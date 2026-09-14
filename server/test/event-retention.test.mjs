@@ -28,6 +28,7 @@ test("message replay keeps every delta without storing cumulative snapshots", ()
       assistantMessageEvent: {
         type: "text_delta",
         delta: chunk,
+        contentIndex: 0,
         partial,
       },
     };
@@ -54,5 +55,21 @@ test("unrecognised message update payloads are retained verbatim", () => {
   appendEvent("future-session", "message_update", payload);
 
   const [stored] = eventsSince("future-session", 0, 10);
+  assert.deepEqual(JSON.parse(stored.payload), payload);
+});
+
+test("unrecognised nested assistant events are retained verbatim", () => {
+  const payload = {
+    type: "message_update",
+    assistantMessageEvent: {
+      type: "future_delta",
+      delta: "future-data",
+      contentIndex: 0,
+      extensionData: { future: true },
+    },
+  };
+  appendEvent("future-nested-session", "message_update", payload);
+
+  const [stored] = eventsSince("future-nested-session", 0, 10);
   assert.deepEqual(JSON.parse(stored.payload), payload);
 });

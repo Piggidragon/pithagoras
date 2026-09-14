@@ -538,13 +538,25 @@ function eventPayloadForStorage(type: string, payload: unknown): unknown {
   if (!event || typeof event !== "object") return payload;
 
   const update = event as Record<string, unknown>;
-  if (typeof update.type !== "string") return payload;
-  const compact: Record<string, unknown> = {};
-  if (typeof update.type === "string") compact.type = update.type;
-  if (typeof update.delta === "string") compact.delta = update.delta;
-  if (typeof update.contentIndex === "number") compact.contentIndex = update.contentIndex;
+  const updateType = update.type;
+  if (
+    (updateType !== "text_delta" &&
+      updateType !== "thinking_delta" &&
+      updateType !== "toolcall_delta") ||
+    typeof update.delta !== "string" ||
+    !Number.isInteger(update.contentIndex)
+  ) {
+    return payload;
+  }
 
-  return { type: "message_update", assistantMessageEvent: compact };
+  return {
+    type: "message_update",
+    assistantMessageEvent: {
+      type: updateType,
+      delta: update.delta,
+      contentIndex: update.contentIndex,
+    },
+  };
 }
 
 /** Events after `since`, for replaying what a disconnected browser missed. */
