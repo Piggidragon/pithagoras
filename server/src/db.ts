@@ -509,16 +509,42 @@ export function eventTime(createdAt: string | undefined): number | undefined {
 }
 
 export function appendEvent(sessionId: string, type: string, payload: unknown): EventRow {
+  const storedPayload = eventPayloadForStorage(type, payload);
+  const encodedPayload = JSON.stringify(storedPayload);
   const info = getDb()
     .prepare("INSERT INTO events (session_id, type, payload) VALUES (?, ?, ?)")
-    .run(sessionId, type, JSON.stringify(payload));
+    .run(sessionId, type, encodedPayload);
   return {
     seq: Number(info.lastInsertRowid),
     session_id: sessionId,
     type,
-    payload: JSON.stringify(payload),
+    payload: encodedPayload,
     created_at: new Date().toISOString(),
   };
+}
+
+/**
+ * Pi includes the complete message twice in every streaming update: once as
+ * `message` and again as `assistantMessageEvent.partial`. Persisting those
+ * growing snapshots for every token makes a single long answer quadratic on
+ * disk. Replays only need the event kind and delta; message_end and the pi
+ * session file retain the completed message.
+ */
+function eventPayloadForStorage(type: string, payload: unknown): unknown {
+  if (type !== "message_update" || !payload || typeof payload !== "object") return payload;
+
+  const source = payload as Record<string, unknown>;
+  const event = source.assistantMessageEvent;
+  if (!event || typeof event !== "object") return payload;
+
+  const update = event as Record<string, unknown>;
+  if (typeof update.type !== "string") return payload;
+  const compact: Record<string, unknown> = {};
+  if (typeof update.type === "string") compact.type = update.type;
+  if (typeof update.delta === "string") compact.delta = update.delta;
+  if (typeof update.contentIndex === "number") compact.contentIndex = update.contentIndex;
+
+  return { type: "message_update", assistantMessageEvent: compact };
 }
 
 /** Events after `since`, for replaying what a disconnected browser missed. */
