@@ -37,12 +37,15 @@ test("message replay keeps every delta without storing cumulative snapshots", ()
   }
 
   const stored = eventsSince("long-session", 0, 1000);
-  const replayed = stored
-    .map((row) => JSON.parse(row.payload).assistantMessageEvent?.delta ?? "")
-    .join("");
+  const storedUpdates = stored.map(
+    (row) => JSON.parse(row.payload).assistantMessageEvent,
+  );
+  const replayed = storedUpdates.map((update) => update?.delta ?? "").join("");
   const storedBytes = stored.reduce((total, row) => total + Buffer.byteLength(row.payload), 0);
 
   assert.equal(stored.length, chunks.length);
+  assert.ok(storedUpdates.every((update) => update?.type === "text_delta"));
+  assert.ok(storedUpdates.every((update) => update?.contentIndex === 0));
   assert.equal(replayed, accumulated);
   assert.ok(
     storedBytes < originalBytes / 10,
