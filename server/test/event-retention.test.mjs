@@ -16,7 +16,7 @@ test("message replay keeps every delta without storing cumulative snapshots", ()
   let accumulated = "";
   let originalBytes = 0;
 
-  for (const chunk of chunks) {
+  for (const [index, chunk] of chunks.entries()) {
     accumulated += chunk;
     const partial = {
       role: "assistant",
@@ -28,7 +28,7 @@ test("message replay keeps every delta without storing cumulative snapshots", ()
       assistantMessageEvent: {
         type: "text_delta",
         delta: chunk,
-        contentIndex: 0,
+        contentIndex: index === 200 ? 1 : 0,
         partial,
       },
     };
@@ -45,7 +45,10 @@ test("message replay keeps every delta without storing cumulative snapshots", ()
 
   assert.equal(stored.length, chunks.length);
   assert.ok(storedUpdates.every((update) => update?.type === "text_delta"));
-  assert.ok(storedUpdates.every((update) => update?.contentIndex === 0));
+  assert.deepEqual(
+    storedUpdates.map((update) => update?.contentIndex),
+    chunks.map((_, index) => (index === 200 ? 1 : 0)),
+  );
   assert.equal(replayed, accumulated);
   assert.ok(
     storedBytes < originalBytes / 10,
