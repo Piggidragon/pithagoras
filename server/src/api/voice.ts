@@ -1,4 +1,5 @@
 import { addVoice, listVoices, readVoice, deleteVoice } from '../voice-presets.js';
+import { spokenNumbers } from '../voice-numbers.js';
 import { VoiceLeases } from '../extensions/voice-leases.js';
 import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,6 +10,8 @@ import express, { type Router } from "express";
 import { getDb, getStoredSettings } from "../db.js";
 
 const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
+// Chatterbox Multilingual, as audio.cpp packages it.
+const CHATTERBOX_LANGUAGES = ["ar", "da", "de", "el", "en", "es", "fi", "fr", "hi", "it", "ko", "ms", "nl", "no", "pl", "pt", "sv", "sw", "tr"];
 export interface VoiceConfig {
   vad?: typeof DEFAULT_VAD;
   enabled: boolean;
@@ -19,7 +22,13 @@ export interface VoiceConfig {
   voice: string;
   language: string;
   cfgScale: number;
-  runtime?: "breeze" | "audio-cpp";
+  runtime?: "breeze" | "audio-cpp" | "chatterbox";
+  // Sent as the OpenAI transcription "model" field. audio.cpp requires it and
+  // names the loaded model; Whisper.cpp ignores unknown fields, so an empty
+  // value keeps the existing Whisper contract byte for byte.
+  sttModel?: string;
+  // Chatterbox emotion exaggeration; its own scale, unrelated to Breeze's CFG.
+  exaggeration?: number;
 }
 function config(): VoiceConfig {
   const stored = getStoredSettings() as Record<string, string>;
@@ -49,13 +58,38 @@ export function validateConfig(value: any): VoiceConfig {
   const cfgScale = value.cfgScale ?? 4;
   if (![1, 4].includes(cfgScale)) throw new Error("Choose fast or expressive speech generation");
   const runtime = value.runtime ?? "breeze";
-  if (!["breeze", "audio-cpp"].includes(runtime)) throw new Error("Choose a supported speech runtime");
+  if (!["breeze", "audio-cpp", "chatterbox"].includes(runtime)) throw new Error("Choose a supported speech runtime");
+  const sttModel = typeof value.sttModel === "string" ? value.sttModel.trim() : value.sttModel ?? "";
+  if (typeof sttModel !== "string" || sttModel.length > 100 || (sttModel && !/^[\w.:-]+$/.test(sttModel)))
+    throw new Error("A speech recognition model id may only contain letters, digits, dot, colon, dash or underscore");
+  const exaggeration = value.exaggeration ?? 0.5;
+  if (typeof exaggeration !== "number" || !Number.isFinite(exaggeration) || exaggeration < 0 || exaggeration > 2)
+    throw new Error("Expressiveness must be between 0 and 2");
+  if (runtime === "chatterbox" && language !== "auto" && !CHATTERBOX_LANGUAGES.includes(language))
+    throw new Error(`Chatterbox speaks: ${CHATTERBOX_LANGUAGES.join(", ")}`);
   const vad = { ...DEFAULT_VAD, ...value.vad };
   for (const [key, min, max] of [['positiveSpeechThreshold', 0.01, 1], ['negativeSpeechThreshold', 0, 0.99], ['minSpeechMs', 64, 2000], ['preSpeechPadMs', 0, 1000], ['redemptionMs', 200, 3000]] as const) {
     if (typeof vad[key] !== 'number' || !Number.isFinite(vad[key]) || vad[key] < min || vad[key] > max) throw new Error(`Invalid VAD ${key}: expected ${min}–${max}`);
   }
   if (vad.negativeSpeechThreshold >= vad.positiveSpeechThreshold) throw new Error('Speech-end threshold must be lower than speech-start threshold');
-  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
+  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, exaggeration, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
+}
+/** The samples of a RIFF/WAVE buffer, checked to be what the player expects. */
+export function wavPcm(wav: Buffer): Buffer {
+  if (wav.length < 44 || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE")
+    throw new Error("Chatterbox returned invalid WAV audio");
+  for (let at = 12; at + 8 <= wav.length;) {
+    const id = wav.toString("ascii", at, at + 4), size = wav.readUInt32LE(at + 4);
+    if (id === "fmt " && (wav.readUInt16LE(at + 10) !== 1 || wav.readUInt32LE(at + 12) !== 24000 || wav.readUInt16LE(at + 22) !== 16))
+      throw new Error("Expected mono 24 kHz 16-bit audio from Chatterbox");
+    if (id === "data") {
+      const pcm = wav.subarray(at + 8, Math.min(at + 8 + size, wav.length));
+      if (!pcm.length || pcm.length % 2) throw new Error("Chatterbox returned invalid PCM audio");
+      return pcm;
+    }
+    at += 8 + size + (size % 2);
+  }
+  throw new Error("Chatterbox returned no audio data");
 }
 export function pcmWav(pcm: Buffer): Buffer {
   if (!pcm.length || pcm.length % 2) throw new Error("Breeze returned invalid PCM audio");
@@ -143,6 +177,9 @@ export function voiceRouter(): Router {
     form.set("file", new Blob([new Uint8Array(req.body)], { type: "audio/wav" }), "recording.wav");
     form.set("response_format", "json");
     form.set("language", config().language);
+    // OpenAI-compatible recognition services (audio.cpp, Qwen3-ASR) name the
+    // loaded model here; Whisper.cpp has one model and ignores the field.
+    if (config().sttModel) form.set("model", config().sttModel!);
     const controller = new AbortController();
     res.on("close", () => controller.abort());
     try {
@@ -165,6 +202,11 @@ export function voiceRouter(): Router {
     const form = new FormData();
     form.set("text", text); form.set("instruction", settings.instruction); form.set("cfg_scale", String(settings.cfgScale));
     const native: Record<string, unknown> = { model: "breeze", input: text, stream: true, stream_format: "audio", response_format: "pcm", options: { instruction: settings.instruction, guidance_scale: String(settings.cfgScale), seed: "42", stream_frames_per_event: "8", stream_lookahead_margin: "4" } };
+    // Chatterbox has no streaming mode in audio.cpp: one phrase, one WAV. The
+    // browser buffers each phrase before playing it either way.
+    const chatterboxLanguage = settings.language === "auto" ? "en" : settings.language;
+    const chatterbox: Record<string, unknown> = { model: "chatterbox", input: spokenNumbers(text, chatterboxLanguage),
+      language: chatterboxLanguage, response_format: "wav", options: { exaggeration: String(settings.exaggeration ?? 0.5), seed: "42" } };
     const controller = new AbortController();
     res.on("close", () => controller.abort());
     try {
@@ -175,6 +217,7 @@ export function voiceRouter(): Router {
         if(preset.audio){
           form.set('ref_audio',new Blob([new Uint8Array(preset.audio)],{type:'audio/wav'}),'reference.wav');form.set('ref_text',preset.transcript);
           native.voice_ref={type:'base64',data:preset.audio.toString('base64')};native.reference_text=preset.transcript;
+          chatterbox.voice_ref={type:'base64',data:preset.audio.toString('base64')};
         }
       }
       if (settings.voice === "aria") {
@@ -188,20 +231,33 @@ export function voiceRouter(): Router {
         form.set("ref_text", transcript.trim());
         native.voice_ref = { type: "base64", data: audio.toString("base64") };
         native.reference_text = transcript.trim();
+        chatterbox.voice_ref = { type: "base64", data: audio.toString("base64") };
       }
+      // Chatterbox clones a speaker; it has no designed or built-in voice.
+      if (settings.runtime === "chatterbox" && !chatterbox.voice_ref)
+        throw new Error("Chatterbox speaks with a reference clone: choose Aria or a voice with a recording");
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]);
       let upstream: Response;
       // Cancellation may leave Breeze finishing its current GPU operation.
       // Keep one browser request pending instead of exposing normal contention.
       do {
         const attemptStarted=performance.now();
-        upstream = await fetch(settings.breezeUrl, { method: "POST", body: settings.runtime === "audio-cpp" ? JSON.stringify(native) : form, headers: settings.runtime === "audio-cpp" ? { "Content-Type": "application/json" } : undefined, redirect: "error", signal });
+        const json = settings.runtime === "audio-cpp" ? native : settings.runtime === "chatterbox" ? chatterbox : null;
+        upstream = await fetch(settings.breezeUrl, { method: "POST", body: json ? JSON.stringify(json) : form, headers: json ? { "Content-Type": "application/json" } : undefined, redirect: "error", signal });
         if (upstream.status !== 409) break;
         await upstream.body?.cancel();
         await delay(750, undefined, { signal });
         busyMs+=performance.now()-attemptStarted;
       } while (true);
-      if (!upstream.ok) throw new Error(`Breeze returned HTTP ${upstream.status}`);
+      const runtimeName = settings.runtime === "chatterbox" ? "Chatterbox" : "Breeze";
+      if (!upstream.ok) throw new Error(`${runtimeName} returned HTTP ${upstream.status}`);
+      if (settings.runtime === "chatterbox") {
+        if (!upstream.headers.get("content-type")?.startsWith("audio/wav")) throw new Error("Expected WAV audio from the Chatterbox API");
+        const wav = Buffer.from(await upstream.arrayBuffer());
+        res.set("Server-Timing", `tts_headers;dur=${(performance.now()-speechStarted).toFixed(1)}, tts_busy;dur=${busyMs.toFixed(1)}`);
+        if (req.get("accept") !== "audio/pcm") return res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);
+        return res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store" }).send(wavPcm(wav));
+      }
       if (!upstream.headers.get("content-type")?.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && upstream.headers.get("content-type")?.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
       const rate = upstream.headers.get("x-sample-rate");
       if (rate && rate !== "24000") throw new Error(`Unsupported Breeze sample rate: ${rate}`);
