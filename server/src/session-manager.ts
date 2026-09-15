@@ -1,3 +1,4 @@
+import { LiveEvents } from "./live-events.js";
 import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
 import { mkdirSync } from "node:fs";
@@ -75,6 +76,9 @@ interface LiveSession {
  */
 class SessionManager extends EventEmitter {
   private live = new Map<string, LiveSession>();
+  private stream = new LiveEvents(appendEvent);
+
+  liveSnapshot(sessionId: string) { return this.stream.snapshot(sessionId); }
   /** In-flight ask() per session, so messages in one chat are answered in turn. */
   private asking = new Map<string, Promise<string>>();
   /**
@@ -100,7 +104,7 @@ class SessionManager extends EventEmitter {
     return this.live.get(sessionId)?.client.running ?? false;
   }
 
-  /** Record an event: persist it, then fan out to any attached SSE clients. */
+  /** Stream updates in memory; persist completed messages and lifecycle metadata. */
   private record(sessionId: string, type: string, payload: unknown): void {
     if (EPHEMERAL_EVENTS.has(type)) {
       // Still deliver it to anyone attached right now, with a negative seq so
@@ -113,7 +117,7 @@ class SessionManager extends EventEmitter {
       });
       return;
     }
-    const row = appendEvent(sessionId, type, payload);
+    const row = this.stream.record(sessionId, type, payload);
     this.emit(`session:${sessionId}`, row);
   }
 
@@ -281,6 +285,7 @@ class SessionManager extends EventEmitter {
 
     client.on("exit", ({ code, signal }: { code: number | null; signal: string | null }) => {
       this.live.delete(sessionId);
+      this.stream.clear(sessionId);
       const current = getSession(sessionId);
       // A clean exit after a finished run is normal; anything else is a failure
       // worth surfacing in the UI rather than leaving as a silent stall.
@@ -696,6 +701,7 @@ class SessionManager extends EventEmitter {
     if (!live) return;
     live.client.dispose();
     this.live.delete(sessionId);
+    this.stream.clear(sessionId);
     await live.executor.cleanup?.(sessionId).catch(() => {});
   }
 

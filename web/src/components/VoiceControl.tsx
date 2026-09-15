@@ -34,12 +34,13 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   if(!profiler.current)profiler.current=new VoiceProfiler(()=>refreshProfile(n=>n+1));
   const eventSeq=useRef(0);eventSeq.current=toolEvents.reduce((n,e)=>Math.max(n,e.seq),0);
   const profileSeq=useRef(Infinity);
+  const profileLiveSeen=useRef(new WeakSet<object>());
   const profileMark=(name:string)=>{if(profiling.current)profiler.current!.mark(name);};
   useEffect(()=>{
     if(!profiling.current)return;
     for(const event of toolEvents){
-      if(event.seq<=profileSeq.current)continue;
-      profileSeq.current=event.seq;
+      if(event.seq < 0) { if(profileLiveSeen.current.has(event))continue; profileLiveSeen.current.add(event); }
+      else { if(event.seq<=profileSeq.current)continue; profileSeq.current=event.seq; }
       const inner=event.payload?.assistantMessageEvent;
       if(event.type==='message_update'&&inner?.delta&&['text_delta','thinking_delta','toolcall_delta'].includes(inner.type))profileMark('first_model_token');
       if(event.type==='message_update'&&inner?.delta&&inner?.type==='text_delta')profileMark('first_text');

@@ -523,14 +523,15 @@ export function eventTime(createdAt: string | undefined): number | undefined {
 }
 
 export function appendEvent(sessionId: string, type: string, payload: unknown): EventRow {
+  const encodedPayload = JSON.stringify(payload);
   const info = getDb()
     .prepare("INSERT INTO events (session_id, type, payload) VALUES (?, ?, ?)")
-    .run(sessionId, type, JSON.stringify(payload));
+    .run(sessionId, type, encodedPayload);
   return {
     seq: Number(info.lastInsertRowid),
     session_id: sessionId,
     type,
-    payload: JSON.stringify(payload),
+    payload: encodedPayload,
     created_at: new Date().toISOString(),
   };
 }

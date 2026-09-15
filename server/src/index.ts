@@ -608,7 +608,7 @@ app.get("/api/sessions/:id/events", (req, res) => {
   });
 
   const write = (row: { seq: number; type: string; payload: string; created_at?: string }) => {
-    res.write(`id: ${row.seq}\ndata: ${JSON.stringify({
+    res.write(`${row.seq > 0 ? `id: ${row.seq}\n` : ""}data: ${JSON.stringify({
       seq: row.seq,
       type: row.type,
       // What the activity line counts from, so a refresh mid-run still knows
@@ -617,6 +617,9 @@ app.get("/api/sessions/:id/events", (req, res) => {
       payload: JSON.parse(row.payload),
     })}\n\n`);
   };
+
+  // Replace stale in-memory deltas before durable replay, then restore the current snapshot.
+  res.write("event: live-reset\ndata: {}\n\n");
 
   // A fresh load gets the end of the conversation, not the beginning. Replaying
   // from zero and stopping at the batch limit is how a long session came back
@@ -637,6 +640,7 @@ app.get("/api/sessions/:id/events", (req, res) => {
     }
     if (batch.length < 5000) break;
   }
+  for (const row of sessions.liveSnapshot(session.id)) write(row);
   res.write(`event: caught-up\ndata: ${JSON.stringify({ seq: lastSent })}\n\n`);
 
   const onEvent = (row: { seq: number; type: string; payload: string; created_at?: string }) => {
