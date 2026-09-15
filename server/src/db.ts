@@ -523,8 +523,7 @@ export function eventTime(createdAt: string | undefined): number | undefined {
 }
 
 export function appendEvent(sessionId: string, type: string, payload: unknown): EventRow {
-  const storedPayload = eventPayloadForStorage(type, payload);
-  const encodedPayload = JSON.stringify(storedPayload);
+  const encodedPayload = JSON.stringify(payload);
   const info = getDb()
     .prepare("INSERT INTO events (session_id, type, payload) VALUES (?, ?, ?)")
     .run(sessionId, type, encodedPayload);
@@ -534,42 +533,6 @@ export function appendEvent(sessionId: string, type: string, payload: unknown): 
     type,
     payload: encodedPayload,
     created_at: new Date().toISOString(),
-  };
-}
-
-/**
- * Pi includes the complete message twice in every streaming update: once as
- * `message` and again as `assistantMessageEvent.partial`. Persisting those
- * growing snapshots for every token makes a single long answer quadratic on
- * disk. Replays only need the event kind and delta; message_end and the pi
- * session file retain the completed message.
- */
-function eventPayloadForStorage(type: string, payload: unknown): unknown {
-  if (type !== "message_update" || !payload || typeof payload !== "object") return payload;
-
-  const source = payload as Record<string, unknown>;
-  const event = source.assistantMessageEvent;
-  if (!event || typeof event !== "object") return payload;
-
-  const update = event as Record<string, unknown>;
-  const updateType = update.type;
-  if (
-    (updateType !== "text_delta" &&
-      updateType !== "thinking_delta" &&
-      updateType !== "toolcall_delta") ||
-    typeof update.delta !== "string" ||
-    !Number.isInteger(update.contentIndex)
-  ) {
-    return payload;
-  }
-
-  return {
-    type: "message_update",
-    assistantMessageEvent: {
-      type: updateType,
-      delta: update.delta,
-      contentIndex: update.contentIndex,
-    },
   };
 }
 
