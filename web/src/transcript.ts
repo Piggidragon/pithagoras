@@ -1,8 +1,8 @@
 import type { PortalEvent } from "./api";
 
 export type Item =
-  | { kind: "user"; id: string; text: string }
-  | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean }
+  | { kind: "user"; id: string; text: string; audio?: boolean }
+  | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
   | { kind: "tool"; id: string; name: string; status: "running" | "done" | "error"; detail?: string }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
 
@@ -16,6 +16,7 @@ export type Item =
  */
 export function buildTranscript(events: PortalEvent[]): Item[] {
   const items: Item[] = [];
+  let audioReply = false;
   let current: Extract<Item, { kind: "assistant" }> | null = null;
 
   const closeCurrent = () => {
@@ -28,17 +29,21 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
   for (const ev of events) {
     const p = ev.payload ?? {};
     switch (ev.type) {
-      case "portal_prompt":
+      case "portal_prompt": {
         closeCurrent();
-        items.push({ kind: "user", id: `u${ev.seq}`, text: String(p.message ?? "") });
+        const raw = String(p.message ?? "");
+        const tagged = raw.startsWith("[Audio mode]\n");
+        audioReply = p.voice === true || tagged;
+        items.push({ kind: "user", id: `u${ev.seq}`, text: tagged ? raw.slice("[Audio mode]\n".length) : raw, audio: p.voice === true || tagged });
         break;
+      }
 
       case "message_update": {
         const inner = p.assistantMessageEvent ?? {};
         const delta = typeof inner.delta === "string" ? inner.delta : "";
         if (!delta) break;
         if (!current) {
-          current = { kind: "assistant", id: `a${ev.seq}`, text: "", thinking: "", done: false };
+          current = { kind: "assistant", id: `a${ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
           items.push(current);
         }
         if (inner.type === "thinking_delta") current.thinking += delta;
@@ -149,7 +154,11 @@ export interface Activity {
  */
 export function activity(events: PortalEvent[]): Activity {
   let prefill: Activity["prefill"];
-  let prefillAt: number | undefined;
+  // Compaction can emit its own model events; retain its identity until it ends.
+  const compact = [...events].reverse().find(ev => ['compaction_start', 'compaction_end', 'agent_end', 'portal_prompt'].includes(ev.type));
+  if (compact?.type === 'compaction_start') {
+    return { label: 'compacting the conversation', since: compact.at };
+  }
 
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i];
@@ -160,7 +169,7 @@ export function activity(events: PortalEvent[]): Activity {
       case "portal_prefill":
         if (!prefill) {
           prefill = { total: p.total ?? 0, cache: p.cache ?? 0, processed: p.processed ?? 0 };
-          prefillAt = ev.at;
+
         }
         break;
 
@@ -174,8 +183,13 @@ export function activity(events: PortalEvent[]): Activity {
         return { label: "thinking", since: ev.at };
 
       case "message_update":
+        if (p.assistantMessageEvent?.delta) {
+          return { label: p.assistantMessageEvent.type === 'thinking_delta' ? 'thinking' : 'writing the reply', since: ev.at };
+        }
+        break;
       case "message_start":
-        return { label: "writing the reply", since: ev.at };
+        if (p.message?.role === 'assistant') return { label: 'processing the prompt', since: ev.at, prefill };
+        break;
 
       case "compaction_start":
         return { label: "compacting the conversation", since: ev.at };
@@ -187,7 +201,7 @@ export function activity(events: PortalEvent[]): Activity {
       case "turn_start":
       case "agent_start":
       case "portal_prompt":
-        return { label: "processing the prompt", since: prefillAt ?? ev.at, prefill };
+        return { label: "processing the prompt", since: ev.at, prefill };
     }
   }
   return { label: "working" };

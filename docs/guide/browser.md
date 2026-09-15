@@ -1,5 +1,9 @@
 # The agent's browser
 
+::: tip Docker installation
+See [Docker add-ons](/guide/add-ons) for installation, controls and profile cleanup.
+:::
+
 Optional. Nothing here is installed, pulled or shown unless you ask for it.
 
 A real browser, in its own container, with a profile that stays signed in. You
@@ -30,6 +34,13 @@ enough to matter.
 finds the logins still there.
 
 ## Logging in
+
+Browser tool responses use on-demand snapshots to keep model context small.
+Actions return status without repeating the entire page. The agent uses
+`browser_find` for matching text and element references. An explicit
+`browser_snapshot({})` returns the full accessibility tree without an imposed
+depth limit. Targeted snapshots and optional depth limits are available when
+the agent only needs a particular section.
 
 **Browser → Open browser** in the portal, or `https://<host>:3011` directly.
 That is a full Chromium in a web page: sign into whatever the agent should have,
@@ -125,3 +136,16 @@ reaches it owns every account the browser is signed into.
 
 Host networking is what keeps it to the box. Never publish it, never put it
 behind a reverse proxy, and treat the profile volume as the secret it is.
+
+### Screenshot images
+
+The portal requests inline image data for browser screenshots. In the pinned
+Playwright version, providing `filename` suppresses the image block, leaving
+only a file link. The portal removes that argument from screenshot calls;
+Playwright still saves the screenshot under an automatic filename. Capture
+options such as target, full-page, scale, and format remain available.
+
+Snapshot output uses compact notation: `[eN]` or `[fNeN]` is the exact element
+reference, an omitted role means `generic`, and `[pointer]` means a pointer
+cursor. The tree retains its nodes, text, URLs and state; this formatting does
+not impose a depth limit or truncate content.

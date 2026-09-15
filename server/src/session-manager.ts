@@ -323,7 +323,7 @@ class SessionManager extends EventEmitter {
    * for the first message in a session takes seconds and the composer has
    * nothing to show for them otherwise.
    */
-  async prompt(sessionId: string, message: string): Promise<void> {
+  async prompt(sessionId: string, message: string, options?: { voice?: boolean }): Promise<void> {
     this.mark(sessionId, "running");
     // Same reason as in abort(): a session mid-compaction is detached from
     // agent events, and a prompt started there is invisible.
@@ -333,7 +333,7 @@ class SessionManager extends EventEmitter {
     // and isBusy() reads false for however long pi takes to answer.
     this.mark(sessionId, "running");
     try {
-      await this.submit(sessionId, message);
+      await this.submit(sessionId, message, options);
     } catch (e) {
       const failure = (e as Error).message;
       updateSession(sessionId, { status: "error", last_error: failure });
@@ -342,7 +342,7 @@ class SessionManager extends EventEmitter {
     }
   }
 
-  private async submit(sessionId: string, message: string): Promise<void> {
+  private async submit(sessionId: string, message: string, options?: { voice?: boolean }): Promise<void> {
     const client = await this.ensureClient(sessionId);
 
     // A slash command is an instruction to the agent, not something said in the
@@ -371,8 +371,8 @@ class SessionManager extends EventEmitter {
       return;
     }
 
-    if (!isCommand) this.record(sessionId, "portal_prompt", { message });
-    await client.prompt(message);
+    if (!isCommand) this.record(sessionId, "portal_prompt", { message, ...(options?.voice ? { voice: true } : {}) });
+    await client.prompt(message, options);
     // A slash command completes inside prompt() without ever starting an agent
     // turn, so no agent_settled arrives to clear the status. Settle it here
     // rather than leaving "working" on screen forever. Asking pi rather than

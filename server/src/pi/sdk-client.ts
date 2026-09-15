@@ -1,3 +1,7 @@
+import { CanvasTools } from "./canvas-tools.js";
+import { acceptPrompt } from "./accept-prompt.js";
+import { VoiceFirstTurn, audioSystemRules, audioMessage } from "./voice-first.js";
+import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -66,7 +70,7 @@ function framing(cwd: string, role?: string): string[] {
       return false;
     }
   });
-  const lines: string[] = [];
+  const lines: string[] = [...audioSystemRules(), BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE];
   if (present.length) {
     lines.push(
       `${present.join(", ")} in your working directory are yours, not reference material about someone else. Each opens with a block saying what it is for; follow it.`,
@@ -149,6 +153,8 @@ function callable(obj: any, key: string): any {
  */
 export class SdkPiClient extends EventEmitter implements PiClient {
   private disposed = false;
+  private canvases?: CanvasTools;
+  private voiceFirst?: VoiceFirstTurn;
   /** Dialogs an extension is waiting on, keyed by request id. */
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
   /** The portal's own id for this conversation — what prefill progress is reported against. */
@@ -201,6 +207,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Without an explicit loader the SDK starts with no extensions, skills or
     // prompt templates — so installed packages contribute no commands at all.
     // The CLI wires this up for you; here it has to be asked for.
+    const voiceFirst = new VoiceFirstTurn();
+    const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
     let resourceLoader: any;
     try {
       // Both are required: the constructor resolves each and throws on
@@ -209,6 +217,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // Every session, unconditionally: the point is to limit what a turn can do
       // after it reads something untrusted, and any session can read something.
       const factories: { name: string; factory: (pi: any) => void }[] = [
+        { name: "voice-first", factory: voiceFirst.extension },
         { name: "guard", factory: guardExtension(
             opts.sessionDir,
             opts.whoNow ?? (() => ({ role: "primary" })),
@@ -217,6 +226,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             opts.browserNow ?? (() => ({ allowed: false, allowlist: [] })),
           ) },
       ];
+      if (canvases) factories.push({ name: "canvases", factory: canvases.extension });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       // Only where it means something: a conversation with the primary user has
@@ -300,7 +310,11 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
     const client = new SdkPiClient(session, modelRuntime, () => {});
     client.portalSessionId = opts.sessionId;
-    const unsub = session.subscribe((event: any) => client.emit("event", event));
+    client.canvases = canvases;
+    if (resourceLoader) {
+      client.voiceFirst = voiceFirst;
+    }
+    const unsub = session.subscribe((event: any) => { canvases?.observe(event); client.emit("event", event); });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};
 
@@ -444,18 +458,24 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return true;
   }
 
-  async prompt(message: string): Promise<void> {
-    await this.session.prompt(message, {
-      // expandPromptTemplates lets "/name" resolve to its template or extension
-      // command, which is how the TUI treats the same input.
-      expandPromptTemplates: true,
-      // Required while a turn is running, and pi refuses the message without
-      // it. followUp rather than steer: the composer offers to queue a
-      // follow-up, and a message typed while the agent works is nearly always
-      // the next thing to do rather than a correction to the thing in flight.
-      // Interrupting is what Stop is for.
-      streamingBehavior: "followUp",
-    });
+  async prompt(message: string, options?: { voice?: boolean }): Promise<void> {
+    if (options?.voice) {
+      this.voiceFirst?.arm(this.isIdle());
+    } else {
+      this.voiceFirst?.reset();
+    }
+    const promptOptions = { expandPromptTemplates: true, streamingBehavior: "followUp" };
+    try {
+      if (options?.voice) {
+        await acceptPrompt(
+          preflightResult => this.session.prompt(audioMessage(message), { ...promptOptions, preflightResult }),
+          error => {
+            this.voiceFirst?.reset();
+            this.emit("event", { type: "portal_notice", text: `Voice turn failed: ${error instanceof Error ? error.message : error}`, error: true });
+          },
+        );
+      } else await this.session.prompt(message, promptOptions);
+    } catch (error) { if (options?.voice) this.voiceFirst?.reset(); throw error; }
   }
 
   async abort(): Promise<void> {
@@ -463,7 +483,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // agent run and leaves a summarisation going — the one case where Stop
     // looks like it did nothing at all.
     if (this.session.isCompacting) this.session.abortCompaction();
-    await this.session.abort();
+    try { await this.session.abort(); } finally { this.canvases?.interrupt(); }
   }
 
   /**
@@ -482,6 +502,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.canvases?.interrupt();
     try {
       this.unsubscribe();
     } catch {

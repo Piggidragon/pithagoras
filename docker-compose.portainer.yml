@@ -10,7 +10,7 @@ services:
       - pithagoras-data:/data
       # Workspaces the agent may work in.
       - ${WORKSPACES_DIR:-/root/repos}:/workspaces
-      # Only needed when EXECUTOR=container.
+      # Required for managed Browser/Voice add-ons and EXECUTOR=container.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       # With host networking the portal binds PORT directly on the host.

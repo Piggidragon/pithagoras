@@ -62,7 +62,7 @@ const MCP_VERSION = "0.0.79";
 
 const mcpEntry = () => ({
   command: "npx",
-  args: ["-y", `@playwright/mcp@${MCP_VERSION}`, "--cdp-endpoint", CDP],
+  args: ["-y", `@playwright/mcp@${MCP_VERSION}`, "--cdp-endpoint", CDP, "--snapshot-mode", "none"],
   lifecycle: "lazy",
   directTools: DIRECT_TOOLS,
   excludeTools: EXCLUDE_TOOLS,
@@ -78,12 +78,13 @@ function findConnection(): string | null {
   return null;
 }
 /**
- * Move an existing connection off `@latest`.
+ * Pin existing connections and enable on-demand snapshots.
  *
  * The pin only reaches a config the portal writes, and nobody rewrites theirs
  * — an install from before this would go on tracking whatever npm publishes
- * next. Only the version is touched, and only on an entry that is ours: same
- * package, same debugging endpoint.
+ * next. Migrate only our package and debugging endpoint. Suppressing automatic
+ * snapshots avoids repeating a whole page after every click or keystroke;
+ * explicit snapshot and find calls still return their requested content.
  */
 export function pinConnection(): void {
   const { config, error } = readMcpFile();
@@ -93,13 +94,23 @@ export function pinConnection(): void {
     const args = (entry as { args?: unknown }).args;
     if (!Array.isArray(args) || !args.includes("--cdp-endpoint") || !args.includes(CDP)) continue;
     const at = args.findIndex((a) => typeof a === "string" && a.startsWith("@playwright/mcp@"));
-    if (at === -1 || args[at] === `@playwright/mcp@${MCP_VERSION}`) continue;
-    args[at] = `@playwright/mcp@${MCP_VERSION}`;
-    changed = true;
+    if (at === -1) continue;
+    if (args[at] !== `@playwright/mcp@${MCP_VERSION}`) {
+      args[at] = `@playwright/mcp@${MCP_VERSION}`;
+      changed = true;
+    }
+    const mode = args.indexOf("--snapshot-mode");
+    if (mode === -1) {
+      args.push("--snapshot-mode", "none");
+      changed = true;
+    } else if (args[mode + 1] !== "none") {
+      args[mode + 1] = "none";
+      changed = true;
+    }
   }
   if (changed) {
     writeMcpFile(config);
-    console.log(`[portal] pinned the browser's MCP server to @playwright/mcp@${MCP_VERSION}`);
+    console.log(`[portal] configured browser MCP @playwright/mcp@${MCP_VERSION} with on-demand snapshots`);
   }
 }
 

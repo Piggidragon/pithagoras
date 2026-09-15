@@ -1,5 +1,5 @@
 import { LuGlobe } from "react-icons/lu";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { ContextPill } from "./ContextPill";
 
@@ -103,6 +103,7 @@ export function ComposerBar({
   running,
   panelRequest,
   onPanelConsumed,
+  actions,
 }: {
   sessionId: string;
   /** What the sidebar already knows, so the pills can paint immediately. */
@@ -111,6 +112,7 @@ export function ComposerBar({
   /** Set by /model so the slash command opens the same picker as the pill. */
   panelRequest?: "model" | "effort" | null;
   onPanelConsumed?: () => void;
+  actions?: ReactNode;
 }) {
   // Seeded from the session row rather than starting empty. Waiting on a
   // request to draw the model name meant the pills appeared blank for as long
@@ -268,13 +270,13 @@ export function ComposerBar({
   };
 
   return (
-    <div ref={ref} className="relative mt-1.5 flex items-center gap-1 text-xs">
-      <div className="ml-auto flex items-center gap-1">
+    <div ref={ref} className="composer-toolbar relative text-xs">
+      <div className="composer-settings">
         <button
           type="button"
           disabled={busy}
           onClick={() => setOpen(open === "model" ? null : "model")}
-          className={`max-w-[220px] truncate rounded-lg px-2 py-1 transition disabled:opacity-50 ${
+          className={`max-w-[220px] truncate rounded-lg px-2 py-1.5 transition disabled:opacity-50 ${
             open === "model" ? "bg-fg/10 text-fg" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
           }`}
           title={cfg.state.model.id}
@@ -334,6 +336,7 @@ export function ComposerBar({
           title={running ? "working" : "idle"}
         />
       </div>
+      {actions && <div className="composer-actions">{actions}</div>}
 
       {/* Models */}
       {open === "model" && (

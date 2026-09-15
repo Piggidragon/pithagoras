@@ -137,7 +137,24 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
+export interface VoiceConfig {
+  sentenceChunks?: boolean;
+  ttsPrefetch?: boolean;
+  comparison?: boolean;
+  statusSpeech?: boolean;
+  pipelineMode?: "parallel" | "sequential";
+  vad?: typeof DEFAULT_VAD;
+  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp";
+}
+
+export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; }
 export const api = {
+  voiceInstallStatus: () => json<VoiceInstallStatus>('/api/voice/install'),
+  voiceAction: (action: 'install' | 'start' | 'stop') => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST'}),
+  connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
+  voice: () => json<VoiceConfig>("/api/voice"),
+  setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
   authStatus: () => json<{ authRequired: boolean; authed: boolean }>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
@@ -153,10 +170,10 @@ export const api = {
   renameSession: (id: string, title: string) =>
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
-  prompt: (id: string, message: string) =>
+  prompt: (id: string, message: string, options?: { voice?: boolean }) =>
     json<{ ok: true }>(`/api/sessions/${id}/prompt`, {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, ...(options?.voice ? { voice: true } : {}) }),
     }),
   respondUi: (sessionId: string, id: string, payload: { value?: unknown; cancelled?: boolean }) =>
     json<{ ok: boolean }>(`/api/sessions/${sessionId}/ui-response`, {

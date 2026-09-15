@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { LuCheck, LuGlobe, LuRefreshCw, LuTrash2 } from "react-icons/lu";
+import { VoiceAddon } from "./VoiceAddon";
+import { useEffect, useId, useState } from "react";
+import { LuCheck, LuGlobe, LuMic, LuRefreshCw, LuTrash2 } from "react-icons/lu";
 import { api, type BrowserStatus } from "../api";
 
 /**
@@ -10,7 +11,43 @@ import { api, type BrowserStatus } from "../api";
  * place to be discovered from — nothing was visible until it was already
  * running, so there was nowhere to press install.
  */
+const addons = [{ id: 'browser', label: 'Browser', Icon: LuGlobe }, { id: 'voice', label: 'Voice', Icon: LuMic }] as const;
+type Addon = typeof addons[number]['id'];
+
 export function PortalExtensions({ onError }: { onError: (e: string) => void }) {
+  const id = useId();
+  const [selected, setSelected] = useState<Addon>('browser');
+  const [visited, setVisited] = useState<Addon[]>(['browser']);
+  const select = (addon: Addon) => {
+    setSelected(addon);
+    setVisited(previous => previous.includes(addon) ? previous : [...previous, addon]);
+  };
+  return <div>
+    <p className="mb-4 text-xs text-fg-muted">Install and manage the add-ons for your sessions.</p>
+    <div role="tablist" aria-label="Add-ons" className="flex gap-1 rounded-xl border border-line bg-raised/40 p-1">
+      {addons.map(({ id: addon, label, Icon }, index) => <button
+        key={addon} id={`${id}-${addon}-tab`} type="button" role="tab"
+        aria-selected={selected === addon} aria-controls={`${id}-${addon}-panel`}
+        tabIndex={selected === addon ? 0 : -1} onClick={() => select(addon)}
+        onKeyDown={event => {
+          const next = event.key === 'ArrowRight' ? (index + 1) % addons.length
+            : event.key === 'ArrowLeft' ? (index + addons.length - 1) % addons.length
+            : event.key === 'Home' ? 0 : event.key === 'End' ? addons.length - 1 : null;
+          if (next === null) return;
+          event.preventDefault(); select(addons[next].id);
+          document.getElementById(`${id}-${addons[next].id}-tab`)?.focus();
+        }}
+        className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${selected === addon ? 'bg-accent/12 text-accent shadow-sm ring-1 ring-inset ring-accent/25' : 'text-fg-muted hover:bg-fg/5 hover:text-fg'}`}
+      ><Icon className="h-4 w-4" />{label}</button>)}
+    </div>
+    {addons.map(({ id: addon }) => <div key={addon} role="tabpanel" id={`${id}-${addon}-panel`}
+      aria-labelledby={`${id}-${addon}-tab`} hidden={selected !== addon}>
+      {visited.includes(addon) && (addon === 'browser' ? <BrowserAddon onError={onError} /> : <VoiceAddon onError={onError} />)}
+    </div>)}
+  </div>;
+}
+
+function BrowserAddon({ onError }: { onError: (e: string) => void }) {
   const [status, setStatus] = useState<BrowserStatus | null>(null);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,12 +89,7 @@ export function PortalExtensions({ onError }: { onError: (e: string) => void }) 
 
   return (
     <>
-      <p className="mb-4 text-xs text-fg-faint">
-        Parts of the portal you can add if you want them. Nothing here is installed by default,
-        and removing one leaves nothing behind.
-      </p>
-
-      <div className="rounded-xl border border-line bg-raised/40 p-3">
+      <div className="mt-4 rounded-xl border border-line bg-raised/40 p-3">
         <div className="flex items-start gap-2.5">
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
             <LuGlobe className="h-4 w-4" />

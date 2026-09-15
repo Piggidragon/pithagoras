@@ -1,6 +1,12 @@
+import { ActivityProgress } from './ActivityProgress';
+import { useWorkPanels } from "../use-work-panels";
+import { CanvasPanel } from "./CanvasPanel";
+import { displaySpeechText } from "../voice";
+import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
+import { VoiceControl } from "./VoiceControl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuGlobe, LuSquareTerminal } from "react-icons/lu";
+import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
 import { activity, buildTranscript, type Activity } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
@@ -83,12 +89,15 @@ export function Chat({
   hasEarlier?: boolean;
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
-  onSend: (message: string) => Promise<void>;
+  onSend: (message: string, options?: { voice?: boolean }) => Promise<void>;
   onAbort: () => Promise<void>;
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
 }) {
   const [input, setInput] = useState("");
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [canvasOpen, setCanvasOpen] = useState(false);
+  const [voiceHost, setVoiceHost] = useState<HTMLDivElement | null>(null);
   const [sending, setSending] = useState(false);
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   // Whether there is a browser to watch, and whether you are watching it. Asked
@@ -96,6 +105,7 @@ export function Chat({
   const [browserUp, setBrowserUp] = useState(false);
   const [watching, setWatching] = useState(false);
   const [terminal, setTerminal] = useState(false);
+  useWorkPanels(!voiceMode && watching, !voiceMode && terminal, canvasOpen, panel => { if(panel === "browser") setWatching(false); else if(panel === "terminal") setTerminal(false); else setCanvasOpen(false); });
   const browserPane = useRef<HTMLDivElement>(null);
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
@@ -245,15 +255,17 @@ export function Chat({
     setSending(true);
     setInput("");
     try {
-      await onSend(msg);
+      await onSend(msg, voiceMode ? { voice: true } : undefined);
     } finally {
       setSending(false);
     }
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="border-b border-line px-4 py-3">
+    <div className="session-workspace relative flex h-full min-h-0 flex-col">
+      <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} open={canvasOpen} setOpen={setCanvasOpen}/>
+      <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
+      <header className={voiceMode ? "hidden" : "border-b border-line px-4 py-3"}>
         <div className="mx-auto flex w-full max-w-3xl items-center gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-sm font-medium text-fg">{session.title}</h2>
@@ -291,19 +303,15 @@ export function Chat({
           >
             <LuSquareTerminal className="h-3.5 w-3.5" />
           </button>
-          {running && (
-            <button
-              onClick={onAbort}
-              className="rounded-lg border border-line px-2.5 py-1 text-xs text-fg-muted transition hover:bg-fg/5 hover:text-fg"
-            >
-              Stop
-            </button>
-          )}
+          <button onClick={() => setCanvasOpen(v => !v)} aria-label="Session canvases" title="Session canvases" aria-expanded={canvasOpen}
+            className={`rounded-lg border px-2 py-1 text-xs transition ${canvasOpen ? 'border-accent/40 bg-accent/10 text-accent' : 'border-line text-fg-muted hover:bg-fg/5 hover:text-fg'}`}>
+            <LuFileText className="h-3.5 w-3.5" />
+          </button>
         </div>
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className={voiceMode ? "hidden" : "flex min-h-0 flex-1"}>
       <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl space-y-3">
@@ -343,6 +351,7 @@ export function Chat({
             return (
               <div key={item.id} className="flex justify-end">
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
+                  {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title="Sent in voice mode"><LuAudioLines size={13} aria-hidden="true" /><span>Audio</span></div>}
                   <div className="whitespace-pre-wrap">{text}</div>
                   {blocks.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap justify-end gap-1">
@@ -380,7 +389,7 @@ export function Chat({
                       plugins={mermaid ? { mermaid } : undefined}
                       mermaid={mermaidOptions}
                     >
-                      {item.text.replace(/<\/?think(ing)?>/gi, "")}
+                      {(item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "")}
                     </Streamdown>
                   </div>
                 )}
@@ -431,9 +440,9 @@ export function Chat({
           e.preventDefault();
           send();
         }}
-        className="border-t border-line px-4 py-3"
+        className="px-4 pb-4 pt-2 sm:px-6 sm:pb-5"
       >
-        <div className="relative mx-auto w-full max-w-3xl">
+        <div className="prompt-shell relative mx-auto w-full max-w-3xl">
         {matches.length > 0 && (
           <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
             {matches.map((c) => (
@@ -464,7 +473,8 @@ export function Chat({
           }}
           rows={2}
           placeholder={running ? "pi is working — send to queue a follow-up…" : "Describe the task…"}
-          className="w-full resize-none rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+          aria-label="Message"
+          className="prompt-input"
         />
           <ComposerBar
             sessionId={session.id}
@@ -472,6 +482,15 @@ export function Chat({
             running={running}
             panelRequest={panelRequest}
             onPanelConsumed={() => setPanelRequest(null)}
+            actions={<>
+              <VoiceControl canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
+              {running && !input.trim() ? <button type="button" aria-label="Stop generation" title="Stop generation" onClick={onAbort} className="prompt-action prompt-stop">
+                <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />
+              </button> : <button type="submit" aria-label="Send message" title={running ? 'Send follow-up' : 'Send message'} disabled={sending || !input.trim()}
+                className="prompt-action prompt-send">
+                <LuArrowUp aria-hidden className="h-5 w-5" />
+              </button>}
+            </>}
           />
         </div>
       </form>
@@ -571,6 +590,7 @@ export function Chat({
  * progress — a cached prefix shows as already done, because it is.
  */
 function ActivityLine({ phase, now }: { phase: Activity; now: number }) {
+  if (phase.label === 'processing the prompt' || phase.label === 'compacting the conversation') return <ActivityProgress phase={phase} />;
   const seconds = phase.since ? Math.floor((now - phase.since) / 1000) : 0;
   const p = phase.prefill;
   // `processed` already counts the cached prefix — llama.cpp reports the first

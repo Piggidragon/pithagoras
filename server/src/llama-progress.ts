@@ -1,3 +1,4 @@
+import { LlamaSessionCache } from "./llama-session-cache.js";
 import http from "node:http";
 import https from "node:https";
 import type { AddressInfo } from "node:net";
@@ -37,6 +38,7 @@ let port = 0;
 let notify: OnProgress = () => {};
 
 const PREFIX = "/s/";
+const diskCache = new LlamaSessionCache();
 
 function readProgress(text: string, sessionId: string): void {
   // SSE frames, one JSON object per `data:` line. Anything unparseable is not
@@ -101,31 +103,41 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
     const headers = { ...req.headers, host: target.host };
     if (body.length) headers["content-length"] = String(body.length);
 
-    const out = client.request(
-      {
-        protocol: target.protocol,
-        hostname: target.hostname,
-        port: target.port,
-        path: target.pathname + target.search,
-        method: req.method,
-        headers,
-      },
-      (upstreamRes) => {
-        res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
-        const streaming = (upstreamRes.headers["content-type"] ?? "").includes("event-stream");
-        upstreamRes.on("data", (c: Buffer) => {
-          if (streaming) readProgress(c.toString("utf8"), sessionId);
-          res.write(c);
-        });
-        upstreamRes.on("end", () => res.end());
-      },
-    );
-    out.on("error", (e) => {
-      if (!res.headersSent) res.writeHead(502);
-      res.end(String((e as Error).message));
+    const controller = new AbortController();
+    res.on("close", () => controller.abort());
+    const forward = () => new Promise<boolean>((resolve, reject) => {
+      const out = client.request(
+        { protocol: target.protocol, hostname: target.hostname, port: target.port,
+          path: target.pathname + target.search, method: req.method, headers, signal: controller.signal },
+        upstreamRes => {
+          res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+          const streaming = (upstreamRes.headers["content-type"] ?? "").includes("event-stream");
+          let progressBuffer = "";
+          upstreamRes.on("data", (c: Buffer) => {
+            if (streaming) {
+              progressBuffer += c.toString("utf8");
+              const end = progressBuffer.lastIndexOf("\n");
+              if (end >= 0) { readProgress(progressBuffer.slice(0, end), sessionId); progressBuffer = progressBuffer.slice(end + 1); }
+            }
+            res.write(c);
+          });
+          upstreamRes.on("error", reject);
+          upstreamRes.on("end", () => { resolve(upstreamRes.statusCode === 200); });
+        },
+      );
+      out.on("error", reject);
+      out.end(body);
     });
-    if (body.length) out.write(body);
-    out.end();
+    let model = "";
+    try { model = JSON.parse(body.toString()).model ?? ""; } catch { /* Non-completion route. */ }
+    const enabled = (process.env.LLAMA_DISK_CACHE_MODELS ?? "").split(",").includes(model) && !!model && target.pathname.endsWith("/chat/completions");
+    void (enabled ? diskCache.run(upstream, model, sessionId, controller.signal, forward) : forward())
+      .then(() => res.end())
+      .catch(error => {
+        if (res.destroyed) return;
+        if (!res.headersSent) res.writeHead(502);
+        res.end(String(error));
+      });
   });
 }
 

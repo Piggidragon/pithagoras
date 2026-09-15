@@ -10,7 +10,7 @@ import type { NextFunction, Request, Response } from "express";
  */
 const PASSWORD = process.env.PORTAL_PASSWORD || "";
 const SECRET = process.env.PORTAL_SECRET || crypto.randomBytes(32).toString("hex");
-const COOKIE = "pi_portal_auth";
+const COOKIE = (process.env.VOICE_COMPARISON === "true" || process.env.VOICE_PIPELINE_MODE === "sequential") ? "pi_portal_sequential_auth" : "pi_portal_auth";
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export const authEnabled = PASSWORD.length > 0;

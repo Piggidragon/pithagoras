@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { inlineBrowserScreenshot } from "./browser-screenshot.js";
+import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-format.js";
 import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
 
 /**
@@ -350,16 +352,20 @@ export function guardExtension(
     let tainted = false;
 
     pi.on("tool_result", (event: any) => {
+      const compact = !event.isError && isBrowserSnapshot(event.toolName, event.input ?? {});
+      const formatted = compact ? (event.content ?? []).map((part: any) =>
+        part?.type === 'text' && typeof part.text === 'string' ? { ...part, text: cleanBrowserSnapshot(part.text) } : part,
+      ) : event.content;
       const source =
         event.toolName === "bash" ? cmd(event.input ?? {}) : String(event.toolName ?? "");
       // MCP tools reach servers the portal does not control, so their output is
       // treated the same way as mail: someone else's words.
       const untrusted = UNTRUSTED_COMMAND.test(source) || /^mcp(_|$)/.test(source);
-      if (!untrusted || event.isError) return undefined;
+      if (!untrusted || event.isError) return compact ? { content: formatted } : undefined;
 
       tainted = true;
       const { open, close } = envelope(randomBytes(8).toString("hex"));
-      const content = (Array.isArray(event.content) ? event.content : []).map((part: any) =>
+      const content = (Array.isArray(formatted) ? formatted : []).map((part: any) =>
         part?.type === "text" && typeof part.text === "string"
           ? { ...part, text: deface(part.text) }
           : part,
@@ -387,6 +393,7 @@ export function guardExtension(
       // helping somebody else.
       const asBrowser = browserCall(event.toolName, event.input ?? {});
       if (asBrowser.isBrowser) {
+        inlineBrowserScreenshot(event.toolName, event.input);
         // Mutated in place — that is how pi takes an argument change.
         normaliseTarget(event.input);
         const browser = browserNow();

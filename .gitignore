@@ -9,3 +9,12 @@ data/
 # VitePress build output and cache
 docs/.vitepress/dist
 docs/.vitepress/cache
+
+# Optional voice runtime checkouts and model weights
+voice-runtime/
+
+# Generated, version-matched VAD model and WebAssembly assets
+web/public/voice-assets/
+
+playwright-report/
+test-results/

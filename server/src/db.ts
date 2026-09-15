@@ -96,6 +96,19 @@ export function getDb(): Database.Database {
     -- Every event pi emits is appended here. This is what makes the portal
     -- fire-and-forget: a browser that reconnects days later replays from its
     -- last seen seq instead of having missed the run entirely.
+    CREATE TABLE IF NOT EXISTS canvases (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      revision INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'saved',
+      active_call TEXT,
+      agent_read_revision INTEGER,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases(session_id);
+
     CREATE TABLE IF NOT EXISTS events (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
@@ -488,6 +501,7 @@ export function updateSession(
 
 export function deleteSession(id: string): void {
   const d = getDb();
+  d.prepare("DELETE FROM canvases WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
 }

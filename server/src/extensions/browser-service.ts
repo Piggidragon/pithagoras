@@ -71,6 +71,14 @@ export const pullState = () => pulling;
  * what is already on the machine rather than adding to the image.
  */
 export async function status() {
+  if (process.env.BROWSER_EXTERNAL === 'true') {
+    let running = false;
+    try {
+      const response = await fetch(`${process.env.BROWSER_CDP_URL || 'http://127.0.0.1:9222'}/json/version`, {signal: AbortSignal.timeout(4000)});
+      running = response.ok && typeof (await response.json() as {Browser?:string}).Browser === 'string';
+    } catch { /* An externally managed browser can be stopped independently. */ }
+    return {available:false, mode:'external' as const, image:true, container:running ? 'running' as const : 'stopped' as const, pulling};
+  }
   if (!dockerAvailable()) {
     const l = local.status();
     return {
@@ -134,6 +142,7 @@ function spec(cfg: BrowserConfig) {
 }
 
 export async function install(): Promise<void> {
+  if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
   // Nothing to install without Docker: the local runner uses a browser that is
   // already there, so installing is just starting it.
   if (!dockerAvailable()) return local.start();
@@ -171,6 +180,7 @@ export async function install(): Promise<void> {
 }
 
 export async function start(): Promise<void> {
+  if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
   if (!dockerAvailable()) return local.start();
   const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/start`);
   // 304 is "already running", which is the state being asked for.
@@ -180,6 +190,7 @@ export async function start(): Promise<void> {
 }
 
 export async function stop(): Promise<void> {
+  if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
   if (!dockerAvailable()) return local.stop();
   const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/stop?t=10`);
   if (res.status >= 400 && res.status !== 304) {
@@ -189,6 +200,7 @@ export async function stop(): Promise<void> {
 
 /** Removes the container. The profile volume is left alone — that is the logins. */
 export async function remove(): Promise<void> {
+  if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
   if (!dockerAvailable()) return local.stop();
   await request("POST", `/containers/${CONTAINER}/stop?t=10`).catch(() => {});
   const res = await request<{ message?: string }>("DELETE", `/containers/${CONTAINER}?force=true`);
@@ -199,6 +211,7 @@ export async function remove(): Promise<void> {
 
 /** Forgets the logins as well. Separate on purpose, and not undoable. */
 export async function forgetProfile(): Promise<void> {
+  if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
   await remove();
   const res = await request<{ message?: string }>("DELETE", `/volumes/${VOLUME}`);
   if (res.status >= 400 && res.status !== 404) {

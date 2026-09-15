@@ -302,8 +302,8 @@ function Shell({
                 setLoadingBefore(false);
               }
             }}
-            onSend={async (msg) => {
-              await api.prompt(active.id, msg);
+            onSend={async (msg, options) => {
+              await api.prompt(active.id, msg, options);
               refreshSessions();
             }}
             onAbort={async () => {

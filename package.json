@@ -15,5 +15,8 @@
     "start": "node server/dist/index.js",
     "docs": "npm run dev -w docs",
     "docs:build": "npm run build -w docs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
   }
 }

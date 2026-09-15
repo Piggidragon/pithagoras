@@ -34,6 +34,9 @@ export default defineConfig({
           { text: "Prompt injection", link: "/guide/security" },
           { text: "MCP servers", link: "/guide/mcp" },
           { text: "The agent's browser", link: "/guide/browser" },
+          { text: "Docker add-ons", link: "/guide/add-ons" },
+          { text: "Voice control", link: "/guide/voice" },
+          { text: "Session canvases", link: "/guide/canvases" },
         ],
       },
       {
