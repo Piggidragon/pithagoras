@@ -15,6 +15,10 @@ export const COMPACTION_PHRASES = [
   "I need a little room in my context. Let me summarize our conversation, then I'll carry on.",
   "Let me do a quick context compaction so I can keep going.",
 ];
+/** First murmur after this long in a thinking turn; later gaps grow up to the cap. */
+export const FILLER_FIRST_MS = 3500;
+export const FILLER_GAP_MS = 4500;
+export const FILLER_MAX_MS = 25000;
 export type VoicePhase = "Listening" | "Hearing you" | "Transcribing" | "Thinking" | "Compacting context" | "Speaking";
 export interface VoiceIO {
   sequential?: boolean;
@@ -26,6 +30,8 @@ export interface VoiceIO {
   abort: () => Promise<void>;
   agentRunning: () => boolean;
   synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status') => Promise<PreparedSpeech>;
+  /** Plays a short pre-rendered murmur during long thinking; resolves when it ends. */
+  filler?: (signal: AbortSignal) => Promise<void>;
   trace?: (name:string)=>void;
   phase: (phase: VoicePhase) => void;
   error: (message: string) => void;
@@ -56,7 +62,35 @@ export class HandsFreeVoice {
   private thinkingAnnounced = false;
   private lastThinkingAt = -Infinity;
   private lastThinkingPhrase = -1;
+  private fillerTimer?: ReturnType<typeof setTimeout>;
+  private fillerPlayback?: AbortController;
+  private fillersThisTurn = 0;
   private clearThinkingTimer() { clearTimeout(this.thinkingTimer); this.thinkingTimer = undefined; }
+  private clearFillers() {
+    clearTimeout(this.fillerTimer); this.fillerTimer = undefined;
+    this.fillerPlayback?.abort(); this.fillerPlayback = undefined;
+  }
+  private fillerAllowed() {
+    return !!this.io.filler && this.io.statusSpeech !== false && !this.io.sequential && this.alive && !this.compacting && !this.hearing
+      && this.acceptingReplies && !this.output.length && !this.pipeline.busy && !this.thinkingPipeline.busy && (this.io.agentRunning() || this.sending);
+  }
+  private scheduleFiller() {
+    if (!this.fillerAllowed()) { clearTimeout(this.fillerTimer); this.fillerTimer = undefined; return; }
+    if (this.fillerTimer || this.fillerPlayback) return;
+    // Space murmurs further apart the longer the model reasons, with jitter so
+    // they do not tick like a metronome.
+    const base = Math.min(FILLER_MAX_MS, this.fillersThisTurn ? FILLER_GAP_MS * (1 + this.fillersThisTurn) : FILLER_FIRST_MS);
+    this.fillerTimer = setTimeout(() => {
+      this.fillerTimer = undefined;
+      if (!this.fillerAllowed()) return;
+      const playback = new AbortController(); this.fillerPlayback = playback;
+      this.fillersThisTurn++;
+      this.io.trace?.('filler');
+      void this.io.filler!(playback.signal).catch(() => {}).finally(() => {
+        if (this.fillerPlayback === playback) { this.fillerPlayback = undefined; this.state(); }
+      });
+    }, base * (0.8 + Math.random() * 0.4));
+  }
 
 
   constructor(private io: VoiceIO, initial: Item[]) {
@@ -78,11 +112,12 @@ export class HandsFreeVoice {
     if (!this.alive) return;
     const phase = this.hearing ? "Hearing you" : this.compacting ? "Compacting context" : this.processing && !this.sending ? "Transcribing" : this.pipeline.busy || this.thinkingPipeline.busy ? "Speaking" : this.io.agentRunning() || this.sending ? "Thinking" : "Listening";
     this.io.phase(phase);
+    this.scheduleFiller();
     if (this.io.statusSpeech === false || this.io.sequential || phase !== "Thinking" || !this.acceptingReplies || this.output.length) this.clearThinkingTimer();
     else if (!this.thinkingAnnounced && !this.thinkingTimer && Date.now() - this.lastThinkingAt >= 20000) {
       this.thinkingTimer = setTimeout(() => {
         this.thinkingTimer = undefined;
-        if (!this.alive || this.compacting || this.hearing || !this.acceptingReplies || this.pipeline.busy || this.output.length || !(this.io.agentRunning() || this.sending)) return;
+        if (!this.alive || this.compacting || this.hearing || !this.acceptingReplies || this.pipeline.busy || this.fillerPlayback || this.output.length || !(this.io.agentRunning() || this.sending)) return;
         this.thinkingAnnounced = true; this.lastThinkingAt = Date.now();
         const candidates = THINKING_PHRASES.map((_, i) => i).filter(i => i !== this.lastThinkingPhrase);
         this.lastThinkingPhrase = candidates[Math.floor(Math.random() * candidates.length)];
@@ -94,6 +129,7 @@ export class HandsFreeVoice {
     if (!this.alive || active === this.compacting) return;
     this.compacting = active;
     this.clearThinkingTimer();
+    if (active) this.clearFillers();
     if (this.io.statusSpeech === false || this.io.sequential) { this.state(); return; }
     if (active) {
       this.lastCompactionWaitAt = -Infinity;
@@ -122,6 +158,7 @@ export class HandsFreeVoice {
       return;
     }
     this.clearThinkingTimer();
+    this.clearFillers();
     this.hearing = true;
     this.acceptingReplies = false;
     this.ignoreCurrent();
@@ -164,6 +201,7 @@ export class HandsFreeVoice {
         this.acceptingReplies = true;
         this.sending = true;
         this.thinkingAnnounced = false;
+        this.fillersThisTurn = 0;
         this.state();
         try {
           await this.io.send(text);
@@ -211,6 +249,7 @@ export class HandsFreeVoice {
   stop() {
     this.alive = false;
     this.clearThinkingTimer();
+    this.clearFillers();
     this.pipeline.cancel();
     this.thinkingPipeline.cancel();
     this.transcription.abort();

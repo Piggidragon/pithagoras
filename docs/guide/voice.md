@@ -186,6 +186,14 @@ The first sentence still needs model synthesis time before audio is available.
 Code blocks are
 replaced with a short spoken notice. Thinking and tool output are not spoken.
 
+Long reasoning is not silent. When voice starts, the portal renders a few short
+murmurs (“Hmm…”, “Mhm.”) in the selected voice once and keeps them in the
+browser. While the agent thinks or runs tools without speaking, one plays after
+a few seconds, with gaps that grow the longer the turn lasts, so no speech
+request competes with the model mid-turn. Speaking over a murmur cuts it off;
+`VOICE_STATUS_SPEECH=false` and the sequential pipeline disable murmurs along
+with the other spoken status notices.
+
 If transcription or sending fails, the error appears beside the controls; a
 failed send leaves the recognized text visible for copying. If Breeze reports
 HTTP 409, another request owns its single-concurrency runtime. End voice in the

@@ -14,6 +14,7 @@ import { LiveTranscription } from "../live-transcription";
 import { preparePcmSpeech, readPcmStream, playAudioBuffer } from "../pcm-stream";
 import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
+import { FillerSounds } from "../voice-fillers";
 
 export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, items, running, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, terminalActivity, toolEvents }: {
   sessionId: string;
@@ -94,6 +95,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     if(!response.ok)throw new Error((await response.json()).error||'Could not connect voice service');
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
+  const fillerRendering = useRef<AbortController | null>(null);
 
   const stop = () => {
     profiler.current?.close('stopped');
@@ -106,6 +108,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     mutedRef.current = false;
     levels.current = { input: 0, output: 0 };
     clearTimeout(maxTurn.current);
+    fillerRendering.current?.abort(); fillerRendering.current = null;
     voice.current?.stop(); voice.current = null;
     transcription.current?.reset(); transcription.current = null;
     const detector = vad.current; vad.current = null;
@@ -177,10 +180,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     requestAnimationFrame(() => startButton.current?.focus({ preventScroll: true }));
   };
 
-  const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'='reply') => {
-    const trace=profiling.current?profiler.current!.current:undefined;
-    const mark=(name:string,detail?:Record<string,number|string|boolean>,at?:number)=>{if(trace)profiler.current!.mark(kind+'_'+name,detail,trace,at);};
-    mark('tts_request');
+  const requestSpeech = async (text: string, signal: AbortSignal, mark: (name: string, detail?: Record<string, number | string | boolean>) => void = () => {}) => {
     // The previous cancelled request may still be releasing Breeze's GPU lock.
     let response: Response;
     const deadline = Date.now() + 15000;
@@ -205,7 +205,23 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         if (signal.aborted) cancel();
       });
     } while (true);
-    if (!response.ok) throw new Error((await response.json()).error || "Speech generation failed");
+    return response;
+  };
+  /** A whole phrase as one buffer, for murmurs played later without the network. */
+  const renderSpeech = async (text: string, signal: AbortSignal, audio: AudioContext) => {
+    const response = await requestSpeech(text, signal);
+    if (response.headers.get("content-type")?.startsWith("audio/pcm")) {
+      if (response.headers.get("x-sample-rate") !== "24000" || !response.body) throw new Error("Unsupported speech stream");
+      return readPcmStream(response.body, audio, signal);
+    }
+    const bytes = await response.arrayBuffer(); signal.throwIfAborted();
+    return audio.decodeAudioData(bytes);
+  };
+  const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'='reply') => {
+    const trace=profiling.current?profiler.current!.current:undefined;
+    const mark=(name:string,detail?:Record<string,number|string|boolean>,at?:number)=>{if(trace)profiler.current!.mark(kind+'_'+name,detail,trace,at);};
+    mark('tts_request');
+    const response = await requestSpeech(text, signal, mark);
     mark('tts_headers',{serverTiming:response.headers.get('server-timing')??''});
     let body=response.body;
     if(body&&trace){let first=true;body=body.pipeThrough(new TransformStream<Uint8Array<ArrayBuffer>,Uint8Array<ArrayBuffer>>({transform(chunk,controller){if(first&&chunk.length){first=false;mark('first_bytes');}controller.enqueue(chunk);}}));}
@@ -286,6 +302,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         return result.text;
       }, text => { if (current()) setTranscript(text); }, !sequential.current);
       transcription.current = live;
+      const fillers = new FillerSounds(audio, (text, signal) => renderSpeech(text, signal, audio));
       const controller = new HandsFreeVoice({
         statusSpeech: statusSpeech.current,
         sequential: sequential.current,
@@ -296,6 +313,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         abort: () => latest.current.onAbort(),
         agentRunning: () => latest.current.running,
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
+        filler: signal => fillers.play(signal),
         trace: profileMark,
         phase: value => { if (current()) setPhase(value); },
         error: message => { if (current()) {setError(message);profiler.current?.close('error');} },
@@ -344,6 +362,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       await detector.start();
       if (!current()) return;
       setEnabled(true); setStarting(false); cue("start");
+      if (statusSpeech.current && !sequential.current) {
+        const rendering = new AbortController(); fillerRendering.current = rendering;
+        void fillers.prepare(rendering.signal);
+      }
     } catch (e) {
       if (current()) { setError((e as Error).message); stop(); }
     }

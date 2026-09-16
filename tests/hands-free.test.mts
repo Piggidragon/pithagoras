@@ -254,3 +254,40 @@ test('sentence comparison submits a completed sentence before the agent turn end
  voice.observe([{...reply('a20',false),text:'Here is the first complete sentence. More'}]);await tick();
  assert.deepEqual(generated,['Here is the first complete sentence.']);voice.stop();
 });
+
+test('long thinking plays spaced murmurs that stop with the reply and never replace the phrase', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let running = true; const fillers: AbortSignal[] = [];
+  const { voice, spoken } = setup({ agentRunning: () => running, filler: async signal => { fillers.push(signal); } });
+  voice.observe([reply('a10')]); await tick();
+  t.mock.timers.tick(1800); await tick();
+  assert.equal(spoken.length, 1);
+  assert.equal(fillers.length, 0);
+  t.mock.timers.tick(4200); await tick();
+  assert.equal(fillers.length, 1);
+  // The second gap is longer than the first, so the same wait is not enough.
+  t.mock.timers.tick(4200); await tick(); voice.observe([reply('a10')]); await tick();
+  assert.equal(fillers.length, 1);
+  t.mock.timers.tick(7000); await tick();
+  assert.equal(fillers.length, 2);
+  running = false; voice.observe([reply('a10'), reply('a20')]); await tick();
+  t.mock.timers.tick(60000); await tick();
+  assert.equal(fillers.length, 2);
+  voice.stop();
+});
+
+test('barge-in cuts a murmur short; murmurs respect disabled status speech', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let playing: AbortSignal | undefined;
+  const { voice } = setup({ agentRunning: () => true, filler: signal => { playing = signal; return new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true })); } });
+  voice.observe([reply('a10')]); await tick();
+  t.mock.timers.tick(1800); await tick(); t.mock.timers.tick(4200); await tick();
+  assert.ok(playing);
+  voice.speechStart();
+  assert.equal(playing.aborted, true); voice.stop();
+  let quiet = 0;
+  const silent = setup({ statusSpeech: false, agentRunning: () => true, filler: async () => { quiet++; } });
+  silent.voice.observe([reply('a10')]); await tick();
+  t.mock.timers.tick(60000); await tick();
+  assert.equal(quiet, 0); silent.voice.stop();
+});
