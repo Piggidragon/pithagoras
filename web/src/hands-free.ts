@@ -1,37 +1,32 @@
 import { SpeechPipeline, type PreparedSpeech } from "./speech-pipeline";
 import type { Item } from "./transcript";
 import { StreamingSpeech } from "./voice";
+import { pick, statusPhrases, type FillerKind } from "./voice-phrases";
+import type { ToolKind } from "./tool-kind";
 
-export const THINKING_PHRASES = [
-  "Let me think about that for a moment.",
-  "Give me a moment to think this through.",
-  "Let me consider that.",
-  "I’m thinking through your request.",
-  "Let me take a moment with that.",
-];
-
-export const COMPACTION_PHRASES = [
-  "My context is getting full. Let me quickly compact our conversation before I continue.",
-  "I need a little room in my context. Let me summarize our conversation, then I'll carry on.",
-  "Let me do a quick context compaction so I can keep going.",
-];
-/** First murmur after this long in a thinking turn; later gaps grow up to the cap. */
+/** First filler after this long in a thinking turn; later gaps grow up to the cap. */
 export const FILLER_FIRST_MS = 3500;
 export const FILLER_GAP_MS = 4500;
 export const FILLER_MAX_MS = 25000;
+/** A tool that finishes sooner than this is not worth announcing. */
+export const TOOL_FILLER_DELAY_MS = 1200;
+/** Skip a tool announcement right after the agent itself spoke, which often already said what it is about to do. */
+export const TOOL_FILLER_QUIET_MS = 4000;
 export type VoicePhase = "Listening" | "Hearing you" | "Transcribing" | "Thinking" | "Compacting context" | "Speaking";
 export interface VoiceIO {
   sequential?: boolean;
   sentenceChunks?: boolean;
   ttsPrefetch?: boolean;
   statusSpeech?: boolean;
+  /** Language for spoken status notices; see voice-phrases. */
+  language?: string;
   transcribe: (samples: Float32Array, signal: AbortSignal) => Promise<string>;
   send: (text: string) => Promise<void>;
   abort: () => Promise<void>;
   agentRunning: () => boolean;
   synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status') => Promise<PreparedSpeech>;
-  /** Plays a short pre-rendered murmur during long thinking; resolves when it ends. */
-  filler?: (signal: AbortSignal) => Promise<void>;
+  /** Plays a pre-rendered filler and resolves when it ends; undefined when none of that kind is ready. */
+  filler?: (kind: FillerKind, signal: AbortSignal) => Promise<void> | undefined;
   trace?: (name:string)=>void;
   phase: (phase: VoicePhase) => void;
   error: (message: string) => void;
@@ -61,14 +56,36 @@ export class HandsFreeVoice {
   private thinkingTimer?: ReturnType<typeof setTimeout>;
   private thinkingAnnounced = false;
   private lastThinkingAt = -Infinity;
-  private lastThinkingPhrase = -1;
+  private lastThinkingPhrase?: string;
   private fillerTimer?: ReturnType<typeof setTimeout>;
   private fillerPlayback?: AbortController;
   private fillersThisTurn = 0;
+  private tool?: ToolKind;
+  private toolTimer?: ReturnType<typeof setTimeout>;
+  private announcedTools = new Set<ToolKind>();
+  private lastSpokeAt = -Infinity;
+  private get phrases() { return statusPhrases(this.io.language ?? "en"); }
   private clearThinkingTimer() { clearTimeout(this.thinkingTimer); this.thinkingTimer = undefined; }
   private clearFillers() {
     clearTimeout(this.fillerTimer); this.fillerTimer = undefined;
+    clearTimeout(this.toolTimer); this.toolTimer = undefined;
     this.fillerPlayback?.abort(); this.fillerPlayback = undefined;
+  }
+  /** Starts a filler if one of this kind is ready and nothing else is being said. */
+  private startFiller(kind: FillerKind) {
+    if (!this.io.filler || this.fillerPlayback) return false;
+    const playback = new AbortController();
+    const playing = this.io.filler(kind, playback.signal);
+    if (!playing) return false;
+    this.fillerPlayback = playback;
+    if (kind !== 'murmur') this.lastSpokeAt = Date.now();
+    // A filler resets the spacing, so a murmur never trails right behind it.
+    clearTimeout(this.fillerTimer); this.fillerTimer = undefined;
+    this.io.trace?.('filler');
+    void playing.catch(() => {}).finally(() => {
+      if (this.fillerPlayback === playback) { this.fillerPlayback = undefined; this.state(); }
+    });
+    return true;
   }
   private fillerAllowed() {
     return !!this.io.filler && this.io.statusSpeech !== false && !this.io.sequential && this.alive && !this.compacting && !this.hearing
@@ -82,14 +99,29 @@ export class HandsFreeVoice {
     const base = Math.min(FILLER_MAX_MS, this.fillersThisTurn ? FILLER_GAP_MS * (1 + this.fillersThisTurn) : FILLER_FIRST_MS);
     this.fillerTimer = setTimeout(() => {
       this.fillerTimer = undefined;
-      if (!this.fillerAllowed()) return;
-      const playback = new AbortController(); this.fillerPlayback = playback;
+      if (!this.fillerAllowed() || this.fillerPlayback) return;
       this.fillersThisTurn++;
-      this.io.trace?.('filler');
-      void this.io.filler!(playback.signal).catch(() => {}).finally(() => {
-        if (this.fillerPlayback === playback) { this.fillerPlayback = undefined; this.state(); }
-      });
+      // Long turns mix in a short "still on it" among the wordless murmurs.
+      if (!(this.fillersThisTurn > 2 && Math.random() < 0.35 && this.startFiller('still'))) this.startFiller('murmur');
+      // Nothing ready yet: the spacing still grows, and the next attempt follows.
+      if (!this.fillerPlayback) this.scheduleFiller();
     }, base * (0.8 + Math.random() * 0.4));
+  }
+  /** A tool started; a long-running one may be announced once per turn in the user's language. */
+  toolStart(kind: ToolKind) {
+    if (!this.alive) return;
+    this.tool = kind;
+    clearTimeout(this.toolTimer); this.toolTimer = undefined;
+    if (kind === 'tool' || this.announcedTools.has(kind) || Date.now() - this.lastSpokeAt < TOOL_FILLER_QUIET_MS) return;
+    this.toolTimer = setTimeout(() => {
+      this.toolTimer = undefined;
+      if (this.tool !== kind || !this.fillerAllowed() || Date.now() - this.lastSpokeAt < TOOL_FILLER_QUIET_MS) return;
+      if (this.startFiller(kind)) this.announcedTools.add(kind);
+    }, TOOL_FILLER_DELAY_MS);
+  }
+  toolEnd() {
+    this.tool = undefined;
+    clearTimeout(this.toolTimer); this.toolTimer = undefined;
   }
 
 
@@ -112,6 +144,7 @@ export class HandsFreeVoice {
     if (!this.alive) return;
     const phase = this.hearing ? "Hearing you" : this.compacting ? "Compacting context" : this.processing && !this.sending ? "Transcribing" : this.pipeline.busy || this.thinkingPipeline.busy ? "Speaking" : this.io.agentRunning() || this.sending ? "Thinking" : "Listening";
     this.io.phase(phase);
+    if (phase === "Speaking") this.lastSpokeAt = Date.now();
     this.scheduleFiller();
     if (this.io.statusSpeech === false || this.io.sequential || phase !== "Thinking" || !this.acceptingReplies || this.output.length) this.clearThinkingTimer();
     else if (!this.thinkingAnnounced && !this.thinkingTimer && Date.now() - this.lastThinkingAt >= 20000) {
@@ -119,9 +152,10 @@ export class HandsFreeVoice {
         this.thinkingTimer = undefined;
         if (!this.alive || this.compacting || this.hearing || !this.acceptingReplies || this.pipeline.busy || this.fillerPlayback || this.output.length || !(this.io.agentRunning() || this.sending)) return;
         this.thinkingAnnounced = true; this.lastThinkingAt = Date.now();
-        const candidates = THINKING_PHRASES.map((_, i) => i).filter(i => i !== this.lastThinkingPhrase);
-        this.lastThinkingPhrase = candidates[Math.floor(Math.random() * candidates.length)];
-        this.thinkingPipeline.enqueue([THINKING_PHRASES[this.lastThinkingPhrase]],'status');
+        // A pre-rendered phrase starts instantly; otherwise synthesize one.
+        if (this.startFiller('think')) return;
+        this.lastThinkingPhrase = pick(this.phrases.think, this.lastThinkingPhrase);
+        this.thinkingPipeline.enqueue([this.lastThinkingPhrase],'status');
       }, 1800);
     }
   }
@@ -134,8 +168,8 @@ export class HandsFreeVoice {
     if (active) {
       this.lastCompactionWaitAt = -Infinity;
       this.thinkingPipeline.cancel();
-      if (!this.hearing && this.acceptingReplies) this.pipeline.enqueue([COMPACTION_PHRASES[Math.floor(Math.random() * COMPACTION_PHRASES.length)]],'status');
-    } else this.pipeline.enqueue([completed ? "Context compaction is done. I'm ready to continue." : "Context compaction stopped before it finished."],'status');
+      if (!this.hearing && this.acceptingReplies) this.pipeline.enqueue([pick(this.phrases.compacting)],'status');
+    } else this.pipeline.enqueue([completed ? this.phrases.compactionDone : this.phrases.compactionStopped],'status');
     this.state();
   }
   observe(items: Item[]) {
@@ -153,7 +187,7 @@ export class HandsFreeVoice {
       this.compactionSpeech = true;
       if (this.io.statusSpeech !== false && !this.io.sequential && Date.now() - this.lastCompactionWaitAt >= 8000) {
         this.lastCompactionWaitAt = Date.now();
-        this.pipeline.enqueue(["I'm still compacting our conversation. Please wait a moment; I'll let you know when I'm ready."],'status');
+        this.pipeline.enqueue([this.phrases.compactionWait],'status');
       }
       return;
     }
@@ -202,6 +236,7 @@ export class HandsFreeVoice {
         this.sending = true;
         this.thinkingAnnounced = false;
         this.fillersThisTurn = 0;
+        this.announcedTools.clear();
         this.state();
         try {
           await this.io.send(text);

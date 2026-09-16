@@ -255,10 +255,11 @@ test('sentence comparison submits a completed sentence before the agent turn end
  assert.deepEqual(generated,['Here is the first complete sentence.']);voice.stop();
 });
 
-test('long thinking plays spaced murmurs that stop with the reply and never replace the phrase', async (t) => {
+test('long thinking plays spaced murmurs that stop with the reply', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  let running = true; const fillers: AbortSignal[] = [];
-  const { voice, spoken } = setup({ agentRunning: () => running, filler: async signal => { fillers.push(signal); } });
+  let running = true; const fillers: string[] = [];
+  // No pre-rendered thinking phrase: it is synthesized live, then murmurs follow.
+  const { voice, spoken } = setup({ agentRunning: () => running, filler: (kind) => kind === 'murmur' ? (fillers.push(kind), Promise.resolve()) : undefined });
   voice.observe([reply('a10')]); await tick();
   t.mock.timers.tick(1800); await tick();
   assert.equal(spoken.length, 1);
@@ -276,18 +277,59 @@ test('long thinking plays spaced murmurs that stop with the reply and never repl
   voice.stop();
 });
 
-test('barge-in cuts a murmur short; murmurs respect disabled status speech', async (t) => {
+test('a pre-rendered thinking phrase replaces live synthesis', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fillers: string[] = [];
+  const { voice, spoken } = setup({ agentRunning: () => true, filler: kind => { fillers.push(kind); return Promise.resolve(); } });
+  voice.observe([reply('a10')]); await tick();
+  t.mock.timers.tick(1800); await tick();
+  assert.deepEqual(spoken, []); assert.deepEqual(fillers, ['think']);
+  voice.stop();
+});
+
+test('barge-in cuts a filler short; fillers respect disabled status speech', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let playing: AbortSignal | undefined;
-  const { voice } = setup({ agentRunning: () => true, filler: signal => { playing = signal; return new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true })); } });
+  const { voice } = setup({ agentRunning: () => true, filler: (_kind, signal) => { playing = signal; return new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true })); } });
   voice.observe([reply('a10')]); await tick();
-  t.mock.timers.tick(1800); await tick(); t.mock.timers.tick(4200); await tick();
+  t.mock.timers.tick(1800); await tick();
   assert.ok(playing);
   voice.speechStart();
   assert.equal(playing.aborted, true); voice.stop();
   let quiet = 0;
   const silent = setup({ statusSpeech: false, agentRunning: () => true, filler: async () => { quiet++; } });
-  silent.voice.observe([reply('a10')]); await tick();
+  silent.voice.observe([reply('a10')]); silent.voice.toolStart('command'); await tick();
   t.mock.timers.tick(60000); await tick();
   assert.equal(quiet, 0); silent.voice.stop();
+});
+
+test('a long tool is announced once per turn; quick tools and tools right after speech are not', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const fillers: string[] = [];
+  const tools = () => fillers.filter(kind => !['murmur', 'still'].includes(kind));
+  const { voice, spoken } = setup({ agentRunning: () => true, filler: kind => kind === 'think' ? undefined : (fillers.push(kind), Promise.resolve()) });
+  voice.speechStart(); voice.speechEnd(new Float32Array(16000)); await tick();
+  t.mock.timers.tick(1800); await tick();
+  // The live thinking phrase just played, so the browser is not announced on top.
+  assert.equal(spoken.length, 1);
+  voice.toolStart('browser'); t.mock.timers.tick(1200); await tick();
+  assert.deepEqual(tools(), []);
+  voice.toolEnd(); t.mock.timers.tick(4000); await tick();
+  voice.toolStart('read'); t.mock.timers.tick(500); voice.toolEnd();
+  t.mock.timers.tick(1000); await tick();
+  assert.deepEqual(tools(), []);
+  voice.toolStart('command'); t.mock.timers.tick(1200); await tick();
+  assert.deepEqual(tools(), ['command']);
+  voice.toolEnd(); t.mock.timers.tick(5000); await tick();
+  voice.toolStart('command'); t.mock.timers.tick(1200); await tick();
+  assert.deepEqual(tools(), ['command']);
+  voice.toolEnd(); voice.stop();
+});
+
+test('status notices follow the voice language', async () => {
+  const { voice, spoken } = setup({ language: 'de' });
+  voice.setCompacting(true); await tick(); voice.setCompacting(false); await tick();
+  assert.ok(spoken.some(text => text.includes('Kontext')));
+  assert.ok(spoken.includes('Die Zusammenfassung ist fertig. Ich kann weitermachen.'));
+  voice.stop();
 });

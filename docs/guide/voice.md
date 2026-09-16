@@ -186,13 +186,32 @@ The first sentence still needs model synthesis time before audio is available.
 Code blocks are
 replaced with a short spoken notice. Thinking and tool output are not spoken.
 
-Long reasoning is not silent. When voice starts, the portal renders a few short
-murmurs (“Hmm…”, “Mhm.”) in the selected voice once and keeps them in the
-browser. While the agent thinks or runs tools without speaking, one plays after
-a few seconds, with gaps that grow the longer the turn lasts, so no speech
-request competes with the model mid-turn. Speaking over a murmur cuts it off;
-`VOICE_STATUS_SPEECH=false` and the sequential pipeline disable murmurs along
-with the other spoken status notices.
+Long work is not silent. When voice starts, the portal renders short fillers in
+the selected voice and keeps them in the browser, one of each kind first. It
+renders only between turns, so no filler request competes with a reply or the
+model:
+
+- **Murmurs** (“Hmm…”, “Mhm.”) during thinking. The first comes after a few
+  seconds; the gaps grow the longer the turn lasts, and long turns mix in a
+  short “still on it”.
+- **Thinking phrase.** The existing “let me think” notice plays from the
+  rendered clips when ready, instead of a live speech request.
+- **Tool announcements** (“Let me check the browser.”) for a command, file
+  read, edit, search or browser call still running after about a second. Each
+  kind is announced at most once per turn, and not right after the agent spoke,
+  since it has often just said what it is doing.
+
+Spoken fillers and status notices use the saved input language. With
+auto-detect, the browser's language is used. Phrases exist for English, German,
+Spanish, French, Italian, Portuguese, Russian, Chinese, Japanese, Korean, Hindi
+and Arabic. Other languages get wordless murmurs only, with status notices in
+English. Speaking over a filler cuts it off. `VOICE_STATUS_SPEECH=false` and
+the sequential pipeline disable spoken fillers with the other status notices.
+
+With interface sounds on, voice mode also plays quiet synthesized work sounds
+while the agent is not speaking: typing during commands and edits, a page rustle
+when reading, searching or browsing, and a soft tone when a tool the listener
+waited on finishes (lower if it failed).
 
 If transcription or sending fails, the error appears beside the controls; a
 failed send leaves the recognized text visible for copying. If Breeze reports
