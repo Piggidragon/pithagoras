@@ -1,9 +1,18 @@
 import { SpeechPipeline, type PreparedSpeech } from "./speech-pipeline";
 import type { Item } from "./transcript";
 import { StreamingSpeech } from "./voice";
-import { pick, statusPhrases, type FillerKind } from "./voice-phrases";
+import { pick } from "./voice-fillers";
+import type { FillerKind, VoiceNotices } from "./api";
 import type { ToolKind } from "./tool-kind";
 
+/** Until the portal's notices in the voice language arrive. */
+export const ENGLISH_NOTICES: VoiceNotices = {
+  think: ["Let me think about that for a moment.", "Give me a moment to think this through.", "Let me consider that.", "I’m thinking through your request.", "Let me take a moment with that."],
+  compacting: ["My context is getting full. Let me quickly compact our conversation before I continue.", "I need a little room in my context. Let me summarize our conversation, then I'll carry on.", "Let me do a quick context compaction so I can keep going."],
+  compactionWait: "I'm still compacting our conversation. Please wait a moment; I'll let you know when I'm ready.",
+  compactionDone: "Context compaction is done. I'm ready to continue.",
+  compactionStopped: "Context compaction stopped before it finished.",
+};
 /** First filler after this long in a thinking turn; later gaps grow up to the cap. */
 export const FILLER_FIRST_MS = 3500;
 export const FILLER_GAP_MS = 4500;
@@ -18,8 +27,8 @@ export interface VoiceIO {
   sentenceChunks?: boolean;
   ttsPrefetch?: boolean;
   statusSpeech?: boolean;
-  /** Language for spoken status notices; see voice-phrases. */
-  language?: string;
+  /** Spoken status notices in the voice language, once known. */
+  notices?: () => VoiceNotices | undefined;
   transcribe: (samples: Float32Array, signal: AbortSignal) => Promise<string>;
   send: (text: string) => Promise<void>;
   abort: () => Promise<void>;
@@ -64,7 +73,7 @@ export class HandsFreeVoice {
   private toolTimer?: ReturnType<typeof setTimeout>;
   private announcedTools = new Set<ToolKind>();
   private lastSpokeAt = -Infinity;
-  private get phrases() { return statusPhrases(this.io.language ?? "en"); }
+  private get phrases() { return this.io.notices?.() ?? ENGLISH_NOTICES; }
   private clearThinkingTimer() { clearTimeout(this.thinkingTimer); this.thinkingTimer = undefined; }
   private clearFillers() {
     clearTimeout(this.fillerTimer); this.fillerTimer = undefined;

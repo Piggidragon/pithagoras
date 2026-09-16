@@ -326,8 +326,9 @@ test('a long tool is announced once per turn; quick tools and tools right after 
   voice.toolEnd(); voice.stop();
 });
 
-test('status notices follow the voice language', async () => {
-  const { voice, spoken } = setup({ language: 'de' });
+test('status notices come from the portal in the voice language', async () => {
+  const de = { think: ['Moment.'], compacting: ['Mein Kontext wird voll.'], compactionWait: 'Noch einen Moment.', compactionDone: 'Die Zusammenfassung ist fertig. Ich kann weitermachen.', compactionStopped: 'Abgebrochen.' };
+  const { voice, spoken } = setup({ notices: () => de });
   voice.setCompacting(true); await tick(); voice.setCompacting(false); await tick();
   assert.ok(spoken.some(text => text.includes('Kontext')));
   assert.ok(spoken.includes('Die Zusammenfassung ist fertig. Ich kann weitermachen.'));

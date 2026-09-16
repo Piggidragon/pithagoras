@@ -186,10 +186,17 @@ The first sentence still needs model synthesis time before audio is available.
 Code blocks are
 replaced with a short spoken notice. Thinking and tool output are not spoken.
 
-Long work is not silent. When voice starts, the portal renders short fillers in
-the selected voice and keeps them in the browser, one of each kind first. It
-renders only between turns, so no filler request competes with a reply or the
-model:
+Long work is not silent. The portal renders short filler clips in the selected
+voice once and keeps them under `DATA_DIR/voice-clips`, so a voice conversation
+never waits for them. Rendering starts in the background when voice is set up or
+its settings are saved, and again at portal start for anything missing, such as
+new phrases after an update. It pauses while live speech or transcription is
+running. A managed voice runtime stays loaded while a batch renders. Changing the
+voice, language or speech settings renders a new set; the four most recently
+used sets are kept, so switching back is instant. With auto-detect, a language is
+rendered the first time a browser asks for it and then kept up to date like the
+saved one. Browsers download ready clips when voice starts and pick up the rest
+as they finish.
 
 - **Murmurs** (“Hmm…”, “Mhm.”) during thinking. The first comes after a few
   seconds; the gaps grow the longer the turn lasts, and long turns mix in a

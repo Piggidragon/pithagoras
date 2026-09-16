@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { trimSilence } from '../web/src/voice-fillers.js';
-import { PHRASES, fillerPhrases, phraseLanguage } from '../web/src/voice-phrases.js';
+import { PHRASES, fillerPhrases, phraseLanguage } from '../server/src/voice-phrases.js';
 import { toolKind } from '../web/src/tool-kind.js';
 
 test('fillers lose TTS padding but keep a short natural onset and tail', () => {
@@ -14,16 +14,20 @@ test('fillers lose TTS padding but keep a short natural onset and tail', () => {
 
 test('every phrase language covers every filler and notice', () => {
   for (const [language, table] of Object.entries(PHRASES)) {
-    for (const [kind, texts] of fillerPhrases(language)) assert.ok(texts.length && texts.every(text => text.trim() && text.length <= 80), `${language} ${kind}`);
+    const clips = fillerPhrases(language);
+    assert.deepEqual(new Set(clips.map(clip => clip.kind)), new Set(['murmur', 'think', 'command', 'read', 'edit', 'browser', 'search', 'still']), language);
+    assert.ok(clips.every(clip => clip.text.trim() && clip.text.length <= 80), language);
     assert.ok(table.compacting.length && table.compactionWait && table.compactionDone && table.compactionStopped, language);
   }
+  // One of every kind renders before any variation.
+  assert.deepEqual(fillerPhrases('de').slice(0, 8).map(clip => clip.kind), ['murmur', 'think', 'command', 'read', 'edit', 'browser', 'search', 'still']);
 });
 
-test('filler language: configured first, then the browser, never guessed wording', () => {
+test('filler language: configured first, then the client, never guessed wording', () => {
   assert.equal(phraseLanguage('fr', ['de-DE']), 'fr');
   assert.equal(phraseLanguage('auto', ['xx', 'de-AT', 'en']), 'de');
   assert.equal(phraseLanguage(undefined, []), 'en');
-  assert.deepEqual(fillerPhrases('ta').map(([kind]) => kind), ['murmur']);
+  assert.deepEqual(fillerPhrases('ta').map(clip => clip.kind), ['murmur', 'murmur', 'murmur', 'murmur']);
 });
 
 test('tool calls are grouped by what a listener hears about', () => {

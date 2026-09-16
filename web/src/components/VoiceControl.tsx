@@ -15,7 +15,6 @@ import { preparePcmSpeech, readPcmStream, playAudioBuffer } from "../pcm-stream"
 import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
 import { FillerSounds } from "../voice-fillers";
-import { phraseLanguage } from "../voice-phrases";
 import { WorkSounds } from "../work-sounds";
 import { toolKind, type ToolKind } from "../tool-kind";
 
@@ -83,8 +82,6 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const vadSettings = useRef(DEFAULT_VAD);
   const sequential = useRef(false);
   const statusSpeech = useRef(true);
-  const speechLanguage = useRef("en");
-  const voiceKey = useRef("");
   const work = useRef<WorkSounds | null>(null);
   const toolSeq = useRef(Infinity);
   const toolLiveSeen = useRef(new WeakSet<object>());
@@ -106,7 +103,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     if(!response.ok)throw new Error((await response.json()).error||'Could not connect voice service');
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
-  const fillerRendering = useRef<AbortController | null>(null);
+  const fillerLoading = useRef<AbortController | null>(null);
 
   const stop = () => {
     profiler.current?.close('stopped');
@@ -119,7 +116,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     mutedRef.current = false;
     levels.current = { input: 0, output: 0 };
     clearTimeout(maxTurn.current);
-    fillerRendering.current?.abort(); fillerRendering.current = null;
+    fillerLoading.current?.abort(); fillerLoading.current = null;
     work.current?.stop(); work.current = null;
     runningTools.current.clear(); finishedTools.current.clear();
     voice.current?.stop(); voice.current = null;
@@ -137,8 +134,6 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (!mounted.current) return;
       managed.current=config.managed===true;
       statusSpeech.current = config.statusSpeech !== false;
-      speechLanguage.current = phraseLanguage(config.language, navigator.languages?.length ? navigator.languages : [navigator.language]);
-      voiceKey.current = JSON.stringify([config.runtime, config.breezeUrl, config.voice, config.instruction, config.cfgScale]);
       setComparison(config.comparison === true);
       sequential.current = config.pipelineMode === "sequential";
       setSequentialMode(sequential.current);
@@ -221,7 +216,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     requestAnimationFrame(() => startButton.current?.focus({ preventScroll: true }));
   };
 
-  const requestSpeech = async (text: string, signal: AbortSignal, mark: (name: string, detail?: Record<string, number | string | boolean>) => void = () => {}) => {
+  const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'='reply') => {
+    const trace=profiling.current?profiler.current!.current:undefined;
+    const mark=(name:string,detail?:Record<string,number|string|boolean>,at?:number)=>{if(trace)profiler.current!.mark(kind+'_'+name,detail,trace,at);};
+    mark('tts_request');
     // The previous cancelled request may still be releasing Breeze's GPU lock.
     let response: Response;
     const deadline = Date.now() + 15000;
@@ -246,23 +244,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         if (signal.aborted) cancel();
       });
     } while (true);
-    return response;
-  };
-  /** A whole phrase as one buffer, for murmurs played later without the network. */
-  const renderSpeech = async (text: string, signal: AbortSignal, audio: AudioContext) => {
-    const response = await requestSpeech(text, signal);
-    if (response.headers.get("content-type")?.startsWith("audio/pcm")) {
-      if (response.headers.get("x-sample-rate") !== "24000" || !response.body) throw new Error("Unsupported speech stream");
-      return readPcmStream(response.body, audio, signal);
-    }
-    const bytes = await response.arrayBuffer(); signal.throwIfAborted();
-    return audio.decodeAudioData(bytes);
-  };
-  const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'='reply') => {
-    const trace=profiling.current?profiler.current!.current:undefined;
-    const mark=(name:string,detail?:Record<string,number|string|boolean>,at?:number)=>{if(trace)profiler.current!.mark(kind+'_'+name,detail,trace,at);};
-    mark('tts_request');
-    const response = await requestSpeech(text, signal, mark);
+    if (!response.ok) throw new Error((await response.json()).error || "Speech generation failed");
     mark('tts_headers',{serverTiming:response.headers.get('server-timing')??''});
     let body=response.body;
     if(body&&trace){let first=true;body=body.pipeThrough(new TransformStream<Uint8Array<ArrayBuffer>,Uint8Array<ArrayBuffer>>({transform(chunk,controller){if(first&&chunk.length){first=false;mark('first_bytes');}controller.enqueue(chunk);}}));}
@@ -347,11 +329,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         return result.text;
       }, text => { if (current()) setTranscript(text); }, !sequential.current);
       transcription.current = live;
-      // Render only between turns, so fillers never hold up a reply or the model.
-      const fillers = new FillerSounds(audio, speechLanguage.current, voiceKey.current, (text, signal) => renderSpeech(text, signal, audio), () => phaseRef.current === "Listening");
+      const fillers = new FillerSounds(audio);
       const controller = new HandsFreeVoice({
         statusSpeech: statusSpeech.current,
-        language: speechLanguage.current,
+        notices: () => fillers.notices,
         sequential: sequential.current,
         sentenceChunks: sentenceChunks.current,
         ttsPrefetch: ttsPrefetch.current,
@@ -410,8 +391,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (!current()) return;
       setEnabled(true); setStarting(false); cue("start");
       if (statusSpeech.current && !sequential.current) {
-        const rendering = new AbortController(); fillerRendering.current = rendering;
-        void fillers.prepare(rendering.signal);
+        // The portal renders clips when voice is set up; this only downloads them.
+        const loading = new AbortController(); fillerLoading.current = loading;
+        void fillers.load(navigator.languages?.length ? navigator.languages : [navigator.language], loading.signal);
       }
     } catch (e) {
       if (current()) { setError((e as Error).message); stop(); }

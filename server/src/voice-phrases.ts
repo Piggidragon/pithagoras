@@ -1,7 +1,8 @@
-import type { ToolKind } from "./tool-kind";
-
-/** Short spoken fillers, rendered ahead of time and played while the agent works. */
-export type FillerKind = "murmur" | "think" | "still" | Exclude<ToolKind, "tool">;
+/**
+ * Short spoken fillers, rendered ahead of time and played while the agent
+ * works. The tool kinds match the browser's grouping of tool calls.
+ */
+export type FillerKind = "murmur" | "think" | "still" | "command" | "browser" | "search" | "read" | "edit";
 
 export interface VoicePhrases {
   murmur?: string[];
@@ -192,23 +193,20 @@ export const PHRASES: Record<string, VoicePhrases> = {
   },
 };
 
-/** The configured input language, or the browser's when voice auto-detects. */
-export function phraseLanguage(configured: string | undefined, browser: readonly string[] = []) {
+/** The configured input language, or the first requested one with phrases when voice auto-detects. */
+export function phraseLanguage(configured: string | undefined, requested: readonly string[] = []) {
   if (configured && configured !== "auto") return configured;
-  return browser.map(tag => tag.toLowerCase().split("-")[0]).find(code => code in PHRASES) ?? "en";
+  return requested.map(tag => tag.toLowerCase().split("-")[0]).find(code => code in PHRASES) ?? "en";
 }
 
 /** Status notices fall back to English; fillers do not, so they never speak the wrong language. */
 export const statusPhrases = (language: string) => PHRASES[language] ?? PHRASES.en;
 
-export function fillerPhrases(language: string): [FillerKind, string[]][] {
+/** One phrase of every kind first, then the variations, so the most useful clips are ready soonest. */
+export function fillerPhrases(language: string): { kind: FillerKind; text: string }[] {
   const table = PHRASES[language];
-  const murmur: [FillerKind, string[]] = ["murmur", table?.murmur ?? MURMURS];
-  if (!table) return [murmur];
-  return [murmur, ["think", table.think.slice(0, 3)], ["command", table.command], ["read", table.read], ["edit", table.edit], ["browser", table.browser], ["search", table.search], ["still", table.still]];
+  const groups: [FillerKind, string[]][] = [["murmur", table?.murmur ?? MURMURS]];
+  if (table) groups.push(["think", table.think.slice(0, 3)], ["command", table.command], ["read", table.read], ["edit", table.edit], ["browser", table.browser], ["search", table.search], ["still", table.still]);
+  const rounds = Math.max(...groups.map(([, texts]) => texts.length));
+  return Array.from({ length: rounds }, (_, i) => groups.filter(([, texts]) => i < texts.length).map(([kind, texts]) => ({ kind, text: texts[i] }))).flat();
 }
-
-export const pick = <T,>(values: readonly T[], avoid?: T) => {
-  const candidates = values.length > 1 ? values.filter(v => v !== avoid) : values;
-  return candidates[Math.floor(Math.random() * candidates.length)];
-};
