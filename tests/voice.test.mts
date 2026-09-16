@@ -7,7 +7,8 @@ import express from 'express';
 import { speechChunks, newSpeech } from '../web/src/voice.js';
 const dir = mkdtempSync(join(tmpdir(), 'pithagoras-voice-'));
 process.env.DATA_DIR = dir;
-const { voiceRouter, pcmWav, validateConfig } = await import('../server/src/api/voice.js');
+const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice } = await import('../server/src/api/voice.js');
+const { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } = await import('../server/src/voice-languages.js');
 const { getDb } = await import('../server/src/db.js');
 const upstream = express();
 let calls = 0;
@@ -189,12 +190,15 @@ test('Chatterbox clones a reference, writes numbers out and returns one buffered
   // The recognition model reaches the OpenAI-compatible transcription endpoint.
   await fetch(`${base}/sessions/test/voice/transcribe`, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: new Uint8Array(pcmWav(Buffer.alloc(32))) });
   assert.ok(transcriptionBody.includes('name="model"\r\n\r\nqwen3-asr\r\n'));
-  // A designed voice has no recording to clone from.
-  await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...chatterbox, voice: 'design' }) });
-  const refused = await fetch(`${base}/sessions/test/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Ohne Referenz.' }) });
-  assert.equal(refused.status, 502);
+  // A designed voice has no recording to clone from: refused on save, not on
+  // every phrase of a conversation.
+  const refused = await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...chatterbox, voice: 'design' }) });
+  assert.equal(refused.status, 400);
   assert.match((await refused.json()).error, /reference clone/);
   assert.throws(() => validateConfig({ ...chatterbox, language: 'ru' }), /Chatterbox speaks/);
+  // Chatterbox is told a language; auto-detect would silently mean English.
+  assert.throws(() => validateConfig({ ...chatterbox, language: 'auto' }), /needs an input language/);
+  assert.equal(validateConfig({ ...chatterbox, language: 'nl' }).language, 'nl');
   assert.throws(() => validateConfig({ ...settings, sttModel: 'a model' }));
   assert.throws(() => validateConfig({ ...settings, exaggeration: 5 }));
 });
@@ -206,4 +210,31 @@ test('VAD settings preserve defaults, accept tuning and reject invalid threshold
   for (const vad of [{redemptionMs:0}, {minSpeechMs:NaN}, {preSpeechPadMs:1001}, {positiveSpeechThreshold:0.3,negativeSpeechThreshold:0.4}]) {
     assert.throws(() => validateConfig({...settings,vad}));
   }
+});
+
+test('every language a runtime accepts is one the add-on can offer', () => {
+  for (const code of CHATTERBOX_LANGUAGES) assert.ok(INPUT_LANGUAGES.some(([value]) => value === code), `${code} is missing from the input languages`);
+  assert.equal(validateConfig({ ...settings, language: 'sw' }).language, 'sw');
+});
+
+test('a WAV whose data chunk carries a placeholder size keeps its samples', () => {
+  const wav = pcmWav(Buffer.from([0, 0, 255, 127]));
+  assert.deepEqual(wavPcm(wav), Buffer.from([0, 0, 255, 127]));
+  for (const size of [0, 0xffffffff]) {
+    const placeholder = Buffer.from(wav);
+    placeholder.writeUInt32LE(size, 40);
+    assert.deepEqual(wavPcm(placeholder), Buffer.from([0, 0, 255, 127]));
+  }
+  // A truncated fmt chunk is reported as unsupported audio, not as a read past the end.
+  const truncated = Buffer.concat([Buffer.from('RIFF\u0000\u0000\u0000\u0000WAVE', 'ascii'), Buffer.alloc(40), Buffer.from('fmt ', 'ascii'), Buffer.alloc(8)]);
+  assert.throws(() => wavPcm(truncated), /Expected mono 24 kHz 16-bit audio/);
+});
+
+test('connecting the managed voice drops a recognition model from another runtime', async () => {
+  const saved = await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, runtime: 'chatterbox', voice: 'aria', language: 'de', sttModel: 'qwen3-asr' }) });
+  assert.equal(saved.status, 200);
+  // Whisper.cpp is sent this field verbatim; another runtime's model id would
+  // reach it in the multipart body of every transcription.
+  assert.equal(connectManagedVoice().sttModel, '');
+  assert.equal((await (await fetch(`${base}/voice`)).json()).sttModel, '');
 });

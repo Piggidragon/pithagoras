@@ -154,9 +154,20 @@ VOICE_GPU=1 docker compose -f docker-compose.yml -f docker-compose.voice.yml \
 curl --fail http://127.0.0.1:7871/health
 ```
 
+`server.json` binds loopback, and Compose publishes the container's port on
+`127.0.0.1:7871`: the service has no authentication, so nothing should reach it
+from the network. The Chatterbox entry declares `"task": "clon"`, which is
+audio.cpp's own name for voice cloning — not a truncated `"clone"`.
+
 `deploy/voice-multilingual/` also holds a systemd unit for a native audio.cpp
 build. It reads the same `server.json`, so point `/models` at your GGUF
-directory — a symlink is enough — or edit the two paths in that file.
+directory — a symlink is enough — or edit the two paths in that file. Build the
+server where the unit expects it, next to the existing Breeze unit's binary:
+
+```sh
+cd /opt/audio.cpp
+scripts/build_linux.sh --backend cuda --target audiocpp_server
+```
 
 ### Point the portal at it
 
@@ -170,9 +181,11 @@ Open **Settings → Add-ons → Voice → Advanced connection** and set:
 | Speech recognition model | `qwen3-asr` |
 
 Then choose your **Input language** — it selects the spoken language too — and a
-**Speaking voice**. Chatterbox always clones a reference recording: choose Aria
-or add a voice with a recording in the language you want to hear. A designed
-voice is refused rather than silently replaced. Use a clean 10-second reference.
+**Speaking voice**. Chatterbox has no detection mode, so **Auto-detect** is not
+offered for it and the dropdown lists only the nineteen languages above.
+Chatterbox always clones a reference recording: choose Aria or add a voice with
+a recording in the language you want to hear. A designed voice is refused when
+you save, not silently replaced. Use a clean 10-second reference.
 
 **Speech delivery** replaces Breeze's Fast/Expressive choice. It sets
 Chatterbox's emotion exaggeration: calm, natural, or expressive.
@@ -180,8 +193,12 @@ Chatterbox's emotion exaggeration: calm, natural, or expressive.
 Numbers are written out before synthesis for languages that have a pack
 (currently German and English), because Chatterbox otherwise reads digit groups
 unreliably — "4070" came back from recognition as "70". The transcript keeps the
-digits; only synthesis sees the words. Adding a language is one entry in
-`server/src/voice-numbers.ts`; a language without a pack keeps its digits.
+digits; only synthesis sees the words. Each pack knows how its language groups
+thousands, so German "100.000" is spoken as one number rather than as a decimal.
+Dates, clock times, version strings, ranges and anything with a leading zero
+keep their digits: reading them as quantities would be worse than leaving them.
+Adding a language is one entry in `server/src/voice-numbers.ts`; a language
+without a pack keeps its digits, and the add-on says so under the language.
 
 Chatterbox has no streaming mode in audio.cpp, so each phrase arrives as one
 complete WAV instead of a PCM stream. Playback is unchanged, because the browser

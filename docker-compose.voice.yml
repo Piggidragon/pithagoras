@@ -47,4 +47,4 @@ services:
     volumes:
       - ${AUDIOCPP_MODELS:-./voice-runtime/audio-cpp}:/models:ro
       - ./deploy/voice-multilingual/server.json:/config/server.json:ro
-    command: ["server", "--config", "/config/server.json"]
+    command: ["server", "--config", "/config/server.json", "--host", "0.0.0.0"]
