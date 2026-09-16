@@ -84,11 +84,17 @@ export function validateConfig(value: any): VoiceConfig {
 export function wavPcm(wav: Buffer): Buffer {
   if (wav.length < 44 || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE")
     throw new Error("Chatterbox returned invalid WAV audio");
+  let format = false;
   for (let at = 12; at + 8 <= wav.length;) {
     const id = wav.toString("ascii", at, at + 4), size = wav.readUInt32LE(at + 4);
-    if (id === "fmt " && (size < 16 || at + 24 > wav.length || wav.readUInt16LE(at + 10) !== 1 || wav.readUInt32LE(at + 12) !== 24000 || wav.readUInt16LE(at + 22) !== 16))
-      throw new Error("Expected mono 24 kHz 16-bit audio from Chatterbox");
+    if (id === "fmt ") {
+      if (size < 16 || at + 24 > wav.length || wav.readUInt16LE(at + 8) !== 1 || wav.readUInt16LE(at + 10) !== 1 || wav.readUInt32LE(at + 12) !== 24000 || wav.readUInt16LE(at + 22) !== 16)
+        throw new Error("Expected mono 24 kHz 16-bit audio from Chatterbox");
+      format = true;
+    }
     if (id === "data") {
+      // Samples are only meaningful once the fmt chunk has described them.
+      if (!format) throw new Error("Expected mono 24 kHz 16-bit audio from Chatterbox");
       // A writer that does not know the length up front leaves a placeholder
       // size behind. The response is fully buffered, so its end is the truth.
       const end = size && at + 8 + size <= wav.length ? at + 8 + size : wav.length;
@@ -282,9 +288,11 @@ export function voiceRouter(): Router {
       if (settings.runtime === "chatterbox") {
         if (!/^audio\/(wav|x-wav|wave|vnd\.wave)\b/.test(upstream.headers.get("content-type") ?? "")) throw new Error("Expected WAV audio from the Chatterbox API");
         const wav = Buffer.from(await upstream.arrayBuffer());
+        // Validate before either branch, so a malformed WAV is never passed on.
+        const pcm = wavPcm(wav);
         res.set("Server-Timing", `tts_headers;dur=${(performance.now()-speechStarted).toFixed(1)}, tts_busy;dur=${busyMs.toFixed(1)}`);
         if (req.get("accept") !== "audio/pcm") return res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);
-        return res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store" }).send(wavPcm(wav));
+        return res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store" }).send(pcm);
       }
       if (!upstream.headers.get("content-type")?.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && upstream.headers.get("content-type")?.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
       const rate = upstream.headers.get("x-sample-rate");

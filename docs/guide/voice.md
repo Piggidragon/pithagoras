@@ -169,6 +169,9 @@ cd /opt/audio.cpp
 scripts/build_linux.sh --backend cuda --target audiocpp_server
 ```
 
+The unit uses GPU 0 unless `/etc/default/pithagoras-audio-cpp-multilingual`
+sets another, for example `VOICE_GPU=1`.
+
 ### Point the portal at it
 
 Open **Settings → Add-ons → Voice → Advanced connection** and set:

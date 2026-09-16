@@ -228,6 +228,12 @@ test('a WAV whose data chunk carries a placeholder size keeps its samples', () =
   // A truncated fmt chunk is reported as unsupported audio, not as a read past the end.
   const truncated = Buffer.concat([Buffer.from('RIFF\u0000\u0000\u0000\u0000WAVE', 'ascii'), Buffer.alloc(40), Buffer.from('fmt ', 'ascii'), Buffer.alloc(8)]);
   assert.throws(() => wavPcm(truncated), /Expected mono 24 kHz 16-bit audio/);
+  // Samples ahead of their fmt chunk, or in a non-PCM encoding, are refused.
+  const dataFirst = Buffer.concat([wav.subarray(0, 12), wav.subarray(36), wav.subarray(12, 36)]);
+  assert.throws(() => wavPcm(dataFirst), /Expected mono 24 kHz 16-bit audio/);
+  const float = Buffer.from(wav);
+  float.writeUInt16LE(3, 20);
+  assert.throws(() => wavPcm(float), /Expected mono 24 kHz 16-bit audio/);
 });
 
 test('connecting the managed voice drops a recognition model from another runtime', async () => {
