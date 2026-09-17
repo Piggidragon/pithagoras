@@ -1,7 +1,8 @@
 /**
  * Short spoken fillers, rendered ahead of time. Each is tied to a moment the
  * listener can place: their own request, a slow or failed tool, a long silence.
- * No wordless murmurs: speech runtimes render them unpredictably, often twice.
+ * No wordless murmurs or one-word phrases: speech runtimes render them
+ * unpredictably, often twice.
  */
 export type FillerKind = "ackQuestion" | "ackRequest" | "slowCommand" | "slowTests" | "slowInstall" | "slowBuild" | "slowBrowser" | "slowSearch" | "slow" | "toolFailed" | "toolDone" | "still";
 
@@ -21,7 +22,7 @@ export type VoicePhrases = Record<FillerKind, string[]> & {
 export const PHRASES: Record<string, VoicePhrases> = {
   en: {
     ackQuestion: ["Let me see.", "Let me check."],
-    ackRequest: ["Okay.", "Sure.", "On it."],
+    ackRequest: ["Okay, on it.", "Sure thing.", "Got it."],
     slowCommand: ["The command is still running."],
     slowTests: ["The tests are still running."],
     slowInstall: ["Still installing."],
@@ -40,7 +41,7 @@ export const PHRASES: Record<string, VoicePhrases> = {
   },
   de: {
     ackQuestion: ["Mal sehen.", "Moment, ich schau mal."],
-    ackRequest: ["Okay.", "Alles klar.", "Mach ich."],
+    ackRequest: ["Alles klar.", "Mach ich.", "Okay, verstanden."],
     slowCommand: ["Der Befehl läuft noch."],
     slowTests: ["Die Tests laufen noch."],
     slowInstall: ["Die Installation läuft noch."],
@@ -59,7 +60,7 @@ export const PHRASES: Record<string, VoicePhrases> = {
   },
   es: {
     ackQuestion: ["A ver.", "Déjame ver."],
-    ackRequest: ["Vale.", "De acuerdo.", "Enseguida."],
+    ackRequest: ["Vale, entendido.", "De acuerdo.", "Ahora mismo."],
     slowCommand: ["El comando sigue en marcha."],
     slowTests: ["Las pruebas siguen ejecutándose."],
     slowInstall: ["La instalación sigue en curso."],
@@ -77,8 +78,8 @@ export const PHRASES: Record<string, VoicePhrases> = {
     compactionStopped: "El resumen se detuvo antes de terminar.",
   },
   fr: {
-    ackQuestion: ["Voyons.", "Je regarde."],
-    ackRequest: ["D’accord.", "Entendu.", "Je m’en occupe."],
+    ackQuestion: ["Voyons voir.", "Je regarde."],
+    ackRequest: ["D’accord, c’est parti.", "C’est noté.", "Je m’en occupe."],
     slowCommand: ["La commande tourne encore."],
     slowTests: ["Les tests tournent encore."],
     slowInstall: ["L’installation est encore en cours."],
@@ -96,7 +97,7 @@ export const PHRASES: Record<string, VoicePhrases> = {
     compactionStopped: "Le résumé s’est arrêté avant la fin.",
   },
   it: {
-    ackQuestion: ["Vediamo.", "Controllo subito."],
+    ackQuestion: ["Vediamo un po’.", "Controllo subito."],
     ackRequest: ["Va bene.", "D’accordo.", "Ci penso io."],
     slowCommand: ["Il comando è ancora in esecuzione."],
     slowTests: ["I test sono ancora in corso."],
@@ -116,7 +117,7 @@ export const PHRASES: Record<string, VoicePhrases> = {
   },
   pt: {
     ackQuestion: ["Deixa eu ver.", "Vou verificar."],
-    ackRequest: ["Tá bom.", "Beleza.", "Pode deixar."],
+    ackRequest: ["Tá bom.", "Beleza, deixa comigo.", "Pode deixar."],
     slowCommand: ["O comando ainda está rodando."],
     slowTests: ["Os testes ainda estão rodando."],
     slowInstall: ["A instalação ainda está em andamento."],
@@ -135,7 +136,7 @@ export const PHRASES: Record<string, VoicePhrases> = {
   },
   ru: {
     ackQuestion: ["Сейчас посмотрим.", "Секунду, проверю."],
-    ackRequest: ["Хорошо.", "Понятно.", "Сейчас сделаю."],
+    ackRequest: ["Хорошо, сейчас.", "Понятно, делаю.", "Сейчас сделаю."],
     slowCommand: ["Команда ещё выполняется."],
     slowTests: ["Тесты ещё идут."],
     slowInstall: ["Установка ещё идёт."],
@@ -211,7 +212,7 @@ export const PHRASES: Record<string, VoicePhrases> = {
   },
   hi: {
     ackQuestion: ["देखते हैं।", "एक पल, देखते हैं।"],
-    ackRequest: ["ठीक है।", "बिल्कुल।", "अभी करते हैं।"],
+    ackRequest: ["ठीक है।", "जी, समझ गए।", "अभी करते हैं।"],
     slowCommand: ["कमांड अभी चल रही है।"],
     slowTests: ["टेस्ट अभी चल रहे हैं।"],
     slowInstall: ["इंस्टॉलेशन अभी चल रहा है।"],
@@ -230,7 +231,7 @@ export const PHRASES: Record<string, VoicePhrases> = {
   },
   ar: {
     ackQuestion: ["لنرَ.", "دعني أتحقق."],
-    ackRequest: ["حسنًا.", "تمام.", "سأبدأ الآن."],
+    ackRequest: ["حسنًا، سأبدأ.", "تمام، فهمت.", "سأبدأ الآن."],
     slowCommand: ["الأمر لا يزال قيد التشغيل."],
     slowTests: ["الاختبارات لا تزال قيد التشغيل."],
     slowInstall: ["التثبيت لا يزال جاريًا."],

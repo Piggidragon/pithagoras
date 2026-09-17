@@ -18,6 +18,8 @@ test('every phrase language covers every filler and notice', () => {
     const clips = fillerPhrases(language);
     assert.deepEqual(new Set(clips.map(clip => clip.kind)), new Set(kinds), language);
     assert.ok(clips.every(clip => clip.text.trim() && clip.text.length <= 60), language);
+    // Chatterbox says a lone word such as "Okay." twice.
+    assert.ok(clips.every(clip => !/^\p{L}+[.!。]$/u.test(clip.text) || !/\p{Script=Latin}|\p{Script=Cyrillic}|\p{Script=Arabic}/u.test(clip.text)), language);
     assert.ok(table.think.length && table.compacting.length && table.compactionWait && table.compactionDone && table.compactionStopped, language);
   }
   // Acknowledgements render first: they play in every turn.
