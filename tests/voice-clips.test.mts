@@ -1,6 +1,6 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readdirSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VoiceClips } from '../server/src/voice-clips.js';
@@ -49,9 +49,9 @@ test('a voice change mid-batch renders the rest in the new voice; disabled rende
   let switched = false;
   const clips = new VoiceClips({ root, version: () => switched ? 'd'.repeat(32) : 'c'.repeat(32), enabled: () => true, quietMs: 0,
     render: async () => { switched = true; return pcm; } });
-  await clips.warm('ta');
+  await clips.warm('de');
   assert.equal(readdirSync(join(root, 'c'.repeat(32))).length, 1);
-  assert.ok((await clips.list('ta')).clips.every(clip => clip.ready));
+  assert.ok((await clips.list('de')).clips.every(clip => clip.ready));
   let calls = 0;
   const off = new VoiceClips({ root, version: () => 'e'.repeat(32), enabled: () => false, render: async () => { calls++; return pcm; } });
   await off.warm('en');
@@ -62,9 +62,12 @@ test('invalid ids cannot read outside the store, and old voices are pruned', asy
   const { clips } = store();
   assert.equal(await clips.read('../x', 'a'.repeat(64)), undefined);
   for (const v of ['1', '2', '3', '4', '5']) mkdirSync(join(root, v.repeat(32)), { recursive: true });
+  mkdirSync(join(root, 'f'.repeat(32)), { recursive: true });
+  writeFileSync(join(root, 'f'.repeat(32), `${'0'.repeat(64)}.pcm`), pcm);
   const pruned = new VoiceClips({ root, version: () => 'f'.repeat(32), enabled: () => true, quietMs: 0, keep: 2, render: async () => pcm });
-  await pruned.warm('ta');
+  await pruned.warm('en');
   const kept = readdirSync(root).filter(name => /^[0-9a-f]{32}$/.test(name));
+  assert.equal(readdirSync(join(root, 'f'.repeat(32))).length, fillerPhrases('en').length);
   assert.equal(kept.length, 2); assert.ok(kept.includes('f'.repeat(32)));
 });
 

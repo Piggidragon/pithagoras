@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fillerPhrases, statusPhrases } from "./voice-phrases.js";
+import { PHRASES, fillerPhrases, statusPhrases } from "./voice-phrases.js";
 
 export const clipHash = (text: string) => createHash("sha256").update(text).digest("hex");
 const HEX = /^[0-9a-f]{32,64}$/;
@@ -126,6 +126,10 @@ export class VoiceClips {
     await utimes(this.dir(version), now, now).catch(() => {});
   }
   private async prune(current: string) {
+    // Phrases dropped in an update leave clips nothing will ask for again.
+    const phrases = new Set(Object.keys(PHRASES).flatMap(language => fillerPhrases(language).map(clip => `${clipHash(clip.text)}.pcm`)));
+    for (const name of await readdir(this.dir(current)).catch(() => [] as string[]))
+      if (name.endsWith(".pcm") && !phrases.has(name)) await rm(path.join(this.dir(current), name), { force: true });
     const entries = await readdir(this.options.root, { withFileTypes: true }).catch(() => []);
     const dirs = await Promise.all(entries.filter(e => e.isDirectory() && HEX.test(e.name) && e.name !== current)
       .map(async e => ({ name: e.name, at: (await stat(this.dir(e.name))).mtimeMs })));

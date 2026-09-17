@@ -198,21 +198,28 @@ rendered the first time a browser asks for it and then kept up to date like the
 saved one. Browsers download ready clips when voice starts and pick up the rest
 as they finish.
 
-- **Murmurs** (“Hmm…”, “Mhm.”) during thinking. The first comes after a few
-  seconds; the gaps grow the longer the turn lasts, and long turns mix in a
-  short “still on it”.
-- **Thinking phrase.** The existing “let me think” notice plays from the
-  rendered clips when ready, instead of a live speech request.
-- **Tool announcements** (“Let me check the browser.”) for a command, file
-  read, edit, search or browser call still running after about a second. Each
-  kind is announced at most once per turn, and not right after the agent spoke,
-  since it has often just said what it is doing.
+Each filler belongs to a moment the listener can place. Fillers never play on
+a timer alone, and a reply that arrives during one waits for it to finish:
+
+- **Acknowledgement**, 0.3 seconds after a request: “Let me see.” for a question
+  and “Okay.” for anything else. One- and two-word replies such as “thanks” get
+  none, and at most one plays every 15 seconds. It replaces the spoken thinking
+  notice for that turn.
+- **Slow tool**, after 6 seconds, naming what is still running where the call
+  shows it: tests, an install, a build, a command, a page load or a search.
+- **Tool result**: “That didn't work.” shortly after a failed call, and
+  “Okay, let's see.” when the agent goes quiet after a tool that took more than
+  4 seconds.
+- **Still on it**, only after 15 seconds of silence, then after 30 and 45.
+
+The agent itself announces each tool call before making it, so fillers do not
+repeat that. Wordless murmurs are not used, because speech runtimes render them
+unpredictably, often twice.
 
 Spoken fillers and status notices use the saved input language. With
 auto-detect, the browser's language is used. Phrases exist for English, German,
 Spanish, French, Italian, Portuguese, Russian, Chinese, Japanese, Korean, Hindi
-and Arabic. Other languages get wordless murmurs only, with status notices in
-English. Speaking over a filler cuts it off. `VOICE_STATUS_SPEECH=false` and
+and Arabic. Other languages get no fillers, with status notices in English. Speaking over a filler cuts it off. `VOICE_STATUS_SPEECH=false` and
 the sequential pipeline disable spoken fillers with the other status notices.
 
 With interface sounds on, voice mode also plays quiet synthesized work sounds

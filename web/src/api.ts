@@ -148,7 +148,7 @@ export interface VoiceConfig {
   enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp";
 }
 
-export type FillerKind = "murmur" | "think" | "still" | "command" | "browser" | "search" | "read" | "edit";
+export type FillerKind = "ackQuestion" | "ackRequest" | "slowCommand" | "slowTests" | "slowInstall" | "slowBuild" | "slowBrowser" | "slowSearch" | "slow" | "toolFailed" | "toolDone" | "still";
 /** Spoken status notices in the voice language, rendered live when needed. */
 export interface VoiceNotices { think: string[]; compacting: string[]; compactionWait: string; compactionDone: string; compactionStopped: string }
 export interface VoiceClipList { version: string; language: string; notices: VoiceNotices; clips: { kind: FillerKind; text: string; hash: string; ready: boolean }[] }

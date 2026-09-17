@@ -16,7 +16,7 @@ import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
 import { FillerSounds } from "../voice-fillers";
 import { WorkSounds } from "../work-sounds";
-import { toolKind, type ToolKind } from "../tool-kind";
+import { slowFiller, toolKind, type ToolKind } from "../tool-kind";
 
 export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, items, running, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, terminalActivity, toolEvents }: {
   sessionId: string;
@@ -87,6 +87,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const toolLiveSeen = useRef(new WeakSet<object>());
   const runningTools = useRef(new Map<string, { kind: ToolKind; at: number }>());
   const finishedTools = useRef(new Set<string>());
+  /** Tool calls that overlap count as one stretch of work: when it began and whether any call failed. */
+  const toolBatch = useRef<{ at: number; failed: boolean } | null>(null);
   const [comparison, setComparison] = useState(false);
   const sentenceChunks = useRef(false);
   const ttsPrefetch = useRef(false);
@@ -118,7 +120,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     clearTimeout(maxTurn.current);
     fillerLoading.current?.abort(); fillerLoading.current = null;
     work.current?.stop(); work.current = null;
-    runningTools.current.clear(); finishedTools.current.clear();
+    runningTools.current.clear(); finishedTools.current.clear(); toolBatch.current = null;
     voice.current?.stop(); voice.current = null;
     transcription.current?.reset(); transcription.current = null;
     const detector = vad.current; vad.current = null;
@@ -167,15 +169,23 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (event.type === "tool_execution_start" && !runningTools.current.has(id) && !finishedTools.current.has(id)) {
         const kind = toolKind(event.payload);
         runningTools.current.set(id, { kind, at: performance.now() });
-        controller.toolStart(kind);
+        toolBatch.current ??= { at: performance.now(), failed: false };
+        controller.toolStart(slowFiller(event.payload));
         if (soundsEnabled.current && phaseRef.current === "Thinking" && (kind === "read" || kind === "search" || kind === "browser")) work.current?.page();
       } else if (event.type === "tool_execution_end" && runningTools.current.has(id)) {
         const tool = runningTools.current.get(id)!;
         runningTools.current.delete(id); finishedTools.current.add(id);
-        if (!runningTools.current.size) controller.toolEnd();
+        if (event.payload?.isError && toolBatch.current) toolBatch.current.failed = true;
+        if (!runningTools.current.size && toolBatch.current) {
+          controller.toolEnd(toolBatch.current.failed, performance.now() - toolBatch.current.at);
+          toolBatch.current = null;
+        }
         // Only a tool the listener waited on earns a completion tone.
         if (performance.now() - tool.at >= 1500 && phaseRef.current === "Thinking") cue(event.payload?.isError ? "failed" : "done");
-      } else if (event.type === "agent_end") { runningTools.current.clear(); controller.toolEnd(); }
+      } else if (event.type === "agent_end" && runningTools.current.size) {
+        // An aborted turn ends its tools without results; nothing to react to.
+        runningTools.current.clear(); toolBatch.current = null; controller.toolEnd(false, 0);
+      }
     }
     updateTyping();
   }, [toolEvents]);

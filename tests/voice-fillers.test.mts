@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { trimSilence } from '../web/src/voice-fillers.js';
 import { PHRASES, fillerPhrases, phraseLanguage } from '../server/src/voice-phrases.js';
-import { toolKind } from '../web/src/tool-kind.js';
+import { slowFiller, toolKind } from '../web/src/tool-kind.js';
 
 test('fillers lose TTS padding but keep a short natural onset and tail', () => {
   const samples = new Float32Array(1000); samples.fill(0.5, 400, 600);
@@ -13,21 +13,22 @@ test('fillers lose TTS padding but keep a short natural onset and tail', () => {
 });
 
 test('every phrase language covers every filler and notice', () => {
+  const kinds = ['ackQuestion', 'ackRequest', 'slowCommand', 'slowTests', 'slowInstall', 'slowBuild', 'slowBrowser', 'slowSearch', 'slow', 'toolFailed', 'toolDone', 'still'];
   for (const [language, table] of Object.entries(PHRASES)) {
     const clips = fillerPhrases(language);
-    assert.deepEqual(new Set(clips.map(clip => clip.kind)), new Set(['murmur', 'think', 'command', 'read', 'edit', 'browser', 'search', 'still']), language);
-    assert.ok(clips.every(clip => clip.text.trim() && clip.text.length <= 80), language);
-    assert.ok(table.compacting.length && table.compactionWait && table.compactionDone && table.compactionStopped, language);
+    assert.deepEqual(new Set(clips.map(clip => clip.kind)), new Set(kinds), language);
+    assert.ok(clips.every(clip => clip.text.trim() && clip.text.length <= 60), language);
+    assert.ok(table.think.length && table.compacting.length && table.compactionWait && table.compactionDone && table.compactionStopped, language);
   }
-  // One of every kind renders before any variation.
-  assert.deepEqual(fillerPhrases('de').slice(0, 8).map(clip => clip.kind), ['murmur', 'think', 'command', 'read', 'edit', 'browser', 'search', 'still']);
+  // Acknowledgements render first: they play in every turn.
+  assert.deepEqual(fillerPhrases('de').slice(0, 2).map(clip => clip.kind), ['ackRequest', 'ackQuestion']);
 });
 
 test('filler language: configured first, then the client, never guessed wording', () => {
   assert.equal(phraseLanguage('fr', ['de-DE']), 'fr');
   assert.equal(phraseLanguage('auto', ['xx', 'de-AT', 'en']), 'de');
   assert.equal(phraseLanguage(undefined, []), 'en');
-  assert.deepEqual(fillerPhrases('ta').map(clip => clip.kind), ['murmur', 'murmur', 'murmur', 'murmur']);
+  assert.deepEqual(fillerPhrases('ta'), []);
 });
 
 test('tool calls are grouped by what a listener hears about', () => {
@@ -36,4 +37,10 @@ test('tool calls are grouped by what a listener hears about', () => {
   assert.equal(toolKind({ toolName: 'read' }), 'read');
   assert.equal(toolKind({ toolName: 'edit' }), 'edit');
   assert.equal(toolKind({ toolName: 'todo' }), 'tool');
+  assert.equal(slowFiller({ toolName: 'bash', input: { command: 'npm test -- --watch=false' } }), 'slowTests');
+  assert.equal(slowFiller({ toolName: 'bash', input: { command: 'pnpm add zod' } }), 'slowInstall');
+  assert.equal(slowFiller({ toolName: 'bash', input: { command: 'cargo build --release' } }), 'slowBuild');
+  assert.equal(slowFiller({ toolName: 'bash', input: { command: 'sleep 10' } }), 'slowCommand');
+  assert.equal(slowFiller({ toolName: 'browser_navigate' }), 'slowBrowser');
+  assert.equal(slowFiller({ toolName: 'edit' }), 'slow');
 });
