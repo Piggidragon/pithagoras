@@ -208,9 +208,12 @@ class SessionManager extends EventEmitter {
    * before it prompts, and any two requests landing together on a session
    * nobody has opened yet will do it.
    */
-  private ensureClient(sessionId: string): Promise<PiClient> {
+  private async ensureClient(sessionId: string, insideEdit = false): Promise<PiClient> {
+    // A client started now would read the file the edit is about to rewrite, and
+    // go on holding the conversation as it was.
+    if (!insideEdit) await this.whenEditable(sessionId);
     const existing = this.live.get(sessionId);
-    if (existing?.client.running) return Promise.resolve(existing.client);
+    if (existing?.client.running) return existing.client;
 
     const starting = this.starting.get(sessionId);
     if (starting) return starting;
@@ -338,7 +341,9 @@ class SessionManager extends EventEmitter {
    * for the first message in a session takes seconds and the composer has
    * nothing to show for them otherwise.
    */
-  async prompt(sessionId: string, message: string, options?: { voice?: boolean }): Promise<void> {
+  async prompt(sessionId: string, message: string, options?: { voice?: boolean }, insideEdit = false): Promise<void> {
+    // Behind an edit in progress, not through it: see withEdit.
+    if (!insideEdit) await this.whenEditable(sessionId);
     this.mark(sessionId, "running");
     // Same reason as in abort(): a session mid-compaction is detached from
     // agent events, and a prompt started there is invisible.
@@ -348,7 +353,7 @@ class SessionManager extends EventEmitter {
     // and isBusy() reads false for however long pi takes to answer.
     this.mark(sessionId, "running");
     try {
-      await this.submit(sessionId, message, options);
+      await this.submit(sessionId, message, options, insideEdit);
     } catch (e) {
       const failure = (e as Error).message;
       updateSession(sessionId, { status: "error", last_error: failure });
@@ -357,8 +362,13 @@ class SessionManager extends EventEmitter {
     }
   }
 
-  private async submit(sessionId: string, message: string, options?: { voice?: boolean }): Promise<void> {
-    const client = await this.ensureClient(sessionId);
+  private async submit(
+    sessionId: string,
+    message: string,
+    options?: { voice?: boolean },
+    insideEdit = false,
+  ): Promise<void> {
+    const client = await this.ensureClient(sessionId, insideEdit);
 
     // A slash command is an instruction to the agent, not something said in the
     // conversation, so it should not appear as a chat message — its dialog or
@@ -404,8 +414,41 @@ class SessionManager extends EventEmitter {
    * would be answering something that is being removed underneath it.
    */
   async removeMessage(sessionId: string, seq: number, scope: Scope): Promise<void> {
-    const { removed } = await this.cut(sessionId, seq, scope);
-    this.record(sessionId, "portal_removed", removed);
+    await this.withEdit(sessionId, async () => {
+      const { removed } = await this.cut(sessionId, seq, scope);
+      this.record(sessionId, "portal_removed", removed);
+    });
+  }
+
+  /** Edits waiting to finish, by session. */
+  private editing = new Map<string, Promise<void>>();
+
+  /**
+   * One edit at a time on a conversation, and nothing else starting pi on it.
+   *
+   * An edit rewrites the file pi reads and drops events; a prompt arriving in
+   * the middle would open a client on the old conversation, or have its own
+   * event deleted with the tail. Held from before the busy check to after the
+   * replacement is sent or the old conversation is back. Other callers wait for
+   * it rather than fail — a message from a channel arrives a moment late instead
+   * of not at all — while a second edit is refused.
+   */
+  private async withEdit<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+    if (this.editing.has(sessionId)) {
+      throw new SessionEditError("busy", "This conversation is already being edited.");
+    }
+    let release!: () => void;
+    this.editing.set(sessionId, new Promise<void>((resolve) => (release = resolve)));
+    try {
+      return await work();
+    } finally {
+      this.editing.delete(sessionId);
+      release();
+    }
+  }
+
+  private async whenEditable(sessionId: string): Promise<void> {
+    for (let edit = this.editing.get(sessionId); edit; edit = this.editing.get(sessionId)) await edit;
   }
 
   /**
@@ -479,26 +522,28 @@ class SessionManager extends EventEmitter {
 
   /** Replace a message: everything from it onwards goes, and the new text is sent in its place. */
   async editMessage(sessionId: string, seq: number, message: string): Promise<void> {
-    const { removed, undo } = await this.cut(sessionId, seq, "tail");
-    const before = latestSeq();
-    try {
-      await this.prompt(sessionId, message);
-    } catch (e) {
-      // The replacement never got to the agent, so the conversation it was
-      // meant to replace is still the conversation: nothing may be lost to a
-      // model that was down or a client that would not start.
-      await undo();
-      // The transcript recorded the replacement before pi refused it.
-      for (const m of sentMessages(sessionId)) {
-        if (m.seq <= before) continue;
-        deleteEvent(m.seq);
-        this.record(sessionId, "portal_removed", { from: m.seq, to: m.seq + 1 });
+    await this.withEdit(sessionId, async () => {
+      const { removed, undo } = await this.cut(sessionId, seq, "tail");
+      const before = latestSeq();
+      try {
+        await this.prompt(sessionId, message, undefined, true);
+      } catch (e) {
+        // The replacement never got to the agent, so the conversation it was
+        // meant to replace is still the conversation: nothing may be lost to a
+        // model that was down or a client that would not start.
+        await undo();
+        // The transcript recorded the replacement before pi refused it.
+        for (const m of sentMessages(sessionId)) {
+          if (m.seq <= before) continue;
+          deleteEvent(m.seq);
+          this.record(sessionId, "portal_removed", { from: m.seq, to: m.seq + 1 });
+        }
+        throw e;
       }
-      throw e;
-    }
-    // Told only now, and only about what was removed: the replacement's own
-    // events are newer than everything that went, so a browser keeps them.
-    this.record(sessionId, "portal_removed", { from: removed.from, to: before + 1 });
+      // Told only now, and only about what was removed: the replacement's own
+      // events are newer than everything that went, so a browser keeps them.
+      this.record(sessionId, "portal_removed", { from: removed.from, to: before + 1 });
+    });
   }
 
   /**
