@@ -800,7 +800,7 @@ function MessageEditor({
   const changed = value.trim() !== initial.trim();
 
   const save = async () => {
-    if (!value.trim() || saving) return;
+    if (!value.trim() || !changed || saving) return;
     setSaving(true);
     try {
       await onSave(value.trim());

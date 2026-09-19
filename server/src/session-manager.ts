@@ -9,8 +9,11 @@ import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js"
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
 import {
   appendEvent,
+  deleteEvent,
   deleteEventsBetween,
   getSession,
+  latestSeq,
+  restoreEvents,
   sentMessages,
   getSettings,
   markOrphanedSessionsInterrupted,
@@ -18,6 +21,7 @@ import {
   browserAllowlist,
   routineGuards,
   updateSession,
+  type EventRow,
 } from "./db.js";
 
 /**
@@ -400,6 +404,24 @@ class SessionManager extends EventEmitter {
    * would be answering something that is being removed underneath it.
    */
   async removeMessage(sessionId: string, seq: number, scope: Scope): Promise<void> {
+    const { removed } = await this.cut(sessionId, seq, scope);
+    this.record(sessionId, "portal_removed", removed);
+  }
+
+  /**
+   * The removal itself, without telling anyone, and with a way back.
+   *
+   * Two things are changed — pi's file and the transcript — and they have to
+   * stay in step. The file goes first, since a message gone from the screen but
+   * still remembered by the agent is the worse of the two ways to be wrong. If
+   * the transcript then fails to update, the file is put back. `undo` does the
+   * same later, for a caller whose next step failed.
+   */
+  private async cut(
+    sessionId: string,
+    seq: number,
+    scope: Scope,
+  ): Promise<{ removed: { from: number; to: number | null }; undo: () => Promise<void> }> {
     const session = getSession(sessionId);
     if (!session) throw new SessionEditError("missing", "Unknown session");
     if (this.isBusy(sessionId) || this.compacting.has(sessionId)) {
@@ -416,31 +438,67 @@ class SessionManager extends EventEmitter {
     await this.stop(sessionId);
 
     const file = session.pi_session_file;
-    if (file && existsSync(file)) {
-      const edited = dropMessage(
-        readFileSync(file, "utf8"),
-        sent.slice(0, ordinal + 1).map((m) => m.message),
-        ordinal,
-        scope,
-      );
-      // Beside it, then renamed over it, so a crash mid-write leaves the
-      // original rather than half of each.
+    // Beside it, then renamed over it, so a crash mid-write leaves the
+    // original rather than half of each.
+    const write = (text: string) => {
       const tmp = `${file}.edit`;
-      writeFileSync(tmp, edited);
-      renameSync(tmp, file);
+      writeFileSync(tmp, text);
+      renameSync(tmp, file!);
+    };
+    let original: string | undefined;
+    if (file && existsSync(file)) {
+      original = readFileSync(file, "utf8");
+      write(
+        dropMessage(
+          original,
+          sent.slice(0, ordinal + 1).map((m) => m.message),
+          ordinal,
+          scope,
+        ),
+      );
     } else if (session.executor !== "host") {
       throw new SessionEditError("unsupported", "Messages cannot be edited in a container session.");
     }
 
     const to = scope === "tail" ? null : (sent[ordinal + 1]?.seq ?? null);
-    deleteEventsBetween(sessionId, seq, to);
-    this.record(sessionId, "portal_removed", { from: seq, to });
+    let gone: EventRow[];
+    try {
+      gone = deleteEventsBetween(sessionId, seq, to);
+    } catch (e) {
+      if (original !== undefined) write(original);
+      throw e;
+    }
+    const undo = async () => {
+      // A client started since would hold the edited conversation in memory.
+      await this.stop(sessionId);
+      if (original !== undefined) write(original);
+      restoreEvents(gone);
+    };
+    return { removed: { from: seq, to }, undo };
   }
 
   /** Replace a message: everything from it onwards goes, and the new text is sent in its place. */
   async editMessage(sessionId: string, seq: number, message: string): Promise<void> {
-    await this.removeMessage(sessionId, seq, "tail");
-    await this.prompt(sessionId, message);
+    const { removed, undo } = await this.cut(sessionId, seq, "tail");
+    const before = latestSeq();
+    try {
+      await this.prompt(sessionId, message);
+    } catch (e) {
+      // The replacement never got to the agent, so the conversation it was
+      // meant to replace is still the conversation: nothing may be lost to a
+      // model that was down or a client that would not start.
+      await undo();
+      // The transcript recorded the replacement before pi refused it.
+      for (const m of sentMessages(sessionId)) {
+        if (m.seq <= before) continue;
+        deleteEvent(m.seq);
+        this.record(sessionId, "portal_removed", { from: m.seq, to: m.seq + 1 });
+      }
+      throw e;
+    }
+    // Told only now, and only about what was removed: the replacement's own
+    // events are newer than everything that went, so a browser keeps them.
+    this.record(sessionId, "portal_removed", { from: removed.from, to: before + 1 });
   }
 
   /**
