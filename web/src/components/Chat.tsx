@@ -167,6 +167,15 @@ export function Chat({
   const bottomRef = useRef<HTMLDivElement>(null);
   const settled = useRef(false);
   const items = useMemo(() => buildTranscript(events), [events]);
+  // The last thing the person said. Retrying it replaces it and what came of
+  // it, which is only safe where nothing follows that would go too.
+  const lastSaid = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it.kind === "user" && splitContext(it.text).text) return it.id;
+    }
+    return undefined;
+  }, [items]);
 
 
   // Diagrams: the plugin is only fetched once a reply actually contains a
@@ -401,12 +410,30 @@ export function Chat({
                     something that no longer exists. Sending it again is fine —
                     it just queues, like any other message. */}
                 <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                  <MessageAction
-                    label="Send again"
-                    onClick={() => attempt(() => onSend(text))}
-                  >
-                    <LuRotateCw className="h-3 w-3" />
-                  </MessageAction>
+                  {item.id === lastSaid ? (
+                    // Retry: the same as editing without changing a word. After
+                    // a Stop this is what clears the half-finished answer out of
+                    // the agent's memory instead of stacking a second question
+                    // on top of it.
+                    <MessageAction
+                      label={
+                        running
+                          ? "Stop the run to retry"
+                          : "Retry — drops the reply and sends this message again"
+                      }
+                      disabled={running}
+                      onClick={() => attempt(() => onEditMessage(item.seq, text))}
+                    >
+                      <LuRotateCw className="h-3 w-3" />
+                    </MessageAction>
+                  ) : (
+                    <MessageAction
+                      label="Send again as a new message"
+                      onClick={() => attempt(() => onSend(text))}
+                    >
+                      <LuRotateCw className="h-3 w-3" />
+                    </MessageAction>
+                  )}
                   <MessageAction
                     label={running ? "Stop the run to edit" : "Edit — replaces this message and everything after it"}
                     disabled={running}

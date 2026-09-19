@@ -27,10 +27,15 @@ While a run is in progress you can keep typing; further messages are queued.
 
 ## Sent messages
 
-Hovering one of your messages gives it three actions:
+Hovering one of your messages gives it these actions:
 
-- **Send again** sends the same text as a new message. While a run is going it
-  queues, like anything else you type.
+- **Retry**, on your last message, drops the agent's reply to it — a half-finished
+  one after a Stop, say — and sends the same text again. It is editing without
+  changing a word, so the agent's memory ends up as if the first attempt never
+  happened rather than holding it and a second copy of the question.
+- **Send again**, on an older message, sends its text as a new message at the
+  end. Retrying one of those would drop everything since. While a run is going
+  it queues, like anything else you type.
 - **Edit** rewrites the message in place. It replaces that message *and
   everything after it* — the agent's answers were to a question that is no
   longer the same one — and sends the new text.
