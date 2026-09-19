@@ -13,6 +13,7 @@ import { RoutinesPage } from "./components/RoutinesPage";
 import { AuditPage } from "./components/AuditPanel";
 import { BrowserPage } from "./components/BrowserPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
+import { ConfirmHost } from "./components/ConfirmDialog";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 type Tab = "general" | "extensions" | "advanced";
@@ -47,7 +48,9 @@ export default function App() {
   // Every meaningful view has a URL: a session, and its settings tabs. Deep
   // links and the back button work, and the server's SPA fallback serves them.
   return (
-    <Routes>
+    <>
+      <ConfirmHost />
+      <Routes>
       <Route path="/" element={<Shell />} />
       <Route path="/sessions" element={<Shell view="sessions" />} />
       <Route path="/agent" element={<Shell view="agent" />} />
@@ -60,7 +63,8 @@ export default function App() {
       <Route path="/settings" element={<Shell settings />} />
       <Route path="/settings/:tab" element={<Shell settings />} />
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }
 

@@ -11,6 +11,7 @@ import {
   LuTrash2,
 } from "react-icons/lu";
 import { api, type ReportTarget, type ReportTo, type Routine } from "../api";
+import { confirmDialog } from "./ConfirmDialog";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -795,8 +796,15 @@ function RoutineDetail({
         </button>
 
         <button
-          onClick={() => {
-            if (confirm(`Delete "${r.name}"? Its sessions are kept.`)) {
+          onClick={async () => {
+            if (
+              await confirmDialog({
+                title: `Delete "${r.name}"?`,
+                message: "Its sessions are kept.",
+                confirmLabel: "Delete",
+                danger: true,
+              })
+            ) {
               act("save", async () => {
                 await api.deleteRoutine(r.id);
                 onBack();

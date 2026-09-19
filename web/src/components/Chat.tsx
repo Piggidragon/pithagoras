@@ -12,6 +12,7 @@ import { activity, buildTranscript, type Activity } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
+import { confirmDialog } from "./ConfirmDialog";
 import { TerminalPanel } from "./TerminalPanel";
 
 /**
@@ -445,8 +446,15 @@ export function Chat({
                     label={running ? "Stop the run to delete" : "Delete this message and the reply to it"}
                     disabled={running}
                     danger
-                    onClick={() => {
-                      if (confirm("Delete this message and the agent's reply to it? The agent forgets it too."))
+                    onClick={async () => {
+                      if (
+                        await confirmDialog({
+                          title: "Delete this message?",
+                          message: "The agent's reply to it goes too, and the agent forgets both.",
+                          confirmLabel: "Delete",
+                          danger: true,
+                        })
+                      )
                         attempt(() => onDeleteMessage(item.seq));
                     }}
                   >

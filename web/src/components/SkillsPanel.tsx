@@ -14,6 +14,7 @@ import {
   LuWrench,
 } from "react-icons/lu";
 import { api, type FoundSkill, type Skill, type SkillDiagnostic } from "../api";
+import { confirmDialog } from "./ConfirmDialog";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -458,8 +459,14 @@ function SkillDetail({
               {saved ? "Saved" : "Save"}
             </button>
             <button
-              onClick={() => {
-                if (confirm(`Delete the skill "${s.name}"?`)) {
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: `Delete the skill "${s.name}"?`,
+                    confirmLabel: "Delete",
+                    danger: true,
+                  })
+                ) {
                   act(async () => {
                     await api.deleteSkill(s.name);
                     onBack();
