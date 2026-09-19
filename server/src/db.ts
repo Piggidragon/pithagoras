@@ -554,6 +554,21 @@ export function replayStart(sessionId: string, keep: number): number {
   return row?.seq ?? 0;
 }
 
+/** Every message the portal sent to the agent in this session, oldest first. */
+export function sentMessages(sessionId: string): { seq: number; message: string }[] {
+  const rows = getDb()
+    .prepare("SELECT seq, payload FROM events WHERE session_id = ? AND type = 'portal_prompt' ORDER BY seq ASC")
+    .all(sessionId) as { seq: number; payload: string }[];
+  return rows.map((r) => ({ seq: r.seq, message: String(JSON.parse(r.payload)?.message ?? "") }));
+}
+
+/** Drops a stretch of a session's transcript: `from` up to, not including, `to` — or to the end. */
+export function deleteEventsBetween(sessionId: string, from: number, to: number | null): void {
+  getDb()
+    .prepare("DELETE FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)")
+    .run(sessionId, from, to, to);
+}
+
 /** The page before a cursor, oldest first — what a transcript scrolls back into. */
 export function eventsBefore(sessionId: string, before: number, limit = 1500): EventRow[] {
   return getDb()

@@ -1,14 +1,17 @@
 import { LiveEvents } from "./live-events.js";
 import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { PiClient } from "./pi/types.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
+import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
 import {
   appendEvent,
+  deleteEventsBetween,
   getSession,
+  sentMessages,
   getSettings,
   markOrphanedSessionsInterrupted,
   browserAllowed,
@@ -60,6 +63,9 @@ const EPHEMERAL_EVENTS = new Set([
   // Prefill progress: a hundred rows per long prompt, and meaningless once the
   // answer has arrived. Delivered to whoever is watching, never stored.
   "portal_prefill",
+  // Tells a page which stretch of its transcript is gone. Stored, it would be
+  // replayed to a reader who never saw what it refers to.
+  "portal_removed",
 ]);
 
 interface LiveSession {
@@ -384,6 +390,57 @@ class SessionManager extends EventEmitter {
     // assuming: a message sent mid-run is queued and returns from prompt()
     // immediately, with the model still going.
     if (client.isIdle?.()) this.mark(sessionId, "idle");
+  }
+
+  /**
+   * Take a message back out of the conversation.
+   *
+   * Out of pi's record as well as the transcript: see session-edit.ts for why
+   * the second half is the point. Refused while a run is going — the agent
+   * would be answering something that is being removed underneath it.
+   */
+  async removeMessage(sessionId: string, seq: number, scope: Scope): Promise<void> {
+    const session = getSession(sessionId);
+    if (!session) throw new SessionEditError("missing", "Unknown session");
+    if (this.isBusy(sessionId) || this.compacting.has(sessionId)) {
+      throw new SessionEditError("busy", "Stop the run first — the agent is still working.");
+    }
+
+    const sent = sentMessages(sessionId);
+    const ordinal = sent.findIndex((m) => m.seq === seq);
+    if (ordinal < 0) throw new SessionEditError("missing", "That message is not in this conversation");
+
+    // Released before the file changes: a live pi holds the conversation in
+    // memory and would write its own version back over the edit. The next
+    // prompt reopens it from the file.
+    await this.stop(sessionId);
+
+    const file = session.pi_session_file;
+    if (file && existsSync(file)) {
+      const edited = dropMessage(
+        readFileSync(file, "utf8"),
+        sent.slice(0, ordinal + 1).map((m) => m.message),
+        ordinal,
+        scope,
+      );
+      // Beside it, then renamed over it, so a crash mid-write leaves the
+      // original rather than half of each.
+      const tmp = `${file}.edit`;
+      writeFileSync(tmp, edited);
+      renameSync(tmp, file);
+    } else if (session.executor !== "host") {
+      throw new SessionEditError("unsupported", "Messages cannot be edited in a container session.");
+    }
+
+    const to = scope === "tail" ? null : (sent[ordinal + 1]?.seq ?? null);
+    deleteEventsBetween(sessionId, seq, to);
+    this.record(sessionId, "portal_removed", { from: seq, to });
+  }
+
+  /** Replace a message: everything from it onwards goes, and the new text is sent in its place. */
+  async editMessage(sessionId: string, seq: number, message: string): Promise<void> {
+    await this.removeMessage(sessionId, seq, "tail");
+    await this.prompt(sessionId, message);
   }
 
   /**
