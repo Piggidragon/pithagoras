@@ -14,6 +14,7 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type BrokenChannelPackage, type Channel, type ChannelKind } from "../api";
+import { confirmDialog } from "./ConfirmDialog";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -241,8 +242,15 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
                 </span>
               ) : (
                 <button
-                  onClick={() => {
-                    if (confirm(`Uninstall ${k.packageName}? Configured channels are kept.`)) {
+                  onClick={async () => {
+                    if (
+                      await confirmDialog({
+                        title: `Uninstall ${k.packageName}?`,
+                        message: "Configured channels are kept.",
+                        confirmLabel: "Uninstall",
+                        danger: true,
+                      })
+                    ) {
                       act(() => api.removeChannelPackage(k.packageName));
                     }
                   }}
@@ -630,16 +638,23 @@ function ChannelDetail({
           )}
         </button>
         <button
-          onClick={() => {
+          onClick={async () => {
             // Say what happens to the conversations rather than leaving someone
             // to discover later that the agent forgot them.
             const fate =
               ch.sessionCount > 0
-                ? `\n\nIts ${ch.sessionCount} conversation${
+                ? `Its ${ch.sessionCount} conversation${
                     ch.sessionCount === 1 ? "" : "s"
                   } are kept, and come back if you recreate a channel with the slug "${ch.slug}".`
                 : "";
-            if (confirm(`Remove "${ch.name}"?${fate}`)) {
+            if (
+              await confirmDialog({
+                title: `Remove "${ch.name}"?`,
+                message: fate || undefined,
+                confirmLabel: "Remove",
+                danger: true,
+              })
+            ) {
               act(async () => {
                 await api.deleteChannel(ch.id);
                 onBack();

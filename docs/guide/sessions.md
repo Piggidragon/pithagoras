@@ -66,9 +66,11 @@ paths.
 Pinning is stored server-side and drives the ordering (`pinned DESC,
 updated_at DESC`), so the sidebar and the Sessions page never disagree.
 
-Hovering a session gives you pin and delete. Double-clicking its name renames it.
-The Agent tab's conversations can be renamed and deleted the same way, from the
-row.
+Hovering a session gives you pin, rename and delete. Renaming turns the name into
+a field where it stands — Enter or clicking away keeps the new one, Escape puts
+the old one back — and double-clicking the name does the same. Delete asks in the
+portal's own dialog, with the button saying what it will do. The Agent tab's
+conversations can be renamed and deleted the same way, from the row.
 
 ## Model and effort
 

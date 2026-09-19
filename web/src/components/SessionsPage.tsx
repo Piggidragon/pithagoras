@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { LuMessagesSquare, LuPin, LuPinOff, LuSearch, LuTrash2 } from "react-icons/lu";
 import type { Session, SessionStatus } from "../api";
+import { confirmDialog } from "./ConfirmDialog";
 
 const STATUS_STYLE: Record<SessionStatus, string> = {
   running: "bg-accent animate-pulse",
@@ -130,9 +131,16 @@ export function SessionsPage({
                       {s.pinned ? <LuPinOff className="h-3.5 w-3.5" /> : <LuPin className="h-3.5 w-3.5" />}
                     </button>
                     <button
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        if (confirm(`Delete "${s.title}"? This stops it if it is running.`)) {
+                        if (
+                          await confirmDialog({
+                            title: `Delete "${s.title}"?`,
+                            message: "It is stopped if it is running, and its transcript is removed.",
+                            confirmLabel: "Delete",
+                            danger: true,
+                          })
+                        ) {
                           onDelete(s.id);
                         }
                       }}

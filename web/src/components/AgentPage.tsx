@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   LuBot,
   LuCheck,
@@ -14,6 +14,8 @@ import {
 } from "react-icons/lu";
 import { api, type AgentSession, type AgentSetup as Setup, type SessionStatus } from "../api";
 import { AgentSetup } from "./AgentSetup";
+import { confirmDialog } from "./ConfirmDialog";
+import { TitleInput } from "./TitleInput";
 
 const STATUS_STYLE: Record<SessionStatus, string> = {
   running: "bg-accent animate-pulse",
@@ -50,6 +52,8 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
+  // The conversation whose name is open for editing, if any.
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   const load = () =>
     api
@@ -74,9 +78,8 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
    * not block the chat — the next message in it simply starts a new
    * conversation, which is the reason to say so first.
    */
-  const rename = async (s: AgentSession) => {
-    const next = prompt("Rename conversation", s.title)?.trim();
-    if (!next || next === s.title) return;
+  const rename = async (s: AgentSession, next: string) => {
+    setRenaming(null);
     setError("");
     try {
       await api.renameSession(s.id, next);
@@ -88,11 +91,14 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
 
   const remove = async (s: AgentSession) => {
     const fresh = s.channel && s.channel.slug !== BROWSER;
-    const ok = confirm(
-      fresh
-        ? `Delete "${s.title}"? The agent forgets this conversation, and the next message in that chat starts a new one.`
-        : `Delete "${s.title}"? This stops it if it is running.`,
-    );
+    const ok = await confirmDialog({
+      title: `Delete "${s.title}"?`,
+      message: fresh
+        ? "The agent forgets this conversation, and the next message in that chat starts a new one."
+        : "It is stopped if it is running, and its transcript is removed.",
+      confirmLabel: "Delete",
+      danger: true,
+    });
     if (!ok) return;
     setError("");
     try {
@@ -240,44 +246,54 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
                   <ul className="mt-1.5 space-y-1">
                     {group.items.map((s) => (
                       <li key={s.id} className="group relative">
-                        <button
-                          onClick={() => onSelect(s.id)}
-                          className="flex w-full items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 text-left transition hover:bg-fg/5"
-                        >
-                          <span
-                            className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[s.status]}`}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm text-fg">{s.title}</p>
-                            <p className="truncate font-mono text-[10px] text-fg-faint">
-                              {s.channel_key}
-                            </p>
+                        {renaming === s.id ? (
+                          // Not a button while the name is being typed: an input
+                          // inside one cannot be focused reliably, and a click in
+                          // the field must not open the conversation.
+                          <div className={ROW}>
+                            <RowBody
+                              s={s}
+                              title={
+                                <TitleInput
+                                  value={s.title}
+                                  label="Conversation name"
+                                  className="w-full text-sm"
+                                  onCommit={(next) => rename(s, next)}
+                                  onCancel={() => setRenaming(null)}
+                                />
+                              }
+                            />
                           </div>
-                          <LuMessageSquare className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-                          <span className="shrink-0 text-[11px] text-fg-faint group-hover:invisible group-focus-within:invisible [@media(hover:none)]:hidden">
-                            {when(s.updated_at)}
-                          </span>
-                        </button>
-                        {/* Over the timestamp rather than beside it: the row is a
-                            button, and one button cannot hold another. */}
-                        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                          <button
-                            onClick={() => rename(s)}
-                            title="Rename"
-                            aria-label={`Rename ${s.title}`}
-                            className="rounded p-1.5 text-fg-subtle transition hover:text-accent"
-                          >
-                            <LuPencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => remove(s)}
-                            title="Delete conversation"
-                            aria-label={`Delete ${s.title}`}
-                            className="rounded p-1.5 text-fg-subtle transition hover:text-danger"
-                          >
-                            <LuTrash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                        ) : (
+                          <>
+                            <button onClick={() => onSelect(s.id)} className={`${ROW} hover:bg-fg/5`}>
+                              <RowBody
+                                s={s}
+                                title={<p className="truncate text-sm text-fg">{s.title}</p>}
+                              />
+                            </button>
+                            {/* Over the timestamp rather than beside it: the row is
+                                a button, and one button cannot hold another. */}
+                            <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                              <button
+                                onClick={() => setRenaming(s.id)}
+                                title="Rename"
+                                aria-label={`Rename ${s.title}`}
+                                className="rounded p-1.5 text-fg-subtle transition hover:text-accent"
+                              >
+                                <LuPencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => remove(s)}
+                                title="Delete conversation"
+                                aria-label={`Delete ${s.title}`}
+                                className="rounded p-1.5 text-fg-subtle transition hover:text-danger"
+                              >
+                                <LuTrash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -288,6 +304,26 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
         </div>
       </div>
     </div>
+  );
+}
+
+const ROW =
+  "flex w-full items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 text-left transition";
+
+/** What a conversation row shows, whether or not its name is being edited. */
+function RowBody({ s, title }: { s: AgentSession; title: ReactNode }) {
+  return (
+    <>
+      <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[s.status]}`} />
+      <div className="min-w-0 flex-1">
+        {title}
+        <p className="truncate font-mono text-[10px] text-fg-faint">{s.channel_key}</p>
+      </div>
+      <LuMessageSquare className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+      <span className="shrink-0 text-[11px] text-fg-faint group-hover:invisible group-focus-within:invisible [@media(hover:none)]:hidden">
+        {when(s.updated_at)}
+      </span>
+    </>
   );
 }
 

@@ -1,9 +1,12 @@
 import { useState, type ReactNode } from "react";
+import { confirmDialog } from "./ConfirmDialog";
+import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import {
   LuBot,
   LuPanelLeftClose,
   LuPanelLeftOpen,
+  LuPencil,
   LuClock,
   LuGlobe,
   LuMessagesSquare,
@@ -348,6 +351,7 @@ function SessionItem({
   onDelete: (id: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
 }) {
+  const [renaming, setRenaming] = useState(false);
   return (
     <div
       onClick={onSelect}
@@ -360,16 +364,28 @@ function SessionItem({
           className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[s.status]}`}
           title={STATUS_LABEL[s.status]}
         />
-        <span
-          className="truncate text-sm text-fg"
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            const next = prompt("Rename session", s.title);
-            if (next?.trim()) onRename(s.id, next.trim());
-          }}
-        >
-          {s.title}
-        </span>
+        {renaming ? (
+          <TitleInput
+            value={s.title}
+            label="Session name"
+            className="flex-1 text-sm"
+            onCommit={(next) => {
+              setRenaming(false);
+              onRename(s.id, next);
+            }}
+            onCancel={() => setRenaming(false)}
+          />
+        ) : (
+          <span
+            className="truncate text-sm text-fg"
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setRenaming(true);
+            }}
+          >
+            {s.title}
+          </span>
+        )}
 
         <div className="ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex">
           <button
@@ -385,7 +401,24 @@ function SessionItem({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (confirm(`Delete "${s.title}"? This stops it if it is running.`)) {
+              setRenaming(true);
+            }}
+            className="rounded p-1 text-fg-subtle hover:text-accent"
+            title="Rename"
+          >
+            <LuPencil className="h-3 w-3" />
+          </button>
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (
+                await confirmDialog({
+                  title: `Delete "${s.title}"?`,
+                  message: "It is stopped if it is running, and its transcript is removed.",
+                  confirmLabel: "Delete",
+                  danger: true,
+                })
+              ) {
                 onDelete(s.id);
               }
             }}
