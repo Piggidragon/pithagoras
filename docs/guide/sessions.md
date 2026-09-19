@@ -25,6 +25,32 @@ not wait for the work to finish. Close the tab if you like.
 While a run is in progress you can keep typing; further messages are queued.
 **Stop** aborts the current run.
 
+## Sent messages
+
+Hovering one of your messages gives it three actions:
+
+- **Send again** sends the same text as a new message. While a run is going it
+  queues, like anything else you type.
+- **Edit** rewrites the message in place. It replaces that message *and
+  everything after it* — the agent's answers were to a question that is no
+  longer the same one — and sends the new text.
+- **Delete** removes the message and the agent's answer to it, tool calls
+  included, and leaves the rest of the conversation as it was.
+
+Edit and delete change what the agent remembers, not just what the page shows:
+pi's own record of the conversation is edited too, and the agent's next turn
+reads the version without the message. They are unavailable while a run is in
+progress, so stop it first.
+
+They do not undo what the agent *did*. Files it changed, commands it ran and
+messages it sent stay as they are; only the memory of having done them goes.
+
+Some cases are refused rather than guessed at, with a message saying why. A
+message that a compaction has already folded into its summary cannot be deleted
+on its own, since the summary would go on describing it — edit it instead, which
+drops the summary with everything after. A conversation with branches from pi's
+`/tree` cannot be trimmed cleanly either. Nothing is changed when this happens.
+
 ## Sidebar and the sessions page
 
 The sidebar opens with New, Sessions and Agents, then **Pinned**, then
@@ -36,6 +62,8 @@ Pinning is stored server-side and drives the ordering (`pinned DESC,
 updated_at DESC`), so the sidebar and the Sessions page never disagree.
 
 Hovering a session gives you pin and delete. Double-clicking its name renames it.
+The Agent tab's conversations can be renamed and deleted the same way, from the
+row.
 
 ## Model and effort
 
