@@ -296,28 +296,37 @@ export function ComposerBar({
   const thinkingOn = cfg.state.thinkingLevel !== "off";
   const fixed = levels.length <= 1;
 
-  // The level being saved right now. A drag ends in pointerup and then very
+  // The levels being saved right now. A drag ends in pointerup and then very
   // likely a blur or keyup, all reading the same value before the first save
   // has come back — and until it has, the comparison below is still against the
   // old level, so each of them would save it again. A ref, not state: it has to
   // be visible to the very next event, before any re-render.
-  const saving = useRef<string | null>(null);
+  //
+  // A set rather than one slot, because the slider is not disabled while a save
+  // is out: a second level can start before the first returns, and each request
+  // must only clear itself. One slot let the first to finish wipe the other's
+  // entry and end the busy state early.
+  const saving = useRef(new Set<string>());
 
   const applyLevel = async (level: string | undefined) => {
     if (!level || level === cfg.state.thinkingLevel) {
       setDragEffort(null);
       return;
     }
-    if (saving.current === level) return;
-    saving.current = level;
+    if (saving.current.has(level)) return;
+    saving.current.add(level);
     setBusy(true);
     try {
       await api.setConfig(sessionId, { thinkingLevel: level });
       await load();
     } finally {
-      saving.current = null;
-      setBusy(false);
-      setDragEffort(null);
+      saving.current.delete(level);
+      // Only when nothing else is still out: the slider stays where it was
+      // dragged, and the controls stay busy, until the last save has landed.
+      if (saving.current.size === 0) {
+        setBusy(false);
+        setDragEffort(null);
+      }
     }
   };
   const commitEffort = (index: number) => applyLevel(levels[index]);
