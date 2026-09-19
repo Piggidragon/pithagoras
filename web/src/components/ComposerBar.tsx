@@ -296,16 +296,26 @@ export function ComposerBar({
   const thinkingOn = cfg.state.thinkingLevel !== "off";
   const fixed = levels.length <= 1;
 
+  // The level being saved right now. A drag ends in pointerup and then very
+  // likely a blur or keyup, all reading the same value before the first save
+  // has come back — and until it has, the comparison below is still against the
+  // old level, so each of them would save it again. A ref, not state: it has to
+  // be visible to the very next event, before any re-render.
+  const saving = useRef<string | null>(null);
+
   const applyLevel = async (level: string | undefined) => {
     if (!level || level === cfg.state.thinkingLevel) {
       setDragEffort(null);
       return;
     }
+    if (saving.current === level) return;
+    saving.current = level;
     setBusy(true);
     try {
       await api.setConfig(sessionId, { thinkingLevel: level });
       await load();
     } finally {
+      saving.current = null;
       setBusy(false);
       setDragEffort(null);
     }
