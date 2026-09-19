@@ -126,3 +126,10 @@ test('a dead branch hanging off a removed message is removed with it', () => {
   assert.ok(!ids(out).includes('dead'));
   assert.deepEqual(conversation(out), ['u2', 'a2']);
 });
+
+test('a later message that merely contains the words is not taken for a message pi never got', () => {
+  // "foo" failed before reaching pi; "foobar" is a different message that happens to contain it.
+  const partial = file(user('u1', null, 'first'), asst('a1', 'u1'), user('u2', 'a1', 'foobar'), asst('a2', 'u2'));
+  assert.throws(() => dropMessage(partial, ['first', 'foo'], 1, 'turn'), (e) => e instanceof SessionEditError && e.code === 'unmatched');
+  assert.throws(() => dropMessage(partial, ['first', 'foo'], 1, 'tail'), (e) => e.code === 'unmatched');
+});

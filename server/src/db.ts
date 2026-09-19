@@ -562,11 +562,52 @@ export function sentMessages(sessionId: string): { seq: number; message: string 
   return rows.map((r) => ({ seq: r.seq, message: String(JSON.parse(r.payload)?.message ?? "") }));
 }
 
-/** Drops a stretch of a session's transcript: `from` up to, not including, `to` — or to the end. */
-export function deleteEventsBetween(sessionId: string, from: number, to: number | null): void {
-  getDb()
-    .prepare("DELETE FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)")
-    .run(sessionId, from, to, to);
+/**
+ * Drops a stretch of a session's transcript: `from` up to, not including, `to` — or to the end.
+ * Returns what it removed, so the caller can put it back.
+ */
+export function deleteEventsBetween(sessionId: string, from: number, to: number | null): EventRow[] {
+  const db = getDb();
+  return db.transaction(() => {
+    const rows = db
+      .prepare("SELECT * FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?) ORDER BY seq ASC")
+      .all(sessionId, from, to, to) as EventRow[];
+    db.prepare("DELETE FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)").run(
+      sessionId,
+      from,
+      to,
+      to,
+    );
+    return rows;
+  })();
+}
+
+/** Puts events back under the seq they had — the inverse of deleteEventsBetween. */
+export function restoreEvents(rows: EventRow[]): void {
+  const db = getDb();
+  const insert = db.prepare(
+    "INSERT OR REPLACE INTO events (seq, session_id, type, payload, created_at) VALUES (?, ?, ?, ?, ?)",
+  );
+  db.transaction(() => {
+    for (const r of rows) insert.run(r.seq, r.session_id, r.type, r.payload, r.created_at);
+  })();
+}
+
+/**
+ * The highest seq ever handed out, deleted events included: everything recorded
+ * from now on is greater. Read from the sequence rather than the table, because
+ * the newest rows may be the ones just removed.
+ */
+export function latestSeq(): number {
+  const row = getDb().prepare("SELECT seq FROM sqlite_sequence WHERE name = 'events'").get() as
+    | { seq: number }
+    | undefined;
+  return row?.seq ?? 0;
+}
+
+/** Drops one event. */
+export function deleteEvent(seq: number): void {
+  getDb().prepare("DELETE FROM events WHERE seq = ?").run(seq);
 }
 
 /** The page before a cursor, oldest first — what a transcript scrolls back into. */

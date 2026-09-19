@@ -74,13 +74,16 @@ function pathTo(byId: Map<string, Entry>, leaf: string): Entry[] {
 /**
  * Which of pi's user entries a message the portal sent corresponds to.
  *
- * Matched by text, in order. The portal logs every message it sends and pi
- * stores every one it receives, but they are not the same list: a slash command
- * is not a chat message to the portal and can expand into one for pi, and a
- * message that failed before reaching pi has no entry at all. So each sent
- * message looks forward from the last one matched, and one that finds nothing
- * is skipped rather than stopping the count — only the message being asked
- * about has to be found.
+ * Matched by text, in order, and only exactly — or with the one prefix the
+ * portal adds to a voice turn. A looser match would take a message pi never
+ * received for a later one that merely contains its words, and remove the wrong
+ * turn from the file. The portal logs every message it sends and pi stores every
+ * one it receives, but they are not the same list: a slash command is not a chat
+ * message to the portal and can expand into one for pi, and a message that
+ * failed before reaching pi has no entry at all. So each sent message looks
+ * forward from the last one matched, and one that finds nothing is skipped
+ * rather than stopping the count — only the message being asked about has to be
+ * found.
  */
 function locate(path: Entry[], sent: string[], ordinal: number): string {
   const users = path.filter(isUser).map((e) => ({ id: e.id!, text: textOf(e.message?.content) }));
@@ -88,10 +91,9 @@ function locate(path: Entry[], sent: string[], ordinal: number): string {
   let found = -1;
   for (let i = 0; i <= ordinal; i++) {
     const want = sent[i] ?? "";
-    let hit = users.findIndex(
+    const hit = users.findIndex(
       (u, j) => j >= from && (u.text === want || u.text === AUDIO_MESSAGE_PREFIX + want),
     );
-    if (hit < 0 && want) hit = users.findIndex((u, j) => j >= from && u.text.includes(want));
     if (hit < 0) {
       if (i === ordinal) {
         throw new SessionEditError(

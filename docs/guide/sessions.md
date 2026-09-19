@@ -54,7 +54,13 @@ Some cases are refused rather than guessed at, with a message saying why. A
 message that a compaction has already folded into its summary cannot be deleted
 on its own, since the summary would go on describing it — edit it instead, which
 drops the summary with everything after. A conversation with branches from pi's
-`/tree` cannot be trimmed cleanly either. Nothing is changed when this happens.
+`/tree` cannot be trimmed cleanly either. A message is only matched to the agent's
+record by its exact text (or as a voice turn), never by a fragment of it. Nothing
+is changed when this happens.
+
+If an edit's replacement is refused — the model is unreachable, say — the
+conversation is put back as it was, rather than left without the messages the
+edit meant to replace.
 
 ## Sidebar and the sessions page
 
