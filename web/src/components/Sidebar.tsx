@@ -8,6 +8,7 @@ import {
   LuPanelLeftOpen,
   LuPencil,
   LuClock,
+  LuFolderKanban,
   LuGlobe,
   LuMessagesSquare,
   LuPin,
@@ -17,7 +18,7 @@ import {
   LuShield,
   LuTrash2,
 } from "react-icons/lu";
-import type { Session, SessionStatus, Workspace } from "../api";
+import type { Session, SessionStatus } from "../api";
 
 const STATUS_STYLE: Record<SessionStatus, string> = {
   running: "bg-accent animate-pulse",
@@ -36,53 +37,35 @@ const STATUS_LABEL: Record<SessionStatus, string> = {
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
 const RECENTS_LIMIT = 12;
 
-/** Mirrors the server's slugify so the preview matches what actually gets created. */
-function slugify(input: string): string {
-  return input
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^[-._]+|[-._]+$/g, "")
-    .slice(0, 64);
-}
-
-// Sentinel for the dropdown — a new workspace is the default choice.
-const NEW = "__new__";
-
 export function Sidebar({
   sessions,
-  workspaces,
   executor,
   activeId,
   view,
   hasBrowser,
   onSelect,
-  onCreate,
+  onNewChat,
   onDelete,
   onRename,
   onPin,
-  onCreateWorkspace,
   onOpenSettings,
   onNavigate,
 }: {
   sessions: Session[];
-  workspaces: Workspace[];
   executor: string;
   activeId: string | null;
   /** Which top-level destination is showing, so the nav can mark it. */
-  view: "chat" | "sessions" | "agent" | "routines" | "browser" | "audit";
+  view: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "audit";
   /** Whether the optional browser service is there at all. */
   hasBrowser: boolean;
   onSelect: (id: string) => void;
-  onCreate: (workspacePath: string) => Promise<void>;
+  /** A chat in Home, opened. */
+  onNewChat: () => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
-  onCreateWorkspace: (name: string) => Promise<Workspace>;
   onOpenSettings: () => void;
-  onNavigate: (to: "sessions" | "agent" | "routines" | "browser" | "audit") => void;
+  onNavigate: (to: "sessions" | "projects" | "agent" | "routines" | "browser" | "audit") => void;
 }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebarCollapsed") === "true");
   const toggleSidebar = () => {
@@ -91,32 +74,18 @@ export function Sidebar({
       return !value;
     });
   };
-  const [creating, setCreating] = useState(false);
-  const [choice, setChoice] = useState<string>(NEW);
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const makingNew = choice === NEW;
-  const slug = slugify(name);
-  const canSubmit = makingNew ? slug.length > 0 : Boolean(choice);
-
-  const submit = async () => {
-    if (!canSubmit) return;
-    setError(null);
-    setBusy(true);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const newChat = async () => {
+    if (starting) return;
+    setStarting(true);
+    setStartError(null);
     try {
-      // Either branch produces a workspace path; the session takes its name
-      // from that folder.
-      const workspacePath = makingNew ? (await onCreateWorkspace(name.trim())).path : choice;
-      await onCreate(workspacePath);
-      setName("");
-      setChoice(NEW);
-      setCreating(false);
+      await onNewChat();
     } catch (e) {
-      setError((e as Error).message);
+      setStartError((e as Error).message);
     } finally {
-      setBusy(false);
+      setStarting(false);
     }
   };
 
@@ -163,12 +132,18 @@ export function Sidebar({
 
       {/* Destinations, above the session lists. */}
       <nav className="px-2 pb-2">
-        <NavItem icon={<LuPlus />} label="New" onClick={() => setCreating((v) => !v)} active={creating} />
+        <NavItem icon={<LuPlus />} label="New" onClick={newChat} active={starting} />
         <NavItem
           icon={<LuMessagesSquare />}
           label="Sessions"
           onClick={() => onNavigate("sessions")}
           active={view === "sessions"}
+        />
+        <NavItem
+          icon={<LuFolderKanban />}
+          label="Projects"
+          onClick={() => onNavigate("projects")}
+          active={view === "projects"}
         />
         <NavItem
           icon={<LuBot />}
@@ -199,54 +174,7 @@ export function Sidebar({
           active={view === "audit"}
         />
 
-        {creating && (
-          <div className="mt-2 space-y-2 px-1">
-            <select
-              value={choice}
-              onChange={(e) => setChoice(e.target.value)}
-              className="w-full rounded-lg border border-line bg-raised/60 px-2 py-1.5 text-sm text-fg-muted"
-            >
-              <option value={NEW}>New workspace</option>
-              {workspaces.length > 0 && (
-                <optgroup label="Existing workspaces">
-                  {workspaces.map((w) => (
-                    <option key={w.path} value={w.path}>
-                      {w.name}
-                      {w.isGit ? " (git)" : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-
-            {makingNew && (
-              <div>
-                <input
-                  autoFocus
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && submit()}
-                  placeholder="Cool Project"
-                  className="w-full rounded-lg border border-line bg-raised/60 px-2 py-1.5 text-sm outline-none focus:border-accent/60"
-                />
-                {name.trim() && (
-                  <p className="mt-1 truncate font-mono text-[11px] text-fg-subtle">
-                    {slug ? `→ ${slug}` : "needs at least one letter or digit"}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {error && <p className="text-xs text-danger">{error}</p>}
-            <button
-              onClick={submit}
-              disabled={busy || !canSubmit}
-              className="w-full rounded-lg bg-accent/12 px-2 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
-            >
-              {busy ? "Creating…" : "Start session"}
-            </button>
-          </div>
-        )}
+        {startError && <p className="px-2.5 pt-1 text-xs text-danger">{startError}</p>}
       </nav>
 
       <div className="flex-1 overflow-y-auto px-2 pb-2">
@@ -429,7 +357,11 @@ function SessionItem({
           </button>
         </div>
       </div>
-      <div className="truncate pl-4 text-[11px] text-fg-subtle">{s.workspace.split("/").pop()}</div>
+      {/* Cut at the start, not the end: what tells chats apart is the last part of
+          the path. rtl moves the ellipsis; bdi keeps the path itself left to right. */}
+      <div className="truncate pl-4 text-left font-mono text-[10px] text-fg-subtle [direction:rtl]" title={s.workspace}>
+        <bdi>{s.workspace}</bdi>
+      </div>
     </div>
   );
 }

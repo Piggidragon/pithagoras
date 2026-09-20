@@ -20,6 +20,12 @@ export interface SessionRow {
   thinking_level: string | null;
   /** SQLite has no boolean; 0 or 1. */
   pinned: number;
+  /**
+   * 1 while the chat is still waiting to be named after its first message.
+   * A flag rather than a look at the title: a chat somebody calls "New chat" on
+   * purpose is theirs, and is not renamed.
+   */
+  auto_title: number;
   /** pi's own session file, so the exact conversation is reopened on restart. */
   pi_session_file: string | null;
   /**
@@ -82,6 +88,7 @@ export function getDb(): Database.Database {
       model TEXT,
       thinking_level TEXT,
       pinned INTEGER NOT NULL DEFAULT 0,
+      auto_title INTEGER NOT NULL DEFAULT 0,
       pi_session_file TEXT,
       kind TEXT NOT NULL DEFAULT 'task',
       channel_slug TEXT,
@@ -303,6 +310,10 @@ function migrate(d: Database.Database): void {
   if (!names.includes("pinned")) {
     d.exec("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
   }
+  // Existing chats have their names already, so they default to none pending.
+  if (!names.includes("auto_title")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN auto_title INTEGER NOT NULL DEFAULT 0");
+  }
   if (!names.includes("pi_session_file")) {
     d.exec("ALTER TABLE sessions ADD COLUMN pi_session_file TEXT");
   }
@@ -408,14 +419,16 @@ export function createSession(row: {
   channel_slug?: string | null;
   channel_key?: string | null;
   routine_slug?: string | null;
+  auto_title?: number;
 }): void {
   getDb()
     .prepare(
-      `INSERT INTO sessions (id, title, workspace, executor, kind, channel_slug, channel_key, routine_slug)
-       VALUES (@id, @title, @workspace, @executor, @kind, @channel_slug, @channel_key, @routine_slug)`
+      `INSERT INTO sessions (id, title, workspace, executor, kind, channel_slug, channel_key, routine_slug, auto_title)
+       VALUES (@id, @title, @workspace, @executor, @kind, @channel_slug, @channel_key, @routine_slug, @auto_title)`
     )
     .run({
       kind: "task",
+      auto_title: 0,
       channel_slug: null,
       channel_key: null,
       routine_slug: null,
@@ -482,6 +495,7 @@ export function updateSession(
       | "model"
       | "thinking_level"
       | "pinned"
+      | "auto_title"
       | "pi_session_file"
     >
   >

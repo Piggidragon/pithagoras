@@ -1,5 +1,5 @@
 import { canvasesRouter } from "./api/canvases.js";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import path from "node:path";
@@ -53,6 +53,18 @@ import { eventTime, getDb } from "./db.js";
 import { getBuiltinCommands } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
+import {
+  NEW_CHAT_TITLE,
+  ProjectError,
+  createProject,
+  deleteProjectFolder,
+  describeProject,
+  getProject,
+  listProjects,
+  readInstructions,
+  titleFrom,
+  writeInstructions,
+} from "./projects.js";
 import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
 
 // WORKSPACE_ROOT is the new name; WORKSPACE_ROOT still works for existing deploys.
@@ -224,6 +236,108 @@ app.post("/api/workspaces", (req, res) => {
   res.json({ name, path: target, isGit: false });
 });
 
+// --- projects ---
+
+const projectStatus = { invalid: 400, missing: 404, exists: 409 } as const;
+
+const projectFailure = (res: express.Response, e: unknown) => {
+  if (e instanceof ProjectError) return res.status(projectStatus[e.code]).json({ error: e.message });
+  res.status(500).json({ error: (e as Error).message });
+};
+
+/**
+ * Chats that work in this folder, or in one below it — a chat may be started
+ * in a subfolder, and it belongs to the project all the same.
+ */
+const chatsIn = (dir: string, all = listSessions()) =>
+  all.filter((s) => s.workspace === dir || s.workspace.startsWith(dir + path.sep));
+
+/** The projects, each with how many chats it has and when one last moved. */
+app.get("/api/projects", (_req, res) => {
+  try {
+    if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, projects: [] });
+    // Read once, not once per project.
+    const all = listSessions();
+    const projects = listProjects(WORKSPACE_ROOT).map((p) => {
+      const chats = chatsIn(p.path, all);
+      return {
+        ...p,
+        sessions: chats.length,
+        lastActive: chats.reduce((latest, s) => (s.updated_at > latest ? s.updated_at : latest), "") || null,
+      };
+    });
+    res.json({ root: WORKSPACE_ROOT, projects });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+app.post("/api/projects", (req, res) => {
+  const { name, instructions } = req.body ?? {};
+  if (typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "name required" });
+  if (instructions !== undefined && typeof instructions !== "string") {
+    return res.status(400).json({ error: "instructions must be text" });
+  }
+  try {
+    res.json(createProject(WORKSPACE_ROOT, name, instructions));
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/** What deleting a project would take with it, for the confirmation. */
+app.get("/api/projects/:name", (req, res) => {
+  try {
+    const project = getProject(WORKSPACE_ROOT, req.params.name);
+    res.json({ ...project, sessions: chatsIn(project.path).length, ...describeProject(WORKSPACE_ROOT, project.name) });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+app.get("/api/projects/:name/instructions", (req, res) => {
+  try {
+    res.json({ text: readInstructions(WORKSPACE_ROOT, req.params.name) });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+app.put("/api/projects/:name/instructions", (req, res) => {
+  const text = req.body?.text;
+  if (typeof text !== "string") return res.status(400).json({ error: "text required" });
+  try {
+    writeInstructions(WORKSPACE_ROOT, req.params.name, text);
+    res.json({ ok: true });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/** The project, its chats and its folder. Refused while any chat in it is running. */
+app.delete("/api/projects/:name", async (req, res) => {
+  try {
+    const project = getProject(WORKSPACE_ROOT, req.params.name);
+    const chats = chatsIn(project.path);
+    if (chats.some((s) => sessions.isBusy(s.id))) {
+      return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
+    }
+    // In an order in which a failure leaves nothing half done. Stopping is first
+    // and destroys nothing. The folder is next, the part most likely to fail (a
+    // busy mount, a file that is not ours), and before anything that cannot come
+    // back — the chats' transcripts. Their rows go last, together, so that
+    // either all are removed or none.
+    for (const chat of chats) await sessions.stop(chat.id);
+    deleteProjectFolder(WORKSPACE_ROOT, project.name);
+    getDb().transaction(() => {
+      for (const chat of chats) deleteSession(chat.id);
+    })();
+    res.json({ ok: true, sessionsDeleted: chats.length });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
 // --- sessions ---
 
 /** SQLite stores pinned as 0/1; the API speaks booleans. */
@@ -325,23 +439,38 @@ app.put("/api/agent/files/:name", (req, res) => {
 
 app.post("/api/sessions", (req, res) => {
   const { title, workspace } = req.body ?? {};
-  if (typeof workspace !== "string" || !workspace) {
-    return res.status(400).json({ error: "workspace required" });
+  if (workspace !== undefined && (typeof workspace !== "string" || !workspace)) {
+    return res.status(400).json({ error: "workspace must be a path" });
   }
-  // Keep pi inside the mounted workspace area — no escaping to the rest of the FS.
-  const resolved = path.resolve(workspace);
-  if (resolved !== WORKSPACE_ROOT && !resolved.startsWith(WORKSPACE_ROOT + path.sep)) {
+  // Without one, a chat starts in Home: the agent's own directory, where its
+  // SOUL.md, PrimaryUser.md and MEMORY.md are.
+  const home = agentHome();
+  const resolved = workspace === undefined ? home : path.resolve(workspace);
+  // Keep pi inside the mounted workspace area — no escaping to the rest of the
+  // FS. Home is the one place outside it a chat may start.
+  if (resolved !== home && resolved !== WORKSPACE_ROOT && !resolved.startsWith(WORKSPACE_ROOT + path.sep)) {
     return res.status(400).json({ error: "workspace must be inside the workspace root" });
   }
   if (!existsSync(resolved)) return res.status(400).json({ error: "workspace does not exist" });
+  // The check above is on the text of the path, and a link inside the root
+  // passes it while leading anywhere. Where it really points must be inside too.
+  if (resolved !== home) {
+    const real = realpathSync(resolved);
+    const realRoot = realpathSync(WORKSPACE_ROOT);
+    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+      return res.status(400).json({ error: "workspace must be inside the workspace root" });
+    }
+  }
 
   const id = nanoid(12);
   createSession({
     id,
-    // Default the session name to the workspace folder name.
-    title: (typeof title === "string" && title.trim()) || path.basename(resolved),
+    // Named after its first message once there is one; see the prompt route.
+    title: (typeof title === "string" && title.trim()) || NEW_CHAT_TITLE,
     workspace: resolved,
     executor: EXECUTOR_KIND,
+    // Only a chat that was not given a name is named later.
+    auto_title: typeof title === "string" && title.trim() ? 0 : 1,
   });
   res.json(toApi(getSession(id)!));
 });
@@ -356,7 +485,8 @@ app.patch("/api/sessions/:id", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const { title, pinned } = req.body ?? {};
-  if (typeof title === "string" && title.trim()) updateSession(session.id, { title: title.trim() });
+  // A name somebody chose stays, whatever it says.
+  if (typeof title === "string" && title.trim()) updateSession(session.id, { title: title.trim(), auto_title: 0 });
   if (typeof pinned === "boolean") updateSession(session.id, { pinned: pinned ? 1 : 0 });
   res.json(toApi(getSession(session.id)!));
 });
@@ -382,6 +512,11 @@ app.post("/api/sessions/:id/prompt", async (req, res) => {
     // Returns as soon as pi accepts the prompt. The run continues server-side
     // regardless of what this browser does next.
     await sessions.prompt(session.id, message, { voice: req.body?.voice === true });
+    // A chat that has no name yet is named after what it starts with — once pi
+    // has taken the message, so one that never got there does not keep its name.
+    // Read again: a rename that came in meanwhile is not overwritten.
+    const title = titleFrom(message);
+    if (title && getSession(session.id)?.auto_title) updateSession(session.id, { title, auto_title: 0 });
     res.json({ ok: true, status: "running" });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });

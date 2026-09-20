@@ -41,7 +41,7 @@ const SHARED_FILES = ["SOUL.md", "TEAM.md"];
 
 const filesFor = (role?: string) => (!role || role === "primary" ? CONTEXT_FILES : SHARED_FILES);
 
-function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
+export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
   for (const name of filesFor(role)) {
     const file = path.join(cwd, name);
