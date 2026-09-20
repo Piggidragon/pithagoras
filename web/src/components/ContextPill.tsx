@@ -69,7 +69,7 @@ function ContextWindow({
 
   // Follows the server when the number changes there, and leaves what is being
   // typed alone while it does not.
-  useEffect(restore, [shown]);
+  useEffect(restore, [shown, limit]);
 
   const save = async (tokens: number | null) => {
     setBusy(true);
@@ -124,12 +124,18 @@ function ContextWindow({
           <button
             type="button"
             disabled={busy}
+            // Keeps focus in the field, so it is not left first: leaving it commits what
+            // was typed, which disables this button before the click can land.
+            onMouseDown={(e) => e.preventDefault()}
             title={
               byDefault
                 ? `Back to ${byDefault.toLocaleString()}, ${fallback && byDefault === fallback ? "the default from Settings" : "what the model says"}`
                 : "Back to what the model says"
             }
-            onClick={() => save(null)}
+            onClick={() => {
+              setDirty(false);
+              void save(null);
+            }}
             className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-raised disabled:opacity-50"
           >
             Reset
@@ -284,8 +290,7 @@ export function ContextPill({
 
           {cfg.contextLimitSupported === false ? (
             <p className="rounded-lg bg-raised/40 px-2 py-2 text-[11px] text-fg-faint">
-              The context window is the one in the model's entry: with the container executor it cannot be
-              changed here.
+              {cfg.contextLimitNote ?? "The context window cannot be changed here."}
             </p>
           ) : (
             <ContextWindow cfg={cfg} onChanged={onChanged} onError={(e) => setNote({ text: e.message, error: true })} />

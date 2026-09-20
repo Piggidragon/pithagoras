@@ -249,9 +249,23 @@ export function ComposerBar({
   // wait for the whole run to end, so the percentage sat still for as long as
   // the agent worked — the very time it is changing. Not while idle, where the
   // ticks of an old transcript being opened would only be requests for nothing.
+  //
+  // Only the figures are asked for, not the whole config: that one carries the
+  // model catalogue, which pi rebuilds from each provider's credentials every
+  // time it is asked, and a long run has a great many turns.
+  const currentSession = useRef(sessionId);
+  currentSession.current = sessionId;
   useEffect(() => {
-    if (running && turns) load();
-  }, [turns]);
+    if (!running || !turns) return;
+    const asked = sessionId;
+    api
+      .stats(asked)
+      .then((r) => {
+        // An answer for a chat that has since been left is not this one's.
+        if (r.stats && currentSession.current === asked) setCfg((prev) => ({ ...prev, stats: r.stats }));
+      })
+      .catch(() => {});
+  }, [turns, running, sessionId]);
 
   useEffect(() => {
     if (!panelRequest) return;

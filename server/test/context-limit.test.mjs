@@ -148,3 +148,18 @@ test('one chat that cannot take the window does not stop the others getting it',
   assert.deepEqual(got, ['good']);
   assert.match(errors.join(), /bad.*torn down/);
 });
+
+test('a window that cannot be applied costs the run and the config nothing', () => {
+  const { client } = clientFor({ provider: 'p', id: 'q', contextWindow: 1000 }, 1000);
+  client.session = { get model() { throw new Error('agent is gone'); } };
+  const errors = [];
+  const log = console.error;
+  console.error = (m) => errors.push(m);
+  try {
+    assert.throws(() => client.applyContextLimit(), /agent is gone/, 'the plain call still says so');
+    assert.doesNotThrow(() => client.applyLimitQuietly());
+  } finally {
+    console.error = log;
+  }
+  assert.match(errors.join(), /could not apply the context window: agent is gone/);
+});

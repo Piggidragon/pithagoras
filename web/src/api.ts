@@ -430,6 +430,8 @@ export const api = {
 
   /** Cheap: never starts pi. Stats are null when the session is not live. */
   config: (id: string) => json<PiConfig>(`/api/sessions/${id}/config`),
+  /** Only the token and context figures, which is all a run needs refreshed; does not start pi. */
+  stats: (id: string) => json<{ live: boolean; stats: PiConfig["stats"] }>(`/api/sessions/${id}/stats`),
   /** Starts pi if needed — only called when the model picker is opened. */
   models: (id: string) => json<PiConfig>(`/api/sessions/${id}/models`),
   setConfig: (id: string, patch: ConfigPatch) =>
@@ -580,6 +582,8 @@ export interface PiConfig {
   contextDefault?: number | null;
   /** False when pi runs where the portal cannot change its window: EXECUTOR=container. */
   contextLimitSupported?: boolean;
+  /** Why the window cannot be set, when `contextLimitSupported` is false. */
+  contextLimitNote?: string;
   stats: null | {
     tokens: { input: number; output: number; total: number };
     cost: number;

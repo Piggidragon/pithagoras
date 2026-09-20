@@ -322,7 +322,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const unsub = session.subscribe((event: any) => {
       // Before anything is measured against the window: pi swaps the model for the
       // registry's whenever an extension registers a provider, and that undoes it.
-      if (event?.type === "agent_start") client.applyContextLimit();
+      if (event?.type === "agent_start") client.applyLimitQuietly();
       canvases?.observe(event);
       client.emit("event", event);
     });
@@ -389,7 +389,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       console.error(`[portal] could not route llama progress: ${(e as Error).message}`);
     }
 
-    client.applyContextLimit();
+    client.applyLimitQuietly();
     return client;
   }
 
@@ -546,7 +546,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   async getStats(): Promise<PiStats> {
     // Read here as well as on run start: the figure shown is worked out against
     // whatever model the session has now.
-    this.applyContextLimit();
+    this.applyLimitQuietly();
     const stats = (await this.session.getSessionStats?.()) ?? {};
     const usage = (await this.session.getContextUsage?.()) ?? {};
     const contextWindow = usage.contextWindow ?? this.session.model?.contextWindow ?? 0;
@@ -614,7 +614,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const model = this.modelRuntime.getModel(provider, modelId);
     if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
     await this.session.setModel(viaProgressProxy(model, this.portalSessionId) ?? model);
-    this.applyContextLimit();
+    this.applyLimitQuietly();
   }
 
   /**
@@ -627,6 +627,21 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * default model. With nothing set the definition's own number is put back, so
    * removing a limit takes effect too.
    */
+  /**
+   * For the places that have another job first: reading a stored number and
+   * looking at the session's model can both fail (a database closing at
+   * shutdown, a pi release that stops exposing `agent`), and a run that never
+   * gets to say it started, or a config that answers 500 and takes every pill
+   * with it, is a poor price for a window that could not be read.
+   */
+  applyLimitQuietly(): void {
+    try {
+      this.applyContextLimit();
+    } catch (e) {
+      console.error(`[portal] could not apply the context window: ${(e as Error).message}`);
+    }
+  }
+
   applyContextLimit(): void {
     const current = this.session.model;
     if (!current) return;
@@ -678,7 +693,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     await this.session.reload();
     // Reloading has extensions register their providers again, which puts the
     // registry's model, with its own window, back on the session.
-    this.applyContextLimit();
+    this.applyLimitQuietly();
   }
 
   /** HTML unless a .jsonl path is given, matching pi's own /export. */

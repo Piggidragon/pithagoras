@@ -602,15 +602,26 @@ async function liveConfig(client: Awaited<ReturnType<typeof sessions.client>>) {
     client.getModels(),
     client.getStats(),
   ]);
+  // A window is kept per model, so it needs one: pi reports "unknown" when none
+  // is selected, and a number stored against that would never be read by anything.
+  const noModel = state.model.id === "unknown" || state.model.provider === "unknown";
+  const supported = typeof client.applyContextLimit === "function" && !noModel;
   return {
     live: true,
     state,
     thinking: { levels },
     models: { models },
     stats,
-    contextLimit: getContextLimit(state.model.provider, state.model.id) ?? null,
+    contextLimit: noModel ? null : (getContextLimit(state.model.provider, state.model.id) ?? null),
     contextDefault: getDefaultContextLimit() ?? null,
-    contextLimitSupported: typeof client.applyContextLimit === "function",
+    contextLimitSupported: supported,
+    ...(supported
+      ? {}
+      : {
+          contextLimitNote: noModel
+            ? "Choose a model first: the context window is kept per model."
+            : "The context window is the one in the model's entry: with the container executor it cannot be changed here.",
+        }),
   };
 }
 
@@ -645,6 +656,24 @@ app.get("/api/sessions/:id/config", async (req, res) => {
 
   try {
     res.json(await liveConfig(await sessions.client(session.id)));
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+/**
+ * Only the token and context figures, for keeping the pill current during a run.
+ *
+ * Not the config: that asks for the model catalogue too, and pi works the
+ * catalogue out afresh on every request — a check of each provider's
+ * credentials — which is too much to do after every turn of a long run.
+ */
+app.get("/api/sessions/:id/stats", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  if (!sessions.isRunning(session.id)) return res.json({ live: false, stats: null });
+  try {
+    res.json({ live: true, stats: await (await sessions.client(session.id)).getStats() });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -724,6 +753,10 @@ app.put("/api/context-limit", (req, res) => {
   const { provider, model, tokens } = req.body ?? {};
   if (typeof provider !== "string" || !provider || typeof model !== "string" || !model) {
     return res.status(400).json({ error: "provider and model required" });
+  }
+  // What pi reports for a session with no model, and not one that can be looked up.
+  if (provider === "unknown" || model === "unknown") {
+    return res.status(400).json({ error: "Choose a model first: the context window is kept per model" });
   }
   // Refused rather than rounded or clamped: a window quietly different from the
   // one typed would be found out when a chat overflowed.
