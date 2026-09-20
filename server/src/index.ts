@@ -332,6 +332,7 @@ app.delete("/api/projects/:name", async (req, res) => {
     getDb().transaction(() => {
       for (const chat of chats) deleteSession(chat.id);
     })();
+    for (const chat of chats) sessions.removeFiles(chat.id);
     res.json({ ok: true, sessionsDeleted: chats.length });
   } catch (e) {
     projectFailure(res, e);
@@ -496,6 +497,7 @@ app.delete("/api/sessions/:id", async (req, res) => {
   if (!session) return res.status(404).json({ error: "Not found" });
   await sessions.stop(session.id);
   deleteSession(session.id);
+  sessions.removeFiles(session.id);
   res.json({ ok: true });
 });
 

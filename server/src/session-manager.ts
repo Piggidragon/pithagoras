@@ -6,6 +6,7 @@ import path from "node:path";
 import type { PiClient } from "./pi/types.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
+import { removeSessionFiles } from "./session-files.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
 import {
   appendEvent,
@@ -863,6 +864,19 @@ class SessionManager extends EventEmitter {
     this.live.delete(sessionId);
     this.stream.clear(sessionId);
     await live.executor.cleanup?.(sessionId).catch(() => {});
+  }
+
+  /**
+   * Removes what pi wrote for a session, once its rows are gone. It never fails
+   * the caller: the chat is already deleted, and a folder that will not go —
+   * one a container wrote as another user — is a leftover, not an error.
+   */
+  removeFiles(sessionId: string): void {
+    try {
+      removeSessionFiles(SESSION_ROOT, sessionId);
+    } catch (e) {
+      console.error(`[portal] could not remove the files of session ${sessionId}:`, (e as Error).message);
+    }
   }
 
   /** Drop the running process so the next turn rebuilds it — used when a
