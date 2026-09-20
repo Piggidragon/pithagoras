@@ -38,7 +38,10 @@ export function ProjectsPage({
       .catch((e) => setError((e as Error).message));
   }, []);
   // Also when the chats change: the counts and the "last active" are theirs.
-  useEffect(load, [load, sessions]);
+  // The list is a new array on every poll, so it is what is in it that is
+  // compared — reloading the projects every few seconds for nothing is not.
+  const chats = sessions.map((s) => `${s.id}:${s.workspace}:${s.updated_at}`).join("|");
+  useEffect(load, [load, chats]);
 
   const attempt = async (fn: () => Promise<void>) => {
     setError(null);

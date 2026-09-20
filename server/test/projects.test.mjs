@@ -98,3 +98,37 @@ test('a chat is named after its first line, briefly, and never after a command',
   assert.equal(P.titleFrom('   \n  '), undefined);
   assert.equal(P.NEW_CHAT_TITLE, 'New chat');
 });
+
+test('a link in the root is not listed as a project, since every operation on it would refuse', () => {
+  const r = root(); const outside = root();
+  mkdirSync(path.join(r, 'real'));
+  symlinkSync(outside, path.join(r, 'linked'));
+  assert.deepEqual(P.listProjects(r).map((p) => p.name), ['real']);
+  rmSync(r, { recursive: true }); rmSync(outside, { recursive: true });
+});
+
+test('instructions that are too long are refused before the folder is made, so the name stays free', () => {
+  const r = root();
+  assert.equal(code(() => P.createProject(r, 'big', 'x'.repeat(100_001))), 'invalid');
+  assert.equal(existsSync(path.join(r, 'big')), false);
+  assert.equal(P.createProject(r, 'big', 'short').name, 'big');
+  rmSync(r, { recursive: true });
+});
+
+test('the limit message uses the same digits wherever the server runs', () => {
+  const r = root();
+  try { P.createProject(r, 'big', 'x'.repeat(100_001)); assert.fail('should have refused'); }
+  catch (e) { assert.match(e.message, /100,000 characters/); }
+  rmSync(r, { recursive: true });
+});
+
+test('saving a long run of blanks is quick', () => {
+  const r = root();
+  P.createProject(r, 'blanks');
+  const started = Date.now();
+  P.writeInstructions(r, 'blanks', ' '.repeat(99_999) + 'x');
+  assert.ok(Date.now() - started < 500, `took ${Date.now() - started} ms`);
+  P.writeInstructions(r, 'blanks', 'x' + ' '.repeat(99_998) + '\n');
+  assert.ok(Date.now() - started < 1000);
+  rmSync(r, { recursive: true });
+});

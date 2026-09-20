@@ -97,8 +97,10 @@ export function listProjects(root: string): ProjectInfo[] {
   return readdirSync(root)
     .filter((name) => !name.startsWith("."))
     .filter((name) => {
+      // lstat, like resolveProject: a link is not listed as a project, because
+      // every operation on one would refuse it.
       try {
-        return statSync(path.join(root, name)).isDirectory();
+        return lstatSync(path.join(root, name)).isDirectory();
       } catch {
         return false;
       }
@@ -125,6 +127,8 @@ export function createProject(root: string, rawName: string, instructions?: stri
   if (path.resolve(target) !== target || path.dirname(target) !== path.resolve(root)) {
     throw new ProjectError("invalid", "Invalid project name");
   }
+  // Before the folder exists: a refusal after it would leave the name taken.
+  if (instructions !== undefined) checkInstructions(instructions);
   if (existsSync(target)) throw new ProjectError("exists", `There is already a project "${name}"`);
   mkdirSync(target, { recursive: true });
   if (instructions?.trim()) writeInstructions(root, name, instructions);
@@ -140,18 +144,24 @@ export function readInstructions(root: string, name: string): string {
   }
 }
 
+function checkInstructions(text: string): void {
+  if (text.length > MAX_INSTRUCTIONS) {
+    // en-US, not the server's locale: the message is English whatever the host is.
+    throw new ProjectError("invalid", `Instructions are limited to ${MAX_INSTRUCTIONS.toLocaleString("en-US")} characters`);
+  }
+}
+
 /** Saves the project's instructions; blank removes the file, so an empty project has none. */
 export function writeInstructions(root: string, name: string, text: string): void {
   const dir = resolveProject(root, name);
-  if (text.length > MAX_INSTRUCTIONS) {
-    throw new ProjectError("invalid", `Instructions are limited to ${MAX_INSTRUCTIONS.toLocaleString()} characters`);
-  }
+  checkInstructions(text);
   const file = path.join(dir, INSTRUCTIONS_FILE);
   if (!text.trim()) {
     rmSync(file, { force: true });
     return;
   }
-  writeFileSync(file, text.replace(/\s+$/, "") + "\n");
+  // trimEnd, not a regex: /\s+$/ backtracks quadratically on a long run of blanks.
+  writeFileSync(file, text.trimEnd() + "\n");
 }
 
 /** What is in a project, for the question "are you sure?". */

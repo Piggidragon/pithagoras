@@ -1,5 +1,5 @@
 import { canvasesRouter } from "./api/canvases.js";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import path from "node:path";
@@ -18,7 +18,7 @@ import {
   listSessions,
   updateSession,
 } from "./db.js";
-import { agentHome, resolveChannelSession } from "./agent.js";
+import { agentHome, agentHomePath, resolveChannelSession } from "./agent.js";
 import {
   agentFileStatus,
   runWizard,
@@ -316,11 +316,14 @@ app.delete("/api/projects/:name", async (req, res) => {
     if (chats.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
+    // The folder first: it is the part that can fail (a busy mount, a file that
+    // is not ours), and a refusal must not have already taken the chats — and
+    // their transcripts, which cannot come back — with it.
+    deleteProjectFolder(WORKSPACE_ROOT, project.name);
     for (const chat of chats) {
       await sessions.stop(chat.id);
       deleteSession(chat.id);
     }
-    deleteProjectFolder(WORKSPACE_ROOT, project.name);
     res.json({ ok: true, sessionsDeleted: chats.length });
   } catch (e) {
     projectFailure(res, e);
@@ -333,7 +336,9 @@ app.delete("/api/projects/:name", async (req, res) => {
 const toApi = (s: ReturnType<typeof getSession> & {}) => ({
   ...s,
   // What the folder is called on screen: Home is the agent's own directory.
-  folder: s.workspace === agentHome() ? "Home" : path.basename(s.workspace),
+  // agentHomePath, not agentHome: this runs for every chat on every poll and
+  // must not touch the disk.
+  folder: s.workspace === agentHomePath() ? "Home" : path.basename(s.workspace),
   pinned: Boolean(s.pinned),
   live: sessions.isRunning(s.id),
 });
@@ -443,6 +448,15 @@ app.post("/api/sessions", (req, res) => {
     return res.status(400).json({ error: "workspace must be inside the workspace root" });
   }
   if (!existsSync(resolved)) return res.status(400).json({ error: "workspace does not exist" });
+  // The check above is on the text of the path, and a link inside the root
+  // passes it while leading anywhere. Where it really points must be inside too.
+  if (resolved !== home) {
+    const real = realpathSync(resolved);
+    const realRoot = realpathSync(WORKSPACE_ROOT);
+    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+      return res.status(400).json({ error: "workspace must be inside the workspace root" });
+    }
+  }
 
   const id = nanoid(12);
   createSession({
@@ -451,6 +465,8 @@ app.post("/api/sessions", (req, res) => {
     title: (typeof title === "string" && title.trim()) || NEW_CHAT_TITLE,
     workspace: resolved,
     executor: EXECUTOR_KIND,
+    // Only a chat that was not given a name is named later.
+    auto_title: typeof title === "string" && title.trim() ? 0 : 1,
   });
   res.json(toApi(getSession(id)!));
 });
@@ -465,7 +481,8 @@ app.patch("/api/sessions/:id", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const { title, pinned } = req.body ?? {};
-  if (typeof title === "string" && title.trim()) updateSession(session.id, { title: title.trim() });
+  // A name somebody chose stays, whatever it says.
+  if (typeof title === "string" && title.trim()) updateSession(session.id, { title: title.trim(), auto_title: 0 });
   if (typeof pinned === "boolean") updateSession(session.id, { pinned: pinned ? 1 : 0 });
   res.json(toApi(getSession(session.id)!));
 });
@@ -487,15 +504,15 @@ app.post("/api/sessions/:id/prompt", async (req, res) => {
   if (typeof message !== "string" || !message.trim()) {
     return res.status(400).json({ error: "message required" });
   }
-  // A chat that has no name yet is named after what it starts with.
-  if (session.title === NEW_CHAT_TITLE) {
-    const title = titleFrom(message);
-    if (title) updateSession(session.id, { title });
-  }
   try {
     // Returns as soon as pi accepts the prompt. The run continues server-side
     // regardless of what this browser does next.
     await sessions.prompt(session.id, message, { voice: req.body?.voice === true });
+    // A chat that has no name yet is named after what it starts with — once pi
+    // has taken the message, so one that never got there does not keep its name.
+    // Read again: a rename that came in meanwhile is not overwritten.
+    const title = titleFrom(message);
+    if (title && getSession(session.id)?.auto_title) updateSession(session.id, { title, auto_title: 0 });
     res.json({ ok: true, status: "running" });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });

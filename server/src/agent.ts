@@ -10,9 +10,14 @@ import { createSession, findChannelSession, type SessionRow } from "./db.js";
  * start a session against, and listing it as one would be misleading.
  */
 export function agentHome(): string {
-  const dir = path.resolve(process.env.AGENT_HOME || "/data/agent-home");
+  const dir = agentHomePath();
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/** Where it is, without touching the disk — for what only needs to compare paths. */
+export function agentHomePath(): string {
+  return path.resolve(process.env.AGENT_HOME || "/data/agent-home");
 }
 
 /** Keys come from outside, so they are bounded before touching the database. */
