@@ -403,3 +403,32 @@
 .voice-profile p {margin:10px 0;color:rgb(var(--fg-muted));}
 .voice-profile table {width:100%;margin:12px 0;}.voice-profile td{padding:5px 3px;border-bottom:1px solid rgb(var(--line));}.voice-profile td:not(:first-child){text-align:right;white-space:nowrap;}
 .voice-profile pre {white-space:pre-wrap;font-size:10px;max-height:160px;overflow:auto;}.voice-profile button{padding:6px 10px;border:1px solid rgb(var(--line));border-radius:8px;}
+
+/* Files, in voice mode: a window like the browser's and the terminal's. It
+   takes the middle when the terminal is up and the browser is not, and the
+   side otherwise; the stage's classes say where the presence goes. The
+   window has the theme's own surface, since what is in it is text to read. */
+.voice-files-window { position: absolute; z-index: 2; overflow: hidden; border: 1px solid #62718a; border-radius: 18px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 30px 90px #0005, 0 2px 10px #0003; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transition: transform .7s cubic-bezier(.22,1,.36,1), left .7s cubic-bezier(.22,1,.36,1), top .7s cubic-bezier(.22,1,.36,1), width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1), opacity .4s, visibility .7s; }
+.voice-files-window > header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 42px; padding: 0 10px 0 16px; border-bottom: 1px solid #62718a; background: rgb(var(--surface)); color: rgb(var(--fg)); font-size: 11px; font-weight: 500; }
+.voice-files-window header > span { display: flex; align-items: center; gap: 8px; }
+.voice-files-window header > div { display: flex; gap: 2px; }
+.voice-files-window header button { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: rgb(var(--fg)); background: rgb(var(--fg) / .09); border: 1px solid rgb(var(--fg) / .3); transition: color .2s, background .2s; }
+.voice-files-window header button:hover { background: rgb(var(--fg) / .18); }
+.voice-files-window header svg { width: 15px; height: 15px; }
+.voice-files-window > :not(header) { flex: 1; min-height: 0; }
+.voice-files-window.as-main { left: 50%; top: 47%; width: min(1000px, calc(100% - 64px)); height: calc(100% - 164px); transform: translate(-50%, -42%) scale(.92); }
+.voice-files-window.as-main.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+.voice-files-window.as-side { right: 24px; top: 50%; width: calc(67% - 36px); height: calc(100% - 120px); transform: translate(60px, -50%) scale(.97); }
+.voice-files-window.as-side.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(0, -50%) scale(1); }
+.is-browsing.is-terminal .voice-files-window.as-main { left: 35%; width: calc(70% - 42px); }
+.is-browsing.is-terminal .voice-files-window.as-side { right: 20px; top: 47%; width: calc(30% - 18px); height: calc(100% - 164px); }
+@media (min-width: 601px) {
+  .voice-stage.is-terminal:not(.is-browsing) .voice-files-window.as-side { top: 47%; height: calc(100% - 164px); }
+}
+@media (max-width: 600px) {
+  .voice-files-window.as-main, .voice-files-window.as-side { left: 12px; right: 12px; top: 62px; width: auto; height: calc(100% - 160px); transform: translateY(24px) scale(.96); }
+  .voice-files-window.as-main.is-open, .voice-files-window.as-side.is-open { transform: translateY(0) scale(1); }
+  .is-browsing.is-terminal .voice-files-window.as-main { left: 12px; width: auto; height: calc(62% - 106px); }
+  .is-browsing.is-terminal .voice-files-window.as-side { left: 12px; right: 12px; top: calc(62% - 34px); width: auto; height: calc(38% - 66px); }
+}
+@media (prefers-reduced-motion: reduce) { .voice-files-window { transition: none; } }

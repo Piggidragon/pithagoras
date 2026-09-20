@@ -1,0 +1,25 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { settlePanels } from '../web/src/use-work-panels.js';
+
+test('two panels stay open as they are', () => {
+  assert.deepEqual(settlePanels([], ['terminal', 'files']), { order: ['terminal', 'files'], close: [] });
+});
+
+test('a third closes the one that has been open longest', () => {
+  const first = settlePanels([], ['browser', 'terminal']);
+  const second = settlePanels(first.order, ['browser', 'terminal', 'files']);
+  assert.deepEqual(second, { order: ['terminal', 'files'], close: ['browser'] });
+});
+
+test('a panel that was closed drops out of the order, and comes back as the newest', () => {
+  const opened = settlePanels([], ['files', 'canvas']);
+  const closed = settlePanels(opened.order, ['canvas']);
+  assert.deepEqual(closed, { order: ['canvas'], close: [] });
+  assert.deepEqual(settlePanels(closed.order, ['canvas', 'files']).order, ['canvas', 'files']);
+});
+
+test('files and canvas count like the others', () => {
+  const a = settlePanels(['canvas', 'files'], ['canvas', 'files', 'browser']);
+  assert.deepEqual(a, { order: ['files', 'browser'], close: ['canvas'] });
+});

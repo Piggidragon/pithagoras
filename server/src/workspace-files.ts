@@ -1,0 +1,276 @@
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  ftruncateSync,
+  lstatSync,
+  openSync,
+  readSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from "node:fs";
+import path from "node:path";
+
+/**
+ * Looking at, changing and taking away the files in a chat's folder, from the browser.
+ *
+ * The folder is one the agent already works in with full access, so this gives
+ * the browser the same view and nothing more. What it must not do is let a
+ * name that arrives in a URL reach past that folder, and the agent can leave
+ * links in it that point anywhere. So a path is checked twice: as text, and
+ * again where it really leads once every link along it is followed. And a file
+ * is opened without following a link in its last place, which closes the gap
+ * between the check and the open.
+ *
+ * The listing, reading and resolving here were first written for the workspace
+ * file browser in PR 2, keyed by workspace name; this is the same, keyed by
+ * folder, so that a chat in Home — outside the workspace root — has files too.
+ */
+
+/** Above this a file is offered as a download only: it is neither shown nor sent back whole. */
+export const MAX_EDIT_BYTES = 1024 * 1024;
+/** A folder with more than this is cut off, and says so. */
+export const MAX_ENTRIES = 2_000;
+/** Left out of the whole-folder archive: regenerable, or huge, and not the work itself. */
+export const ARCHIVE_EXCLUDES = ["node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build"];
+
+export type FileErrorCode = "invalid" | "missing" | "conflict" | "too_large";
+
+export class FileError extends Error {
+  constructor(
+    readonly code: FileErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export interface FileEntry {
+  name: string;
+  /** "link" is a link that could not be followed to something inside the folder. */
+  type: "dir" | "file" | "link";
+  size: number;
+  mtime: number;
+}
+
+const isWithin = (root: string, p: string) => p === root || p.startsWith(root + path.sep);
+
+const lexists = (p: string): boolean => {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The real folder `dir` stands for, or an error if there is none.
+ *
+ * Canonical once, up front, so that every check after it compares real paths
+ * with real paths.
+ */
+export function baseDir(dir: string): string {
+  try {
+    const real = realpathSync(dir);
+    if (!statSync(real).isDirectory()) throw new Error("not a directory");
+    return real;
+  } catch {
+    throw new FileError("missing", "This chat's folder does not exist");
+  }
+}
+
+/** `p` with every link in the part of it that exists followed; the rest stays as written. */
+function realThroughExisting(p: string): string {
+  let current = p;
+  const tail: string[] = [];
+  // lstat, not exists: a link that points nowhere still exists, and stopping at
+  // it is what lets realpath below refuse it. Walking past it would treat its
+  // name as a plain missing folder, and a write would then follow the link.
+  while (!lexists(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) throw new FileError("missing", "There is no such place");
+    tail.unshift(path.basename(current));
+    current = parent;
+  }
+  let real: string;
+  try {
+    real = realpathSync(current);
+  } catch {
+    throw new FileError("invalid", "That path leads outside the folder");
+  }
+  return tail.length ? path.join(real, ...tail) : real;
+}
+
+/**
+ * The absolute path for `rel` inside `base` (which is already canonical).
+ *
+ * Refuses `..`, an absolute path and anything that a link leads out of the
+ * folder by. What is returned is the checked, canonical path — use it, not the
+ * text that came in.
+ */
+export function resolveInside(base: string, rel: unknown): string {
+  const text = String(rel ?? "");
+  if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
+  const resolved = path.resolve(base, text.replace(/^[/\\]+/, ""));
+  if (!isWithin(base, resolved)) throw new FileError("invalid", "That path leads outside the folder");
+  const real = realThroughExisting(resolved);
+  if (!isWithin(base, real)) throw new FileError("invalid", "That path leads outside the folder");
+  return real;
+}
+
+/** What is directly in a folder: folders first, then files, each by name. */
+export function listDir(base: string, rel: unknown): { path: string; entries: FileEntry[]; truncated: boolean } {
+  const target = resolveInside(base, rel);
+  let names;
+  try {
+    names = readdirSync(target, { withFileTypes: true });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOTDIR") throw new FileError("invalid", "That is not a folder");
+    throw new FileError("missing", "There is no such folder");
+  }
+  const entries: FileEntry[] = [];
+  for (const dirent of names) {
+    if (dirent.name === ".git") continue;
+    const full = path.join(target, dirent.name);
+    try {
+      let st = lstatSync(full);
+      let type: FileEntry["type"] = st.isDirectory() ? "dir" : "file";
+      if (st.isSymbolicLink()) {
+        // Shown as what it leads to, but only if that is inside the folder.
+        // A link that leads out, or nowhere, is listed and left alone.
+        type = "link";
+        const real = realpathSync(full);
+        if (isWithin(base, real)) {
+          st = statSync(real);
+          type = st.isDirectory() ? "dir" : "file";
+        }
+      }
+      entries.push({ name: dirent.name, type, size: st.size, mtime: st.mtimeMs });
+    } catch {
+      // Gone since it was listed, or a link to nowhere.
+      entries.push({ name: dirent.name, type: "link", size: 0, mtime: 0 });
+    }
+  }
+  entries.sort((a, b) => {
+    const rank = (t: FileEntry["type"]) => (t === "dir" ? 0 : 1);
+    return rank(a.type) - rank(b.type) || a.name.localeCompare(b.name);
+  });
+  return {
+    path: path.relative(base, target),
+    entries: entries.slice(0, MAX_ENTRIES),
+    truncated: entries.length > MAX_ENTRIES,
+  };
+}
+
+/**
+ * Opens a plain file without following a link in its last place, or waiting on one.
+ * A pipe left there would otherwise hold the server; a device is not a file.
+ */
+function openPlain(file: string, flags: number): number {
+  let fd: number;
+  try {
+    fd = openSync(file, flags | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o644);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") throw new FileError("missing", "There is no such file");
+    if (code === "ELOOP" || code === "ENXIO" || code === "EISDIR") {
+      throw new FileError("invalid", "That is a link, a folder or not a plain file");
+    }
+    throw e;
+  }
+  if (!fstatSync(fd).isFile()) {
+    closeSync(fd);
+    throw new FileError("invalid", "That is not a plain file");
+  }
+  return fd;
+}
+
+/** Null bytes early in a file are the cheap, reliable sign that it is not text. */
+const looksBinary = (head: Buffer) => head.includes(0);
+
+export type FileContent = { binary: true; size: number; mtime: number } | { binary: false; size: number; mtime: number; content: string };
+
+/** A file's text, or the fact that it is not text or too large to show. */
+export function readText(base: string, rel: unknown): FileContent {
+  const fd = openPlain(resolveInside(base, rel), constants.O_RDONLY);
+  try {
+    const st = fstatSync(fd);
+    if (st.size > MAX_EDIT_BYTES) return { binary: true, size: st.size, mtime: st.mtimeMs };
+    const buffer = Buffer.alloc(st.size);
+    let read = 0;
+    while (read < st.size) {
+      const n = readSync(fd, buffer, read, st.size - read, read);
+      if (n === 0) break;
+      read += n;
+    }
+    const data = buffer.subarray(0, read);
+    if (looksBinary(data.subarray(0, 8000))) return { binary: true, size: st.size, mtime: st.mtimeMs };
+    return { binary: false, size: st.size, mtime: st.mtimeMs, content: data.toString("utf8") };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** The checked path of a plain file, for sending it as a download. */
+export function downloadPath(base: string, rel: unknown): string {
+  const file = resolveInside(base, rel);
+  const st = lstatSync(file, { throwIfNoEntry: false });
+  if (!st) throw new FileError("missing", "There is no such file");
+  if (!st.isFile()) throw new FileError("invalid", "That is not a plain file");
+  return file;
+}
+
+/**
+ * Saves a file's text.
+ *
+ * `expected` is the modification time the editor was showing. If the file has
+ * changed since — the agent writes here too — the save is refused instead of
+ * putting the older text over the newer, and the person chooses what to keep.
+ */
+export function writeText(base: string, rel: unknown, content: string, expected?: number): { size: number; mtime: number } {
+  if (Buffer.byteLength(content, "utf8") > MAX_EDIT_BYTES) {
+    throw new FileError("too_large", `Files over ${MAX_EDIT_BYTES / 1024 / 1024} MB are not edited here`);
+  }
+  const target = resolveInside(base, rel);
+  if (target === base) throw new FileError("invalid", "That is the folder, not a file");
+  // Not created with O_TRUNC: the file is looked at before anything is cut off.
+  const fd = openPlain(target, constants.O_WRONLY | constants.O_CREAT);
+  try {
+    const st = fstatSync(fd);
+    if (st.nlink > 1) throw new FileError("invalid", "That file is shared with another, so it is left alone");
+    if (expected !== undefined && st.size > 0 && Math.abs(st.mtimeMs - expected) > 1) {
+      throw new FileError("conflict", "The file changed after you opened it");
+    }
+    ftruncateSync(fd, 0);
+    const data = Buffer.from(content, "utf8");
+    let written = 0;
+    while (written < data.length) written += writeSync(fd, data, written, data.length - written, written);
+    const after = fstatSync(fd);
+    return { size: after.size, mtime: after.mtimeMs };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Removes a file, or a folder and all that is in it. A link is removed as the
+ * link it is, and what it points at stays. The folder itself is not removable
+ * from here: that is the chat's place, not something in it.
+ */
+export function removeEntry(base: string, rel: unknown): void {
+  const text = String(rel ?? "");
+  if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
+  const lexical = path.resolve(base, text.replace(/^[/\\]+/, ""));
+  if (!isWithin(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
+  if (lexical === base) throw new FileError("invalid", "The folder itself is not removed from here");
+  // The parent is followed and checked; the last name is not, so that a link
+  // there goes, not what it leads to.
+  const parent = resolveInside(base, path.relative(base, path.dirname(lexical)));
+  const target = path.join(parent, path.basename(lexical));
+  if (!lexists(target)) throw new FileError("missing", "There is no such file or folder");
+  rmSync(target, { recursive: true });
+}

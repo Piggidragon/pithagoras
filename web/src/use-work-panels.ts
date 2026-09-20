@@ -1,12 +1,27 @@
 import { useLayoutEffect, useRef } from 'react';
-type Panel = 'browser' | 'terminal' | 'canvas';
+export type Panel = 'browser' | 'terminal' | 'canvas' | 'files';
+/** Two panels beside the conversation is what fits; a third would cover one of them. */
+const MAX_OPEN = 2;
+
+/**
+ * Which panels to close so that no more than two stay open: the ones open the
+ * longest. `order` is the panels in the order they were opened, and is returned
+ * brought up to date.
+ */
+export function settlePanels(order: Panel[], open: Panel[]): { order: Panel[]; close: Panel[] } {
+  const next = order.filter(p => open.includes(p));
+  for (const panel of open) if (!next.includes(panel)) next.push(panel);
+  const close: Panel[] = [];
+  while (next.length > MAX_OPEN) close.push(next.shift()!);
+  return { order: next, close };
+}
+
 /** Enforce before paint so a third panel never covers the current workspace. */
-export function useWorkPanels(browser:boolean,terminal:boolean,canvas:boolean,hide:(panel:Panel)=>void) {
-  const order=useRef<Panel[]>([]),callback=useRef(hide);callback.current=hide;
-  useLayoutEffect(()=>{
-    const visible:Panel[]=[];if(browser)visible.push('browser');if(terminal)visible.push('terminal');if(canvas)visible.push('canvas');
-    order.current=order.current.filter(p=>visible.includes(p));
-    for(const panel of visible)if(!order.current.includes(panel))order.current.push(panel);
-    while(order.current.length>2)callback.current(order.current.shift()!);
-  },[browser,terminal,canvas]);
+export function useWorkPanels(open: Record<Panel, boolean>, hide: (panel: Panel) => void) {
+  const order = useRef<Panel[]>([]), callback = useRef(hide); callback.current = hide;
+  useLayoutEffect(() => {
+    const settled = settlePanels(order.current, (Object.keys(open) as Panel[]).filter(p => open[p]));
+    order.current = settled.order;
+    for (const panel of settled.close) callback.current(panel);
+  }, [open.browser, open.terminal, open.canvas, open.files]);
 }

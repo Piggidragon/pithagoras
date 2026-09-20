@@ -8,9 +8,9 @@ import { VoiceControl } from "./VoiceControl";
 import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
+import { LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
 import { activity, buildTranscript, type Activity } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
@@ -18,6 +18,8 @@ import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { confirmDialog } from "./ConfirmDialog";
 import { TerminalPanel } from "./TerminalPanel";
+import { FilesPanel } from "./FilesPanel";
+import { latestFileActivity } from "../file-activity";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -133,7 +135,14 @@ export function Chat({
   const [browserUp, setBrowserUp] = useState(false);
   const [watching, setWatching] = useState(false);
   const [terminal, setTerminal] = useState(false);
-  useWorkPanels(!voiceMode && watching, !voiceMode && terminal, canvasOpen, panel => { if(panel === "browser") setWatching(false); else if(panel === "terminal") setTerminal(false); else setCanvasOpen(false); });
+  const [files, setFiles] = useState(false);
+  const fileActivity = useMemo(() => latestFileActivity(events, session.workspace), [events, session.workspace]);
+  useWorkPanels(
+    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files },
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else setCanvasOpen(false); },
+  );
+  // Beside the conversation, top to bottom in this order.
+  const asidePanels = [watching && "browser", files && "files", terminal && "terminal"].filter(Boolean) as ("browser" | "files" | "terminal")[];
   const browserPane = useRef<HTMLDivElement>(null);
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
@@ -503,6 +512,19 @@ export function Chat({
           >
             <LuSquareTerminal className="h-3.5 w-3.5" />
           </button>
+          <button
+            onClick={() => setFiles((v) => !v)}
+            aria-label="Files"
+            aria-expanded={files}
+            title={files ? "Hide the files" : "Browse the files in this chat's folder"}
+            className={`rounded-lg border px-2 py-1 text-xs transition ${
+              files
+                ? "border-accent/40 bg-accent/10 text-accent"
+                : "border-line text-fg-muted hover:bg-fg/5 hover:text-fg"
+            }`}
+          >
+            <LuFolderOpen className="h-3.5 w-3.5" />
+          </button>
           <button onClick={() => setCanvasOpen(v => !v)} aria-label="Session canvases" title="Session canvases" aria-expanded={canvasOpen}
             className={`rounded-lg border px-2 py-1 text-xs transition ${canvasOpen ? 'border-accent/40 bg-accent/10 text-accent' : 'border-line text-fg-muted hover:bg-fg/5 hover:text-fg'}`}>
             <LuFileText className="h-3.5 w-3.5" />
@@ -789,7 +811,7 @@ export function Chat({
             onPanelConsumed={() => setPanelRequest(null)}
             actions={<>
               <DictationButton dictation={dictation} />
-              <VoiceControl canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
+              <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
               {running && !input.trim() ? <button type="button" aria-label="Stop generation" title="Stop generation" onClick={onAbort} className="prompt-action prompt-stop">
                 <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />
               </button> : <button type="submit" aria-label="Send message" title={running ? 'Send follow-up' : 'Send message'} disabled={sending || !input.trim()}
@@ -805,7 +827,7 @@ export function Chat({
       {/* Beside the conversation rather than above it: the page changing while
           the agent explains what it is doing is the thing worth seeing, and a
           strip across the top pushed the transcript out of view to show it. */}
-      {(watching || terminal) && (
+      {asidePanels.length > 0 && (
         <>
           <div
             onPointerDown={dragWidth}
@@ -817,67 +839,60 @@ export function Chat({
             style={{ width: asideWidth }}
             className="flex shrink-0 flex-col overflow-hidden border-l border-line [&:fullscreen]:w-screen"
           >
-            {watching && (
-              <div
-                className="flex min-h-0 flex-col bg-black"
-                style={{ flex: terminal ? `${split} 1 0%` : "1 1 0%" }}
-              >
-                <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
-                  <span className="text-[11px] text-fg-subtle">Browser</span>
-                  <button
-                    onClick={() => browserPane.current?.requestFullscreen?.()}
-                    className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
-                  >
-                    Fullscreen
-                  </button>
-                  <button
-                    onClick={() => setWatching(false)}
-                    title="Collapse"
-                    className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
-                  >
-                    ✕
-                  </button>
+            {asidePanels.map((kind, i) => (
+              <Fragment key={kind}>
+                {i > 0 && (
+                  <div
+                    onPointerDown={dragSplit}
+                    title="Drag to resize"
+                    className="h-1 shrink-0 cursor-row-resize bg-line transition hover:bg-accent/40"
+                  />
+                )}
+                <div
+                  className={`flex min-h-0 flex-col ${kind === "browser" ? "bg-black" : ""}`}
+                  style={{ flex: asidePanels.length === 1 ? "1 1 0%" : `${i === 0 ? split : 1 - split} 1 0%` }}
+                >
+                  <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
+                    <span className="text-[11px] text-fg-subtle">{kind === "browser" ? "Browser" : kind === "files" ? "Files" : "Terminal"}</span>
+                    {kind === "terminal" && <span className="truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
+                    {kind === "browser" && (
+                      <button
+                        onClick={() => browserPane.current?.requestFullscreen?.()}
+                        className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
+                      >
+                        Fullscreen
+                      </button>
+                    )}
+                    <button
+                      onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? setFiles(false) : setTerminal(false))}
+                      title="Collapse"
+                      className={`${kind === "browser" ? "" : "ml-auto "}rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {kind === "browser" && (
+                    <iframe
+                      src="/browser-ui/"
+                      title="The agent's browser"
+                      className="min-h-0 flex-1 border-0"
+                      allow="clipboard-read; clipboard-write; fullscreen"
+                    />
+                  )}
+                  {kind === "files" && (
+                    <div className="min-h-0 flex-1 bg-surface">
+                      {/* Not before the chat's events are here: what it did earlier is not news. */}
+                      {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} />}
+                    </div>
+                  )}
+                  {kind === "terminal" && (
+                    <div className="min-h-0 flex-1">
+                      <TerminalPanel sessionId={session.id} />
+                    </div>
+                  )}
                 </div>
-                <iframe
-                  src="/browser-ui/"
-                  title="The agent's browser"
-                  className="min-h-0 flex-1 border-0"
-                  allow="clipboard-read; clipboard-write; fullscreen"
-                />
-              </div>
-            )}
-
-            {watching && terminal && (
-              <div
-                onPointerDown={dragSplit}
-                title="Drag to resize"
-                className="h-1 shrink-0 cursor-row-resize bg-line transition hover:bg-accent/40"
-              />
-            )}
-
-            {terminal && (
-              <div
-                className="flex min-h-0 flex-col"
-                style={{ flex: watching ? `${1 - split} 1 0%` : "1 1 0%" }}
-              >
-                <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
-                  <span className="text-[11px] text-fg-subtle">Terminal</span>
-                  <span className="truncate font-mono text-[10px] text-fg-faint">
-                    {session.workspace}
-                  </span>
-                  <button
-                    onClick={() => setTerminal(false)}
-                    title="Collapse"
-                    className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div className="min-h-0 flex-1">
-                  <TerminalPanel sessionId={session.id} />
-                </div>
-              </div>
-            )}
+              </Fragment>
+            ))}
           </aside>
         </>
       )}

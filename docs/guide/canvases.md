@@ -26,7 +26,7 @@ The agent has five tools: `canvas_create`, `canvas_list`, `canvas_read`,
 the document and revision before the content so live writes have an unambiguous
 target. No content is guessed to complete an interrupted call.
 
-At most two work panels are visible alongside the orb. Opening a third minimizes
+At most two work panels — the browser, the terminal, [Files](/guide/files) and canvases — are visible alongside the orb. Opening a third minimizes
 the least recently opened panel. On desktop, a single work panel sits on the
 right with the full orb on the left. Two panels use the compact orb dock below;
 the canvas gets more width than the terminal. Minimizing a document does not

@@ -37,6 +37,7 @@ import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { browserRouter } from "./api/browser.js";
 import { terminalRouter } from "./api/terminal.js";
+import { filesRouter } from "./api/files.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
@@ -826,6 +827,7 @@ app.use("/api", peopleRouter());
 app.use("/api", browserRouter());
 app.use("/api", voiceRouter());
 app.use("/api", terminalRouter());
+app.use("/api", filesRouter());
 app.use("/api", canvasesRouter());
 // Before the SPA fallback, which answers everything that is not /api.
 mountBrowserProxy(app);

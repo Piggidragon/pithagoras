@@ -38,6 +38,7 @@ export default defineConfig({
           { text: "Docker add-ons", link: "/guide/add-ons" },
           { text: "Voice control", link: "/guide/voice" },
           { text: "Session canvases", link: "/guide/canvases" },
+          { text: "Files", link: "/guide/files" },
         ],
       },
       {

@@ -1,10 +1,12 @@
 import { ActivityProgress } from './ActivityProgress';
 import type { Activity } from '../transcript';
 import { useWorkPanels } from "../use-work-panels";
+import { FilesPanel } from "./FilesPanel";
+import { latestFileActivity } from "../file-activity";
 import { VoiceToolActivity } from "./VoiceToolActivity";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { buildTranscript } from "../transcript";
-import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinus, LuVolume2, LuVolumeX, LuTerminal, LuFileText } from "react-icons/lu";
+import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinus, LuVolume2, LuVolumeX, LuTerminal, LuFileText, LuFolderOpen } from "react-icons/lu";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { api, type PortalEvent } from "../api";
 import type { VoiceCue } from "../voice-cues";
@@ -86,7 +88,8 @@ function VoiceOrb({ mode, levels }: { mode: OrbMode; levels: MutableRefObject<Vo
   return <canvas ref={canvas} aria-hidden="true" className="voice-orb" data-mode={mode} />;
 }
 
-export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, terminalActivity, toolEvents, sounds, onSounds, onCue }: {
+export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, terminalActivity, toolEvents, sounds, onSounds, onCue }: {
+  sessionId: string; folder: string;
   workPhase?: Activity | null;
   canvasOpen: boolean; onCanvasMinimize: () => void; onCanvasToggle: () => void;
   title: string; phase: VoicePhase; starting: boolean; muted: boolean; speaking: boolean;
@@ -97,7 +100,21 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
   const activity = useRef(browserActivity), terminalSeen = useRef(terminalActivity);
   const terminal = useRef<HTMLElement>(null);
   const [shown, setShown] = useState(false), [terminalShown, setTerminalShown] = useState(false);
-  useWorkPanels(shown, terminalShown, canvasOpen, panel => { if(panel === "browser") setShown(false); else if(panel === "terminal") setTerminalShown(false); else onCanvasMinimize(); });
+  const [filesShown, setFilesShown] = useState(false), [filesUsed, setFilesUsed] = useState(false), [filesSince, setFilesSince] = useState<number | undefined>(undefined);
+  const filesWindow = useRef<HTMLElement>(null);
+  useWorkPanels({ browser: shown, terminal: terminalShown, canvas: canvasOpen, files: filesShown }, panel => {
+    if (panel === "browser") setShown(false); else if (panel === "terminal") setTerminalShown(false); else if (panel === "files") setFilesShown(false); else onCanvasMinimize();
+  });
+  // What the agent reads or changes in the chat's folder. Files opens on it as
+  // the browser and terminal do, and follows it from there.
+  const fileActivity = useMemo(() => latestFileActivity(toolEvents, folder), [toolEvents, folder]);
+  const filesSeen = useRef(fileActivity?.seq ?? 0);
+  // Where the two windows go: one takes the middle when the browser is up, the
+  // other the side. Files sits at the side, except beside the terminal, where
+  // it takes the middle and the terminal keeps the side.
+  const filesMain = filesShown && terminalShown && !shown;
+  const browsing = shown || filesMain;
+  const sideWindow = terminalShown || (filesShown && !filesMain);
   const [loaded, setLoaded] = useState(false);
   const [terminalUsed, setTerminalUsed] = useState(false);
   const [browserError, setBrowserError] = useState('');
@@ -114,12 +131,23 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
     const observer = new ResizeObserver(follow);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [thought, shown, terminalShown]);
+  }, [thought, shown, terminalShown, filesShown]);
   useEffect(() => { end.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     if (browser.current) browser.current.inert = !shown;
     if (terminal.current) terminal.current.inert = !terminalShown;
-  }, [shown, terminalShown]);
+    if (filesWindow.current) filesWindow.current.inert = !filesShown;
+  }, [shown, terminalShown, filesShown]);
+  useEffect(() => {
+    if (!fileActivity || fileActivity.seq <= filesSeen.current) return;
+    filesSeen.current = fileActivity.seq;
+    // The first time, the panel starts from just before this, so it shows it.
+    if (!filesUsed) { setFilesSince(fileActivity.seq - 1); setFilesUsed(true); }
+    setFilesShown(true); onCue("focus");
+  }, [fileActivity?.seq, filesUsed, onCue]);
+  const openFiles = () => {
+    setFilesUsed(true); setFilesShown(true); onCue("focus");
+  };
   useEffect(() => {
     if (terminalActivity <= terminalSeen.current) return;
     terminalSeen.current = terminalActivity; setTerminalUsed(true);
@@ -141,11 +169,13 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
   const status = starting ? "Connecting" : input ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : "Listening";
-  return <section className={`voice-stage ${shown ? 'is-browsing' : ''} ${terminalShown ? 'is-terminal' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(canvasOpen)} data-mode={mode}>
+  const anyPanel = shown || terminalShown || filesShown;
+  return <section className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(filesShown) + Number(canvasOpen)} data-mode={mode}>
     <header className="voice-stage-header">
       <span className="voice-stage-session">{title}</span>
       <div className="voice-utilities">
         <button type="button" onClick={onCanvasToggle} title="Session canvases" aria-label="Session canvases" aria-expanded={canvasOpen}><LuFileText /></button>
+        {!filesShown && <button type="button" onClick={openFiles} title="Show files" aria-label="Show files"><LuFolderOpen /></button>}
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title="Show browser" aria-label="Show browser"><LuGlobe /></button>}
         {terminalUsed && !terminalShown && <button type="button" aria-label="Show terminal" title="Show terminal" onClick={() => { setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
         <button type="button" onClick={onSounds} title={sounds ? 'Mute sound effects' : 'Enable sound effects'} aria-label={sounds ? 'Mute sound effects' : 'Enable sound effects'} aria-pressed={sounds}>{sounds ? <LuVolume2 /> : <LuVolumeX />}</button>
@@ -163,16 +193,20 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
       <header><span><LuTerminal />Terminal</span><div><button type="button" aria-label="Minimize terminal" title="Minimize terminal" onClick={() => { setTerminalShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {terminalUsed && <VoiceTerminal events={toolEvents} />}
     </section>
+    <section ref={filesWindow} className={`voice-files-window ${filesMain ? 'as-main' : 'as-side'} ${filesShown ? 'is-open' : ''}`} aria-label="Files" aria-hidden={!filesShown}>
+      <header><span><LuFolderOpen />Files</span><div><button type="button" aria-label="Minimize files" title="Minimize files" onClick={() => { setFilesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
+      {filesUsed && <FilesPanel sessionId={sessionId} folder={folder} activity={fileActivity} since={filesSince} />}
+    </section>
     <VoiceToolActivity events={toolEvents} />
     <div className="voice-presence">
       <div className="voice-avatar"><VoiceOrb mode={mode} levels={levels} /></div>
       <div className="voice-dock-center">
         {workPhase && ['processing the prompt','compacting the conversation'].includes(workPhase.label) ? <ActivityProgress phase={workPhase} compact /> : <>
-        <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? phase : thought && (shown || terminalShown) ? 'Thinking' : status}</div>
-        {(shown || terminalShown) && thought && phase !== 'Compacting context' && <div ref={thoughtViewport} className="voice-thought-stream" aria-label="Live model thinking">{thought.slice(-1200)}</div>}
+        <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? phase : thought && anyPanel ? 'Thinking' : status}</div>
+        {anyPanel && thought && phase !== 'Compacting context' && <div ref={thoughtViewport} className="voice-thought-stream" aria-label="Live model thinking">{thought.slice(-1200)}</div>}
         </>}
       </div>
-      {!shown && !terminalShown && transcript && (input || phase === "Transcribing") && <p className="voice-live-transcript" aria-label="Live transcription">{transcript}</p>}
+      {!anyPanel && transcript && (input || phase === "Transcribing") && <p className="voice-live-transcript" aria-label="Live transcription">{transcript}</p>}
 
       <div className="voice-stage-controls">
         <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={muted ? 'Unmute microphone' : 'Mute microphone'} aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>
