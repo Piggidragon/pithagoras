@@ -8,14 +8,10 @@ const P = await import('../dist/projects.js');
 const root = () => mkdtempSync(path.join(tmpdir(), 'projects-'));
 const code = (fn) => { try { fn(); } catch (e) { return e instanceof P.ProjectError ? e.code : `other:${e.message}`; } return 'none'; };
 
-test('the projects are the folders under the root, and Home is not one of them', () => {
+test('the projects are the folders under the root, by name, without hidden ones or files', () => {
   const r = root();
   mkdirSync(path.join(r, 'zeta')); mkdirSync(path.join(r, 'alpha')); mkdirSync(path.join(r, '.hidden'));
   writeFileSync(path.join(r, 'a-file'), 'x');
-  assert.deepEqual(P.listProjects(r).map((p) => p.name), ['alpha', 'zeta']);
-  // Home is made on demand and is still not listed once it exists.
-  assert.equal(P.ensureHome(r), path.join(r, 'home'));
-  assert.ok(existsSync(path.join(r, 'home')));
   assert.deepEqual(P.listProjects(r).map((p) => p.name), ['alpha', 'zeta']);
   rmSync(r, { recursive: true });
 });
@@ -46,6 +42,7 @@ test('names that are taken, reserved or unusable are refused', () => {
   const r = root();
   P.createProject(r, 'one');
   assert.equal(code(() => P.createProject(r, 'One')), 'exists');
+  // "home" is what chats start in, and would read as it.
   assert.equal(code(() => P.createProject(r, 'home')), 'invalid');
   assert.equal(code(() => P.createProject(r, 'Home')), 'invalid');
   assert.equal(code(() => P.createProject(r, '???')), 'invalid');
@@ -72,7 +69,7 @@ test('a name from outside cannot reach beyond the root', () => {
   rmSync(r, { recursive: true }); rmSync(outside, { recursive: true });
 });
 
-test('deleting a project removes its folder, and Home cannot be deleted', () => {
+test('deleting a project removes its folder', () => {
   const r = root();
   P.createProject(r, 'gone', 'x');
   writeFileSync(path.join(r, 'gone', 'work.txt'), 'abc');
@@ -83,24 +80,6 @@ test('deleting a project removes its folder, and Home cannot be deleted', () => 
   assert.deepEqual(d, { files: 3, bytes: 2 + 3 + 4, complete: true });
   P.deleteProjectFolder(r, 'gone');
   assert.ok(!existsSync(path.join(r, 'gone')));
-  P.ensureHome(r);
-  assert.equal(code(() => P.deleteProjectFolder(r, 'home')), 'protected');
-  assert.ok(existsSync(path.join(r, 'home')));
-  rmSync(r, { recursive: true });
-});
-
-test('Home is not a project: no instructions, no counting, no deleting', () => {
-  const r = root();
-  P.ensureHome(r);
-  writeFileSync(path.join(r, 'home', 'AGENTS.md'), 'stray');
-  for (const [what, fn] of [
-    ['getProject', () => P.getProject(r, 'home')],
-    ['readInstructions', () => P.readInstructions(r, 'home')],
-    ['writeInstructions', () => P.writeInstructions(r, 'home', 'x')],
-    ['describeProject', () => P.describeProject(r, 'home')],
-    ['deleteProjectFolder', () => P.deleteProjectFolder(r, 'home')],
-  ]) assert.equal(code(fn), 'protected', what);
-  assert.equal(readFileSync(path.join(r, 'home', 'AGENTS.md'), 'utf8'), 'stray');
   rmSync(r, { recursive: true });
 });
 

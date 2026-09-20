@@ -358,7 +358,7 @@ function SessionItem({
           </button>
         </div>
       </div>
-      <div className="truncate pl-4 text-[11px] text-fg-subtle">{projectLabel(s.workspace)}</div>
+      <div className="truncate pl-4 text-[11px] text-fg-subtle">{s.folder ?? projectLabel(s.workspace)}</div>
     </div>
   );
 }

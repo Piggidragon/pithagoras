@@ -59,7 +59,6 @@ import {
   createProject,
   deleteProjectFolder,
   describeProject,
-  ensureHome,
   getProject,
   listProjects,
   readInstructions,
@@ -239,7 +238,7 @@ app.post("/api/workspaces", (req, res) => {
 
 // --- projects ---
 
-const projectStatus = { invalid: 400, missing: 404, exists: 409, protected: 403 } as const;
+const projectStatus = { invalid: 400, missing: 404, exists: 409 } as const;
 
 const projectFailure = (res: express.Response, e: unknown) => {
   if (e instanceof ProjectError) return res.status(projectStatus[e.code]).json({ error: e.message });
@@ -249,9 +248,10 @@ const projectFailure = (res: express.Response, e: unknown) => {
 /** Chats that work in this folder. */
 const chatsIn = (dir: string) => listSessions().filter((s) => s.workspace === dir);
 
-/** The projects, each with how many chats it has and when one last moved. Home is not one. */
+/** The projects, each with how many chats it has and when one last moved. */
 app.get("/api/projects", (_req, res) => {
   try {
+    if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, projects: [] });
     const projects = listProjects(WORKSPACE_ROOT).map((p) => {
       const chats = chatsIn(p.path);
       return {
@@ -332,6 +332,8 @@ app.delete("/api/projects/:name", async (req, res) => {
 /** SQLite stores pinned as 0/1; the API speaks booleans. */
 const toApi = (s: ReturnType<typeof getSession> & {}) => ({
   ...s,
+  // What the folder is called on screen: Home is the agent's own directory.
+  folder: s.workspace === agentHome() ? "Home" : path.basename(s.workspace),
   pinned: Boolean(s.pinned),
   live: sessions.isRunning(s.id),
 });
@@ -431,10 +433,13 @@ app.post("/api/sessions", (req, res) => {
   if (workspace !== undefined && (typeof workspace !== "string" || !workspace)) {
     return res.status(400).json({ error: "workspace must be a path" });
   }
-  // Without one, a chat starts in Home.
-  // Keep pi inside the mounted workspace area — no escaping to the rest of the FS.
-  const resolved = workspace === undefined ? ensureHome(WORKSPACE_ROOT) : path.resolve(workspace);
-  if (resolved !== WORKSPACE_ROOT && !resolved.startsWith(WORKSPACE_ROOT + path.sep)) {
+  // Without one, a chat starts in Home: the agent's own directory, where its
+  // SOUL.md, PrimaryUser.md and MEMORY.md are.
+  const home = agentHome();
+  const resolved = workspace === undefined ? home : path.resolve(workspace);
+  // Keep pi inside the mounted workspace area — no escaping to the rest of the
+  // FS. Home is the one place outside it a chat may start.
+  if (resolved !== home && resolved !== WORKSPACE_ROOT && !resolved.startsWith(WORKSPACE_ROOT + path.sep)) {
     return res.status(400).json({ error: "workspace must be inside the workspace root" });
   }
   if (!existsSync(resolved)) return res.status(400).json({ error: "workspace does not exist" });
@@ -839,11 +844,6 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
-  try {
-    ensureHome(WORKSPACE_ROOT);
-  } catch (e) {
-    console.error(`[portal] could not create the Home folder: ${(e as Error).message}`);
-  }
   console.log(`  auth:     ${authEnabled ? "password" : "DISABLED"}`);
 
   // Enabled channels come up with the server, so a restart does not silently

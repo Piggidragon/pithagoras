@@ -17,6 +17,8 @@ export interface Session {
   thinking_level: string | null;
   /** How the session came to exist. */
   kind?: "task" | "agent" | "routine";
+  /** What its folder is called: "Home" for the agent's own directory, else the folder's name. */
+  folder?: string;
 }
 
 /** A set of instructions the agent pulls in when the description matches. */

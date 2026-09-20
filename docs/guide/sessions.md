@@ -5,8 +5,8 @@ folder it works in. It is the normal unit of work in the portal.
 
 ## Where a session works
 
-**New** starts a chat in **Home**; a chat in a project works in that project's
-folder. See [Projects](/guide/projects) for both. The session is named after its
+**New** starts a chat in **Home**, the agent's own directory; a chat in a project works
+in that project's folder. See [Projects](/guide/projects) for both. The session is named after its
 first message, and you can rename it.
 
 Paths are validated server-side: a workspace must resolve inside the workspace

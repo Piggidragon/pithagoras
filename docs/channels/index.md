@@ -4,6 +4,10 @@ Sessions are per-task: one workspace, one job, its own conversation. The **agent
 is the opposite — a single long-lived pi session rooted at a fixed directory,
 `agentHome`, that you talk to continuously.
 
+Chats you start with **New** in the portal work in `agentHome` too, so the agent's
+SOUL.md, PrimaryUser.md and MEMORY.md are there in those as well. Chats in a
+[project](/guide/projects) are ordinary per-task sessions and have none of them.
+
 A **channel** is a two-way link into that agent. Messages arrive through it and
 the agent's replies go back out the same way.
 

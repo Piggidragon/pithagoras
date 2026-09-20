@@ -90,8 +90,8 @@ The **Config** button in a task opens the web equivalent of pi's TUI slash comma
 
 ## Sessions and workspaces
 
-A **session** is a conversation, and it works in a folder. **New** starts one in **Home**, a
-folder that is always there. A **project** is an extra folder you make on purpose, on the
+A **session** is a conversation, and it works in a folder. **New** starts one in **Home**, the
+agent's own directory, where its SOUL.md, PrimaryUser.md and MEMORY.md are. A **project** is an extra folder you make on purpose, on the
 Projects tab: `"Cool Project"` becomes `cool-project`, with instructions of its own saved as its
 `AGENTS.md`. Opening a project opens its chat, and `/new` or `/clear` starts a fresh one in it.
 Deleting a session never deletes a folder.

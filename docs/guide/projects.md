@@ -1,9 +1,11 @@
 # Projects
 
 Every chat works in a folder. Most chats do not need one of their own, so there
-is a single **Home** folder, and **New** starts a chat there. A **project** is an
-extra folder you make on purpose — with instructions for the agent — for work
-that should stay together.
+is a single **Home**, and **New** starts a chat there. Home is the agent's own
+directory: its SOUL.md, PrimaryUser.md and MEMORY.md are there, so in Home the agent
+knows who it is and who it works for, and keeps its memory. A **project** is an extra
+folder you make on purpose, with instructions for the agent in an AGENTS.md — and
+only that — for work that should stay together.
 
 ## Home and New
 
@@ -11,9 +13,18 @@ that should stay together.
 The chat is called *New chat* until you send its first message, and is then named
 after it (the first line, shortened). Rename it any time from the sidebar.
 
-Home is the folder `home` under the workspace root. It is made when the server
-starts and cannot be deleted. It is not a project: it is not listed on the Projects
-tab and has no instructions.
+Home is the agent's directory, `AGENT_HOME` (`/data/agent-home` unless you set it) —
+the same one the conversations on the Agent tab work in, so they share the agent's
+SOUL.md, PrimaryUser.md and MEMORY.md, and anything the agent keeps in Home chats is
+there for the others. It lives outside the workspace root, so it is not a project:
+it is not listed on the Projects tab, has no instructions of its own and cannot be
+deleted. If the agent has not been set up yet, Home has none of those files and its
+chats start without them.
+
+| Chat in | The agent has |
+| --- | --- |
+| Home | SOUL.md, PrimaryUser.md and MEMORY.md |
+| A project | The project's AGENTS.md, and nothing of the agent's own |
 
 ## The Projects tab
 
