@@ -245,15 +245,21 @@ const projectFailure = (res: express.Response, e: unknown) => {
   res.status(500).json({ error: (e as Error).message });
 };
 
-/** Chats that work in this folder. */
-const chatsIn = (dir: string) => listSessions().filter((s) => s.workspace === dir);
+/**
+ * Chats that work in this folder, or in one below it — a chat may be started
+ * in a subfolder, and it belongs to the project all the same.
+ */
+const chatsIn = (dir: string, all = listSessions()) =>
+  all.filter((s) => s.workspace === dir || s.workspace.startsWith(dir + path.sep));
 
 /** The projects, each with how many chats it has and when one last moved. */
 app.get("/api/projects", (_req, res) => {
   try {
     if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, projects: [] });
+    // Read once, not once per project.
+    const all = listSessions();
     const projects = listProjects(WORKSPACE_ROOT).map((p) => {
-      const chats = chatsIn(p.path);
+      const chats = chatsIn(p.path, all);
       return {
         ...p,
         sessions: chats.length,
@@ -316,14 +322,16 @@ app.delete("/api/projects/:name", async (req, res) => {
     if (chats.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
-    // The folder first: it is the part that can fail (a busy mount, a file that
-    // is not ours), and a refusal must not have already taken the chats — and
-    // their transcripts, which cannot come back — with it.
+    // In an order in which a failure leaves nothing half done. Stopping is first
+    // and destroys nothing. The folder is next, the part most likely to fail (a
+    // busy mount, a file that is not ours), and before anything that cannot come
+    // back — the chats' transcripts. Their rows go last, together, so that
+    // either all are removed or none.
+    for (const chat of chats) await sessions.stop(chat.id);
     deleteProjectFolder(WORKSPACE_ROOT, project.name);
-    for (const chat of chats) {
-      await sessions.stop(chat.id);
-      deleteSession(chat.id);
-    }
+    getDb().transaction(() => {
+      for (const chat of chats) deleteSession(chat.id);
+    })();
     res.json({ ok: true, sessionsDeleted: chats.length });
   } catch (e) {
     projectFailure(res, e);
@@ -332,13 +340,26 @@ app.delete("/api/projects/:name", async (req, res) => {
 
 // --- sessions ---
 
+/**
+ * What the chat's folder is called on screen: Home for the agent's own
+ * directory, otherwise the project — also for a chat in one of its subfolders.
+ * agentHomePath, not agentHome: this runs for every chat on every poll and must
+ * not touch the disk.
+ */
+const folderOf = (workspace: string) => {
+  if (workspace === agentHomePath()) return "Home";
+  const below = path.relative(WORKSPACE_ROOT, workspace);
+  if (below && !below.startsWith("..") && !path.isAbsolute(below)) return below.split(path.sep)[0];
+  return path.basename(workspace);
+};
+
 /** SQLite stores pinned as 0/1; the API speaks booleans. */
 const toApi = (s: ReturnType<typeof getSession> & {}) => ({
   ...s,
   // What the folder is called on screen: Home is the agent's own directory.
   // agentHomePath, not agentHome: this runs for every chat on every poll and
   // must not touch the disk.
-  folder: s.workspace === agentHomePath() ? "Home" : path.basename(s.workspace),
+  folder: folderOf(s.workspace),
   pinned: Boolean(s.pinned),
   live: sessions.isRunning(s.id),
 });

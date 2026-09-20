@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -131,4 +131,47 @@ test('saving a long run of blanks is quick', () => {
   P.writeInstructions(r, 'blanks', 'x' + ' '.repeat(99_998) + '\n');
   assert.ok(Date.now() - started < 1000);
   rmSync(r, { recursive: true });
+});
+
+test('a link in place of AGENTS.md is neither read nor written through', () => {
+  const r = root(); const outside = root();
+  P.createProject(r, 'linked');
+  const target = path.join(outside, 'secret');
+  writeFileSync(target, 'not yours');
+  symlinkSync(target, path.join(r, 'linked', 'AGENTS.md'));
+  assert.equal(code(() => P.readInstructions(r, 'linked')), 'invalid');
+  assert.equal(code(() => P.writeInstructions(r, 'linked', 'overwritten')), 'invalid');
+  assert.equal(readFileSync(target, 'utf8'), 'not yours');
+  // Clearing removes the link itself, and leaves what it pointed at.
+  P.writeInstructions(r, 'linked', '');
+  assert.equal(existsSync(path.join(r, 'linked', 'AGENTS.md')), false);
+  assert.equal(readFileSync(target, 'utf8'), 'not yours');
+  rmSync(r, { recursive: true }); rmSync(outside, { recursive: true });
+});
+
+test('a second name for a file elsewhere is not written to either', () => {
+  const r = root(); const outside = root();
+  P.createProject(r, 'shared');
+  const target = path.join(outside, 'other');
+  writeFileSync(target, 'not yours');
+  linkSync(target, path.join(r, 'shared', 'AGENTS.md'));
+  assert.equal(code(() => P.writeInstructions(r, 'shared', 'overwritten')), 'invalid');
+  assert.equal(readFileSync(target, 'utf8'), 'not yours');
+  rmSync(r, { recursive: true }); rmSync(outside, { recursive: true });
+});
+
+test('an AGENTS.md far larger than the editor takes is refused rather than read into memory', () => {
+  const r = root();
+  P.createProject(r, 'huge');
+  writeFileSync(path.join(r, 'huge', 'AGENTS.md'), 'x'.repeat(400_001));
+  assert.equal(code(() => P.readInstructions(r, 'huge')), 'invalid');
+  writeFileSync(path.join(r, 'huge', 'AGENTS.md'), 'y'.repeat(100_000));
+  assert.equal(P.readInstructions(r, 'huge').length, 100_000);
+  rmSync(r, { recursive: true });
+});
+
+test('a title is cut between characters, not through one', () => {
+  const t = P.titleFrom('😀'.repeat(60));
+  assert.equal(t, '😀'.repeat(47) + '…');
+  assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])/.test(t));
 });

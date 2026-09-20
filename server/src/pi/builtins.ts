@@ -26,6 +26,16 @@ const PORTAL_SUPPORTED: Record<string, "server" | "client"> = {
   name: "client",
 };
 
+/**
+ * What the portal says about the commands it reinterprets. These win over pi's
+ * own wording: pi's /clear talks about clearing the context, while here it
+ * starts another chat, and the menu must not promise the one that is not done.
+ */
+const PORTAL_DESCRIPTIONS: Record<string, string> = {
+  new: "Start a new chat in this folder",
+  clear: "Start a fresh chat in this folder",
+};
+
 /** Used only if the SDK's internal module moves; keeps `/` working regardless. */
 const FALLBACK_DESCRIPTIONS: Record<string, string> = {
   compact: "Manually compact the session context",
@@ -35,7 +45,7 @@ const FALLBACK_DESCRIPTIONS: Record<string, string> = {
   model: "Select model",
   settings: "Open settings",
   new: "Start a new session",
-  clear: "Start a fresh chat in this project",
+  clear: "Start a fresh chat in this folder",
   name: "Set session display name",
 };
 
@@ -64,7 +74,7 @@ export async function getBuiltinCommands(): Promise<BuiltinCommand[]> {
   const bySdk = new Map(sdkCommands.map((c) => [c.name, c]));
   cached = Object.entries(PORTAL_SUPPORTED).map(([name, where]) => ({
     name,
-    description: bySdk.get(name)?.description ?? FALLBACK_DESCRIPTIONS[name],
+    description: PORTAL_DESCRIPTIONS[name] ?? bySdk.get(name)?.description ?? FALLBACK_DESCRIPTIONS[name],
     argumentHint: bySdk.get(name)?.argumentHint,
     source: "builtin",
     where,

@@ -1,7 +1,12 @@
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
+  ftruncateSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -33,6 +38,8 @@ const RESERVED = new Set(["home"]);
 /** What pi reads as a project's instructions. */
 export const INSTRUCTIONS_FILE = "AGENTS.md";
 const MAX_INSTRUCTIONS = 100_000;
+/** What is read back: characters can be up to four bytes, and this is a ceiling, not a target. */
+const MAX_READ_BYTES = MAX_INSTRUCTIONS * 4;
 /** A walk that has counted this many entries stops: the number is a warning, not an inventory. */
 const COUNT_LIMIT = 20_000;
 
@@ -135,12 +142,47 @@ export function createProject(root: string, rawName: string, instructions?: stri
   return infoFor(root, name);
 }
 
+/**
+ * Opens the instructions file without following a link or waiting on one.
+ *
+ * Whatever works in a project can replace AGENTS.md with a link to something
+ * the portal would happily read or overwrite as itself — a key, a cron entry,
+ * the agent's own SOUL.md — and the folder is where that agent works. So the
+ * file is opened with O_NOFOLLOW, and O_NONBLOCK so that a pipe left there
+ * cannot hold the server, and only a plain file is ever used.
+ */
+function openInstructions(file: string, flags: number): number | undefined {
+  let fd: number;
+  try {
+    fd = openSync(file, flags | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o644);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return undefined;
+    if (code === "ELOOP" || code === "ENXIO") {
+      throw new ProjectError("invalid", `${INSTRUCTIONS_FILE} is a link or not a plain file, so it is left alone`);
+    }
+    throw e;
+  }
+  if (!fstatSync(fd).isFile()) {
+    closeSync(fd);
+    throw new ProjectError("invalid", `${INSTRUCTIONS_FILE} is not a plain file, so it is left alone`);
+  }
+  return fd;
+}
+
 export function readInstructions(root: string, name: string): string {
   const dir = resolveProject(root, name);
+  const fd = openInstructions(path.join(dir, INSTRUCTIONS_FILE), constants.O_RDONLY);
+  if (fd === undefined) return "";
   try {
-    return readFileSync(path.join(dir, INSTRUCTIONS_FILE), "utf8");
-  } catch {
-    return "";
+    // Writes are capped, but the agent can leave a file of any size here, and
+    // reading one into a JSON response would be the server's problem.
+    if (fstatSync(fd).size > MAX_READ_BYTES) {
+      throw new ProjectError("invalid", `${INSTRUCTIONS_FILE} is too large to edit here; edit it in the folder`);
+    }
+    return readFileSync(fd, "utf8");
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -160,8 +202,19 @@ export function writeInstructions(root: string, name: string, text: string): voi
     rmSync(file, { force: true });
     return;
   }
-  // trimEnd, not a regex: /\s+$/ backtracks quadratically on a long run of blanks.
-  writeFileSync(file, text.trimEnd() + "\n");
+  // Not created with O_TRUNC: the file is looked at before anything is cut off.
+  const fd = openInstructions(file, constants.O_WRONLY | constants.O_CREAT);
+  if (fd === undefined) throw new ProjectError("missing", `${INSTRUCTIONS_FILE} could not be created`);
+  try {
+    if (fstatSync(fd).nlink > 1) {
+      throw new ProjectError("invalid", `${INSTRUCTIONS_FILE} is shared with another file, so it is left alone`);
+    }
+    ftruncateSync(fd, 0);
+    // trimEnd, not a regex: /\s+$/ backtracks quadratically on a long run of blanks.
+    writeFileSync(fd, text.trimEnd() + "\n");
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** What is in a project, for the question "are you sure?". */
@@ -209,7 +262,9 @@ export function deleteProjectFolder(root: string, name: string): void {
 export function titleFrom(message: string): string | undefined {
   const line = message.split("\n").find((l) => l.trim())?.replace(/\s+/g, " ").trim();
   if (!line || line.startsWith("/")) return undefined;
-  return line.length > 48 ? line.slice(0, 47).trimEnd() + "…" : line;
+  // By character, not UTF-16 unit: cutting an emoji in half leaves half of it.
+  const chars = Array.from(line);
+  return chars.length > 48 ? chars.slice(0, 47).join("").trimEnd() + "…" : line;
 }
 
 /** The name a chat has until its first message names it. */

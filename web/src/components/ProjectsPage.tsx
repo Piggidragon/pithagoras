@@ -38,9 +38,11 @@ export function ProjectsPage({
       .catch((e) => setError((e as Error).message));
   }, []);
   // Also when the chats change: the counts and the "last active" are theirs.
-  // The list is a new array on every poll, so it is what is in it that is
-  // compared — reloading the projects every few seconds for nothing is not.
-  const chats = sessions.map((s) => `${s.id}:${s.workspace}:${s.updated_at}`).join("|");
+  // The list is a new array on every poll, and a running chat changes its
+  // timestamp on every one. What the server counts is only which chats there
+  // are and where, so that is what is compared; "last active" is worked out
+  // here from the list itself.
+  const chats = sessions.map((s) => `${s.id}:${s.workspace}`).join("|");
   useEffect(load, [load, chats]);
 
   const attempt = async (fn: () => Promise<void>) => {
@@ -52,11 +54,17 @@ export function ProjectsPage({
     }
   };
 
+  /** The project's newest chat, counting ones started in a subfolder. */
+  const latestChat = (p: Project) =>
+    sessions
+      .filter((s) => s.workspace === p.path || s.workspace.startsWith(p.path + "/"))
+      .reduce<Session | null>((best, s) => (!best || s.updated_at > best.updated_at ? s : best), null);
+
+  const lastActive = (p: Project) => latestChat(p)?.updated_at ?? p.lastActive;
+
   const open = (p: Project) =>
     attempt(async () => {
-      const latest = sessions
-        .filter((s) => s.workspace === p.path)
-        .reduce<Session | null>((best, s) => (!best || s.updated_at > best.updated_at ? s : best), null);
+      const latest = latestChat(p);
       if (latest) onOpenChat(latest.id);
       else await onNewChat(p.path);
     });
@@ -136,7 +144,7 @@ export function ProjectsPage({
                     </div>
                     <p className="truncate text-[11px] text-fg-faint">
                       {p.sessions} chat{p.sessions === 1 ? "" : "s"}
-                      {p.lastActive ? ` · last ${when(p.lastActive)}` : ""}
+                      {lastActive(p) ? ` · last ${when(lastActive(p)!)}` : ""}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
@@ -188,7 +196,13 @@ export function ProjectsPage({
             const project = await api.createProject(name, instructions);
             setCreating(false);
             load();
-            await onNewChat(project.path);
+            // The dialog is gone by now, so a failure here is shown on the page:
+            // the project exists, only its first chat did not open.
+            try {
+              await onNewChat(project.path);
+            } catch (e) {
+              setError(`"${project.name}" was created, but its chat did not open: ${(e as Error).message}`);
+            }
           }}
         />
       )}
