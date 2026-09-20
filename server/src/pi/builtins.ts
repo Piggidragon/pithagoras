@@ -22,6 +22,7 @@ const PORTAL_SUPPORTED: Record<string, "server" | "client"> = {
   model: "client",
   settings: "client",
   new: "client",
+  clear: "client",
   name: "client",
 };
 
@@ -34,6 +35,7 @@ const FALLBACK_DESCRIPTIONS: Record<string, string> = {
   model: "Select model",
   settings: "Open settings",
   new: "Start a new session",
+  clear: "Start a fresh chat in this project",
   name: "Set session display name",
 };
 

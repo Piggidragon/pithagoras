@@ -28,16 +28,30 @@ curl -s -b jar localhost:4100/api/sessions
 | `GET /api/workspaces` | `{ root, workspaces: [{ name, path, isGit }] }` |
 | `POST /api/workspaces` | `{ name }` → creates a directory; the name is slugified |
 
+## Projects
+
+The folders chats work in. Home is always first and cannot be deleted; a project is
+any other folder directly under the workspace root. See [Projects](/guide/projects).
+
+| | |
+| --- | --- |
+| `GET /api/projects` | `{ root, projects: [{ name, path, isHome, isGit, hasInstructions, sessions, lastActive }] }` |
+| `POST /api/projects` | `{ name, instructions? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home` |
+| `GET /api/projects/:name` | The project plus `{ files, bytes, complete }` — what deleting it would remove |
+| `GET /api/projects/:name/instructions` | `{ text }` |
+| `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it |
+| `DELETE /api/projects/:name` | Deletes its chats and its folder; 409 while one is running, 403 for Home |
+
 ## Sessions
 
 | | |
 | --- | --- |
 | `GET /api/sessions` | `{ sessions, executor }` — pinned first, then most recent. Task sessions only. |
 | `GET /api/agent/sessions` | `{ sessions, agentHome }` — conversations reached through a channel, each with the channel that owns it |
-| `POST /api/sessions` | `{ workspace, title? }` |
+| `POST /api/sessions` | `{ workspace?, title? }` — no workspace means Home; no title means "New chat", replaced by the first message |
 | `GET /api/sessions/:id` | One session |
 | `PATCH /api/sessions/:id` | `{ title?, pinned? }` |
-| `DELETE /api/sessions/:id` | Stops it if running, then deletes it and its events |
+| `DELETE /api/sessions/:id` | Stops it if running, then deletes it and its events. The folder is left alone. |
 
 A session:
 

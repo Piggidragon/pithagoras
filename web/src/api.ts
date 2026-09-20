@@ -114,6 +114,27 @@ export interface Workspace {
   isGit: boolean;
 }
 
+/** A folder chats work in. Home is where "New" starts one; the rest are made on purpose. */
+export interface Project {
+  name: string;
+  path: string;
+  isHome: boolean;
+  isGit: boolean;
+  /** Whether the folder has an AGENTS.md — the project's instructions. */
+  hasInstructions: boolean;
+  /** How many chats work in it, and when one last moved. */
+  sessions: number;
+  lastActive: string | null;
+}
+
+/** What deleting a project would take with it. */
+export interface ProjectContents extends Project {
+  files: number;
+  bytes: number;
+  /** False when the count stopped early on a very large folder. */
+  complete: boolean;
+}
+
 export interface CompactionSettings {
   enabled: boolean;
   /** The floor a compaction cannot go below — kept verbatim, never summarised. */
@@ -162,11 +183,25 @@ export const api = {
   createWorkspace: (name: string) =>
     json<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify({ name }) }),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
-  createSession: (workspace: string, title?: string) =>
+  /** Without a workspace the chat starts in Home. */
+  createSession: (workspace?: string, title?: string) =>
     json<Session>("/api/sessions", {
       method: "POST",
       body: JSON.stringify({ workspace, title }),
     }),
+  projects: () => json<{ root: string; projects: Project[] }>("/api/projects"),
+  createProject: (name: string, instructions?: string) =>
+    json<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name, instructions }) }),
+  projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),
+  projectInstructions: (name: string) =>
+    json<{ text: string }>(`/api/projects/${encodeURIComponent(name)}/instructions`),
+  setProjectInstructions: (name: string, text: string) =>
+    json<{ ok: true }>(`/api/projects/${encodeURIComponent(name)}/instructions`, {
+      method: "PUT",
+      body: JSON.stringify({ text }),
+    }),
+  deleteProject: (name: string) =>
+    json<{ ok: true; sessionsDeleted: number }>(`/api/projects/${encodeURIComponent(name)}`, { method: "DELETE" }),
   renameSession: (id: string, title: string) =>
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),

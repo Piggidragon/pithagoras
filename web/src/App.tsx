@@ -1,13 +1,14 @@
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { api, type PortalEvent, type Session, type SessionStatus, type Workspace } from "./api";
+import { api, type PortalEvent, type Session, type SessionStatus } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
 import { ConfigModal } from "./components/ConfigModal";
 import { ExtensionDialog, type UiRequest } from "./components/ExtensionDialog";
 import { SessionsPage } from "./components/SessionsPage";
+import { ProjectsPage } from "./components/ProjectsPage";
 import { AgentPage } from "./components/AgentPage";
 import { RoutinesPage } from "./components/RoutinesPage";
 import { AuditPage } from "./components/AuditPanel";
@@ -53,6 +54,7 @@ export default function App() {
       <Routes>
       <Route path="/" element={<Shell />} />
       <Route path="/sessions" element={<Shell view="sessions" />} />
+      <Route path="/projects" element={<Shell view="projects" />} />
       <Route path="/agent" element={<Shell view="agent" />} />
       <Route path="/routines" element={<Shell view="routines" />} />
       <Route path="/browser" element={<Shell view="browser" />} />
@@ -73,7 +75,7 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "agent" | "routines" | "browser" | "audit";
+  view?: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "audit";
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
@@ -83,7 +85,6 @@ function Shell({
   // URLs still have to open — the Agent and Routines pages link straight to
   // them, and without this those links landed on the empty state.
   const [other, setOther] = useState<Session | null>(null);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [executor, setExecutor] = useState("host");
   // Asked once: the browser is optional, and the answer only changes when
   // somebody starts or stops a container.
@@ -120,10 +121,6 @@ function Shell({
         }
       })
       .catch((e) => setError(String(e)));
-    api
-      .workspaces()
-      .then((r) => setWorkspaces(r.workspaces))
-      .catch(() => {});
     api
       .browser()
       .then((b) => setHasBrowser(b.running || b.sessions.length > 0 || b.routines.length > 0))
@@ -272,15 +269,14 @@ function Shell({
     <div className="flex h-screen bg-canvas">
       <Sidebar
         sessions={sessions}
-        workspaces={workspaces}
         executor={executor}
         activeId={sessionId ?? null}
         view={view}
         hasBrowser={hasBrowser}
         onNavigate={(to) => navigate(`/${to}`)}
         onSelect={(id) => navigate(`/s/${id}`)}
-        onCreate={async (workspacePath) => {
-          const s = await api.createSession(workspacePath);
+        onNewChat={async () => {
+          const s = await api.createSession();
           await refreshSessions();
           navigate(`/s/${s.id}`);
         }}
@@ -300,12 +296,6 @@ function Shell({
         onOpenSettings={() =>
           navigate(sessionId ? `/s/${sessionId}/settings/general` : "/settings/general")
         }
-        onCreateWorkspace={async (name) => {
-          const created = await api.createWorkspace(name);
-          const list = await api.workspaces();
-          setWorkspaces(list.workspaces);
-          return created;
-        }}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -322,6 +312,17 @@ function Shell({
               await api.pinSession(id, pinned);
               refreshSessions();
             }}
+          />
+        ) : view === "projects" ? (
+          <ProjectsPage
+            sessions={sessions}
+            onOpenChat={(id) => navigate(`/s/${id}`)}
+            onNewChat={async (workspace) => {
+              const s = await api.createSession(workspace);
+              await refreshSessions();
+              navigate(`/s/${s.id}`);
+            }}
+            onChanged={() => refreshSessions()}
           />
         ) : view === "agent" ? (
           <AgentPage onSelect={(id) => navigate(`/s/${id}`)} />
@@ -370,7 +371,8 @@ function Shell({
             onClientCommand={async (name, args) => {
               if (name === "settings") {
                 navigate(`/s/${active.id}/settings/general`);
-              } else if (name === "new") {
+              } else if (name === "new" || name === "clear") {
+                // A fresh chat in the same project, or in Home.
                 const s = await api.createSession(active.workspace);
                 await refreshSessions();
                 navigate(`/s/${s.id}`);

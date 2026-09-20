@@ -90,10 +90,11 @@ The **Config** button in a task opens the web equivalent of pi's TUI slash comma
 
 ## Sessions and workspaces
 
-A **workspace** is a folder pi works in; a **session** is a conversation against one.
-Creating a session defaults to making a fresh workspace — name it however you like and the
-folder is slugified (`"Cool Project"` becomes `cool-project`), with the session taking that
-same name. Pick an existing workspace from the dropdown to continue in one you already have.
+A **session** is a conversation, and it works in a folder. **New** starts one in **Home**, a
+folder that is always there. A **project** is an extra folder you make on purpose, on the
+Projects tab: `"Cool Project"` becomes `cool-project`, with instructions of its own saved as its
+`AGENTS.md`. Opening a project opens its chat, and `/new` or `/clear` starts a fresh one in it.
+Deleting a session never deletes a folder.
 
 Each session has its own pi conversation, workspace, and status. The sidebar shows
 them all with a live status dot: running, idle, error, or **interrupted** — meaning the

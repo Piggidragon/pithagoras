@@ -35,7 +35,8 @@ menu of things that quietly do nothing.
 | `/reload` | Reload extensions, skills, prompts and settings |
 | `/model` | Open the model picker |
 | `/settings` | Open settings |
-| `/new` | Start a session in this workspace |
+| `/new` | Start a new chat in this project (Home, if that is where you are) |
+| `/clear` | The same as `/new` |
 | `/name` | Rename the session |
 
 The first four act on the session server-side and report through the event

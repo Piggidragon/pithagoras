@@ -53,6 +53,19 @@ import { eventTime, getDb } from "./db.js";
 import { getBuiltinCommands } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
+import {
+  NEW_CHAT_TITLE,
+  ProjectError,
+  createProject,
+  deleteProjectFolder,
+  describeProject,
+  ensureHome,
+  getProject,
+  listProjects,
+  readInstructions,
+  titleFrom,
+  writeInstructions,
+} from "./projects.js";
 import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
 
 // WORKSPACE_ROOT is the new name; WORKSPACE_ROOT still works for existing deploys.
@@ -224,6 +237,97 @@ app.post("/api/workspaces", (req, res) => {
   res.json({ name, path: target, isGit: false });
 });
 
+// --- projects ---
+
+const projectStatus = { invalid: 400, missing: 404, exists: 409, protected: 403 } as const;
+
+const projectFailure = (res: express.Response, e: unknown) => {
+  if (e instanceof ProjectError) return res.status(projectStatus[e.code]).json({ error: e.message });
+  res.status(500).json({ error: (e as Error).message });
+};
+
+/** Chats that work in this folder. */
+const chatsIn = (dir: string) => listSessions().filter((s) => s.workspace === dir);
+
+/** Home first, then the projects, each with how many chats it has and when one last moved. */
+app.get("/api/projects", (_req, res) => {
+  try {
+    const projects = listProjects(WORKSPACE_ROOT).map((p) => {
+      const chats = chatsIn(p.path);
+      return {
+        ...p,
+        sessions: chats.length,
+        lastActive: chats.reduce((latest, s) => (s.updated_at > latest ? s.updated_at : latest), "") || null,
+      };
+    });
+    res.json({ root: WORKSPACE_ROOT, projects });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+app.post("/api/projects", (req, res) => {
+  const { name, instructions } = req.body ?? {};
+  if (typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "name required" });
+  if (instructions !== undefined && typeof instructions !== "string") {
+    return res.status(400).json({ error: "instructions must be text" });
+  }
+  try {
+    res.json(createProject(WORKSPACE_ROOT, name, instructions));
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/** What deleting a project would take with it, for the confirmation. */
+app.get("/api/projects/:name", (req, res) => {
+  try {
+    const project = getProject(WORKSPACE_ROOT, req.params.name);
+    res.json({ ...project, sessions: chatsIn(project.path).length, ...describeProject(WORKSPACE_ROOT, project.name) });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+app.get("/api/projects/:name/instructions", (req, res) => {
+  try {
+    res.json({ text: readInstructions(WORKSPACE_ROOT, req.params.name) });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+app.put("/api/projects/:name/instructions", (req, res) => {
+  const text = req.body?.text;
+  if (typeof text !== "string") return res.status(400).json({ error: "text required" });
+  try {
+    writeInstructions(WORKSPACE_ROOT, req.params.name, text);
+    res.json({ ok: true });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/** The project, its chats and its folder. Refused while any chat in it is running. */
+app.delete("/api/projects/:name", async (req, res) => {
+  try {
+    const project = getProject(WORKSPACE_ROOT, req.params.name);
+    if (project.isHome) throw new ProjectError("protected", "Home cannot be deleted");
+    const chats = chatsIn(project.path);
+    if (chats.some((s) => sessions.isBusy(s.id))) {
+      return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
+    }
+    for (const chat of chats) {
+      await sessions.stop(chat.id);
+      deleteSession(chat.id);
+    }
+    deleteProjectFolder(WORKSPACE_ROOT, project.name);
+    res.json({ ok: true, sessionsDeleted: chats.length });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
 // --- sessions ---
 
 /** SQLite stores pinned as 0/1; the API speaks booleans. */
@@ -325,11 +429,12 @@ app.put("/api/agent/files/:name", (req, res) => {
 
 app.post("/api/sessions", (req, res) => {
   const { title, workspace } = req.body ?? {};
-  if (typeof workspace !== "string" || !workspace) {
-    return res.status(400).json({ error: "workspace required" });
+  if (workspace !== undefined && (typeof workspace !== "string" || !workspace)) {
+    return res.status(400).json({ error: "workspace must be a path" });
   }
+  // Without one, a chat starts in Home.
   // Keep pi inside the mounted workspace area — no escaping to the rest of the FS.
-  const resolved = path.resolve(workspace);
+  const resolved = workspace === undefined ? ensureHome(WORKSPACE_ROOT) : path.resolve(workspace);
   if (resolved !== WORKSPACE_ROOT && !resolved.startsWith(WORKSPACE_ROOT + path.sep)) {
     return res.status(400).json({ error: "workspace must be inside the workspace root" });
   }
@@ -338,8 +443,8 @@ app.post("/api/sessions", (req, res) => {
   const id = nanoid(12);
   createSession({
     id,
-    // Default the session name to the workspace folder name.
-    title: (typeof title === "string" && title.trim()) || path.basename(resolved),
+    // Named after its first message once there is one; see the prompt route.
+    title: (typeof title === "string" && title.trim()) || NEW_CHAT_TITLE,
     workspace: resolved,
     executor: EXECUTOR_KIND,
   });
@@ -377,6 +482,11 @@ app.post("/api/sessions/:id/prompt", async (req, res) => {
   const message = req.body?.message;
   if (typeof message !== "string" || !message.trim()) {
     return res.status(400).json({ error: "message required" });
+  }
+  // A chat that has no name yet is named after what it starts with.
+  if (session.title === NEW_CHAT_TITLE) {
+    const title = titleFrom(message);
+    if (title) updateSession(session.id, { title });
   }
   try {
     // Returns as soon as pi accepts the prompt. The run continues server-side
@@ -730,6 +840,11 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
+  try {
+    ensureHome(WORKSPACE_ROOT);
+  } catch (e) {
+    console.error(`[portal] could not create the Home folder: ${(e as Error).message}`);
+  }
   console.log(`  auth:     ${authEnabled ? "password" : "DISABLED"}`);
 
   // Enabled channels come up with the server, so a restart does not silently

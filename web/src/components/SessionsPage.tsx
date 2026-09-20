@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { LuMessagesSquare, LuPin, LuPinOff, LuSearch, LuTrash2 } from "react-icons/lu";
 import type { Session, SessionStatus } from "../api";
+import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 
 const STATUS_STYLE: Record<SessionStatus, string> = {
@@ -8,16 +9,6 @@ const STATUS_STYLE: Record<SessionStatus, string> = {
   idle: "bg-fg-faint",
   error: "bg-danger",
   interrupted: "bg-warn",
-};
-
-const when = (iso: string) => {
-  const then = new Date(iso + (iso.endsWith("Z") ? "" : "Z")).getTime();
-  const mins = Math.round((Date.now() - then) / 60000);
-  if (!Number.isFinite(mins)) return iso;
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
-  return `${Math.round(mins / 1440)}d ago`;
 };
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {

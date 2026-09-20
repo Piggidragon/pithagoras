@@ -1,21 +1,17 @@
 # Sessions
 
-A session is one workspace directory, one conversation with pi, and its own
-model and effort level. It is the normal unit of work in the portal.
+A session is one conversation with pi, its own model and effort level, and the
+folder it works in. It is the normal unit of work in the portal.
 
-## Workspaces
+## Where a session works
 
-Every session is created against a directory under the workspace root. You can
-pick an existing one or create a new one, which is the default — most tasks
-start with a fresh directory.
-
-The name you type is slugified into a folder name, and that folder name becomes
-the session title. "Cool Project" produces the directory `cool-project` and a
-session called `cool-project`. One name drives both, so there is nothing to keep
-in sync.
+**New** starts a chat in **Home**; a chat in a project works in that project's
+folder. See [Projects](/guide/projects) for both. The session is named after its
+first message, and you can rename it.
 
 Paths are validated server-side: a workspace must resolve inside the workspace
-root, so a session cannot be pointed at the rest of the filesystem.
+root, so a session cannot be pointed at the rest of the filesystem. Deleting a
+session never deletes its folder.
 
 ## Giving it a task
 
@@ -64,8 +60,8 @@ edit meant to replace.
 
 ## Sidebar and the sessions page
 
-The sidebar opens with New, Sessions and Agents, then **Pinned**, then
-**Recents**. Recents is capped at twelve; anything past that is reachable from
+The sidebar opens with New, Sessions, Projects and Agent, then **Pinned**, then
+**Recents**; under each chat's title it shows the folder it works in. Recents is capped at twelve; anything past that is reachable from
 the Sessions page, which lists everything with search over names and workspace
 paths.
 
