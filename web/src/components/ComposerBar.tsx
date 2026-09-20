@@ -60,10 +60,14 @@ function readLevels(): Record<string, string[]> {
   }
 }
 
-function cachedLevels(provider: string | null | undefined, model: string | null | undefined): string[] {
+/** What was last reported for this model, or undefined when nothing has been. */
+function knownLevels(provider: string | null | undefined, model: string | null | undefined): string[] | undefined {
   const known = readLevels()[levelsKey(provider ?? "", model ?? "")];
-  return Array.isArray(known) && known.length && known.every((l) => typeof l === "string") ? known : DEFAULT_LEVELS;
+  return Array.isArray(known) && known.length && known.every((l) => typeof l === "string") ? known : undefined;
 }
+
+const cachedLevels = (provider: string | null | undefined, model: string | null | undefined) =>
+  knownLevels(provider, model) ?? DEFAULT_LEVELS;
 
 function cacheLevels(provider: string, model: string, levels: string[]) {
   if (!model || !levels.length) return;
@@ -194,11 +198,15 @@ export function ComposerBar({
       .config(sessionId)
       .then((next) => {
         cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels);
+        // /config is the cheap route and reports neither. The levels are then
+        // what was last reported for the model it names — not for the one the
+        // seed guessed, which for a chat with no model of its own (a fresh /new)
+        // was nothing at all, and drew the full slider for a model that only
+        // switches on and off. Failing that, whatever is already known stays.
+        const known = knownLevels(next.state.model.provider, next.state.model.id);
         setCfg((prev) => ({
           ...next,
-          // /config is the cheap route and reports neither, so anything already
-          // known — seeded levels, a catalogue already fetched — is kept.
-          thinking: next.thinking.levels.length ? next.thinking : prev.thinking,
+          thinking: next.thinking.levels.length ? next.thinking : known ? { levels: known } : prev.thinking,
           models: next.models.models.length ? next.models : prev.models,
         }));
       })
