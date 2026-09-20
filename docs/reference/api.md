@@ -30,16 +30,17 @@ curl -s -b jar localhost:4100/api/sessions
 
 ## Projects
 
-The folders chats work in. Home is always first and cannot be deleted; a project is
-any other folder directly under the workspace root. See [Projects](/guide/projects).
+The folders made on purpose for chats to work in: every folder directly under the
+workspace root except Home, which is where chats start and is not a project (every
+endpoint below answers 403 for it). See [Projects](/guide/projects).
 
 | | |
 | --- | --- |
-| `GET /api/projects` | `{ root, projects: [{ name, path, isHome, isGit, hasInstructions, sessions, lastActive }] }` |
+| `GET /api/projects` | `{ root, projects: [{ name, path, isGit, hasInstructions, sessions, lastActive }] }` |
 | `POST /api/projects` | `{ name, instructions? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home` |
 | `GET /api/projects/:name` | The project plus `{ files, bytes, complete }` — what deleting it would remove |
 | `GET /api/projects/:name/instructions` | `{ text }` |
-| `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it. Both instruction endpoints answer 403 for Home, which has none. |
+| `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it. |
 | `DELETE /api/projects/:name` | Deletes its chats and its folder; 409 while one is running, 403 for Home |
 
 ## Sessions

@@ -8,14 +8,15 @@ const P = await import('../dist/projects.js');
 const root = () => mkdtempSync(path.join(tmpdir(), 'projects-'));
 const code = (fn) => { try { fn(); } catch (e) { return e instanceof P.ProjectError ? e.code : `other:${e.message}`; } return 'none'; };
 
-test('Home is made on demand and listed first', () => {
+test('the projects are the folders under the root, and Home is not one of them', () => {
   const r = root();
   mkdirSync(path.join(r, 'zeta')); mkdirSync(path.join(r, 'alpha')); mkdirSync(path.join(r, '.hidden'));
   writeFileSync(path.join(r, 'a-file'), 'x');
-  const list = P.listProjects(r);
-  assert.deepEqual(list.map((p) => p.name), ['home', 'alpha', 'zeta']);
-  assert.equal(list[0].isHome, true);
+  assert.deepEqual(P.listProjects(r).map((p) => p.name), ['alpha', 'zeta']);
+  // Home is made on demand and is still not listed once it exists.
+  assert.equal(P.ensureHome(r), path.join(r, 'home'));
   assert.ok(existsSync(path.join(r, 'home')));
+  assert.deepEqual(P.listProjects(r).map((p) => p.name), ['alpha', 'zeta']);
   rmSync(r, { recursive: true });
 });
 
@@ -82,19 +83,23 @@ test('deleting a project removes its folder, and Home cannot be deleted', () => 
   assert.deepEqual(d, { files: 3, bytes: 2 + 3 + 4, complete: true });
   P.deleteProjectFolder(r, 'gone');
   assert.ok(!existsSync(path.join(r, 'gone')));
-  P.listProjects(r);
+  P.ensureHome(r);
   assert.equal(code(() => P.deleteProjectFolder(r, 'home')), 'protected');
   assert.ok(existsSync(path.join(r, 'home')));
   rmSync(r, { recursive: true });
 });
 
-test('Home has no instructions of its own', () => {
+test('Home is not a project: no instructions, no counting, no deleting', () => {
   const r = root();
-  P.listProjects(r);
+  P.ensureHome(r);
   writeFileSync(path.join(r, 'home', 'AGENTS.md'), 'stray');
-  assert.equal(P.getProject(r, 'home').hasInstructions, false);
-  assert.equal(code(() => P.readInstructions(r, 'home')), 'protected');
-  assert.equal(code(() => P.writeInstructions(r, 'home', 'x')), 'protected');
+  for (const [what, fn] of [
+    ['getProject', () => P.getProject(r, 'home')],
+    ['readInstructions', () => P.readInstructions(r, 'home')],
+    ['writeInstructions', () => P.writeInstructions(r, 'home', 'x')],
+    ['describeProject', () => P.describeProject(r, 'home')],
+    ['deleteProjectFolder', () => P.deleteProjectFolder(r, 'home')],
+  ]) assert.equal(code(fn), 'protected', what);
   assert.equal(readFileSync(path.join(r, 'home', 'AGENTS.md'), 'utf8'), 'stray');
   rmSync(r, { recursive: true });
 });

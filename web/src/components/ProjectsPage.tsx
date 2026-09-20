@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { LuFileText, LuFolderGit2, LuFolderKanban, LuHouse, LuPlus, LuTrash2 } from "react-icons/lu";
+import { LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
 import { api, type Project, type Session } from "../api";
 import { bytesLabel, slugify } from "../projects";
 import { when } from "../time";
@@ -9,9 +9,9 @@ import { Modal } from "./Modal";
 /**
  * The folders chats work in.
  *
- * Home is always first: it is where "New" starts a chat. The rest are projects
- * made on purpose, each with instructions of its own that end up as the
- * folder's AGENTS.md. Opening one opens its latest chat, or starts one.
+ * Projects are folders made on purpose, each with instructions of its own that
+ * end up as the folder's AGENTS.md. Opening one opens its latest chat, or starts
+ * one. Home, where "New" starts a chat, is not a project and is not listed.
  */
 export function ProjectsPage({
   sessions,
@@ -110,6 +110,11 @@ export function ProjectsPage({
             <p className="py-12 text-center text-sm text-fg-subtle">Loading…</p>
           ) : (
             <ul className="mt-4 space-y-1">
+              {projects.length === 0 && (
+                <li className="py-12 text-center text-sm text-fg-subtle">
+                  No projects yet. New chats start in Home; make a project for work that should stay together.
+                </li>
+              )}
               {projects.map((p) => (
                 <li
                   key={p.path}
@@ -117,11 +122,11 @@ export function ProjectsPage({
                   className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:bg-fg/5"
                 >
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-canvas text-fg-muted">
-                    {p.isHome ? <LuHouse className="h-4 w-4" /> : p.isGit ? <LuFolderGit2 className="h-4 w-4" /> : <LuFolderKanban className="h-4 w-4" />}
+                    {p.isGit ? <LuFolderGit2 className="h-4 w-4" /> : <LuFolderKanban className="h-4 w-4" />}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
-                      <p className="truncate text-sm text-fg">{p.isHome ? "Home" : p.name}</p>
+                      <p className="truncate text-sm text-fg">{p.name}</p>
                       {p.hasInstructions && (
                         <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">instructions</span>
                       )}
@@ -143,32 +148,28 @@ export function ProjectsPage({
                     >
                       <LuPlus className="h-3.5 w-3.5" />
                     </button>
-                    {!p.isHome && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditing(p);
-                        }}
-                        className="rounded p-1.5 text-fg-subtle hover:text-accent"
-                        title="Instructions (AGENTS.md)"
-                        aria-label={`Instructions for ${p.name}`}
-                      >
-                        <LuFileText className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    {!p.isHome && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          remove(p);
-                        }}
-                        className="rounded p-1.5 text-fg-subtle hover:text-danger"
-                        title="Delete project"
-                        aria-label={`Delete ${p.name}`}
-                      >
-                        <LuTrash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditing(p);
+                      }}
+                      className="rounded p-1.5 text-fg-subtle hover:text-accent"
+                      title="Instructions (AGENTS.md)"
+                      aria-label={`Instructions for ${p.name}`}
+                    >
+                      <LuFileText className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        remove(p);
+                      }}
+                      className="rounded p-1.5 text-fg-subtle hover:text-danger"
+                      title="Delete project"
+                      aria-label={`Delete ${p.name}`}
+                    >
+                      <LuTrash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </li>
               ))}

@@ -12,12 +12,13 @@ The chat is called *New chat* until you send its first message, and is then name
 after it (the first line, shortened). Rename it any time from the sidebar.
 
 Home is the folder `home` under the workspace root. It is made when the server
-starts and cannot be deleted.
+starts and cannot be deleted. It is not a project: it is not listed on the Projects
+tab and has no instructions.
 
 ## The Projects tab
 
-**Projects** in the sidebar lists Home first, then every project, with how many
-chats each has and when one last moved.
+**Projects** in the sidebar lists the projects — not Home — with how many chats each
+has and when one last moved.
 
 - **Click a project** to open its latest chat, or start one if it has none.
 - **New project** asks for a name and, optionally, instructions, then creates the
@@ -27,7 +28,7 @@ chats each has and when one last moved.
 - **Instructions** (the document icon) edits the folder's instructions.
 - **Delete** removes the project: its chats and its folder, after a confirmation
   that says how many chats and files go with it. It is refused while a chat in
-  the project is running. Home has no delete.
+  the project is running.
 
 ## Chats inside a project
 
@@ -49,6 +50,6 @@ Chats started after a change pick it up. A chat that is already open does after
 
 ## Folders that already exist
 
-Any folder directly under the workspace root is a project, whether the portal made
-it or not, so folders and chats from before this existed are listed as they are.
+Any folder directly under the workspace root, other than Home, is a project, whether
+the portal made it or not, so folders and chats from before this existed are listed as they are.
 The instructions are whatever AGENTS.md they already have.

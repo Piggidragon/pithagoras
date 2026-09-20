@@ -249,7 +249,7 @@ const projectFailure = (res: express.Response, e: unknown) => {
 /** Chats that work in this folder. */
 const chatsIn = (dir: string) => listSessions().filter((s) => s.workspace === dir);
 
-/** Home first, then the projects, each with how many chats it has and when one last moved. */
+/** The projects, each with how many chats it has and when one last moved. Home is not one. */
 app.get("/api/projects", (_req, res) => {
   try {
     const projects = listProjects(WORKSPACE_ROOT).map((p) => {
@@ -312,7 +312,6 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
-    if (project.isHome) throw new ProjectError("protected", "Home cannot be deleted");
     const chats = chatsIn(project.path);
     if (chats.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });

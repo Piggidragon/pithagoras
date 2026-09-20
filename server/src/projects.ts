@@ -16,10 +16,11 @@ import { isValidSlug, slugify } from "./slug.js";
  * Projects: the folders a chat can work in.
  *
  * Every chat works in a folder. Most do not need one of their own, so there is
- * a single Home folder that "New" starts chats in. A project is an extra folder
- * you make on purpose, with instructions of its own. Nothing here is tied to a
- * session: deleting a chat never touches a folder, and a folder is only ever
- * created or removed by one of the functions below.
+ * a single Home folder that "New" starts chats in. Home is not a project and is
+ * not listed with them. A project is an extra folder you make on purpose, with
+ * instructions of its own. Nothing here is tied to a session: deleting a chat
+ * never touches a folder, and a folder is only ever created or removed by one of
+ * the functions below.
  *
  * The instructions are the folder's AGENTS.md, which pi reads on its own when a
  * chat starts in it — there is nothing to hand over, and the file can be edited
@@ -48,10 +49,12 @@ export class ProjectError extends Error {
 export interface ProjectInfo {
   name: string;
   path: string;
-  isHome: boolean;
   isGit: boolean;
   hasInstructions: boolean;
 }
+
+/** Home is where chats start, not a project: it has no instructions, is not listed, and cannot be deleted. */
+const notAProject = () => new ProjectError("protected", "Home is not a project: it has no instructions and cannot be deleted");
 
 /**
  * The real folder a project name stands for, checked to be one directly under the root.
@@ -93,17 +96,14 @@ const infoFor = (root: string, name: string): ProjectInfo => {
   return {
     name,
     path: dir,
-    isHome: name === HOME_NAME,
     isGit: existsSync(path.join(dir, ".git")),
-    // Home has none of its own: see noHomeInstructions.
-    hasInstructions: name !== HOME_NAME && existsSync(path.join(dir, INSTRUCTIONS_FILE)),
+    hasInstructions: existsSync(path.join(dir, INSTRUCTIONS_FILE)),
   };
 };
 
-/** Home first, then every other folder directly under the root, by name. */
+/** Every folder directly under the root except Home, by name. */
 export function listProjects(root: string): ProjectInfo[] {
-  ensureHome(root);
-  const others = readdirSync(root)
+  return readdirSync(root)
     .filter((name) => !name.startsWith(".") && name !== HOME_NAME)
     .filter((name) => {
       try {
@@ -112,11 +112,12 @@ export function listProjects(root: string): ProjectInfo[] {
         return false;
       }
     })
-    .sort();
-  return [HOME_NAME, ...others].map((name) => infoFor(root, name));
+    .sort()
+    .map((name) => infoFor(root, name));
 }
 
 export function getProject(root: string, name: string): ProjectInfo {
+  if (name === HOME_NAME) throw notAProject();
   resolveProject(root, name);
   return infoFor(root, name);
 }
@@ -140,11 +141,8 @@ export function createProject(root: string, rawName: string, instructions?: stri
   return infoFor(root, name);
 }
 
-/** Home is where chats start when no project is chosen, not a project: it has no AGENTS.md to write. */
-const noHomeInstructions = () => new ProjectError("protected", "Home has no instructions of its own");
-
 export function readInstructions(root: string, name: string): string {
-  if (name === HOME_NAME) throw noHomeInstructions();
+  if (name === HOME_NAME) throw notAProject();
   const dir = resolveProject(root, name);
   try {
     return readFileSync(path.join(dir, INSTRUCTIONS_FILE), "utf8");
@@ -155,7 +153,7 @@ export function readInstructions(root: string, name: string): string {
 
 /** Saves the project's instructions; blank removes the file, so an empty project has none. */
 export function writeInstructions(root: string, name: string, text: string): void {
-  if (name === HOME_NAME) throw noHomeInstructions();
+  if (name === HOME_NAME) throw notAProject();
   const dir = resolveProject(root, name);
   if (text.length > MAX_INSTRUCTIONS) {
     throw new ProjectError("invalid", `Instructions are limited to ${MAX_INSTRUCTIONS.toLocaleString()} characters`);
@@ -170,6 +168,7 @@ export function writeInstructions(root: string, name: string, text: string): voi
 
 /** What is in a project, for the question "are you sure?". */
 export function describeProject(root: string, name: string): { files: number; bytes: number; complete: boolean } {
+  if (name === HOME_NAME) throw notAProject();
   const dir = resolveProject(root, name);
   let files = 0;
   let bytes = 0;
@@ -202,7 +201,7 @@ export function describeProject(root: string, name: string): { files: number; by
 
 /** Removes the folder and everything in it. Home is never removed. */
 export function deleteProjectFolder(root: string, name: string): void {
-  if (name === HOME_NAME) throw new ProjectError("protected", "Home cannot be deleted");
+  if (name === HOME_NAME) throw notAProject();
   rmSync(resolveProject(root, name), { recursive: true, force: true });
 }
 

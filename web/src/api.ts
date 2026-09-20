@@ -114,11 +114,10 @@ export interface Workspace {
   isGit: boolean;
 }
 
-/** A folder chats work in. Home is where "New" starts one; the rest are made on purpose. */
+/** A folder made on purpose for chats to work in. Home, where "New" starts one, is not a project. */
 export interface Project {
   name: string;
   path: string;
-  isHome: boolean;
   isGit: boolean;
   /** Whether the folder has an AGENTS.md — the project's instructions. */
   hasInstructions: boolean;
