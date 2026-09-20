@@ -27,6 +27,7 @@ export function ProjectsPage({
   onChanged: () => void;
 }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [root, setRoot] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
@@ -34,7 +35,10 @@ export function ProjectsPage({
   const load = useCallback(() => {
     api
       .projects()
-      .then((r) => setProjects(r.projects))
+      .then((r) => {
+        setProjects(r.projects);
+        setRoot(r.root);
+      })
       .catch((e) => setError((e as Error).message));
   }, []);
   // Also when the chats change: the counts and the "last active" are theirs.
@@ -142,6 +146,9 @@ export function ProjectsPage({
                         <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">instructions</span>
                       )}
                     </div>
+                    <p className="truncate font-mono text-[11px] text-fg-faint" title={p.path}>
+                      {p.path}
+                    </p>
                     <p className="truncate text-[11px] text-fg-faint">
                       {p.sessions} chat{p.sessions === 1 ? "" : "s"}
                       {lastActive(p) ? ` · last ${when(lastActive(p)!)}` : ""}
@@ -191,6 +198,7 @@ export function ProjectsPage({
 
       {creating && (
         <NewProject
+          root={root}
           onClose={() => setCreating(false)}
           onCreate={async (name, instructions) => {
             const project = await api.createProject(name, instructions);
@@ -223,9 +231,12 @@ export function ProjectsPage({
 const FIELD = "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none placeholder:text-fg-faint focus:border-accent/60";
 
 function NewProject({
+  root,
   onClose,
   onCreate,
 }: {
+  /** Where the folder will be made, so the preview is the whole path. */
+  root: string;
   onClose: () => void;
   onCreate: (name: string, instructions: string) => Promise<void>;
 }) {
@@ -281,7 +292,7 @@ function NewProject({
       </label>
       {name.trim() && (
         <p className="mt-1 truncate font-mono text-[11px] text-fg-subtle">
-          {slug ? `→ ${slug}` : "needs at least one letter or digit"}
+          {slug ? `→ ${root ? `${root}/` : ""}${slug}` : "needs at least one letter or digit"}
         </p>
       )}
       <label className="mt-4 block text-xs text-fg-muted">

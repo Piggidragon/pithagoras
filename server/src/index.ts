@@ -18,7 +18,7 @@ import {
   listSessions,
   updateSession,
 } from "./db.js";
-import { agentHome, agentHomePath, resolveChannelSession } from "./agent.js";
+import { agentHome, resolveChannelSession } from "./agent.js";
 import {
   agentFileStatus,
   runWizard,
@@ -340,26 +340,9 @@ app.delete("/api/projects/:name", async (req, res) => {
 
 // --- sessions ---
 
-/**
- * What the chat's folder is called on screen: Home for the agent's own
- * directory, otherwise the project — also for a chat in one of its subfolders.
- * agentHomePath, not agentHome: this runs for every chat on every poll and must
- * not touch the disk.
- */
-const folderOf = (workspace: string) => {
-  if (workspace === agentHomePath()) return "Home";
-  const below = path.relative(WORKSPACE_ROOT, workspace);
-  if (below && !below.startsWith("..") && !path.isAbsolute(below)) return below.split(path.sep)[0];
-  return path.basename(workspace);
-};
-
 /** SQLite stores pinned as 0/1; the API speaks booleans. */
 const toApi = (s: ReturnType<typeof getSession> & {}) => ({
   ...s,
-  // What the folder is called on screen: Home is the agent's own directory.
-  // agentHomePath, not agentHome: this runs for every chat on every poll and
-  // must not touch the disk.
-  folder: folderOf(s.workspace),
   pinned: Boolean(s.pinned),
   live: sessions.isRunning(s.id),
 });

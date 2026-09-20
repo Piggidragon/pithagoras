@@ -44,7 +44,8 @@ has and when one last moved.
 ## Chats inside a project
 
 In any chat, `/new` or `/clear` starts a fresh chat in the same project. The
-sidebar shows each chat's folder under its title: *Home*, or the project's name.
+sidebar shows each chat's full path under its title — Home is the agent's own
+directory, a project is a folder under the workspace root.
 
 Deleting a chat never deletes a folder. Folders are only made by **New project**
 and only removed by deleting a project.

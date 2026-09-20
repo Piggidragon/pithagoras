@@ -19,7 +19,6 @@ import {
   LuTrash2,
 } from "react-icons/lu";
 import type { Session, SessionStatus } from "../api";
-import { projectLabel } from "../projects";
 
 const STATUS_STYLE: Record<SessionStatus, string> = {
   running: "bg-accent animate-pulse",
@@ -358,7 +357,11 @@ function SessionItem({
           </button>
         </div>
       </div>
-      <div className="truncate pl-4 text-[11px] text-fg-subtle">{s.folder ?? projectLabel(s.workspace)}</div>
+      {/* Cut at the start, not the end: what tells chats apart is the last part of
+          the path. rtl moves the ellipsis; bdi keeps the path itself left to right. */}
+      <div className="truncate pl-4 text-left font-mono text-[10px] text-fg-subtle [direction:rtl]" title={s.workspace}>
+        <bdi>{s.workspace}</bdi>
+      </div>
     </div>
   );
 }
