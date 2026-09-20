@@ -13,6 +13,7 @@ import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
+import { getContextLimit } from "../db.js";
 
 function asArray(v: any): any[] {
   const resolved = typeof v === "function" ? v() : v;
@@ -378,6 +379,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       console.error(`[portal] could not route llama progress: ${(e as Error).message}`);
     }
 
+    client.applyContextLimit();
     return client;
   }
 
@@ -599,6 +601,27 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const model = this.modelRuntime.getModel(provider, modelId);
     if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
     await this.session.setModel(viaProgressProxy(model, this.portalSessionId) ?? model);
+    this.applyContextLimit();
+  }
+
+  /**
+   * Give the session the context window this portal knows the model to have.
+   *
+   * pi reads the window off the model it is running, so the number is put there
+   * rather than beside it — the percentage and the moment of compaction then
+   * agree with it. Assigned to the agent's state instead of going through
+   * setModel, which writes a model change into the conversation and into pi's
+   * default model. Without a limit the definition's own number is put back, so
+   * removing one takes effect too.
+   */
+  applyContextLimit(): void {
+    const current = this.session.model;
+    if (!current) return;
+    const declared = this.modelRuntime.getModel(current.provider, current.id)?.contextWindow;
+    const wanted = getContextLimit(current.provider, current.id) ?? declared;
+    if (wanted && wanted !== current.contextWindow) {
+      this.session.agent.state.model = { ...current, contextWindow: wanted };
+    }
   }
 
   async setThinkingLevel(level: string): Promise<void> {

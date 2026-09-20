@@ -20,6 +20,108 @@ function tone(pct: number) {
   return { stroke: "#34d399", text: "text-ok", bar: "bg-ok" };
 }
 
+/**
+ * What the model can really hold — the number the percentage and the moment of
+ * compaction are measured against.
+ *
+ * pi takes it from the model's definition, which cannot know how the server is
+ * run: llama.cpp with `--parallel 2` gives each chat half of `ctx-size`, so a
+ * chat compacts far too late and then fails at the server. This is where it is
+ * put right, per model, and it holds for every chat that uses the model.
+ */
+function ContextWindow({
+  cfg,
+  onChanged,
+  onError,
+}: {
+  cfg: PiConfig;
+  onChanged: () => Promise<void> | void;
+  onError: (error: Error) => void;
+}) {
+  const { provider, id } = cfg.state.model;
+  const limit = cfg.contextLimit ?? null;
+  const declared = cfg.models.models.find((m) => m.id === id && m.provider === provider)?.contextWindow;
+  const shown = cfg.stats?.contextUsage.contextWindow ?? limit ?? declared;
+  const [text, setText] = useState(shown ? String(shown) : "");
+  const [busy, setBusy] = useState(false);
+
+  // Follows the server when the number changes there, and leaves what is being
+  // typed alone while it does not.
+  useEffect(() => setText(shown ? String(shown) : ""), [shown]);
+
+  const save = async (tokens: number | null) => {
+    setBusy(true);
+    try {
+      await api.setContextLimit(provider, id, tokens);
+      await onChanged();
+    } catch (e) {
+      onError(e as Error);
+      setText(shown ? String(shown) : "");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const commit = () => {
+    const n = Number(text.replace(/[\s,._]/g, ""));
+    if (!text.trim() || n === shown) return;
+    if (!Number.isInteger(n) || n < 1024) {
+      onError(new Error("Enter the window as a whole number of tokens, 1,024 or more"));
+      setText(shown ? String(shown) : "");
+      return;
+    }
+    void save(n === declared ? null : n);
+  };
+
+  return (
+    <div className="rounded-lg bg-raised/40 px-2 py-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-sm text-fg">Context window</p>
+        <p className="text-[11px] text-fg-subtle">{limit ? "set by you" : declared ? "from the model" : ""}</p>
+      </div>
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={text}
+          disabled={busy}
+          aria-label="Context window in tokens"
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2 py-1 text-sm tabular-nums text-fg disabled:opacity-50"
+        />
+        {declared ? (
+          <button
+            type="button"
+            disabled={busy}
+            title={`Half of ${declared.toLocaleString()}: what one of two parallel slots holds`}
+            onClick={() => save(Math.floor(declared / 2))}
+            className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-raised disabled:opacity-50"
+          >
+            Half
+          </button>
+        ) : null}
+        {limit ? (
+          <button
+            type="button"
+            disabled={busy}
+            title={declared ? `Back to ${declared.toLocaleString()}, what the model says` : "Back to what the model says"}
+            onClick={() => save(null)}
+            className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-raised disabled:opacity-50"
+          >
+            Reset
+          </button>
+        ) : null}
+      </div>
+      <p className="mt-1.5 text-[11px] text-fg-faint">
+        What the server holds for one chat. With llama.cpp <code>--parallel 2</code> that is half of{" "}
+        <code>ctx-size</code>. Applies to every chat on this model.
+      </p>
+    </div>
+  );
+}
+
 function Donut({ pct, color }: { pct: number; color: string }) {
   const filled = Math.max(0, Math.min(100, pct));
   return (
@@ -46,8 +148,8 @@ export function ContextPill({
   onChanged,
 }: {
   sessionId: string;
-  /** Only rendered once pi is live, so the stats are known to be there. */
-  cfg: PiConfig & { stats: NonNullable<PiConfig["stats"]> };
+  /** Without stats — a chat pi has not run yet — only the window can be set. */
+  cfg: PiConfig;
   /** Stats move after compaction and after toggling auto-compaction. */
   onChanged: () => Promise<void> | void;
 }) {
@@ -76,8 +178,9 @@ export function ContextPill({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const usage = cfg.stats.contextUsage;
-  const pct = usage.percent ?? 0;
+  const stats = cfg.stats;
+  const usage = stats?.contextUsage;
+  const pct = usage?.percent ?? 0;
   const t = tone(pct);
   const auto = cfg.state.autoCompactionEnabled !== false;
 
@@ -117,46 +220,66 @@ export function ContextPill({
     }
   };
 
-  const rows: [string, string][] = [
-    ["Input", cfg.stats.tokens.input.toLocaleString()],
-    ["Output", cfg.stats.tokens.output.toLocaleString()],
-    ["Messages", String(cfg.stats.totalMessages ?? 0)],
-    ["Tool calls", String(cfg.stats.toolCalls ?? 0)],
-    ["Cost", `$${cfg.stats.cost.toFixed(4)}`],
-  ];
+  const rows: [string, string][] = stats
+    ? [
+        ["Input", stats.tokens.input.toLocaleString()],
+        ["Output", stats.tokens.output.toLocaleString()],
+        ["Messages", String(stats.totalMessages ?? 0)],
+        ["Tool calls", String(stats.toolCalls ?? 0)],
+        ["Cost", `$${stats.cost.toFixed(4)}`],
+      ]
+    : [];
+  const modelKnown = Boolean(cfg.state.model.provider && cfg.state.model.id && cfg.state.model.id !== "default");
 
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        title={`Context ${pct.toFixed(1)}% full`}
+        title={usage ? `Context ${pct.toFixed(1)}% full` : "Context — not measured until this chat has run"}
         className={`flex items-center gap-1.5 rounded px-2 py-1 ${
           open ? "bg-raised" : "hover:bg-raised"
         }`}
       >
-        <Donut pct={pct} color={t.stroke} />
-        <span className={`tabular-nums ${t.text}`}>{pct.toFixed(0)}%</span>
+        <Donut pct={pct} color={usage ? t.stroke : "#3f3f46"} />
+        <span className={`tabular-nums ${usage ? t.text : "text-fg-faint"}`}>{usage ? `${pct.toFixed(0)}%` : "—"}</span>
       </button>
 
       {open && (
         <div className="absolute bottom-full right-0 mb-2 w-72 rounded-xl border border-line bg-surface p-3 shadow-pop">
-          <div className="flex items-baseline justify-between">
-            <p className="text-sm text-fg-muted">Context</p>
-            <p className={`text-sm tabular-nums ${t.text}`}>{pct.toFixed(1)}% full</p>
-          </div>
+          {usage ? (
+            <>
+              <div className="flex items-baseline justify-between">
+                <p className="text-sm text-fg-muted">Context</p>
+                <p className={`text-sm tabular-nums ${t.text}`}>{pct.toFixed(1)}% full</p>
+              </div>
 
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${t.bar}`}
-              style={{ width: `${Math.min(100, pct)}%` }}
-            />
-          </div>
-          <p className="mt-1.5 text-[11px] tabular-nums text-fg-subtle">
-            {usage.tokens.toLocaleString()} of {usage.contextWindow.toLocaleString()} tokens ·{" "}
-            {Math.max(0, usage.contextWindow - usage.tokens).toLocaleString()} left
-          </p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${t.bar}`}
+                  style={{ width: `${Math.min(100, pct)}%` }}
+                />
+              </div>
+              <p className="mt-1.5 text-[11px] tabular-nums text-fg-subtle">
+                {usage.tokens.toLocaleString()} of {usage.contextWindow.toLocaleString()} tokens ·{" "}
+                {Math.max(0, usage.contextWindow - usage.tokens).toLocaleString()} left
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-fg-muted">Context is measured once this chat has run.</p>
+          )}
 
+          {modelKnown && (
+            <div className="mt-3">
+              <ContextWindow cfg={cfg} onChanged={onChanged} onError={(e) => setNote({ text: e.message, error: true })} />
+            </div>
+          )}
+          {!usage && note && (
+            <p className={`mt-2 text-[11px] ${note.error ? "text-danger" : "text-ok"}`}>{note.text}</p>
+          )}
+
+          {usage && stats && (
+            <>
           <div className="my-3 border-t border-line" />
 
           <button
@@ -231,6 +354,8 @@ export function ContextPill({
               </div>
             ))}
           </dl>
+            </>
+          )}
         </div>
       )}
     </div>

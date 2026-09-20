@@ -437,6 +437,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify(patch),
     }),
+  /** The window a model really has on this server; `null` goes back to what its definition says. */
+  setContextLimit: (provider: string, model: string, tokens: number | null) =>
+    json<{ ok: true; contextLimit: number | null }>("/api/context-limit", {
+      method: "PUT",
+      body: JSON.stringify({ provider, model, tokens }),
+    }),
   compact: (id: string) =>
     json<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),
 
@@ -561,6 +567,8 @@ export interface PiConfig {
   state: PiState;
   thinking: { levels: string[] };
   models: { models: PiModel[] };
+  /** The context window set for this model, when it differs from its definition. */
+  contextLimit?: number | null;
   stats: null | {
     tokens: { input: number; output: number; total: number };
     cost: number;

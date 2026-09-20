@@ -140,6 +140,7 @@ export function ComposerBar({
   sessionId,
   session,
   running,
+  turns,
   panelRequest,
   onPanelConsumed,
   actions,
@@ -148,6 +149,8 @@ export function ComposerBar({
   /** What the sidebar already knows, so the pills can paint immediately. */
   session: Session;
   running: boolean;
+  /** How many turns the transcript holds; each one that ends leaves pi with a new token count. */
+  turns?: number;
   /** Set by /model so the slash command opens the same picker as the pill. */
   panelRequest?: "model" | "effort" | null;
   onPanelConsumed?: () => void;
@@ -198,6 +201,9 @@ export function ComposerBar({
       .config(sessionId)
       .then((next) => {
         cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels);
+        // Also kept here, not only when the picker is opened: what a model's
+        // window is declared to be is needed by a chat pi has not started for.
+        cacheModels(next.models.models);
         // /config is the cheap route and reports neither. The levels are then
         // what was last reported for the model it names — not for the one the
         // seed guessed, which for a chat with no model of its own (a fresh /new)
@@ -241,6 +247,14 @@ export function ComposerBar({
   useEffect(() => {
     if (!running) load();
   }, [running]);
+
+  // And after each turn of a run, when pi has the new token count: this used to
+  // wait for the whole run to end, so the percentage sat still for as long as
+  // the agent worked — the very time it is changing. Not while idle, where the
+  // ticks of an old transcript being opened would only be requests for nothing.
+  useEffect(() => {
+    if (running && turns) load();
+  }, [turns]);
 
   useEffect(() => {
     if (!panelRequest) return;
@@ -407,13 +421,7 @@ export function ComposerBar({
             <LuGlobe className="h-3.5 w-3.5" />
           </button>
         )}
-        {cfg.stats && (
-          <ContextPill
-            sessionId={sessionId}
-            cfg={cfg as PiConfig & { stats: NonNullable<PiConfig["stats"]> }}
-            onChanged={load}
-          />
-        )}
+        <ContextPill sessionId={sessionId} cfg={cfg} onChanged={load} />
         <span
           className={`ml-1 h-2 w-2 rounded-full ${running ? "animate-pulse bg-warn" : "bg-raised"}`}
           title={running ? "working" : "idle"}

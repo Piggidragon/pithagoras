@@ -98,15 +98,34 @@ every restart.
 ## Context
 
 The rightmost pill is a donut showing how full the context window is, green
-through amber to red as it fills. Clicking it opens everything context-related:
+through amber to red as it fills. It follows a run turn by turn rather than
+waiting for it to finish. Clicking it opens everything context-related:
 
 - the exact usage — tokens used, window size, tokens left
+- the **context window**, which you can change (below)
 - **auto-compact**, on by default, which summarises before the window fills
 - **compact now**, to do it immediately
 - input and output tokens, message count, tool calls, cost
 
 pi refuses to compact a session that is too short, and says so rather than
 failing quietly.
+
+Until a chat has run there is nothing to measure, and the pill shows a dash —
+the context window can still be set from it.
+
+### The context window
+
+The percentage, and the moment a chat is compacted, are measured against the
+window in the model's entry in `models.json`. That number cannot know how the
+server is run. llama.cpp with `--parallel 2` splits `ctx-size` between two
+slots, so a chat gets half of what the model's entry says: it is compacted far
+too late and then fails at the server.
+
+Set what one chat really holds in the pill's **Context window** field. **Half**
+fills in half of the declared window, which is what `--parallel 2` leaves each
+chat; **Reset** goes back to the model's own number. The setting belongs to the
+model, not the chat: it applies to every chat that uses that model, open ones
+included, and is kept in the portal's database — `models.json` is left alone.
 
 ## Persistence
 

@@ -65,7 +65,16 @@ import {
   titleFrom,
   writeInstructions,
 } from "./projects.js";
-import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
+import {
+  CONTEXT_LIMIT_MAX,
+  CONTEXT_LIMIT_MIN,
+  getContextLimit,
+  getSettingDefaults,
+  getSettings,
+  getStoredSettings,
+  setContextLimit,
+  setSettings,
+} from "./db.js";
 
 // WORKSPACE_ROOT is the new name; WORKSPACE_ROOT still works for existing deploys.
 const WORKSPACE_ROOT = path.resolve(
@@ -574,6 +583,24 @@ app.post("/api/sessions/:id/abort", async (req, res) => {
 
 // --- per-session config (the web equivalent of the TUI's slash commands) ---
 
+/** Everything the pills under the composer show, from a running pi. */
+async function liveConfig(client: Awaited<ReturnType<typeof sessions.client>>) {
+  const [state, levels, models, stats] = await Promise.all([
+    client.getState(),
+    client.getThinkingLevels(),
+    client.getModels(),
+    client.getStats(),
+  ]);
+  return {
+    live: true,
+    state,
+    thinking: { levels },
+    models: { models },
+    stats,
+    contextLimit: getContextLimit(state.model.provider, state.model.id) ?? null,
+  };
+}
+
 app.get("/api/sessions/:id/config", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
@@ -585,16 +612,21 @@ app.get("/api/sessions/:id/config", async (req, res) => {
   // here on the row.
   if (!sessions.isRunning(session.id)) {
     const defaults = getSettings();
+    const provider = session.provider || defaults.provider;
+    const modelId = session.model || defaults.model;
     return res.json({
       live: false,
       state: {
         model: {
-          id: session.model || defaults.model || "default",
-          name: session.model || defaults.model || "pi's default",
-          provider: session.provider || defaults.provider,
+          id: modelId || "default",
+          name: modelId || "pi's default",
+          provider,
         },
         thinkingLevel: session.thinking_level || defaults.thinkingLevel,
       },
+      // Kept beside the model rather than in pi, so it can be read and changed
+      // before pi has ever been started for this chat.
+      contextLimit: (modelId && getContextLimit(provider, modelId)) || null,
       // Unknowable without the session open, and a made-up zero reads as
       // "empty context" rather than "not measured yet".
       stats: null,
@@ -604,14 +636,7 @@ app.get("/api/sessions/:id/config", async (req, res) => {
   }
 
   try {
-    const client = await sessions.client(session.id);
-    const [state, levels, models, stats] = await Promise.all([
-      client.getState(),
-      client.getThinkingLevels(),
-      client.getModels(),
-      client.getStats(),
-    ]);
-    res.json({ live: true, state, thinking: { levels }, models: { models }, stats });
+    res.json(await liveConfig(await sessions.client(session.id)));
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -627,14 +652,7 @@ app.get("/api/sessions/:id/models", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   try {
-    const client = await sessions.client(session.id);
-    const [state, levels, models, stats] = await Promise.all([
-      client.getState(),
-      client.getThinkingLevels(),
-      client.getModels(),
-      client.getStats(),
-    ]);
-    res.json({ live: true, state, thinking: { levels }, models: { models }, stats });
+    res.json(await liveConfig(await sessions.client(session.id)));
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -684,6 +702,33 @@ app.post("/api/sessions/:id/config", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: (e as Error).message, applied });
   }
+});
+
+/**
+ * What a model's context window really is on this server — see getContextLimit.
+ *
+ * Its own route, not part of a session's config: the number belongs to the
+ * model, so it holds for every chat that uses it, and it can be set before pi
+ * has been started for the one you are looking at.
+ */
+app.put("/api/context-limit", (req, res) => {
+  const { provider, model, tokens } = req.body ?? {};
+  if (typeof provider !== "string" || !provider || typeof model !== "string" || !model) {
+    return res.status(400).json({ error: "provider and model required" });
+  }
+  // Refused rather than rounded or clamped: a window quietly different from the
+  // one typed would be found out when a chat overflowed.
+  if (
+    tokens !== null &&
+    !(Number.isInteger(tokens) && tokens >= CONTEXT_LIMIT_MIN && tokens <= CONTEXT_LIMIT_MAX)
+  ) {
+    return res.status(400).json({
+      error: `The context window must be a whole number between ${CONTEXT_LIMIT_MIN.toLocaleString("en-US")} and ${CONTEXT_LIMIT_MAX.toLocaleString("en-US")} tokens`,
+    });
+  }
+  setContextLimit(provider, model, tokens);
+  sessions.applyContextLimits();
+  res.json({ ok: true, contextLimit: tokens });
 });
 
 app.post("/api/sessions/:id/compact", async (req, res) => {

@@ -191,6 +191,11 @@ class SessionManager extends EventEmitter {
     return done.filter(Boolean).length;
   }
 
+  /** A changed context limit reaches the chats that are open, not just the ones started later. */
+  applyContextLimits(): void {
+    for (const s of this.live.values()) s.client.applyContextLimit?.();
+  }
+
   /** How far llama.cpp has got through the prompt. Straight out to the browser. */
   reportPrefill(sessionId: string, prefill: unknown): void {
     this.record(sessionId, "portal_prefill", prefill);
