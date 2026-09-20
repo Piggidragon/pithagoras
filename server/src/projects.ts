@@ -95,7 +95,8 @@ const infoFor = (root: string, name: string): ProjectInfo => {
     path: dir,
     isHome: name === HOME_NAME,
     isGit: existsSync(path.join(dir, ".git")),
-    hasInstructions: existsSync(path.join(dir, INSTRUCTIONS_FILE)),
+    // Home has none of its own: see noHomeInstructions.
+    hasInstructions: name !== HOME_NAME && existsSync(path.join(dir, INSTRUCTIONS_FILE)),
   };
 };
 
@@ -139,7 +140,11 @@ export function createProject(root: string, rawName: string, instructions?: stri
   return infoFor(root, name);
 }
 
+/** Home is where chats start when no project is chosen, not a project: it has no AGENTS.md to write. */
+const noHomeInstructions = () => new ProjectError("protected", "Home has no instructions of its own");
+
 export function readInstructions(root: string, name: string): string {
+  if (name === HOME_NAME) throw noHomeInstructions();
   const dir = resolveProject(root, name);
   try {
     return readFileSync(path.join(dir, INSTRUCTIONS_FILE), "utf8");
@@ -150,6 +155,7 @@ export function readInstructions(root: string, name: string): string {
 
 /** Saves the project's instructions; blank removes the file, so an empty project has none. */
 export function writeInstructions(root: string, name: string, text: string): void {
+  if (name === HOME_NAME) throw noHomeInstructions();
   const dir = resolveProject(root, name);
   if (text.length > MAX_INSTRUCTIONS) {
     throw new ProjectError("invalid", `Instructions are limited to ${MAX_INSTRUCTIONS.toLocaleString()} characters`);

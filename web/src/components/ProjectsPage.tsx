@@ -143,17 +143,19 @@ export function ProjectsPage({
                     >
                       <LuPlus className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditing(p);
-                      }}
-                      className="rounded p-1.5 text-fg-subtle hover:text-accent"
-                      title="Instructions (AGENTS.md)"
-                      aria-label={`Instructions for ${p.name}`}
-                    >
-                      <LuFileText className="h-3.5 w-3.5" />
-                    </button>
+                    {!p.isHome && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditing(p);
+                        }}
+                        className="rounded p-1.5 text-fg-subtle hover:text-accent"
+                        title="Instructions (AGENTS.md)"
+                        aria-label={`Instructions for ${p.name}`}
+                      >
+                        <LuFileText className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     {!p.isHome && (
                       <button
                         onClick={(e) => {
@@ -317,7 +319,7 @@ function Instructions({
 
   return (
     <Modal
-      title={`Instructions · ${project.isHome ? "Home" : project.name}`}
+      title={`Instructions · ${project.name}`}
       subtitle="Saved as AGENTS.md in the folder — edit it there too if you like"
       onClose={onClose}
       footer={

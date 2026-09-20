@@ -39,7 +39,7 @@ any other folder directly under the workspace root. See [Projects](/guide/projec
 | `POST /api/projects` | `{ name, instructions? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home` |
 | `GET /api/projects/:name` | The project plus `{ files, bytes, complete }` — what deleting it would remove |
 | `GET /api/projects/:name/instructions` | `{ text }` |
-| `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it |
+| `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it. Both instruction endpoints answer 403 for Home, which has none. |
 | `DELETE /api/projects/:name` | Deletes its chats and its folder; 409 while one is running, 403 for Home |
 
 ## Sessions

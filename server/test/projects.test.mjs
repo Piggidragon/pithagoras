@@ -88,6 +88,17 @@ test('deleting a project removes its folder, and Home cannot be deleted', () => 
   rmSync(r, { recursive: true });
 });
 
+test('Home has no instructions of its own', () => {
+  const r = root();
+  P.listProjects(r);
+  writeFileSync(path.join(r, 'home', 'AGENTS.md'), 'stray');
+  assert.equal(P.getProject(r, 'home').hasInstructions, false);
+  assert.equal(code(() => P.readInstructions(r, 'home')), 'protected');
+  assert.equal(code(() => P.writeInstructions(r, 'home', 'x')), 'protected');
+  assert.equal(readFileSync(path.join(r, 'home', 'AGENTS.md'), 'utf8'), 'stray');
+  rmSync(r, { recursive: true });
+});
+
 test('instructions have a size limit', () => {
   const r = root();
   P.createProject(r, 'big');

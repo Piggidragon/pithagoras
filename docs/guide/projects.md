@@ -42,7 +42,7 @@ and only removed by deleting a project.
 A project's instructions are the folder's `AGENTS.md`, which pi reads by itself
 when a chat starts in it. The editor and the file are the same thing: edit it in
 the portal or in the folder, whichever is nearer. Saving an empty text removes the
-file. Home can have instructions too.
+file. Home has none of its own.
 
 Chats started after a change pick it up. A chat that is already open does after
 `/reload`.
