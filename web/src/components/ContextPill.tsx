@@ -151,8 +151,8 @@ export function ContextPill({
   onChanged,
 }: {
   sessionId: string;
-  /** Without stats — a chat pi has not run yet — only the window can be set. */
-  cfg: PiConfig;
+  /** Only rendered once pi is live, so the stats are known to be there. */
+  cfg: PiConfig & { stats: NonNullable<PiConfig["stats"]> };
   /** Stats move after compaction and after toggling auto-compaction. */
   onChanged: () => Promise<void> | void;
 }) {
@@ -181,9 +181,8 @@ export function ContextPill({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const stats = cfg.stats;
-  const usage = stats?.contextUsage;
-  const pct = usage?.percent ?? 0;
+  const usage = cfg.stats.contextUsage;
+  const pct = usage.percent ?? 0;
   const t = tone(pct);
   const auto = cfg.state.autoCompactionEnabled !== false;
 
@@ -223,66 +222,50 @@ export function ContextPill({
     }
   };
 
-  const rows: [string, string][] = stats
-    ? [
-        ["Input", stats.tokens.input.toLocaleString()],
-        ["Output", stats.tokens.output.toLocaleString()],
-        ["Messages", String(stats.totalMessages ?? 0)],
-        ["Tool calls", String(stats.toolCalls ?? 0)],
-        ["Cost", `$${stats.cost.toFixed(4)}`],
-      ]
-    : [];
-  const modelKnown = Boolean(cfg.state.model.provider && cfg.state.model.id && cfg.state.model.id !== "default");
+  const rows: [string, string][] = [
+    ["Input", cfg.stats.tokens.input.toLocaleString()],
+    ["Output", cfg.stats.tokens.output.toLocaleString()],
+    ["Messages", String(cfg.stats.totalMessages ?? 0)],
+    ["Tool calls", String(cfg.stats.toolCalls ?? 0)],
+    ["Cost", `$${cfg.stats.cost.toFixed(4)}`],
+  ];
 
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        title={usage ? `Context ${pct.toFixed(1)}% full` : "Context — not measured until this chat has run"}
+        title={`Context ${pct.toFixed(1)}% full`}
         className={`flex items-center gap-1.5 rounded px-2 py-1 ${
           open ? "bg-raised" : "hover:bg-raised"
         }`}
       >
-        <Donut pct={pct} color={usage ? t.stroke : "#3f3f46"} />
-        <span className={`tabular-nums ${usage ? t.text : "text-fg-faint"}`}>{usage ? `${pct.toFixed(0)}%` : "—"}</span>
+        <Donut pct={pct} color={t.stroke} />
+        <span className={`tabular-nums ${t.text}`}>{pct.toFixed(0)}%</span>
       </button>
 
       {open && (
         <div className="absolute bottom-full right-0 mb-2 w-72 rounded-xl border border-line bg-surface p-3 shadow-pop">
-          {usage ? (
-            <>
-              <div className="flex items-baseline justify-between">
-                <p className="text-sm text-fg-muted">Context</p>
-                <p className={`text-sm tabular-nums ${t.text}`}>{pct.toFixed(1)}% full</p>
-              </div>
+          <div className="flex items-baseline justify-between">
+            <p className="text-sm text-fg-muted">Context</p>
+            <p className={`text-sm tabular-nums ${t.text}`}>{pct.toFixed(1)}% full</p>
+          </div>
 
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${t.bar}`}
-                  style={{ width: `${Math.min(100, pct)}%` }}
-                />
-              </div>
-              <p className="mt-1.5 text-[11px] tabular-nums text-fg-subtle">
-                {usage.tokens.toLocaleString()} of {usage.contextWindow.toLocaleString()} tokens ·{" "}
-                {Math.max(0, usage.contextWindow - usage.tokens).toLocaleString()} left
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-fg-muted">Context is measured once this chat has run.</p>
-          )}
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${t.bar}`}
+              style={{ width: `${Math.min(100, pct)}%` }}
+            />
+          </div>
+          <p className="mt-1.5 text-[11px] tabular-nums text-fg-subtle">
+            {usage.tokens.toLocaleString()} of {usage.contextWindow.toLocaleString()} tokens ·{" "}
+            {Math.max(0, usage.contextWindow - usage.tokens).toLocaleString()} left
+          </p>
 
-          {modelKnown && (
-            <div className="mt-3">
-              <ContextWindow cfg={cfg} onChanged={onChanged} onError={(e) => setNote({ text: e.message, error: true })} />
-            </div>
-          )}
-          {!usage && note && (
-            <p className={`mt-2 text-[11px] ${note.error ? "text-danger" : "text-ok"}`}>{note.text}</p>
-          )}
+          <div className="my-3 border-t border-line" />
 
-          {usage && stats && (
-            <>
+          <ContextWindow cfg={cfg} onChanged={onChanged} onError={(e) => setNote({ text: e.message, error: true })} />
+
           <div className="my-3 border-t border-line" />
 
           <button
@@ -357,8 +340,6 @@ export function ContextPill({
               </div>
             ))}
           </dl>
-            </>
-          )}
         </div>
       )}
     </div>

@@ -110,9 +110,6 @@ waiting for it to finish. Clicking it opens everything context-related:
 pi refuses to compact a session that is too short, and says so rather than
 failing quietly.
 
-Until a chat has run there is nothing to measure, and the pill shows a dash —
-the context window can still be set from it.
-
 ### The context window
 
 The percentage, and the moment a chat is compacted, are measured against the

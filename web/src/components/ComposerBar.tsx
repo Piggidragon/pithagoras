@@ -201,9 +201,6 @@ export function ComposerBar({
       .config(sessionId)
       .then((next) => {
         cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels);
-        // Also kept here, not only when the picker is opened: what a model's
-        // window is declared to be is needed by a chat pi has not started for.
-        cacheModels(next.models.models);
         // /config is the cheap route and reports neither. The levels are then
         // what was last reported for the model it names — not for the one the
         // seed guessed, which for a chat with no model of its own (a fresh /new)
@@ -421,7 +418,13 @@ export function ComposerBar({
             <LuGlobe className="h-3.5 w-3.5" />
           </button>
         )}
-        <ContextPill sessionId={sessionId} cfg={cfg} onChanged={load} />
+        {cfg.stats && (
+          <ContextPill
+            sessionId={sessionId}
+            cfg={cfg as PiConfig & { stats: NonNullable<PiConfig["stats"]> }}
+            onChanged={load}
+          />
+        )}
         <span
           className={`ml-1 h-2 w-2 rounded-full ${running ? "animate-pulse bg-warn" : "bg-raised"}`}
           title={running ? "working" : "idle"}

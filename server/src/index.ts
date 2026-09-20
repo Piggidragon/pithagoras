@@ -615,22 +615,16 @@ app.get("/api/sessions/:id/config", async (req, res) => {
   // here on the row.
   if (!sessions.isRunning(session.id)) {
     const defaults = getSettings();
-    const provider = session.provider || defaults.provider;
-    const modelId = session.model || defaults.model;
     return res.json({
       live: false,
       state: {
         model: {
-          id: modelId || "default",
-          name: modelId || "pi's default",
-          provider,
+          id: session.model || defaults.model || "default",
+          name: session.model || defaults.model || "pi's default",
+          provider: session.provider || defaults.provider,
         },
         thinkingLevel: session.thinking_level || defaults.thinkingLevel,
       },
-      // Kept beside the model rather than in pi, so it can be read and changed
-      // before pi has ever been started for this chat.
-      contextLimit: (modelId && getContextLimit(provider, modelId)) || null,
-      contextDefault: getDefaultContextLimit() ?? null,
       // Unknowable without the session open, and a made-up zero reads as
       // "empty context" rather than "not measured yet".
       stats: null,
