@@ -199,6 +199,21 @@ export function Chat({
   // one is what made opening it slow, and the top of it is not what anybody
   // opens it for. Earlier messages are added as you scroll towards them.
   const [shown, setShown] = useState(PAGE);
+  // Reading above the end: what is appended must not push the oldest message
+  // drawn out of the window, and with it whatever is being read. The window
+  // grows by what was added instead; at the end it slides along as before.
+  const [tail, setTail] = useState<{ id?: string; count: number }>({ count: 0 });
+  const lastId = items.length ? items[items.length - 1].id : undefined;
+  if (lastId !== tail.id || items.length !== tail.count) {
+    let appended = 0;
+    if (tail.id && lastId !== tail.id) {
+      for (let i = items.length - 1; i >= 0 && items[i].id !== tail.id; i--) appended++;
+      // The one that was last is gone, so this is not something added after it.
+      if (appended === items.length) appended = 0;
+    }
+    if (appended > 0 && !scroller.following.current) setShown((n) => n + appended);
+    setTail({ id: lastId, count: items.length });
+  }
   const visible = shown >= items.length ? items : items.slice(items.length - shown);
   const hiddenHere = items.length - visible.length;
   const topEdge = useRef<HTMLDivElement>(null);
@@ -240,9 +255,12 @@ export function Chat({
   };
   const revealNow = useRef(reveal);
   revealNow.current = reveal;
+  // A different conversation starts from its end again. Only `shown`: what was
+  // last said follows from the events, and clearing it here as well would make
+  // the first update after opening look like a message just sent — and pull the
+  // view to the end from wherever it was being read.
   useEffect(() => {
     setShown(PAGE);
-    lastSpoken.current = null;
   }, [session.id]);
   // Added above without moving what is being read.
   useLayoutEffect(() => {
@@ -347,7 +365,7 @@ export function Chat({
     // Stay at the end while the agent writes — unless you scrolled up to read,
     // which new output must not undo. Something you just said, and the first
     // paint of a conversation, always go to the end — before it is painted, so
-    // the top of it is never seen.
+    // the top of it is never seen, nor new content at the old scroll position.
     let said: string | null = null;
     for (let i = items.length - 1; i >= 0 && !said; i--) if (items[i].kind === "user") said = items[i].id;
     const fresh = said !== lastSpoken.current;
@@ -501,7 +519,7 @@ export function Chat({
       >
         <div ref={list} className="mx-auto w-full max-w-3xl space-y-3">
         <div ref={topEdge} aria-hidden className="h-px" />
-        {hasEarlier && hiddenHere === 0 && (
+        {!loading && hasEarlier && hiddenHere === 0 && (
           <div data-earlier="" className="flex justify-center pb-2">
             <button
               onClick={onLoadEarlier}
@@ -513,7 +531,7 @@ export function Chat({
           </div>
         )}
 
-        {loading && items.length === 0 && (
+        {loading && (
           <p role="status" className="pt-16 text-center text-sm text-fg-muted">
             Loading the conversation…
           </p>
@@ -526,7 +544,7 @@ export function Chat({
           </div>
         )}
 
-        {visible.map((item) => {
+        {(loading ? [] : visible).map((item) => {
           if (item.kind === "user") {
             const { text, blocks } = splitContext(item.text);
             // Nothing but framing: the portal spoke, not a person. Drawing it as
@@ -696,7 +714,7 @@ export function Chat({
           {actionError && (
             <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
           )}
-          {running && phase && <ActivityLine phase={phase} now={now} />}
+          {!loading && running && phase && <ActivityLine phase={phase} now={now} />}
         </div>
       </div>
 
