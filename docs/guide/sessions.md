@@ -98,15 +98,41 @@ every restart.
 ## Context
 
 The rightmost pill is a donut showing how full the context window is, green
-through amber to red as it fills. Clicking it opens everything context-related:
+through amber to red as it fills. It follows a run turn by turn rather than
+waiting for it to finish. Clicking it opens everything context-related:
 
 - the exact usage — tokens used, window size, tokens left
+- the **context window**, which you can change (below)
 - **auto-compact**, on by default, which summarises before the window fills
 - **compact now**, to do it immediately
 - input and output tokens, message count, tool calls, cost
 
 pi refuses to compact a session that is too short, and says so rather than
 failing quietly.
+
+### The context window
+
+The percentage, and the moment a chat is compacted, are measured against the
+window in the model's entry in `models.json`. That number cannot know how the
+server is run. llama.cpp with `--parallel 2` splits `ctx-size` between two
+slots, so a chat gets half of what the model's entry says: it is compacted far
+too late and then fails at the server.
+
+Set what one chat really holds in the pill's **Context window** field; **Reset**
+goes back to the default (below) or, without one, the model's own number. The
+setting belongs to the model, not the chat: it applies to every chat that uses
+that model, open ones included, and is kept in the portal's database —
+`models.json` is left alone. The pill appears once a chat has run; before that
+the window is the one in the model's entry, or the default below.
+
+For all models at once there is a **Context window** default under
+Settings → General. It is a ceiling: a model that declares more is held to it, a
+model that declares less keeps its own number, and a window set for one model in
+its pill wins over it. Leave it empty to use what each model says.
+
+Neither is available with `EXECUTOR=container`. pi runs inside the container
+there and the portal cannot change its model, so the field and the default are
+turned off rather than accepting a number that would do nothing.
 
 ## Persistence
 

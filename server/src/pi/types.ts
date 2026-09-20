@@ -59,6 +59,8 @@ export interface PiClient extends EventEmitter {
   setAutoCompaction(enabled: boolean): Promise<void>;
   /** Re-read pi's settings file. Optional: not every executor can. */
   refreshSettings?(): Promise<void>;
+  /** Take up a changed context limit for the current model. Optional, like the above. */
+  applyContextLimit?(): void;
   setAutoRetry(enabled: boolean): Promise<void>;
   compact(): Promise<void>;
   reload(): Promise<void>;

@@ -22,6 +22,7 @@ import { api, type ExtensionInfo, type GlobalSettings, type ReportTarget, type R
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
+import { parseWindow } from "../context-window";
 import { KeepRecent, formatTokens, useKeepRecentSave } from "./KeepRecent";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
@@ -369,6 +370,10 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [keepRecent, setKeepRecent] = useState<number | null>(null);
   const [applied, setApplied] = useState<string | null>(null);
+  /** Typed text, so that a half-written number is not turned into a request. */
+  const [ctxText, setCtxText] = useState("");
+  const [ctxSaved, setCtxSaved] = useState<number | null>(null);
+  const [ctxNote, setCtxNote] = useState<string | null>(null);
 
   const load = () =>
     api
@@ -377,6 +382,8 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
         setStored(r.stored);
         setDefaults(r.defaults);
         setKeepRecent(r.compaction.keepRecentTokens);
+        setCtxSaved(r.contextDefault);
+        setCtxText(r.contextDefault ? String(r.contextDefault) : "");
         setMeta({
           executor: r.executor,
           workspaceRoot: r.workspaceRoot,
@@ -409,6 +416,27 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
       void load();
     },
   );
+
+  /** On leaving the field, on its own — like the slider above, not part of Save defaults. */
+  const saveContextDefault = async () => {
+    const parsed = parseWindow(ctxText);
+    const n = parsed.kind === "ok" ? parsed.tokens : null;
+    if (parsed.kind === "bad") {
+      onError(`${parsed.message} — or leave it empty for none`);
+      return setCtxText(ctxSaved ? String(ctxSaved) : "");
+    }
+    if (n === ctxSaved) return setCtxText(ctxSaved ? String(ctxSaved) : "");
+    try {
+      const r = await api.setContextDefault(n);
+      setCtxSaved(r.contextDefault);
+      setCtxText(r.contextDefault ? String(r.contextDefault) : "");
+      setCtxNote(n === null ? "Removed" : "Saved");
+      setTimeout(() => setCtxNote(null), 3000);
+    } catch (e) {
+      onError((e as Error).message);
+      setCtxText(ctxSaved ? String(ctxSaved) : "");
+    }
+  };
 
   if (!stored || !defaults) return <p className="text-sm text-fg-subtle">Loading…</p>;
 
@@ -521,6 +549,39 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
             above it reaches sessions that are already open.
           </p>
           {applied && <p className="mt-1 text-xs text-ok">{applied}</p>}
+        </div>
+      </Section>
+
+      <Section
+        title="Context window"
+        hint="How many tokens a chat may hold before it is compacted. Leave it empty to use what each model says."
+      >
+        <div className="rounded-xl border border-line bg-raised/40 p-3">
+          <input
+            value={ctxText}
+            disabled={meta?.executor === "container"}
+            inputMode="numeric"
+            onChange={(e) => setCtxText(e.target.value)}
+            onBlur={saveContextDefault}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            placeholder="what each model says"
+            aria-label="Default context window in tokens"
+            className={`${inputCls} font-mono`}
+          />
+          <p className="mt-2 text-xs text-fg-faint">
+            Applies to every chat, open ones included. A model that says it has less keeps its own
+            number, and a window set for one model in its context pill wins over this. It is
+            for a server that gives each chat less than the model declares — llama.cpp with{" "}
+            <code>--parallel 2</code> gives each chat half of <code>ctx-size</code>. Saved when you
+            leave the field.
+          </p>
+          {meta?.executor === "container" && (
+            <p className="mt-1 text-xs text-warn">
+              Not available with the container executor: pi runs inside the container, where the portal
+              cannot change its context window.
+            </p>
+          )}
+          {ctxNote && <p className="mt-1 text-xs text-ok">{ctxNote}</p>}
         </div>
       </Section>
 

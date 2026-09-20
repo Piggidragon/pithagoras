@@ -118,13 +118,28 @@ Types worth knowing: `portal_prompt`, `portal_status`, `portal_notice`,
 
 | | |
 | --- | --- |
-| `GET /api/sessions/:id/config` | `{ state, thinking, models, stats }` |
+| `GET /api/sessions/:id/config` | `{ state, thinking, models, stats, contextLimit }` |
 | `POST /api/sessions/:id/config` | `{ provider?, modelId?, thinkingLevel?, autoCompaction?, autoRetry? }` |
+| `PUT /api/context-limit` | `{ provider, model, tokens }` — the context window this model really has here; `tokens: null` goes back to the default, or the model's own |
+| `PUT /api/context-default` | `{ tokens }` — a ceiling on the window of every model; `null` removes it. Also returned by `GET /api/settings` as `contextDefault` |
 | `POST /api/sessions/:id/compact` | Compact now |
 | `GET /api/sessions/:id/commands` | The slash command palette |
 
-`GET` starts pi if it is not already up, so the values are live rather than
-guessed. The response carries context usage and token counts.
+`GET` does not start pi. While it is not running the response is `live: false`
+with the stored model and effort, empty `thinking` and `models`, and
+`stats: null`; once it is, it carries context usage and token counts.
+
+When pi is running, the response also has `contextLimit`, the window set with
+`PUT /api/context-limit` or `null`, and `contextDefault`, the ceiling from
+`PUT /api/context-default`. Both apply to open chats at once, and `contextLimit`
+is per model rather than per chat. `contextLimitSupported` is `false` when pi
+cannot be given a window (see below). None of the three is in the `live: false`
+response.
+
+With `EXECUTOR=container` both `PUT` routes answer 400: pi runs in the container
+behind an RPC client, and the portal cannot change the model it measures
+against. `tokens` must
+be a whole number from 1,024 to 10,000,000.
 
 `POST` returns `{ ok, applied, state }`, where `applied` lists what actually
 changed. Only those fields are persisted — an effort change does not rewrite the

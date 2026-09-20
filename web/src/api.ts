@@ -430,12 +430,26 @@ export const api = {
 
   /** Cheap: never starts pi. Stats are null when the session is not live. */
   config: (id: string) => json<PiConfig>(`/api/sessions/${id}/config`),
+  /** Only the token and context figures, which is all a run needs refreshed; does not start pi. */
+  stats: (id: string) => json<{ live: boolean; stats: PiConfig["stats"] }>(`/api/sessions/${id}/stats`),
   /** Starts pi if needed — only called when the model picker is opened. */
   models: (id: string) => json<PiConfig>(`/api/sessions/${id}/models`),
   setConfig: (id: string, patch: ConfigPatch) =>
     json<{ ok: true; applied: string[]; state: PiState }>(`/api/sessions/${id}/config`, {
       method: "POST",
       body: JSON.stringify(patch),
+    }),
+  /** The window a model really has on this server; `null` goes back to what its definition says. */
+  setContextLimit: (provider: string, model: string, tokens: number | null) =>
+    json<{ ok: true; contextLimit: number | null }>("/api/context-limit", {
+      method: "PUT",
+      body: JSON.stringify({ provider, model, tokens }),
+    }),
+  /** The window every chat is held to unless its model has its own; `null` removes it. */
+  setContextDefault: (tokens: number | null) =>
+    json<{ ok: true; contextDefault: number | null }>("/api/context-default", {
+      method: "PUT",
+      body: JSON.stringify({ tokens }),
     }),
   compact: (id: string) =>
     json<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),
@@ -460,6 +474,7 @@ export const api = {
       /** pi's own compaction tuning, which lives in its settings.json not ours. */
       compaction: CompactionSettings;
       compactionDefaults: CompactionSettings;
+      contextDefault: number | null;
       executor: string;
       workspaceRoot: string;
     }>("/api/settings"),
@@ -561,6 +576,14 @@ export interface PiConfig {
   state: PiState;
   thinking: { levels: string[] };
   models: { models: PiModel[] };
+  /** The context window set for this model, when it differs from its definition. */
+  contextLimit?: number | null;
+  /** The window every chat is held to, as a ceiling; set in Settings. */
+  contextDefault?: number | null;
+  /** False when pi runs where the portal cannot change its window: EXECUTOR=container. */
+  contextLimitSupported?: boolean;
+  /** Why the window cannot be set, when `contextLimitSupported` is false. */
+  contextLimitNote?: string;
   stats: null | {
     tokens: { input: number; output: number; total: number };
     cost: number;

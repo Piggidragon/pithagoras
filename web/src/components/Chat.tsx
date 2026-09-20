@@ -325,6 +325,12 @@ export function Chat({
   // What it is doing, and for how long. The clock ticks only while something is
   // running, so an idle session re-renders no more than it used to.
   const phase = useMemo(() => (running ? activity(events) : null), [running, events]);
+  // What tells the composer that pi has a new token count to show. A compaction
+  // moves it too, and it is not a turn.
+  const turns = useMemo(
+    () => events.reduce((n, e) => n + (e.type === "turn_end" || e.type === "compaction_end" ? 1 : 0), 0),
+    [events],
+  );
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running) return;
@@ -778,6 +784,7 @@ export function Chat({
             sessionId={session.id}
             session={session}
             running={running}
+            turns={turns}
             panelRequest={panelRequest}
             onPanelConsumed={() => setPanelRequest(null)}
             actions={<>

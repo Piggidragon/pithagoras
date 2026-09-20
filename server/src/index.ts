@@ -65,7 +65,17 @@ import {
   titleFrom,
   writeInstructions,
 } from "./projects.js";
-import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
+import {
+  contextLimitProblem,
+  getContextLimit,
+  getDefaultContextLimit,
+  getSettingDefaults,
+  getSettings,
+  getStoredSettings,
+  setContextLimit,
+  setDefaultContextLimit,
+  setSettings,
+} from "./db.js";
 
 // WORKSPACE_ROOT is the new name; WORKSPACE_ROOT still works for existing deploys.
 const WORKSPACE_ROOT = path.resolve(
@@ -120,6 +130,7 @@ app.get("/api/settings", (_req, res) => {
     // say which file a value lives in.
     compaction: readCompactionSettings(),
     compactionDefaults: COMPACTION_DEFAULTS,
+    contextDefault: getDefaultContextLimit() ?? null,
     executor: EXECUTOR_KIND,
     workspaceRoot: WORKSPACE_ROOT,
   });
@@ -574,6 +585,46 @@ app.post("/api/sessions/:id/abort", async (req, res) => {
 
 // --- per-session config (the web equivalent of the TUI's slash commands) ---
 
+/**
+ * Why the window cannot be changed, when it cannot. With EXECUTOR=container pi
+ * runs in the container behind an RPC client, and the model it measures against
+ * is out of the portal's reach — so a value stored here would change nothing
+ * while the pill claimed it had.
+ */
+const CONTEXT_UNSUPPORTED =
+  "The context window cannot be changed with EXECUTOR=container: pi runs inside the container, where the portal has no hold on its model";
+
+/** Everything the pills under the composer show, from a running pi. */
+async function liveConfig(client: Awaited<ReturnType<typeof sessions.client>>) {
+  const [state, levels, models, stats] = await Promise.all([
+    client.getState(),
+    client.getThinkingLevels(),
+    client.getModels(),
+    client.getStats(),
+  ]);
+  // A window is kept per model, so it needs one: pi reports "unknown" when none
+  // is selected, and a number stored against that would never be read by anything.
+  const noModel = state.model.id === "unknown" || state.model.provider === "unknown";
+  const supported = typeof client.applyContextLimit === "function" && !noModel;
+  return {
+    live: true,
+    state,
+    thinking: { levels },
+    models: { models },
+    stats,
+    contextLimit: noModel ? null : (getContextLimit(state.model.provider, state.model.id) ?? null),
+    contextDefault: getDefaultContextLimit() ?? null,
+    contextLimitSupported: supported,
+    ...(supported
+      ? {}
+      : {
+          contextLimitNote: noModel
+            ? "Choose a model first: the context window is kept per model."
+            : "The context window is the one in the model's entry: with the container executor it cannot be changed here.",
+        }),
+  };
+}
+
 app.get("/api/sessions/:id/config", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
@@ -604,14 +655,25 @@ app.get("/api/sessions/:id/config", async (req, res) => {
   }
 
   try {
-    const client = await sessions.client(session.id);
-    const [state, levels, models, stats] = await Promise.all([
-      client.getState(),
-      client.getThinkingLevels(),
-      client.getModels(),
-      client.getStats(),
-    ]);
-    res.json({ live: true, state, thinking: { levels }, models: { models }, stats });
+    res.json(await liveConfig(await sessions.client(session.id)));
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+/**
+ * Only the token and context figures, for keeping the pill current during a run.
+ *
+ * Not the config: that asks for the model catalogue too, and pi works the
+ * catalogue out afresh on every request — a check of each provider's
+ * credentials — which is too much to do after every turn of a long run.
+ */
+app.get("/api/sessions/:id/stats", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  if (!sessions.isRunning(session.id)) return res.json({ live: false, stats: null });
+  try {
+    res.json({ live: true, stats: await (await sessions.client(session.id)).getStats() });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -627,14 +689,7 @@ app.get("/api/sessions/:id/models", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   try {
-    const client = await sessions.client(session.id);
-    const [state, levels, models, stats] = await Promise.all([
-      client.getState(),
-      client.getThinkingLevels(),
-      client.getModels(),
-      client.getStats(),
-    ]);
-    res.json({ live: true, state, thinking: { levels }, models: { models }, stats });
+    res.json(await liveConfig(await sessions.client(session.id)));
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -684,6 +739,45 @@ app.post("/api/sessions/:id/config", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: (e as Error).message, applied });
   }
+});
+
+/**
+ * What a model's context window really is on this server — see getContextLimit.
+ *
+ * Its own route, not part of a session's config: the number belongs to the
+ * model, so it holds for every chat that uses it, and it can be set before pi
+ * has been started for the one you are looking at.
+ */
+app.put("/api/context-limit", (req, res) => {
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: CONTEXT_UNSUPPORTED });
+  const { provider, model, tokens } = req.body ?? {};
+  if (typeof provider !== "string" || !provider || typeof model !== "string" || !model) {
+    return res.status(400).json({ error: "provider and model required" });
+  }
+  // What pi reports for a session with no model, and not one that can be looked up.
+  if (provider === "unknown" || model === "unknown") {
+    return res.status(400).json({ error: "Choose a model first: the context window is kept per model" });
+  }
+  // Refused rather than rounded or clamped: a window quietly different from the
+  // one typed would be found out when a chat overflowed.
+  const problem = tokens === null ? undefined : contextLimitProblem(tokens);
+  if (problem) return res.status(400).json({ error: problem });
+  setContextLimit(provider, model, tokens);
+  sessions.applyContextLimits();
+  res.json({ ok: true, contextLimit: tokens });
+});
+
+/** The window every chat is held to unless its model has one of its own; a ceiling, see contextWindowFor. */
+app.put("/api/context-default", (req, res) => {
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: CONTEXT_UNSUPPORTED });
+  // Asked for outright, so that a request without it does not clear the setting.
+  if (!req.body || !("tokens" in req.body)) return res.status(400).json({ error: "tokens required" });
+  const tokens = req.body.tokens;
+  const problem = tokens === null ? undefined : contextLimitProblem(tokens);
+  if (problem) return res.status(400).json({ error: problem });
+  setDefaultContextLimit(tokens);
+  sessions.applyContextLimits();
+  res.json({ ok: true, contextDefault: tokens });
 });
 
 app.post("/api/sessions/:id/compact", async (req, res) => {

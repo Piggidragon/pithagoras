@@ -141,6 +141,7 @@ export function ComposerBar({
   sessionId,
   session,
   running,
+  turns,
   panelRequest,
   onPanelConsumed,
   actions,
@@ -149,6 +150,8 @@ export function ComposerBar({
   /** What the sidebar already knows, so the pills can paint immediately. */
   session: Session;
   running: boolean;
+  /** How many turns the transcript holds; each one that ends leaves pi with a new token count. */
+  turns?: number;
   /** Set by /model so the slash command opens the same picker as the pill. */
   panelRequest?: "model" | "effort" | null;
   onPanelConsumed?: () => void;
@@ -242,6 +245,28 @@ export function ComposerBar({
   useEffect(() => {
     if (!running) load();
   }, [running]);
+
+  // And after each turn of a run, when pi has the new token count: this used to
+  // wait for the whole run to end, so the percentage sat still for as long as
+  // the agent worked — the very time it is changing. Not while idle, where the
+  // ticks of an old transcript being opened would only be requests for nothing.
+  //
+  // Only the figures are asked for, not the whole config: that one carries the
+  // model catalogue, which pi rebuilds from each provider's credentials every
+  // time it is asked, and a long run has a great many turns.
+  const currentSession = useRef(sessionId);
+  currentSession.current = sessionId;
+  useEffect(() => {
+    if (!running || !turns) return;
+    const asked = sessionId;
+    api
+      .stats(asked)
+      .then((r) => {
+        // An answer for a chat that has since been left is not this one's.
+        if (r.stats && currentSession.current === asked) setCfg((prev) => ({ ...prev, stats: r.stats }));
+      })
+      .catch(() => {});
+  }, [turns, running, sessionId]);
 
   useEffect(() => {
     if (!panelRequest) return;

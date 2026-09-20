@@ -721,6 +721,85 @@ export function setSettings(patch: Partial<GlobalSettings>): GlobalSettings {
   return getSettings();
 }
 
+/**
+ * The context window a model really has, when that is not what its
+ * definition says.
+ *
+ * pi takes the window from the model's entry in models.json, and everything
+ * that depends on it — the percentage, when a chat is compacted — follows that
+ * number. A server can hold less: llama.cpp with `--parallel 2` splits
+ * `ctx-size` between two slots, so a chat gets half of what the definition
+ * promises and a long one fails instead of being compacted. The definition
+ * cannot be right for every deployment, so the number is kept here, per model,
+ * and wins when it is set.
+ */
+export const CONTEXT_LIMIT_MIN = 1_024;
+export const CONTEXT_LIMIT_MAX = 10_000_000;
+const contextLimitKey = (provider: string, model: string) => `context_limit:${provider}/${model}`;
+
+export function getContextLimit(provider: string, model: string): number | undefined {
+  const row = getDb()
+    .prepare("SELECT value FROM settings WHERE key = ?")
+    .get(contextLimitKey(provider, model)) as { value: string } | undefined;
+  const n = Number(row?.value);
+  return Number.isInteger(n) && n >= CONTEXT_LIMIT_MIN && n <= CONTEXT_LIMIT_MAX ? n : undefined;
+}
+
+/** `null` hands the model back to the default, or to what its definition says. */
+export function setContextLimit(provider: string, model: string, tokens: number | null): void {
+  storeLimit(contextLimitKey(provider, model), tokens);
+}
+
+const DEFAULT_LIMIT_KEY = "context_limit_default";
+
+/** The window every chat is held to, unless its model has one of its own. */
+export function getDefaultContextLimit(): number | undefined {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key = ?").get(DEFAULT_LIMIT_KEY) as
+    | { value: string }
+    | undefined;
+  const n = Number(row?.value);
+  return Number.isInteger(n) && n >= CONTEXT_LIMIT_MIN && n <= CONTEXT_LIMIT_MAX ? n : undefined;
+}
+
+export function setDefaultContextLimit(tokens: number | null): void {
+  storeLimit(DEFAULT_LIMIT_KEY, tokens);
+}
+
+function storeLimit(key: string, tokens: number | null): void {
+  if (tokens === null) getDb().prepare("DELETE FROM settings WHERE key = ?").run(key);
+  else
+    getDb()
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(key, String(tokens));
+}
+
+/**
+ * The window a chat on this model is held to.
+ *
+ * What was set for the model wins. Failing that, the default applies as a
+ * ceiling, not as a size: a model that declares less than the default keeps
+ * what it declares, since raising it would promise room it does not have.
+ * `declared` is the model's own number, when it has one.
+ */
+export function contextWindowFor(provider: string, model: string, declared?: number): number | undefined {
+  const own = getContextLimit(provider, model);
+  if (own) return own;
+  const fallback = getDefaultContextLimit();
+  if (!fallback) return declared;
+  return declared ? Math.min(declared, fallback) : fallback;
+}
+
+/** Why a window is refused, or undefined when it is fine. Shared by everything that accepts one. */
+export function contextLimitProblem(tokens: unknown): string | undefined {
+  if (Number.isInteger(tokens) && (tokens as number) >= CONTEXT_LIMIT_MIN && (tokens as number) <= CONTEXT_LIMIT_MAX) {
+    return undefined;
+  }
+  // en-US, not the server's locale: the message is English whatever the host is.
+  return `The context window must be a whole number between ${CONTEXT_LIMIT_MIN.toLocaleString("en-US")} and ${CONTEXT_LIMIT_MAX.toLocaleString("en-US")} tokens`;
+}
+
 /** Where reports go when a routine does not name a destination of its own. */
 export interface ReportTo {
   channel: string;
