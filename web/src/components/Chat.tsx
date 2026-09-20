@@ -1,5 +1,6 @@
 import { ActivityProgress } from './ActivityProgress';
 import { useWorkPanels } from "../use-work-panels";
+import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
 import { displaySpeechText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
@@ -154,8 +155,8 @@ export function Chat({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const settled = useRef(false);
+  const scroller = useFollowBottom<HTMLDivElement>();
+  const lastSpoken = useRef<string | null>(null);
   const items = useMemo(() => buildTranscript(events), [events]);
 
 
@@ -220,7 +221,6 @@ export function Chat({
   useEffect(() => {
     // Only offered where it would work: an iframe needs a secure context, and
     // over plain HTTP the client inside it refuses to start.
-    settled.current = false;
     if (!window.isSecureContext) return;
     api
       .browser()
@@ -229,10 +229,14 @@ export function Chat({
   }, []);
 
   useEffect(() => {
-    // Jump on the first paint, glide afterwards. Smooth-scrolling through a
-    // whole replayed conversation is the thing that looked broken on refresh.
-    bottomRef.current?.scrollIntoView({ behavior: settled.current ? "smooth" : "auto" });
-    settled.current = true;
+    // Stay at the end while the agent writes — unless you scrolled up to read,
+    // which new output must not undo. Something you just said, and the first
+    // paint of a conversation, always go to the end.
+    let said: string | null = null;
+    for (let i = items.length - 1; i >= 0 && !said; i--) if (items[i].kind === "user") said = items[i].id;
+    const fresh = said !== lastSpoken.current;
+    lastSpoken.current = said;
+    scroller.follow(fresh);
   }, [items.length, events.length]);
 
   const send = async () => {
@@ -313,7 +317,7 @@ export function Chat({
 
       <div className={voiceMode ? "hidden" : "flex min-h-0 flex-1"}>
       <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-6">
+      <div ref={scroller.ref} onScroll={scroller.onScroll} className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl space-y-3">
         {hasEarlier && (
           <div className="flex justify-center pb-2">
@@ -431,7 +435,6 @@ export function Chat({
         })}
 
           {running && phase && <ActivityLine phase={phase} now={now} />}
-          <div ref={bottomRef} />
         </div>
       </div>
 
