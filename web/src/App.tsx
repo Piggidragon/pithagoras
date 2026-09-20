@@ -92,6 +92,8 @@ function Shell({
   /** Whether anything older than what we hold is still on the server. */
   const [moreBefore, setMoreBefore] = useState(false);
   const [loadingBefore, setLoadingBefore] = useState(false);
+  /** Whether the replay of the conversation has arrived, so it is not drawn half-built. */
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uiQueue, setUiQueue] = useState<UiRequest[]>([]);
   const esRef = useRef<EventSource | null>(null);
@@ -132,6 +134,7 @@ function Shell({
     setEvents([]);
     setMoreBefore(false);
     setUiQueue([]);
+    setLoaded(false);
     if (!sessionId) return;
 
     let cancelled = false;
@@ -141,38 +144,32 @@ function Shell({
       const es = new EventSource(`/api/sessions/${sessionId}/events?since=${seq}`);
       esRef.current = es;
       es.addEventListener("live-reset", () => setEvents(resetLiveEvents));
-      es.onmessage = (m) => {
-        const ev: PortalEvent = JSON.parse(m.data);
-        // A message was taken out of the conversation: drop what it covered,
-        // rather than reloading everything to find out what is left.
-        if (ev.type === "portal_removed") {
-          const { from, to } = ev.payload as { from: number; to: number | null };
-          setEvents((prev) => prev.filter((e) => !(e.seq >= from && (to == null || e.seq < to))));
-          return;
+      // Until it has caught up, what arrives is history being replayed. It is
+      // gathered and applied in one go: drawing the conversation once per event
+      // is what made a long one open at the top, build downwards over seconds and
+      // then jump to the end.
+      let replay: PortalEvent[] | null = [];
+      // Applied straight from the event, not by re-fetching: the round trip
+      // is what made the Stop button appear a beat late, or not at all when
+      // the reply came back before the list did.
+      const applyStatus = (ev: PortalEvent) => {
+        if (ev.type !== "portal_status") return;
+        const status = (ev.payload as { status?: SessionStatus }).status;
+        if (status) {
+          setSessions((prev) =>
+            prev.map((s) => (s.id === sessionId ? { ...s, status } : s)),
+          );
+          // An agent or routine session is not in that list at all — it is
+          // fetched once, on its own. Without this it kept whatever status
+          // the fetch happened to catch, so a chat either never started
+          // working or never stopped, and the activity line ran forever.
+          setOther((prev) => (prev?.id === sessionId ? { ...prev, status } : prev));
         }
-        // Live-only events (dialogs) use a negative seq and must not move the
-        // resume cursor, or reconnecting would skip real history.
-        if (ev.seq > 0) seq = ev.seq;
-        setEvents((prev) => appendLiveEvent(prev, ev));
-        // Applied straight from the event, not by re-fetching: the round trip
-        // is what made the Stop button appear a beat late, or not at all when
-        // the reply came back before the list did.
-        if (ev.type === "portal_status") {
-          const status = (ev.payload as { status?: SessionStatus }).status;
-          if (status) {
-            setSessions((prev) =>
-              prev.map((s) => (s.id === sessionId ? { ...s, status } : s)),
-            );
-            // An agent or routine session is not in that list at all — it is
-            // fetched once, on its own. Without this it kept whatever status
-            // the fetch happened to catch, so a chat either never started
-            // working or never stopped, and the activity line ran forever.
-            setOther((prev) => (prev?.id === sessionId ? { ...prev, status } : prev));
-          }
-          refreshSessions().catch(() => {});
-        }
-        // Dialogs an extension is blocking on. notify/setStatus/setWidget are
-        // one-way and must not open a modal.
+        refreshSessions().catch(() => {});
+      };
+      // Dialogs an extension is blocking on. notify/setStatus/setWidget are
+      // one-way and must not open a modal.
+      const applyDialog = (ev: PortalEvent) => {
         if (ev.type === "extension_ui_request") {
           const req = ev.payload as UiRequest;
           if (["select", "confirm", "input", "editor"].includes(req.method)) {
@@ -184,7 +181,40 @@ function Shell({
           setUiQueue((q) => q.filter((x) => x.id !== id));
         }
       };
+      const flush = () => {
+        const batch = replay;
+        replay = null;
+        if (!batch?.length) return;
+        setEvents((prev) => batch.reduce(appendLiveEvent, prev));
+        // Only where the session ended up is news; the statuses it passed
+        // through on the way were each a request for the session list.
+        const last = [...batch].reverse().find((e) => e.type === "portal_status");
+        if (last) applyStatus(last);
+        batch.forEach(applyDialog);
+      };
+      es.onmessage = (m) => {
+        const ev: PortalEvent = JSON.parse(m.data);
+        // Live-only events (dialogs) use a negative seq and must not move the
+        // resume cursor, or reconnecting would skip real history.
+        if (ev.seq > 0) seq = ev.seq;
+        if (replay) {
+          replay.push(ev);
+          return;
+        }
+        // A message was taken out of the conversation: drop what it covered,
+        // rather than reloading everything to find out what is left.
+        if (ev.type === "portal_removed") {
+          const { from, to } = ev.payload as { from: number; to: number | null };
+          setEvents((prev) => prev.filter((e) => !(e.seq >= from && (to == null || e.seq < to))));
+          return;
+        }
+        setEvents((prev) => appendLiveEvent(prev, ev));
+        applyStatus(ev);
+        applyDialog(ev);
+      };
       es.addEventListener("caught-up", () => {
+        flush();
+        setLoaded(true);
         // Only now do we know where the replayed window starts, and therefore
         // whether the conversation continues above it.
         setEvents((prev) => {
@@ -198,6 +228,8 @@ function Shell({
         });
       });
       es.onerror = () => {
+        // Keep what arrived: the resume cursor has already moved past it.
+        flush();
         es.close();
         setTimeout(connect, 2000);
       };
@@ -299,6 +331,7 @@ function Shell({
           <Chat
             session={active}
             events={events}
+            loading={!loaded}
             hasEarlier={moreBefore}
             loadingEarlier={loadingBefore}
             onLoadEarlier={async () => {
