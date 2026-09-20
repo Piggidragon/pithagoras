@@ -41,7 +41,7 @@ them. See [Projects](/guide/projects).
 | `GET /api/projects/:name` | The project plus `{ files, bytes, complete }` — what deleting it would remove |
 | `GET /api/projects/:name/instructions` | `{ text }` |
 | `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it. |
-| `DELETE /api/projects/:name` | Deletes its chats and its folder; 409 while one is running |
+| `DELETE /api/projects/:name` | Deletes its chats (with their conversation files) and its folder; 409 while one is running |
 
 ## Sessions
 
@@ -52,7 +52,7 @@ them. See [Projects](/guide/projects).
 | `POST /api/sessions` | `{ workspace?, title? }` — no workspace means Home, the agent's directory; no title means "New chat", replaced by the first message |
 | `GET /api/sessions/:id` | One session |
 | `PATCH /api/sessions/:id` | `{ title?, pinned? }` |
-| `DELETE /api/sessions/:id` | Stops it if running, then deletes it and its events. The folder is left alone. |
+| `DELETE /api/sessions/:id` | Stops it if running, then deletes it, its events and pi's conversation file for it (in `SESSION_DIR`). The folder it worked in is left alone. |
 
 A session:
 

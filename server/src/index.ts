@@ -327,11 +327,12 @@ app.delete("/api/projects/:name", async (req, res) => {
     // busy mount, a file that is not ours), and before anything that cannot come
     // back — the chats' transcripts. Their rows go last, together, so that
     // either all are removed or none.
-    for (const chat of chats) await sessions.stop(chat.id);
+    for (const chat of chats) await sessions.discard(chat.id);
     deleteProjectFolder(WORKSPACE_ROOT, project.name);
     getDb().transaction(() => {
       for (const chat of chats) deleteSession(chat.id);
     })();
+    for (const chat of chats) sessions.removeFiles(chat.id);
     res.json({ ok: true, sessionsDeleted: chats.length });
   } catch (e) {
     projectFailure(res, e);
@@ -494,8 +495,9 @@ app.patch("/api/sessions/:id", (req, res) => {
 app.delete("/api/sessions/:id", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  await sessions.stop(session.id);
+  await sessions.discard(session.id);
   deleteSession(session.id);
+  sessions.removeFiles(session.id);
   res.json({ ok: true });
 });
 
