@@ -24,8 +24,11 @@ export function removeSessionFiles(root: string, sessionId: string): boolean {
   if (path.dirname(dir) !== path.resolve(root)) throw new Error(`"${sessionId}" is not a session id`);
   try {
     lstatSync(dir);
-  } catch {
-    return false;
+  } catch (e) {
+    // Only "not there" means there is nothing to do. A folder that cannot be
+    // looked at is a leftover, and the caller is told so.
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw e;
   }
   rmSync(dir, { recursive: true, force: true });
   return true;

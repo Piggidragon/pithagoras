@@ -44,3 +44,13 @@ test('a link in the place of the folder is removed as a link, and what it pointe
   assert.equal(readFileSync(path.join(outside, 'precious'), 'utf8'), 'x');
   rmSync(r, { recursive: true }); rmSync(outside, { recursive: true });
 });
+
+test('only "not there" means nothing to do; a folder that cannot be looked at is an error', () => {
+  const r = root();
+  assert.equal(removeSessionFiles(path.join(r, 'no-such-root'), 'abc'), false);
+  // A root that is a file: the folder under it cannot be looked at, and that is not "absent".
+  const file = path.join(r, 'a-file');
+  writeFileSync(file, 'x');
+  assert.throws(() => removeSessionFiles(file, 'abc'), /ENOTDIR/);
+  rmSync(r, { recursive: true });
+});

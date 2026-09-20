@@ -866,6 +866,29 @@ class SessionManager extends EventEmitter {
     await live.executor.cleanup?.(sessionId).catch(() => {});
   }
 
+  /** Waits for a launch that is still in flight; it is not in `live` until it has finished. */
+  private async settleStart(sessionId: string): Promise<void> {
+    let starting: Promise<unknown> | undefined;
+    while ((starting = this.starting.get(sessionId))) await starting.catch(() => {});
+  }
+
+  /**
+   * Brings a session to a stop for good, so its rows and files can go.
+   *
+   * stop() does nothing for a session whose process is still starting, and it
+   * does not wait for a run to end. A launch that outlived the delete would then
+   * make the session's folder again, and a run that was still appending would
+   * write into one that is gone. So the launch is waited for, the run is aborted
+   * and waited for, and only then is the process disposed.
+   */
+  async discard(sessionId: string): Promise<void> {
+    await this.settleStart(sessionId);
+    await this.abort(sessionId).catch(() => {});
+    // A prompt can have started a launch while the abort was being waited for.
+    await this.settleStart(sessionId);
+    await this.stop(sessionId);
+  }
+
   /**
    * Removes what pi wrote for a session, once its rows are gone. It never fails
    * the caller: the chat is already deleted, and a folder that will not go —
