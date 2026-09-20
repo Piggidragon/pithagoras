@@ -5,7 +5,7 @@ import { CanvasPanel } from "./CanvasPanel";
 import { displaySpeechText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
@@ -228,10 +228,11 @@ export function Chat({
       .catch(() => setBrowserUp(false));
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Stay at the end while the agent writes — unless you scrolled up to read,
     // which new output must not undo. Something you just said, and the first
-    // paint of a conversation, always go to the end.
+    // paint of a conversation, always go to the end — before it is painted, so
+    // new content is never seen at the old scroll position.
     let said: string | null = null;
     for (let i = items.length - 1; i >= 0 && !said; i--) if (items[i].kind === "user") said = items[i].id;
     const fresh = said !== lastSpoken.current;
