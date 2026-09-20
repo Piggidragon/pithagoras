@@ -66,13 +66,14 @@ import {
   writeInstructions,
 } from "./projects.js";
 import {
-  CONTEXT_LIMIT_MAX,
-  CONTEXT_LIMIT_MIN,
+  contextLimitProblem,
   getContextLimit,
+  getDefaultContextLimit,
   getSettingDefaults,
   getSettings,
   getStoredSettings,
   setContextLimit,
+  setDefaultContextLimit,
   setSettings,
 } from "./db.js";
 
@@ -129,6 +130,7 @@ app.get("/api/settings", (_req, res) => {
     // say which file a value lives in.
     compaction: readCompactionSettings(),
     compactionDefaults: COMPACTION_DEFAULTS,
+    contextDefault: getDefaultContextLimit() ?? null,
     executor: EXECUTOR_KIND,
     workspaceRoot: WORKSPACE_ROOT,
   });
@@ -598,6 +600,7 @@ async function liveConfig(client: Awaited<ReturnType<typeof sessions.client>>) {
     models: { models },
     stats,
     contextLimit: getContextLimit(state.model.provider, state.model.id) ?? null,
+    contextDefault: getDefaultContextLimit() ?? null,
   };
 }
 
@@ -627,6 +630,7 @@ app.get("/api/sessions/:id/config", async (req, res) => {
       // Kept beside the model rather than in pi, so it can be read and changed
       // before pi has ever been started for this chat.
       contextLimit: (modelId && getContextLimit(provider, modelId)) || null,
+      contextDefault: getDefaultContextLimit() ?? null,
       // Unknowable without the session open, and a made-up zero reads as
       // "empty context" rather than "not measured yet".
       stats: null,
@@ -718,17 +722,23 @@ app.put("/api/context-limit", (req, res) => {
   }
   // Refused rather than rounded or clamped: a window quietly different from the
   // one typed would be found out when a chat overflowed.
-  if (
-    tokens !== null &&
-    !(Number.isInteger(tokens) && tokens >= CONTEXT_LIMIT_MIN && tokens <= CONTEXT_LIMIT_MAX)
-  ) {
-    return res.status(400).json({
-      error: `The context window must be a whole number between ${CONTEXT_LIMIT_MIN.toLocaleString("en-US")} and ${CONTEXT_LIMIT_MAX.toLocaleString("en-US")} tokens`,
-    });
-  }
+  const problem = tokens === null ? undefined : contextLimitProblem(tokens);
+  if (problem) return res.status(400).json({ error: problem });
   setContextLimit(provider, model, tokens);
   sessions.applyContextLimits();
   res.json({ ok: true, contextLimit: tokens });
+});
+
+/** The window every chat is held to unless its model has one of its own; a ceiling, see contextWindowFor. */
+app.put("/api/context-default", (req, res) => {
+  // Asked for outright, so that a request without it does not clear the setting.
+  if (!req.body || !("tokens" in req.body)) return res.status(400).json({ error: "tokens required" });
+  const tokens = req.body.tokens;
+  const problem = tokens === null ? undefined : contextLimitProblem(tokens);
+  if (problem) return res.status(400).json({ error: problem });
+  setDefaultContextLimit(tokens);
+  sessions.applyContextLimits();
+  res.json({ ok: true, contextDefault: tokens });
 });
 
 app.post("/api/sessions/:id/compact", async (req, res) => {

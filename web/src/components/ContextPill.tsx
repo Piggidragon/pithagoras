@@ -27,7 +27,8 @@ function tone(pct: number) {
  * pi takes it from the model's definition, which cannot know how the server is
  * run: llama.cpp with `--parallel 2` gives each chat half of `ctx-size`, so a
  * chat compacts far too late and then fails at the server. This is where it is
- * put right, per model, and it holds for every chat that uses the model.
+ * put right for one model, and it holds for every chat that uses it. A default
+ * for all models is in Settings; what is set here wins over it.
  */
 function ContextWindow({
   cfg,
@@ -40,8 +41,18 @@ function ContextWindow({
 }) {
   const { provider, id } = cfg.state.model;
   const limit = cfg.contextLimit ?? null;
+  const fallback = cfg.contextDefault ?? null;
   const declared = cfg.models.models.find((m) => m.id === id && m.provider === provider)?.contextWindow;
-  const shown = cfg.stats?.contextUsage.contextWindow ?? limit ?? declared;
+  // The default is a ceiling: a model that declares less keeps its own.
+  const byDefault = fallback ? (declared ? Math.min(declared, fallback) : fallback) : declared;
+  const shown = cfg.stats?.contextUsage.contextWindow ?? limit ?? byDefault;
+  const source = limit
+    ? "set for this model"
+    : fallback && (!declared || fallback < declared)
+      ? "default from Settings"
+      : declared
+        ? "from the model"
+        : "";
   const [text, setText] = useState(shown ? String(shown) : "");
   const [busy, setBusy] = useState(false);
 
@@ -70,14 +81,14 @@ function ContextWindow({
       setText(shown ? String(shown) : "");
       return;
     }
-    void save(n === declared ? null : n);
+    void save(n);
   };
 
   return (
     <div className="rounded-lg bg-raised/40 px-2 py-2">
       <div className="flex items-baseline justify-between gap-2">
         <p className="text-sm text-fg">Context window</p>
-        <p className="text-[11px] text-fg-subtle">{limit ? "set by you" : declared ? "from the model" : ""}</p>
+        <p className="text-[11px] text-fg-subtle">{source}</p>
       </div>
       <div className="mt-1.5 flex items-center gap-1.5">
         <input
@@ -91,22 +102,15 @@ function ContextWindow({
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2 py-1 text-sm tabular-nums text-fg disabled:opacity-50"
         />
-        {declared ? (
-          <button
-            type="button"
-            disabled={busy}
-            title={`Half of ${declared.toLocaleString()}: what one of two parallel slots holds`}
-            onClick={() => save(Math.floor(declared / 2))}
-            className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-raised disabled:opacity-50"
-          >
-            Half
-          </button>
-        ) : null}
         {limit ? (
           <button
             type="button"
             disabled={busy}
-            title={declared ? `Back to ${declared.toLocaleString()}, what the model says` : "Back to what the model says"}
+            title={
+              byDefault
+                ? `Back to ${byDefault.toLocaleString()}, ${fallback && byDefault === fallback ? "the default from Settings" : "what the model says"}`
+                : "Back to what the model says"
+            }
             onClick={() => save(null)}
             className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-raised disabled:opacity-50"
           >
@@ -115,8 +119,7 @@ function ContextWindow({
         ) : null}
       </div>
       <p className="mt-1.5 text-[11px] text-fg-faint">
-        What the server holds for one chat. With llama.cpp <code>--parallel 2</code> that is half of{" "}
-        <code>ctx-size</code>. Applies to every chat on this model.
+        What the server holds for one chat. Applies to every chat on this model.
       </p>
     </div>
   );

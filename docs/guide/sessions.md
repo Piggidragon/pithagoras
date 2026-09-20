@@ -121,11 +121,16 @@ server is run. llama.cpp with `--parallel 2` splits `ctx-size` between two
 slots, so a chat gets half of what the model's entry says: it is compacted far
 too late and then fails at the server.
 
-Set what one chat really holds in the pill's **Context window** field. **Half**
-fills in half of the declared window, which is what `--parallel 2` leaves each
-chat; **Reset** goes back to the model's own number. The setting belongs to the
-model, not the chat: it applies to every chat that uses that model, open ones
-included, and is kept in the portal's database — `models.json` is left alone.
+Set what one chat really holds in the pill's **Context window** field; **Reset**
+goes back to the default (below) or, without one, the model's own number. The
+setting belongs to the model, not the chat: it applies to every chat that uses
+that model, open ones included, and is kept in the portal's database —
+`models.json` is left alone.
+
+For all models at once there is a **Context window** default under
+Settings → General. It is a ceiling: a model that declares more is held to it, a
+model that declares less keeps its own number, and a window set for one model in
+its pill wins over it. Leave it empty to use what each model says.
 
 ## Persistence
 

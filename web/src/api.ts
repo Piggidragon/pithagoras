@@ -443,6 +443,12 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ provider, model, tokens }),
     }),
+  /** The window every chat is held to unless its model has its own; `null` removes it. */
+  setContextDefault: (tokens: number | null) =>
+    json<{ ok: true; contextDefault: number | null }>("/api/context-default", {
+      method: "PUT",
+      body: JSON.stringify({ tokens }),
+    }),
   compact: (id: string) =>
     json<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),
 
@@ -466,6 +472,7 @@ export const api = {
       /** pi's own compaction tuning, which lives in its settings.json not ours. */
       compaction: CompactionSettings;
       compactionDefaults: CompactionSettings;
+      contextDefault: number | null;
       executor: string;
       workspaceRoot: string;
     }>("/api/settings"),
@@ -569,6 +576,8 @@ export interface PiConfig {
   models: { models: PiModel[] };
   /** The context window set for this model, when it differs from its definition. */
   contextLimit?: number | null;
+  /** The window every chat is held to, as a ceiling; set in Settings. */
+  contextDefault?: number | null;
   stats: null | {
     tokens: { input: number; output: number; total: number };
     cost: number;
