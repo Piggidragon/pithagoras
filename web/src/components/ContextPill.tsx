@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LuChevronRight, LuRefreshCw } from "react-icons/lu";
 import { api, type PiConfig } from "../api";
+import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 
 /**
@@ -41,11 +42,14 @@ function ContextWindow({
 }) {
   const { provider, id } = cfg.state.model;
   const limit = cfg.contextLimit ?? null;
+
   const fallback = cfg.contextDefault ?? null;
   const declared = cfg.models.models.find((m) => m.id === id && m.provider === provider)?.contextWindow;
   // The default is a ceiling: a model that declares less keeps its own.
   const byDefault = fallback ? (declared ? Math.min(declared, fallback) : fallback) : declared;
-  const shown = cfg.stats?.contextUsage.contextWindow ?? limit ?? byDefault;
+  // Not `??`: pi reports 0, not nothing, when it cannot work a window out.
+  const measured = cfg.stats?.contextUsage.contextWindow;
+  const shown = measured && measured > 0 ? measured : (limit ?? byDefault);
   const source = limit
     ? "set for this model"
     : fallback && (!declared || fallback < declared)
@@ -54,11 +58,18 @@ function ContextWindow({
         ? "from the model"
         : "";
   const [text, setText] = useState(shown ? String(shown) : "");
+  /** Whether the field has been typed in, as opposed to showing what is set. */
+  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const restore = () => {
+    setText(shown ? String(shown) : "");
+    setDirty(false);
+  };
 
   // Follows the server when the number changes there, and leaves what is being
   // typed alone while it does not.
-  useEffect(() => setText(shown ? String(shown) : ""), [shown]);
+  useEffect(restore, [shown]);
 
   const save = async (tokens: number | null) => {
     setBusy(true);
@@ -67,21 +78,25 @@ function ContextWindow({
       await onChanged();
     } catch (e) {
       onError(e as Error);
-      setText(shown ? String(shown) : "");
+      restore();
     } finally {
       setBusy(false);
     }
   };
 
   const commit = () => {
-    const n = Number(text.replace(/[\s,._]/g, ""));
-    if (!text.trim() || n === shown) return;
-    if (!Number.isInteger(n) || n < 1024) {
-      onError(new Error("Enter the window as a whole number of tokens, 1,024 or more"));
-      setText(shown ? String(shown) : "");
-      return;
+    if (!dirty) return;
+    const parsed = parseWindow(text);
+    if (parsed.kind === "empty") return restore();
+    if (parsed.kind === "bad") {
+      onError(new Error(parsed.message));
+      return restore();
     }
-    void save(n);
+    // Against what is set for this model, not what is in force: typing the number
+    // the default already gives is how a model is pinned to it.
+    if (parsed.tokens === limit) return restore();
+    setDirty(false);
+    void save(parsed.tokens);
   };
 
   return (
@@ -97,7 +112,10 @@ function ContextWindow({
           value={text}
           disabled={busy}
           aria-label="Context window in tokens"
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setDirty(true);
+          }}
           onBlur={commit}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2 py-1 text-sm tabular-nums text-fg disabled:opacity-50"
@@ -264,7 +282,14 @@ export function ContextPill({
 
           <div className="my-3 border-t border-line" />
 
-          <ContextWindow cfg={cfg} onChanged={onChanged} onError={(e) => setNote({ text: e.message, error: true })} />
+          {cfg.contextLimitSupported === false ? (
+            <p className="rounded-lg bg-raised/40 px-2 py-2 text-[11px] text-fg-faint">
+              The context window is the one in the model's entry: with the container executor it cannot be
+              changed here.
+            </p>
+          ) : (
+            <ContextWindow cfg={cfg} onChanged={onChanged} onError={(e) => setNote({ text: e.message, error: true })} />
+          )}
 
           <div className="my-3 border-t border-line" />
 

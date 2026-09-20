@@ -129,9 +129,16 @@ Types worth knowing: `portal_prompt`, `portal_status`, `portal_notice`,
 with the stored model and effort, empty `thinking` and `models`, and
 `stats: null`; once it is, it carries context usage and token counts.
 
-`contextLimit` is the window set with `PUT /api/context-limit`, or `null`, and
-`contextDefault` the ceiling from `PUT /api/context-default`. Both apply to open
-chats at once, and `contextLimit` is per model rather than per chat. `tokens` must
+When pi is running, the response also has `contextLimit`, the window set with
+`PUT /api/context-limit` or `null`, and `contextDefault`, the ceiling from
+`PUT /api/context-default`. Both apply to open chats at once, and `contextLimit`
+is per model rather than per chat. `contextLimitSupported` is `false` when pi
+cannot be given a window (see below). None of the three is in the `live: false`
+response.
+
+With `EXECUTOR=container` both `PUT` routes answer 400: pi runs in the container
+behind an RPC client, and the portal cannot change the model it measures
+against. `tokens` must
 be a whole number from 1,024 to 10,000,000.
 
 `POST` returns `{ ok, applied, state }`, where `applied` lists what actually

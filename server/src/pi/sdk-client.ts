@@ -160,6 +160,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
+  /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
+  private appliedModel?: object;
+  /** What each model's own definition says its window is, as last seen on a model that was pi's. */
+  private definitionWindows = new Map<string, number | undefined>();
 
   private constructor(
     private readonly session: any,
@@ -315,7 +319,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (resourceLoader) {
       client.voiceFirst = voiceFirst;
     }
-    const unsub = session.subscribe((event: any) => { canvases?.observe(event); client.emit("event", event); });
+    const unsub = session.subscribe((event: any) => {
+      // Before anything is measured against the window: pi swaps the model for the
+      // registry's whenever an extension registers a provider, and that undoes it.
+      if (event?.type === "agent_start") client.applyContextLimit();
+      canvases?.observe(event);
+      client.emit("event", event);
+    });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};
 
@@ -534,6 +544,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   async getStats(): Promise<PiStats> {
+    // Read here as well as on run start: the figure shown is worked out against
+    // whatever model the session has now.
+    this.applyContextLimit();
     const stats = (await this.session.getSessionStats?.()) ?? {};
     const usage = (await this.session.getContextUsage?.()) ?? {};
     const contextWindow = usage.contextWindow ?? this.session.model?.contextWindow ?? 0;
@@ -617,11 +630,19 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   applyContextLimit(): void {
     const current = this.session.model;
     if (!current) return;
-    const declared = this.modelRuntime.getModel(current.provider, current.id)?.contextWindow;
+    const key = `${current.provider}/${current.id}`;
+    // A model that is not the one put here last is pi's own — the registry's, put
+    // back after a reload or a provider registering — and its window is what the
+    // definition says. Kept, because the registry cannot always say it later: a
+    // provider that has gone leaves nothing to look it up in, and the window
+    // would then stay wherever it was last set.
+    if (current !== this.appliedModel) this.definitionWindows.set(key, current.contextWindow);
+    const declared = this.modelRuntime.getModel(current.provider, current.id)?.contextWindow ?? this.definitionWindows.get(key);
     const wanted = contextWindowFor(current.provider, current.id, declared);
-    if (wanted && wanted !== current.contextWindow) {
-      this.session.agent.state.model = { ...current, contextWindow: wanted };
-    }
+    if (wanted === current.contextWindow) return;
+    const next = { ...current, contextWindow: wanted };
+    this.appliedModel = next;
+    this.session.agent.state.model = next;
   }
 
   async setThinkingLevel(level: string): Promise<void> {
@@ -655,6 +676,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   async reload(): Promise<void> {
     await this.session.reload();
+    // Reloading has extensions register their providers again, which puts the
+    // registry's model, with its own window, back on the session.
+    this.applyContextLimit();
   }
 
   /** HTML unless a .jsonl path is given, matching pi's own /export. */

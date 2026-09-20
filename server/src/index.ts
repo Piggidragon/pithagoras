@@ -585,6 +585,15 @@ app.post("/api/sessions/:id/abort", async (req, res) => {
 
 // --- per-session config (the web equivalent of the TUI's slash commands) ---
 
+/**
+ * Why the window cannot be changed, when it cannot. With EXECUTOR=container pi
+ * runs in the container behind an RPC client, and the model it measures against
+ * is out of the portal's reach — so a value stored here would change nothing
+ * while the pill claimed it had.
+ */
+const CONTEXT_UNSUPPORTED =
+  "The context window cannot be changed with EXECUTOR=container: pi runs inside the container, where the portal has no hold on its model";
+
 /** Everything the pills under the composer show, from a running pi. */
 async function liveConfig(client: Awaited<ReturnType<typeof sessions.client>>) {
   const [state, levels, models, stats] = await Promise.all([
@@ -601,6 +610,7 @@ async function liveConfig(client: Awaited<ReturnType<typeof sessions.client>>) {
     stats,
     contextLimit: getContextLimit(state.model.provider, state.model.id) ?? null,
     contextDefault: getDefaultContextLimit() ?? null,
+    contextLimitSupported: typeof client.applyContextLimit === "function",
   };
 }
 
@@ -710,6 +720,7 @@ app.post("/api/sessions/:id/config", async (req, res) => {
  * has been started for the one you are looking at.
  */
 app.put("/api/context-limit", (req, res) => {
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: CONTEXT_UNSUPPORTED });
   const { provider, model, tokens } = req.body ?? {};
   if (typeof provider !== "string" || !provider || typeof model !== "string" || !model) {
     return res.status(400).json({ error: "provider and model required" });
@@ -725,6 +736,7 @@ app.put("/api/context-limit", (req, res) => {
 
 /** The window every chat is held to unless its model has one of its own; a ceiling, see contextWindowFor. */
 app.put("/api/context-default", (req, res) => {
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: CONTEXT_UNSUPPORTED });
   // Asked for outright, so that a request without it does not clear the setting.
   if (!req.body || !("tokens" in req.body)) return res.status(400).json({ error: "tokens required" });
   const tokens = req.body.tokens;

@@ -22,6 +22,7 @@ import { api, type ExtensionInfo, type GlobalSettings, type ReportTarget, type R
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
+import { parseWindow } from "../context-window";
 import { KeepRecent, formatTokens, useKeepRecentSave } from "./KeepRecent";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
@@ -418,13 +419,13 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
 
   /** On leaving the field, on its own — like the slider above, not part of Save defaults. */
   const saveContextDefault = async () => {
-    const digits = ctxText.replace(/[\s,._]/g, "");
-    const n = digits ? Number(digits) : null;
-    if (n === ctxSaved) return setCtxText(ctxSaved ? String(ctxSaved) : "");
-    if (n !== null && (!Number.isInteger(n) || n < 1024)) {
-      onError("Enter the window as a whole number of tokens, 1,024 or more — or leave it empty for none");
+    const parsed = parseWindow(ctxText);
+    const n = parsed.kind === "ok" ? parsed.tokens : null;
+    if (parsed.kind === "bad") {
+      onError(`${parsed.message} — or leave it empty for none`);
       return setCtxText(ctxSaved ? String(ctxSaved) : "");
     }
+    if (n === ctxSaved) return setCtxText(ctxSaved ? String(ctxSaved) : "");
     try {
       const r = await api.setContextDefault(n);
       setCtxSaved(r.contextDefault);
@@ -558,6 +559,7 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
         <div className="rounded-xl border border-line bg-raised/40 p-3">
           <input
             value={ctxText}
+            disabled={meta?.executor === "container"}
             inputMode="numeric"
             onChange={(e) => setCtxText(e.target.value)}
             onBlur={saveContextDefault}
@@ -573,6 +575,12 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
             <code>--parallel 2</code> gives each chat half of <code>ctx-size</code>. Saved when you
             leave the field.
           </p>
+          {meta?.executor === "container" && (
+            <p className="mt-1 text-xs text-warn">
+              Not available with the container executor: pi runs inside the container, where the portal
+              cannot change its context window.
+            </p>
+          )}
           {ctxNote && <p className="mt-1 text-xs text-ok">{ctxNote}</p>}
         </div>
       </Section>

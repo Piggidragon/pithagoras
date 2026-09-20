@@ -193,7 +193,16 @@ class SessionManager extends EventEmitter {
 
   /** A changed context limit reaches the chats that are open, not just the ones started later. */
   applyContextLimits(): void {
-    for (const s of this.live.values()) s.client.applyContextLimit?.();
+    // One chat at a time, like refreshSettings: one that is mid-teardown is not a
+    // reason for the others to keep the old window, or for the save to fail after
+    // the value has been stored.
+    for (const [id, s] of this.live) {
+      try {
+        s.client.applyContextLimit?.();
+      } catch (e) {
+        console.error(`[portal] could not apply the context window to ${id}: ${(e as Error).message}`);
+      }
+    }
   }
 
   /** How far llama.cpp has got through the prompt. Straight out to the browser. */

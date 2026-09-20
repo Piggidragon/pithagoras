@@ -19,8 +19,11 @@ function clientFor(model, declared) {
   };
   const client = Object.create(SdkPiClient.prototype);
   client.session = session;
-  client.modelRuntime = { getModel: () => ({ ...model, contextWindow: declared }) };
-  return { client, session };
+  client.definitionWindows = new Map();
+  // `registry.gone` stands for a provider that is no longer there to look the model up in.
+  const registry = { gone: false };
+  client.modelRuntime = { getModel: () => (registry.gone ? undefined : { ...model, contextWindow: declared }) };
+  return { client, session, registry };
 }
 
 test('a limit belongs to one model, and can be taken away', () => {
@@ -93,4 +96,55 @@ test('only whole numbers in range are accepted as a window', () => {
   for (const bad of [0, 1023, 10_000_001, 1.5, '131072', NaN, null, undefined, {}]) {
     assert.match(contextLimitProblem(bad), /whole number between 1,024 and 10,000,000/, String(bad));
   }
+});
+
+test('a model pi puts back, as it does on /reload, is given the window again', () => {
+  setContextLimit('p', 'r', 65536);
+  const { client, session } = clientFor({ provider: 'p', id: 'r', contextWindow: 131072 }, 131072);
+  client.applyContextLimit();
+  assert.equal(session.model.contextWindow, 65536);
+  // pi swaps in the registry's own object when a provider registers again.
+  session.agent.state.model = { provider: 'p', id: 'r', contextWindow: 131072 };
+  client.applyContextLimit();
+  assert.equal(session.model.contextWindow, 65536);
+  setContextLimit('p', 'r', null);
+});
+
+test('Reset works when the registry can no longer say what the model declares', () => {
+  setContextLimit('p', 'g', 65536);
+  const { client, session, registry } = clientFor({ provider: 'p', id: 'g', contextWindow: 131072 }, 131072);
+  client.applyContextLimit();
+  assert.equal(session.model.contextWindow, 65536);
+  registry.gone = true;
+  setContextLimit('p', 'g', null);
+  client.applyContextLimit();
+  assert.equal(session.model.contextWindow, 131072, 'back to what it declared, not left lowered');
+});
+
+test('a model that declares less than the default is not raised when the registry has lost it', () => {
+  setDefaultContextLimit(131072);
+  const { client, session, registry } = clientFor({ provider: 'p', id: 's', contextWindow: 32768 }, 32768);
+  client.applyContextLimit();
+  registry.gone = true;
+  client.applyContextLimit();
+  assert.equal(session.model.contextWindow, 32768);
+  setDefaultContextLimit(null);
+});
+
+test('one chat that cannot take the window does not stop the others getting it', async () => {
+  const { sessions } = await import('../dist/session-manager.js');
+  const got = [];
+  const errors = [];
+  const log = console.error;
+  console.error = (m) => errors.push(m);
+  sessions.live.set('bad', { client: { applyContextLimit() { throw new Error('torn down'); } } });
+  sessions.live.set('good', { client: { applyContextLimit() { got.push('good'); } } });
+  try {
+    assert.doesNotThrow(() => sessions.applyContextLimits());
+  } finally {
+    console.error = log;
+    sessions.live.clear();
+  }
+  assert.deepEqual(got, ['good']);
+  assert.match(errors.join(), /bad.*torn down/);
 });

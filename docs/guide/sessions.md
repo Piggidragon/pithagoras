@@ -122,12 +122,17 @@ Set what one chat really holds in the pill's **Context window** field; **Reset**
 goes back to the default (below) or, without one, the model's own number. The
 setting belongs to the model, not the chat: it applies to every chat that uses
 that model, open ones included, and is kept in the portal's database —
-`models.json` is left alone.
+`models.json` is left alone. The pill appears once a chat has run; before that
+the window is the one in the model's entry, or the default below.
 
 For all models at once there is a **Context window** default under
 Settings → General. It is a ceiling: a model that declares more is held to it, a
 model that declares less keeps its own number, and a window set for one model in
 its pill wins over it. Leave it empty to use what each model says.
+
+Neither is available with `EXECUTOR=container`. pi runs inside the container
+there and the portal cannot change its model, so the field and the default are
+turned off rather than accepting a number that would do nothing.
 
 ## Persistence
 

@@ -578,6 +578,8 @@ export interface PiConfig {
   contextLimit?: number | null;
   /** The window every chat is held to, as a ceiling; set in Settings. */
   contextDefault?: number | null;
+  /** False when pi runs where the portal cannot change its window: EXECUTOR=container. */
+  contextLimitSupported?: boolean;
   stats: null | {
     tokens: { input: number; output: number; total: number };
     cost: number;
