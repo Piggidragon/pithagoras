@@ -317,7 +317,7 @@ export function Chat({
     // Stay at the end while the agent writes — unless you scrolled up to read,
     // which new output must not undo. Something you just said, and the first
     // paint of a conversation, always go to the end — before it is painted, so
-    // the top of it is never seen.
+    // the top of it is never seen, nor new content at the old scroll position.
     let said: string | null = null;
     for (let i = items.length - 1; i >= 0 && !said; i--) if (items[i].kind === "user") said = items[i].id;
     const fresh = said !== lastSpoken.current;
