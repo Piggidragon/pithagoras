@@ -88,8 +88,12 @@ function Shell({
   /** Whether anything older than what we hold is still on the server. */
   const [moreBefore, setMoreBefore] = useState(false);
   const [loadingBefore, setLoadingBefore] = useState(false);
-  /** Whether the replay of the conversation has arrived, so it is not drawn half-built. */
-  const [loaded, setLoaded] = useState(false);
+  /**
+   * Which session's replay has arrived, so it is not drawn half-built. A session
+   * id rather than a flag: the first render after switching still holds the
+   * previous session's events, and must not show them under the new title.
+   */
+  const [loadedSession, setLoadedSession] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uiQueue, setUiQueue] = useState<UiRequest[]>([]);
   const esRef = useRef<EventSource | null>(null);
@@ -130,7 +134,7 @@ function Shell({
     setEvents([]);
     setMoreBefore(false);
     setUiQueue([]);
-    setLoaded(false);
+    setLoadedSession(null);
     if (!sessionId) return;
 
     let cancelled = false;
@@ -203,7 +207,7 @@ function Shell({
       };
       es.addEventListener("caught-up", () => {
         flush();
-        setLoaded(true);
+        setLoadedSession(sessionId);
         // Only now do we know where the replayed window starts, and therefore
         // whether the conversation continues above it.
         setEvents((prev) => {
@@ -319,9 +323,9 @@ function Shell({
         ) : active ? (
           <Chat
             session={active}
-            events={events}
-            loading={!loaded}
-            hasEarlier={moreBefore}
+            events={loadedSession === active.id ? events : []}
+            loading={loadedSession !== active.id}
+            hasEarlier={loadedSession === active.id && moreBefore}
             loadingEarlier={loadingBefore}
             onLoadEarlier={async () => {
               const oldest = events.find((e) => e.seq > 0)?.seq;
