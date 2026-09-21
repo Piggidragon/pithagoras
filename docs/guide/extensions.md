@@ -32,6 +32,37 @@ Settings → Extensions. Four spec forms:
 They persist across restarts, because `HOME` points at the data volume. **Update
 all** upgrades everything; the bin icon removes one.
 
+## Switching one off
+
+Every installed package has a switch in Settings → Extensions. Off is not
+uninstalled: the package stays where it is, with its settings and everything it
+downloaded, and simply loads nothing — no commands, skills, prompts, themes or
+tools — until it is switched back on. It is the difference between trying a week
+without `pi-lens` and having to install it again to find out.
+
+pi does this itself. A package in `settings.json` can be written as an object,
+and an empty list for a kind of resource loads none of that kind; `pi config` in
+a terminal writes the same thing from a menu. The switch writes exactly that:
+
+```json
+{ "source": "npm:pi-lens", "extensions": [], "skills": [], "prompts": [], "themes": [] }
+```
+
+and, switched on, puts the entry back. If the package was narrowed by hand — some
+of its extensions off, some on — it shows as **filtered**, and that narrowing is
+kept aside while it is off and given back when it is on again, rather than lost
+to a plain entry.
+
+Conversations that are open and idle are reloaded, so the change is there at
+once; ones in the middle of a run keep what they had until `/reload` or their
+next start, and the page says how many they were. Packages a project brings in
+are that project's to decide and have no switch here.
+
+::: warning Some packages carry others with them
+`pi-mcp-adapter` is what makes MCP servers into tools. Switching it off takes
+every MCP server with it, [the browser](/guide/browser) included.
+:::
+
 ## Configuring
 
 An extension that reads settings gets its own page in the settings navigation,

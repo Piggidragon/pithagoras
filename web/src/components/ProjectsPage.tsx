@@ -87,6 +87,7 @@ export function ProjectsPage({
         message: `${parts.length ? parts.join(" and ") + " go with it. " : "It is empty. "}This cannot be undone.`,
         confirmLabel: "Delete project",
         danger: true,
+        deletes: true,
       });
       if (!ok) return;
       await api.deleteProject(p.name);

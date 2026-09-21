@@ -17,6 +17,7 @@ import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { confirmDialog } from "./ConfirmDialog";
+import { moveHighlight, paletteMatches, slashToken } from "../slash-palette";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
 import { latestFileActivity } from "../file-activity";
@@ -353,6 +354,12 @@ export function Chat({
     () => events.reduce((n, e) => n + (e.type === "turn_end" || e.type === "compaction_end" ? 1 : 0), 0),
     [events],
   );
+  // A notice is the portal speaking, not a message: only what a person or pi
+  // said counts. Earlier pages that are not loaded yet count as said.
+  const started = useMemo(
+    () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant"),
+    [items, hasEarlier],
+  );
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running) return;
@@ -374,10 +381,29 @@ export function Chat({
   }, [session.id, running]);
 
   // Show the palette while the composer holds a bare "/name" prefix.
-  const slashQuery = /^\/([\w:-]*)$/.exec(input.trimStart());
-  const matches = slashQuery
-    ? commands.filter((c) => c.name.toLowerCase().startsWith(slashQuery[1].toLowerCase())).slice(0, 8)
-    : [];
+  const slashText = slashToken(input);
+  const allMatches = useMemo(
+    () => (slashText === null ? [] : paletteMatches(commands, slashText)),
+    [commands, slashText],
+  );
+  /** Escape puts the list away until something else is typed. */
+  const [paletteShut, setPaletteShut] = useState(false);
+  /** Which command Enter runs and Tab completes; the first until an arrow says otherwise. */
+  const [picked, setPicked] = useState(0);
+  useEffect(() => {
+    setPicked(0);
+    setPaletteShut(false);
+  }, [slashText]);
+  const matches = paletteShut ? [] : allMatches;
+  const paletteRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    paletteRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [picked, matches.length]);
+  /** What is left in the box once a command is chosen: its name, ready for arguments. */
+  const complete = (c: PiCommand) => {
+    caret.current = null;
+    setInput(`/${c.name} `);
+  };
 
   useEffect(() => {
     // Only offered where it would work: an iframe needs a secure context, and
@@ -675,6 +701,7 @@ export function Chat({
                           message: "The agent's reply to it goes too, and the agent forgets both.",
                           confirmLabel: "Delete",
                           danger: true,
+                          deletes: true,
                         })
                       )
                         attempt(() => onDeleteMessage(item.seq));
@@ -768,17 +795,26 @@ export function Chat({
       >
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
         {matches.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
-            {matches.map((c) => (
+          <div
+            ref={paletteRef}
+            role="listbox"
+            aria-label="Commands"
+            className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-xl border border-line bg-surface shadow-pop"
+          >
+            {matches.map((c, i) => (
               <button
                 key={c.name}
                 type="button"
+                role="option"
+                aria-selected={i === picked}
+                onMouseEnter={() => setPicked(i)}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  caret.current = null;
-                  setInput(`/${c.name} `);
+                  complete(c);
                 }}
-                className="flex w-full items-baseline gap-2 px-3 py-2 text-left transition hover:bg-fg/5"
+                className={`flex w-full items-baseline gap-2 px-3 py-2 text-left transition ${
+                  i === picked ? "bg-fg/5" : ""
+                }`}
               >
                 <span className="font-mono text-xs text-accent">/{c.name}</span>
                 <span className="truncate text-xs text-fg-subtle">{c.description}</span>
@@ -799,6 +835,34 @@ export function Chat({
             caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
           }}
           onKeyDown={(e) => {
+            if (matches.length > 0 && !e.nativeEvent.isComposing) {
+              const chosen = matches[Math.min(picked, matches.length - 1)];
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setPicked((i) => moveHighlight(i, e.key === "ArrowDown" ? 1 : -1, matches.length));
+                return;
+              }
+              if (e.key === "Tab" && !e.shiftKey) {
+                e.preventDefault();
+                complete(chosen);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setPaletteShut(true);
+                return;
+              }
+              // The command that is lit runs, rather than the half of its name
+              // that was typed going to the agent as a message. One that cannot
+              // do anything without an argument waits for it instead.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (sending) return;
+                if (chosen.needsArgument) complete(chosen);
+                else void submit(`/${chosen.name}`, true);
+                return;
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();
@@ -820,6 +884,7 @@ export function Chat({
             session={session}
             running={running}
             turns={turns}
+            started={started}
             panelRequest={panelRequest}
             onPanelConsumed={() => setPanelRequest(null)}
             actions={<>

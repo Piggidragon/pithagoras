@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { asksBeforeDeleting } from "../confirm-prefs";
 
 /**
  * Asking "are you sure" in the portal's own dialog instead of the browser's.
@@ -17,6 +18,12 @@ export interface ConfirmOptions {
   confirmLabel?: string;
   /** Destructive: the button is red, and focus starts on Cancel. */
   danger?: boolean;
+  /**
+   * Removes something, so the question can be switched off in Settings. Not
+   * the same as `danger`: throwing away unsaved edits is dangerous too, but
+   * there is no copy of them to fall back on and nobody asked to skip it.
+   */
+  deletes?: boolean;
 }
 
 type Pending = ConfirmOptions & { id: number; resolve: (ok: boolean) => void };
@@ -25,6 +32,7 @@ let present: ((p: Pending) => void) | null = null;
 let counter = 0;
 
 export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
+  if (options.deletes && !asksBeforeDeleting()) return Promise.resolve(true);
   // Nothing mounted to draw it — which is a bug, but not one that should make
   // a delete button do nothing.
   if (!present) {

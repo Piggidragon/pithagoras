@@ -928,6 +928,34 @@ class SessionManager extends EventEmitter {
     return done.filter(Boolean).length;
   }
 
+  /**
+   * pi reads which packages to load when a conversation starts, so a package
+   * switched on or off reaches the open ones by reloading them. Only the idle:
+   * a reload rebinds every extension, which is not something to do under a run or a
+   * compaction. Those are counted rather than skipped in silence, since they
+   * keep what they had until they are reloaded.
+   */
+  async reloadIdle(): Promise<{ reloaded: number; waiting: number }> {
+    let waiting = 0;
+    const done = await Promise.all(
+      [...this.live.entries()].map(async ([sessionId, { client }]) => {
+        if (this.isBusy(sessionId) || this.compacting.has(sessionId)) {
+          waiting++;
+          return false;
+        }
+        try {
+          await client.reload();
+          return true;
+        } catch (e) {
+          console.error(`[portal] could not reload ${sessionId}: ${(e as Error).message}`);
+          waiting++;
+          return false;
+        }
+      })
+    );
+    return { reloaded: done.filter(Boolean).length, waiting };
+  }
+
   async abort(sessionId: string): Promise<void> {
     const live = this.live.get(sessionId);
     if (!live?.client.running) {

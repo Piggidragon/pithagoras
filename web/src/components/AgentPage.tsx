@@ -98,6 +98,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
         : "It is stopped if it is running, and its transcript is removed.",
       confirmLabel: "Delete",
       danger: true,
+      deletes: true,
     });
     if (!ok) return;
     setError("");

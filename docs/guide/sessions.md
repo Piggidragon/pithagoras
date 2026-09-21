@@ -71,8 +71,11 @@ updated_at DESC`), so the sidebar and the Sessions page never disagree.
 Hovering a session gives you pin, rename and delete. Renaming turns the name into
 a field where it stands — Enter or clicking away keeps the new one, Escape puts
 the old one back — and double-clicking the name does the same. Delete asks in the
-portal's own dialog, with the button saying what it will do. The Agent tab's
-conversations can be renamed and deleted the same way, from the row.
+portal's own dialog, with the button saying what it will do — and **Settings →
+General → Confirmations** turns that question off, for chats, messages, files,
+skills, routines, projects, voices and channels alike. It is kept per browser.
+Discarding unsaved changes is still asked about. The Agent tab's conversations
+can be renamed and deleted the same way, from the row.
 
 ## Model and effort
 
@@ -94,6 +97,31 @@ pi coerces the level on a model that does not reason — ask for `high` on a
 non-reasoning model and it lands on `off`. What gets stored is the level pi
 resolved to, not the one you asked for, so a rejected value is not reapplied on
 every restart.
+
+### When `off` does not switch thinking off
+
+The pill can say `off` and the model go on thinking. What `off` puts in the
+request is decided by pi from the model's entry in `models.json`, and for an
+OpenAI-compatible server it does not know how to switch reasoning off unless it
+is told. Left alone it sends `reasoning_effort: "off"`, which llama.cpp does not
+read: measured on a Qwen-family model, that answer reasons exactly as much as
+`medium` does.
+
+Those models switch thinking through their chat template, so say so:
+
+```json
+{
+  "id": "Ornith1.5-35b",
+  "reasoning": true,
+  "thinkingLevelMap": { "off": "off", "minimal": null, "low": null, "medium": "medium", "high": null, "xhigh": null, "max": null },
+  "compat": { "thinkingFormat": "qwen-chat-template" }
+}
+```
+
+pi then sends `chat_template_kwargs: { "enable_thinking": false }` for `off` and
+`true` for any other level — the request above went from 67 tokens to 4. A model
+with `"off": null` in its `thinkingLevelMap` has no off at all and the pill does
+not offer one; give it `"off": "off"` and the `compat` line to add it.
 
 ## Context
 
@@ -122,8 +150,10 @@ Set what one chat really holds in the pill's **Context window** field; **Reset**
 goes back to the default (below) or, without one, the model's own number. The
 setting belongs to the model, not the chat: it applies to every chat that uses
 that model, open ones included, and is kept in the portal's database —
-`models.json` is left alone. The pill appears once a chat has run; before that
-the window is the one in the model's entry, or the default below.
+`models.json` is left alone. The pill appears once something has been said in a chat, and not before: an
+empty conversation has nothing to measure, and a meter reading 0% is not
+information. Until then the window is the one in the model's entry, or the
+default below.
 
 For all models at once there is a **Context window** default under
 Settings → General. It is a ceiling: a model that declares more is held to it, a

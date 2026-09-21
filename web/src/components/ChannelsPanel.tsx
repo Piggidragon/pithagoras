@@ -249,6 +249,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
                         message: "Configured channels are kept.",
                         confirmLabel: "Uninstall",
                         danger: true,
+                        deletes: true,
                       })
                     ) {
                       act(() => api.removeChannelPackage(k.packageName));
@@ -653,6 +654,7 @@ function ChannelDetail({
                 message: fate || undefined,
                 confirmLabel: "Remove",
                 danger: true,
+                deletes: true,
               })
             ) {
               act(async () => {

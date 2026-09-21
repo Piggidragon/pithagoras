@@ -278,6 +278,7 @@ export function FilesPanel({
       message,
       confirmLabel: "Delete",
       danger: true,
+      deletes: true,
     });
     if (!ok) return;
     let problem: string | null = null;

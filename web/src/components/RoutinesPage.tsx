@@ -803,6 +803,7 @@ function RoutineDetail({
                 message: "Its sessions are kept.",
                 confirmLabel: "Delete",
                 danger: true,
+                deletes: true,
               })
             ) {
               act("save", async () => {

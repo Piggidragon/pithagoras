@@ -3,7 +3,10 @@ import { promisify } from "node:util";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
-import { piSettingsPath } from "../pi-settings.js";
+import { piSettingsPath, updatePiSettings } from "../pi-settings.js";
+import { extensionStash, setExtensionStash } from "../db.js";
+import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
+import { sessions } from "../session-manager.js";
 
 const run = promisify(execFile);
 
@@ -22,6 +25,13 @@ export interface ExtensionInfo {
   homepage?: string;
   version?: string;
   settings: DetectedSetting[];
+  /**
+   * Whether pi loads it. Absent where the portal cannot say, or cannot switch
+   * it: a package the project brings is that project's to decide.
+   */
+  enabled?: boolean;
+  /** Some of its files are off by hand; switching it off and on must not lose that. */
+  filtered?: boolean;
 }
 
 const settingsFile = piSettingsPath;
@@ -55,7 +65,9 @@ function parseList(output: string): { spec: string; path?: string; scope?: strin
     if (indent === 0) {
       scope = text.replace(/packages:?$/i, "").trim() || undefined;
     } else if (indent <= 2) {
-      out.push({ spec: text, scope });
+      // `pi list` says so after the source when the entry is an object, and
+      // that is not part of the name pi takes back in `remove`.
+      out.push({ spec: text.replace(/\s+\(filtered\)$/, ""), scope });
     } else {
       const last = out[out.length - 1];
       if (last && !last.path) last.path = text;
@@ -126,6 +138,7 @@ export function extensionsRouter(): Router {
       const { stdout } = await run("pi", ["list"], { timeout: 60_000 });
       const settings = readSettings();
       const packages = parseList(stdout);
+      const listed = Array.isArray(settings.packages) ? settings.packages : [];
 
       const infos: ExtensionInfo[] = packages.map((pkg) => {
         const info: ExtensionInfo = {
@@ -135,6 +148,14 @@ export function extensionsRouter(): Router {
           scope: pkg.scope,
           settings: [],
         };
+
+        if (!pkg.scope || /^user/i.test(pkg.scope)) {
+          const entry = listed.find((e) => sourceOf(e) === pkg.spec);
+          if (entry !== undefined) {
+            info.enabled = !isSwitchedOff(entry);
+            if (isFiltered(entry)) info.filtered = true;
+          }
+        }
 
         if (pkg.path && existsSync(path.join(pkg.path, "package.json"))) {
           try {
@@ -163,6 +184,35 @@ export function extensionsRouter(): Router {
       });
 
       res.json({ extensions: infos, settingsPath: settingsFile() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * Switch an installed package off, or on again, without uninstalling it — the
+   * way `pi config` does, by emptying what it may load. Open conversations are
+   * reloaded so the change is there without a restart.
+   */
+  router.put("/extensions/enabled", async (req, res) => {
+    const { spec, enabled } = req.body ?? {};
+    if (typeof spec !== "string" || !spec || typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "spec and enabled are required" });
+    }
+    try {
+      let stash = extensionStash();
+      let found = false;
+      await updatePiSettings((all) => {
+        const changed = setPackageEnabled(Array.isArray(all.packages) ? all.packages : [], spec, enabled, stash);
+        if (!changed) return;
+        found = true;
+        all.packages = changed.packages;
+        stash = changed.stash;
+      });
+      if (!found) return res.status(404).json({ error: "That package is not installed for this user" });
+      setExtensionStash(stash);
+      const { reloaded, waiting } = await sessions.reloadIdle();
+      res.json({ ok: true, enabled, reloaded, waiting });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }

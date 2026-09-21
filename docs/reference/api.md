@@ -189,6 +189,7 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `DELETE /api/packages` | `{ spec }` |
 | `POST /api/packages/update` | Update everything |
 | `GET /api/extensions` | Parsed packages with their recovered settings |
+| `PUT /api/extensions/enabled` | `{ spec, enabled }` — switch a package off or on without uninstalling it; reloads idle open sessions and says how many were left waiting |
 | `PUT /api/extensions/settings` | `{ key, value }` — empty value removes the key |
 | `GET /api/pi-settings` | Raw `settings.json` |
 | `PUT /api/pi-settings` | `{ content }` — refused unless it parses as JSON |

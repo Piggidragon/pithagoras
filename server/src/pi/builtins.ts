@@ -52,7 +52,12 @@ const FALLBACK_DESCRIPTIONS: Record<string, string> = {
 export interface BuiltinCommand extends PiCommand {
   where: "server" | "client";
   argumentHint?: string;
+  /** Does nothing without an argument, so the menu completes it rather than running it. */
+  needsArgument?: boolean;
 }
+
+/** `/name` with no name is a command that silently does nothing. */
+const NEEDS_ARGUMENT = new Set(["name"]);
 
 let cached: BuiltinCommand[] | undefined;
 
@@ -76,6 +81,7 @@ export async function getBuiltinCommands(): Promise<BuiltinCommand[]> {
     name,
     description: PORTAL_DESCRIPTIONS[name] ?? bySdk.get(name)?.description ?? FALLBACK_DESCRIPTIONS[name],
     argumentHint: bySdk.get(name)?.argumentHint,
+    ...(NEEDS_ARGUMENT.has(name) ? { needsArgument: true } : {}),
     source: "builtin",
     where,
   }));

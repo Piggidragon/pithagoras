@@ -1200,6 +1200,23 @@ function putSetting(key: string, value: string): void {
   else db.prepare("DELETE FROM settings WHERE key = ?").run(key);
 }
 
+/**
+ * What a package's entry looked like before it was switched off, so switching
+ * it back on gives that back rather than a plain one.
+ */
+export function extensionStash(): Record<string, unknown> {
+  try {
+    const raw = JSON.parse((getStoredSettings() as Record<string, string>).extension_stash || "{}");
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setExtensionStash(stash: Record<string, unknown>): void {
+  putSetting("extension_stash", Object.keys(stash).length ? JSON.stringify(stash) : "");
+}
+
 /** Tools that are off unless a conversation says otherwise. */
 export function toolDefaultsOff(): string[] {
   return parseToolsOff((getStoredSettings() as Record<string, string>).tools_off_default);

@@ -624,6 +624,11 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ spec }),
     }),
+  setExtensionEnabled: (spec: string, enabled: boolean) =>
+    json<{ ok: true; enabled: boolean; reloaded: number; waiting: number }>("/api/extensions/enabled", {
+      method: "PUT",
+      body: JSON.stringify({ spec, enabled }),
+    }),
   updatePackages: () =>
     json<{ ok: true; output: string }>("/api/packages/update", { method: "POST" }),
 };
@@ -750,6 +755,10 @@ export interface ExtensionInfo {
   homepage?: string;
   version?: string;
   settings: DetectedSetting[];
+  /** Whether pi loads it; absent where the portal cannot switch it. */
+  enabled?: boolean;
+  /** Narrowed by hand in settings.json: some of what it brings is off already. */
+  filtered?: boolean;
 }
 
 export interface GlobalSettings {
@@ -764,6 +773,8 @@ export interface PiCommand {
   source: "builtin" | "extension" | "prompt" | "skill" | string;
   /** Builtins only: "client" commands are handled here, not sent to pi. */
   where?: "server" | "client";
+  /** Builtins only: does nothing without one, so choosing it leaves the box open for it. */
+  needsArgument?: boolean;
   sourceInfo?: { path?: string; scope?: string; origin?: string };
 }
 

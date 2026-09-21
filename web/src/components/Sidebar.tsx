@@ -345,6 +345,7 @@ function SessionItem({
                   message: "It is stopped if it is running, and its transcript is removed.",
                   confirmLabel: "Delete",
                   danger: true,
+                  deletes: true,
                 })
               ) {
                 onDelete(s.id);

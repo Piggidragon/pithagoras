@@ -465,6 +465,7 @@ function SkillDetail({
                     title: `Delete the skill "${s.name}"?`,
                     confirmLabel: "Delete",
                     danger: true,
+                    deletes: true,
                   })
                 ) {
                   act(async () => {
