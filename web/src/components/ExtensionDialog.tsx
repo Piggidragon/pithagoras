@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { LuCheck, LuTerminal, LuX } from "react-icons/lu";
 import { api } from "../api";
+import { TuiSurface } from "./TuiSurface";
+import type { FrameBus } from "../tui-frames";
 
 export interface UiRequest {
   id: string;
-  method: "select" | "confirm" | "input" | "editor" | string;
+  method: "select" | "confirm" | "input" | "editor" | "custom" | string;
   title?: string;
   message?: string;
   options?: string[];
@@ -16,18 +18,29 @@ export interface UiRequest {
  * The browser standing in for the TUI when an extension asks the user
  * something. Without this, pi hands the extension a default straight away and
  * commands that open a menu appear to do nothing.
+ *
+ * Four of the five shapes are the ones pi names — a menu, a yes/no, a line, a
+ * block of text — and the page draws each with its own controls. The fifth is
+ * whatever the extension drew itself, which nothing here can anticipate, so it
+ * is shown as the screen it is.
  */
 export function ExtensionDialog({
   sessionId,
   request,
+  frames,
   onDone,
 }: {
   sessionId: string;
   request: UiRequest;
+  frames: FrameBus;
   onDone: () => void;
 }) {
   const [value, setValue] = useState(request.defaultValue ?? "");
   const [busy, setBusy] = useState(false);
+  // A drawn screen handles its own keys, including escape and the arrows, and
+  // its own idea of what cancelling means. Taking either from it would make it
+  // behave differently here than in the terminal it was written for.
+  const drawn = request.method === "custom";
 
   const respond = async (payload: { value?: unknown; cancelled?: boolean }) => {
     setBusy(true);
@@ -40,17 +53,22 @@ export function ExtensionDialog({
   };
 
   useEffect(() => {
+    if (drawn) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && respond({ cancelled: true });
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [request.id]);
+  }, [request.id, drawn]);
 
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
-      onMouseDown={(e) => e.target === e.currentTarget && respond({ cancelled: true })}
+      onMouseDown={(e) => e.target === e.currentTarget && !drawn && respond({ cancelled: true })}
     >
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-line bg-surface shadow-pop">
+      <div
+        className={`w-full overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
+          drawn ? "max-w-3xl" : "max-w-md"
+        }`}
+      >
         <header className="flex items-start gap-3 border-b border-line px-4 py-3">
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/12 text-accent">
             <LuTerminal className="h-4 w-4" />
@@ -63,12 +81,16 @@ export function ExtensionDialog({
           </div>
           <button
             onClick={() => respond({ cancelled: true })}
+            title={drawn ? "Close without answering" : undefined}
             className="rounded-lg p-1 text-fg-subtle transition hover:bg-fg/10 hover:text-fg"
           >
             <LuX className="h-4 w-4" />
           </button>
         </header>
 
+        {drawn ? (
+          <TuiSurface sessionId={sessionId} requestId={request.id} frames={frames} />
+        ) : (
         <div className="max-h-[55vh] overflow-y-auto p-3">
           {request.method === "select" && (
             <ul className="space-y-1">
@@ -146,6 +168,7 @@ export function ExtensionDialog({
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );

@@ -1,10 +1,99 @@
 import type { PortalEvent } from "./api";
+import { extractLinks, omitDrawn, type ToolLink } from "./tool-links";
 
 export type Item =
   | { kind: "user"; id: string; seq: number; text: string; audio?: boolean }
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
-  | { kind: "tool"; id: string; name: string; status: "running" | "done" | "error"; detail?: string }
+  | {
+      kind: "tool";
+      id: string;
+      name: string;
+      status: "running" | "done" | "error";
+      detail?: string;
+      /** What the tool drew for itself, when it draws — see ToolRender. */
+      render?: { collapsed: string[]; expanded?: string[] };
+      /** What the tool actually returned, which is what the model was given. */
+      output?: string;
+      /** Where it says that came from — see tool-links. */
+      links?: ToolLink[];
+    }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
+
+/**
+ * How much of a tool's output is worth putting on a page.
+ *
+ * A read of a large file comes back whole, and the whole of it in the DOM is a
+ * scroll bar nobody asked for. The model got all of it either way; this is only
+ * what a person is shown.
+ */
+const MAX_OUTPUT = 20_000;
+
+/**
+ * The sources a tool's output names, worked out once per tool call.
+ *
+ * The transcript is rebuilt from the whole event list on every streamed
+ * delta — tens of times a second while a reply is coming in. Reading the links
+ * out of every tool result each time means a regex pass over every output in
+ * the conversation per frame, on the thread that has to draw it. Nothing about
+ * the answer can change once the tool has ended, so it is kept against the
+ * event that produced it. Held weakly: the entry goes when the event does.
+ */
+const linkCache = new WeakMap<object, ToolLink[]>();
+
+function toolLinks(
+  event: object,
+  output: string | undefined,
+  render: { collapsed: string[]; expanded?: string[] } | undefined
+): ToolLink[] {
+  const seen = linkCache.get(event);
+  if (seen) return seen;
+  // Only the ones the tool did not already list itself: it knows which of them
+  // it used, and saying it twice is saying it twice.
+  const links = omitDrawn(
+    extractLinks(output),
+    [...(render?.collapsed ?? []), ...(render?.expanded ?? [])],
+    output
+  );
+  linkCache.set(event, links);
+  return links;
+}
+
+/**
+ * What the tool handed back, as text.
+ *
+ * Two shapes, because pi has two: a content array like a message, and the
+ * plain `output` string a tool may return instead. Anything that is not text —
+ * an image — has nothing to put here.
+ */
+function toolOutput(p: any): string | undefined {
+  const result = p?.result;
+  if (!result) return undefined;
+  const parts = Array.isArray(result.content)
+    ? result.content
+        .filter((c: any) => c?.type === "text" && typeof c.text === "string")
+        .map((c: any) => c.text)
+    : [];
+  const text = (parts.length ? parts.join("\n") : String(result.output ?? "")).trim();
+  if (!text) return undefined;
+  return text.length > MAX_OUTPUT ? text.slice(0, MAX_OUTPUT) + "\n…" : text;
+}
+
+/**
+ * A tool's own drawing of this step, when it ships one.
+ *
+ * Checked rather than trusted: it comes off the event stream, may have been
+ * stored by an older build, and a malformed one must not take the transcript
+ * with it.
+ */
+function toolRender(p: any): { collapsed: string[]; expanded?: string[] } | undefined {
+  const render = p?.render;
+  const strings = (v: unknown) =>
+    Array.isArray(v) && v.every((line) => typeof line === "string") ? (v as string[]) : undefined;
+  const collapsed = strings(render?.collapsed);
+  if (!collapsed?.length) return undefined;
+  const expanded = strings(render?.expanded);
+  return expanded ? { collapsed, expanded } : { collapsed };
+}
 
 /**
  * Fold pi's event stream into renderable turns.
@@ -76,6 +165,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
           name: String(p.toolName ?? p.name ?? "tool"),
           status: "running",
           detail: summarizeToolInput(p),
+          render: toolRender(p),
         });
         break;
 
@@ -86,6 +176,13 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
           const it = items[i];
           if (it.kind === "tool" && it.status === "running" && it.name === name) {
             it.status = p.isError || p.error ? "error" : "done";
+            // What the tool drew for its result replaces what it drew for the
+            // call: the call was a guess at what would happen, and this is it.
+            const drawn = toolRender(p);
+            if (drawn) it.render = drawn;
+            it.output = toolOutput(p);
+            const links = toolLinks(ev, it.output, it.render);
+            if (links.length) it.links = links;
             break;
           }
         }

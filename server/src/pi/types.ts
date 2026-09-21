@@ -69,4 +69,15 @@ export interface PiClient extends EventEmitter {
 
   /** Answer an extension dialog. Returns false if the request is unknown/expired. */
   respondUi(id: string, response: { cancelled?: boolean; value?: unknown }): boolean;
+
+  /**
+   * A keystroke for a screen an extension is drawing, as a terminal would have
+   * sent it. Optional: only an executor that runs the component itself has one
+   * to deliver to.
+   */
+  uiInput?(id: string, data: string): boolean;
+  /** The size of the browser's terminal for that screen, in cells. */
+  uiResize?(id: string, cols: number, rows: number): boolean;
+  /** The screen as it stands, for a terminal that has only just opened. */
+  uiFrame?(id: string): { data: string; lines: number } | undefined;
 }

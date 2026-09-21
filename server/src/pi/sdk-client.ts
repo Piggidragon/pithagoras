@@ -14,6 +14,42 @@ import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { contextWindowFor } from "../db.js";
+import {
+  TuiSurface,
+  plainChoices,
+  plainLines,
+  plainText,
+  type OverlayHandle,
+  type TuiComponent,
+  type TuiFrame,
+} from "./tui-bridge.js";
+import { tuiRuntime, type TuiRuntime } from "./tui-runtime.js";
+import { ToolRenderer } from "./tool-render.js";
+
+/** How wide a widget is drawn. The page wraps what it gets; the component cannot be asked. */
+/**
+ * How long a drawn screen may sit untouched before it is taken down.
+ *
+ * Long, because it only runs while nothing is happening: a screen nobody has
+ * typed into or looked at for half an hour is one whose page has gone.
+ */
+const SCREEN_IDLE_MS = 30 * 60_000;
+
+const WIDGET_COLS = 80;
+
+/** What ctx.ui.onTerminalInput() registers: a look at a keystroke before the component. */
+type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
+
+/**
+ * What an extension hands ctx.ui.custom(): pi builds the component from the
+ * surface it is given, so anything that can draw in pi's TUI can draw here.
+ */
+type TuiFactory<T> = (
+  tui: unknown,
+  theme: unknown,
+  keybindings: unknown,
+  done: (result: T) => void
+) => TuiComponent | Promise<TuiComponent>;
 
 function asArray(v: any): any[] {
   const resolved = typeof v === "function" ? v() : v;
@@ -158,6 +194,18 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private voiceFirst?: VoiceFirstTurn;
   /** Dialogs an extension is waiting on, keyed by request id. */
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
+  /** Screens an extension is drawing, keyed by the same request id as the dialog it belongs to. */
+  private surfaces = new Map<string, TuiSurface>();
+  /** Pushes a drawn screen's idle timer back; see showCustom. */
+  private screenAlive = new Map<string, () => void>();
+  /** pi's theme and key table, or null where they could not be loaded. Resolved before binding. */
+  private tui: TuiRuntime | null = null;
+  /** Extensions watching raw keys, which here means keys typed into a screen one is drawing. */
+  private terminalInput: TerminalInputHandler[] = [];
+  /** Widgets an extension is drawing, by the key it named them. */
+  private widgets = new Map<string, TuiSurface>();
+  /** Draws the rows tools draw for themselves. Absent until pi's TUI runtime is loaded. */
+  private toolRender?: ToolRenderer;
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
   /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
@@ -324,7 +372,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // registry's whenever an extension registers a provider, and that undoes it.
       if (event?.type === "agent_start") client.applyLimitQuietly();
       canvases?.observe(event);
-      client.emit("event", event);
+      client.emit("event", client.withToolRender(event));
     });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};
@@ -336,10 +384,31 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Binding a uiContext is what makes interactive commands work at all: an
     // unbound host makes ctx.ui.select() return a default immediately, so a
     // command that asks the user something silently does nothing.
+
+    // pi's theme and key table, resolved before the context is built rather
+    // than on first use: ctx.ui.theme is a plain property on the object an
+    // extension is handed, so there is no later moment to fill it in.
+    client.tui = await tuiRuntime();
+    if (client.tui) {
+      client.toolRender = new ToolRenderer(client.tui, opts.cwd, (name) =>
+        session.getToolDefinition?.(name)
+      );
+    }
     try {
       await session.bindExtensions({
         uiContext: client.buildUiContext(),
-        mode: "rpc",
+        // What an extension is told it is talking to, and the one thing it
+        // decides with: pi documents "tui" as meaning custom components can be
+        // drawn. They can now — see tui-bridge — and saying "rpc" told every
+        // extension the opposite. The ones that care check it and degrade:
+        // rpiv-ask-user-question fell back to a numbered list of its first
+        // question, and its real questionnaire was never once built.
+        //
+        // The claim is not free. A custom footer, header or editor still goes
+        // nowhere, because this is a page rather than a screen pi owns. Those
+        // were no-ops under "rpc" too, so nothing that used to work stops —
+        // what changes is that the part which can work is now offered.
+        mode: client.tui ? "tui" : "rpc",
         commandContextActions: {
           waitForIdle: () => session.waitForIdle(),
           reload: async () => {
@@ -408,7 +477,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * by drawing a menu.
    */
   private buildUiContext() {
-    const ask = (payload: Record<string, unknown>, opts: any, fallback: unknown) =>
+    const ask = (
+      payload: Record<string, unknown>,
+      opts: any,
+      fallback: unknown,
+      /** Turns what the page answered back into what the extension offered. */
+      back: (value: unknown) => unknown = (value) => value
+    ) =>
       new Promise((resolve) => {
         const id = randomUUID();
         let settled = false;
@@ -418,7 +493,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           this.pendingUi.delete(id);
           resolve(value);
         };
-        this.pendingUi.set(id, (r) => finish(r.cancelled ? fallback : r.value));
+        this.pendingUi.set(id, (r) => finish(r.cancelled ? fallback : back(r.value)));
 
         // Never park forever — an unanswered dialog would wedge the session.
         const ms = typeof opts?.timeout === "number" ? opts.timeout : 300_000;
@@ -432,34 +507,413 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         this.emit("event", { type: "extension_ui_request", id, ...payload });
       });
 
+    // An extension is writing for a terminal, and what it says arrives dressed
+    // in colour. Anything that goes into the page as words rather than as a
+    // screen is undressed first; anything that is not a string is left alone,
+    // since an extension may hand over less than pi's types promise.
+    const say = (text: unknown) => (typeof text === "string" ? plainText(text) : text);
+
     const fireAndForget = (payload: Record<string, unknown>) =>
       this.emit("event", { type: "extension_ui_request", id: randomUUID(), ...payload });
 
     return {
-      select: (title: string, options: string[], opts?: any) =>
-        ask({ method: "select", title, options }, opts, undefined),
+      /**
+       * A menu, labelled as it would be in a terminal.
+       *
+       * The label is stripped for the page and the answer is turned back into
+       * the string the extension offered: it compares what comes back against
+       * what it put in, and an option that lost its colour on the way out
+       * would not be recognised on the way home.
+       */
+      select: (title: string, options: string[], opts?: any) => {
+        const { labels, original } = plainChoices(options ?? []);
+        return ask({ method: "select", title: say(title), options: labels }, opts, undefined, original);
+      },
       confirm: (title: string, message: string, opts?: any) =>
-        ask({ method: "confirm", title, message }, opts, false),
+        ask({ method: "confirm", title: say(title), message: say(message) }, opts, false),
       input: (title: string, placeholder: string, opts?: any) =>
-        ask({ method: "input", title, placeholder }, opts, undefined),
+        ask(
+          { method: "input", title: say(title), placeholder: say(placeholder) },
+          opts,
+          undefined
+        ),
+      // The content is a document about to be edited and handed back, not a
+      // label — it is left exactly as it came.
       editor: (title: string, content: string, opts?: any) =>
-        ask({ method: "editor", title, defaultValue: content }, opts, undefined),
+        ask({ method: "editor", title: say(title), defaultValue: content }, opts, undefined),
       notify: (message: string, type?: string) =>
-        fireAndForget({ method: "notify", message, notifyType: type }),
+        fireAndForget({ method: "notify", message: say(message), notifyType: type }),
       setStatus: (key: string, text: string) =>
-        fireAndForget({ method: "setStatus", statusKey: key, statusText: text }),
-      setWidget: (key: string, content: unknown) => {
+        fireAndForget({ method: "setStatus", statusKey: key, statusText: say(text) }),
+      /**
+       * A widget sits in the page beside the composer, not in a terminal, so
+       * whichever form it arrives in it is sent as the text it came to — a
+       * line of ANSI there would read as gibberish.
+       */
+      setWidget: (key: string, content: unknown, options?: { placement?: string }) => {
+        const placement = options?.placement === "belowEditor" ? "belowEditor" : "aboveEditor";
+        if (typeof content === "function") {
+          this.liveWidget(key, content as TuiFactory<unknown>, placement);
+          return;
+        }
+        this.dropWidget(key);
         if (content === undefined || Array.isArray(content)) {
-          fireAndForget({ method: "setWidget", widgetKey: key, widgetContent: content });
+          fireAndForget({
+            method: "setWidget",
+            widgetKey: key,
+            widgetContent: content && plainLines(content as string[]),
+            widgetPlacement: placement,
+          });
         }
       },
-      onTerminalInput: () => () => {},
-      // TUI-only affordances with no meaning in a browser.
+      setTitle: (title: string) => fireAndForget({ method: "setTitle", title: say(title) }),
+      /**
+       * An extension drawing its own screen.
+       *
+       * The component runs here and the browser gets the frames — see
+       * tui-bridge. Held open until the component calls done(), which is how
+       * pi's own modes end it, or until the dialog times out like any other.
+       */
+      custom: (factory: TuiFactory<unknown>, options?: any) =>
+        this.showCustom(factory, options),
+      /**
+       * Keys an extension wants before the component sees them.
+       *
+       * A terminal has one keyboard and this has none — the only keys that
+       * exist here are the ones typed into a screen an extension is drawing,
+       * so those are what these handlers get. It is how a component offers a
+       * shortcut that still works while it has hidden itself, which is the
+       * case pi's own TUI uses it for.
+       */
+      onTerminalInput: (handler: TerminalInputHandler) => {
+        this.terminalInput.push(handler);
+        return () => {
+          const at = this.terminalInput.indexOf(handler);
+          if (at >= 0) this.terminalInput.splice(at, 1);
+        };
+      },
+      /** pi's own theme, so a component is styled the way its author expects. */
+      theme: this.tui?.theme,
+      /**
+       * The rest of pi's UI surface, answered rather than missing.
+       *
+       * These have no meaning in a browser, and while the portal called itself
+       * an RPC client an extension that checks the mode never asked for them.
+       * Saying "tui" is what makes the interactive branch run — and that
+       * branch reaches for the editor, the theme list, the tool expansion
+       * state. A missing one is not a feature quietly skipped, it is
+       * `ctx.ui.getEditorText is not a function` thrown out of a command.
+       */
       setWorkingMessage: () => {},
       setWorkingVisible: () => {},
       setWorkingIndicator: () => {},
       setHiddenThinkingLabel: () => {},
+      // The composer belongs to the page and the session cannot reach into it.
+      pasteToEditor: () => {},
+      setEditorText: () => {},
+      getEditorText: () => "",
+      // One theme, the one the components are drawn with. Switching it would
+      // change what the server draws, not what the page looks like.
+      getAllThemes: () => [],
+      getTheme: () => undefined,
+      setTheme: () => ({ success: false, error: "The portal draws with one theme." }),
+      // Each tool row in the page opens on its own; there is no single state.
+      getToolsExpanded: () => false,
+      setToolsExpanded: () => {},
+      // The portal's chat has no editor component, header or footer to replace,
+      // and an autocomplete provider has no input to attach to.
+      setFooter: () => {},
+      setHeader: () => {},
+      addAutocompleteProvider: () => {},
+      setEditorComponent: () => {},
+      getEditorComponent: () => undefined,
     };
+  }
+
+  /**
+   * Run a component for the browser and wait for what it produces.
+   *
+   * The id is shared with the dialog queue on purpose: to the page this is one
+   * more extension dialog, answered by a screen instead of a button, and it
+   * cancels, times out and clears through the paths that already exist.
+   */
+  private showCustom(factory: TuiFactory<unknown>, options?: any): Promise<unknown> {
+    const runtime = this.tui;
+    if (!runtime) {
+      // Exactly what pi's RPC mode returns. Said out loud, though: an extension
+      // that silently does nothing is the thing this feature exists to end.
+      this.emit("event", {
+        type: "portal_notice",
+        text: "An extension wanted to draw its own screen, which this server could not set up.",
+        error: true,
+      });
+      return Promise.resolve(undefined);
+    }
+    const id = randomUUID();
+    const cols = 96;
+    const rows = 24;
+    // Declared before the surface so its onFail can reach it; assigned inside
+    // the promise, which is where finish() exists.
+    let stop: (value: unknown) => void = () => {};
+    const surface = new TuiSurface({
+      cols,
+      rows,
+      onFrame: (frame) => this.emit("event", { type: "extension_ui_frame", id, ...frame }),
+      // A component that throws has already lost its screen. Ending the
+      // dialog too is the difference between the extension carrying on and
+      // the page holding a dead screen open until it times out, swallowing
+      // every key typed into it and every dialog queued behind it.
+      onFail: (error) => {
+        this.emit("event", {
+          type: "portal_notice",
+          text: `An extension's screen stopped: ${error.message}`,
+          error: true,
+        });
+        stop(undefined);
+      },
+    });
+    // Ahead of the component, as a terminal would deliver them — see
+    // onTerminalInput. A copy per keystroke, because a handler may remove
+    // itself while it is being called.
+    surface.addInputListener((data) => {
+      let payload = data;
+      for (const handler of [...this.terminalInput]) {
+        const result = handler(payload);
+        if (typeof result?.data === "string") payload = result.data;
+        if (result?.consume) return { consume: true };
+      }
+      return payload === data ? undefined : { data: payload };
+    });
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (value: unknown) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        this.pendingUi.delete(id);
+        this.surfaces.delete(id);
+        this.screenAlive.delete(id);
+        surface.dispose();
+        // The only one of these that ends itself. A menu closes when something
+        // is picked, and nothing else would tell the page to take it down —
+        // it sat there, answered, until somebody closed it by hand.
+        this.emit("event", { type: "extension_ui_done", id });
+        resolve(value);
+      };
+
+      // Cancelling a screen is the same as cancelling a dialog, so the ✕ and
+      // the timeout below both arrive through this.
+      this.pendingUi.set(id, () => finish(undefined));
+
+      stop = finish;
+
+      /**
+       * Idle, not elapsed.
+       *
+       * A dialog with a button is answered in seconds and a fixed five minutes
+       * is a fair ceiling for one. A screen is a place to work: a questionnaire
+       * read carefully, a tree walked through. Timing that out while somebody
+       * is typing into it takes the screen away mid-sentence and tells the
+       * extension they cancelled. So the clock only runs while nothing is
+       * happening, and anything the page does pushes it back.
+       */
+      const idle = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => finish(undefined), SCREEN_IDLE_MS);
+        if (typeof timer.unref === "function") timer.unref();
+      };
+      idle();
+      this.screenAlive.set(id, idle);
+
+      // Not in pi's type for custom(), which takes only overlay options — but
+      // an extension that passes one means it, and honouring it costs two
+      // lines. An already-aborted signal never fires again, so it is asked.
+      const signal = options?.signal;
+      if (signal?.aborted) {
+        finish(undefined);
+        return;
+      }
+      signal?.addEventListener?.("abort", () => finish(undefined));
+
+      let component: TuiComponent;
+      try {
+        component = factory(surface, runtime.theme, runtime.keybindings, (result: unknown) =>
+          finish(result)
+        ) as TuiComponent;
+      } catch (e) {
+        this.emit("event", {
+          type: "portal_notice",
+          text: `An extension's screen would not start: ${(e as Error).message}`,
+          error: true,
+        });
+        finish(undefined);
+        return;
+      }
+
+      // A factory may be async. Nothing is shown until it settles, which is
+      // what the TUI does too.
+      Promise.resolve(component)
+        .then((ready) => {
+          if (settled) {
+            ready?.dispose?.();
+            return;
+          }
+          this.surfaces.set(id, surface);
+          surface.attach(ready);
+          // pi's contract: the extension is handed a way to control its own
+          // screen after it is shown. What it gets here stands for the one
+          // component on this surface — see rootHandle.
+          try {
+            options?.onHandle?.(this.rootHandle(surface, ready));
+          } catch {
+            // The extension's own callback. If it throws, that is its screen
+            // to lose, not this session.
+          }
+          this.emit("event", {
+            type: "extension_ui_request",
+            id,
+            method: "custom",
+            title: typeof options?.title === "string" ? options.title : undefined,
+            cols,
+            rows,
+          });
+        })
+        .catch((e) => {
+          this.emit("event", {
+            type: "portal_notice",
+            text: `An extension's screen would not start: ${(e as Error).message}`,
+            error: true,
+          });
+          finish(undefined);
+        });
+    });
+  }
+
+  /**
+   * A widget built from a component, kept alive for as long as it is shown.
+   *
+   * The component is registered once and repaints itself afterwards by calling
+   * requestRender on the surface it was handed — rpiv-todo's task overlay does
+   * exactly this, registering on the first task and then redrawing on every
+   * change. Drawing it once and throwing the surface away left that overlay
+   * frozen on whatever the list looked like the moment it first appeared.
+   */
+  private liveWidget(key: string, factory: TuiFactory<unknown>, placement: string): void {
+    const runtime = this.tui;
+    if (!runtime) return;
+    this.dropWidget(key);
+    const surface = new TuiSurface({
+      cols: WIDGET_COLS,
+      // No viewport to overflow: a widget is as long as it is, and the page
+      // decides what it has room for.
+      rows: 200,
+      onFrame: () => {},
+      // The lines the surface just composed, rather than asking it to compose
+      // them again: a widget wants the text, not a screen, and composing twice
+      // walks the whole component tree twice — and runs twice whatever a
+      // component does while it draws.
+      onLines: (lines) =>
+        this.emit("event", {
+          type: "extension_ui_request",
+          id: randomUUID(),
+          method: "setWidget",
+          widgetKey: key,
+          widgetContent: plainLines(lines),
+          widgetPlacement: placement,
+        }),
+    });
+    this.widgets.set(key, surface);
+    try {
+      const component = factory(surface, runtime.theme, runtime.keybindings, () => {});
+      // An async widget has no moment at which the portal would ask again, and
+      // pi's own widget contract is synchronous.
+      if (component instanceof Promise) return this.dropWidget(key);
+      surface.attach(component);
+    } catch {
+      this.dropWidget(key);
+    }
+  }
+
+  /** Stop drawing a widget, whether it was replaced or cleared. */
+  private dropWidget(key: string): void {
+    const surface = this.widgets.get(key);
+    if (!surface) return;
+    this.widgets.delete(key);
+    surface.dispose();
+  }
+
+  /**
+   * A tool event, with what the tool drew for it attached.
+   *
+   * Left exactly as it was when the tool draws nothing, which is most of them
+   * — the generic row the portal builds itself is still the answer there.
+   */
+  private withToolRender(event: any): any {
+    if (!this.toolRender || !event || typeof event.type !== "string") return event;
+    if (!event.type.startsWith("tool_execution_")) return event;
+    const render = this.toolRender.render(event);
+    if (event.type === "tool_execution_end") {
+      // The same key the renderer filed it under. An event without a call id
+      // is filed under the tool's name, and forgetting only the ones that have
+      // an id left that entry behind for the next call of the same tool to
+      // find — which would then be handed the previous call's component and
+      // draw the previous call's results.
+      this.toolRender.forget(String(event.toolCallId ?? event.toolName));
+    }
+    return render ? { ...event, render } : event;
+  }
+
+  /** A keystroke for a screen an extension is drawing. False when it has gone. */
+  uiInput(id: string, data: string): boolean {
+    const surface = this.surfaces.get(id);
+    if (!surface) return false;
+    this.screenAlive.get(id)?.();
+    surface.input(data);
+    return true;
+  }
+
+  /**
+   * What an extension is given to control the screen it just opened.
+   *
+   * pi hands over an overlay handle because in the TUI a custom screen is an
+   * overlay. Here it is the whole surface, so the handle stands for the one
+   * component on it: hiding empties the screen and leaves the extension
+   * running, which is the pattern the handle exists for — a screen put away
+   * while a shortcut stays live. The dialog stays open around it, thin and
+   * empty, because the page has no idea of a screen that is there but not
+   * showing.
+   */
+  private rootHandle(surface: TuiSurface, component: TuiComponent): OverlayHandle {
+    return {
+      hide: () => surface.clear(),
+      setHidden: (hidden: boolean) => {
+        if (hidden) surface.clear();
+        else if (!surface.isShowing(component)) surface.attach(component);
+      },
+      isHidden: () => !surface.isShowing(component),
+      focus: () => surface.setFocus(component),
+      unfocus: (opts?: { target: TuiComponent | null }) =>
+        surface.setFocus(opts ? opts.target : null),
+      isFocused: () => surface.isFocused(component),
+    };
+  }
+
+  /** The browser's terminal changed size; the component lays itself out again. */
+  uiResize(id: string, cols: number, rows: number): boolean {
+    const surface = this.surfaces.get(id);
+    if (!surface) return false;
+    // A page that has just attached is somebody arriving at the screen, which
+    // is the opposite of nobody being there.
+    this.screenAlive.get(id)?.();
+    surface.resize(cols, rows);
+    return true;
+  }
+
+  /** The current screen, for a terminal that has only just opened. */
+  uiFrame(id: string): TuiFrame | undefined {
+    return this.surfaces.get(id)?.frame();
   }
 
   /** Answer a dialog the UI just resolved. */
@@ -515,6 +969,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (this.disposed) return;
     this.disposed = true;
     this.canvases?.interrupt();
+    // A screen or widget whose session is gone has nothing left to draw for,
+    // and its render timer would keep the process awake.
+    for (const surface of this.surfaces.values()) surface.dispose();
+    this.surfaces.clear();
+    this.screenAlive.clear();
+    for (const surface of this.widgets.values()) surface.dispose();
+    this.widgets.clear();
+    this.toolRender?.clear();
     try {
       this.unsubscribe();
     } catch {

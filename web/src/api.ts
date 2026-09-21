@@ -263,6 +263,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ id, ...payload }),
     }),
+  /** A keystroke for a screen an extension is drawing, as the terminal produced it. */
+  uiInput: (sessionId: string, id: string, data: string) =>
+    json<{ ok: boolean }>(`/api/sessions/${sessionId}/ui-input`, {
+      method: "POST",
+      body: JSON.stringify({ id, data }),
+    }),
+  /** How big that screen is here. The reply carries the current frame. */
+  uiResize: (sessionId: string, id: string, cols: number, rows: number) =>
+    json<{ ok: boolean; frame?: { data: string; lines: number } }>(`/api/sessions/${sessionId}/ui-size`, {
+      method: "POST",
+      body: JSON.stringify({ id, cols, rows }),
+    }),
 
   mcp: () => json<McpConfigView>("/api/mcp"),
   saveMcpServer: (name: string, entry: McpServerEntry, from?: string) =>

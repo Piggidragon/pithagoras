@@ -16,6 +16,11 @@ import { activity, buildTranscript, type Activity } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
+import { ExtensionWidgets } from "./ExtensionOutput";
+import { hiddenStatuses, hideStatus, showAllStatuses } from "../status-hiding";
+import { ToolRender } from "./ToolRender";
+import { ToolSources } from "./ToolSources";
+import type { ExtensionStatus, ExtensionWidget } from "../extension-ui";
 import { confirmDialog } from "./ConfirmDialog";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
@@ -87,6 +92,8 @@ function ContextChip({ label, body }: { label: string; body: string }) {
 export function Chat({
   session,
   events,
+  widgets = [],
+  statuses = [],
   onSend,
   onEditMessage,
   onDeleteMessage,
@@ -99,6 +106,10 @@ export function Chat({
 }: {
   session: Session;
   events: PortalEvent[];
+  /** Blocks extensions pinned near the composer, in the order they first appeared. */
+  widgets?: ExtensionWidget[];
+  /** One-line notes extensions keep current, shown under them. */
+  statuses?: ExtensionStatus[];
   /** The conversation is still arriving; drawing it now would show it half-built. */
   loading?: boolean;
   hasEarlier?: boolean;
@@ -113,6 +124,9 @@ export function Chat({
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
 }) {
+  // Status lines the reader has switched off — see status-hiding.
+  const [hidden, setHidden] = useState<string[]>(hiddenStatuses);
+
   const [input, setInput] = useState("");
   // Where dictated words go. Kept beside the state because several phrases can
   // arrive before React has drawn the first, and each must land after the last.
@@ -726,15 +740,32 @@ export function Chat({
                   ? "text-accent"
                   : "text-fg-faint";
             return (
-              <div
-                key={item.id}
-                className="flex items-center gap-2 py-0.5 font-mono text-[11px] text-fg-faint"
-              >
-                <span className={`shrink-0 ${tone}`}>
-                  {item.status === "running" ? "◇" : item.status === "error" ? "✕" : "◆"}
-                </span>
-                <span className="shrink-0 text-fg-subtle">{item.name}</span>
-                {item.detail && <span className="truncate opacity-60">{item.detail}</span>}
+              <div key={item.id} className="py-0.5">
+                <div className="flex items-center gap-2 font-mono text-[11px] text-fg-faint">
+                  <span className={`shrink-0 ${tone}`}>
+                    {item.status === "running" ? "◇" : item.status === "error" ? "✕" : "◆"}
+                  </span>
+                  <span className="shrink-0 text-fg-subtle">{item.name}</span>
+                  {item.detail && <span className="truncate opacity-60">{item.detail}</span>}
+                </div>
+                {/* Only where the tool drew something itself. Everything else
+                    keeps the one-line row it has always had. */}
+                {item.render && <ToolRender render={item.render} />}
+                {item.links && <ToolSources links={item.links} />}
+                {/* And what it actually returned, folded away like a thought:
+                    it is what the model was given, and now and then it is the
+                    only place a detail lives — the sources behind a search sit
+                    in here, not in the summary the tool draws. */}
+                {item.output && (
+                  <details className="mt-0.5 text-[11px] text-fg-subtle">
+                    <summary className="cursor-pointer select-none font-mono hover:text-fg-muted">
+                      output
+                    </summary>
+                    <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words border-l border-line pl-2 font-mono text-[11px] leading-[1.5] text-fg-muted">
+                      {item.output}
+                    </pre>
+                  </details>
+                )}
               </div>
             );
           }
@@ -766,7 +797,18 @@ export function Chat({
         }}
         className="px-4 pb-4 pt-2 sm:px-6 sm:pb-5"
       >
-        <div className="prompt-shell relative mx-auto w-full max-w-3xl">
+        <div className="relative mx-auto w-full max-w-3xl">
+        {/* Above the composer, which is where pi puts a widget unless it asks
+            for otherwise, and the only place in this page with the same
+            relationship to typing. */}
+        <ExtensionWidgets
+          widgets={widgets}
+          statuses={statuses.filter((s) => !hidden.includes(s.key))}
+          onHide={(key) => setHidden(hideStatus(key))}
+          hiddenCount={hidden.filter((k) => statuses.some((s) => s.key === k)).length}
+          onShowAll={() => setHidden(showAllStatuses())}
+        />
+        <div className="prompt-shell relative">
         {matches.length > 0 && (
           <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
             {matches.map((c) => (
@@ -833,6 +875,10 @@ export function Chat({
               </button>}
             </>}
           />
+        </div>
+        {/* And the other side of it, for a widget that asked to be under the
+            editor rather than over it. */}
+        <ExtensionWidgets widgets={widgets} placement="belowEditor" />
         </div>
       </form>
       </div>
