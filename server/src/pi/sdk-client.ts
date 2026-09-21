@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { PiClient, PiCommand, PiState, PiStats } from "./types.js";
+import type { PiClient, PiCommand, PiState, PiStats, PiTool } from "./types.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
@@ -134,6 +134,38 @@ function isLlama(provider: string | undefined): boolean {
   return provider === "llama.cpp" || (provider?.startsWith("llama-server") ?? false);
 }
 
+/**
+ * Who a tool belongs to, said the way a person would.
+ *
+ * pi's own `source` is the kind of place it came from — "builtin", "auto",
+ * "inline" — which groups four unrelated packages under one word. The name is
+ * in the path: the package for anything installed, the file for a loose
+ * extension, and pi's own angle-bracketed markers for the rest.
+ */
+function sourceLabel(info: any): string {
+  const path = typeof info?.path === "string" ? info.path : "";
+
+  // pi writes its own as <builtin:read> and the portal's inline ones as
+  // <inline:canvases>. The second is worth naming; the first is the agent.
+  const marker = /^<(builtin|inline):([^>]+)>$/.exec(path);
+  if (marker) return marker[1] === "inline" ? marker[2] : "built in";
+
+  const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path);
+  if (pkg) return pkg[1];
+
+  if (path) {
+    const parts = path.split("/").filter(Boolean);
+    const file = parts.pop() ?? "";
+    const name = file.replace(/\.[cm]?[jt]sx?$/, "");
+    // An extension in a directory of its own is named by the directory, which
+    // is what its author called it — "index" is not a name.
+    return name === "index" ? (parts.pop() ?? name) : name || "built in";
+  }
+
+  const source = typeof info?.source === "string" ? info.source.trim() : "";
+  return source || "built in";
+}
+
 /** Read a member that may be a getter or a method, without assuming which. */
 function callable(obj: any, key: string): any {
   const v = obj?.[key];
@@ -172,6 +204,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   ) {
     super();
     this.setMaxListeners(0);
+    this.guardActiveTools();
   }
 
   static async create(opts: {
@@ -196,6 +229,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     whoNow?: () => { role: string; key?: string };
     /** Lowest role this conversation serves, deciding which context files load. */
     role?: string;
+    /** Tools this conversation has switched off, by name. */
+    toolsOff?: string[];
     /** The portal's session id, for tools that record against it. */
     sessionId?: string;
     /** False lets a run act on what it read — see guardExtension. */
@@ -336,15 +371,17 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Binding a uiContext is what makes interactive commands work at all: an
     // unbound host makes ctx.ui.select() return a default immediately, so a
     // command that asks the user something silently does nothing.
+
+    client.switchedOff = new Set(opts.toolsOff ?? []);
     try {
       await session.bindExtensions({
         uiContext: client.buildUiContext(),
         mode: "rpc",
         commandContextActions: {
           waitForIdle: () => session.waitForIdle(),
-          reload: async () => {
-            await session.reload();
-          },
+          // Through the client, not the session: a reload has to put the tool
+          // switches back, and only the client knows them.
+          reload: () => client.reload(),
         },
         onError: (err: any) =>
           client.emit("event", {
@@ -390,6 +427,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
 
     client.applyLimitQuietly();
+    // After binding, not before: a tool an extension registers does not exist
+    // until then, and switching it off ahead of time switches off nothing.
+    if (client.switchedOff.size) client.applyToolsOff();
     return client;
   }
 
@@ -582,6 +622,89 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }));
   }
 
+  /** Names this session has switched off. Applied at every start and on change. */
+  /** Not private: create() fills it before the session is handed over. */
+  switchedOff = new Set<string>();
+
+  /**
+   * What pi wants active, before the switches take anything out of it.
+   *
+   * The registry is not that: `getAllTools()` is every definition pi knows,
+   * including `grep`, `find` and `ls`, which it registers and leaves inactive.
+   * Subtracting the switches from the registry switched those on the first
+   * time anyone turned anything off. The baseline is pi's own choice, in
+   * whatever way it makes it — at start, when an extension registers a tool
+   * later, on a reload — and the switches only ever take names out of it.
+   */
+  private wanted = new Set<string>();
+  private activate?: (names: string[]) => void;
+
+  /**
+   * Put the switches in the one place every activation goes through.
+   *
+   * pi activates tools from several directions and none of them asks us: an
+   * extension that registers a tool later (`lifecycle: "lazy"` is the whole
+   * point of an MCP server that connects on first use) has it activated by
+   * `refreshTools()`, and a reload activates every extension tool again. Each
+   * ends in `setActiveToolsByName`, so that is where the names come out.
+   */
+  private guardActiveTools(): void {
+    const session = this.session;
+    if (typeof session?.setActiveToolsByName !== "function") return;
+    const original = session.setActiveToolsByName.bind(session) as (names: string[]) => void;
+    this.activate = original;
+    try {
+      this.wanted = new Set<string>(session.getActiveToolNames?.() ?? []);
+    } catch {
+      this.wanted = new Set();
+    }
+    session.setActiveToolsByName = (names: string[]) => {
+      this.wanted = new Set(names);
+      original(names.filter((name) => !this.switchedOff.has(name)));
+    };
+  }
+
+  /**
+   * Every tool the session could be offered, with where it came from.
+   *
+   * The source is what a person recognises: a package name rather than the
+   * path pi tracks it by, so the list groups the way somebody thinks about it
+   * — "the web search one", not four unrelated rows. A tool pi leaves inactive
+   * is not listed: a tick beside something the model cannot call is a state
+   * the session is not in.
+   */
+  async getTools(): Promise<PiTool[]> {
+    const all: any[] = this.session.getAllTools?.() ?? [];
+    const offered = this.wanted.size ? all.filter((tool) => this.wanted.has(String(tool.name))) : all;
+    return offered.map((tool) => ({
+      name: String(tool.name),
+      description: typeof tool.description === "string" ? tool.description : undefined,
+      source: sourceLabel(tool.sourceInfo),
+      enabled: !this.switchedOff.has(String(tool.name)),
+    }));
+  }
+
+  /**
+   * Switch tools off by name.
+   *
+   * Named rather than listing what stays: pi wants the active set, but that is
+   * a snapshot, and a tool registered later would silently never be on. The
+   * active set is computed from what pi wants right now, every time.
+   */
+  async setToolsOff(names: string[]): Promise<void> {
+    this.switchedOff = new Set(names);
+    this.applyToolsOff();
+  }
+
+  applyToolsOff(): void {
+    try {
+      if (!this.activate || !this.wanted.size) return;
+      this.activate([...this.wanted].filter((name) => !this.switchedOff.has(name)));
+    } catch (e) {
+      console.error(`[portal] could not apply the tool switches: ${(e as Error).message}`);
+    }
+  }
+
   /**
    * Commands come from three places, matching how pi builds this list.
    * Extension commands live on the runner — promptTemplates alone is only the
@@ -694,6 +817,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Reloading has extensions register their providers again, which puts the
     // registry's model, with its own window, back on the session.
     this.applyLimitQuietly();
+    // And has pi switch every extension tool back on — which is every MCP tool,
+    // the browser's among them. The switches are the portal's to keep.
+    if (this.switchedOff.size) this.applyToolsOff();
   }
 
   /** HTML unless a .jsonl path is given, matching pi's own /export. */

@@ -83,3 +83,79 @@ anything.
 
 An unanswered dialog times out after five minutes rather than wedging the
 session forever.
+## Switching tools off for one chat
+
+The blocks icon in the composer says which tools the agent may reach for **in
+this conversation**. "Look this up for me" and "do not go online, just read the
+repo" are both reasonable in the same week.
+
+Tools are grouped by what installed them, so a package can be switched off in
+one go. An MCP server is its own group rather than a share of the adapter that
+attached it — three servers used to arrive as one pile of forty tools called
+`pi-mcp-adapter`, and nobody thinks of them that way.
+
+::: tip The browser is one of them
+It used to have a switch of its own beside the composer, which was a second
+answer to a question the tools list already asked — and the two could
+disagree. It is now an MCP server like any other: its tools are in the list,
+switched one at a time or as a group, with a default like anything else.
+Having its tools is having the browser, so a conversation with them all off is
+not offered them and does not reach the container. Where it may go once it is
+there is still the [allowlist](/guide/browser#where-it-may-go)'s question, not this one.
+:::
+
+It takes effect from the next message — pi is told at once and there is no need
+to restart the conversation — and it is remembered per chat, including across a
+restart.
+
+The list is what the model could be offered. pi registers `grep`, `find` and
+`ls` and leaves them inactive, so they are not there to tick. A switch holds
+against everything that would turn a tool back on — an extension that registers
+it later, a `/reload` — because it is taken out of what pi wants active each
+time pi says so, not applied once.
+
+### Calling them something else
+
+An npm name is an address. `@juicesharp/rpiv-ask-user-question` says exactly
+where a package came from and makes a poor heading for the list of what it can
+do, especially in a column narrow enough to truncate it.
+
+So a group can be given a name: the pencil beside it in **Settings → Tools**.
+The name is used wherever that package appears — the popover, the settings, the
+extensions list — and the address stays underneath it, in the heading's tooltip
+and under the package where you install and remove it. Clearing the field gives
+the derived name back rather than leaving a blank heading.
+
+Unnamed, a group is called what it calls itself, minus the scope:
+`@forecastx/deep-research` is headed **deep-research**.
+
+The groups start shut, in both places. A handful of extensions is sixty tools,
+and sixty checkboxes is not a list anybody reads; each closed group says how
+many of its tools are off, which is the only thing worth knowing from outside
+it. The ones you open stay open, here and in the settings — they are the same
+groups asked about at two scopes.
+
+### And what every chat starts with
+
+Per chat is right for "not this time" and wrong for "hardly ever" — nobody
+wants to turn the same tool off at the start of every conversation. **Settings
+→ Tools** has the other half: which tools a conversation starts with.
+
+A chat may still disagree with the default in either direction, and the row
+says so where it does. What a chat stores is only its disagreement, so changing
+a default reaches every conversation that never said anything about that tool —
+including the ones open right now.
+
+The list there is what the portal has seen a session register, not what is
+loaded this second: pi builds its registry when a conversation starts, and
+having to open a chat before you could say "off everywhere" would be the wrong
+way round. It fills in as soon as any conversation has run.
+
+A switch for a tool that is not loaded right now is kept, so reinstalling an
+extension does not quietly bring back something you turned off.
+
+::: tip Not the same as uninstalling
+The extension is still loaded, its commands still work, and other chats are
+unaffected. The tool is simply not offered to the model in this one.
+:::
+

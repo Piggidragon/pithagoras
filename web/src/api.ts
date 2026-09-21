@@ -155,6 +155,17 @@ export type FileContent =
   | { binary: true; size: number; mtime: number }
   | { binary: false; size: number; mtime: number; content: string };
 
+/** A tool a conversation could use, and whether it is switched on for it. */
+export interface PortalTool {
+  name: string;
+  description?: string;
+  /** The package or MCP server that registered it, for grouping. */
+  source: string;
+  enabled: boolean;
+  /** Whether it is on by default, so a chat can show where it disagrees. */
+  defaultOn?: boolean;
+}
+
 export interface PortalEvent {
   seq: number;
   type: string;
@@ -258,6 +269,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
+  /** Every tool the portal has seen, for setting a default without opening a chat. */
+  toolDefaults: () =>
+    json<{
+      tools: { name: string; source: string; defaultOn: boolean }[];
+      off: string[];
+      names: Record<string, string>;
+    }>("/api/tools"),
+  /** Which tools are off unless a conversation says otherwise. */
+  setToolDefaults: (off: string[]) =>
+    json<{ off: string[]; applied: number }>("/api/tools", { method: "PUT", body: JSON.stringify({ off }) }),
+  /** What this conversation could use. `live` is false when pi is not running to ask. */
+  tools: (sessionId: string) =>
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+      `/api/sessions/${sessionId}/tools`
+    ),
+  /** What each package is called here; everything unnamed keeps its own name. */
+  toolNames: () => json<{ names: Record<string, string> }>("/api/tool-names"),
+  setToolNames: (names: Record<string, string>) =>
+    json<{ names: Record<string, string> }>("/api/tool-names", {
+      method: "PUT",
+      body: JSON.stringify({ names }),
+    }),
+  /** Switch tools off by name; everything not named is on. */
+  setTools: (sessionId: string, off: string[]) =>
+    json<{ off: string[] }>(`/api/sessions/${sessionId}/tools`, {
+      method: "PUT",
+      body: JSON.stringify({ off }),
+    }),
   respondUi: (sessionId: string, id: string, payload: { value?: unknown; cancelled?: boolean }) =>
     json<{ ok: boolean }>(`/api/sessions/${sessionId}/ui-response`, {
       method: "POST",
@@ -360,11 +399,6 @@ export const api = {
     json<{ allowlist: string }>("/api/browser/allowlist", {
       method: "PUT",
       body: JSON.stringify({ domains }),
-    }),
-  setSessionBrowser: (id: string, enabled: boolean) =>
-    json<{ enabled: boolean }>(`/api/sessions/${id}/browser`, {
-      method: "PUT",
-      body: JSON.stringify({ enabled }),
     }),
 
   audit: (limit = 200) => json<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
@@ -849,6 +883,11 @@ export interface BrowserStatus {
   pages: { title: string; url: string }[];
   uiPort: string;
   allowlist: string;
-  sessions: { id: string; title: string; kind: string }[];
+  /** Is the browser wired up at all, whether or not it is running right now? */
+  configured: boolean;
+  /** Does a conversation that has never said anything about it get the browser? */
+  byDefault: boolean;
+  /** Only the conversations that disagree with that — see "Who may drive it". */
+  sessions: { id: string; title: string; kind: string; allowed: boolean }[];
   routines: { slug: string; name: string }[];
 }

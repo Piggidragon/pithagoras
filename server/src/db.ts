@@ -1,5 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting } from "./pi-settings.js";
+import { browserTool, toolEnabled } from "./tool-policy.js";
+import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
@@ -56,6 +58,10 @@ export interface SessionRow {
   last_person_key: string | null;
   /** May this session drive the agent's browser? Off unless turned on. */
   browser: number;
+  /** Tools switched off for this conversation, newline separated. */
+  tools_off: string;
+  /** And switched on against a default that has them off. */
+  tools_on: string;
 }
 
 export interface EventRow {
@@ -329,6 +335,18 @@ function migrate(d: Database.Database): void {
   if (!names.includes("role")) {
     d.exec("ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'primary'");
   }
+  // Tools switched off for this conversation, by name, newline separated.
+  // Stored as the exceptions rather than the allowed set: a tool installed
+  // after the choice was made is on, which is what "off" was never said about.
+  if (!names.includes("tools_off")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN tools_off TEXT NOT NULL DEFAULT ''");
+  }
+  // And the ones switched back on against a default that has them off. Two
+  // lists rather than one, because a conversation holds exceptions to the
+  // default and an exception runs in both directions.
+  if (!names.includes("tools_on")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN tools_on TEXT NOT NULL DEFAULT ''");
+  }
 
   if (!names.includes("kind")) {
     d.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'task'");
@@ -408,6 +426,8 @@ function migrate(d: Database.Database): void {
   if (noteCols.length && !noteCols.includes("pending_delivery")) {
     d.exec("ALTER TABLE notes ADD COLUMN pending_delivery INTEGER NOT NULL DEFAULT 0");
   }
+  // Last, because it reads the settings the tables above have to exist for.
+  adoptBrowserGrants(d);
 }
 
 export function createSession(row: {
@@ -966,7 +986,92 @@ export function routineGuards(slug: string | null | undefined): boolean {
   return row ? row.guard === 1 : true;
 }
 
-/** Does this session get the browser? Routines answer for their own runs. */
+/**
+ * Carry the old per-session browser grant into the tool switches.
+ *
+ * The browser used to be opt-in per conversation, stored in `sessions.browser`
+ * and off by default. It is an MCP server now, and a server's tools are on
+ * unless something says otherwise — which on an upgrade would hand every
+ * conversation that ever existed a browser signed into real accounts, because
+ * nobody had said otherwise about a switch that did not exist yet.
+ *
+ * So the posture is carried over rather than replaced: the browser's tools go
+ * into the defaults as off, and the conversations that had the grant get it
+ * back as their own exception. A new install is unaffected and starts the way
+ * any other server does. Run once, because after it the operator's own choices
+ * are the ones in there.
+ *
+ * It cannot run when the database opens. Which tools are the browser's is only
+ * known once a session has registered them, and on the first start after an
+ * upgrade none has: the catalogue is a key this build introduced. So the first
+ * call only decides whether there is a posture to carry — an install with
+ * conversations in it — and marks it `pending`. It runs again from
+ * `rememberTools()` and does the carrying the moment the browser's tools
+ * appear. Until then `browserAllowed()` goes on reading the old column. After
+ * it, a browser tool that shows up later is carried the same way.
+ */
+export function adoptBrowserGrants(d: Database.Database = getDb(), fresh: string[] = []): void {
+  const flag = d
+    .prepare("SELECT value FROM settings WHERE key = 'browser_tools_adopted'")
+    .get() as { value: string } | undefined;
+  if (flag?.value === "1") return;
+  const mark = (value: string) =>
+    d
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('browser_tools_adopted', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      )
+      .run(value);
+
+  let state = flag?.value;
+  if (!state) {
+    // Nobody has ever had a conversation: nothing was granted, nothing to keep.
+    if (!d.prepare("SELECT 1 FROM sessions LIMIT 1").get()) return void mark("1");
+    mark((state = "pending"));
+  }
+
+  const servers = mcpServerNames();
+  const browsers = browserServers();
+  // Waiting: every browser tool seen so far. Carrying: only the ones that are
+  // new. The catalogue is what one session happened to have registered — a lazy
+  // server has cached some of its tools and not others, and a pinned version
+  // that is bumped adds names — so the posture has to reach whatever turns up
+  // later, not only what was there on the first day. What was carried over and
+  // since changed by the operator is not touched again.
+  const names =
+    state === "pending"
+      ? knownTools()
+          .map((t) => t.name)
+          .filter((name) => browserTool(name, servers, browsers))
+      : fresh.filter((name) => browserTool(name, servers, browsers));
+  if (!names.length) return;
+
+  setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...names])]);
+  const granted = d
+    .prepare("SELECT id FROM sessions WHERE browser = 1 AND kind != 'routine'")
+    .all() as { id: string }[];
+  for (const { id } of granted) {
+    const tools = sessionTools(id);
+    setSessionTools(id, { off: tools.off, on: [...new Set([...tools.on, ...names])] });
+  }
+  mark("carry");
+}
+
+/** Is there a grant still waiting for the browser's tools to be seen? */
+function browserAdoptionPending(): boolean {
+  return (getStoredSettings() as Record<string, string>).browser_tools_adopted === "pending";
+}
+
+/**
+ * Does this session get the browser? Routines answer for their own runs.
+ *
+ * For an ordinary conversation this is not stored any more: the browser is an
+ * MCP server like any other, so its tools are switched in the tools list, and
+ * having the browser is having its tools. A second place recording the same
+ * answer could only ever disagree with the first.
+ *
+ * The `sessions.browser` column is what that second place was. It is left in
+ * the schema and read by nothing.
+ */
 export function browserAllowed(session: SessionRow): boolean {
   if (session.kind === "routine" && session.routine_slug) {
     const row = getDb().prepare("SELECT browser FROM routines WHERE slug = ?").get(
@@ -974,7 +1079,219 @@ export function browserAllowed(session: SessionRow): boolean {
     ) as { browser: number } | undefined;
     return row ? row.browser === 1 : false;
   }
-  return session.browser === 1;
+  const browserNames = seenBrowserTools();
+  if (!browserNames.length) return session.browser === 1 || !browserColumnDecides();
+  const defaults = toolDefaultsOff();
+  const exceptions = sessionTools(session.id);
+  return browserNames.some((name) => toolEnabled(name, defaults, exceptions));
+}
+
+/** The browser's tools, as far as any session has registered them. */
+function seenBrowserTools(): string[] {
+  const servers = mcpServerNames();
+  const browsers = browserServers();
+  return knownTools()
+    .map((t) => t.name)
+    .filter((name) => browserTool(name, servers, browsers));
+}
+
+/**
+ * With no browser tool seen there is no switch to read, and three situations
+ * look the same from here:
+ *
+ * - A container deployment, where pi is reached over RPC and never reports its
+ *   registry. The old per-session grant is still the only answer anyone has.
+ * - An upgrade still waiting for the browser's tools to appear, so the grants
+ *   can be carried over. The old column stands until they do.
+ * - No server that is the browser at all: nothing here to switch, so the column.
+ *
+ * Anything else is a browser server configured and not yet registered by any
+ * session — a fresh install whose first conversation is still starting, or a
+ * lazy server whose tools pi has not cached yet. Nobody has said anything about
+ * it, which is what a default is for, so it is on, as any other server is.
+ */
+function browserColumnDecides(): boolean {
+  if ((process.env.EXECUTOR || "host") === "container") return true;
+  if (browserAdoptionPending()) return true;
+  return browserServers().length === 0;
+}
+
+/**
+ * The conversations that disagree with the default about the browser.
+ *
+ * Every one that says anything about tools, and every one that holds the old
+ * grant, is asked — not those whose switches happen to mention the word
+ * `browser`, which is not what a server is called when it is called something
+ * else, and misses the column where that is still the only record.
+ */
+export function browserExceptions(): SessionRow[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM sessions
+       WHERE COALESCE(tools_off, '') != '' OR COALESCE(tools_on, '') != '' OR browser = 1
+       ORDER BY updated_at DESC`
+    )
+    .all() as SessionRow[];
+  const byDefault = browserByDefault();
+  return rows.filter((row) => browserAllowed(row) !== byDefault);
+}
+
+/** Is the browser on for a conversation that has never said anything about it? */
+export function browserByDefault(): boolean {
+  const names = seenBrowserTools();
+  if (!names.length) return !browserColumnDecides();
+  const off = new Set(toolDefaultsOff());
+  return names.some((name) => !off.has(name));
+}
+
+/**
+ * What a conversation says about tools, as exceptions to the default.
+ *
+ * Two lists because an exception runs both ways: a tool the default leaves on
+ * can be switched off here, and one the default has off can be switched on.
+ * Exceptions rather than a full picture so that changing a default reaches
+ * every conversation that never said anything about it, which is the whole
+ * point of having one.
+ */
+export interface SessionTools {
+  off: string[];
+  on: string[];
+}
+
+export function sessionTools(sessionId: string): SessionTools {
+  const row = getDb().prepare("SELECT tools_off, tools_on FROM sessions WHERE id = ?").get(
+    sessionId
+  ) as { tools_off: string | null; tools_on: string | null } | undefined;
+  return { off: parseToolsOff(row?.tools_off), on: parseToolsOff(row?.tools_on) };
+}
+
+export function parseToolsOff(raw: string | null | undefined): string[] {
+  return (raw ?? "")
+    .split("\n")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+/** Sorted and deduped, so the column reads the same however it was written. */
+const clean = (names: string[]): string[] =>
+  [...new Set(names.map((n) => n.trim()).filter(Boolean))].sort();
+
+export function setSessionTools(sessionId: string, tools: SessionTools): SessionTools {
+  const stored = { off: clean(tools.off), on: clean(tools.on) };
+  getDb()
+    .prepare("UPDATE sessions SET tools_off = ?, tools_on = ? WHERE id = ?")
+    .run(stored.off.join("\n"), stored.on.join("\n"), sessionId);
+  return stored;
+}
+
+/**
+ * A setting the portal keeps for itself, outside the model defaults.
+ *
+ * GlobalSettings is what a session launches with; these are neither that nor
+ * pi's, so they go straight to the table rather than widening a type that
+ * every launch reads.
+ */
+function putSetting(key: string, value: string): void {
+  const db = getDb();
+  if (value)
+    db.prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(key, value);
+  else db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+}
+
+/** Tools that are off unless a conversation says otherwise. */
+export function toolDefaultsOff(): string[] {
+  return parseToolsOff((getStoredSettings() as Record<string, string>).tools_off_default);
+}
+
+export function setToolDefaultsOff(names: string[]): string[] {
+  const stored = clean(names);
+  putSetting("tools_off_default", stored.join("\n"));
+  return stored;
+}
+
+/**
+ * Every tool the portal has seen a session register, so the settings page can
+ * offer a default for one without a conversation being open.
+ *
+ * A remembered list rather than a live one: pi builds its registry when a
+ * session starts, and nobody should have to start a chat to say that a tool
+ * should be off in all of them. Refreshed whenever a session does report.
+ */
+export interface KnownTool {
+  name: string;
+  source: string;
+}
+
+/**
+ * What each package is called here, where somebody has said.
+ *
+ * An npm name is an address, not a label: `@juicesharp/rpiv-ask-user-question`
+ * is the truth about where a thing came from and a poor heading for the list
+ * of what it can do. So a group may be given a name, and keeps the address
+ * underneath it for anyone who needs to install or remove the thing.
+ *
+ * Keyed by what the portal files a tool under — a package, an MCP server, or
+ * "built in" — because that is what the heading says.
+ */
+export function toolGroupNames(): Record<string, string> {
+  const raw = (getStoredSettings() as Record<string, string>).tool_group_names;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const names: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const label = typeof value === "string" ? value.trim() : "";
+      if (key.trim() && label) names[key] = label.slice(0, 60);
+    }
+    return names;
+  } catch {
+    return {};
+  }
+}
+
+export function setToolGroupNames(names: Record<string, unknown>): Record<string, string> {
+  const stored: Record<string, string> = {};
+  for (const [key, value] of Object.entries(names ?? {})) {
+    const label = typeof value === "string" ? value.trim() : "";
+    // An empty one is not a name of its own; it is asking for the name back.
+    if (key.trim() && label) stored[key.trim()] = label.slice(0, 60);
+  }
+  putSetting("tool_group_names", JSON.stringify(stored));
+  return stored;
+}
+
+export function knownTools(): KnownTool[] {
+  const raw = (getStoredSettings() as Record<string, string>).tools_seen;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((t) => t && typeof t.name === "string")
+      .map((t) => ({ name: String(t.name), source: String(t.source ?? "") }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Take up what a session reported. Merged rather than replaced: another
+ * session may have extensions this one does not, and an extension that is
+ * merely not loaded today should not lose the default somebody set for it.
+ */
+export function rememberTools(tools: KnownTool[]): void {
+  if (!tools.length) return;
+  const merged = new Map(knownTools().map((t) => [t.name, t]));
+  const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
+  for (const tool of tools) merged.set(tool.name, { name: tool.name, source: tool.source });
+  const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+  putSetting("tools_seen", JSON.stringify(sorted));
+  // The first moment the browser's tools can be told apart from the rest, and
+  // every moment a new one turns up.
+  adoptBrowserGrants(getDb(), fresh);
 }
 
 /**

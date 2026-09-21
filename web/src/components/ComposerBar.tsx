@@ -1,4 +1,5 @@
-import { LuGlobe } from "react-icons/lu";
+import { LuBlocks } from "react-icons/lu";
+import { ToolSwitches } from "./ToolSwitches";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
@@ -174,21 +175,7 @@ export function ComposerBar({
   const [cfg, setCfg] = useState<PiConfig>(() => seed(session));
   /** True while a catalogue fetch is in flight — not "has one ever run". */
   const [loadingCatalogue, setLoadingCatalogue] = useState(false);
-  const [open, setOpen] = useState<null | "model" | "effort">(null);
-  const [browser, setBrowser] = useState(false);
-  const [hasBrowser, setHasBrowser] = useState(false);
-
-  // The browser is optional and its answer changes only when somebody starts a
-  // container, so this is asked once per session rather than polled.
-  useEffect(() => {
-    api
-      .browser()
-      .then((b) => {
-        setHasBrowser(b.running || b.sessions.length > 0);
-        setBrowser(b.sessions.some((x) => x.id === sessionId));
-      })
-      .catch(() => setHasBrowser(false));
-  }, [sessionId]);
+  const [open, setOpen] = useState<null | "model" | "effort" | "tools">(null);
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState("");
   const [recents, setRecents] = useState<string[]>(readRecents);
@@ -416,31 +403,18 @@ export function ComposerBar({
         >
           {onOff ? `thinking ${thinkingOn ? "on" : "off"}` : cfg.state.thinkingLevel}
         </button>
-        {/* Only where there is a browser to grant. On a deployment without the
-            optional service this is not a disabled control, it is nothing. */}
-        {hasBrowser && (
-          <button
-            onClick={async () => {
-              const next = !browser;
-              setBrowser(next);
-              try {
-                await api.setSessionBrowser(sessionId, next);
-              } catch {
-                setBrowser(!next);
-              }
-            }}
-            className={`rounded-lg px-2 py-1 transition ${
-              browser ? "bg-accent/12 text-accent" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
-            }`}
-            title={
-              browser
-                ? "Browser on for this session — takes effect on its next start"
-                : "Let this session drive the agent's browser"
-            }
-          >
-            <LuGlobe className="h-3.5 w-3.5" />
-          </button>
-        )}
+        {/* Everything the agent may reach for in this conversation, the
+            browser included — it brings tools like any other package, and a
+            second switch of its own was two answers to one question. */}
+        <button
+          onClick={() => setOpen(open === "tools" ? null : "tools")}
+          className={`rounded-lg px-2 py-1 transition ${
+            open === "tools" ? "bg-fg/10 text-fg" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
+          }`}
+          title="Which tools this conversation may use"
+        >
+          <LuBlocks className="h-3.5 w-3.5" />
+        </button>
         {cfg.stats && (
           <ContextPill
             sessionId={sessionId}
@@ -454,6 +428,14 @@ export function ComposerBar({
         />
       </div>
       {actions && <div className="composer-actions">{actions}</div>}
+
+      {/* Tools */}
+      {open === "tools" && (
+        <div className="absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+          <p className="px-3 py-1 text-[11px] text-fg-subtle">Tools in this chat</p>
+          <ToolSwitches sessionId={sessionId} />
+        </div>
+      )}
 
       {/* Models */}
       {open === "model" && (

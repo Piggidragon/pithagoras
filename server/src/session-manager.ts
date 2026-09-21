@@ -3,7 +3,9 @@ import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { PiClient } from "./pi/types.js";
+import type { PiClient, PiTool } from "./pi/types.js";
+import { effectiveOff, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
+import { mcpServerNames } from "./api/mcp.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { removeSessionFiles } from "./session-files.js";
@@ -19,6 +21,11 @@ import {
   getSettings,
   markOrphanedSessionsInterrupted,
   browserAllowed,
+  sessionTools,
+  setSessionTools,
+  toolDefaultsOff,
+  rememberTools,
+  knownTools,
   browserAllowlist,
   routineGuards,
   updateSession,
@@ -275,6 +282,7 @@ class SessionManager extends EventEmitter {
       // The session's settled role picks the context files; the live one gates
       // each tool call, so a group conversation follows whoever is speaking.
       role: session.role,
+      toolsOff: this.offFor(sessionId),
       whoNow: () => ({ role: this.speakerRole(sessionId), key: this.speakerKey(sessionId) }),
     });
 
@@ -290,6 +298,17 @@ class SessionManager extends EventEmitter {
       updateSession(sessionId, { pi_session_file: file });
     };
     rememberSessionFile();
+
+    // What this session registered, written down as soon as it exists. The
+    // settings page offers a default per tool, and needing to open a chat
+    // before you can say "off everywhere" would be the wrong way round.
+    void client
+      .getTools?.()
+      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source }))))
+      .catch(() => {
+        // A session that cannot list its tools still works; the catalogue
+        // simply stays as it was.
+      });
 
     client.on("event", (msg) => {
       rememberSessionFile();
@@ -810,6 +829,103 @@ class SessionManager extends EventEmitter {
   /** Answer an extension dialog for a live session. */
   respondUi(sessionId: string, id: string, response: { cancelled?: boolean; value?: unknown }): boolean {
     return this.live.get(sessionId)?.client.respondUi(id, response) ?? false;
+  }
+
+  /**
+   * Everything off for this conversation: the default, bent by its own
+   * exceptions. The whole picture, including tools that are not loaded right
+   * now — which is what the page has to be given, or its next answer would
+   * drop the exceptions it was never shown.
+   */
+  offFor(sessionId: string, names: string[] = []): string[] {
+    return effectiveOff(
+      [...names, ...knownTools().map((t) => t.name)],
+      toolDefaultsOff(),
+      sessionTools(sessionId)
+    );
+  }
+
+  /**
+   * Every tool this conversation could use, and whether it is on.
+   *
+   * Only a running session can list them: pi builds the registry when it
+   * starts, and what an extension registered is not knowable before that. What
+   * it reports is remembered, so the settings page can offer a default for a
+   * tool without a conversation being open.
+   */
+  async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
+    const client = this.live.get(sessionId)?.client;
+    const listed = client?.getTools ? await client.getTools() : [];
+    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source })));
+    const defaults = toolDefaultsOff();
+    const exceptions = sessionTools(sessionId);
+    const servers = mcpServerNames();
+    return {
+      tools: listed.map((tool) => ({
+        ...tool,
+        source: toolSource(tool.name, tool.source, servers),
+        enabled: toolEnabled(tool.name, defaults, exceptions),
+        defaultOn: !defaults.includes(tool.name),
+      })),
+      live: Boolean(listed.length),
+    };
+  }
+
+  /**
+   * Say which tools this conversation should have off.
+   *
+   * What is written down is the difference from the default, not the whole
+   * picture: a tool that is off because the default says so is not recorded
+   * here, so changing that default still reaches this conversation.
+   */
+  async setTools(sessionId: string, wantedOff: string[]): Promise<string[]> {
+    const client = this.live.get(sessionId)?.client;
+    const listed = client?.getTools ? await client.getTools() : [];
+    // What this call is answering about: the tools this session registered,
+    // plus the ones it already holds an exception for. Not the portal-wide
+    // catalogue — a tool that is merely not loaded in this run was not on the
+    // page, so nobody said anything about it and nothing should be written
+    // down in their name.
+    //
+    // Except when nothing is running to have registered anything: the page
+    // that is answering was drawn while it was, and the tools it showed are the
+    // ones the portal has seen. Without them a tool switched *on* would be in
+    // neither list, no exception would be written, and the write would answer
+    // 200 while the tool went on following the default.
+    const held = sessionTools(sessionId);
+    const answered = [
+      ...(listed.length ? listed.map((t) => t.name) : knownTools().map((t) => t.name)),
+      ...held.off,
+      ...held.on,
+    ];
+    setSessionTools(sessionId, exceptionsFor(wantedOff, toolDefaultsOff(), answered, held));
+    const off = this.offFor(sessionId, listed.map((t) => t.name));
+    await client?.setToolsOff?.(off);
+    return off;
+  }
+
+  /**
+   * A default changed. Every conversation that did not disagree about the tool
+   * is affected, including the ones running right now — otherwise the setting
+   * would only mean anything to chats started afterwards.
+   */
+  async applyToolDefaults(): Promise<number> {
+    const done = await Promise.all(
+      [...this.live.entries()].map(async ([sessionId, { client }]) => {
+        // Per session, like refreshSettings: the default is already stored, so
+        // one chat that is mid-teardown must not fail the save and leave the
+        // page showing the opposite of what the database now holds.
+        try {
+          const listed = client.getTools ? await client.getTools() : [];
+          await client.setToolsOff?.(this.offFor(sessionId, listed.map((t) => t.name)));
+          return true;
+        } catch (e) {
+          console.error(`[portal] could not apply the tool defaults to ${sessionId}: ${(e as Error).message}`);
+          return false;
+        }
+      })
+    );
+    return done.filter(Boolean).length;
   }
 
   async abort(sessionId: string): Promise<void> {

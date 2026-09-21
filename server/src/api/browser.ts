@@ -1,6 +1,15 @@
 import express, { type Router } from "express";
-import { browserAllowlist, getDb, setBrowserAllowlist, type SessionRow } from "../db.js";
-import { readMcpFile, writeMcpFile } from "./mcp.js";
+import {
+  browserAllowed,
+  browserAllowlist,
+  browserByDefault,
+  browserExceptions,
+  getDb,
+  setBrowserAllowlist,
+  type SessionRow,
+} from "../db.js";
+import { BROWSER_MCP } from "../tool-policy.js";
+import { BROWSER_CDP, browserServers, findConnection, readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/browser-service.js";
 
 /**
@@ -11,14 +20,14 @@ import * as service from "../extensions/browser-service.js";
  * portal owns none of that; it owns the question of which sessions may reach it.
  */
 
-const CDP = process.env.BROWSER_CDP_URL || "http://127.0.0.1:9222";
+const CDP = BROWSER_CDP;
 
 /**
  * How the agent reaches the browser: an MCP server attached over the debugging
  * protocol. `--cdp-endpoint` is the whole point — without it the Playwright
  * server launches its own throwaway Chromium, signed into nothing.
  */
-const MCP_NAME = "browser";
+const MCP_NAME = BROWSER_MCP;
 
 /**
  * The tools worth putting in the prompt, and the one worth hiding.
@@ -68,15 +77,6 @@ const mcpEntry = () => ({
   excludeTools: EXCLUDE_TOOLS,
 });
 
-/** Is some MCP server pointed at our browser, whatever it is called? */
-function findConnection(): string | null {
-  const { config } = readMcpFile();
-  for (const [name, entry] of Object.entries(config.mcpServers)) {
-    const args = (entry as { args?: unknown }).args;
-    if (Array.isArray(args) && args.includes("--cdp-endpoint") && args.includes(CDP)) return name;
-  }
-  return null;
-}
 /**
  * Pin existing connections and enable on-demand snapshots.
  *
@@ -141,9 +141,10 @@ export function browserRouter(): Router {
       // optional, and the portal works without it.
     }
 
-    const sessions = getDb()
-      .prepare("SELECT * FROM sessions WHERE browser = 1 ORDER BY updated_at DESC")
-      .all() as SessionRow[];
+    // The conversations that disagree with the default, not every one that
+    // may drive it: the browser is on unless switched off, so "all of them"
+    // is the answer almost always and it tells nobody anything.
+    const sessions = browserExceptions();
     const routines = getDb()
       .prepare("SELECT slug, name FROM routines WHERE browser = 1")
       .all() as { slug: string; name: string }[];
@@ -163,7 +164,16 @@ export function browserRouter(): Router {
       // The container itself, which the portal installs rather than compose.
       install: await service.status(),
       config: { user: service.config().user, hasPassword: Boolean(service.config().password) },
-      sessions: sessions.map((s) => ({ id: s.id, title: s.title, kind: s.kind })),
+      // Whether a conversation that has never said anything about it has it,
+      // and the ones that said otherwise.
+      byDefault: browserByDefault(),
+      configured: browserServers().length > 0,
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        title: s.title,
+        kind: s.kind,
+        allowed: browserAllowed(s),
+      })),
       routines,
     });
   });
@@ -179,6 +189,10 @@ export function browserRouter(): Router {
   router.post("/browser/connect", (_req, res) => {
     const { config, error } = readMcpFile();
     if (error) return res.status(409).json({ error: `Fix mcp.json first: ${error}` });
+    // Already wired, under whatever name: a second entry would attach the same
+    // browser twice, and rewriting somebody's own would lose what they put in it.
+    const existing = findConnection();
+    if (existing) return res.json({ connectedAs: existing });
     config.mcpServers[MCP_NAME] = mcpEntry();
     writeMcpFile(config);
     res.json({ connectedAs: MCP_NAME });
@@ -247,7 +261,22 @@ export function browserRouter(): Router {
    * Turn the browser on or off for one session. Takes effect on its next
    * launch: the tool list is fixed when pi starts.
    */
+  /**
+   * Grant the browser to one conversation, where the tool switches cannot.
+   *
+   * With EXECUTOR=container pi is reached over RPC and never reports what it
+   * registered, so the portal has no tool list to switch and browserAllowed()
+   * falls back to this column. On a host deployment the tools list is the
+   * answer and this would be a second one, so it is refused there rather than
+   * quietly writing a column nothing reads.
+   */
   router.put("/sessions/:id/browser", (req, res) => {
+    if ((process.env.EXECUTOR || "host") !== "container") {
+      return res.status(400).json({
+        error:
+          "The browser is switched with its tools — open the tools list beside the composer, or Settings → Tools for every conversation",
+      });
+    }
     const on = Boolean(req.body?.enabled);
     const row = getDb().prepare("SELECT id FROM sessions WHERE id = ?").get(req.params.id);
     if (!row) return res.status(404).json({ error: "Not found" });

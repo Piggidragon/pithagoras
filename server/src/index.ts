@@ -26,6 +26,8 @@ import {
   type WizardInput,
 } from "./agent-setup.js";
 import { sessions, EXECUTOR_KIND } from "./session-manager.js";
+import { toolSource } from "./tool-policy.js";
+import { mcpServerNames } from "./api/mcp.js";
 import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
@@ -73,6 +75,11 @@ import {
   getSettingDefaults,
   getSettings,
   getStoredSettings,
+  knownTools,
+  toolGroupNames,
+  setToolGroupNames,
+  setToolDefaultsOff,
+  toolDefaultsOff,
   setContextLimit,
   setDefaultContextLimit,
   setSettings,
@@ -575,6 +582,99 @@ app.post("/api/sessions/:id/ui-response", (req, res) => {
   if (typeof id !== "string") return res.status(400).json({ error: "id required" });
   const delivered = sessions.respondUi(session.id, id, { value, cancelled: Boolean(cancelled) });
   res.json({ ok: delivered, note: delivered ? undefined : "Request already resolved or expired" });
+});
+
+/**
+ * The tools this conversation could use, and which of them are on.
+ *
+ * Only a running session can answer: pi builds the registry when it starts,
+ * and what an extension registered is not knowable before that. A conversation
+ * that is idle says so, and the page offers to wake it rather than showing an
+ * empty list as though there were no tools.
+ */
+/**
+ * A container session reaches pi over RPC, which has no tool registry to ask
+ * and nothing to tell. Said plainly rather than answered with an empty list
+ * and a switch that does nothing.
+ */
+const TOOLS_UNSUPPORTED =
+  "Tools cannot be switched with EXECUTOR=container: pi runs inside the container and the portal never sees what it registered";
+
+app.get("/api/sessions/:id/tools", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+  const { tools, live } = await sessions.getTools(session.id);
+  const names = toolGroupNames();
+  // The whole off list, not only the tools loaded right now: the page sends
+  // this back on the next flip, and anything missing from it would read as
+  // "switch that one on again".
+  res.json({ tools, live, names, off: sessions.offFor(session.id) });
+});
+
+/** Switch tools off for this conversation. Everything not named is on. */
+app.put("/api/sessions/:id/tools", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+  const off = req.body?.off;
+  if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
+    return res.status(400).json({ error: "off must be a list of tool names" });
+  }
+  res.json({ off: await sessions.setTools(session.id, off) });
+});
+
+/**
+ * Tools the portal has ever seen registered, and whether each is on by default.
+ *
+ * Remembered rather than asked, so a default can be set without opening a
+ * conversation: pi builds its registry when a session starts, and nobody
+ * should have to start a chat to say that a tool should be off in all of them.
+ */
+app.get("/api/tools", (_req, res) => {
+  // Refused here as well as on the PUT: a list of checkboxes that draws fine
+  // and answers every flip with an error is the switch that looks like it works.
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+  const off = new Set(toolDefaultsOff());
+  const servers = mcpServerNames();
+  res.json({
+    tools: knownTools().map((tool) => ({
+      ...tool,
+      source: toolSource(tool.name, tool.source, servers),
+      defaultOn: !off.has(tool.name),
+    })),
+    off: [...off].sort(),
+    names: toolGroupNames(),
+  });
+});
+
+/** What each package is called here. Everything not named keeps its own name. */
+app.get("/api/tool-names", (_req, res) => res.json({ names: toolGroupNames() }));
+
+app.put("/api/tool-names", (req, res) => {
+  const names = req.body?.names;
+  if (!names || typeof names !== "object" || Array.isArray(names)) {
+    return res.status(400).json({ error: "names must be an object" });
+  }
+  res.json({ names: setToolGroupNames(names as Record<string, unknown>) });
+});
+
+/**
+ * Which tools are off unless a conversation says otherwise.
+ *
+ * Applied to the conversations running right now as well: a default that only
+ * meant anything to chats started afterwards would be a setting you could not
+ * see working.
+ */
+app.put("/api/tools", async (req, res) => {
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+  const off = req.body?.off;
+  if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
+    return res.status(400).json({ error: "off must be a list of tool names" });
+  }
+  const stored = setToolDefaultsOff(off);
+  const applied = await sessions.applyToolDefaults();
+  res.json({ off: stored, applied });
 });
 
 app.post("/api/sessions/:id/abort", async (req, res) => {
