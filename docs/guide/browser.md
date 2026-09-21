@@ -115,6 +115,11 @@ other package is: the blocks icon beside the composer for one conversation,
 a conversation with them all off is not offered them and does not reach the
 container. A routine still has its own switch on its own page.
 
+Which server that is comes from where it connects, not from what it is called:
+the one whose `--cdp-endpoint` points at this browser. The portal writes it as
+`browser`, and an entry written by hand or by an older portal under another name
+is found the same way.
+
 Like any other package, its tools are **on** unless something says otherwise.
 An installation that had the old per-session switch keeps what it had: the
 browser's tools are written into the defaults as off and the conversations that

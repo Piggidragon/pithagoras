@@ -139,3 +139,10 @@ test("what the chat held is dropped once the switch is flipped back", () => {
 test("without anything held, nothing changes", () => {
   assert.deepEqual(exceptionsFor(["T"], ["T"], ["T"]), { off: [], on: [] });
 });
+
+test("a browser can be called anything, given which servers are it", () => {
+  assert.equal(browserTool("chrome_browser_click", ["chrome"], ["chrome"]), true);
+  assert.equal(browserTool("chrome_browser_click", ["chrome"]), false);
+  // And a server that is not one of them is still not.
+  assert.equal(browserTool("scratch_browser_click", ["chrome", "scratch"], ["chrome"]), false);
+});

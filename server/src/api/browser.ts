@@ -9,7 +9,7 @@ import {
   type SessionRow,
 } from "../db.js";
 import { BROWSER_MCP } from "../tool-policy.js";
-import { mcpServerNames, readMcpFile, writeMcpFile } from "./mcp.js";
+import { BROWSER_CDP, browserServers, findConnection, readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/browser-service.js";
 
 /**
@@ -20,7 +20,7 @@ import * as service from "../extensions/browser-service.js";
  * portal owns none of that; it owns the question of which sessions may reach it.
  */
 
-const CDP = process.env.BROWSER_CDP_URL || "http://127.0.0.1:9222";
+const CDP = BROWSER_CDP;
 
 /**
  * How the agent reaches the browser: an MCP server attached over the debugging
@@ -77,15 +77,6 @@ const mcpEntry = () => ({
   excludeTools: EXCLUDE_TOOLS,
 });
 
-/** Is some MCP server pointed at our browser, whatever it is called? */
-function findConnection(): string | null {
-  const { config } = readMcpFile();
-  for (const [name, entry] of Object.entries(config.mcpServers)) {
-    const args = (entry as { args?: unknown }).args;
-    if (Array.isArray(args) && args.includes("--cdp-endpoint") && args.includes(CDP)) return name;
-  }
-  return null;
-}
 /**
  * Pin existing connections and enable on-demand snapshots.
  *
@@ -176,7 +167,7 @@ export function browserRouter(): Router {
       // Whether a conversation that has never said anything about it has it,
       // and the ones that said otherwise.
       byDefault: browserByDefault(),
-      configured: mcpServerNames().includes(MCP_NAME),
+      configured: browserServers().length > 0,
       sessions: sessions.map((s) => ({
         id: s.id,
         title: s.title,
@@ -198,6 +189,10 @@ export function browserRouter(): Router {
   router.post("/browser/connect", (_req, res) => {
     const { config, error } = readMcpFile();
     if (error) return res.status(409).json({ error: `Fix mcp.json first: ${error}` });
+    // Already wired, under whatever name: a second entry would attach the same
+    // browser twice, and rewriting somebody's own would lose what they put in it.
+    const existing = findConnection();
+    if (existing) return res.json({ connectedAs: existing });
     config.mcpServers[MCP_NAME] = mcpEntry();
     writeMcpFile(config);
     res.json({ connectedAs: MCP_NAME });

@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting } from "./pi-settings.js";
-import { BROWSER_MCP, browserTool, toolEnabled } from "./tool-policy.js";
-import { mcpServerNames } from "./api/mcp.js";
+import { browserTool, toolEnabled } from "./tool-policy.js";
+import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
@@ -1007,9 +1007,10 @@ export function routineGuards(slug: string | null | undefined): boolean {
  * call only decides whether there is a posture to carry — an install with
  * conversations in it — and marks it `pending`. It runs again from
  * `rememberTools()` and does the carrying the moment the browser's tools
- * appear. Until then `browserAllowed()` goes on reading the old column.
+ * appear. Until then `browserAllowed()` goes on reading the old column. After
+ * it, a browser tool that shows up later is carried the same way.
  */
-export function adoptBrowserGrants(d: Database.Database = getDb()): void {
+export function adoptBrowserGrants(d: Database.Database = getDb(), fresh: string[] = []): void {
   const flag = d
     .prepare("SELECT value FROM settings WHERE key = 'browser_tools_adopted'")
     .get() as { value: string } | undefined;
@@ -1021,16 +1022,27 @@ export function adoptBrowserGrants(d: Database.Database = getDb()): void {
       )
       .run(value);
 
-  if (!flag) {
+  let state = flag?.value;
+  if (!state) {
     // Nobody has ever had a conversation: nothing was granted, nothing to keep.
     if (!d.prepare("SELECT 1 FROM sessions LIMIT 1").get()) return void mark("1");
-    mark("pending");
+    mark((state = "pending"));
   }
 
   const servers = mcpServerNames();
-  const names = knownTools()
-    .map((t) => t.name)
-    .filter((name) => browserTool(name, servers));
+  const browsers = browserServers();
+  // Waiting: every browser tool seen so far. Carrying: only the ones that are
+  // new. The catalogue is what one session happened to have registered — a lazy
+  // server has cached some of its tools and not others, and a pinned version
+  // that is bumped adds names — so the posture has to reach whatever turns up
+  // later, not only what was there on the first day. What was carried over and
+  // since changed by the operator is not touched again.
+  const names =
+    state === "pending"
+      ? knownTools()
+          .map((t) => t.name)
+          .filter((name) => browserTool(name, servers, browsers))
+      : fresh.filter((name) => browserTool(name, servers, browsers));
   if (!names.length) return;
 
   setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...names])]);
@@ -1041,7 +1053,7 @@ export function adoptBrowserGrants(d: Database.Database = getDb()): void {
     const tools = sessionTools(id);
     setSessionTools(id, { off: tools.off, on: [...new Set([...tools.on, ...names])] });
   }
-  mark("1");
+  mark("carry");
 }
 
 /** Is there a grant still waiting for the browser's tools to be seen? */
@@ -1077,9 +1089,10 @@ export function browserAllowed(session: SessionRow): boolean {
 /** The browser's tools, as far as any session has registered them. */
 function seenBrowserTools(): string[] {
   const servers = mcpServerNames();
+  const browsers = browserServers();
   return knownTools()
     .map((t) => t.name)
-    .filter((name) => browserTool(name, servers));
+    .filter((name) => browserTool(name, servers, browsers));
 }
 
 /**
@@ -1090,9 +1103,9 @@ function seenBrowserTools(): string[] {
  *   registry. The old per-session grant is still the only answer anyone has.
  * - An upgrade still waiting for the browser's tools to appear, so the grants
  *   can be carried over. The old column stands until they do.
- * - No server called `browser` at all: nothing here to switch, so the column.
+ * - No server that is the browser at all: nothing here to switch, so the column.
  *
- * Anything else is a `browser` server configured and not yet registered by any
+ * Anything else is a browser server configured and not yet registered by any
  * session — a fresh install whose first conversation is still starting, or a
  * lazy server whose tools pi has not cached yet. Nobody has said anything about
  * it, which is what a default is for, so it is on, as any other server is.
@@ -1100,15 +1113,22 @@ function seenBrowserTools(): string[] {
 function browserColumnDecides(): boolean {
   if ((process.env.EXECUTOR || "host") === "container") return true;
   if (browserAdoptionPending()) return true;
-  return !mcpServerNames().includes(BROWSER_MCP);
+  return browserServers().length === 0;
 }
 
-/** The conversations that disagree with the default about the browser. */
+/**
+ * The conversations that disagree with the default about the browser.
+ *
+ * Every one that says anything about tools, and every one that holds the old
+ * grant, is asked — not those whose switches happen to mention the word
+ * `browser`, which is not what a server is called when it is called something
+ * else, and misses the column where that is still the only record.
+ */
 export function browserExceptions(): SessionRow[] {
   const rows = getDb()
     .prepare(
       `SELECT * FROM sessions
-       WHERE tools_off LIKE '%browser%' OR tools_on LIKE '%browser%'
+       WHERE COALESCE(tools_off, '') != '' OR COALESCE(tools_on, '') != '' OR browser = 1
        ORDER BY updated_at DESC`
     )
     .all() as SessionRow[];
@@ -1265,11 +1285,13 @@ export function knownTools(): KnownTool[] {
 export function rememberTools(tools: KnownTool[]): void {
   if (!tools.length) return;
   const merged = new Map(knownTools().map((t) => [t.name, t]));
+  const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
   for (const tool of tools) merged.set(tool.name, { name: tool.name, source: tool.source });
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   putSetting("tools_seen", JSON.stringify(sorted));
-  // The first moment the browser's tools can be told apart from the rest.
-  adoptBrowserGrants();
+  // The first moment the browser's tools can be told apart from the rest, and
+  // every moment a new one turns up.
+  adoptBrowserGrants(getDb(), fresh);
 }
 
 /**

@@ -41,14 +41,22 @@ export function mcpServerOf(name: string, servers: Iterable<string>): string | u
 /**
  * Does this tool come from the agent's browser?
  *
+ * `browsers` is the servers that are the browser, which the caller works out
+ * from what they connect to; it defaults to the name the portal writes.
+ *
  * Asked through mcpServerOf rather than by prefix, because the prefix is
  * ambiguous: a server called `browser_staging` names a tool
  * `browser_staging_click`, which starts with `browser_` and is not the
  * browser's. Whether a conversation may drive the signed-in Chromium hangs on
  * this answer, so it is the careful one.
  */
-export function browserTool(name: string, servers: Iterable<string>): boolean {
-  return mcpServerOf(name, servers) === BROWSER_MCP;
+export function browserTool(
+  name: string,
+  servers: Iterable<string>,
+  browsers: string[] = [BROWSER_MCP]
+): boolean {
+  const server = mcpServerOf(name, servers);
+  return server !== undefined && browsers.includes(server);
 }
 
 

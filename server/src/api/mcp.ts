@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { piAgentDir } from "../pi-settings.js";
+import { BROWSER_MCP } from "../tool-policy.js";
 
 const run = promisify(execFile);
 
@@ -102,6 +103,41 @@ export function mcpServerNames(): string[] {
   } catch {
     return [];
   }
+}
+
+/** Where the agent's browser listens for the debugging protocol. */
+export const BROWSER_CDP = process.env.BROWSER_CDP_URL || "http://127.0.0.1:9222";
+
+/** The servers configured to attach to our browser, whatever they are called. */
+function connectedServers(): string[] {
+  const names: string[] = [];
+  for (const [name, entry] of Object.entries(readMcpFile().config.mcpServers ?? {})) {
+    const args = (entry as { args?: unknown }).args;
+    if (Array.isArray(args) && args.includes("--cdp-endpoint") && args.includes(BROWSER_CDP)) {
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+/** Is some MCP server pointed at our browser, whatever it is called? */
+export function findConnection(): string | null {
+  return connectedServers()[0] ?? null;
+}
+
+/**
+ * Which servers are the agent's browser.
+ *
+ * Found by what they connect to, not by a name: `--cdp-endpoint` is what makes
+ * a Playwright server the browser rather than a throwaway Chromium, and an
+ * entry written by hand or by an older portal may be called anything. The one
+ * the portal writes is called `browser`, and one that is called that counts
+ * too — it is the name the rest of the portal has always looked for.
+ */
+export function browserServers(): string[] {
+  const names = new Set(connectedServers());
+  if (mcpServerNames().includes(BROWSER_MCP)) names.add(BROWSER_MCP);
+  return [...names];
 }
 
 export function writeMcpFile(config: McpFile): void {

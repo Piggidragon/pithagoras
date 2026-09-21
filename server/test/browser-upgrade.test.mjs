@@ -19,11 +19,14 @@ const {
   adoptBrowserGrants,
   browserAllowed,
   browserByDefault,
+  browserExceptions,
   createSession,
   getDb,
   getSession,
   rememberTools,
   sessionTools,
+  setSessionTools,
+  setToolDefaultsOff,
   toolDefaultsOff,
 } = await import("../dist/db.js");
 
@@ -60,7 +63,8 @@ test("the first session to register them carries the posture over", () => {
   // The order production has: the database is open long before any session
   // launches and reports its tools.
   rememberTools(seen());
-  assert.equal(flag(), "1");
+  // Not "1": the posture keeps applying to browser tools that turn up later.
+  assert.equal(flag(), "carry");
   for (const name of BROWSER) assert.ok(toolDefaultsOff().includes(name), name);
   assert.deepEqual(sessionTools("was-on").on, BROWSER);
   assert.equal(browserAllowed(getSession("was-on")), true);
@@ -73,4 +77,33 @@ test("and only once", () => {
   rememberTools(seen());
   assert.deepEqual(toolDefaultsOff(), []);
   assert.equal(browserAllowed(getSession("was-off")), true);
+});
+
+test("a browser tool that turns up later is carried the same way", () => {
+  // A lazy server has cached some of its tools and not others, and a pinned
+  // version that is bumped adds names. Neither may arrive default-on on an
+  // install that was upgraded to keep the browser off.
+  setToolDefaultsOff(BROWSER);
+  rememberTools([{ name: "browser_browser_type", source: "pi-mcp-adapter" }]);
+  assert.ok(toolDefaultsOff().includes("browser_browser_type"));
+  assert.ok(sessionTools("was-on").on.includes("browser_browser_type"));
+  assert.equal(browserAllowed(getSession("was-off")), false);
+  assert.equal(browserAllowed(getSession("was-on")), true);
+  // And one that is not the browser's is left alone.
+  rememberTools([{ name: "web_fetch", source: "pi-web-access" }]);
+  assert.ok(!toolDefaultsOff().includes("web_fetch"));
+});
+
+test("a grant that still lives in the column is listed, whatever the tools say", () => {
+  // The Browser page lists the conversations that disagree with the default.
+  // Filtering on the tools columns first left it empty exactly where the column
+  // is the only record — a container deployment, or an upgrade still waiting.
+  setSessionTools("was-on", { off: [], on: [] });
+  setToolDefaultsOff([]);
+  getDb().prepare("UPDATE settings SET value = 'pending' WHERE key = 'browser_tools_adopted'").run();
+  getDb().prepare("DELETE FROM settings WHERE key = 'tools_seen'").run();
+  assert.deepEqual(
+    browserExceptions().map((row) => row.id),
+    ["was-on"]
+  );
 });

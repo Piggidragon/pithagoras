@@ -204,6 +204,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   ) {
     super();
     this.setMaxListeners(0);
+    this.guardActiveTools();
   }
 
   static async create(opts: {
@@ -621,25 +622,61 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }));
   }
 
-  /**
-   * Commands come from three places, matching how pi builds this list.
-   * Extension commands live on the runner — promptTemplates alone is only the
-   * templates, which is why an installed extension contributed nothing here.
-   */
   /** Names this session has switched off. Applied at every start and on change. */
   /** Not private: create() fills it before the session is handed over. */
   switchedOff = new Set<string>();
 
   /**
-   * Every tool the session could use, with where it came from.
+   * What pi wants active, before the switches take anything out of it.
+   *
+   * The registry is not that: `getAllTools()` is every definition pi knows,
+   * including `grep`, `find` and `ls`, which it registers and leaves inactive.
+   * Subtracting the switches from the registry switched those on the first
+   * time anyone turned anything off. The baseline is pi's own choice, in
+   * whatever way it makes it — at start, when an extension registers a tool
+   * later, on a reload — and the switches only ever take names out of it.
+   */
+  private wanted = new Set<string>();
+  private activate?: (names: string[]) => void;
+
+  /**
+   * Put the switches in the one place every activation goes through.
+   *
+   * pi activates tools from several directions and none of them asks us: an
+   * extension that registers a tool later (`lifecycle: "lazy"` is the whole
+   * point of an MCP server that connects on first use) has it activated by
+   * `refreshTools()`, and a reload activates every extension tool again. Each
+   * ends in `setActiveToolsByName`, so that is where the names come out.
+   */
+  private guardActiveTools(): void {
+    const session = this.session;
+    if (typeof session?.setActiveToolsByName !== "function") return;
+    const original = session.setActiveToolsByName.bind(session) as (names: string[]) => void;
+    this.activate = original;
+    try {
+      this.wanted = new Set<string>(session.getActiveToolNames?.() ?? []);
+    } catch {
+      this.wanted = new Set();
+    }
+    session.setActiveToolsByName = (names: string[]) => {
+      this.wanted = new Set(names);
+      original(names.filter((name) => !this.switchedOff.has(name)));
+    };
+  }
+
+  /**
+   * Every tool the session could be offered, with where it came from.
    *
    * The source is what a person recognises: a package name rather than the
    * path pi tracks it by, so the list groups the way somebody thinks about it
-   * — "the web search one", not four unrelated rows.
+   * — "the web search one", not four unrelated rows. A tool pi leaves inactive
+   * is not listed: a tick beside something the model cannot call is a state
+   * the session is not in.
    */
   async getTools(): Promise<PiTool[]> {
     const all: any[] = this.session.getAllTools?.() ?? [];
-    return all.map((tool) => ({
+    const offered = this.wanted.size ? all.filter((tool) => this.wanted.has(String(tool.name))) : all;
+    return offered.map((tool) => ({
       name: String(tool.name),
       description: typeof tool.description === "string" ? tool.description : undefined,
       source: sourceLabel(tool.sourceInfo),
@@ -652,7 +689,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    *
    * Named rather than listing what stays: pi wants the active set, but that is
    * a snapshot, and a tool registered later would silently never be on. The
-   * active set is computed from what exists right now, every time.
+   * active set is computed from what pi wants right now, every time.
    */
   async setToolsOff(names: string[]): Promise<void> {
     this.switchedOff = new Set(names);
@@ -661,15 +698,18 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   applyToolsOff(): void {
     try {
-      const all: any[] = this.session.getAllTools?.() ?? [];
-      if (!all.length) return;
-      const active = all.map((t) => String(t.name)).filter((name) => !this.switchedOff.has(name));
-      this.session.setActiveToolsByName?.(active);
+      if (!this.activate || !this.wanted.size) return;
+      this.activate([...this.wanted].filter((name) => !this.switchedOff.has(name)));
     } catch (e) {
       console.error(`[portal] could not apply the tool switches: ${(e as Error).message}`);
     }
   }
 
+  /**
+   * Commands come from three places, matching how pi builds this list.
+   * Extension commands live on the runner — promptTemplates alone is only the
+   * templates, which is why an installed extension contributed nothing here.
+   */
   async getCommands(): Promise<PiCommand[]> {
     const commands: PiCommand[] = [];
 

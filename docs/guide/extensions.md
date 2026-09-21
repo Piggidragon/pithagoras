@@ -108,6 +108,12 @@ It takes effect from the next message — pi is told at once and there is no nee
 to restart the conversation — and it is remembered per chat, including across a
 restart.
 
+The list is what the model could be offered. pi registers `grep`, `find` and
+`ls` and leaves them inactive, so they are not there to tick. A switch holds
+against everything that would turn a tool back on — an extension that registers
+it later, a `/reload` — because it is taken out of what pi wants active each
+time pi says so, not applied once.
+
 ### Calling them something else
 
 An npm name is an address. `@juicesharp/rpiv-ask-user-question` says exactly
