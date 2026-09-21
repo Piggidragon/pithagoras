@@ -166,7 +166,7 @@
 .voice-browser-window header i { width: 5px; height: 5px; border-radius: 50%; background: #3fe1c6; }
 .voice-browser-window iframe { width: 100%; flex: 1; min-height: 0; border: 0; background: #0b0b0d; }
 .voice-browser-window:fullscreen { width: 100vw; height: 100vh; inset: 0; transform: none; border-radius: 0; }
-.is-browsing .voice-browser-window { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+.voice-browser-window.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
 .is-browsing .voice-presence { left: calc(100% - 156px); top: calc(100% - 48px); width: 268px; max-width: none; height: 68px; flex-direction: row; border-radius: 22px; background: rgb(var(--surface) / .8); border: 1px solid rgb(var(--line) / .55); backdrop-filter: blur(20px); padding: 0 12px 0 0; }
 .is-browsing .voice-avatar { width: 76px; flex-shrink: 0; }
 .is-browsing .voice-status { margin: 0; font-size: 10px; flex: 1; white-space: normal; line-height: 1.3; }
@@ -175,7 +175,7 @@
 .is-browsing .voice-stage-action { width: 32px; height: 32px; }
 .is-browsing .voice-stage-action svg { width: 16px; height: 16px; }
 .voice-terminal-window { right: 24px; top: 50%; width: calc(67% - 36px); height: calc(100% - 120px); transform: translate(60px,-50%) scale(.97); }
-.is-terminal .voice-terminal-window { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(0,-50%) scale(1); }
+.voice-terminal-window.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(0,-50%) scale(1); }
 .is-terminal .voice-presence { left: 17%; top: 48%; width: min(260px, 33%); }
 .is-terminal .voice-status { margin-top: -12px; font-size: 11px; }
 .is-terminal .voice-stage-controls { margin-top: 22px; gap: 10px; }
@@ -204,7 +204,7 @@
   .voice-stage-header { padding: 16px; }
   .voice-presence { width: min(360px, 92%); }
   .voice-browser-window, .voice-terminal-window { left: 12px; right: 12px; top: 62px; width: auto; height: calc(100% - 160px); transform: translateY(24px) scale(.96); }
-  .is-browsing .voice-browser-window, .is-terminal .voice-terminal-window { transform: translateY(0) scale(1); }
+  .voice-browser-window.is-open, .voice-terminal-window.is-open { transform: translateY(0) scale(1); }
   .is-browsing .voice-presence, .is-terminal .voice-presence { left: 50%; top: calc(100% - 48px); width: 268px; max-width: none; height: 68px; flex-direction: row; border-radius: 22px; background: rgb(var(--surface) / .8); border: 1px solid rgb(var(--line) / .55); padding: 0 12px 0 0; }
   .is-terminal .voice-avatar { width: 76px; flex-shrink: 0; }
   .is-terminal .voice-status { margin: 0; font-size: 10px; flex: 1; white-space: normal; }
@@ -349,8 +349,10 @@
   .voice-stage[data-panels="1"] .voice-stage-controls { margin: 20px 0 0; gap: 12px; }
   .voice-stage[data-panels="1"] .voice-stage-action { width: 42px; height: 42px; }
   .voice-stage[data-panels="1"] .voice-terminal-window,
+  .voice-stage[data-panels="1"] .voice-files-window,
   .voice-stage[data-panels="1"] .voice-browser-window { left: auto; right: 18px; top: 47%; transform: translateY(-50%); width: 57%; height: calc(100% - 130px); }
   .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-terminal-window,
+  .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-files-window,
   .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-browser-window { left: 2%; right: auto; top: 46%; width: 42%; height: calc(100% - 175px); }
   .session-workspace:has(.voice-stage[data-panels="2"]) .canvas-panel { width: 51cqw; height: calc(100dvh - 275px); }
   .voice-stage[data-panels="1"] .voice-tool-activity { left: 20%; top: 48%; --origin-x: 0px; --origin-y: -30px; }
@@ -368,6 +370,7 @@
 .voice-stage .voice-utilities button { width: 36px; height: 36px; }
 @media (min-width: 601px) {
   .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-browser-window,
+  .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-files-window,
   .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-terminal-window { left: 16px; top: 52px; width: calc(49% - 32px); height: calc(100% - 216px); transform: none; }
   .session-workspace:has(.voice-stage[data-panels="2"]) .canvas-panel { width: calc(51cqw - 16px); height: calc(100% - 164px); margin-top: 0; }
   .session-workspace:has(.voice-stage) .session-canvases { top: 52px; bottom: 0; }
@@ -403,3 +406,32 @@
 .voice-profile p {margin:10px 0;color:rgb(var(--fg-muted));}
 .voice-profile table {width:100%;margin:12px 0;}.voice-profile td{padding:5px 3px;border-bottom:1px solid rgb(var(--line));}.voice-profile td:not(:first-child){text-align:right;white-space:nowrap;}
 .voice-profile pre {white-space:pre-wrap;font-size:10px;max-height:160px;overflow:auto;}.voice-profile button{padding:6px 10px;border:1px solid rgb(var(--line));border-radius:8px;}
+
+/* Files, in voice mode: a window like the browser's and the terminal's. It
+   takes the middle when the terminal is up and the browser is not, and the
+   side otherwise; the stage's classes say where the presence goes. The
+   window has the theme's own surface, since what is in it is text to read. */
+.voice-files-window { position: absolute; z-index: 2; overflow: hidden; border: 1px solid #62718a; border-radius: 18px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 30px 90px #0005, 0 2px 10px #0003; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transition: transform .7s cubic-bezier(.22,1,.36,1), left .7s cubic-bezier(.22,1,.36,1), top .7s cubic-bezier(.22,1,.36,1), width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1), opacity .4s, visibility .7s; }
+.voice-files-window > header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 42px; padding: 0 10px 0 16px; border-bottom: 1px solid #62718a; background: rgb(var(--surface)); color: rgb(var(--fg)); font-size: 11px; font-weight: 500; }
+.voice-files-window header > span { display: flex; align-items: center; gap: 8px; }
+.voice-files-window header > div { display: flex; gap: 2px; }
+.voice-files-window header button { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: rgb(var(--fg)); background: rgb(var(--fg) / .09); border: 1px solid rgb(var(--fg) / .3); transition: color .2s, background .2s; }
+.voice-files-window header button:hover { background: rgb(var(--fg) / .18); }
+.voice-files-window header svg { width: 15px; height: 15px; }
+.voice-files-window > :not(header) { flex: 1; min-height: 0; }
+.voice-files-window.as-main { left: 50%; top: 47%; width: min(1000px, calc(100% - 64px)); height: calc(100% - 164px); transform: translate(-50%, -42%) scale(.92); }
+.voice-files-window.as-main.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+.voice-files-window.as-side { right: 24px; top: 50%; width: calc(67% - 36px); height: calc(100% - 120px); transform: translate(60px, -50%) scale(.97); }
+.voice-files-window.as-side.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(0, -50%) scale(1); }
+.is-browsing.is-terminal .voice-files-window.as-main { left: 35%; width: calc(70% - 42px); }
+.is-browsing.is-terminal .voice-files-window.as-side { right: 20px; top: 47%; width: calc(30% - 18px); height: calc(100% - 164px); }
+@media (min-width: 601px) {
+  .voice-stage.is-terminal:not(.is-browsing) .voice-files-window.as-side { top: 47%; height: calc(100% - 164px); }
+}
+@media (max-width: 600px) {
+  .voice-files-window.as-main, .voice-files-window.as-side { left: 12px; right: 12px; top: 62px; width: auto; height: calc(100% - 160px); transform: translateY(24px) scale(.96); }
+  .voice-files-window.as-main.is-open, .voice-files-window.as-side.is-open { transform: translateY(0) scale(1); }
+  .is-browsing.is-terminal .voice-files-window.as-main { left: 12px; width: auto; height: calc(62% - 106px); }
+  .is-browsing.is-terminal .voice-files-window.as-side { left: 12px; right: 12px; top: calc(62% - 34px); width: auto; height: calc(38% - 66px); }
+}
+@media (prefers-reduced-motion: reduce) { .voice-files-window { transition: none; } }

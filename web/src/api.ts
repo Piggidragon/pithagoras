@@ -140,6 +140,21 @@ export interface CompactionSettings {
   keepRecentTokens: number;
 }
 
+/** One thing in a chat's folder. "link" leads out of it, or nowhere, and is left alone. */
+export interface FileEntry {
+  name: string;
+  type: "dir" | "file" | "link";
+  /** A link, whatever `type` says: one to a folder in this one is a "dir", but deleting it removes only the link. */
+  link?: boolean;
+  size: number;
+  mtime: number;
+}
+
+/** A file as the Files panel shows it: its text, or the fact that it has none to show. */
+export type FileContent =
+  | { binary: true; size: number; mtime: number }
+  | { binary: false; size: number; mtime: number; content: string };
+
 export interface PortalEvent {
   seq: number;
   type: string;
@@ -170,6 +185,31 @@ export interface VoiceConfig {
 
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; }
 export const api = {
+  listFiles: (sessionId: string, dir: string) =>
+    json<{ path: string; entries: FileEntry[]; truncated: boolean }>(
+      `/api/sessions/${sessionId}/files?path=${encodeURIComponent(dir)}`
+    ),
+  readFile: (sessionId: string, file: string) =>
+    json<FileContent>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`),
+  /** `mtime` is the time the text on screen was read at; the save is refused if the file has changed since. */
+  saveFile: (sessionId: string, file: string, content: string, mtime?: number) =>
+    json<{ ok: true; size: number; mtime: number }>(
+      `/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`,
+      { method: "PUT", body: JSON.stringify({ content, mtime }) }
+    ),
+  /** Gives a file or folder another name in the same folder; answers with its new path. */
+  renameFile: (sessionId: string, file: string, name: string) =>
+    json<{ ok: true; path: string }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  deleteFile: (sessionId: string, file: string) =>
+    json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, { method: "DELETE" }),
+  fileDownloadUrl: (sessionId: string, file: string) =>
+    `/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}&download=1`,
+  /** The whole folder, or a folder in it. */
+  archiveDownloadUrl: (sessionId: string, dir = "") =>
+    `/api/sessions/${sessionId}/archive${dir ? `?path=${encodeURIComponent(dir)}` : ""}`,
   voiceInstallStatus: () => json<VoiceInstallStatus>('/api/voice/install'),
   voiceAction: (action: 'install' | 'start' | 'stop') => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST'}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
