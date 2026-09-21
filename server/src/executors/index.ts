@@ -27,6 +27,8 @@ export interface LaunchOptions {
   enforceTaint?: boolean;
   /** Read at each tool call, so a change takes effect without a restart. */
   browserNow?: () => { allowed: boolean; allowlist: string[] };
+  /** Tools this conversation has switched off, by name. */
+  toolsOff?: string[];
 }
 
 export interface Executor {
@@ -76,6 +78,7 @@ export class HostExecutor implements Executor {
       whoNow: opts.whoNow,
       enforceTaint: opts.enforceTaint,
       browserNow: opts.browserNow,
+      toolsOff: opts.toolsOff,
       provider: opts.provider,
       modelId: opts.model,
       thinkingLevel: opts.thinkingLevel,

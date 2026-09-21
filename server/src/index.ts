@@ -73,6 +73,7 @@ import {
   getSettingDefaults,
   getSettings,
   getStoredSettings,
+  parseToolsOff,
   setContextLimit,
   setDefaultContextLimit,
   setSettings,
@@ -575,6 +576,32 @@ app.post("/api/sessions/:id/ui-response", (req, res) => {
   if (typeof id !== "string") return res.status(400).json({ error: "id required" });
   const delivered = sessions.respondUi(session.id, id, { value, cancelled: Boolean(cancelled) });
   res.json({ ok: delivered, note: delivered ? undefined : "Request already resolved or expired" });
+});
+
+/**
+ * The tools this conversation could use, and which of them are on.
+ *
+ * Only a running session can answer: pi builds the registry when it starts,
+ * and what an extension registered is not knowable before that. A conversation
+ * that is idle says so, and the page offers to wake it rather than showing an
+ * empty list as though there were no tools.
+ */
+app.get("/api/sessions/:id/tools", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const { tools, live } = await sessions.getTools(session.id);
+  res.json({ tools, live, off: parseToolsOff(session.tools_off) });
+});
+
+/** Switch tools off for this conversation. Everything not named is on. */
+app.put("/api/sessions/:id/tools", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const off = req.body?.off;
+  if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
+    return res.status(400).json({ error: "off must be a list of tool names" });
+  }
+  res.json({ off: await sessions.setTools(session.id, off) });
 });
 
 app.post("/api/sessions/:id/abort", async (req, res) => {

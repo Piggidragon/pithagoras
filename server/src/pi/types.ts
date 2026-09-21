@@ -15,6 +15,16 @@ export interface PiStats {
   totalMessages: number;
 }
 
+/** A tool a session could use, and where it came from. */
+export interface PiTool {
+  name: string;
+  description?: string;
+  /** The package or file that registered it, for grouping. */
+  source: string;
+  /** False when this conversation has it switched off. */
+  enabled: boolean;
+}
+
 export interface PiCommand {
   name: string;
   description?: string;
@@ -53,6 +63,13 @@ export interface PiClient extends EventEmitter {
   getThinkingLevels(): Promise<string[]>;
   getModels(): Promise<PiState["model"][]>;
   getCommands(): Promise<PiCommand[]>;
+  /**
+   * Every tool this session could use, and whether it is on.
+   * Optional: an executor that cannot ask pi leaves it out.
+   */
+  getTools?(): Promise<PiTool[]>;
+  /** Switch tools off by name. Everything not named is on. */
+  setToolsOff?(names: string[]): Promise<void>;
 
   setModel(provider: string, modelId: string): Promise<void>;
   setThinkingLevel(level: string): Promise<void>;

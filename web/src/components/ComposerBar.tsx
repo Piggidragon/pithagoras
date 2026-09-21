@@ -1,4 +1,5 @@
-import { LuGlobe } from "react-icons/lu";
+import { LuBlocks, LuGlobe } from "react-icons/lu";
+import { ToolSwitches } from "./ToolSwitches";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
@@ -174,7 +175,7 @@ export function ComposerBar({
   const [cfg, setCfg] = useState<PiConfig>(() => seed(session));
   /** True while a catalogue fetch is in flight — not "has one ever run". */
   const [loadingCatalogue, setLoadingCatalogue] = useState(false);
-  const [open, setOpen] = useState<null | "model" | "effort">(null);
+  const [open, setOpen] = useState<null | "model" | "effort" | "tools">(null);
   const [browser, setBrowser] = useState(false);
   const [hasBrowser, setHasBrowser] = useState(false);
 
@@ -416,6 +417,18 @@ export function ComposerBar({
         >
           {onOff ? `thinking ${thinkingOn ? "on" : "off"}` : cfg.state.thinkingLevel}
         </button>
+        {/* One level down from the browser switch beside it: not whether the
+            agent may go online at all, but which of the tools its extensions
+            brought it may reach for in this conversation. */}
+        <button
+          onClick={() => setOpen(open === "tools" ? null : "tools")}
+          className={`rounded-lg px-2 py-1 transition ${
+            open === "tools" ? "bg-fg/10 text-fg" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
+          }`}
+          title="Which tools this conversation may use"
+        >
+          <LuBlocks className="h-3.5 w-3.5" />
+        </button>
         {/* Only where there is a browser to grant. On a deployment without the
             optional service this is not a disabled control, it is nothing. */}
         {hasBrowser && (
@@ -454,6 +467,14 @@ export function ComposerBar({
         />
       </div>
       {actions && <div className="composer-actions">{actions}</div>}
+
+      {/* Tools */}
+      {open === "tools" && (
+        <div className="absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+          <p className="px-3 py-1 text-[11px] text-fg-subtle">Tools in this chat</p>
+          <ToolSwitches sessionId={sessionId} />
+        </div>
+      )}
 
       {/* Models */}
       {open === "model" && (

@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { PiClient, PiCommand, PiState, PiStats } from "./types.js";
+import type { PiClient, PiCommand, PiState, PiStats, PiTool } from "./types.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
@@ -134,6 +134,38 @@ function isLlama(provider: string | undefined): boolean {
   return provider === "llama.cpp" || (provider?.startsWith("llama-server") ?? false);
 }
 
+/**
+ * Who a tool belongs to, said the way a person would.
+ *
+ * pi's own `source` is the kind of place it came from — "builtin", "auto",
+ * "inline" — which groups four unrelated packages under one word. The name is
+ * in the path: the package for anything installed, the file for a loose
+ * extension, and pi's own angle-bracketed markers for the rest.
+ */
+function sourceLabel(info: any): string {
+  const path = typeof info?.path === "string" ? info.path : "";
+
+  // pi writes its own as <builtin:read> and the portal's inline ones as
+  // <inline:canvases>. The second is worth naming; the first is the agent.
+  const marker = /^<(builtin|inline):([^>]+)>$/.exec(path);
+  if (marker) return marker[1] === "inline" ? marker[2] : "built in";
+
+  const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path);
+  if (pkg) return pkg[1];
+
+  if (path) {
+    const parts = path.split("/").filter(Boolean);
+    const file = parts.pop() ?? "";
+    const name = file.replace(/\.[cm]?[jt]sx?$/, "");
+    // An extension in a directory of its own is named by the directory, which
+    // is what its author called it — "index" is not a name.
+    return name === "index" ? (parts.pop() ?? name) : name || "built in";
+  }
+
+  const source = typeof info?.source === "string" ? info.source.trim() : "";
+  return source || "built in";
+}
+
 /** Read a member that may be a getter or a method, without assuming which. */
 function callable(obj: any, key: string): any {
   const v = obj?.[key];
@@ -196,6 +228,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     whoNow?: () => { role: string; key?: string };
     /** Lowest role this conversation serves, deciding which context files load. */
     role?: string;
+    /** Tools this conversation has switched off, by name. */
+    toolsOff?: string[];
     /** The portal's session id, for tools that record against it. */
     sessionId?: string;
     /** False lets a run act on what it read — see guardExtension. */
@@ -336,6 +370,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Binding a uiContext is what makes interactive commands work at all: an
     // unbound host makes ctx.ui.select() return a default immediately, so a
     // command that asks the user something silently does nothing.
+
+    client.switchedOff = new Set(opts.toolsOff ?? []);
     try {
       await session.bindExtensions({
         uiContext: client.buildUiContext(),
@@ -390,6 +426,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
 
     client.applyLimitQuietly();
+    // After binding, not before: a tool an extension registers does not exist
+    // until then, and switching it off ahead of time switches off nothing.
+    if (client.switchedOff.size) client.applyToolsOff();
     return client;
   }
 
@@ -587,6 +626,50 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * Extension commands live on the runner — promptTemplates alone is only the
    * templates, which is why an installed extension contributed nothing here.
    */
+  /** Names this session has switched off. Applied at every start and on change. */
+  /** Not private: create() fills it before the session is handed over. */
+  switchedOff = new Set<string>();
+
+  /**
+   * Every tool the session could use, with where it came from.
+   *
+   * The source is what a person recognises: a package name rather than the
+   * path pi tracks it by, so the list groups the way somebody thinks about it
+   * — "the web search one", not four unrelated rows.
+   */
+  async getTools(): Promise<PiTool[]> {
+    const all: any[] = this.session.getAllTools?.() ?? [];
+    return all.map((tool) => ({
+      name: String(tool.name),
+      description: typeof tool.description === "string" ? tool.description : undefined,
+      source: sourceLabel(tool.sourceInfo),
+      enabled: !this.switchedOff.has(String(tool.name)),
+    }));
+  }
+
+  /**
+   * Switch tools off by name.
+   *
+   * Named rather than listing what stays: pi wants the active set, but that is
+   * a snapshot, and a tool registered later would silently never be on. The
+   * active set is computed from what exists right now, every time.
+   */
+  async setToolsOff(names: string[]): Promise<void> {
+    this.switchedOff = new Set(names);
+    this.applyToolsOff();
+  }
+
+  applyToolsOff(): void {
+    try {
+      const all: any[] = this.session.getAllTools?.() ?? [];
+      if (!all.length) return;
+      const active = all.map((t) => String(t.name)).filter((name) => !this.switchedOff.has(name));
+      this.session.setActiveToolsByName?.(active);
+    } catch (e) {
+      console.error(`[portal] could not apply the tool switches: ${(e as Error).message}`);
+    }
+  }
+
   async getCommands(): Promise<PiCommand[]> {
     const commands: PiCommand[] = [];
 

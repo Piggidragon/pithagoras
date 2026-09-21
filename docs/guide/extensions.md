@@ -83,3 +83,28 @@ anything.
 
 An unanswered dialog times out after five minutes rather than wedging the
 session forever.
+## Switching tools off for one chat
+
+Beside the browser switch in the composer there is a second one, a level down:
+not whether the agent may go online at all, but which of the tools its
+extensions brought it may reach for **in this conversation**. "Look this up for
+me" and "do not go online, just read the repo" are both reasonable in the same
+week.
+
+Tools are grouped by what installed them, so a package can be switched off in
+one go. It takes effect from the next message — pi is told at once and there is
+no need to restart the conversation — and it is remembered per chat, including
+across a restart.
+
+What is stored is the list of tools that are **off**, not the list allowed. An
+extension installed later is on, because nobody said otherwise about it; the
+inverse would have frozen every conversation's tool set at whatever happened to
+exist the day somebody first opened this panel. A switch for a tool that is not
+loaded right now is kept too, so reinstalling an extension does not quietly
+bring back something you turned off.
+
+::: tip Not the same as uninstalling
+The extension is still loaded, its commands still work, and other chats are
+unaffected. The tool is simply not offered to the model in this one.
+:::
+

@@ -56,6 +56,8 @@ export interface SessionRow {
   last_person_key: string | null;
   /** May this session drive the agent's browser? Off unless turned on. */
   browser: number;
+  /** Tools switched off for this conversation, newline separated. */
+  tools_off: string;
 }
 
 export interface EventRow {
@@ -328,6 +330,12 @@ function migrate(d: Database.Database): void {
   }
   if (!names.includes("role")) {
     d.exec("ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'primary'");
+  }
+  // Tools switched off for this conversation, by name, newline separated.
+  // Stored as the exceptions rather than the allowed set: a tool installed
+  // after the choice was made is on, which is what "off" was never said about.
+  if (!names.includes("tools_off")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN tools_off TEXT NOT NULL DEFAULT ''");
   }
 
   if (!names.includes("kind")) {
@@ -975,6 +983,38 @@ export function browserAllowed(session: SessionRow): boolean {
     return row ? row.browser === 1 : false;
   }
   return session.browser === 1;
+}
+
+/**
+ * Tools this conversation has had switched off, by name.
+ *
+ * The exceptions are stored, not the permission: an extension installed after
+ * somebody turned two tools off is on, because nobody said otherwise about it.
+ * The inverse would have quietly frozen every conversation's tool set at
+ * whatever happened to exist the day it was decided.
+ */
+export function toolsOff(sessionId: string): string[] {
+  const row = getDb().prepare("SELECT tools_off FROM sessions WHERE id = ?").get(sessionId) as
+    | { tools_off: string | null }
+    | undefined;
+  return parseToolsOff(row?.tools_off);
+}
+
+export function parseToolsOff(raw: string | null | undefined): string[] {
+  return (raw ?? "")
+    .split("\n")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+export function setToolsOff(sessionId: string, names: string[]): string[] {
+  // Sorted and deduped so the column reads the same however it was written,
+  // and two saves of the same choice are the same row.
+  const clean = [...new Set(names.map((n) => n.trim()).filter(Boolean))].sort();
+  getDb()
+    .prepare("UPDATE sessions SET tools_off = ? WHERE id = ?")
+    .run(clean.join("\n"), sessionId);
+  return clean;
 }
 
 /**

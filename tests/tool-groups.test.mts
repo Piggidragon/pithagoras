@@ -1,0 +1,74 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { groupTools, nextOff } from "../web/src/tool-groups.ts";
+
+const tool = (name: string, source: string, enabled = true) => ({
+  name,
+  source,
+  enabled,
+  description: undefined,
+});
+
+test("tools are grouped by what they came from", () => {
+  const groups = groupTools([
+    tool("web_search", "pi-web-access"),
+    tool("bash", "built in"),
+    tool("web_fetch", "pi-web-access"),
+  ]);
+  assert.deepEqual(groups.map((g) => [g.source, g.tools.length]), [
+    ["pi-web-access", 2],
+    ["built in", 1],
+  ]);
+});
+
+test("what was installed comes before what was always there", () => {
+  const groups = groupTools([tool("bash", "built in"), tool("todo", "rpiv-todo")]);
+  assert.deepEqual(groups.map((g) => g.source), ["rpiv-todo", "built in"]);
+});
+
+test("a group knows whether all of it is on, off, or neither", () => {
+  const [group] = groupTools([
+    tool("a", "pkg", true),
+    tool("b", "pkg", false),
+  ]);
+  assert.equal(group.allOn, false);
+  assert.equal(group.allOff, false);
+  assert.equal(groupTools([tool("a", "pkg", true)])[0].allOn, true);
+  assert.equal(groupTools([tool("a", "pkg", false)])[0].allOff, true);
+});
+
+test("a tool with no source of its own is not its own group", () => {
+  const groups = groupTools([tool("a", ""), tool("b", "  ")]);
+  assert.deepEqual(groups.map((g) => g.source), ["built in"]);
+  assert.equal(groups[0].tools.length, 2);
+});
+
+test("tools within a group read in order", () => {
+  const [group] = groupTools([tool("zed", "pkg"), tool("alpha", "pkg")]);
+  assert.deepEqual(group.tools.map((t) => t.name), ["alpha", "zed"]);
+});
+
+test("switching one off adds it to what is written down", () => {
+  assert.deepEqual(nextOff([], ["web_search"], false), ["web_search"]);
+});
+
+test("switching it back on takes it out again", () => {
+  assert.deepEqual(nextOff(["web_search", "todo"], ["web_search"], true), ["todo"]);
+});
+
+test("a whole group goes at once", () => {
+  assert.deepEqual(nextOff([], ["web_search", "web_fetch"], false), ["web_fetch", "web_search"]);
+  assert.deepEqual(nextOff(["web_search", "web_fetch"], ["web_search", "web_fetch"], true), []);
+});
+
+test("switching off what is already off changes nothing", () => {
+  assert.deepEqual(nextOff(["a"], ["a"], false), ["a"]);
+});
+
+/**
+ * An extension that is not loaded right now still has its switches remembered,
+ * or reinstalling it would quietly bring back tools somebody turned off.
+ */
+test("a name the session has never heard of is kept", () => {
+  assert.deepEqual(nextOff(["gone_tool"], ["web_search"], false), ["gone_tool", "web_search"]);
+});

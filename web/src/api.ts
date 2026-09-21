@@ -155,6 +155,15 @@ export type FileContent =
   | { binary: true; size: number; mtime: number }
   | { binary: false; size: number; mtime: number; content: string };
 
+/** A tool a conversation could use, and whether it is switched on for it. */
+export interface PortalTool {
+  name: string;
+  description?: string;
+  /** The package that registered it, for grouping. */
+  source: string;
+  enabled: boolean;
+}
+
 export interface PortalEvent {
   seq: number;
   type: string;
@@ -257,6 +266,15 @@ export const api = {
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/edit`, {
       method: "POST",
       body: JSON.stringify({ message }),
+    }),
+  /** What this conversation could use. `live` is false when pi is not running to ask. */
+  tools: (sessionId: string) =>
+    json<{ tools: PortalTool[]; live: boolean; off: string[] }>(`/api/sessions/${sessionId}/tools`),
+  /** Switch tools off by name; everything not named is on. */
+  setTools: (sessionId: string, off: string[]) =>
+    json<{ off: string[] }>(`/api/sessions/${sessionId}/tools`, {
+      method: "PUT",
+      body: JSON.stringify({ off }),
     }),
   respondUi: (sessionId: string, id: string, payload: { value?: unknown; cancelled?: boolean }) =>
     json<{ ok: boolean }>(`/api/sessions/${sessionId}/ui-response`, {

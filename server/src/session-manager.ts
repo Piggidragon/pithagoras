@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { PiClient } from "./pi/types.js";
+import type { PiClient, PiTool } from "./pi/types.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { removeSessionFiles } from "./session-files.js";
@@ -19,6 +19,8 @@ import {
   getSettings,
   markOrphanedSessionsInterrupted,
   browserAllowed,
+  toolsOff,
+  setToolsOff,
   browserAllowlist,
   routineGuards,
   updateSession,
@@ -275,6 +277,7 @@ class SessionManager extends EventEmitter {
       // The session's settled role picks the context files; the live one gates
       // each tool call, so a group conversation follows whoever is speaking.
       role: session.role,
+      toolsOff: toolsOff(sessionId),
       whoNow: () => ({ role: this.speakerRole(sessionId), key: this.speakerKey(sessionId) }),
     });
 
@@ -810,6 +813,33 @@ class SessionManager extends EventEmitter {
   /** Answer an extension dialog for a live session. */
   respondUi(sessionId: string, id: string, response: { cancelled?: boolean; value?: unknown }): boolean {
     return this.live.get(sessionId)?.client.respondUi(id, response) ?? false;
+  }
+
+  /**
+   * Every tool this conversation could use, and whether it is on.
+   *
+   * Asked of the running session, because only pi knows what is registered.
+   * A conversation that is not running has nothing to ask, and the stored
+   * switches are all there is to say about it.
+   */
+  async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
+    const client = this.live.get(sessionId)?.client;
+    const tools = client?.getTools ? await client.getTools() : [];
+    return { tools, live: Boolean(tools.length) };
+  }
+
+  /**
+   * Switch tools off for this conversation.
+   *
+   * Written down whether or not it is running: the choice outlives the
+   * process. A running session is told at once, and pi applies it from the
+   * next turn — there is no need to restart the conversation to stop a tool
+   * being offered.
+   */
+  async setTools(sessionId: string, off: string[]): Promise<string[]> {
+    const stored = setToolsOff(sessionId, off);
+    await this.live.get(sessionId)?.client.setToolsOff?.(stored);
+    return stored;
   }
 
   async abort(sessionId: string): Promise<void> {
