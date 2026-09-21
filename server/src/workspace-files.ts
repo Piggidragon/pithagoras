@@ -1,8 +1,12 @@
+import { randomBytes } from "node:crypto";
 import {
   closeSync,
   constants,
+  fchmodSync,
+  fchownSync,
   fstatSync,
-  ftruncateSync,
+  fsyncSync,
+  linkSync,
   lstatSync,
   openSync,
   readSync,
@@ -11,6 +15,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
 import path from "node:path";
@@ -38,7 +43,7 @@ export const MAX_ENTRIES = 2_000;
 /** Left out of the whole-folder archive: regenerable, or huge, and not the work itself. */
 export const ARCHIVE_EXCLUDES = ["node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build"];
 
-export type FileErrorCode = "invalid" | "missing" | "conflict" | "exists" | "too_large";
+export type FileErrorCode = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed";
 
 export class FileError extends Error {
   constructor(
@@ -133,9 +138,21 @@ export function listDir(base: string, rel: unknown): { path: string; entries: Fi
     if ((e as NodeJS.ErrnoException).code === "ENOTDIR") throw new FileError("invalid", "That is not a folder");
     throw new FileError("missing", "There is no such folder");
   }
+  // The cap bounds the work, not only the answer: every entry that is looked at
+  // is a syscall (two more for a link), on the thread that also serves every
+  // other request. So a big folder is cut down first, on what the listing
+  // already says — folders before files, then by name — and only what is kept is
+  // looked at. That is also the order the answer is in, so nothing is lost by it.
+  let candidates = names.filter((d) => d.name !== ".git");
+  const total = candidates.length;
+  if (total > MAX_ENTRIES) {
+    const kind = (d: (typeof candidates)[number]) => (d.isDirectory() ? 0 : 1);
+    candidates = candidates
+      .sort((a, b) => kind(a) - kind(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      .slice(0, MAX_ENTRIES);
+  }
   const entries: FileEntry[] = [];
-  for (const dirent of names) {
-    if (dirent.name === ".git") continue;
+  for (const dirent of candidates) {
     const full = path.join(target, dirent.name);
     try {
       let st = lstatSync(full);
@@ -160,11 +177,7 @@ export function listDir(base: string, rel: unknown): { path: string; entries: Fi
     const rank = (t: FileEntry["type"]) => (t === "dir" ? 0 : 1);
     return rank(a.type) - rank(b.type) || a.name.localeCompare(b.name);
   });
-  return {
-    path: path.relative(base, target),
-    entries: entries.slice(0, MAX_ENTRIES),
-    truncated: entries.length > MAX_ENTRIES,
-  };
+  return { path: path.relative(base, target), entries, truncated: total > MAX_ENTRIES };
 }
 
 /** What is said when a save would put older text over newer, or over a file that is gone. */
@@ -221,13 +234,31 @@ export function readText(base: string, rel: unknown): FileContent {
   }
 }
 
-/** The checked path of a plain file, for sending it as a download. */
-export function downloadPath(base: string, rel: unknown): string {
+/**
+ * A plain file opened for sending as a download: the descriptor, its size and its name.
+ *
+ * What is sent is read from the descriptor that was opened here, without
+ * following a link, so nothing can be swapped in between the check and the
+ * send. Handing the path on to be opened again is what that would allow, and it
+ * would also treat a name that starts with a dot as one to refuse. The caller
+ * owns the descriptor.
+ */
+export function openDownload(base: string, rel: unknown): { fd: number; size: number; name: string } {
   const file = resolveInside(base, rel);
-  const st = lstatSync(file, { throwIfNoEntry: false });
-  if (!st) throw new FileError("missing", "There is no such file");
-  if (!st.isFile()) throw new FileError("invalid", "That is not a plain file");
-  return file;
+  const fd = openPlain(file, constants.O_RDONLY);
+  return { fd, size: fstatSync(fd).size, name: path.basename(file) };
+}
+
+/** What a failed write is called to the person: it did not happen, and the file is as it was. */
+function writeFailure(e: unknown): unknown {
+  const code = (e as NodeJS.ErrnoException)?.code;
+  // The folder it was to go in is not there, or is not a folder.
+  if (code === "ENOENT") return new FileError("missing", "There is no such folder");
+  if (code === "ENOTDIR") return new FileError("invalid", "That is not a folder");
+  if (code && ["ENOSPC", "EDQUOT", "EIO", "EROFS", "EACCES", "EPERM", "EFBIG"].includes(code)) {
+    return new FileError("failed", `The file could not be saved (${code}). It was left as it was.`);
+  }
+  return e;
 }
 
 /**
@@ -236,6 +267,14 @@ export function downloadPath(base: string, rel: unknown): string {
  * `expected` is the modification time the editor was showing. If the file has
  * changed since — the agent writes here too — the save is refused instead of
  * putting the older text over the newer, and the person chooses what to keep.
+ *
+ * The text is written to a file beside it and put in place by a rename, not
+ * written into the file itself. Cutting a file off and then failing to fill it
+ * (a full disk, an I/O error) leaves an empty file where the work was, and a
+ * file whose time has moved, so the next save is refused as a conflict. Done this
+ * way a failed save leaves the file exactly as it was. The rename also replaces
+ * whatever is at the name and does not follow it, so a link put there after the
+ * check is replaced, not written through.
  */
 export function writeText(base: string, rel: unknown, content: string, expected?: number): { size: number; mtime: number } {
   if (Buffer.byteLength(content, "utf8") > MAX_EDIT_BYTES) {
@@ -243,32 +282,70 @@ export function writeText(base: string, rel: unknown, content: string, expected?
   }
   const target = resolveInside(base, rel);
   if (target === base) throw new FileError("invalid", "That is the folder, not a file");
-  // Not created with O_TRUNC: the file is looked at before anything is cut off.
-  // And not with O_CREAT to begin with: a file that is there is opened as it is,
-  // so an emptied one is compared like any other. One that is not there was
-  // either never made (no `expected`, so make it) or has been taken away since
-  // it was opened, and putting it back with old text is not what a save means.
-  let fd: number;
+  // Looked at before anything is written, and without O_CREAT: a file that is
+  // there is checked as it is, so an emptied one is compared like any other. One
+  // that is not there was either never made (no `expected`, so make it) or has
+  // been taken away since it was opened, and putting it back with old text is
+  // not what a save means.
+  let mode = 0o644;
+  let owner: { uid: number; gid: number } | undefined;
+  let existed = true;
   try {
-    fd = openPlain(target, constants.O_WRONLY);
+    const fd = openPlain(target, constants.O_WRONLY);
+    try {
+      const st = fstatSync(fd);
+      if (st.nlink > 1) throw new FileError("invalid", "That file is shared with another, so it is left alone");
+      if (expected !== undefined && Math.abs(st.mtimeMs - expected) > 1) throw new FileError("conflict", CHANGED);
+      mode = st.mode & 0o7777;
+      owner = { uid: st.uid, gid: st.gid };
+    } finally {
+      closeSync(fd);
+    }
   } catch (e) {
-    if (!(e instanceof FileError) || e.code !== "missing") throw e;
+    if (!(e instanceof FileError) || e.code !== "missing") throw writeFailure(e);
     if (expected !== undefined) throw new FileError("conflict", CHANGED);
-    fd = openPlain(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL);
+    existed = false;
   }
+
+  const temp = path.join(path.dirname(target), `.${path.basename(target).slice(0, 100)}.${randomBytes(6).toString("hex")}.tmp`);
+  let fd: number | undefined;
   try {
-    const st = fstatSync(fd);
-    if (st.nlink > 1) throw new FileError("invalid", "That file is shared with another, so it is left alone");
-    if (expected !== undefined && Math.abs(st.mtimeMs - expected) > 1) throw new FileError("conflict", CHANGED);
-    ftruncateSync(fd, 0);
+    fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+    // What the file had: the mode is cut by the umask on creation, and the owner is not ours if the portal runs as another user.
+    fchmodSync(fd, mode);
+    if (owner) {
+      try {
+        fchownSync(fd, owner.uid, owner.gid);
+      } catch {
+        // Not allowed to give it away; it stays ours.
+      }
+    }
     const data = Buffer.from(content, "utf8");
     let written = 0;
     while (written < data.length) written += writeSync(fd, data, written, data.length - written, written);
-    const after = fstatSync(fd);
-    return { size: after.size, mtime: after.mtimeMs };
-  } finally {
+    fsyncSync(fd);
     closeSync(fd);
+    fd = undefined;
+    if (existed) {
+      renameSync(temp, target);
+    } else {
+      // A file that is made is not put over one that has appeared since: a link
+      // fails where a rename would replace. Where links are not possible, rename.
+      try {
+        linkSync(temp, target);
+        unlinkSync(temp);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new FileError("conflict", CHANGED);
+        renameSync(temp, target);
+      }
+    }
+  } catch (e) {
+    if (fd !== undefined) closeSync(fd);
+    rmSync(temp, { force: true });
+    throw writeFailure(e);
   }
+  const after = statSync(target);
+  return { size: after.size, mtime: after.mtimeMs };
 }
 
 /**

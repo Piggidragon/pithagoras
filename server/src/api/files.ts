@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { closeSync, createReadStream } from "node:fs";
 import path from "node:path";
 import express, { type Response, type Router } from "express";
 import { getSession } from "../db.js";
@@ -6,9 +7,9 @@ import {
   ARCHIVE_EXCLUDES,
   FileError,
   baseDir,
-  downloadPath,
   listDir,
   folderPath,
+  openDownload,
   readText,
   removeEntry,
   renameEntry,
@@ -25,7 +26,7 @@ import {
  * into its folder and a refusal into a status.
  */
 
-const STATUS = { invalid: 400, missing: 404, conflict: 409, exists: 409, too_large: 413 } as const;
+const STATUS = { invalid: 400, missing: 404, conflict: 409, exists: 409, too_large: 413, failed: 500 } as const;
 
 function fail(res: Response, e: unknown) {
   if (e instanceof FileError) return res.status(STATUS[e.code]).json({ error: e.message });
@@ -66,10 +67,22 @@ export function filesRouter(): Router {
     if (!base) return;
     try {
       if (req.query.download === "1") {
-        const file = downloadPath(base, req.query.path);
-        return res.download(file, path.basename(file), (err) => {
-          if (err && !res.headersSent) fail(res, err);
+        // Sent from the descriptor that was checked, not from the path again: see openDownload.
+        const { fd, size, name } = openDownload(base, req.query.path);
+        res.attachment(name);
+        res.setHeader("Content-Length", size);
+        if (size === 0) {
+          closeSync(fd);
+          return void res.end();
+        }
+        // Up to the size that was announced, even if the file has grown since.
+        const stream = createReadStream("", { fd, start: 0, end: size - 1 });
+        stream.on("error", (e) => {
+          console.error("[portal] files: download failed:", e.message);
+          res.destroy();
         });
+        res.on("close", () => stream.destroy());
+        return void stream.pipe(res);
       }
       res.json(readText(base, req.query.path));
     } catch (e) {

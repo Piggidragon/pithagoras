@@ -23,3 +23,14 @@ test('files and canvas count like the others', () => {
   const a = settlePanels(['canvas', 'files'], ['canvas', 'files', 'browser']);
   assert.deepEqual(a, { order: ['files', 'browser'], close: ['canvas'] });
 });
+
+test('a panel with something in it that would be lost stays, and another goes instead', () => {
+  const opened = settlePanels([], ['files', 'browser']);
+  assert.deepEqual(settlePanels(opened.order, ['files', 'browser', 'terminal'], ['files']), { order: ['files', 'terminal'], close: ['browser'] });
+  // Without the wish to keep it, the one open the longest goes.
+  assert.deepEqual(settlePanels(opened.order, ['files', 'browser', 'terminal']).close, ['files']);
+});
+
+test('if every older panel is to be kept, the one just opened is the one that goes', () => {
+  assert.deepEqual(settlePanels(['files', 'browser'], ['files', 'browser', 'terminal'], ['files', 'browser']).close, ['terminal']);
+});

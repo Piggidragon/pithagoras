@@ -29,6 +29,9 @@ that started there. Nothing outside it can be reached.
 - **Delete** a file or a folder and everything in it, after a confirmation. A
   link is removed as the link; what it points at stays.
 
+A save is made whole: the text is written beside the file and put in place, so a
+save that fails (a full disk, say) leaves the file as it was.
+
 The agent writes here too, so a save is checked. If the file changed after you
 opened it, the save is refused and you choose between loading the new version
 and saving yours anyway.
@@ -47,5 +50,7 @@ button in the top right to open it yourself.
 ## Panels
 
 At most two panels are open beside the conversation. Opening a third closes the
-one that has been open longest. The browser, the terminal, Files and
+one that has been open longest — unless Files has an edit that is not saved, in
+which case another one is closed instead. Closing Files yourself, or reloading the
+page, asks first while there is an edit. The browser, the terminal, Files and
 [canvases](/guide/canvases) all count.

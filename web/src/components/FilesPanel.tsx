@@ -66,11 +66,14 @@ export function FilesPanel({
   folder,
   activity,
   since,
+  onDirtyChange,
 }: {
   sessionId: string;
   folder: string;
   activity: FileActivity | null;
   since?: number;
+  /** Told whether there are changes not saved, so that whoever can close the panel can ask first. */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [dir, setDir] = useState("");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -95,6 +98,22 @@ export function FilesPanel({
   const listAsk = useRef(0);
   const fileAsk = useRef(0);
   const handled = useRef(since ?? activity?.seq ?? 0);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  // Gone, so nothing is left to ask about.
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  // Reloading or closing the tab is a way out too.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   const root = folder.split("/").filter(Boolean).pop() || "folder";
 
   const loadDir = useCallback(

@@ -136,11 +136,24 @@ export function Chat({
   const [watching, setWatching] = useState(false);
   const [terminal, setTerminal] = useState(false);
   const [files, setFiles] = useState(false);
+  // Whether Files has an edit that is not saved: closing it would lose it.
+  const [filesDirty, setFilesDirty] = useState(false);
   const fileActivity = useMemo(() => latestFileActivity(events, session.workspace), [events, session.workspace]);
   useWorkPanels(
     { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files },
     panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else setCanvasOpen(false); },
+    // A third panel closes another one instead, while Files has an edit in it.
+    filesDirty ? ["files"] : [],
   );
+  const closeFiles = async () => {
+    if (
+      filesDirty &&
+      !(await confirmDialog({ title: "Discard your changes?", message: "The file open in Files has changes that are not saved.", confirmLabel: "Discard", danger: true }))
+    ) {
+      return;
+    }
+    setFiles(false);
+  };
   // Beside the conversation, top to bottom in this order.
   const asidePanels = [watching && "browser", files && "files", terminal && "terminal"].filter(Boolean) as ("browser" | "files" | "terminal")[];
   const browserPane = useRef<HTMLDivElement>(null);
@@ -513,7 +526,7 @@ export function Chat({
             <LuSquareTerminal className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => setFiles((v) => !v)}
+            onClick={() => (files ? void closeFiles() : setFiles(true))}
             aria-label="Files"
             aria-expanded={files}
             title={files ? "Hide the files" : "Browse the files in this chat's folder"}
@@ -864,7 +877,7 @@ export function Chat({
                       </button>
                     )}
                     <button
-                      onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? setFiles(false) : setTerminal(false))}
+                      onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? void closeFiles() : setTerminal(false))}
                       title="Collapse"
                       className={`${kind === "browser" ? "" : "ml-auto "}rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg`}
                     >
@@ -882,7 +895,7 @@ export function Chat({
                   {kind === "files" && (
                     <div className="min-h-0 flex-1 bg-surface">
                       {/* Not before the chat's events are here: what it did earlier is not news. */}
-                      {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} />}
+                      {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} onDirtyChange={setFilesDirty} />}
                     </div>
                   )}
                   {kind === "terminal" && (

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 const files = await import('../dist/workspace-files.js');
-const { FileError, baseDir, listDir, readText, writeText, removeEntry, renameEntry, folderPath, resolveInside, downloadPath, MAX_EDIT_BYTES } = files;
+const { FileError, baseDir, listDir, readText, writeText, removeEntry, renameEntry, folderPath, resolveInside, openDownload, MAX_EDIT_BYTES } = files;
 
 /** A folder to work in, and one beside it that nothing may reach. */
 function setup() {
@@ -188,15 +188,29 @@ test('the folder itself cannot be removed, however it is spelled', () => {
   done();
 });
 
-test('a download is the checked path of a plain file, and nothing else', () => {
+/** Everything a download hands over, read from its descriptor. */
+const drain = ({ fd, size }) => { const buf = Buffer.alloc(size); readSync(fd, buf, 0, size, 0); closeSync(fd); return buf.toString(); };
+
+test('a download is a plain file opened once, dotfiles included, and nothing else', () => {
   const { dir, base, outside, done } = setup();
-  writeFileSync(path.join(dir, 'a.txt'), 'x'); mkdirSync(path.join(dir, 'sub'));
-  assert.equal(downloadPath(base, 'a.txt'), path.join(base, 'a.txt'));
-  assert.equal(code(() => downloadPath(base, 'sub')), 'invalid');
-  assert.equal(code(() => downloadPath(base, 'gone')), 'missing');
+  writeFileSync(path.join(dir, 'a.txt'), 'hello'); writeFileSync(path.join(dir, '.env'), 'SECRET=1'); mkdirSync(path.join(dir, 'sub'));
+  const file = openDownload(base, 'a.txt');
+  assert.equal(file.name, 'a.txt'); assert.equal(file.size, 5); assert.equal(drain(file), 'hello');
+  const dot = openDownload(base, '.env');
+  assert.equal(dot.name, '.env'); assert.equal(drain(dot), 'SECRET=1');
+  assert.equal(code(() => openDownload(base, 'sub')), 'invalid');
+  assert.equal(code(() => openDownload(base, 'gone')), 'missing');
   symlinkSync(path.join(outside, 'secret'), path.join(dir, 'peek'));
-  assert.equal(code(() => downloadPath(base, 'peek')), 'invalid');
+  assert.equal(code(() => openDownload(base, 'peek')), 'invalid');
   done();
+});
+
+test('a download from a folder that sits under a dot-folder is not refused for it', () => {
+  const top = mkdtempSync(path.join(tmpdir(), 'wsfiles-'));
+  const dir = path.join(top, '.hidden', 'home'); mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'a.txt'), 'x');
+  assert.equal(drain(openDownload(baseDir(dir), 'a.txt')), 'x');
+  rmSync(top, { recursive: true });
 });
 
 test('a folder that is itself a link is followed once, up front, and checked against where it leads', () => {
@@ -321,5 +335,46 @@ test('an empty file that has not changed is saved, and a file made without a tim
   assert.equal(readFileSync(path.join(dir, 'empty.txt'), 'utf8'), 'now with text');
   writeText(base, 'made.txt', 'new');
   assert.equal(readFileSync(path.join(dir, 'made.txt'), 'utf8'), 'new');
+  done();
+});
+
+test('a save is put in place whole: the mode stays, and no temporary file is left', () => {
+  const { dir, base, done } = setup();
+  const file = path.join(dir, 'a.sh');
+  writeFileSync(file, '#!/bin/sh\n'); chmodSync(file, 0o750);
+  writeText(base, 'a.sh', '#!/bin/sh\necho hi\n', readText(base, 'a.sh').mtime);
+  assert.equal(readFileSync(file, 'utf8'), '#!/bin/sh\necho hi\n');
+  assert.equal(statSync(file).mode & 0o7777, 0o750);
+  writeText(base, 'made.txt', 'new');
+  assert.deepEqual(readdirSync(dir).sort(), ['a.sh', 'made.txt']);
+  done();
+});
+
+test('a save that cannot be made leaves the file as it was, and the next save is not a conflict', { skip: process.getuid?.() === 0 && 'root can write anywhere' }, () => {
+  const { dir, base, done } = setup();
+  const file = path.join(dir, 'a.txt');
+  writeFileSync(file, 'precious');
+  const opened = readText(base, 'a.txt');
+  chmodSync(dir, 0o500);
+  try {
+    assert.equal(code(() => writeText(base, 'a.txt', 'never lands', opened.mtime)), 'failed');
+    assert.equal(readFileSync(file, 'utf8'), 'precious');
+    assert.equal(statSync(file).mtimeMs, opened.mtime);
+  } finally { chmodSync(dir, 0o700); }
+  writeText(base, 'a.txt', 'second try', opened.mtime);
+  assert.equal(readFileSync(file, 'utf8'), 'second try');
+  assert.deepEqual(readdirSync(dir), ['a.txt']);
+  done();
+});
+
+test('a folder over the cap is cut down before it is looked at, and folders still come first', () => {
+  const { dir, base, done } = setup();
+  for (let i = 0; i < files.MAX_ENTRIES + 5; i++) writeFileSync(path.join(dir, `f${i}`), '');
+  mkdirSync(path.join(dir, 'zzz-last-by-name'));
+  const list = listDir(base, '');
+  assert.equal(list.entries.length, files.MAX_ENTRIES);
+  assert.equal(list.entries[0].name, 'zzz-last-by-name');
+  assert.equal(list.entries[0].type, 'dir');
+  assert.equal(list.truncated, true);
   done();
 });
