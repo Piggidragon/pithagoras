@@ -319,6 +319,11 @@ export class TuiSurface {
     return this.shot(this.compose());
   }
 
+  /** What the component drew, before it is turned into a screen. For a widget, which is text. */
+  lines(): string[] {
+    return this.compose();
+  }
+
   dispose(): void {
     this.stop();
     for (const o of this.overlays) safely(() => o.component.dispose?.());

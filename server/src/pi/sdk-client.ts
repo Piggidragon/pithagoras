@@ -17,6 +17,9 @@ import { contextWindowFor } from "../db.js";
 import { TuiSurface, plainLines, type TuiComponent, type TuiFrame } from "./tui-bridge.js";
 import { tuiRuntime, type TuiRuntime } from "./tui-runtime.js";
 
+/** How wide a widget is drawn. The page wraps what it gets; the component cannot be asked. */
+const WIDGET_COLS = 80;
+
 /** What ctx.ui.onTerminalInput() registers: a look at a keystroke before the component. */
 type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
 
@@ -180,6 +183,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private tui: TuiRuntime | null = null;
   /** Extensions watching raw keys, which here means keys typed into a screen one is drawing. */
   private terminalInput: TerminalInputHandler[] = [];
+  /** Widgets an extension is drawing, by the key it named them. */
+  private widgets = new Map<string, TuiSurface>();
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
   /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
@@ -486,16 +491,23 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         fireAndForget({ method: "notify", message, notifyType: type }),
       setStatus: (key: string, text: string) =>
         fireAndForget({ method: "setStatus", statusKey: key, statusText: text }),
+      /**
+       * A widget sits in the page beside the composer, not in a terminal, so
+       * whichever form it arrives in it is sent as the text it came to — a
+       * line of ANSI there would read as gibberish.
+       */
       setWidget: (key: string, content: unknown) => {
-        // A widget built from a component is drawn here and sent as the text it
-        // came to. It sits in the page beside the composer, not in a terminal,
-        // and a line of ANSI there would read as gibberish.
-        const lines =
-          typeof content === "function"
-            ? plainLines(this.drawOnce(content as TuiFactory<unknown>))
-            : content;
-        if (lines === undefined || Array.isArray(lines)) {
-          fireAndForget({ method: "setWidget", widgetKey: key, widgetContent: lines });
+        if (typeof content === "function") {
+          this.liveWidget(key, content as TuiFactory<unknown>);
+          return;
+        }
+        this.dropWidget(key);
+        if (content === undefined || Array.isArray(content)) {
+          fireAndForget({
+            method: "setWidget",
+            widgetKey: key,
+            widgetContent: content && plainLines(content as string[]),
+          });
         }
       },
       setTitle: (title: string) => fireAndForget({ method: "setTitle", title }),
@@ -652,24 +664,51 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     });
   }
 
-  /** One render of a component that is only wanted for its text. */
-  private drawOnce(factory: TuiFactory<unknown>, width = 80): string[] {
+  /**
+   * A widget built from a component, kept alive for as long as it is shown.
+   *
+   * The component is registered once and repaints itself afterwards by calling
+   * requestRender on the surface it was handed — rpiv-todo's task overlay does
+   * exactly this, registering on the first task and then redrawing on every
+   * change. Drawing it once and throwing the surface away left that overlay
+   * frozen on whatever the list looked like the moment it first appeared.
+   */
+  private liveWidget(key: string, factory: TuiFactory<unknown>): void {
     const runtime = this.tui;
-    if (!runtime) return [];
-    const surface = new TuiSurface({ cols: width, rows: 200, onFrame: () => {} });
+    if (!runtime) return;
+    this.dropWidget(key);
+    const surface = new TuiSurface({
+      cols: WIDGET_COLS,
+      // No viewport to overflow: a widget is as long as it is, and the page
+      // decides what it has room for.
+      rows: 200,
+      onFrame: () =>
+        this.emit("event", {
+          type: "extension_ui_request",
+          id: randomUUID(),
+          method: "setWidget",
+          widgetKey: key,
+          widgetContent: plainLines(surface.lines()),
+        }),
+    });
+    this.widgets.set(key, surface);
     try {
-      const component = factory(surface, runtime.theme, runtime.keybindings, () => {}) as
-        | TuiComponent
-        | Promise<TuiComponent>;
-      // Only a component that exists right now can be flattened into lines; an
-      // async widget has no moment at which the portal would ask again.
-      if (component instanceof Promise) return [];
-      return component.render(width);
+      const component = factory(surface, runtime.theme, runtime.keybindings, () => {});
+      // An async widget has no moment at which the portal would ask again, and
+      // pi's own widget contract is synchronous.
+      if (component instanceof Promise) return this.dropWidget(key);
+      surface.attach(component);
     } catch {
-      return [];
-    } finally {
-      surface.dispose();
+      this.dropWidget(key);
     }
+  }
+
+  /** Stop drawing a widget, whether it was replaced or cleared. */
+  private dropWidget(key: string): void {
+    const surface = this.widgets.get(key);
+    if (!surface) return;
+    this.widgets.delete(key);
+    surface.dispose();
   }
 
   /** A keystroke for a screen an extension is drawing. False when it has gone. */
@@ -746,10 +785,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (this.disposed) return;
     this.disposed = true;
     this.canvases?.interrupt();
-    // A screen whose session is gone has nothing left to draw for, and its
-    // render timer would keep the process awake.
+    // A screen or widget whose session is gone has nothing left to draw for,
+    // and its render timer would keep the process awake.
     for (const surface of this.surfaces.values()) surface.dispose();
     this.surfaces.clear();
+    for (const surface of this.widgets.values()) surface.dispose();
+    this.widgets.clear();
     try {
       this.unsubscribe();
     } catch {

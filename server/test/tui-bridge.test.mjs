@@ -270,3 +270,24 @@ test("one of pi's own components can be shown and answered", async (t) => {
   assert.equal(chosen, "beta");
   surface.dispose();
 });
+
+test("a widget's lines can be read back as often as it repaints", async () => {
+  const painted = [];
+  const surface = new TuiSurface({
+    cols: 40,
+    rows: 200,
+    onFrame: () => painted.push(plainLines(surface.lines())),
+  });
+  const component = stub(["\u001b[38;5;69m● Todos (0/1)\u001b[39m"]);
+  surface.attach(component);
+  await settled();
+  assert.deepEqual(painted.at(-1), ["● Todos (0/1)"]);
+
+  // A widget registers its component once and repaints by asking the surface,
+  // which is what rpiv-todo's overlay does on every task change.
+  component.lines = ["● Todos (0/2)", "├─ ○ one", "└─ ○ two"];
+  surface.requestRender();
+  await settled();
+  assert.deepEqual(painted.at(-1), ["● Todos (0/2)", "├─ ○ one", "└─ ○ two"]);
+  surface.dispose();
+});
