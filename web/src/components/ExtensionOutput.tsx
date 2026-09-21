@@ -16,14 +16,22 @@ export function ExtensionWidgets({
   widgets,
   statuses = [],
   placement = "aboveEditor",
+  onHide,
+  hiddenCount = 0,
+  onShowAll,
 }: {
   widgets: ExtensionWidget[];
   statuses?: ExtensionStatus[];
   /** Which side of the composer this block is, as pi's widget options name it. */
   placement?: ExtensionWidget["placement"];
+  /** Silence one status line for good — see status-hiding. */
+  onHide?: (key: string) => void;
+  /** How many have been silenced, and the way back. */
+  hiddenCount?: number;
+  onShowAll?: () => void;
 }) {
   const mine = widgets.filter((w) => w.placement === placement);
-  if (!mine.length && !statuses.length) return null;
+  if (!mine.length && !statuses.length && !hiddenCount) return null;
   return (
     <div className={placement === "belowEditor" ? "mt-2 space-y-1.5" : "mb-2 space-y-1.5"}>
       {mine.map((widget) => (
@@ -35,10 +43,38 @@ export function ExtensionWidgets({
           {widget.lines.join("\n")}
         </pre>
       ))}
-      {statuses.length > 0 && (
-        <p className="truncate px-1 text-[11px] text-fg-faint">
-          {statuses.map((s) => s.text).join("  ·  ")}
-        </p>
+      {(statuses.length > 0 || hiddenCount > 0) && (
+        /* One chip each rather than one run of text, so a status that is not
+           worth reading can be switched off on its own. */
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
+          {statuses.map((status) => (
+            <span key={status.key} className="group/status inline-flex items-center gap-1">
+              <span className="truncate text-[11px] text-fg-faint">{status.text}</span>
+              {onHide && (
+                <button
+                  type="button"
+                  onClick={() => onHide(status.key)}
+                  title={`Stop showing ${status.key}`}
+                  aria-label={`Stop showing ${status.key}`}
+                  className="rounded p-0.5 text-fg-faint opacity-0 transition hover:bg-fg/10 hover:text-fg focus-visible:opacity-100 group-hover/status:opacity-100"
+                >
+                  <LuX className="h-2.5 w-2.5" />
+                </button>
+              )}
+            </span>
+          ))}
+          {/* The way back sits where the line went away, rather than in a
+              settings tab three clicks from here. */}
+          {hiddenCount > 0 && onShowAll && (
+            <button
+              type="button"
+              onClick={onShowAll}
+              className="rounded px-1 text-[11px] text-fg-faint underline decoration-dotted underline-offset-2 transition hover:text-fg"
+            >
+              {hiddenCount === 1 ? "1 hidden" : `${hiddenCount} hidden`}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

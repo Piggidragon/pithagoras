@@ -17,6 +17,7 @@ import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { ExtensionWidgets } from "./ExtensionOutput";
+import { hiddenStatuses, hideStatus, showAllStatuses } from "../status-hiding";
 import { ToolRender } from "./ToolRender";
 import { ToolSources } from "./ToolSources";
 import type { ExtensionStatus, ExtensionWidget } from "../extension-ui";
@@ -123,6 +124,9 @@ export function Chat({
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
 }) {
+  // Status lines the reader has switched off — see status-hiding.
+  const [hidden, setHidden] = useState<string[]>(hiddenStatuses);
+
   const [input, setInput] = useState("");
   // Where dictated words go. Kept beside the state because several phrases can
   // arrive before React has drawn the first, and each must land after the last.
@@ -797,7 +801,13 @@ export function Chat({
         {/* Above the composer, which is where pi puts a widget unless it asks
             for otherwise, and the only place in this page with the same
             relationship to typing. */}
-        <ExtensionWidgets widgets={widgets} statuses={statuses} />
+        <ExtensionWidgets
+          widgets={widgets}
+          statuses={statuses.filter((s) => !hidden.includes(s.key))}
+          onHide={(key) => setHidden(hideStatus(key))}
+          hiddenCount={hidden.filter((k) => statuses.some((s) => s.key === k)).length}
+          onShowAll={() => setHidden(showAllStatuses())}
+        />
         <div className="prompt-shell relative">
         {matches.length > 0 && (
           <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">

@@ -91,7 +91,7 @@ place here:
 | Call | Where it goes |
 | --- | --- |
 | `setWidget(key, lines, opts)` | A block by the composer, one per key — above it, or below where the widget asked for `belowEditor`. Cleared by passing `undefined` |
-| `setStatus(key, text)` | A line under the widgets |
+| `setStatus(key, text)` | A line under the widgets, which can be switched off — see below |
 | `notify(message, type)` | A message in the corner, which goes on its own — sooner for `info` than for `error` |
 
 A widget may be a component rather than lines, and pi's contract is that the
@@ -105,6 +105,18 @@ terminal whether or not it has one, so `LSP Inactive` arrives wrapped in the
 codes that would have made it grey, and those read as gibberish in a page. A
 menu still answers with the string the extension offered, colour and all —
 the extension compares the answer against what it put in.
+
+A status is a footer in the terminal pi was written for: furniture you stop
+seeing. A page has no footer, so it lands above the composer — and a line of
+text in a chat reads as somebody saying something. `pi-lens` sets **LSP
+Inactive** once and leaves it there for the life of the session, which looks
+like an announcement and is not one.
+
+So any of them can be switched off: hover the line and take it away with the ✕.
+It is remembered by the key the extension gave it rather than by its words,
+which change, and it applies to every conversation in this browser. A silenced
+line leaves **n hidden** where it was, which brings them back — the way out and
+the way back in the same place.
 
 `setTitle` is delivered and nothing reads it yet.
 
