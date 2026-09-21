@@ -17,6 +17,9 @@ import { contextWindowFor } from "../db.js";
 import { TuiSurface, plainLines, type TuiComponent, type TuiFrame } from "./tui-bridge.js";
 import { tuiRuntime, type TuiRuntime } from "./tui-runtime.js";
 
+/** What ctx.ui.onTerminalInput() registers: a look at a keystroke before the component. */
+type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
+
 /**
  * What an extension hands ctx.ui.custom(): pi builds the component from the
  * surface it is given, so anything that can draw in pi's TUI can draw here.
@@ -175,6 +178,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private surfaces = new Map<string, TuiSurface>();
   /** pi's theme and key table, or null where they could not be loaded. Resolved before binding. */
   private tui: TuiRuntime | null = null;
+  /** Extensions watching raw keys, which here means keys typed into a screen one is drawing. */
+  private terminalInput: TerminalInputHandler[] = [];
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
   /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
@@ -361,7 +366,18 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     try {
       await session.bindExtensions({
         uiContext: client.buildUiContext(),
-        mode: "rpc",
+        // What an extension is told it is talking to, and the one thing it
+        // decides with: pi documents "tui" as meaning custom components can be
+        // drawn. They can now — see tui-bridge — and saying "rpc" told every
+        // extension the opposite. The ones that care check it and degrade:
+        // rpiv-ask-user-question fell back to a numbered list of its first
+        // question, and its real questionnaire was never once built.
+        //
+        // The claim is not free. A custom footer, header or editor still goes
+        // nowhere, because this is a page rather than a screen pi owns. Those
+        // were no-ops under "rpc" too, so nothing that used to work stops —
+        // what changes is that the part which can work is now offered.
+        mode: client.tui ? "tui" : "rpc",
         commandContextActions: {
           waitForIdle: () => session.waitForIdle(),
           reload: async () => {
@@ -492,7 +508,22 @@ export class SdkPiClient extends EventEmitter implements PiClient {
        */
       custom: (factory: TuiFactory<unknown>, options?: any) =>
         this.showCustom(factory, options),
-      onTerminalInput: () => () => {},
+      /**
+       * Keys an extension wants before the component sees them.
+       *
+       * A terminal has one keyboard and this has none — the only keys that
+       * exist here are the ones typed into a screen an extension is drawing,
+       * so those are what these handlers get. It is how a component offers a
+       * shortcut that still works while it has hidden itself, which is the
+       * case pi's own TUI uses it for.
+       */
+      onTerminalInput: (handler: TerminalInputHandler) => {
+        this.terminalInput.push(handler);
+        return () => {
+          const at = this.terminalInput.indexOf(handler);
+          if (at >= 0) this.terminalInput.splice(at, 1);
+        };
+      },
       /** pi's own theme, so a component is styled the way its author expects. */
       theme: this.tui?.theme,
       // TUI-only affordances with no meaning in a browser.
@@ -536,6 +567,18 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       cols,
       rows,
       onFrame: (frame) => this.emit("event", { type: "extension_ui_frame", id, ...frame }),
+    });
+    // Ahead of the component, as a terminal would deliver them — see
+    // onTerminalInput. A copy per keystroke, because a handler may remove
+    // itself while it is being called.
+    surface.addInputListener((data) => {
+      let payload = data;
+      for (const handler of [...this.terminalInput]) {
+        const result = handler(payload);
+        if (typeof result?.data === "string") payload = result.data;
+        if (result?.consume) return { consume: true };
+      }
+      return payload === data ? undefined : { data: payload };
     });
 
     return new Promise((resolve) => {
