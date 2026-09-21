@@ -100,7 +100,7 @@ across a restart.
 
 Per chat is right for "not this time" and wrong for "hardly ever" — nobody
 wants to turn the same tool off at the start of every conversation. **Settings
-→ Extensions** has the other half: which tools a conversation starts with.
+→ Tools** has the other half: which tools a conversation starts with.
 
 A chat may still disagree with the default in either direction, and the row
 says so where it does. What a chat stores is only its disagreement, so changing

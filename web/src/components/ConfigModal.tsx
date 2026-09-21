@@ -7,6 +7,7 @@ import {
   LuDownload,
   LuExternalLink,
   LuFileJson,
+  LuHammer,
   LuPlug,
   LuPuzzle,
   LuRadio,
@@ -34,6 +35,7 @@ export type Tab =
   | "channels"
   | "people"
   | "add-ons"
+  | "tools"
   | "skills"
   | "mcp"
   | "extensions"
@@ -66,6 +68,12 @@ const TABS: { id: Tab; label: string; icon: ReactNode; hint: string }[] = [
     label: "Add-ons",
     icon: <LuPuzzle />,
     hint: "Optional parts of the portal itself",
+  },
+  {
+    id: "tools",
+    label: "Tools",
+    icon: <LuHammer />,
+    hint: "What the agent may reach for, by default",
   },
   {
     id: "skills",
@@ -173,19 +181,17 @@ export function ConfigModal({
       {nav.kind === "tab" && nav.id === "channels" && <ChannelsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "people" && <PeoplePanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "add-ons" && <PortalExtensions onError={setError} />}
+      {nav.kind === "tab" && nav.id === "tools" && <ToolDefaults onError={setError} />}
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "mcp" && <McpPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "extensions" && (
-        <>
-          <ExtensionsPanel
-            extensions={extensions}
-            loading={loadingExts}
-            onError={setError}
-            onRefresh={loadExtensions}
-            onConfigure={(spec) => setNav({ kind: "ext", spec })}
-          />
-          <ToolDefaults onError={setError} />
-        </>
+        <ExtensionsPanel
+          extensions={extensions}
+          loading={loadingExts}
+          onError={setError}
+          onRefresh={loadExtensions}
+          onConfigure={(spec) => setNav({ kind: "ext", spec })}
+        />
       )}
       {nav.kind === "tab" && nav.id === "advanced" && (
         <AdvancedPanel settingsPath={settingsPath} onError={setError} />

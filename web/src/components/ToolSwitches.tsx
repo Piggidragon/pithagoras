@@ -123,8 +123,8 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
         </div>
       ))}
       <p className="px-3 py-1.5 text-[10px] text-fg-faint">
-        Applies from the next message, for this conversation. Settings → Extensions sets what
-        every conversation starts with.
+        Applies from the next message, for this conversation. Settings → Tools sets what every
+        conversation starts with.
       </p>
     </div>
   );

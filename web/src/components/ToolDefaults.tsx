@@ -51,20 +51,23 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   if (loading) return null;
 
   return (
-    <section className="mt-6">
-      <h3 className="text-sm font-medium text-fg">Tools</h3>
-      <p className="mt-1 text-xs text-fg-muted">
-        Which tools a conversation starts with. A chat can still switch any of them the other
-        way for itself, from the blocks icon beside the composer.
-      </p>
+    <>
+      <section className="mb-6 rounded-xl border border-line bg-raised/40 p-3">
+        <p className="text-xs text-fg-subtle">
+          What a conversation starts with. A tool switched off here is not offered to the model
+          in any chat — the extension stays installed and its slash commands still work. One
+          chat can switch any of them the other way for itself, from the blocks icon beside the
+          composer, and a change here reaches every chat that has not.
+        </p>
+      </section>
 
       {!tools.length ? (
-        <p className="mt-3 rounded-lg border border-line bg-raised/40 px-3 py-2 text-xs text-fg-subtle">
-          Nothing listed yet. Tools appear here once a conversation has run — that is when pi
-          builds the list of what its extensions registered.
+        <p className="rounded-xl border border-line bg-raised/40 px-3 py-2 text-xs text-fg-subtle">
+          Nothing listed yet. Tools appear once a conversation has run — that is when pi builds
+          the list of what its extensions registered.
         </p>
       ) : (
-        <div className="mt-3 overflow-hidden rounded-xl border border-line">
+        <div className="overflow-hidden rounded-xl border border-line">
           {/* Read from the switches rather than from what was loaded: the list
               is what exists, `off` is what has been decided about it, and only
               the second changes while this is open. */}
@@ -109,6 +112,6 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
           ))}
         </div>
       )}
-    </section>
+    </>
   );
 }
