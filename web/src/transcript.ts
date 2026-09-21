@@ -3,8 +3,33 @@ import type { PortalEvent } from "./api";
 export type Item =
   | { kind: "user"; id: string; seq: number; text: string; audio?: boolean }
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
-  | { kind: "tool"; id: string; name: string; status: "running" | "done" | "error"; detail?: string }
+  | {
+      kind: "tool";
+      id: string;
+      name: string;
+      status: "running" | "done" | "error";
+      detail?: string;
+      /** What the tool drew for itself, when it draws — see ToolRender. */
+      render?: { collapsed: string[]; expanded?: string[] };
+    }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
+
+/**
+ * A tool's own drawing of this step, when it ships one.
+ *
+ * Checked rather than trusted: it comes off the event stream, may have been
+ * stored by an older build, and a malformed one must not take the transcript
+ * with it.
+ */
+function toolRender(p: any): { collapsed: string[]; expanded?: string[] } | undefined {
+  const render = p?.render;
+  const strings = (v: unknown) =>
+    Array.isArray(v) && v.every((line) => typeof line === "string") ? (v as string[]) : undefined;
+  const collapsed = strings(render?.collapsed);
+  if (!collapsed?.length) return undefined;
+  const expanded = strings(render?.expanded);
+  return expanded ? { collapsed, expanded } : { collapsed };
+}
 
 /**
  * Fold pi's event stream into renderable turns.
@@ -76,6 +101,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
           name: String(p.toolName ?? p.name ?? "tool"),
           status: "running",
           detail: summarizeToolInput(p),
+          render: toolRender(p),
         });
         break;
 
@@ -86,6 +112,10 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
           const it = items[i];
           if (it.kind === "tool" && it.status === "running" && it.name === name) {
             it.status = p.isError || p.error ? "error" : "done";
+            // What the tool drew for its result replaces what it drew for the
+            // call: the call was a guess at what would happen, and this is it.
+            const drawn = toolRender(p);
+            if (drawn) it.render = drawn;
             break;
           }
         }

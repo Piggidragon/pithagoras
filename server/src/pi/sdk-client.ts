@@ -16,6 +16,7 @@ import { proxyBaseUrl } from "../llama-progress.js";
 import { contextWindowFor } from "../db.js";
 import { TuiSurface, plainLines, type TuiComponent, type TuiFrame } from "./tui-bridge.js";
 import { tuiRuntime, type TuiRuntime } from "./tui-runtime.js";
+import { ToolRenderer } from "./tool-render.js";
 
 /** How wide a widget is drawn. The page wraps what it gets; the component cannot be asked. */
 const WIDGET_COLS = 80;
@@ -185,6 +186,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private terminalInput: TerminalInputHandler[] = [];
   /** Widgets an extension is drawing, by the key it named them. */
   private widgets = new Map<string, TuiSurface>();
+  /** Draws the rows tools draw for themselves. Absent until pi's TUI runtime is loaded. */
+  private toolRender?: ToolRenderer;
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
   /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
@@ -351,7 +354,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // registry's whenever an extension registers a provider, and that undoes it.
       if (event?.type === "agent_start") client.applyLimitQuietly();
       canvases?.observe(event);
-      client.emit("event", event);
+      client.emit("event", client.withToolRender(event));
     });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};
@@ -368,6 +371,11 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // than on first use: ctx.ui.theme is a plain property on the object an
     // extension is handed, so there is no later moment to fill it in.
     client.tui = await tuiRuntime();
+    if (client.tui) {
+      client.toolRender = new ToolRenderer(client.tui, opts.cwd, (name) =>
+        session.getToolDefinition?.(name)
+      );
+    }
     try {
       await session.bindExtensions({
         uiContext: client.buildUiContext(),
@@ -711,6 +719,22 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     surface.dispose();
   }
 
+  /**
+   * A tool event, with what the tool drew for it attached.
+   *
+   * Left exactly as it was when the tool draws nothing, which is most of them
+   * — the generic row the portal builds itself is still the answer there.
+   */
+  private withToolRender(event: any): any {
+    if (!this.toolRender || !event || typeof event.type !== "string") return event;
+    if (!event.type.startsWith("tool_execution_")) return event;
+    const render = this.toolRender.render(event);
+    if (event.type === "tool_execution_end" && event.toolCallId) {
+      this.toolRender.forget(String(event.toolCallId));
+    }
+    return render ? { ...event, render } : event;
+  }
+
   /** A keystroke for a screen an extension is drawing. False when it has gone. */
   uiInput(id: string, data: string): boolean {
     const surface = this.surfaces.get(id);
@@ -791,6 +815,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     this.surfaces.clear();
     for (const surface of this.widgets.values()) surface.dispose();
     this.widgets.clear();
+    this.toolRender?.clear();
     try {
       this.unsubscribe();
     } catch {

@@ -17,6 +17,7 @@ import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { ExtensionWidgets } from "./ExtensionOutput";
+import { ToolRender } from "./ToolRender";
 import type { ExtensionStatus, ExtensionWidget } from "../extension-ui";
 import { confirmDialog } from "./ConfirmDialog";
 import { TerminalPanel } from "./TerminalPanel";
@@ -734,15 +735,17 @@ export function Chat({
                   ? "text-accent"
                   : "text-fg-faint";
             return (
-              <div
-                key={item.id}
-                className="flex items-center gap-2 py-0.5 font-mono text-[11px] text-fg-faint"
-              >
-                <span className={`shrink-0 ${tone}`}>
-                  {item.status === "running" ? "◇" : item.status === "error" ? "✕" : "◆"}
-                </span>
-                <span className="shrink-0 text-fg-subtle">{item.name}</span>
-                {item.detail && <span className="truncate opacity-60">{item.detail}</span>}
+              <div key={item.id} className="py-0.5">
+                <div className="flex items-center gap-2 font-mono text-[11px] text-fg-faint">
+                  <span className={`shrink-0 ${tone}`}>
+                    {item.status === "running" ? "◇" : item.status === "error" ? "✕" : "◆"}
+                  </span>
+                  <span className="shrink-0 text-fg-subtle">{item.name}</span>
+                  {item.detail && <span className="truncate opacity-60">{item.detail}</span>}
+                </div>
+                {/* Only where the tool drew something itself. Everything else
+                    keeps the one-line row it has always had. */}
+                {item.render && <ToolRender render={item.render} />}
               </div>
             );
           }

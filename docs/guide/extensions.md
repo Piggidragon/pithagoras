@@ -139,10 +139,32 @@ Two differences from a terminal are worth knowing:
   screen, so the terminal's hardware cursor stays hidden — which is what pi does
   by default too.
 
+## Tools that draw their own row
+
+A tool can ship `renderCall` and `renderResult` — pi-tui components drawn in
+place of the generic `◆ name {args}` row. That is where an extension puts the
+part a one-line summary cannot carry: `pi-web-access` draws its search sources
+there, which is why a search here used to show none.
+
+The portal asks the tool to draw and shows what comes back, in the transcript
+under the row. Colour survives, bent into a range that reads against the page
+rather than against a terminal's background, and a terminal hyperlink becomes a
+link you can follow.
+
+pi's renderers are told whether the row is open, and most draw a thin line when
+it is not — for a search, one status line. Both views are drawn on the server,
+so **More** opens instantly and still works on a conversation reopened long
+after the tool that drew it was uninstalled. A tool that ignores the flag draws
+one thing and gets no **More**.
+
+Very long output is cut off rather than written into the event log whole.
+
 ::: warning Only host sessions
-This needs the component to run in the portal's own process. A session on the
-container executor reaches pi over RPC, where `ctx.ui.custom()` returns
-`undefined` — the same answer pi's own RPC mode gives. A channel conversation
-has no screen to draw on either, so a screen opened there is left unanswered
-until it times out.
+Everything on this page that runs a component — a drawn screen, a widget built
+from one, a tool's own row — needs the component to run in the portal's own
+process. A session on the container executor reaches pi over RPC, which has no
+component to run: `ctx.ui.custom()` returns `undefined` there, the same answer
+pi's own RPC mode gives, and tool rows stay generic. A channel conversation has
+no screen to draw on either, so one opened there is left unanswered until it
+times out.
 :::
