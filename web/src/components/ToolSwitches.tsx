@@ -16,12 +16,9 @@ import { useOpenGroups } from "../use-open-groups";
  * it — "turn the web search one off" means four tools that arrived together.
  * An MCP server is a group of its own rather than a share of the adapter, for
  * the same reason: nobody thinks "the adapter", they think "the browser one".
- * Nothing here knows what any of them are.
- *
- * The browser is the one group that is granted rather than switched: what sits
- * behind its tools is access to a container, which a conversation either has
- * or does not. So its tools are listed and move together, and the group's own
- * switch is what writes the grant.
+ * The browser is one of those servers and nothing more — having its tools is
+ * having the browser, which is why the switch it used to have of its own is
+ * gone. Nothing here knows what any of them are.
  */
 export function ToolSwitches({ sessionId }: { sessionId: string }) {
   const [tools, setTools] = useState<PortalTool[] | null>(null);
@@ -107,45 +104,25 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
               type="button"
               disabled={busy}
               onClick={() => flip(group.tools.map((t) => t.name), group.allOff)}
-              title={
-                group.owner === "browser"
-                  ? "The browser is one grant: this conversation either reaches it or it does not"
-                  : undefined
-              }
               className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
             >
-              {group.owner ? (group.allOff ? "on" : "off") : group.allOff ? "all on" : "all off"}
+              {group.allOff ? "all on" : "all off"}
             </button>
           </div>
           <ul className={open ? "pb-1" : "hidden"}>
             {group.tools.map((tool) => (
               <li key={tool.name}>
-                {/* A group with an owner is listed, not switched: the browser
-                    is granted whole, and a checkbox per tool would offer a
-                    half of it that does not exist. */}
                 <label
                   title={tool.description}
-                  className={`flex items-center gap-2 px-3 py-1 text-xs transition ${
-                    group.owner ? "cursor-default" : "cursor-pointer hover:bg-fg/5"
-                  }`}
+                  className="flex cursor-pointer items-center gap-2 px-3 py-1 text-xs transition hover:bg-fg/5"
                 >
-                  {group.owner ? (
-                    <span
-                      aria-hidden
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        tool.enabled ? "bg-accent" : "bg-fg/20"
-                      }`}
-                      style={{ marginLeft: 3, marginRight: 3 }}
-                    />
-                  ) : (
-                    <input
-                      type="checkbox"
-                      checked={tool.enabled}
-                      disabled={busy}
-                      onChange={(e) => flip([tool.name], e.target.checked)}
-                      className="h-3 w-3 shrink-0 accent-accent"
-                    />
-                  )}
+                  <input
+                    type="checkbox"
+                    checked={tool.enabled}
+                    disabled={busy}
+                    onChange={(e) => flip([tool.name], e.target.checked)}
+                    className="h-3 w-3 shrink-0 accent-accent"
+                  />
                   <span
                     className={`min-w-0 flex-1 truncate font-mono ${
                       tool.enabled ? "text-fg" : "text-fg-faint line-through"

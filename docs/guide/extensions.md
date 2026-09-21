@@ -96,12 +96,12 @@ attached it — three servers used to arrive as one pile of forty tools called
 
 ::: tip The browser is one of them
 It used to have a switch of its own beside the composer, which was a second
-answer to a question the tools list already asked. It is a group here like any
-other. The difference is that it is **granted** rather than switched: behind
-its tools is a container the conversation either reaches or does not, so they
-are listed together and the group's switch is what writes the grant. A
-conversation without it is not offered those tools at all, rather than offered
-them and refused when it tries.
+answer to a question the tools list already asked — and the two could
+disagree. It is now an MCP server like any other: its tools are in the list,
+switched one at a time or as a group, with a default like anything else.
+Having its tools is having the browser, so a conversation with them all off is
+not offered them and does not reach the container. Where it may go once it is
+there is still the [allowlist](/guide/add-ons)'s question, not this one.
 ::: It takes effect from the next message — pi is told at once and there is
 no need to restart the conversation — and it is remembered per chat, including
 across a restart.

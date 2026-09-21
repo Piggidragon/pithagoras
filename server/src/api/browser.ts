@@ -1,11 +1,5 @@
 import express, { type Router } from "express";
-import {
-  browserAllowlist,
-  getDb,
-  setBrowserAllowlist,
-  setSessionBrowser,
-  type SessionRow,
-} from "../db.js";
+import { browserAllowed, browserAllowlist, getDb, setBrowserAllowlist, type SessionRow } from "../db.js";
 import { BROWSER_MCP } from "../tool-policy.js";
 import { readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/browser-service.js";
@@ -148,8 +142,10 @@ export function browserRouter(): Router {
       // optional, and the portal works without it.
     }
 
+    // Asked of the tool switches rather than of a column: the browser is an
+    // MCP server like any other, and a conversation that has its tools has it.
     const sessions = getDb()
-      .prepare("SELECT * FROM sessions WHERE browser = 1 ORDER BY updated_at DESC")
+      .prepare("SELECT * FROM sessions ORDER BY updated_at DESC")
       .all() as SessionRow[];
     const routines = getDb()
       .prepare("SELECT slug, name FROM routines WHERE browser = 1")
@@ -170,7 +166,9 @@ export function browserRouter(): Router {
       // The container itself, which the portal installs rather than compose.
       install: await service.status(),
       config: { user: service.config().user, hasPassword: Boolean(service.config().password) },
-      sessions: sessions.map((s) => ({ id: s.id, title: s.title, kind: s.kind })),
+      sessions: sessions
+        .filter((s) => browserAllowed(s))
+        .map((s) => ({ id: s.id, title: s.title, kind: s.kind })),
       routines,
     });
   });
@@ -254,13 +252,5 @@ export function browserRouter(): Router {
    * Turn the browser on or off for one session. Takes effect on its next
    * launch: the tool list is fixed when pi starts.
    */
-  router.put("/sessions/:id/browser", (req, res) => {
-    const on = Boolean(req.body?.enabled);
-    const row = getDb().prepare("SELECT id FROM sessions WHERE id = ?").get(req.params.id);
-    if (!row) return res.status(404).json({ error: "Not found" });
-    setSessionBrowser(req.params.id, on);
-    res.json({ enabled: on });
-  });
-
   return router;
 }

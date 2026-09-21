@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { piSetting } from "./pi-settings.js";
+import { browserTool, toolEnabled } from "./tool-policy.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
@@ -983,16 +984,16 @@ export function routineGuards(slug: string | null | undefined): boolean {
 }
 
 /**
- * Grant or revoke the browser for a conversation.
+ * Does this session get the browser? Routines answer for their own runs.
  *
- * Written from the tool switches: the browser's tools are the browser, and a
- * second control for the same question was one too many.
+ * For an ordinary conversation this is not stored any more: the browser is an
+ * MCP server like any other, so its tools are switched in the tools list, and
+ * having the browser is having its tools. A second place recording the same
+ * answer could only ever disagree with the first.
+ *
+ * The `sessions.browser` column is what that second place was. It is left in
+ * the schema and read by nothing.
  */
-export function setSessionBrowser(id: string, on: boolean): void {
-  getDb().prepare("UPDATE sessions SET browser = ? WHERE id = ?").run(on ? 1 : 0, id);
-}
-
-/** Does this session get the browser? Routines answer for their own runs. */
 export function browserAllowed(session: SessionRow): boolean {
   if (session.kind === "routine" && session.routine_slug) {
     const row = getDb().prepare("SELECT browser FROM routines WHERE slug = ?").get(
@@ -1000,7 +1001,11 @@ export function browserAllowed(session: SessionRow): boolean {
     ) as { browser: number } | undefined;
     return row ? row.browser === 1 : false;
   }
-  return session.browser === 1;
+  const defaults = toolDefaultsOff();
+  const exceptions = sessionTools(session.id);
+  return knownTools().some(
+    (tool) => browserTool(tool.name) && toolEnabled(tool.name, defaults, exceptions)
+  );
 }
 
 /**
