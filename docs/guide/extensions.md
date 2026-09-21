@@ -159,6 +159,12 @@ one thing and gets no **More**.
 
 Very long output is cut off rather than written into the event log whole.
 
+Under that sits **output**, folded away like a thinking block: what the tool
+actually returned, which is what the model was given. A tool's drawing is a
+summary and sometimes the detail only lives here — a plain web search lists its
+sources in the output and not in the row it draws. Long output is cut off for
+the page; the model still got all of it.
+
 ::: warning Only host sessions
 Everything on this page that runs a component — a drawn screen, a widget built
 from one, a tool's own row — needs the component to run in the portal's own

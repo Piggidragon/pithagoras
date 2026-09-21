@@ -11,8 +11,39 @@ export type Item =
       detail?: string;
       /** What the tool drew for itself, when it draws — see ToolRender. */
       render?: { collapsed: string[]; expanded?: string[] };
+      /** What the tool actually returned, which is what the model was given. */
+      output?: string;
     }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
+
+/**
+ * How much of a tool's output is worth putting on a page.
+ *
+ * A read of a large file comes back whole, and the whole of it in the DOM is a
+ * scroll bar nobody asked for. The model got all of it either way; this is only
+ * what a person is shown.
+ */
+const MAX_OUTPUT = 20_000;
+
+/**
+ * What the tool handed back, as text.
+ *
+ * Two shapes, because pi has two: a content array like a message, and the
+ * plain `output` string a tool may return instead. Anything that is not text —
+ * an image — has nothing to put here.
+ */
+function toolOutput(p: any): string | undefined {
+  const result = p?.result;
+  if (!result) return undefined;
+  const parts = Array.isArray(result.content)
+    ? result.content
+        .filter((c: any) => c?.type === "text" && typeof c.text === "string")
+        .map((c: any) => c.text)
+    : [];
+  const text = (parts.length ? parts.join("\n") : String(result.output ?? "")).trim();
+  if (!text) return undefined;
+  return text.length > MAX_OUTPUT ? text.slice(0, MAX_OUTPUT) + "\n…" : text;
+}
 
 /**
  * A tool's own drawing of this step, when it ships one.
@@ -116,6 +147,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
             // call: the call was a guess at what would happen, and this is it.
             const drawn = toolRender(p);
             if (drawn) it.render = drawn;
+            it.output = toolOutput(p);
             break;
           }
         }

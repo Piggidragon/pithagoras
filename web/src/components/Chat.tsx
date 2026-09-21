@@ -746,6 +746,20 @@ export function Chat({
                 {/* Only where the tool drew something itself. Everything else
                     keeps the one-line row it has always had. */}
                 {item.render && <ToolRender render={item.render} />}
+                {/* And what it actually returned, folded away like a thought:
+                    it is what the model was given, and now and then it is the
+                    only place a detail lives — the sources behind a search sit
+                    in here, not in the summary the tool draws. */}
+                {item.output && (
+                  <details className="mt-0.5 text-[11px] text-fg-subtle">
+                    <summary className="cursor-pointer select-none font-mono hover:text-fg-muted">
+                      output
+                    </summary>
+                    <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words border-l border-line pl-2 font-mono text-[11px] leading-[1.5] text-fg-muted">
+                      {item.output}
+                    </pre>
+                  </details>
+                )}
               </div>
             );
           }
