@@ -109,6 +109,13 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
                   >
                     {tool.name}
                   </span>
+                  {/* Only where this chat disagrees with the default, so the
+                      setting is findable from the place it is being overruled. */}
+                  {tool.defaultOn !== undefined && tool.defaultOn !== tool.enabled && (
+                    <span className="shrink-0 text-[10px] text-fg-faint">
+                      default {tool.defaultOn ? "on" : "off"}
+                    </span>
+                  )}
                 </label>
               </li>
             ))}
@@ -116,7 +123,8 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
         </div>
       ))}
       <p className="px-3 py-1.5 text-[10px] text-fg-faint">
-        Applies from the next message. Kept for this conversation only.
+        Applies from the next message, for this conversation. Settings → Extensions sets what
+        every conversation starts with.
       </p>
     </div>
   );

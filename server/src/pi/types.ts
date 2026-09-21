@@ -23,6 +23,8 @@ export interface PiTool {
   source: string;
   /** False when this conversation has it switched off. */
   enabled: boolean;
+  /** Whether it is on by default, so the page can say where a chat disagrees. */
+  defaultOn?: boolean;
 }
 
 export interface PiCommand {

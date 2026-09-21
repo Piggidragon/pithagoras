@@ -98,6 +98,8 @@ out of it, by `..` or by a link, is refused with 400.
 | `POST /api/sessions/:id/prompt` | `{ message }` |
 | `POST /api/sessions/:id/abort` | Stop the current run |
 | `POST /api/sessions/:id/ui-response` | `{ id, value?, cancelled? }` — answer an extension dialog |
+| `GET /api/tools` | `{ tools, off }` — every tool the portal has seen, and which are off by default |
+| `PUT /api/tools` | `{ off: string[] }` — the default for every conversation; applied to the running ones too |
 | `GET /api/sessions/:id/tools` | `{ tools, live, off }` — every tool the conversation could use and whether it is on. `live` is false when pi is not running to be asked |
 | `PUT /api/sessions/:id/tools` | `{ off: string[] }` — switch tools off by name; everything not named is on |
 

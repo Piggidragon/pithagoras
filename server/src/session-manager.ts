@@ -4,6 +4,7 @@ import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { PiClient, PiTool } from "./pi/types.js";
+import { effectiveOff, exceptionsFor, toolEnabled } from "./tool-policy.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { removeSessionFiles } from "./session-files.js";
@@ -19,8 +20,11 @@ import {
   getSettings,
   markOrphanedSessionsInterrupted,
   browserAllowed,
-  toolsOff,
-  setToolsOff,
+  sessionTools,
+  setSessionTools,
+  toolDefaultsOff,
+  rememberTools,
+  knownTools,
   browserAllowlist,
   routineGuards,
   updateSession,
@@ -277,7 +281,7 @@ class SessionManager extends EventEmitter {
       // The session's settled role picks the context files; the live one gates
       // each tool call, so a group conversation follows whoever is speaking.
       role: session.role,
-      toolsOff: toolsOff(sessionId),
+      toolsOff: this.offFor(sessionId),
       whoNow: () => ({ role: this.speakerRole(sessionId), key: this.speakerKey(sessionId) }),
     });
 
@@ -293,6 +297,17 @@ class SessionManager extends EventEmitter {
       updateSession(sessionId, { pi_session_file: file });
     };
     rememberSessionFile();
+
+    // What this session registered, written down as soon as it exists. The
+    // settings page offers a default per tool, and needing to open a chat
+    // before you can say "off everywhere" would be the wrong way round.
+    void client
+      .getTools?.()
+      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source }))))
+      .catch(() => {
+        // A session that cannot list its tools still works; the catalogue
+        // simply stays as it was.
+      });
 
     client.on("event", (msg) => {
       rememberSessionFile();
@@ -815,31 +830,68 @@ class SessionManager extends EventEmitter {
     return this.live.get(sessionId)?.client.respondUi(id, response) ?? false;
   }
 
-  /**
-   * Every tool this conversation could use, and whether it is on.
-   *
-   * Asked of the running session, because only pi knows what is registered.
-   * A conversation that is not running has nothing to ask, and the stored
-   * switches are all there is to say about it.
-   */
-  async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
-    const client = this.live.get(sessionId)?.client;
-    const tools = client?.getTools ? await client.getTools() : [];
-    return { tools, live: Boolean(tools.length) };
+  /** Everything off for this conversation: the default, bent by its own exceptions. */
+  private offFor(sessionId: string, names: string[] = []): string[] {
+    return effectiveOff(
+      [...names, ...knownTools().map((t) => t.name)],
+      toolDefaultsOff(),
+      sessionTools(sessionId)
+    );
   }
 
   /**
-   * Switch tools off for this conversation.
+   * Every tool this conversation could use, and whether it is on.
    *
-   * Written down whether or not it is running: the choice outlives the
-   * process. A running session is told at once, and pi applies it from the
-   * next turn — there is no need to restart the conversation to stop a tool
-   * being offered.
+   * Only a running session can list them: pi builds the registry when it
+   * starts, and what an extension registered is not knowable before that. What
+   * it reports is remembered, so the settings page can offer a default for a
+   * tool without a conversation being open.
    */
-  async setTools(sessionId: string, off: string[]): Promise<string[]> {
-    const stored = setToolsOff(sessionId, off);
-    await this.live.get(sessionId)?.client.setToolsOff?.(stored);
-    return stored;
+  async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
+    const client = this.live.get(sessionId)?.client;
+    const listed = client?.getTools ? await client.getTools() : [];
+    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source })));
+    const defaults = toolDefaultsOff();
+    const exceptions = sessionTools(sessionId);
+    return {
+      tools: listed.map((tool) => ({
+        ...tool,
+        enabled: toolEnabled(tool.name, defaults, exceptions),
+        defaultOn: !defaults.includes(tool.name),
+      })),
+      live: Boolean(listed.length),
+    };
+  }
+
+  /**
+   * Say which tools this conversation should have off.
+   *
+   * What is written down is the difference from the default, not the whole
+   * picture: a tool that is off because the default says so is not recorded
+   * here, so changing that default still reaches this conversation.
+   */
+  async setTools(sessionId: string, wantedOff: string[]): Promise<string[]> {
+    const client = this.live.get(sessionId)?.client;
+    const listed = client?.getTools ? await client.getTools() : [];
+    const known = [...listed.map((t) => t.name), ...knownTools().map((t) => t.name)];
+    setSessionTools(sessionId, exceptionsFor(wantedOff, toolDefaultsOff(), known));
+    const off = this.offFor(sessionId, listed.map((t) => t.name));
+    await client?.setToolsOff?.(off);
+    return off;
+  }
+
+  /**
+   * A default changed. Every conversation that did not disagree about the tool
+   * is affected, including the ones running right now — otherwise the setting
+   * would only mean anything to chats started afterwards.
+   */
+  async applyToolDefaults(): Promise<void> {
+    await Promise.all(
+      [...this.live.entries()].map(async ([sessionId, { client }]) => {
+        const listed = client.getTools ? await client.getTools() : [];
+        await client.setToolsOff?.(this.offFor(sessionId, listed.map((t) => t.name)));
+      })
+    );
   }
 
   async abort(sessionId: string): Promise<void> {

@@ -27,6 +27,7 @@ import { KeepRecent, formatTokens, useKeepRecentSave } from "./KeepRecent";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
+import { ToolDefaults } from "./ToolDefaults";
 
 export type Tab =
   | "general"
@@ -175,13 +176,16 @@ export function ConfigModal({
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "mcp" && <McpPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "extensions" && (
-        <ExtensionsPanel
-          extensions={extensions}
-          loading={loadingExts}
-          onError={setError}
-          onRefresh={loadExtensions}
-          onConfigure={(spec) => setNav({ kind: "ext", spec })}
-        />
+        <>
+          <ExtensionsPanel
+            extensions={extensions}
+            loading={loadingExts}
+            onError={setError}
+            onRefresh={loadExtensions}
+            onConfigure={(spec) => setNav({ kind: "ext", spec })}
+          />
+          <ToolDefaults onError={setError} />
+        </>
       )}
       {nav.kind === "tab" && nav.id === "advanced" && (
         <AdvancedPanel settingsPath={settingsPath} onError={setError} />

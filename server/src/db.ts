@@ -58,6 +58,8 @@ export interface SessionRow {
   browser: number;
   /** Tools switched off for this conversation, newline separated. */
   tools_off: string;
+  /** And switched on against a default that has them off. */
+  tools_on: string;
 }
 
 export interface EventRow {
@@ -336,6 +338,12 @@ function migrate(d: Database.Database): void {
   // after the choice was made is on, which is what "off" was never said about.
   if (!names.includes("tools_off")) {
     d.exec("ALTER TABLE sessions ADD COLUMN tools_off TEXT NOT NULL DEFAULT ''");
+  }
+  // And the ones switched back on against a default that has them off. Two
+  // lists rather than one, because a conversation holds exceptions to the
+  // default and an exception runs in both directions.
+  if (!names.includes("tools_on")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN tools_on TEXT NOT NULL DEFAULT ''");
   }
 
   if (!names.includes("kind")) {
@@ -986,18 +994,24 @@ export function browserAllowed(session: SessionRow): boolean {
 }
 
 /**
- * Tools this conversation has had switched off, by name.
+ * What a conversation says about tools, as exceptions to the default.
  *
- * The exceptions are stored, not the permission: an extension installed after
- * somebody turned two tools off is on, because nobody said otherwise about it.
- * The inverse would have quietly frozen every conversation's tool set at
- * whatever happened to exist the day it was decided.
+ * Two lists because an exception runs both ways: a tool the default leaves on
+ * can be switched off here, and one the default has off can be switched on.
+ * Exceptions rather than a full picture so that changing a default reaches
+ * every conversation that never said anything about it, which is the whole
+ * point of having one.
  */
-export function toolsOff(sessionId: string): string[] {
-  const row = getDb().prepare("SELECT tools_off FROM sessions WHERE id = ?").get(sessionId) as
-    | { tools_off: string | null }
-    | undefined;
-  return parseToolsOff(row?.tools_off);
+export interface SessionTools {
+  off: string[];
+  on: string[];
+}
+
+export function sessionTools(sessionId: string): SessionTools {
+  const row = getDb().prepare("SELECT tools_off, tools_on FROM sessions WHERE id = ?").get(
+    sessionId
+  ) as { tools_off: string | null; tools_on: string | null } | undefined;
+  return { off: parseToolsOff(row?.tools_off), on: parseToolsOff(row?.tools_on) };
 }
 
 export function parseToolsOff(raw: string | null | undefined): string[] {
@@ -1007,14 +1021,83 @@ export function parseToolsOff(raw: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
-export function setToolsOff(sessionId: string, names: string[]): string[] {
-  // Sorted and deduped so the column reads the same however it was written,
-  // and two saves of the same choice are the same row.
-  const clean = [...new Set(names.map((n) => n.trim()).filter(Boolean))].sort();
+/** Sorted and deduped, so the column reads the same however it was written. */
+const clean = (names: string[]): string[] =>
+  [...new Set(names.map((n) => n.trim()).filter(Boolean))].sort();
+
+export function setSessionTools(sessionId: string, tools: SessionTools): SessionTools {
+  const stored = { off: clean(tools.off), on: clean(tools.on) };
   getDb()
-    .prepare("UPDATE sessions SET tools_off = ? WHERE id = ?")
-    .run(clean.join("\n"), sessionId);
-  return clean;
+    .prepare("UPDATE sessions SET tools_off = ?, tools_on = ? WHERE id = ?")
+    .run(stored.off.join("\n"), stored.on.join("\n"), sessionId);
+  return stored;
+}
+
+/**
+ * A setting the portal keeps for itself, outside the model defaults.
+ *
+ * GlobalSettings is what a session launches with; these are neither that nor
+ * pi's, so they go straight to the table rather than widening a type that
+ * every launch reads.
+ */
+function putSetting(key: string, value: string): void {
+  const db = getDb();
+  if (value)
+    db.prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(key, value);
+  else db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+}
+
+/** Tools that are off unless a conversation says otherwise. */
+export function toolDefaultsOff(): string[] {
+  return parseToolsOff((getStoredSettings() as Record<string, string>).tools_off_default);
+}
+
+export function setToolDefaultsOff(names: string[]): string[] {
+  const stored = clean(names);
+  putSetting("tools_off_default", stored.join("\n"));
+  return stored;
+}
+
+/**
+ * Every tool the portal has seen a session register, so the settings page can
+ * offer a default for one without a conversation being open.
+ *
+ * A remembered list rather than a live one: pi builds its registry when a
+ * session starts, and nobody should have to start a chat to say that a tool
+ * should be off in all of them. Refreshed whenever a session does report.
+ */
+export interface KnownTool {
+  name: string;
+  source: string;
+}
+
+export function knownTools(): KnownTool[] {
+  const raw = (getStoredSettings() as Record<string, string>).tools_seen;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((t) => t && typeof t.name === "string")
+      .map((t) => ({ name: String(t.name), source: String(t.source ?? "") }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Take up what a session reported. Merged rather than replaced: another
+ * session may have extensions this one does not, and an extension that is
+ * merely not loaded today should not lose the default somebody set for it.
+ */
+export function rememberTools(tools: KnownTool[]): void {
+  if (!tools.length) return;
+  const merged = new Map(knownTools().map((t) => [t.name, t]));
+  for (const tool of tools) merged.set(tool.name, { name: tool.name, source: tool.source });
+  const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+  putSetting("tools_seen", JSON.stringify(sorted));
 }
 
 /**

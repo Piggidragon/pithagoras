@@ -162,6 +162,8 @@ export interface PortalTool {
   /** The package that registered it, for grouping. */
   source: string;
   enabled: boolean;
+  /** Whether it is on by default, so a chat can show where it disagrees. */
+  defaultOn?: boolean;
 }
 
 export interface PortalEvent {
@@ -267,6 +269,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
+  /** Every tool the portal has seen, for setting a default without opening a chat. */
+  toolDefaults: () =>
+    json<{ tools: { name: string; source: string; defaultOn: boolean }[]; off: string[] }>(
+      "/api/tools"
+    ),
+  /** Which tools are off unless a conversation says otherwise. */
+  setToolDefaults: (off: string[]) =>
+    json<{ off: string[] }>("/api/tools", { method: "PUT", body: JSON.stringify({ off }) }),
   /** What this conversation could use. `live` is false when pi is not running to ask. */
   tools: (sessionId: string) =>
     json<{ tools: PortalTool[]; live: boolean; off: string[] }>(`/api/sessions/${sessionId}/tools`),

@@ -73,7 +73,9 @@ import {
   getSettingDefaults,
   getSettings,
   getStoredSettings,
-  parseToolsOff,
+  knownTools,
+  setToolDefaultsOff,
+  toolDefaultsOff,
   setContextLimit,
   setDefaultContextLimit,
   setSettings,
@@ -590,7 +592,7 @@ app.get("/api/sessions/:id/tools", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const { tools, live } = await sessions.getTools(session.id);
-  res.json({ tools, live, off: parseToolsOff(session.tools_off) });
+  res.json({ tools, live, off: tools.filter((t) => !t.enabled).map((t) => t.name) });
 });
 
 /** Switch tools off for this conversation. Everything not named is on. */
@@ -602,6 +604,38 @@ app.put("/api/sessions/:id/tools", async (req, res) => {
     return res.status(400).json({ error: "off must be a list of tool names" });
   }
   res.json({ off: await sessions.setTools(session.id, off) });
+});
+
+/**
+ * Tools the portal has ever seen registered, and whether each is on by default.
+ *
+ * Remembered rather than asked, so a default can be set without opening a
+ * conversation: pi builds its registry when a session starts, and nobody
+ * should have to start a chat to say that a tool should be off in all of them.
+ */
+app.get("/api/tools", (_req, res) => {
+  const off = new Set(toolDefaultsOff());
+  res.json({
+    tools: knownTools().map((tool) => ({ ...tool, defaultOn: !off.has(tool.name) })),
+    off: [...off].sort(),
+  });
+});
+
+/**
+ * Which tools are off unless a conversation says otherwise.
+ *
+ * Applied to the conversations running right now as well: a default that only
+ * meant anything to chats started afterwards would be a setting you could not
+ * see working.
+ */
+app.put("/api/tools", async (req, res) => {
+  const off = req.body?.off;
+  if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
+    return res.status(400).json({ error: "off must be a list of tool names" });
+  }
+  const stored = setToolDefaultsOff(off);
+  await sessions.applyToolDefaults();
+  res.json({ off: stored });
 });
 
 app.post("/api/sessions/:id/abort", async (req, res) => {

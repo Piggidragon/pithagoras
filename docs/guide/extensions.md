@@ -96,12 +96,24 @@ one go. It takes effect from the next message — pi is told at once and there i
 no need to restart the conversation — and it is remembered per chat, including
 across a restart.
 
-What is stored is the list of tools that are **off**, not the list allowed. An
-extension installed later is on, because nobody said otherwise about it; the
-inverse would have frozen every conversation's tool set at whatever happened to
-exist the day somebody first opened this panel. A switch for a tool that is not
-loaded right now is kept too, so reinstalling an extension does not quietly
-bring back something you turned off.
+### And what every chat starts with
+
+Per chat is right for "not this time" and wrong for "hardly ever" — nobody
+wants to turn the same tool off at the start of every conversation. **Settings
+→ Extensions** has the other half: which tools a conversation starts with.
+
+A chat may still disagree with the default in either direction, and the row
+says so where it does. What a chat stores is only its disagreement, so changing
+a default reaches every conversation that never said anything about that tool —
+including the ones open right now.
+
+The list there is what the portal has seen a session register, not what is
+loaded this second: pi builds its registry when a conversation starts, and
+having to open a chat before you could say "off everywhere" would be the wrong
+way round. It fills in as soon as any conversation has run.
+
+A switch for a tool that is not loaded right now is kept, so reinstalling an
+extension does not quietly bring back something you turned off.
 
 ::: tip Not the same as uninstalling
 The extension is still loaded, its commands still work, and other chats are
