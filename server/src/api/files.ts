@@ -77,6 +77,17 @@ export function filesRouter(): Router {
         }
         // Up to the size that was announced, even if the file has grown since.
         const stream = createReadStream("", { fd, start: 0, end: size - 1 });
+        let sent = 0;
+        stream.on("data", (chunk) => (sent += chunk.length));
+        // If it has shrunk since, the body ends short of the length that was
+        // announced, and a client waits for the rest until it gives up. The
+        // connection is cut instead, so the download fails at once.
+        stream.on("end", () => {
+          if (sent < size) {
+            console.error(`[portal] files: ${name} changed while it was sent (${sent} of ${size} bytes)`);
+            res.destroy();
+          }
+        });
         stream.on("error", (e) => {
           console.error("[portal] files: download failed:", e.message);
           res.destroy();

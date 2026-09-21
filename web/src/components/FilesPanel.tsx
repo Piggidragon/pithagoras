@@ -269,10 +269,13 @@ export function FilesPanel({
 
   const remove = async (entry: FileEntry) => {
     const path = join(dir, entry.name);
-    const what = entry.type === "dir" ? "folder and everything in it" : entry.type === "link" ? "link" : "file";
+    // A link to a folder is listed as a folder, but only the link goes.
+    const message = entry.link
+      ? "This removes the link only. What it points to is not touched."
+      : `This removes the ${entry.type === "dir" ? "folder and everything in it" : "file"}. It cannot be undone.`;
     const ok = await confirmDialog({
       title: `Delete "${entry.name}"?`,
-      message: `This removes the ${what}. It cannot be undone.`,
+      message,
       confirmLabel: "Delete",
       danger: true,
     });
@@ -471,6 +474,7 @@ export function FilesPanel({
                       <LuFileText aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
                     )}
                     <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                    {entry.link && entry.type !== "link" && <LuLink aria-label="A link" className="h-3 w-3 shrink-0 text-fg-faint" />}
                     {entry.type === "file" && <span className="shrink-0 text-[10px] text-fg-faint">{sizeOf(entry.size)}</span>}
                   </button>
                   {/* Out of the way until the row is pointed at, but always there on a touch screen, which cannot point. */}

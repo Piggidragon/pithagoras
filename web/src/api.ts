@@ -144,6 +144,8 @@ export interface CompactionSettings {
 export interface FileEntry {
   name: string;
   type: "dir" | "file" | "link";
+  /** A link, whatever `type` says: one to a folder in this one is a "dir", but deleting it removes only the link. */
+  link?: boolean;
   size: number;
   mtime: number;
 }

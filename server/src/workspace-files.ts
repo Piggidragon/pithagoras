@@ -58,6 +58,11 @@ export interface FileEntry {
   name: string;
   /** "link" is a link that could not be followed to something inside the folder. */
   type: "dir" | "file" | "link";
+  /**
+   * The entry is a link, whatever `type` says. A link that leads to a folder inside
+   * this one is listed as a "dir", but taking it away removes the link, not the folder.
+   */
+  link?: boolean;
   size: number;
   mtime: number;
 }
@@ -157,7 +162,8 @@ export function listDir(base: string, rel: unknown): { path: string; entries: Fi
     try {
       let st = lstatSync(full);
       let type: FileEntry["type"] = st.isDirectory() ? "dir" : "file";
-      if (st.isSymbolicLink()) {
+      const link = st.isSymbolicLink();
+      if (link) {
         // Shown as what it leads to, but only if that is inside the folder.
         // A link that leads out, or nowhere, is listed and left alone.
         type = "link";
@@ -167,10 +173,10 @@ export function listDir(base: string, rel: unknown): { path: string; entries: Fi
           type = st.isDirectory() ? "dir" : "file";
         }
       }
-      entries.push({ name: dirent.name, type, size: st.size, mtime: st.mtimeMs });
+      entries.push({ name: dirent.name, type, ...(link ? { link } : {}), size: st.size, mtime: st.mtimeMs });
     } catch {
       // Gone since it was listed, or a link to nowhere.
-      entries.push({ name: dirent.name, type: "link", size: 0, mtime: 0 });
+      entries.push({ name: dirent.name, type: "link", link: true, size: 0, mtime: 0 });
     }
   }
   entries.sort((a, b) => {
@@ -249,17 +255,23 @@ export function openDownload(base: string, rel: unknown): { fd: number; size: nu
   return { fd, size: fstatSync(fd).size, name: path.basename(file) };
 }
 
-/** What a failed write is called to the person: it did not happen, and the file is as it was. */
-function writeFailure(e: unknown): unknown {
+/**
+ * What a failed change is called to the person, by what the system said.
+ * Anything not known here is left as it is, and becomes a plain 500 with a log line.
+ */
+function ioFailure(e: unknown, what: string, after: string): unknown {
   const code = (e as NodeJS.ErrnoException)?.code;
-  // The folder it was to go in is not there, or is not a folder.
-  if (code === "ENOENT") return new FileError("missing", "There is no such folder");
+  // Gone since it was looked at, or the folder it was to go in is not there.
+  if (code === "ENOENT") return new FileError("missing", "There is no such file or folder");
   if (code === "ENOTDIR") return new FileError("invalid", "That is not a folder");
-  if (code && ["ENOSPC", "EDQUOT", "EIO", "EROFS", "EACCES", "EPERM", "EFBIG"].includes(code)) {
-    return new FileError("failed", `The file could not be saved (${code}). It was left as it was.`);
+  if (code && ["ENOSPC", "EDQUOT", "EIO", "EROFS", "EACCES", "EPERM", "EFBIG", "ENOTEMPTY", "EBUSY"].includes(code)) {
+    return new FileError("failed", `${what} (${code}). ${after}`);
   }
   return e;
 }
+
+/** A save that did not happen: the file is as it was. */
+const writeFailure = (e: unknown) => ioFailure(e, "The file could not be saved", "It was left as it was.");
 
 /**
  * Saves a file's text.
@@ -291,7 +303,9 @@ export function writeText(base: string, rel: unknown, content: string, expected?
   let owner: { uid: number; gid: number } | undefined;
   let existed = true;
   try {
-    const fd = openPlain(target, constants.O_WRONLY);
+    // Only to look at: what is written goes to a file beside it, so the file itself
+    // need not be writable (a read-only one is replaced, and keeps its mode).
+    const fd = openPlain(target, constants.O_RDONLY);
     try {
       const st = fstatSync(fd);
       if (st.nlink > 1) throw new FileError("invalid", "That file is shared with another, so it is left alone");
@@ -364,7 +378,12 @@ export function removeEntry(base: string, rel: unknown): void {
   const parent = resolveInside(base, path.relative(base, path.dirname(lexical)));
   const target = path.join(parent, path.basename(lexical));
   if (!lexists(target)) throw new FileError("missing", "There is no such file or folder");
-  rmSync(target, { recursive: true });
+  try {
+    // A file that has gone since it was looked for is what was asked for.
+    rmSync(target, { recursive: true, force: true });
+  } catch (e) {
+    throw ioFailure(e, "It could not be deleted", "Nothing more was changed.");
+  }
 }
 
 /** A name for one entry: no place in it, and not one of the two that mean a place. */
@@ -396,7 +415,11 @@ export function renameEntry(base: string, rel: unknown, newName: unknown): strin
   const to = path.join(parent, name);
   if (to === from) return path.relative(base, to);
   if (lexists(to)) throw new FileError("exists", `There is already something called "${name}" here`);
-  renameSync(from, to);
+  try {
+    renameSync(from, to);
+  } catch (e) {
+    throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+  }
   return path.relative(base, to);
 }
 

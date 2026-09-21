@@ -83,7 +83,7 @@ out of it, by `..` or by a link, is refused with 400.
 
 | | |
 | --- | --- |
-| `GET /api/sessions/:id/files?path=` | `{ path, entries: [{ name, type, size, mtime }], truncated }` — `type` is `dir`, `file` or `link` (a link that leads out of the folder or nowhere). Folders first; `.git` is left out; at most 2,000 entries |
+| `GET /api/sessions/:id/files?path=` | `{ path, entries: [{ name, type, link?, size, mtime }], truncated }` — `type` is `dir`, `file` or `link` (a link that leads out of the folder or nowhere); `link: true` marks every link, including one to a folder inside this one that is listed as a `dir`. Folders first; `.git` is left out; at most 2,000 entries |
 | `GET /api/sessions/:id/file?path=` | `{ binary: false, size, mtime, content }`, or `{ binary: true, size, mtime }` for what is not text or is over 1 MB |
 | `GET /api/sessions/:id/file?path=&download=1` | The file, as a download |
 | `PUT /api/sessions/:id/file?path=` | `{ content, mtime? }` → saves it. With `mtime`, the time it was read at, the save is refused with 409 if the file has changed since. 413 over 1 MB |

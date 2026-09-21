@@ -378,3 +378,51 @@ test('a folder over the cap is cut down before it is looked at, and folders stil
   assert.equal(list.truncated, true);
   done();
 });
+
+test('a read-only file in a folder that can be written is saved, and stays read-only', { skip: process.getuid?.() === 0 && 'root can write anywhere' }, () => {
+  const { dir, base, done } = setup();
+  const file = path.join(dir, 'generated.txt');
+  writeFileSync(file, 'generated'); chmodSync(file, 0o444);
+  assert.equal(readText(base, 'generated.txt').content, 'generated');
+  writeText(base, 'generated.txt', 'edited', readText(base, 'generated.txt').mtime);
+  assert.equal(readFileSync(file, 'utf8'), 'edited');
+  assert.equal(statSync(file).mode & 0o7777, 0o444);
+  done();
+});
+
+test('what the system refuses on a delete or a rename is said, not a 500', { skip: process.getuid?.() === 0 && 'root can write anywhere' }, () => {
+  const { dir, base, done } = setup();
+  mkdirSync(path.join(dir, 'sub')); writeFileSync(path.join(dir, 'sub', 'a.txt'), 'x');
+  chmodSync(path.join(dir, 'sub'), 0o500);
+  try {
+    assert.equal(code(() => removeEntry(base, 'sub/a.txt')), 'failed');
+    assert.equal(code(() => renameEntry(base, 'sub/a.txt', 'b.txt')), 'failed');
+    assert.equal(existsSync(path.join(dir, 'sub', 'a.txt')), true);
+  } finally { chmodSync(path.join(dir, 'sub'), 0o700); }
+  done();
+});
+
+test('a delete of something that has gone in the meantime is not an error', () => {
+  const { dir, base, done } = setup();
+  writeFileSync(path.join(dir, 'a.txt'), 'x');
+  removeEntry(base, 'a.txt');
+  assert.equal(code(() => removeEntry(base, 'a.txt')), 'missing');
+  done();
+});
+
+test('a link is marked as one, also when it leads to a folder that is listed as a folder', () => {
+  const { dir, base, outside, done } = setup();
+  mkdirSync(path.join(dir, 'sub')); writeFileSync(path.join(dir, 'a.txt'), 'x');
+  symlinkSync(path.join(dir, 'sub'), path.join(dir, 'to-sub'));
+  symlinkSync(path.join(dir, 'a.txt'), path.join(dir, 'to-a'));
+  symlinkSync(outside, path.join(dir, 'out'));
+  symlinkSync(path.join(dir, 'gone'), path.join(dir, 'broken'));
+  const by = Object.fromEntries(listDir(base, '').entries.map((e) => [e.name, e]));
+  assert.deepEqual([by['to-sub'].type, by['to-sub'].link], ['dir', true]);
+  assert.deepEqual([by['to-a'].type, by['to-a'].link], ['file', true]);
+  assert.deepEqual([by.out.type, by.out.link], ['link', true]);
+  assert.deepEqual([by.broken.type, by.broken.link], ['link', true]);
+  assert.equal(by.sub.link, undefined);
+  assert.equal(by['a.txt'].link, undefined);
+  done();
+});
