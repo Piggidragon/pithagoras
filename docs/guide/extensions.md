@@ -90,7 +90,7 @@ place here:
 
 | Call | Where it goes |
 | --- | --- |
-| `setWidget(key, lines)` | A block above the composer, one per key. Cleared by passing `undefined` |
+| `setWidget(key, lines, opts)` | A block by the composer, one per key — above it, or below where the widget asked for `belowEditor`. Cleared by passing `undefined` |
 | `setStatus(key, text)` | A line under the widgets |
 | `notify(message, type)` | A message in the corner, which goes on its own — sooner for `info` than for `error` |
 
@@ -135,7 +135,13 @@ years ago behaves here the way its author intended.
 The dialog is as tall as what was drawn, and closes itself the moment the
 component calls `done()`. The ✕ answers for it — as a cancelled dialog, the same
 as pressing escape in a menu that offers it — for a screen that does not end on
-its own.
+its own. A component that throws takes its screen down and says so, rather than
+leaving a dead one open.
+
+A screen is not a question with a button, so it is not on the five-minute clock
+the dialogs are on. What it has is an idle one: half an hour in which nothing is
+typed into it and nobody opens it. Reading a long questionnaire carefully is not
+what that is for — a page that has gone is.
 
 Two differences from a terminal are worth knowing:
 
@@ -145,6 +151,12 @@ Two differences from a terminal are worth knowing:
 - **The cursor is the component's own.** Components draw their cursor into the
   screen, so the terminal's hardware cursor stays hidden — which is what pi does
   by default too.
+
+`onHandle` is called with a handle to the screen, as pi's contract says. Hiding
+through it empties the screen and leaves the extension running — the pattern the
+handle is for, a screen put away while a shortcut stays live. The dialog stays
+open around it, thin and empty, because the page has no idea of a screen that is
+there but not showing.
 
 ## Tools that draw their own row
 
@@ -187,7 +199,10 @@ count: a citation caught inside a preview is the output quoted back, not the
 tool claiming anything.
 
 The icons are each site's own favicon, fetched by the portal and served from
-its own address. Not from an icon service, which would learn every domain the
+its own address. Only from the public internet: the domain came out of a web
+page, so the name is resolved before it is asked and a redirect is followed by
+hand, which keeps a cited site from pointing the portal at something inside the
+network it runs in. Not from an icon service, which would learn every domain the
 agent read at once. And not from the sites themselves: pointing the page at
 each one would have your browser announce itself to every host the agent cited,
 from your address, the moment an old conversation is opened — and a favicon is

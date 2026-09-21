@@ -107,14 +107,37 @@ export class TuiSurface {
   private cols: number;
   private rows: number;
   private readonly onFrame: (frame: TuiFrame) => void;
+  /**
+   * Told the composed lines instead of a screen, for a surface whose output is
+   * text. A widget wants what the component said, and composing it a second
+   * time to get it would walk the whole tree again — and run again whatever a
+   * component does while it draws.
+   */
+  private readonly onLines?: (lines: string[]) => void;
+  /**
+   * Told when a component has thrown and the surface has stopped.
+   *
+   * The surface cannot end what it does not own: showCustom is parked on a
+   * promise, and without this a screen that died on its first keystroke stayed
+   * on the page, swallowing every further key, until somebody closed it.
+   */
+  private readonly onFail?: (error: Error) => void;
 
   /** Stands in for pi-tui's Terminal. Components read the size; the writes go nowhere. */
   readonly terminal: Record<string, unknown>;
 
-  constructor(opts: { cols: number; rows: number; onFrame: (frame: TuiFrame) => void }) {
+  constructor(opts: {
+    cols: number;
+    rows: number;
+    onFrame: (frame: TuiFrame) => void;
+    onLines?: (lines: string[]) => void;
+    onFail?: (error: Error) => void;
+  }) {
     this.cols = clampCols(opts.cols);
     this.rows = clampRows(opts.rows);
     this.onFrame = opts.onFrame;
+    this.onLines = opts.onLines;
+    this.onFail = opts.onFail;
     const surface = this;
     this.terminal = {
       get columns() {
@@ -168,6 +191,16 @@ export class TuiSurface {
 
   setFocus(component: TuiComponent | null): void {
     this.focused = component;
+  }
+
+  /** Whether this component is the one keys go to. */
+  isFocused(component: TuiComponent): boolean {
+    return this.focused === component;
+  }
+
+  /** Whether this component is on the screen at all. */
+  isShowing(component: TuiComponent): boolean {
+    return this.children.includes(component) || this.overlays.some((o) => o.component === component);
   }
 
   addInputListener(listener: InputListener): () => void {
@@ -391,7 +424,10 @@ export class TuiSurface {
   private paint(): void {
     if (this.stopped) return;
     this.lastFrameAt = Date.now();
-    this.onFrame(this.shot(this.compose()));
+    const lines = this.compose();
+    // One composition, whichever the caller wanted out of it.
+    if (this.onLines) this.onLines(lines);
+    else this.onFrame(this.shot(lines));
   }
 
   /** How tall the screen came out, alongside it: the page sizes itself to that. */
@@ -400,8 +436,12 @@ export class TuiSurface {
   }
 
   private fail(e: unknown): void {
-    this.onFrame(this.shot([``, `  The extension's screen stopped: ${(e as Error).message}`]));
+    const error = e instanceof Error ? e : new Error(String(e));
+    this.onFrame(this.shot([``, `  The extension's screen stopped: ${error.message}`]));
     this.stop();
+    // Said after stopping, so whoever is waiting on this screen can let go of
+    // it rather than hold the page open on something that will never answer.
+    this.onFail?.(error);
   }
 }
 

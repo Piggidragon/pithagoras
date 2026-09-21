@@ -360,3 +360,60 @@ test("an option that is not a string is passed through untouched", () => {
   assert.deepEqual(labels, [odd]);
   assert.equal(original(odd), odd);
 });
+
+test("a surface that wants text composes once and builds no screen", async () => {
+  const lines = [];
+  const frames = [];
+  let drawn = 0;
+  const surface = new TuiSurface({
+    cols: 20,
+    rows: 10,
+    onFrame: (f) => frames.push(f),
+    onLines: (l) => lines.push(l),
+  });
+  surface.attach({
+    render() {
+      drawn++;
+      return ["todo", "  one"];
+    },
+    invalidate() {},
+  });
+  await settled();
+  assert.deepEqual(lines.at(-1), ["todo", "  one"]);
+  assert.equal(frames.length, 0, "no screen was built for text");
+  assert.equal(drawn, 1, `the component drew ${drawn} times`);
+  surface.dispose();
+});
+
+test("a component that throws on a keystroke says so instead of going quiet", () => {
+  const failures = [];
+  const surface = new TuiSurface({
+    cols: 20,
+    rows: 5,
+    onFrame: () => {},
+    onFail: (e) => failures.push(e.message),
+  });
+  surface.attach({
+    render: () => ["here"],
+    handleInput() {
+      throw new Error("no");
+    },
+    invalidate() {},
+  });
+  surface.input("x");
+  assert.deepEqual(failures, ["no"]);
+  surface.dispose();
+});
+
+test("a surface says which component is showing and which has the keys", () => {
+  const surface = new TuiSurface({ cols: 20, rows: 5, onFrame: () => {} });
+  const base = stub(["base"]);
+  const other = stub(["other"]);
+  surface.attach(base);
+  assert.ok(surface.isShowing(base));
+  assert.ok(surface.isFocused(base));
+  assert.ok(!surface.isShowing(other));
+  surface.clear();
+  assert.ok(!surface.isShowing(base));
+  surface.dispose();
+});

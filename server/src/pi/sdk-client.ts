@@ -19,6 +19,7 @@ import {
   plainChoices,
   plainLines,
   plainText,
+  type OverlayHandle,
   type TuiComponent,
   type TuiFrame,
 } from "./tui-bridge.js";
@@ -26,6 +27,14 @@ import { tuiRuntime, type TuiRuntime } from "./tui-runtime.js";
 import { ToolRenderer } from "./tool-render.js";
 
 /** How wide a widget is drawn. The page wraps what it gets; the component cannot be asked. */
+/**
+ * How long a drawn screen may sit untouched before it is taken down.
+ *
+ * Long, because it only runs while nothing is happening: a screen nobody has
+ * typed into or looked at for half an hour is one whose page has gone.
+ */
+const SCREEN_IDLE_MS = 30 * 60_000;
+
 const WIDGET_COLS = 80;
 
 /** What ctx.ui.onTerminalInput() registers: a look at a keystroke before the component. */
@@ -187,6 +196,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
   /** Screens an extension is drawing, keyed by the same request id as the dialog it belongs to. */
   private surfaces = new Map<string, TuiSurface>();
+  /** Pushes a drawn screen's idle timer back; see showCustom. */
+  private screenAlive = new Map<string, () => void>();
   /** pi's theme and key table, or null where they could not be loaded. Resolved before binding. */
   private tui: TuiRuntime | null = null;
   /** Extensions watching raw keys, which here means keys typed into a screen one is drawing. */
@@ -539,9 +550,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
        * whichever form it arrives in it is sent as the text it came to — a
        * line of ANSI there would read as gibberish.
        */
-      setWidget: (key: string, content: unknown) => {
+      setWidget: (key: string, content: unknown, options?: { placement?: string }) => {
+        const placement = options?.placement === "belowEditor" ? "belowEditor" : "aboveEditor";
         if (typeof content === "function") {
-          this.liveWidget(key, content as TuiFactory<unknown>);
+          this.liveWidget(key, content as TuiFactory<unknown>, placement);
           return;
         }
         this.dropWidget(key);
@@ -550,6 +562,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             method: "setWidget",
             widgetKey: key,
             widgetContent: content && plainLines(content as string[]),
+            widgetPlacement: placement,
           });
         }
       },
@@ -581,11 +594,32 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       },
       /** pi's own theme, so a component is styled the way its author expects. */
       theme: this.tui?.theme,
-      // TUI-only affordances with no meaning in a browser.
+      /**
+       * The rest of pi's UI surface, answered rather than missing.
+       *
+       * These have no meaning in a browser, and while the portal called itself
+       * an RPC client an extension that checks the mode never asked for them.
+       * Saying "tui" is what makes the interactive branch run — and that
+       * branch reaches for the editor, the theme list, the tool expansion
+       * state. A missing one is not a feature quietly skipped, it is
+       * `ctx.ui.getEditorText is not a function` thrown out of a command.
+       */
       setWorkingMessage: () => {},
       setWorkingVisible: () => {},
       setWorkingIndicator: () => {},
       setHiddenThinkingLabel: () => {},
+      // The composer belongs to the page and the session cannot reach into it.
+      pasteToEditor: () => {},
+      setEditorText: () => {},
+      getEditorText: () => "",
+      // One theme, the one the components are drawn with. Switching it would
+      // change what the server draws, not what the page looks like.
+      getAllThemes: () => [],
+      getTheme: () => undefined,
+      setTheme: () => ({ success: false, error: "The portal draws with one theme." }),
+      // Each tool row in the page opens on its own; there is no single state.
+      getToolsExpanded: () => false,
+      setToolsExpanded: () => {},
       // The portal's chat has no editor component, header or footer to replace,
       // and an autocomplete provider has no input to attach to.
       setFooter: () => {},
@@ -618,10 +652,25 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const id = randomUUID();
     const cols = 96;
     const rows = 24;
+    // Declared before the surface so its onFail can reach it; assigned inside
+    // the promise, which is where finish() exists.
+    let stop: (value: unknown) => void = () => {};
     const surface = new TuiSurface({
       cols,
       rows,
       onFrame: (frame) => this.emit("event", { type: "extension_ui_frame", id, ...frame }),
+      // A component that throws has already lost its screen. Ending the
+      // dialog too is the difference between the extension carrying on and
+      // the page holding a dead screen open until it times out, swallowing
+      // every key typed into it and every dialog queued behind it.
+      onFail: (error) => {
+        this.emit("event", {
+          type: "portal_notice",
+          text: `An extension's screen stopped: ${error.message}`,
+          error: true,
+        });
+        stop(undefined);
+      },
     });
     // Ahead of the component, as a terminal would deliver them — see
     // onTerminalInput. A copy per keystroke, because a handler may remove
@@ -645,6 +694,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         if (timer) clearTimeout(timer);
         this.pendingUi.delete(id);
         this.surfaces.delete(id);
+        this.screenAlive.delete(id);
         surface.dispose();
         // The only one of these that ends itself. A menu closes when something
         // is picked, and nothing else would tell the page to take it down —
@@ -657,12 +707,29 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // the timeout below both arrive through this.
       this.pendingUi.set(id, () => finish(undefined));
 
-      const ms = typeof options?.timeout === "number" ? options.timeout : 300_000;
-      timer = setTimeout(() => finish(undefined), ms);
-      if (typeof timer.unref === "function") timer.unref();
-      // A signal that is already aborted never fires again, and the request
-      // has gone out by now: without this the screen opens anyway, blocks
-      // every dialog queued behind it, and can only be closed by hand.
+      stop = finish;
+
+      /**
+       * Idle, not elapsed.
+       *
+       * A dialog with a button is answered in seconds and a fixed five minutes
+       * is a fair ceiling for one. A screen is a place to work: a questionnaire
+       * read carefully, a tree walked through. Timing that out while somebody
+       * is typing into it takes the screen away mid-sentence and tells the
+       * extension they cancelled. So the clock only runs while nothing is
+       * happening, and anything the page does pushes it back.
+       */
+      const idle = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => finish(undefined), SCREEN_IDLE_MS);
+        if (typeof timer.unref === "function") timer.unref();
+      };
+      idle();
+      this.screenAlive.set(id, idle);
+
+      // Not in pi's type for custom(), which takes only overlay options — but
+      // an extension that passes one means it, and honouring it costs two
+      // lines. An already-aborted signal never fires again, so it is asked.
       const signal = options?.signal;
       if (signal?.aborted) {
         finish(undefined);
@@ -695,6 +762,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           }
           this.surfaces.set(id, surface);
           surface.attach(ready);
+          // pi's contract: the extension is handed a way to control its own
+          // screen after it is shown. What it gets here stands for the one
+          // component on this surface — see rootHandle.
+          try {
+            options?.onHandle?.(this.rootHandle(surface, ready));
+          } catch {
+            // The extension's own callback. If it throws, that is its screen
+            // to lose, not this session.
+          }
           this.emit("event", {
             type: "extension_ui_request",
             id,
@@ -724,7 +800,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * change. Drawing it once and throwing the surface away left that overlay
    * frozen on whatever the list looked like the moment it first appeared.
    */
-  private liveWidget(key: string, factory: TuiFactory<unknown>): void {
+  private liveWidget(key: string, factory: TuiFactory<unknown>, placement: string): void {
     const runtime = this.tui;
     if (!runtime) return;
     this.dropWidget(key);
@@ -733,13 +809,19 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // No viewport to overflow: a widget is as long as it is, and the page
       // decides what it has room for.
       rows: 200,
-      onFrame: () =>
+      onFrame: () => {},
+      // The lines the surface just composed, rather than asking it to compose
+      // them again: a widget wants the text, not a screen, and composing twice
+      // walks the whole component tree twice — and runs twice whatever a
+      // component does while it draws.
+      onLines: (lines) =>
         this.emit("event", {
           type: "extension_ui_request",
           id: randomUUID(),
           method: "setWidget",
           widgetKey: key,
-          widgetContent: plainLines(surface.lines()),
+          widgetContent: plainLines(lines),
+          widgetPlacement: placement,
         }),
     });
     this.widgets.set(key, surface);
@@ -772,8 +854,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (!this.toolRender || !event || typeof event.type !== "string") return event;
     if (!event.type.startsWith("tool_execution_")) return event;
     const render = this.toolRender.render(event);
-    if (event.type === "tool_execution_end" && event.toolCallId) {
-      this.toolRender.forget(String(event.toolCallId));
+    if (event.type === "tool_execution_end") {
+      // The same key the renderer filed it under. An event without a call id
+      // is filed under the tool's name, and forgetting only the ones that have
+      // an id left that entry behind for the next call of the same tool to
+      // find — which would then be handed the previous call's component and
+      // draw the previous call's results.
+      this.toolRender.forget(String(event.toolCallId ?? event.toolName));
     }
     return render ? { ...event, render } : event;
   }
@@ -782,14 +869,44 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   uiInput(id: string, data: string): boolean {
     const surface = this.surfaces.get(id);
     if (!surface) return false;
+    this.screenAlive.get(id)?.();
     surface.input(data);
     return true;
+  }
+
+  /**
+   * What an extension is given to control the screen it just opened.
+   *
+   * pi hands over an overlay handle because in the TUI a custom screen is an
+   * overlay. Here it is the whole surface, so the handle stands for the one
+   * component on it: hiding empties the screen and leaves the extension
+   * running, which is the pattern the handle exists for — a screen put away
+   * while a shortcut stays live. The dialog stays open around it, thin and
+   * empty, because the page has no idea of a screen that is there but not
+   * showing.
+   */
+  private rootHandle(surface: TuiSurface, component: TuiComponent): OverlayHandle {
+    return {
+      hide: () => surface.clear(),
+      setHidden: (hidden: boolean) => {
+        if (hidden) surface.clear();
+        else if (!surface.isShowing(component)) surface.attach(component);
+      },
+      isHidden: () => !surface.isShowing(component),
+      focus: () => surface.setFocus(component),
+      unfocus: (opts?: { target: TuiComponent | null }) =>
+        surface.setFocus(opts ? opts.target : null),
+      isFocused: () => surface.isFocused(component),
+    };
   }
 
   /** The browser's terminal changed size; the component lays itself out again. */
   uiResize(id: string, cols: number, rows: number): boolean {
     const surface = this.surfaces.get(id);
     if (!surface) return false;
+    // A page that has just attached is somebody arriving at the screen, which
+    // is the opposite of nobody being there.
+    this.screenAlive.get(id)?.();
     surface.resize(cols, rows);
     return true;
   }
@@ -856,6 +973,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // and its render timer would keep the process awake.
     for (const surface of this.surfaces.values()) surface.dispose();
     this.surfaces.clear();
+    this.screenAlive.clear();
     for (const surface of this.widgets.values()) surface.dispose();
     this.widgets.clear();
     this.toolRender?.clear();

@@ -14,15 +14,19 @@ import type { ExtensionNotice, ExtensionStatus, ExtensionWidget } from "../exten
  */
 export function ExtensionWidgets({
   widgets,
-  statuses,
+  statuses = [],
+  placement = "aboveEditor",
 }: {
   widgets: ExtensionWidget[];
-  statuses: ExtensionStatus[];
+  statuses?: ExtensionStatus[];
+  /** Which side of the composer this block is, as pi's widget options name it. */
+  placement?: ExtensionWidget["placement"];
 }) {
-  if (!widgets.length && !statuses.length) return null;
+  const mine = widgets.filter((w) => w.placement === placement);
+  if (!mine.length && !statuses.length) return null;
   return (
-    <div className="mb-2 space-y-1.5">
-      {widgets.map((widget) => (
+    <div className={placement === "belowEditor" ? "mt-2 space-y-1.5" : "mb-2 space-y-1.5"}>
+      {mine.map((widget) => (
         <pre
           key={widget.key}
           aria-label={`${widget.key} panel`}

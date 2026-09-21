@@ -213,3 +213,80 @@ test("the tool is handed back the component it built for that view", () => {
   assert.equal(tool.built.length, 2);
   assert.deepEqual(drawn, { collapsed: ["9 again shut"], expanded: ["9 again open"] });
 });
+
+test("the arguments are there when the result is drawn, not only the call", () => {
+  // pi's end event carries no args, and pi's contract says a renderer has them
+  // on every render of the same call.
+  const seen = [];
+  const r = renderer({
+    search: {
+      renderCall: () => component(["…"]),
+      renderResult: (_result, _opts, _theme, ctx) => {
+        seen.push(ctx.args);
+        return component([`for ${ctx.args?.query}`]);
+      },
+    },
+  });
+  const event = { toolName: "search", toolCallId: "1" };
+  r.render({ ...event, type: "tool_execution_start", args: { query: "ansi" } });
+  const drawn = r.render({ ...event, type: "tool_execution_end", result: { ok: true } });
+  assert.deepEqual(seen, [{ query: "ansi" }, { query: "ansi" }]);
+  assert.deepEqual(drawn, { collapsed: ["for ansi"] });
+});
+
+test("a renderer that reads expanded off the context still gets a More", () => {
+  // pi's own tool-execution.ts sets it in both places, so either is fair.
+  const r = renderer({
+    ctxonly: {
+      renderResult: (result, _opts, _theme, ctx) =>
+        component(ctx.expanded ? [`${result.count} results`, "  one", "  two"] : ["2 results"]),
+    },
+  });
+  const drawn = r.render({
+    type: "tool_execution_end",
+    toolName: "ctxonly",
+    toolCallId: "1",
+    result: { count: 2 },
+  });
+  assert.deepEqual(drawn, {
+    collapsed: ["2 results"],
+    expanded: ["2 results", "  one", "  two"],
+  });
+});
+
+test("the rest of pi's render context is there to be read", () => {
+  let seen;
+  const r = renderer({
+    peek: {
+      renderResult: (_result, _opts, _theme, ctx) => {
+        seen = ctx;
+        return component(["x"]);
+      },
+    },
+  });
+  r.render({
+    type: "tool_execution_end",
+    toolName: "peek",
+    toolCallId: "1",
+    result: {},
+    isError: true,
+  });
+  assert.equal(seen.isError, true);
+  assert.equal(seen.isPartial, false);
+  assert.equal(seen.argsComplete, true);
+  assert.equal(seen.showImages, false);
+  assert.equal(seen.cwd, "/tmp");
+});
+
+test("a call with no id is forgotten under the name it was filed as", () => {
+  const tool = cachingTool();
+  const r = renderer({ keeps: tool });
+  r.render({ type: "tool_execution_end", toolName: "keeps", result: { count: 1 } });
+  assert.equal(tool.built.length, 2);
+  // The same key ToolRenderer files it under when there is no call id.
+  r.forget("keeps");
+  r.render({ type: "tool_execution_end", toolName: "keeps", result: { count: 2 } });
+  // Built again rather than handed the previous call's component, which would
+  // have drawn the previous call's results.
+  assert.equal(tool.built.length, 4);
+});

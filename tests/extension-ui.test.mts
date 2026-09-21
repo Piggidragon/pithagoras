@@ -105,3 +105,24 @@ test("a dialog is somebody else's business, and does not re-render this", () => 
   assert.equal(applyExtensionUi(ui, { method: "select" }), ui);
   assert.equal(applyExtensionUi(ui, { method: "custom" }), ui);
 });
+
+test("a widget that asked to sit under the editor is kept there", () => {
+  const state = applyExtensionUi(NO_EXTENSION_UI, {
+    method: "setWidget",
+    widgetKey: "hints",
+    widgetContent: ["tab to accept"],
+    widgetPlacement: "belowEditor",
+  });
+  assert.deepEqual(state.widgets, [
+    { key: "hints", lines: ["tab to accept"], placement: "belowEditor" },
+  ]);
+});
+
+test("a widget that says nothing about where it goes goes above the editor", () => {
+  const state = applyExtensionUi(NO_EXTENSION_UI, {
+    method: "setWidget",
+    widgetKey: "todos",
+    widgetContent: ["one"],
+  });
+  assert.equal(state.widgets[0].placement, "aboveEditor");
+});

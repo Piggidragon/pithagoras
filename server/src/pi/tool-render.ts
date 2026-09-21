@@ -51,6 +51,16 @@ interface CallState {
   lastCall?: TuiComponent;
   lastCollapsed?: TuiComponent;
   lastExpanded?: TuiComponent;
+  /**
+   * The arguments the tool was called with.
+   *
+   * pi's contract is that these are "shared across call/result renders for the
+   * same tool call", and the end event does not carry them — only the start
+   * and the updates do. A renderer that draws "results for <query>" would
+   * otherwise throw on the one event that is kept, and the row it drew would
+   * be missing from every reopened conversation.
+   */
+  args?: unknown;
 }
 
 export class ToolRenderer {
@@ -80,6 +90,7 @@ export class ToolRenderer {
     const id = String(event.toolCallId ?? name);
     const call = this.calls.get(id) ?? { state: {} };
     this.calls.set(id, call);
+    if (event.args !== undefined) call.args = event.args;
 
     try {
       if (event.type === "tool_execution_start") {
@@ -87,7 +98,7 @@ export class ToolRenderer {
         const component = definition.renderCall(
           event.args,
           this.runtime.theme,
-          this.context(call, event, call.lastCall)
+          this.context(call, event, call.lastCall, false)
         );
         call.lastCall = component;
         return component ? { collapsed: draw(component) } : undefined;
@@ -135,20 +146,30 @@ export class ToolRenderer {
       result,
       { expanded, isPartial },
       this.runtime.theme,
-      this.context(call, event, last)
+      this.context(call, event, last, expanded)
     );
     if (expanded) call.lastExpanded = component;
     else call.lastCollapsed = component;
     return component ? draw(component) : undefined;
   }
 
+  /**
+   * The whole of pi's ToolRenderContext, not the half of it this used to pass.
+   *
+   * A renderer may read `expanded` off the context rather than off the options
+   * — pi's own tool-execution.ts sets both, so either is fair. Reading an
+   * absent one meant drawing the closed view twice, the two coming out
+   * identical, and **More** never appearing: the thing this class is for,
+   * quietly gone.
+   */
   private context(
     call: CallState,
     event: any,
-    lastComponent: TuiComponent | undefined
+    lastComponent: TuiComponent | undefined,
+    expanded: boolean
   ): Record<string, unknown> {
     return {
-      args: event.args,
+      args: call.args,
       toolCallId: String(event.toolCallId ?? ""),
       // Nothing here redraws on its own: an event produced this, and the next
       // event will produce the next one.
@@ -157,6 +178,13 @@ export class ToolRenderer {
       state: call.state,
       cwd: this.cwd,
       executionStarted: true,
+      argsComplete: true,
+      isPartial: event.type === "tool_execution_update",
+      expanded,
+      // There is no terminal to put an image in; what a tool draws here is
+      // text either way.
+      showImages: false,
+      isError: Boolean(event.isError),
     };
   }
 }

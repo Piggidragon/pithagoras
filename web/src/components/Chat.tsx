@@ -794,8 +794,9 @@ export function Chat({
         className="px-4 pb-4 pt-2 sm:px-6 sm:pb-5"
       >
         <div className="relative mx-auto w-full max-w-3xl">
-        {/* Above the composer, which is where pi puts a widget by default and
-            the only place in this page with the same relationship to typing. */}
+        {/* Above the composer, which is where pi puts a widget unless it asks
+            for otherwise, and the only place in this page with the same
+            relationship to typing. */}
         <ExtensionWidgets widgets={widgets} statuses={statuses} />
         <div className="prompt-shell relative">
         {matches.length > 0 && (
@@ -865,6 +866,9 @@ export function Chat({
             </>}
           />
         </div>
+        {/* And the other side of it, for a widget that asked to be under the
+            editor rather than over it. */}
+        <ExtensionWidgets widgets={widgets} placement="belowEditor" />
         </div>
       </form>
       </div>
