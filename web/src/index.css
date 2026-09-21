@@ -166,7 +166,7 @@
 .voice-browser-window header i { width: 5px; height: 5px; border-radius: 50%; background: #3fe1c6; }
 .voice-browser-window iframe { width: 100%; flex: 1; min-height: 0; border: 0; background: #0b0b0d; }
 .voice-browser-window:fullscreen { width: 100vw; height: 100vh; inset: 0; transform: none; border-radius: 0; }
-.is-browsing .voice-browser-window { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+.voice-browser-window.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
 .is-browsing .voice-presence { left: calc(100% - 156px); top: calc(100% - 48px); width: 268px; max-width: none; height: 68px; flex-direction: row; border-radius: 22px; background: rgb(var(--surface) / .8); border: 1px solid rgb(var(--line) / .55); backdrop-filter: blur(20px); padding: 0 12px 0 0; }
 .is-browsing .voice-avatar { width: 76px; flex-shrink: 0; }
 .is-browsing .voice-status { margin: 0; font-size: 10px; flex: 1; white-space: normal; line-height: 1.3; }
@@ -175,7 +175,7 @@
 .is-browsing .voice-stage-action { width: 32px; height: 32px; }
 .is-browsing .voice-stage-action svg { width: 16px; height: 16px; }
 .voice-terminal-window { right: 24px; top: 50%; width: calc(67% - 36px); height: calc(100% - 120px); transform: translate(60px,-50%) scale(.97); }
-.is-terminal .voice-terminal-window { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(0,-50%) scale(1); }
+.voice-terminal-window.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(0,-50%) scale(1); }
 .is-terminal .voice-presence { left: 17%; top: 48%; width: min(260px, 33%); }
 .is-terminal .voice-status { margin-top: -12px; font-size: 11px; }
 .is-terminal .voice-stage-controls { margin-top: 22px; gap: 10px; }
@@ -204,7 +204,7 @@
   .voice-stage-header { padding: 16px; }
   .voice-presence { width: min(360px, 92%); }
   .voice-browser-window, .voice-terminal-window { left: 12px; right: 12px; top: 62px; width: auto; height: calc(100% - 160px); transform: translateY(24px) scale(.96); }
-  .is-browsing .voice-browser-window, .is-terminal .voice-terminal-window { transform: translateY(0) scale(1); }
+  .voice-browser-window.is-open, .voice-terminal-window.is-open { transform: translateY(0) scale(1); }
   .is-browsing .voice-presence, .is-terminal .voice-presence { left: 50%; top: calc(100% - 48px); width: 268px; max-width: none; height: 68px; flex-direction: row; border-radius: 22px; background: rgb(var(--surface) / .8); border: 1px solid rgb(var(--line) / .55); padding: 0 12px 0 0; }
   .is-terminal .voice-avatar { width: 76px; flex-shrink: 0; }
   .is-terminal .voice-status { margin: 0; font-size: 10px; flex: 1; white-space: normal; }

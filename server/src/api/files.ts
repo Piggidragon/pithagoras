@@ -126,14 +126,50 @@ export function filesRouter(): Router {
       return fail(res, e);
     }
     const name = path.basename(base).replace(/[^a-zA-Z0-9_.-]/g, "_") || "workspace";
-    res.setHeader("Content-Type", "application/gzip");
-    res.setHeader("Content-Disposition", `attachment; filename="${name}.tar.gz"`);
     const tar = spawn("tar", ["-czf", "-", ...ARCHIVE_EXCLUDES.map((d) => `--exclude=${d}`), "-C", base, "."]);
-    tar.stdout.pipe(res);
-    // A file that vanishes mid-way makes tar exit non-zero, but what it read is
-    // already in the stream, so there is nothing to add to it.
-    tar.stderr.resume();
-    tar.on("error", () => res.end());
+    // The download is not announced until tar has produced something: a tar that
+    // cannot start, or dies at once, is then an error the person is told about,
+    // not a file of zero bytes that the browser calls finished.
+    let started = false;
+    // Answered already, by an error: whatever tar does after that is not heard.
+    let answered = false;
+    let complaints = "";
+    tar.stderr.on("data", (chunk) => {
+      if (complaints.length < 2_000) complaints += chunk;
+    });
+    const begin = () => {
+      started = true;
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Disposition", `attachment; filename="${name}.tar.gz"`);
+    };
+    tar.stdout.once("data", (first: Buffer) => {
+      begin();
+      res.write(first);
+      // Not ended by the pipe: how tar ended decides how this one does, below.
+      tar.stdout.pipe(res, { end: false });
+    });
+    tar.on("error", (e) => {
+      console.error("[portal] archive: could not run tar:", e.message);
+      answered = true;
+      if (started) res.destroy();
+      else res.status(500).json({ error: "Could not make the archive: tar is not available" });
+    });
+    tar.on("close", (code) => {
+      // Already answered, or killed because nobody was waiting any more.
+      if (answered || code === null || res.destroyed) return;
+      answered = true;
+      // 1 is "a file changed or vanished while it was read": what was read is in
+      // the archive, and that is the ordinary way a busy folder ends. Anything
+      // else means the archive is not the folder, so the download is cut off and
+      // fails, rather than ending as if it were whole.
+      if (code > 1) {
+        console.error(`[portal] archive: tar exited ${code}: ${complaints.trim()}`);
+        if (started) return void res.destroy();
+        return void res.status(500).json({ error: "Could not make the archive" });
+      }
+      if (!started) begin();
+      res.end();
+    });
     // Nobody is waiting any more.
     res.on("close", () => tar.kill());
   });

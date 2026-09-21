@@ -288,3 +288,38 @@ test('a folder is found for archiving, and a file, a missing place and a way out
   assert.equal(code(() => folderPath(base, '../outside')), 'invalid');
   done();
 });
+
+test('a save over a file that was emptied since it was opened is refused, like any other change', () => {
+  const { dir, base, done } = setup();
+  const file = path.join(dir, 'a.txt');
+  writeFileSync(file, 'the first version');
+  const opened = readText(base, 'a.txt').mtime;
+  writeFileSync(file, ''); utimesSync(file, new Date(), new Date(Date.now() + 60_000));
+  assert.equal(code(() => writeText(base, 'a.txt', 'my stale text', opened)), 'conflict');
+  assert.equal(readFileSync(file, 'utf8'), '');
+  done();
+});
+
+test('a save over a file that was taken away since it was opened does not put it back', () => {
+  const { dir, base, done } = setup();
+  const file = path.join(dir, 'a.txt');
+  writeFileSync(file, 'text');
+  const opened = readText(base, 'a.txt').mtime;
+  rmSync(file);
+  assert.equal(code(() => writeText(base, 'a.txt', 'resurrected', opened)), 'conflict');
+  assert.equal(existsSync(file), false);
+  // Saving it anyway, on purpose, is a save without the time it was opened at.
+  writeText(base, 'a.txt', 'on purpose');
+  assert.equal(readFileSync(file, 'utf8'), 'on purpose');
+  done();
+});
+
+test('an empty file that has not changed is saved, and a file made without a time to compare is made', () => {
+  const { dir, base, done } = setup();
+  writeFileSync(path.join(dir, 'empty.txt'), '');
+  writeText(base, 'empty.txt', 'now with text', readText(base, 'empty.txt').mtime);
+  assert.equal(readFileSync(path.join(dir, 'empty.txt'), 'utf8'), 'now with text');
+  writeText(base, 'made.txt', 'new');
+  assert.equal(readFileSync(path.join(dir, 'made.txt'), 'utf8'), 'new');
+  done();
+});

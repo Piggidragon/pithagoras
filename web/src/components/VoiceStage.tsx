@@ -111,7 +111,10 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const filesSeen = useRef(fileActivity?.seq ?? 0);
   // Where the two windows go: one takes the middle when the browser is up, the
   // other the side. Files sits at the side, except beside the terminal, where
-  // it takes the middle and the terminal keeps the side.
+  // it takes the middle and the terminal keeps the side. The stage's classes say
+  // whether there is a window in the middle and one at the side, for where the
+  // orb goes; which window is open is the window's own `is-open`, so Files being
+  // up does not bring the browser or the terminal up with it.
   const filesMain = filesShown && terminalShown && !shown;
   const browsing = shown || filesMain;
   const sideWindow = terminalShown || (filesShown && !filesMain);
@@ -182,14 +185,14 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
 
       </div>
     </header>
-    <section ref={browser} className="voice-browser-window" aria-label="Live browser" aria-hidden={!shown}>
+    <section ref={browser} className={`voice-browser-window ${shown ? 'is-open' : ''}`} aria-label="Live browser" aria-hidden={!shown}>
       <header><span><i />Live browser</span><div>
         <button type="button" aria-label="Fullscreen browser" title="Fullscreen" onClick={() => { void browser.current?.requestFullscreen?.().catch(() => setBrowserError('Fullscreen is unavailable.')); }}><LuMaximize2 /></button>
         <button type="button" aria-label="Minimize browser" title="Minimize browser" onClick={minimize}><LuMinus /></button>
       </div></header>
       {loaded && <iframe src="/browser-ui/" title="The agent's browser" allow="clipboard-read; clipboard-write; fullscreen" />}
     </section>
-    <section ref={terminal} className="voice-terminal-window" aria-label="Live terminal" aria-hidden={!terminalShown}>
+    <section ref={terminal} className={`voice-terminal-window ${terminalShown ? 'is-open' : ''}`} aria-label="Live terminal" aria-hidden={!terminalShown}>
       <header><span><LuTerminal />Terminal</span><div><button type="button" aria-label="Minimize terminal" title="Minimize terminal" onClick={() => { setTerminalShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {terminalUsed && <VoiceTerminal events={toolEvents} />}
     </section>

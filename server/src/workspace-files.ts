@@ -167,6 +167,9 @@ export function listDir(base: string, rel: unknown): { path: string; entries: Fi
   };
 }
 
+/** What is said when a save would put older text over newer, or over a file that is gone. */
+export const CHANGED = "The file changed after you opened it";
+
 /**
  * Opens a plain file without following a link in its last place, or waiting on one.
  * A pipe left there would otherwise hold the server; a device is not a file.
@@ -178,6 +181,8 @@ function openPlain(file: string, flags: number): number {
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") throw new FileError("missing", "There is no such file");
+    // Only where a file is being made and something is there by now.
+    if (code === "EEXIST") throw new FileError("conflict", CHANGED);
     if (code === "ELOOP" || code === "ENXIO" || code === "EISDIR") {
       throw new FileError("invalid", "That is a link, a folder or not a plain file");
     }
@@ -239,13 +244,22 @@ export function writeText(base: string, rel: unknown, content: string, expected?
   const target = resolveInside(base, rel);
   if (target === base) throw new FileError("invalid", "That is the folder, not a file");
   // Not created with O_TRUNC: the file is looked at before anything is cut off.
-  const fd = openPlain(target, constants.O_WRONLY | constants.O_CREAT);
+  // And not with O_CREAT to begin with: a file that is there is opened as it is,
+  // so an emptied one is compared like any other. One that is not there was
+  // either never made (no `expected`, so make it) or has been taken away since
+  // it was opened, and putting it back with old text is not what a save means.
+  let fd: number;
+  try {
+    fd = openPlain(target, constants.O_WRONLY);
+  } catch (e) {
+    if (!(e instanceof FileError) || e.code !== "missing") throw e;
+    if (expected !== undefined) throw new FileError("conflict", CHANGED);
+    fd = openPlain(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL);
+  }
   try {
     const st = fstatSync(fd);
     if (st.nlink > 1) throw new FileError("invalid", "That file is shared with another, so it is left alone");
-    if (expected !== undefined && st.size > 0 && Math.abs(st.mtimeMs - expected) > 1) {
-      throw new FileError("conflict", "The file changed after you opened it");
-    }
+    if (expected !== undefined && Math.abs(st.mtimeMs - expected) > 1) throw new FileError("conflict", CHANGED);
     ftruncateSync(fd, 0);
     const data = Buffer.from(content, "utf8");
     let written = 0;

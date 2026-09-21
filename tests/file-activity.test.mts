@@ -50,3 +50,14 @@ test('the latest counts, and other tools and other places do not', () => {
   assert.deepEqual(latestFileActivity(events, folder), { seq: 1, path: 'a.md', tool: 'read' });
   assert.equal(latestFileActivity([], folder), null);
 });
+
+test('an ending with no call id is not matched to some other call', () => {
+  const events = [
+    start(1, 'read', { path: 'other.md' }, undefined as any),
+    { seq: 2, type: 'tool_execution_end', payload: { toolName: 'write' } },
+  ];
+  // The read is the latest thing that counts; the write's file is not known, and not guessed.
+  assert.deepEqual(latestFileActivity(events as any, folder), { seq: 1, path: 'other.md', tool: 'read' });
+  const onlyEnd = [{ seq: 3, type: 'tool_execution_end', payload: { toolName: 'edit' } }, start(4, 'bash', { command: 'ls' })];
+  assert.equal(latestFileActivity(onlyEnd as any, folder), null);
+});

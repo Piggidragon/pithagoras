@@ -57,7 +57,9 @@ export function latestFileActivity(events: PortalEvent[], folder: string): FileA
       if (!given) {
         for (let j = i - 1; j >= 0 && !given; j--) {
           const before = events[j];
-          if (before.type === "tool_execution_start" && before.payload?.toolCallId === p?.toolCallId) given = pathOf(before.payload);
+          // Only by a call id that is there: without one, "no id" would equal "no id" and
+          // the nearest earlier call with a path — another file's — would be taken.
+          if (p?.toolCallId && before.type === "tool_execution_start" && before.payload?.toolCallId === p.toolCallId) given = pathOf(before.payload);
         }
       }
     } else continue;

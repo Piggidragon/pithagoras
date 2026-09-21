@@ -245,7 +245,7 @@ export function FilesPanel({
     }
     // After the reload, which clears an error: this one is about what was just tried.
     await loadDir(dir);
-    setListError(problem);
+    if (problem) setListError(problem);
   };
 
   const remove = async (entry: FileEntry) => {
@@ -269,7 +269,7 @@ export function FilesPanel({
       problem = (e as Error).message;
     }
     await loadDir(dir);
-    setListError(problem);
+    if (problem) setListError(problem);
   };
 
   const crumbs = dir ? dir.split("/") : [];
