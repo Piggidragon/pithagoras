@@ -14,11 +14,14 @@ import {
   LuPin,
   LuPinOff,
   LuPlus,
+  LuSearch,
   LuSettings,
   LuShield,
   LuTrash2,
 } from "react-icons/lu";
 import type { Session, SessionStatus } from "../api";
+import { local } from "../safe-storage";
+import { filterSessions } from "../session-filter";
 
 const STATUS_STYLE: Record<SessionStatus, string> = {
   running: "bg-accent animate-pulse",
@@ -67,10 +70,10 @@ export function Sidebar({
   onOpenSettings: () => void;
   onNavigate: (to: "sessions" | "projects" | "agent" | "routines" | "browser" | "audit") => void;
 }) {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebarCollapsed") === "true");
+  const [collapsed, setCollapsed] = useState(() => local.get("sidebarCollapsed") === "true");
   const toggleSidebar = () => {
     setCollapsed(value => {
-      localStorage.setItem("sidebarCollapsed", String(!value));
+      local.set("sidebarCollapsed", String(!value));
       return !value;
     });
   };
@@ -89,9 +92,18 @@ export function Sidebar({
     }
   };
 
-  const pinned = sessions.filter((s) => s.pinned);
-  const recents = sessions.filter((s) => !s.pinned);
-  const shownRecents = recents.slice(0, RECENTS_LIMIT);
+  // Only worth a field once the list is longer than it shows: below that the
+  // chat you want is in front of you, and a search box is one more thing to skip.
+  const [query, setQuery] = useState("");
+  const searchable = sessions.length > RECENTS_LIMIT;
+  // The field goes away when the list shrinks below the limit; what was typed
+  // in it must not go on hiding chats from a list that has no box to clear it.
+  const searching = searchable && query.trim() !== "";
+  const found = filterSessions(sessions, searching ? query : "");
+  const pinned = found.filter((s) => s.pinned);
+  const recents = found.filter((s) => !s.pinned);
+  // A search looks through all of them, not only the dozen that are listed.
+  const shownRecents = searching ? recents : recents.slice(0, RECENTS_LIMIT);
 
   const item = (s: Session) => (
     <SessionItem
@@ -177,9 +189,27 @@ export function Sidebar({
         {startError && <p className="px-2.5 pt-1 text-xs text-danger">{startError}</p>}
       </nav>
 
+      {searchable && (
+        <div className="relative px-2 pb-1">
+          <LuSearch aria-hidden className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+            placeholder="Search chats…"
+            aria-label="Search chats"
+            className="w-full rounded-lg border border-line bg-raised/60 py-1.5 pl-8 pr-2 text-xs outline-none placeholder:text-fg-faint focus:border-accent/60"
+          />
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-2 pb-2">
         {sessions.length === 0 && (
           <p className="px-2 py-4 text-xs text-fg-subtle">No sessions yet.</p>
+        )}
+        {sessions.length > 0 && found.length === 0 && (
+          <p className="px-2 py-4 text-xs text-fg-subtle">Nothing matches “{query.trim()}”.</p>
         )}
 
         {pinned.length > 0 && (

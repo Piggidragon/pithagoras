@@ -20,6 +20,14 @@ This matters more than it sounds. An earlier version prefilled each field with
 the *resolved* value, so one click of Save pinned an inherited setting forever —
 which is how a portal could end up permanently stuck on a model nobody chose.
 
+**Notifications** are a switch in the same panel, and kept in this browser like
+the confirmations. Turned on, the browser asks for permission once, and after
+that a chat that finishes or an extension that needs an answer says so while you
+are on another tab or window. Nobody is told about the chat in front of them.
+It needs a secure connection — HTTPS, or `localhost` — because browsers do not
+offer notifications over plain HTTP; the switch says so where it is unavailable.
+A chat that is not open is noticed while the page is visible.
+
 ### Where a model comes from
 
 Resolved in order, first match wins:

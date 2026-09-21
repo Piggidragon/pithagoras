@@ -10,9 +10,9 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
+import { LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
-import { activity, buildTranscript, type Activity } from "../transcript";
+import { activity, buildTranscript, type Activity, type Item } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
@@ -21,6 +21,10 @@ import { moveHighlight, paletteMatches, slashToken } from "../slash-palette";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
 import { latestFileActivity } from "../file-activity";
+import { drafts, withUnsent } from "../drafts";
+import { local } from "../safe-storage";
+import { copyText } from "../clipboard";
+import { opensComposer, stopsRun } from "../shortcuts";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -114,7 +118,7 @@ export function Chat({
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
 }) {
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(() => drafts.get(session.id));
   // Where dictated words go. Kept beside the state because several phrases can
   // arrive before React has drawn the first, and each must land after the last.
   const box = useRef<HTMLTextAreaElement>(null);
@@ -130,6 +134,19 @@ export function Chat({
   // thing done to one — shown in the transcript, where the message is.
   const [editing, setEditing] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // This is one component for every chat, so what belongs to one must be put
+  // away when another opens: the words half written in the box (kept, and
+  // there again when you come back), the message being rewritten — a number
+  // that would name a different message here — and the last complaint.
+  const [boxOf, setBoxOf] = useState(session.id);
+  if (boxOf !== session.id) {
+    setBoxOf(session.id);
+    setInput(drafts.get(session.id));
+    setEditing(null);
+    setActionError(null);
+  }
+  const currentSession = useRef(session.id);
+  currentSession.current = session.id;
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   // Whether there is a browser to watch, and whether you are watching it. Asked
   // once — the answer only changes when somebody installs or removes one.
@@ -161,12 +178,10 @@ export function Chat({
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative.
-  const [asideWidth, setAsideWidth] = useState(() =>
-    Number(localStorage.getItem("panelWidth")) || 560
-  );
-  const [split, setSplit] = useState(() => Number(localStorage.getItem("panelSplit")) || 0.55);
-  useEffect(() => localStorage.setItem("panelWidth", String(asideWidth)), [asideWidth]);
-  useEffect(() => localStorage.setItem("panelSplit", String(split)), [split]);
+  const [asideWidth, setAsideWidth] = useState(() => Number(local.get("panelWidth")) || 560);
+  const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || 0.55);
+  useEffect(() => local.set("panelWidth", String(asideWidth)), [asideWidth]);
+  useEffect(() => local.set("panelSplit", String(split)), [split]);
 
   /**
    * Dragging, on pointer events rather than mouse ones.
@@ -402,7 +417,7 @@ export function Chat({
   /** What is left in the box once a command is chosen: its name, ready for arguments. */
   const complete = (c: PiCommand) => {
     caret.current = null;
-    setInput(`/${c.name} `);
+    changeInput(`/${c.name} `);
   };
 
   useEffect(() => {
@@ -427,28 +442,45 @@ export function Chat({
     scroller.follow(fresh);
   }, [items.length, events.length]);
 
-  /** Send `msg` as a message, or run it if it is one of the portal's own commands. */
+  /**
+   * Send `msg` as a message, or run it if it is one of the portal's own commands.
+   *
+   * What came from the box is taken out of it at once, so that it does not sit
+   * there looking unsent while it is on its way — and put back if it does not
+   * get there. Throws, for the caller to say what went wrong.
+   */
   const submit = async (msg: string, fromBox: boolean) => {
+    const sent = session.id;
     // Some builtins are UI, not prompts: /model opens the picker the pill uses,
     // /settings opens the modal. Sending them to pi would just be a chat line.
     const parsed = /^\/([\w-]+)\s*(.*)$/.exec(msg);
     const client = parsed
       ? commands.find((c) => c.name === parsed[1] && c.where === "client")
       : undefined;
-    if (client && parsed) {
-      if (fromBox) clearBox();
-      if (client.name === "model") setPanelRequest("model");
-      else await onClientCommand(client.name, parsed[2]);
-      return;
-    }
 
-    setSending(true);
     if (fromBox) clearBox();
     try {
-      await onSend(msg, voiceMode ? { voice: true } : undefined);
-    } finally {
-      setSending(false);
+      if (client && parsed) {
+        if (client.name === "model") setPanelRequest("model");
+        else await onClientCommand(client.name, parsed[2]);
+        return;
+      }
+      setSending(true);
+      try {
+        await onSend(msg, voiceMode ? { voice: true } : undefined);
+      } finally {
+        setSending(false);
+      }
+    } catch (e) {
+      if (fromBox) putBack(sent, msg);
+      throw e;
     }
+  };
+
+  /** A message that did not go, back where it was typed — in that chat, if you have left it. */
+  const putBack = (id: string, msg: string) => {
+    if (currentSession.current === id) changeInput(withUnsent(draft.current, msg));
+    else drafts.set(id, withUnsent(drafts.get(id), msg));
   };
 
   const attempt = async (fn: () => Promise<void>) => {
@@ -463,12 +495,18 @@ export function Chat({
   const send = async () => {
     const msg = input.trim();
     if (!msg || sending) return;
-    await submit(msg, true);
+    await attempt(() => submit(msg, true));
+  };
+
+  /** Every change to the box goes through here, so that the draft is kept as it is typed. */
+  const changeInput = (next: string) => {
+    drafts.set(session.id, next);
+    setInput(next);
   };
 
   const clearBox = () => {
     caret.current = null;
-    setInput("");
+    changeInput("");
   };
 
   /** Dictated words, put in the box where the cursor was and the cursor left after them. */
@@ -478,13 +516,28 @@ export function Chat({
     draft.current = next.value;
     caret.current = { start: next.caret, end: next.caret };
     caretTo.current = next.caret;
-    setInput(next.value);
+    changeInput(next.value);
   };
   useLayoutEffect(() => {
     if (caretTo.current === null) return;
     box.current?.setSelectionRange(caretTo.current, caretTo.current);
     caretTo.current = null;
   }, [input]);
+
+  // "/" from anywhere on the page: the box, with the command list open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      // Not behind a dialog: the box is not what is being talked to.
+      if (voiceMode || document.querySelector('[aria-modal="true"]')) return;
+      if (!opensComposer({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, target })) return;
+      e.preventDefault();
+      box.current?.focus();
+      if (!draft.current.trim()) changeInput("/");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [voiceMode, session.id]);
 
   // Phrases sent as they are said go one at a time: a second must not overtake
   // the first, and one that fails goes back in the box rather than being lost.
@@ -659,6 +712,7 @@ export function Chat({
                     something that no longer exists. Sending it again is fine —
                     it just queues, like any other message. */}
                 <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                  <CopyAction text={text} />
                   {item.id === lastSaid ? (
                     // Retry: the same as editing without changing a word. After
                     // a Stop this is what clears the half-finished answer out of
@@ -715,7 +769,7 @@ export function Chat({
           }
           if (item.kind === "assistant") {
             return (
-              <div key={item.id} className="max-w-[90%]">
+              <div key={item.id} className="group max-w-[90%]">
                 {item.thinking && (
                   <details className="mb-1 text-xs text-fg-subtle">
                     <summary className="cursor-pointer hover:text-fg-muted">thinking</summary>
@@ -738,8 +792,15 @@ export function Chat({
                       plugins={mermaid ? { mermaid } : undefined}
                       mermaid={mermaidOptions}
                     >
-                      {(item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "")}
+                      {assistantText(item)}
                     </Streamdown>
+                  </div>
+                )}
+                {/* Once it is whole: what is copied from a half-written reply is
+                    a half-written reply. */}
+                {item.text && item.done && (
+                  <div className="mt-0.5 flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                    <CopyAction text={assistantText(item)} />
                   </div>
                 )}
               </div>
@@ -829,7 +890,7 @@ export function Chat({
           value={input}
           onChange={(e) => {
             caret.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
-            setInput(e.target.value);
+            changeInput(e.target.value);
           }}
           onSelect={(e) => {
             caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
@@ -859,9 +920,22 @@ export function Chat({
                 e.preventDefault();
                 if (sending) return;
                 if (chosen.needsArgument) complete(chosen);
-                else void submit(`/${chosen.name}`, true);
+                else void attempt(() => submit(`/${chosen.name}`, true));
                 return;
               }
+            }
+            if (
+              stopsRun({
+                key: e.key,
+                running,
+                empty: !input.trim(),
+                composing: e.nativeEvent.isComposing,
+                paletteOpen: matches.length > 0,
+              })
+            ) {
+              e.preventDefault();
+              void attempt(onAbort);
+              return;
             }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -890,7 +964,7 @@ export function Chat({
             actions={<>
               <DictationButton dictation={dictation} />
               <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
-              {running && !input.trim() ? <button type="button" aria-label="Stop generation" title="Stop generation" onClick={onAbort} className="prompt-action prompt-stop">
+              {running && !input.trim() ? <button type="button" aria-label="Stop generation" title="Stop generation (Esc)" onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
                 <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />
               </button> : <button type="submit" aria-label="Send message" title={running ? 'Send follow-up' : 'Send message'} disabled={sending || !input.trim()}
                 className="prompt-action prompt-send">
@@ -976,6 +1050,29 @@ export function Chat({
       )}
       </div>
     </div>
+  );
+}
+
+/** What the agent said, as it is read — without the reasoning model's stray tags. */
+const assistantText = (item: Extract<Item, { kind: "assistant" }>) =>
+  (item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "");
+
+/** Copies a message, and for a moment says that it did. */
+function CopyAction({ text }: { text: string }) {
+  const [result, setResult] = useState<"done" | "failed" | null>(null);
+  const timer = useRef<number>();
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return (
+    <MessageAction
+      label={result === "done" ? "Copied" : result === "failed" ? "Could not copy" : "Copy"}
+      onClick={async () => {
+        setResult((await copyText(text)) ? "done" : "failed");
+        window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => setResult(null), 1500);
+      }}
+    >
+      {result === "done" ? <LuCheck className="h-3 w-3 text-ok" /> : <LuCopy className="h-3 w-3" />}
+    </MessageAction>
   );
 }
 

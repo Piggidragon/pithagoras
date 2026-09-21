@@ -21,10 +21,31 @@ not wait for the work to finish. Close the tab if you like.
 While a run is in progress you can keep typing; further messages are queued.
 **Stop** aborts the current run.
 
+## The message box
+
+What you have typed and not sent stays with its chat. Switching to another chat
+gives you that chat's box, and coming back gives you yours again — it survives a
+reload too, for as long as the tab is open. Nothing typed in one chat can be
+sent from another by accident.
+
+A message that does not go — the portal is unreachable, or refuses it — goes back
+in the box, in front of anything typed since, with the reason shown above it.
+Nothing is thrown away to be typed again.
+
+Two keys work from anywhere on the page:
+
+| Key | Does |
+| --- | --- |
+| `/` | Jump to the message box with the command list open. Not while you are typing somewhere else, where it is a character |
+| `Esc` | In the message box, **stop the run**. Only when the box is empty — the moment the send button is a stop button — so it can never cost you words |
+
 ## Sent messages
 
 Hovering one of your messages gives it these actions:
 
+- **Copy** puts the text on the clipboard. The agent's replies have the same
+  button, once they are whole. It works over plain HTTP too, where browsers
+  withhold the clipboard API, by falling back to the older way.
 - **Retry**, on your last message, drops the agent's reply to it — a half-finished
   one after a Stop, say — and sends the same text again. It is editing without
   changing a word, so the agent's memory ends up as if the first attempt never
@@ -67,6 +88,10 @@ paths.
 
 Pinning is stored server-side and drives the ordering (`pinned DESC,
 updated_at DESC`), so the sidebar and the Sessions page never disagree.
+
+With more chats than the sidebar lists, it has a search field above them. It looks
+through every chat by name and folder, not only the ones shown, and Escape clears
+it. The Sessions page has the same search with more room.
 
 Hovering a session gives you pin, rename and delete. Renaming turns the name into
 a field where it stands — Enter or clicking away keeps the new one, Escape puts
@@ -178,6 +203,21 @@ before it was a feature:
 
 If the server restarts mid-run, that session is marked `interrupted` rather than
 left spinning. Send a message to carry on.
+
+## The tab
+
+The browser tab's title follows the chat you have open: `● Fix login · working`
+while it runs, `❓ Fix login · asks you` while an extension is waiting for an
+answer, and the plain name when it is done. Whether it is worth switching back
+to is then readable from the tab strip.
+
+The pages that refresh themselves — the sessions in the sidebar, Agent, Routines,
+Channels, Browser, Audit — do that only while the page is visible, and once at
+once when you come back to it. A tab left in the background asks for nothing.
+
+If the connection to a chat breaks, the page reconnects — after two seconds,
+then four, eight and at most fifteen — and says so once a second attempt has
+failed. It is not shown for a blip.
 
 ## Status dots
 

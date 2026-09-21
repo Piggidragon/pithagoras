@@ -40,6 +40,9 @@ export function Modal({
           before they render anything, so without one the dialog opened as a
           bare title bar and snapped to full height a moment later. */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === "string" ? title : undefined}
         className={`flex max-h-[88vh] w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
           // Grows with the viewport rather than to it: the rail plus a settings
           // form has a comfortable width, and a 34-inch screen should not

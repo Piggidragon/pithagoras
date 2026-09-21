@@ -15,6 +15,7 @@ import {
 } from "react-icons/lu";
 import { api, type BrokenChannelPackage, type Channel, type ChannelKind } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
+import { pollWhileVisible } from "../poll";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -63,8 +64,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
   useEffect(() => {
     load();
     // Channels start, fail and log on their own schedule, so the page follows.
-    const t = setInterval(load, 4000);
-    return () => clearInterval(t);
+    return pollWhileVisible(load, 4000);
   }, []);
 
   const kindOf = (id: string) => kinds.find((k) => k.id === id);

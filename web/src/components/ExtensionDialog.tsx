@@ -50,7 +50,12 @@ export function ExtensionDialog({
       className="fixed inset-0 z-[60] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && respond({ cancelled: true })}
     >
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-line bg-surface shadow-pop">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={request.title || "Extension"}
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-line bg-surface shadow-pop"
+      >
         <header className="flex items-start gap-3 border-b border-line px-4 py-3">
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/12 text-accent">
             <LuTerminal className="h-4 w-4" />

@@ -27,6 +27,7 @@ import { parseWindow } from "../context-window";
 import { KeepRecent, formatTokens, useKeepRecentSave } from "./KeepRecent";
 import { displayName } from "../tool-groups";
 import { useAsksBeforeDeleting } from "../confirm-prefs";
+import { useNotifyState } from "../notify";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
@@ -396,6 +397,44 @@ function Confirmations() {
   );
 }
 
+/** Whether the browser may say so when a chat finishes or needs an answer. */
+function Notifications() {
+  const [state, setOn] = useNotifyState();
+  const note: Record<string, string> = {
+    unsupported:
+      "This browser does not offer them here — they need a secure connection (HTTPS, or localhost).",
+    denied: "The browser has blocked them for this site. Allow them in its site settings, then come back.",
+  };
+  return (
+    <Section
+      title="Notifications"
+      hint="Kept in this browser. The tab title shows what a chat is doing whether or not this is on."
+    >
+      <label
+        className={`flex items-start gap-2.5 rounded-xl border border-line bg-raised/40 p-3 ${
+          state === "unsupported" || state === "denied" ? "opacity-60" : "cursor-pointer"
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={state === "on"}
+          disabled={state === "unsupported" || state === "denied"}
+          onChange={(e) => void setOn(e.target.checked)}
+          className="mt-0.5 h-3.5 w-3.5 accent-accent"
+        />
+        <span className="text-sm text-fg">
+          Tell me when a chat is done or needs me
+          <span className="mt-0.5 block text-xs text-fg-faint">
+            Only while you are on another tab or window: nobody needs telling about the chat in front
+            of them. A chat that is not open is noticed while this page is on screen.
+          </span>
+          {note[state] && <span className="mt-1 block text-xs text-warn">{note[state]}</span>}
+        </span>
+      </label>
+    </Section>
+  );
+}
+
 function GeneralPanel({ onError }: { onError: (e: string) => void }) {
   /** Only the explicit overrides — an empty field means "inherit". */
   const [stored, setStored] = useState<Partial<GlobalSettings> | null>(null);
@@ -627,6 +666,8 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
       <ReportDefault onError={onError} />
 
       <Confirmations />
+
+      <Notifications />
 
       <Section title="Deployment">
         <dl className="rounded-xl border border-line bg-raised/40 p-3 text-sm">

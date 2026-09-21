@@ -16,6 +16,7 @@ import { api, type AgentSession, type AgentSetup as Setup, type SessionStatus } 
 import { AgentSetup } from "./AgentSetup";
 import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
+import { pollWhileVisible } from "../poll";
 
 const STATUS_STYLE: Record<SessionStatus, string> = {
   running: "bg-accent animate-pulse",
@@ -52,6 +53,10 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
+  // Kept apart from `error`: this one comes back by itself when the next
+  // refresh works, and must not wipe out — or be wiped by — the answer to a
+  // rename or a delete.
+  const [loadError, setLoadError] = useState("");
   // The conversation whose name is open for editing, if any.
   const [renaming, setRenaming] = useState<string | null>(null);
 
@@ -61,15 +66,18 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
       .then((r) => {
         setSessions(r.sessions);
         setHome(r.agentHome);
+        setLoadError("");
       })
-      .catch(() => {})
+      // The list stays as it was rather than being emptied, and the page says
+      // it is out of date: an empty list that is really a failed fetch reads as
+      // "the agent has no conversations".
+      .catch((e) => setLoadError((e as Error).message))
       .finally(() => setLoading(false));
 
   useEffect(() => {
     api.agentSetup().then(setSetup).catch(() => {});
     load();
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
+    return pollWhileVisible(load, 5000);
   }, []);
 
   /**
@@ -201,6 +209,11 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
 
           {setup?.initialised && <AgentFiles setup={setup} onSaved={setSetup} />}
 
+          {loadError && (
+            <div className="mt-4 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">
+              Could not refresh the conversations — what is shown may be out of date. {loadError}
+            </div>
+          )}
           {error && (
             <div className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>
           )}

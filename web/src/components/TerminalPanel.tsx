@@ -41,7 +41,17 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
         id = termId;
         source = new EventSource(`/api/terminal/${termId}/stream`);
         source.onmessage = (m) => term.write(JSON.parse(m.data));
-        term.onData((data) => api.terminalInput(termId, data).catch(() => {}));
+        // Keystrokes that go nowhere — the shell has exited, or the portal has
+        // restarted — used to vanish, and the panel looked merely unresponsive.
+        // Said once, not on every key.
+        let told = false;
+        term.onData((data) =>
+          api.terminalInput(termId, data).catch(() => {
+            if (told || closed) return;
+            told = true;
+            term.write("\r\n[Connection to the shell lost — close this panel and open it again]\r\n");
+          }),
+        );
         api.terminalResize(termId, term.rows, term.cols).catch(() => {});
       })
       .catch((e) => term.write(`\r\nCould not open a shell: ${e.message}\r\n`));
