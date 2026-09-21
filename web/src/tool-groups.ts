@@ -81,3 +81,18 @@ export function groupSummary(group: ToolGroup): string {
 export function toggleOpen(open: string[], source: string): string[] {
   return open.includes(source) ? open.filter((s) => s !== source) : [...open, source];
 }
+
+/**
+ * What a group is called on the page.
+ *
+ * A given name wins. Failing that the npm scope is dropped, because
+ * `@juicesharp/rpiv-ask-user-question` is an address and a heading has to fit
+ * in a column: the part after the slash is the part anybody says out loud. The
+ * address is still there, under the package in the extensions list and in the
+ * heading's tooltip.
+ */
+export function displayName(source: string, names: Record<string, string> = {}): string {
+  const given = names[source]?.trim();
+  if (given) return given;
+  return source.replace(/^@[^/]+\//, "") || source;
+}

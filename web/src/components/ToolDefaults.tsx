@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { LuChevronDown, LuChevronRight } from "react-icons/lu";
+import { LuChevronDown, LuChevronRight, LuCheck, LuPencil, LuX } from "react-icons/lu";
 import { api } from "../api";
-import { groupSummary, groupTools, nextOff } from "../tool-groups";
+import { displayName, groupSummary, groupTools, nextOff } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 
 /**
@@ -22,6 +22,9 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   const [off, setOff] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [names, setNames] = useState<Record<string, string>>({});
+  /** The group being renamed, and what has been typed so far. */
+  const [renaming, setRenaming] = useState<{ source: string; value: string } | null>(null);
   const groups = useOpenGroups();
 
   useEffect(() => {
@@ -30,6 +33,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
       .then((r) => {
         setTools(r.tools);
         setOff(r.off);
+        setNames(r.names ?? {});
       })
       .catch((e) => onError(String(e)))
       .finally(() => setLoading(false));
@@ -48,6 +52,28 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
       onError(String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Store a name, or take one away.
+   *
+   * Blank means "call it what it calls itself" rather than an empty heading,
+   * so the entry is removed and the derived name comes back.
+   */
+  const rename = async (source: string, label: string) => {
+    const next = { ...names };
+    if (label.trim()) next[source] = label.trim();
+    else delete next[source];
+    const before = names;
+    setNames(next);
+    setRenaming(null);
+    try {
+      const r = await api.setToolNames(next);
+      setNames(r.names);
+    } catch (e) {
+      setNames(before);
+      onError(String(e));
     }
   };
 
@@ -79,30 +105,83 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
             return (
             <div key={group.source} className="border-b border-line last:border-0">
               <div className="flex items-center gap-1 bg-raised/40 px-1.5 py-1.5">
-                <button
-                  type="button"
-                  aria-expanded={open}
-                  onClick={() => groups.toggle(group.source)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left transition hover:bg-fg/5"
-                >
-                  {open ? (
-                    <LuChevronDown className="h-3 w-3 shrink-0 text-fg-faint" />
-                  ) : (
-                    <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-fg-muted">
-                    {group.source}
-                  </span>
-                  <span className="shrink-0 text-[11px] text-fg-faint">{groupSummary(group)}</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => flip(group.tools.map((t) => t.name), group.allOff)}
-                  className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
-                >
-                  {group.allOff ? "all on" : "all off"}
-                </button>
+                {renaming?.source === group.source ? (
+                  <>
+                    <input
+                      autoFocus
+                      value={renaming.value}
+                      onChange={(e) => setRenaming({ source: group.source, value: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") rename(group.source, renaming.value);
+                        if (e.key === "Escape") setRenaming(null);
+                      }}
+                      placeholder={displayName(group.source)}
+                      aria-label={`Name for ${group.source}`}
+                      className="min-w-0 flex-1 rounded border border-line bg-canvas px-1.5 py-0.5 text-xs text-fg outline-none focus:border-accent/60"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => rename(group.source, renaming.value)}
+                      title="Save"
+                      className="shrink-0 rounded p-1 text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+                    >
+                      <LuCheck className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRenaming(null)}
+                      title="Cancel"
+                      className="shrink-0 rounded p-1 text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+                    >
+                      <LuX className="h-3 w-3" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      onClick={() => groups.toggle(group.source)}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left transition hover:bg-fg/5"
+                    >
+                      {open ? (
+                        <LuChevronDown className="h-3 w-3 shrink-0 text-fg-faint" />
+                      ) : (
+                        <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
+                      )}
+                      <span
+                        title={group.source}
+                        className="min-w-0 flex-1 truncate text-xs font-medium text-fg-muted"
+                      >
+                        {displayName(group.source, names)}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-fg-faint">
+                        {groupSummary(group)}
+                      </span>
+                    </button>
+                    {/* Only here, not in the chat popover: naming a thing is a
+                        settings decision, and the popover is for one chat. */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRenaming({ source: group.source, value: names[group.source] ?? "" })
+                      }
+                      title={`Rename — it is ${group.source}`}
+                      aria-label={`Rename ${group.source}`}
+                      className="shrink-0 rounded p-1 text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+                    >
+                      <LuPencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => flip(group.tools.map((t) => t.name), group.allOff)}
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
+                    >
+                      {group.allOff ? "all on" : "all off"}
+                    </button>
+                  </>
+                )}
               </div>
               <ul className={open ? "py-1" : "hidden"}>
                 {group.tools.map((tool) => (

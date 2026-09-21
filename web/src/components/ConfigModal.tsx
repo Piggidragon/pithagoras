@@ -25,6 +25,7 @@ import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
 import { parseWindow } from "../context-window";
 import { KeepRecent, formatTokens, useKeepRecentSave } from "./KeepRecent";
+import { displayName } from "../tool-groups";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
@@ -649,6 +650,16 @@ function ExtensionsPanel({
 }) {
   const [spec, setSpec] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  // The names given in Settings → Tools. A package is one thing and should be
+  // called the same thing wherever it appears; the spec underneath is what it
+  // is installed and removed by, and that does not change.
+  const [names, setNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api
+      .toolNames()
+      .then((r) => setNames(r.names))
+      .catch(() => setNames({}));
+  }, []);
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
@@ -723,7 +734,9 @@ function ExtensionsPanel({
               >
                 <div className="flex items-center gap-2">
                   <LuPuzzle className="h-4 w-4 shrink-0 text-fg-subtle" />
-                  <p className="truncate text-sm text-fg">{ext.name}</p>
+                  <p title={ext.name} className="truncate text-sm text-fg">
+                    {displayName(ext.name, names)}
+                  </p>
                   {ext.version && (
                     <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 font-mono text-[10px] text-fg-subtle">
                       v{ext.version}

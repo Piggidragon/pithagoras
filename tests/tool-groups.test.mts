@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groupSummary, groupTools, nextOff, toggleOpen } from "../web/src/tool-groups.ts";
+import {
+  displayName,
+  groupSummary,
+  groupTools,
+  nextOff,
+  toggleOpen,
+} from "../web/src/tool-groups.ts";
 
 const tool = (name: string, source: string, enabled = true) => ({
   name,
@@ -100,4 +106,22 @@ test("the browser is a group like any other", () => {
   ]);
   assert.equal(group.source, "browser");
   assert.equal(groupSummary(group), "1 of 2 off");
+});
+
+test("a package with a scope is headed by the part people say out loud", () => {
+  assert.equal(displayName("@juicesharp/rpiv-ask-user-question"), "rpiv-ask-user-question");
+  assert.equal(displayName("@forecastx/deep-research"), "deep-research");
+  assert.equal(displayName("pi-web-access"), "pi-web-access");
+  assert.equal(displayName("built in"), "built in");
+});
+
+test("a name that was given wins over the one derived", () => {
+  const names = { "@forecastx/deep-research": "Deep Research", browser: "Browser" };
+  assert.equal(displayName("@forecastx/deep-research", names), "Deep Research");
+  assert.equal(displayName("browser", names), "Browser");
+  assert.equal(displayName("pi-lens", names), "pi-lens");
+});
+
+test("a name of nothing but spaces is not a name", () => {
+  assert.equal(displayName("@a/b", { "@a/b": "   " }), "b");
 });

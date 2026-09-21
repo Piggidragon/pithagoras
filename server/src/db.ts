@@ -1159,6 +1159,45 @@ export interface KnownTool {
   source: string;
 }
 
+/**
+ * What each package is called here, where somebody has said.
+ *
+ * An npm name is an address, not a label: `@juicesharp/rpiv-ask-user-question`
+ * is the truth about where a thing came from and a poor heading for the list
+ * of what it can do. So a group may be given a name, and keeps the address
+ * underneath it for anyone who needs to install or remove the thing.
+ *
+ * Keyed by what the portal files a tool under — a package, an MCP server, or
+ * "built in" — because that is what the heading says.
+ */
+export function toolGroupNames(): Record<string, string> {
+  const raw = (getStoredSettings() as Record<string, string>).tool_group_names;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const names: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const label = typeof value === "string" ? value.trim() : "";
+      if (key.trim() && label) names[key] = label.slice(0, 60);
+    }
+    return names;
+  } catch {
+    return {};
+  }
+}
+
+export function setToolGroupNames(names: Record<string, unknown>): Record<string, string> {
+  const stored: Record<string, string> = {};
+  for (const [key, value] of Object.entries(names ?? {})) {
+    const label = typeof value === "string" ? value.trim() : "";
+    // An empty one is not a name of its own; it is asking for the name back.
+    if (key.trim() && label) stored[key.trim()] = label.slice(0, 60);
+  }
+  putSetting("tool_group_names", JSON.stringify(stored));
+  return stored;
+}
+
 export function knownTools(): KnownTool[] {
   const raw = (getStoredSettings() as Record<string, string>).tools_seen;
   if (!raw) return [];

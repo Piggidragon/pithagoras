@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { api, type PortalTool } from "../api";
-import { groupSummary, groupTools, nextOff } from "../tool-groups";
+import { displayName, groupSummary, groupTools, nextOff } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 
 /**
@@ -26,6 +26,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
   const [live, setLive] = useState(true);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState("");
+  const [names, setNames] = useState<Record<string, string>>({});
   const groups = useOpenGroups();
 
   useEffect(() => {
@@ -37,6 +38,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
         setTools(r.tools);
         setOff(r.off);
         setLive(r.live);
+        setNames(r.names ?? {});
       })
       .catch((e) => {
         if (cancelled) return;
@@ -106,8 +108,11 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
               ) : (
                 <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
               )}
-              <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-muted">
-                {group.source}
+              <span
+                title={group.source}
+                className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-muted"
+              >
+                {displayName(group.source, names)}
               </span>
               <span className="shrink-0 text-[10px] text-fg-faint">{groupSummary(group)}</span>
             </button>

@@ -102,6 +102,8 @@ out of it, by `..` or by a link, is refused with 400.
 | `PUT /api/tools` | `{ off: string[] }` — the default for every conversation; applied to the running ones too |
 | `GET /api/sessions/:id/tools` | `{ tools, live, off }` — every tool the conversation could use and whether it is on. `live` is false when pi is not running to be asked |
 | `PUT /api/sessions/:id/tools` | `{ off: string[] }` — switch tools off by name; everything not named is on |
+| `GET /api/tool-names` | What each package is called here; everything unnamed keeps its own name |
+| `PUT /api/tool-names` | `{ names }` — a name per package, MCP server or `built in`. An empty one removes it |
 
 `prompt` returns as soon as pi accepts the message, **not** when the work
 finishes. Watch the event stream for progress.

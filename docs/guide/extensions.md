@@ -108,6 +108,21 @@ It takes effect from the next message — pi is told at once and there is no nee
 to restart the conversation — and it is remembered per chat, including across a
 restart.
 
+### Calling them something else
+
+An npm name is an address. `@juicesharp/rpiv-ask-user-question` says exactly
+where a package came from and makes a poor heading for the list of what it can
+do, especially in a column narrow enough to truncate it.
+
+So a group can be given a name: the pencil beside it in **Settings → Tools**.
+The name is used wherever that package appears — the popover, the settings, the
+extensions list — and the address stays underneath it, in the heading's tooltip
+and under the package where you install and remove it. Clearing the field gives
+the derived name back rather than leaving a blank heading.
+
+Unnamed, a group is called what it calls itself, minus the scope:
+`@forecastx/deep-research` is headed **deep-research**.
+
 The groups start shut, in both places. A handful of extensions is sixty tools,
 and sixty checkboxes is not a list anybody reads; each closed group says how
 many of its tools are off, which is the only thing worth knowing from outside

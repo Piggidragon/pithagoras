@@ -271,15 +271,26 @@ export const api = {
     }),
   /** Every tool the portal has seen, for setting a default without opening a chat. */
   toolDefaults: () =>
-    json<{ tools: { name: string; source: string; defaultOn: boolean }[]; off: string[] }>(
-      "/api/tools"
-    ),
+    json<{
+      tools: { name: string; source: string; defaultOn: boolean }[];
+      off: string[];
+      names: Record<string, string>;
+    }>("/api/tools"),
   /** Which tools are off unless a conversation says otherwise. */
   setToolDefaults: (off: string[]) =>
     json<{ off: string[] }>("/api/tools", { method: "PUT", body: JSON.stringify({ off }) }),
   /** What this conversation could use. `live` is false when pi is not running to ask. */
   tools: (sessionId: string) =>
-    json<{ tools: PortalTool[]; live: boolean; off: string[] }>(`/api/sessions/${sessionId}/tools`),
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+      `/api/sessions/${sessionId}/tools`
+    ),
+  /** What each package is called here; everything unnamed keeps its own name. */
+  toolNames: () => json<{ names: Record<string, string> }>("/api/tool-names"),
+  setToolNames: (names: Record<string, string>) =>
+    json<{ names: Record<string, string> }>("/api/tool-names", {
+      method: "PUT",
+      body: JSON.stringify({ names }),
+    }),
   /** Switch tools off by name; everything not named is on. */
   setTools: (sessionId: string, off: string[]) =>
     json<{ off: string[] }>(`/api/sessions/${sessionId}/tools`, {

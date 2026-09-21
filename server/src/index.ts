@@ -85,6 +85,8 @@ import {
   getSettings,
   getStoredSettings,
   knownTools,
+  toolGroupNames,
+  setToolGroupNames,
   setToolDefaultsOff,
   toolDefaultsOff,
   setContextLimit,
@@ -612,10 +614,11 @@ app.get("/api/sessions/:id/tools", async (req, res) => {
   if (!session) return res.status(404).json({ error: "Not found" });
   if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   const { tools, live } = await sessions.getTools(session.id);
+  const names = toolGroupNames();
   // The whole off list, not only the tools loaded right now: the page sends
   // this back on the next flip, and anything missing from it would read as
   // "switch that one on again".
-  res.json({ tools, live, off: sessions.offFor(session.id) });
+  res.json({ tools, live, names, off: sessions.offFor(session.id) });
 });
 
 /** Switch tools off for this conversation. Everything not named is on. */
@@ -647,7 +650,19 @@ app.get("/api/tools", (_req, res) => {
       defaultOn: !off.has(tool.name),
     })),
     off: [...off].sort(),
+    names: toolGroupNames(),
   });
+});
+
+/** What each package is called here. Everything not named keeps its own name. */
+app.get("/api/tool-names", (_req, res) => res.json({ names: toolGroupNames() }));
+
+app.put("/api/tool-names", (req, res) => {
+  const names = req.body?.names;
+  if (!names || typeof names !== "object" || Array.isArray(names)) {
+    return res.status(400).json({ error: "names must be an object" });
+  }
+  res.json({ names: setToolGroupNames(names as Record<string, unknown>) });
 });
 
 /**
