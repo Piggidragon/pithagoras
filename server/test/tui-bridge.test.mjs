@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildFrame, plainLines, TuiSurface } from "../dist/pi/tui-bridge.js";
+import { buildFrame, plainChoices, plainLines, plainText, TuiSurface } from "../dist/pi/tui-bridge.js";
 import { tuiRuntime } from "../dist/pi/tui-runtime.js";
 
 const HOME = "\u001b[?25l\u001b[H";
@@ -331,4 +331,32 @@ test("a widget's lines can be read back as often as it repaints", async () => {
   await settled();
   assert.deepEqual(painted.at(-1), ["● Todos (0/2)", "├─ ○ one", "└─ ○ two"]);
   surface.dispose();
+});
+
+test("a line an extension coloured for a terminal arrives as its words", () => {
+  // What pi-lens puts in the status bar, which read as escape codes in the page.
+  assert.equal(plainText("\u001b[38;5;241mLSP Inactive\u001b[39m"), "LSP Inactive");
+  assert.equal(plainText("\u001b[1m\u001b[31mfailed\u001b[0m  "), "failed");
+  assert.equal(
+    plainText("\u001b]8;;https://example.com\u0007docs\u001b]8;;\u0007"),
+    "docs"
+  );
+  assert.equal(plainText("nothing to take out"), "nothing to take out");
+});
+
+test("a menu is labelled plainly and answers with what was offered", () => {
+  const raw = "\u001b[32mkeep\u001b[39m";
+  const { labels, original } = plainChoices([raw, "discard"]);
+  assert.deepEqual(labels, ["keep", "discard"]);
+  // The extension compares the answer against the options it put in.
+  assert.equal(original("keep"), raw);
+  assert.equal(original("discard"), "discard");
+  assert.equal(original("something else"), "something else");
+});
+
+test("an option that is not a string is passed through untouched", () => {
+  const odd = { label: "x" };
+  const { labels, original } = plainChoices([odd]);
+  assert.deepEqual(labels, [odd]);
+  assert.equal(original(odd), odd);
 });

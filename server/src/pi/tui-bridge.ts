@@ -424,20 +424,57 @@ function safely(fn: () => void): void {
 }
 
 /**
+ * A line of terminal text as the words it says.
+ *
+ * An extension writes for a terminal whether or not it has one: a status line
+ * comes dressed as `\u001b[38;5;241mLSP Inactive\u001b[39m`, which is grey in a
+ * terminal and gibberish in a page. Everything that lands in the page as text
+ * rather than as a screen goes through here.
+ */
+export function plainText(text: string): string {
+  return text
+    .split(CURSOR_MARKER)
+    .join("")
+    // CSI (colours, cursor moves) and OSC (hyperlinks), which is everything
+    // pi's components emit.
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
+    .replace(/\s+$/, "");
+}
+
+/**
  * The text of a rendered screen, with the styling taken out.
  *
  * Widgets go into the page as plain lines rather than a terminal, so a widget
  * built from a component is flattened to what it says.
  */
 export function plainLines(lines: string[]): string[] {
-  return lines.map((line) =>
-    line
-      .split(CURSOR_MARKER)
-      .join("")
-      // CSI (colours, cursor moves) and OSC (hyperlinks), which is everything
-      // pi's components emit.
-      .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
-      .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
-      .replace(/\s+$/, "")
-  );
+  return lines.map(plainText);
+}
+
+/**
+ * A menu's labels for the page, and the way back from one.
+ *
+ * An extension compares what the menu answered against the options it put in.
+ * Undressing a label on the way out would leave it unrecognisable on the way
+ * home, so what the page answers is turned back into the string that was
+ * offered. Two options that differ only in their colour collapse into one
+ * label; the first of them is what comes back, which is the same answer a
+ * terminal would have given for a line that reads the same.
+ */
+export function plainChoices(options: unknown[]): {
+  labels: unknown[];
+  original: (answer: unknown) => unknown;
+} {
+  const labels: unknown[] = [];
+  const back = new Map<unknown, unknown>();
+  for (const option of options) {
+    const label = typeof option === "string" ? plainText(option) : option;
+    labels.push(label);
+    if (!back.has(label)) back.set(label, option);
+  }
+  return {
+    labels,
+    original: (answer) => (back.has(answer) ? back.get(answer) : answer),
+  };
 }

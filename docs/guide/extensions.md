@@ -99,6 +99,13 @@ component is registered once and repaints itself afterwards. That works: the
 block follows it. What arrives is the text it drew, with the colour taken out —
 it sits in a page, not a terminal.
 
+That goes for everything an extension says in words rather than draws as a
+screen: a status, a message, the title of a menu. An extension writes for a
+terminal whether or not it has one, so `LSP Inactive` arrives wrapped in the
+codes that would have made it grey, and those read as gibberish in a page. A
+menu still answers with the string the extension offered, colour and all —
+the extension compares the answer against what it put in.
+
 `setTitle` is delivered and nothing reads it yet.
 
 ## Extensions that draw their own screen

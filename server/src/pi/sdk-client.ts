@@ -14,7 +14,14 @@ import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { contextWindowFor } from "../db.js";
-import { TuiSurface, plainLines, type TuiComponent, type TuiFrame } from "./tui-bridge.js";
+import {
+  TuiSurface,
+  plainChoices,
+  plainLines,
+  plainText,
+  type TuiComponent,
+  type TuiFrame,
+} from "./tui-bridge.js";
 import { tuiRuntime, type TuiRuntime } from "./tui-runtime.js";
 import { ToolRenderer } from "./tool-render.js";
 
@@ -459,7 +466,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * by drawing a menu.
    */
   private buildUiContext() {
-    const ask = (payload: Record<string, unknown>, opts: any, fallback: unknown) =>
+    const ask = (
+      payload: Record<string, unknown>,
+      opts: any,
+      fallback: unknown,
+      /** Turns what the page answered back into what the extension offered. */
+      back: (value: unknown) => unknown = (value) => value
+    ) =>
       new Promise((resolve) => {
         const id = randomUUID();
         let settled = false;
@@ -469,7 +482,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           this.pendingUi.delete(id);
           resolve(value);
         };
-        this.pendingUi.set(id, (r) => finish(r.cancelled ? fallback : r.value));
+        this.pendingUi.set(id, (r) => finish(r.cancelled ? fallback : back(r.value)));
 
         // Never park forever — an unanswered dialog would wedge the session.
         const ms = typeof opts?.timeout === "number" ? opts.timeout : 300_000;
@@ -483,22 +496,44 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         this.emit("event", { type: "extension_ui_request", id, ...payload });
       });
 
+    // An extension is writing for a terminal, and what it says arrives dressed
+    // in colour. Anything that goes into the page as words rather than as a
+    // screen is undressed first; anything that is not a string is left alone,
+    // since an extension may hand over less than pi's types promise.
+    const say = (text: unknown) => (typeof text === "string" ? plainText(text) : text);
+
     const fireAndForget = (payload: Record<string, unknown>) =>
       this.emit("event", { type: "extension_ui_request", id: randomUUID(), ...payload });
 
     return {
-      select: (title: string, options: string[], opts?: any) =>
-        ask({ method: "select", title, options }, opts, undefined),
+      /**
+       * A menu, labelled as it would be in a terminal.
+       *
+       * The label is stripped for the page and the answer is turned back into
+       * the string the extension offered: it compares what comes back against
+       * what it put in, and an option that lost its colour on the way out
+       * would not be recognised on the way home.
+       */
+      select: (title: string, options: string[], opts?: any) => {
+        const { labels, original } = plainChoices(options ?? []);
+        return ask({ method: "select", title: say(title), options: labels }, opts, undefined, original);
+      },
       confirm: (title: string, message: string, opts?: any) =>
-        ask({ method: "confirm", title, message }, opts, false),
+        ask({ method: "confirm", title: say(title), message: say(message) }, opts, false),
       input: (title: string, placeholder: string, opts?: any) =>
-        ask({ method: "input", title, placeholder }, opts, undefined),
+        ask(
+          { method: "input", title: say(title), placeholder: say(placeholder) },
+          opts,
+          undefined
+        ),
+      // The content is a document about to be edited and handed back, not a
+      // label — it is left exactly as it came.
       editor: (title: string, content: string, opts?: any) =>
-        ask({ method: "editor", title, defaultValue: content }, opts, undefined),
+        ask({ method: "editor", title: say(title), defaultValue: content }, opts, undefined),
       notify: (message: string, type?: string) =>
-        fireAndForget({ method: "notify", message, notifyType: type }),
+        fireAndForget({ method: "notify", message: say(message), notifyType: type }),
       setStatus: (key: string, text: string) =>
-        fireAndForget({ method: "setStatus", statusKey: key, statusText: text }),
+        fireAndForget({ method: "setStatus", statusKey: key, statusText: say(text) }),
       /**
        * A widget sits in the page beside the composer, not in a terminal, so
        * whichever form it arrives in it is sent as the text it came to — a
@@ -518,7 +553,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           });
         }
       },
-      setTitle: (title: string) => fireAndForget({ method: "setTitle", title }),
+      setTitle: (title: string) => fireAndForget({ method: "setTitle", title: say(title) }),
       /**
        * An extension drawing its own screen.
        *
