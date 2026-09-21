@@ -18,6 +18,7 @@ import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { ExtensionWidgets } from "./ExtensionOutput";
 import { ToolRender } from "./ToolRender";
+import { ToolSources } from "./ToolSources";
 import type { ExtensionStatus, ExtensionWidget } from "../extension-ui";
 import { confirmDialog } from "./ConfirmDialog";
 import { TerminalPanel } from "./TerminalPanel";
@@ -746,6 +747,7 @@ export function Chat({
                 {/* Only where the tool drew something itself. Everything else
                     keeps the one-line row it has always had. */}
                 {item.render && <ToolRender render={item.render} />}
+                {item.links && <ToolSources links={item.links} />}
                 {/* And what it actually returned, folded away like a thought:
                     it is what the model was given, and now and then it is the
                     only place a detail lives — the sources behind a search sit

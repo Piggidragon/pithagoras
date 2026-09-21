@@ -159,11 +159,23 @@ one thing and gets no **More**.
 
 Very long output is cut off rather than written into the event log whole.
 
-Under that sits **output**, folded away like a thinking block: what the tool
-actually returned, which is what the model was given. A tool's drawing is a
-summary and sometimes the detail only lives here — a plain web search lists its
-sources in the output and not in the row it draws. Long output is cut off for
-the page; the model still got all of it.
+Under that sits **N sources** — where the tool says it got something from, as a
+count and a row of site icons, opening to the list. And under that, **output**,
+folded away like a thinking block: what the tool actually returned, which is
+what the model was given. Long output is cut off for the page; the model still
+got all of it.
+
+Sources are read out of the output, so any tool that cites gets them, not just
+a search. A link counts only where the tool put it in the position of a
+citation — alone on its line, or behind a word like `Source:`. A link sitting
+inside a sentence belongs to the page that was fetched, not to a claim about
+where anything came from, and listing those would turn one fetched page into
+forty citations it never made.
+
+The icons are each site's own favicon, asked for directly. No third-party icon
+service: that would tell someone else every domain the agent read, and the
+point of running this yourself is that nobody is told. A site without one gets
+its initial.
 
 ::: warning Only host sessions
 Everything on this page that runs a component — a drawn screen, a widget built

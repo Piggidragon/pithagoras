@@ -1,4 +1,5 @@
 import type { PortalEvent } from "./api";
+import { extractLinks, type ToolLink } from "./tool-links";
 
 export type Item =
   | { kind: "user"; id: string; seq: number; text: string; audio?: boolean }
@@ -13,6 +14,8 @@ export type Item =
       render?: { collapsed: string[]; expanded?: string[] };
       /** What the tool actually returned, which is what the model was given. */
       output?: string;
+      /** Where it says that came from — see tool-links. */
+      links?: ToolLink[];
     }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
 
@@ -148,6 +151,8 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
             const drawn = toolRender(p);
             if (drawn) it.render = drawn;
             it.output = toolOutput(p);
+            const links = extractLinks(it.output);
+            if (links.length) it.links = links;
             break;
           }
         }
