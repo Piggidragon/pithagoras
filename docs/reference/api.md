@@ -98,6 +98,8 @@ out of it, by `..` or by a link, is refused with 400.
 | `POST /api/sessions/:id/prompt` | `{ message }` |
 | `POST /api/sessions/:id/abort` | Stop the current run |
 | `POST /api/sessions/:id/ui-response` | `{ id, value?, cancelled? }` — answer an extension dialog |
+| `POST /api/sessions/:id/ui-input` | `{ id, data }` — a keystroke for a screen an extension is drawing, as a terminal would have sent it |
+| `POST /api/sessions/:id/ui-size` | `{ id, cols, rows }` — how big that screen is here. Answers `{ ok, frame }`, the screen as it stands |
 
 `prompt` returns as soon as pi accepts the message, **not** when the work
 finishes. Watch the event stream for progress.
@@ -129,6 +131,12 @@ tracking position, or reconnecting will skip real history.
 Types worth knowing: `portal_prompt`, `portal_status`, `portal_notice`,
 `agent_end`, `extension_ui_request`, `extension_ui_cancel`, `extension_error`,
 `stderr`, plus everything pi emits.
+
+An extension drawing its own screen sends `extension_ui_request` with
+`method: "custom"`, then an `extension_ui_frame` — `{ id, data, lines }`, where
+`data` is a whole screen of ANSI to write to a terminal and `lines` is how tall
+it came out — each time it redraws, and `extension_ui_done` when it has its
+answer. See [Extensions](/guide/extensions#extensions-that-draw-their-own-screen).
 
 ## Session config
 

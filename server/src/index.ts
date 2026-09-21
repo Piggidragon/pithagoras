@@ -577,6 +577,39 @@ app.post("/api/sessions/:id/ui-response", (req, res) => {
   res.json({ ok: delivered, note: delivered ? undefined : "Request already resolved or expired" });
 });
 
+/**
+ * Keystrokes for a screen an extension is drawing.
+ *
+ * The body is what the browser's terminal produced, which is the same byte
+ * sequence a TTY would have sent — so no key has to be named, translated or
+ * kept in step with pi's key table.
+ */
+app.post("/api/sessions/:id/ui-input", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const { id, data } = req.body ?? {};
+  if (typeof id !== "string" || typeof data !== "string") {
+    return res.status(400).json({ error: "id and data required" });
+  }
+  res.json({ ok: sessions.uiInput(session.id, id, data) });
+});
+
+/** How big that screen is on the page, so the component lays itself out to fit. */
+app.post("/api/sessions/:id/ui-size", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const { id, cols, rows } = req.body ?? {};
+  if (typeof id !== "string" || !Number.isFinite(cols) || !Number.isFinite(rows)) {
+    return res.status(400).json({ error: "id, cols and rows required" });
+  }
+  const ok = sessions.uiResize(session.id, id, Number(cols), Number(rows));
+  // The frame that resize produced is sent over the event stream like any
+  // other. This one is for the page that has just attached and has no screen
+  // yet — reloading mid-dialog otherwise showed an empty terminal until the
+  // extension happened to redraw.
+  res.json({ ok, frame: sessions.uiFrame(session.id, id) });
+});
+
 app.post("/api/sessions/:id/abort", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });

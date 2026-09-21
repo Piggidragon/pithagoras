@@ -65,6 +65,11 @@ const EPHEMERAL_EVENTS = new Set([
   "queue_update",
   "extension_ui_request",
   "extension_ui_cancel",
+  // A screen an extension is drawing, repainted whenever it changes, and the
+  // word that it is over. Live by definition: both describe something that was
+  // only ever happening now.
+  "extension_ui_frame",
+  "extension_ui_done",
   // Prefill progress: a hundred rows per long prompt, and meaningless once the
   // answer has arrived. Delivered to whoever is watching, never stored.
   "portal_prefill",
@@ -810,6 +815,21 @@ class SessionManager extends EventEmitter {
   /** Answer an extension dialog for a live session. */
   respondUi(sessionId: string, id: string, response: { cancelled?: boolean; value?: unknown }): boolean {
     return this.live.get(sessionId)?.client.respondUi(id, response) ?? false;
+  }
+
+  /** A keystroke for a screen an extension is drawing in this session. */
+  uiInput(sessionId: string, id: string, data: string): boolean {
+    return this.live.get(sessionId)?.client.uiInput?.(id, data) ?? false;
+  }
+
+  /** The browser's terminal for that screen changed size. */
+  uiResize(sessionId: string, id: string, cols: number, rows: number): boolean {
+    return this.live.get(sessionId)?.client.uiResize?.(id, cols, rows) ?? false;
+  }
+
+  /** The screen as it stands. Undefined once the extension has stopped drawing it. */
+  uiFrame(sessionId: string, id: string): { data: string; lines: number } | undefined {
+    return this.live.get(sessionId)?.client.uiFrame?.(id);
   }
 
   async abort(sessionId: string): Promise<void> {

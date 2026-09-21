@@ -1,5 +1,5 @@
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { api, type PortalEvent, type Session, type SessionStatus } from "./api";
 import { Sidebar } from "./components/Sidebar";
@@ -15,6 +15,7 @@ import { AuditPage } from "./components/AuditPanel";
 import { BrowserPage } from "./components/BrowserPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
+import { FrameBus } from "./tui-frames";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 type Tab = "general" | "extensions" | "advanced";
@@ -101,6 +102,12 @@ function Shell({
   const [loadedSession, setLoadedSession] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uiQueue, setUiQueue] = useState<UiRequest[]>([]);
+  /**
+   * Screens extensions are drawing. Kept out of state on purpose: a frame per
+   * keystroke would re-render the page around the terminal that is already
+   * drawing itself.
+   */
+  const frames = useMemo(() => new FrameBus(), []);
   const esRef = useRef<EventSource | null>(null);
 
   const refreshSessions = useCallback(async () => {
@@ -135,6 +142,7 @@ function Shell({
     setEvents([]);
     setMoreBefore(false);
     setUiQueue([]);
+    frames.clear();
     setLoadedSession(null);
     if (!sessionId) return;
 
@@ -173,13 +181,22 @@ function Shell({
       const applyDialog = (ev: PortalEvent) => {
         if (ev.type === "extension_ui_request") {
           const req = ev.payload as UiRequest;
-          if (["select", "confirm", "input", "editor"].includes(req.method)) {
+          if (["select", "confirm", "input", "editor", "custom"].includes(req.method)) {
             setUiQueue((q) => (q.some((x) => x.id === req.id) ? q : [...q, req]));
           }
         }
-        if (ev.type === "extension_ui_cancel") {
+        // Given up waiting, or — for a screen the extension closed itself once
+        // it had its answer — finished. Either way it is not on the page.
+        if (ev.type === "extension_ui_cancel" || ev.type === "extension_ui_done") {
           const id = (ev.payload as { id: string }).id;
+          frames.forget(id);
           setUiQueue((q) => q.filter((x) => x.id !== id));
+        }
+        // A screen being redrawn. It goes straight to the terminal showing it
+        // rather than through state — see FrameBus.
+        if (ev.type === "extension_ui_frame") {
+          const frame = ev.payload as { id: string; data: string; lines: number };
+          frames.emit(frame.id, { data: frame.data, lines: frame.lines });
         }
       };
       const flush = () => {
@@ -391,7 +408,11 @@ function Shell({
         <ExtensionDialog
           sessionId={active.id}
           request={uiQueue[0]}
-          onDone={() => setUiQueue((q) => q.slice(1))}
+          frames={frames}
+          onDone={() => {
+            frames.forget(uiQueue[0].id);
+            setUiQueue((q) => q.slice(1));
+          }}
         />
       )}
 

@@ -83,3 +83,52 @@ anything.
 
 An unanswered dialog times out after five minutes rather than wedging the
 session forever.
+
+## Extensions that draw their own screen
+
+The four shapes above are the ones pi names. An extension that wants something
+else — a tree, a diff, a form, a picker with its own rules — builds it out of
+[pi's TUI components](https://github.com/earendil-works/pi-mono/tree/main/packages/tui)
+and shows it with `ctx.ui.custom()`. There is no list of those to support: each
+one is its own screen, and the author can write a new one tomorrow.
+
+So the portal does not re-implement them. It runs the component and shows you
+what it drew:
+
+```ts
+const choice = await ctx.ui.custom<string | null>((tui, theme, keybindings, done) =>
+  new MyComponent({ theme, keybindings, onSelect: done, onCancel: () => done(null) }),
+);
+```
+
+The component runs on the server against pi's own theme and key table. Each time
+it redraws, the screen it produced is sent to the browser and written into a
+terminal in the dialog; each key you press goes back as the byte sequence a
+terminal would have sent. Arrows, tab, ctrl+c, escape and anything else the
+component listens for arrive as themselves, so a component written for the TUI
+years ago behaves here the way its author intended.
+
+The dialog is as tall as what was drawn, and closes itself the moment the
+component calls `done()`. The ✕ answers for it — as a cancelled dialog, the same
+as pressing escape in a menu that offers it — for a screen that does not end on
+its own.
+
+Two differences from a terminal are worth knowing:
+
+- **Overlays stack instead of floating.** A component that puts something on top
+  of itself gets it drawn underneath instead. It is visible and usable; it is not
+  in the same place.
+- **The cursor is the component's own.** Components draw their cursor into the
+  screen, so the terminal's hardware cursor stays hidden — which is what pi does
+  by default too.
+
+`setWidget` also accepts a component. It is drawn once and shown as the text it
+came to, because a widget sits in the page rather than in a terminal.
+
+::: warning Only host sessions
+This needs the component to run in the portal's own process. A session on the
+container executor reaches pi over RPC, where `ctx.ui.custom()` returns
+`undefined` — the same answer pi's own RPC mode gives. A channel conversation
+has no screen to draw on either, so a screen opened there is left unanswered
+until it times out.
+:::
