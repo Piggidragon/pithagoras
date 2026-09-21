@@ -378,9 +378,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         mode: "rpc",
         commandContextActions: {
           waitForIdle: () => session.waitForIdle(),
-          reload: async () => {
-            await session.reload();
-          },
+          // Through the client, not the session: a reload has to put the tool
+          // switches back, and only the client knows them.
+          reload: () => client.reload(),
         },
         onError: (err: any) =>
           client.emit("event", {
@@ -777,6 +777,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Reloading has extensions register their providers again, which puts the
     // registry's model, with its own window, back on the session.
     this.applyLimitQuietly();
+    // And has pi switch every extension tool back on — which is every MCP tool,
+    // the browser's among them. The switches are the portal's to keep.
+    if (this.switchedOff.size) this.applyToolsOff();
   }
 
   /** HTML unless a .jsonl path is given, matching pi's own /export. */

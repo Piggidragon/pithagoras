@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import path from "node:path";
 import type { PiClient, PiTool } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
-import { readMcpFile } from "./api/mcp.js";
+import { mcpServerNames } from "./api/mcp.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { removeSessionFiles } from "./session-files.js";
@@ -845,15 +845,6 @@ class SessionManager extends EventEmitter {
     );
   }
 
-  /** The MCP servers attached, so a tool can be filed under the one it came through. */
-  private mcpServers(): string[] {
-    try {
-      return Object.keys(readMcpFile().config.mcpServers ?? {});
-    } catch {
-      return [];
-    }
-  }
-
   /**
    * Every tool this conversation could use, and whether it is on.
    *
@@ -868,7 +859,7 @@ class SessionManager extends EventEmitter {
     if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source })));
     const defaults = toolDefaultsOff();
     const exceptions = sessionTools(sessionId);
-    const servers = this.mcpServers();
+    const servers = mcpServerNames();
     return {
       tools: listed.map((tool) => ({
         ...tool,
@@ -897,7 +888,7 @@ class SessionManager extends EventEmitter {
     // down in their name.
     const held = sessionTools(sessionId);
     const answered = [...listed.map((t) => t.name), ...held.off, ...held.on];
-    setSessionTools(sessionId, exceptionsFor(wantedOff, toolDefaultsOff(), answered));
+    setSessionTools(sessionId, exceptionsFor(wantedOff, toolDefaultsOff(), answered, held));
     const off = this.offFor(sessionId, listed.map((t) => t.name));
     await client?.setToolsOff?.(off);
     return off;
@@ -908,13 +899,23 @@ class SessionManager extends EventEmitter {
    * is affected, including the ones running right now — otherwise the setting
    * would only mean anything to chats started afterwards.
    */
-  async applyToolDefaults(): Promise<void> {
-    await Promise.all(
+  async applyToolDefaults(): Promise<number> {
+    const done = await Promise.all(
       [...this.live.entries()].map(async ([sessionId, { client }]) => {
-        const listed = client.getTools ? await client.getTools() : [];
-        await client.setToolsOff?.(this.offFor(sessionId, listed.map((t) => t.name)));
+        // Per session, like refreshSettings: the default is already stored, so
+        // one chat that is mid-teardown must not fail the save and leave the
+        // page showing the opposite of what the database now holds.
+        try {
+          const listed = client.getTools ? await client.getTools() : [];
+          await client.setToolsOff?.(this.offFor(sessionId, listed.map((t) => t.name)));
+          return true;
+        } catch (e) {
+          console.error(`[portal] could not apply the tool defaults to ${sessionId}: ${(e as Error).message}`);
+          return false;
+        }
       })
     );
+    return done.filter(Boolean).length;
   }
 
   async abort(sessionId: string): Promise<void> {

@@ -278,7 +278,7 @@ export const api = {
     }>("/api/tools"),
   /** Which tools are off unless a conversation says otherwise. */
   setToolDefaults: (off: string[]) =>
-    json<{ off: string[] }>("/api/tools", { method: "PUT", body: JSON.stringify({ off }) }),
+    json<{ off: string[]; applied: number }>("/api/tools", { method: "PUT", body: JSON.stringify({ off }) }),
   /** What this conversation could use. `live` is false when pi is not running to ask. */
   tools: (sessionId: string) =>
     json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(

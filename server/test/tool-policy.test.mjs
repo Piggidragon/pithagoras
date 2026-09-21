@@ -111,3 +111,31 @@ test("a default-off tool that was shown and left on is written down as on", () =
   assert.deepEqual(exceptions.on, ["ast_grep_search"]);
   assert.deepEqual(exceptions.off, []);
 });
+
+test("an off somebody set here survives the default coming to agree with it", () => {
+  // Off in this chat, then off by default too, then an unrelated switch is
+  // flipped and the page sends the whole picture back. Written down from
+  // scratch, T would drop out — and switching the default back on would then
+  // turn it on in a chat that had never been told to.
+  const held = { off: ["T"], on: [] };
+  const again = exceptionsFor(["T", "other"], ["T"], ["T", "other"], held);
+  assert.deepEqual(again.off, ["T", "other"]);
+  assert.equal(toolEnabled("T", [], again), false);
+});
+
+test("an on somebody set here survives the same way", () => {
+  const held = { off: [], on: ["T"] };
+  const again = exceptionsFor(["other"], [], ["T", "other"], held);
+  assert.deepEqual(again.on, ["T"]);
+  assert.equal(toolEnabled("T", ["T"], again), true);
+});
+
+test("what the chat held is dropped once the switch is flipped back", () => {
+  const held = { off: ["T"], on: [] };
+  // T is wanted on again, and the default leaves it on: nothing left to say.
+  assert.deepEqual(exceptionsFor([], [], ["T"], held), { off: [], on: [] });
+});
+
+test("without anything held, nothing changes", () => {
+  assert.deepEqual(exceptionsFor(["T"], ["T"], ["T"]), { off: [], on: [] });
+});

@@ -92,11 +92,17 @@ export function effectiveOff(
  * written down to get there. Anything already true by default is not written
  * down at all, so a later change to the default still reaches this
  * conversation — which is the point of having one.
+ *
+ * What the conversation already holds is the exception to that. Something
+ * somebody switched here on purpose is theirs, even where the default has since
+ * come to agree with it: dropping it on the next unrelated flip would leave a
+ * chat that follows whatever the default does next, when it was told not to.
  */
 export function exceptionsFor(
   wantedOff: Iterable<string>,
   defaultsOff: string[],
-  known: Iterable<string>
+  known: Iterable<string>,
+  held: ToolExceptions = { off: [], on: [] }
 ): ToolExceptions {
   const off = new Set(wantedOff);
   const defaults = new Set(defaultsOff);
@@ -106,8 +112,8 @@ export function exceptionsFor(
   // saw — an extension that failed to load, a server that is not attached —
   // and that exception outlives the default it was silently cancelling.
   for (const name of new Set([...known, ...off])) {
-    if (off.has(name) && !defaults.has(name)) exceptions.off.push(name);
-    if (!off.has(name) && defaults.has(name)) exceptions.on.push(name);
+    if (off.has(name) && (!defaults.has(name) || held.off.includes(name))) exceptions.off.push(name);
+    if (!off.has(name) && (defaults.has(name) || held.on.includes(name))) exceptions.on.push(name);
   }
   exceptions.off.sort();
   exceptions.on.sort();

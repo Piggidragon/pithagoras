@@ -27,16 +27,7 @@ import {
 } from "./agent-setup.js";
 import { sessions, EXECUTOR_KIND } from "./session-manager.js";
 import { toolSource } from "./tool-policy.js";
-import { readMcpFile } from "./api/mcp.js";
-
-/** The MCP servers attached, so a tool is filed under the one it came through. */
-function mcpServerNames(): string[] {
-  try {
-    return Object.keys(readMcpFile().config.mcpServers ?? {});
-  } catch {
-    return [];
-  }
-}
+import { mcpServerNames } from "./api/mcp.js";
 import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
@@ -641,6 +632,9 @@ app.put("/api/sessions/:id/tools", async (req, res) => {
  * should have to start a chat to say that a tool should be off in all of them.
  */
 app.get("/api/tools", (_req, res) => {
+  // Refused here as well as on the PUT: a list of checkboxes that draws fine
+  // and answers every flip with an error is the switch that looks like it works.
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   const off = new Set(toolDefaultsOff());
   const servers = mcpServerNames();
   res.json({
@@ -679,8 +673,8 @@ app.put("/api/tools", async (req, res) => {
     return res.status(400).json({ error: "off must be a list of tool names" });
   }
   const stored = setToolDefaultsOff(off);
-  await sessions.applyToolDefaults();
-  res.json({ off: stored });
+  const applied = await sessions.applyToolDefaults();
+  res.json({ off: stored, applied });
 });
 
 app.post("/api/sessions/:id/abort", async (req, res) => {

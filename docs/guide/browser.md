@@ -116,11 +116,15 @@ a conversation with them all off is not offered them and does not reach the
 container. A routine still has its own switch on its own page.
 
 Like any other package, its tools are **on** unless something says otherwise.
-An installation that had the old per-session switch keeps what it had: on the
-first start after upgrading, the browser's tools are written into the defaults
-as off and the conversations that had been granted it are given it back. So an
-existing portal wakes up the way it went to sleep, and a new one starts like
-any other server.
+An installation that had the old per-session switch keeps what it had: the
+browser's tools are written into the defaults as off and the conversations that
+had been granted it are given it back. So an existing portal wakes up the way it
+went to sleep, and a new one starts like any other server.
+
+That happens when the first conversation after the upgrade lists its tools, not
+when the portal starts — which of them are the browser's is only known once a
+session has registered them. Until then the old switch is what answers, so there
+is no moment in between where every conversation has the browser.
 
 ::: tip Turning it off everywhere
 **Settings → Tools → browser → all off**. That is the one switch; there is no

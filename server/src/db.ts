@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { piSetting } from "./pi-settings.js";
-import { browserTool, toolEnabled } from "./tool-policy.js";
+import { BROWSER_MCP, browserTool, toolEnabled } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -1000,32 +1000,53 @@ export function routineGuards(slug: string | null | undefined): boolean {
  * back as their own exception. A new install is unaffected and starts the way
  * any other server does. Run once, because after it the operator's own choices
  * are the ones in there.
+ *
+ * It cannot run when the database opens. Which tools are the browser's is only
+ * known once a session has registered them, and on the first start after an
+ * upgrade none has: the catalogue is a key this build introduced. So the first
+ * call only decides whether there is a posture to carry — an install with
+ * conversations in it — and marks it `pending`. It runs again from
+ * `rememberTools()` and does the carrying the moment the browser's tools
+ * appear. Until then `browserAllowed()` goes on reading the old column.
  */
 export function adoptBrowserGrants(d: Database.Database = getDb()): void {
-  const done = d
+  const flag = d
     .prepare("SELECT value FROM settings WHERE key = 'browser_tools_adopted'")
     .get() as { value: string } | undefined;
-  if (done) return;
+  if (flag?.value === "1") return;
+  const mark = (value: string) =>
+    d
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('browser_tools_adopted', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      )
+      .run(value);
+
+  if (!flag) {
+    // Nobody has ever had a conversation: nothing was granted, nothing to keep.
+    if (!d.prepare("SELECT 1 FROM sessions LIMIT 1").get()) return void mark("1");
+    mark("pending");
+  }
 
   const servers = mcpServerNames();
   const names = knownTools()
     .map((t) => t.name)
     .filter((name) => browserTool(name, servers));
-  // Nothing seen yet: no posture to carry, and the flag is set so a catalogue
-  // that fills in later is not retroactively switched off.
-  if (names.length) {
-    setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...names])]);
-    const granted = d
-      .prepare("SELECT id FROM sessions WHERE browser = 1 AND kind != 'routine'")
-      .all() as { id: string }[];
-    for (const { id } of granted) {
-      const tools = sessionTools(id);
-      setSessionTools(id, { off: tools.off, on: [...new Set([...tools.on, ...names])] });
-    }
+  if (!names.length) return;
+
+  setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...names])]);
+  const granted = d
+    .prepare("SELECT id FROM sessions WHERE browser = 1 AND kind != 'routine'")
+    .all() as { id: string }[];
+  for (const { id } of granted) {
+    const tools = sessionTools(id);
+    setSessionTools(id, { off: tools.off, on: [...new Set([...tools.on, ...names])] });
   }
-  d.prepare(
-    "INSERT INTO settings (key, value) VALUES ('browser_tools_adopted', '1') ON CONFLICT(key) DO UPDATE SET value = '1'"
-  ).run();
+  mark("1");
+}
+
+/** Is there a grant still waiting for the browser's tools to be seen? */
+function browserAdoptionPending(): boolean {
+  return (getStoredSettings() as Record<string, string>).browser_tools_adopted === "pending";
 }
 
 /**
@@ -1046,17 +1067,40 @@ export function browserAllowed(session: SessionRow): boolean {
     ) as { browser: number } | undefined;
     return row ? row.browser === 1 : false;
   }
-  const servers = mcpServerNames();
-  const browserNames = knownTools()
-    .map((t) => t.name)
-    .filter((name) => browserTool(name, servers));
-  // Nothing registered to ask about — a container deployment, where pi is
-  // reached over RPC and never reports its registry. There the old per-session
-  // grant is still the only answer anyone has.
-  if (!browserNames.length) return session.browser === 1;
+  const browserNames = seenBrowserTools();
+  if (!browserNames.length) return session.browser === 1 || !browserColumnDecides();
   const defaults = toolDefaultsOff();
   const exceptions = sessionTools(session.id);
   return browserNames.some((name) => toolEnabled(name, defaults, exceptions));
+}
+
+/** The browser's tools, as far as any session has registered them. */
+function seenBrowserTools(): string[] {
+  const servers = mcpServerNames();
+  return knownTools()
+    .map((t) => t.name)
+    .filter((name) => browserTool(name, servers));
+}
+
+/**
+ * With no browser tool seen there is no switch to read, and three situations
+ * look the same from here:
+ *
+ * - A container deployment, where pi is reached over RPC and never reports its
+ *   registry. The old per-session grant is still the only answer anyone has.
+ * - An upgrade still waiting for the browser's tools to appear, so the grants
+ *   can be carried over. The old column stands until they do.
+ * - No server called `browser` at all: nothing here to switch, so the column.
+ *
+ * Anything else is a `browser` server configured and not yet registered by any
+ * session — a fresh install whose first conversation is still starting, or a
+ * lazy server whose tools pi has not cached yet. Nobody has said anything about
+ * it, which is what a default is for, so it is on, as any other server is.
+ */
+function browserColumnDecides(): boolean {
+  if ((process.env.EXECUTOR || "host") === "container") return true;
+  if (browserAdoptionPending()) return true;
+  return !mcpServerNames().includes(BROWSER_MCP);
 }
 
 /** The conversations that disagree with the default about the browser. */
@@ -1074,9 +1118,10 @@ export function browserExceptions(): SessionRow[] {
 
 /** Is the browser on for a conversation that has never said anything about it? */
 export function browserByDefault(): boolean {
-  const servers = mcpServerNames();
+  const names = seenBrowserTools();
+  if (!names.length) return !browserColumnDecides();
   const off = new Set(toolDefaultsOff());
-  return knownTools().some((t) => browserTool(t.name, servers) && !off.has(t.name));
+  return names.some((name) => !off.has(name));
 }
 
 /**
@@ -1223,6 +1268,8 @@ export function rememberTools(tools: KnownTool[]): void {
   for (const tool of tools) merged.set(tool.name, { name: tool.name, source: tool.source });
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   putSetting("tools_seen", JSON.stringify(sorted));
+  // The first moment the browser's tools can be told apart from the rest.
+  adoptBrowserGrants();
 }
 
 /**

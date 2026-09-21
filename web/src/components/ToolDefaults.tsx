@@ -21,6 +21,8 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   const [tools, setTools] = useState<{ name: string; source: string }[]>([]);
   const [off, setOff] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Why there is nothing to switch here, where the deployment cannot do it. */
+  const [refusal, setRefusal] = useState("");
   const [busy, setBusy] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
   /** The group being renamed, and what has been typed so far. */
@@ -35,9 +37,11 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
         setOff(r.off);
         setNames(r.names ?? {});
       })
-      .catch((e) => onError(String(e)))
+      // A deployment where this cannot work says so in place of the list — the
+      // same as the switches beside the composer, and for the same reason.
+      .catch((e) => setRefusal(String(e).replace(/^Error:\s*/, "")))
       .finally(() => setLoading(false));
-  }, [onError]);
+  }, []);
 
   const flip = async (names: string[], enabled: boolean) => {
     const wanted = nextOff(off, names, enabled);
@@ -78,6 +82,13 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   };
 
   if (loading) return null;
+  if (refusal) {
+    return (
+      <p className="rounded-xl border border-line bg-raised/40 px-3 py-2 text-xs text-fg-subtle">
+        {refusal}
+      </p>
+    );
+  }
 
   return (
     <>
