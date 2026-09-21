@@ -195,11 +195,19 @@ export const api = {
       `/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`,
       { method: "PUT", body: JSON.stringify({ content, mtime }) }
     ),
+  /** Gives a file or folder another name in the same folder; answers with its new path. */
+  renameFile: (sessionId: string, file: string, name: string) =>
+    json<{ ok: true; path: string }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
   deleteFile: (sessionId: string, file: string) =>
     json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, { method: "DELETE" }),
   fileDownloadUrl: (sessionId: string, file: string) =>
     `/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}&download=1`,
-  archiveDownloadUrl: (sessionId: string) => `/api/sessions/${sessionId}/archive`,
+  /** The whole folder, or a folder in it. */
+  archiveDownloadUrl: (sessionId: string, dir = "") =>
+    `/api/sessions/${sessionId}/archive${dir ? `?path=${encodeURIComponent(dir)}` : ""}`,
   voiceInstallStatus: () => json<VoiceInstallStatus>('/api/voice/install'),
   voiceAction: (action: 'install' | 'start' | 'stop') => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST'}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),

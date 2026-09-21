@@ -4,10 +4,13 @@ import {
   LuChevronRight,
   LuCircleAlert,
   LuDownload,
+  LuEye,
+  LuEyeOff,
   LuFileText,
   LuFolder,
   LuLink,
   LuLocateFixed,
+  LuPencil,
   LuRefreshCw,
   LuSave,
   LuTrash2,
@@ -32,6 +35,16 @@ interface Open {
 
 const sizeOf = (bytes: number): string =>
   bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+const HIDDEN_KEY = "filesShowHidden";
+/** Whether names that start with a dot are shown. Off unless it was turned on: they are mostly settings and tools' own folders. */
+const savedShowHidden = (): boolean => {
+  try {
+    return localStorage.getItem(HIDDEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
 
 const parentOf = (p: string) => p.split("/").slice(0, -1).join("/");
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
@@ -70,6 +83,10 @@ export function FilesPanel({
   const [saving, setSaving] = useState(false);
   const [changed, setChanged] = useState(false);
   const [following, setFollowing] = useState(true);
+  const [showHidden, setShowHidden] = useState(savedShowHidden);
+  // The entry being given a name, and the name so far.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
 
   const dirty = !!file && !file.binary && !file.loading && draft !== file.saved;
   const dirtyRef = useRef(dirty);
@@ -201,6 +218,36 @@ export function FilesPanel({
     }
   };
 
+  const toggleHidden = () => {
+    const next = !showHidden;
+    setShowHidden(next);
+    try {
+      localStorage.setItem(HIDDEN_KEY, next ? "1" : "0");
+    } catch {
+      // Not remembered, but it works for now.
+    }
+  };
+
+  const startRename = (entry: FileEntry) => {
+    setRenaming(entry.name);
+    setNewName(entry.name);
+  };
+
+  const finishRename = async (entry: FileEntry) => {
+    const name = newName.trim();
+    setRenaming(null);
+    if (!name || name === entry.name) return;
+    let problem: string | null = null;
+    try {
+      await api.renameFile(sessionId, join(dir, entry.name), name);
+    } catch (e) {
+      problem = (e as Error).message;
+    }
+    // After the reload, which clears an error: this one is about what was just tried.
+    await loadDir(dir);
+    setListError(problem);
+  };
+
   const remove = async (entry: FileEntry) => {
     const path = join(dir, entry.name);
     const what = entry.type === "dir" ? "folder and everything in it" : entry.type === "link" ? "link" : "file";
@@ -211,6 +258,7 @@ export function FilesPanel({
       danger: true,
     });
     if (!ok) return;
+    let problem: string | null = null;
     try {
       await api.deleteFile(sessionId, path);
       if (file && (file.path === path || file.path.startsWith(path + "/"))) {
@@ -218,12 +266,14 @@ export function FilesPanel({
         setFile(null);
       }
     } catch (e) {
-      setListError((e as Error).message);
+      problem = (e as Error).message;
     }
-    void loadDir(dir);
+    await loadDir(dir);
+    setListError(problem);
   };
 
   const crumbs = dir ? dir.split("/") : [];
+  const shown = showHidden ? entries : entries.filter((e) => !e.name.startsWith("."));
 
   return (
     <div className="flex h-full min-h-0 flex-col text-sm">
@@ -254,6 +304,15 @@ export function FilesPanel({
           <span>{following ? "Following" : "Follow"}</span>
         </button>
         <button
+          onClick={toggleHidden}
+          aria-pressed={showHidden}
+          title={showHidden ? "Hide names that start with a dot" : "Show names that start with a dot"}
+          aria-label={showHidden ? "Hide hidden files" : "Show hidden files"}
+          className={`shrink-0 rounded p-1 transition hover:bg-fg/5 hover:text-fg ${showHidden ? "text-accent" : "text-fg-faint"}`}
+        >
+          {showHidden ? <LuEye aria-hidden className="h-3.5 w-3.5" /> : <LuEyeOff aria-hidden className="h-3.5 w-3.5" />}
+        </button>
+        <button
           onClick={() => void loadDir(dir)}
           title="Refresh"
           aria-label="Refresh"
@@ -262,9 +321,9 @@ export function FilesPanel({
           <LuRefreshCw aria-hidden className={`h-3.5 w-3.5 ${listing ? "animate-spin" : ""}`} />
         </button>
         <a
-          href={api.archiveDownloadUrl(sessionId)}
-          title="Download the whole folder as a .tar.gz"
-          aria-label="Download the folder"
+          href={api.archiveDownloadUrl(sessionId, dir)}
+          title={dir ? "Download this folder as a .tar.gz" : "Download the whole folder as a .tar.gz"}
+          aria-label="Download this folder"
           className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
         >
           <LuDownload aria-hidden className="h-3.5 w-3.5" />
@@ -344,35 +403,95 @@ export function FilesPanel({
               <LuCircleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {listError}
             </p>
           )}
-          {!listError && !listing && entries.length === 0 && <p className="px-2 py-3 text-xs text-fg-subtle">Nothing in this folder.</p>}
-          {entries.map((entry) => (
-            <div key={entry.name} className="group flex items-center rounded-lg px-1 transition hover:bg-fg/5">
-              <button
-                onClick={() => void openEntry(entry)}
-                disabled={entry.type === "link"}
-                title={entry.type === "link" ? "A link that leads out of this folder, or nowhere" : entry.name}
-                className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1.5 text-left text-fg disabled:cursor-default disabled:text-fg-faint"
-              >
-                {entry.type === "dir" ? (
-                  <LuFolder aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
-                ) : entry.type === "link" ? (
-                  <LuLink aria-hidden className="h-4 w-4 shrink-0" />
-                ) : (
-                  <LuFileText aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
-                )}
-                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                {entry.type === "file" && <span className="shrink-0 text-[10px] text-fg-faint">{sizeOf(entry.size)}</span>}
-              </button>
-              <button
-                onClick={() => void remove(entry)}
-                title={`Delete ${entry.name}`}
-                aria-label={`Delete ${entry.name}`}
-                className="shrink-0 rounded p-1 text-fg-faint opacity-0 transition hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
-              >
-                <LuTrash2 aria-hidden className="h-3.5 w-3.5" />
-              </button>
+          {!listError && !listing && shown.length === 0 && (
+            <p className="px-2 py-3 text-xs text-fg-subtle">{entries.length === 0 ? "Nothing in this folder." : "Nothing here but hidden files."}</p>
+          )}
+          {shown.map((entry) => (
+            <div key={entry.name} className="group flex items-center rounded-lg px-1 transition hover:bg-fg/5 focus-within:bg-fg/5">
+              {renaming === entry.name ? (
+                <div className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1">
+                  {entry.type === "dir" ? (
+                    <LuFolder aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
+                  ) : entry.type === "link" ? (
+                    <LuLink aria-hidden className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <LuFileText aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
+                  )}
+                  <input
+                    autoFocus
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onFocus={(e) => {
+                      // The name without its extension is what is usually meant to change.
+                      const dot = entry.type === "file" ? e.target.value.lastIndexOf(".") : -1;
+                      e.target.setSelectionRange(0, dot > 0 ? dot : e.target.value.length);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void finishRename(entry);
+                      else if (e.key === "Escape") setRenaming(null);
+                    }}
+                    onBlur={() => setRenaming(null)}
+                    aria-label={`New name for ${entry.name}`}
+                    spellCheck={false}
+                    className="min-w-0 flex-1 rounded border border-accent/40 bg-transparent px-1.5 py-0.5 text-sm text-fg outline-none"
+                  />
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => void openEntry(entry)}
+                    disabled={entry.type === "link"}
+                    title={entry.type === "link" ? "A link that leads out of this folder, or nowhere" : entry.name}
+                    className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1.5 text-left text-fg disabled:cursor-default disabled:text-fg-faint"
+                  >
+                    {entry.type === "dir" ? (
+                      <LuFolder aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
+                    ) : entry.type === "link" ? (
+                      <LuLink aria-hidden className="h-4 w-4 shrink-0" />
+                    ) : (
+                      <LuFileText aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                    {entry.type === "file" && <span className="shrink-0 text-[10px] text-fg-faint">{sizeOf(entry.size)}</span>}
+                  </button>
+                  {/* Out of the way until the row is pointed at, but always there on a touch screen, which cannot point. */}
+                  <div className="flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
+                    {entry.type !== "link" && (
+                      <a
+                        href={entry.type === "dir" ? api.archiveDownloadUrl(sessionId, join(dir, entry.name)) : api.fileDownloadUrl(sessionId, join(dir, entry.name))}
+                        title={entry.type === "dir" ? `Download ${entry.name} as a .tar.gz` : `Download ${entry.name}`}
+                        aria-label={`Download ${entry.name}`}
+                        className="rounded p-1 text-fg-faint transition hover:bg-fg/10 hover:text-fg"
+                      >
+                        <LuDownload aria-hidden className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                    <button
+                      onClick={() => startRename(entry)}
+                      title={`Rename ${entry.name}`}
+                      aria-label={`Rename ${entry.name}`}
+                      className="rounded p-1 text-fg-faint transition hover:bg-fg/10 hover:text-fg"
+                    >
+                      <LuPencil aria-hidden className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => void remove(entry)}
+                      title={`Delete ${entry.name}`}
+                      aria-label={`Delete ${entry.name}`}
+                      className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger"
+                    >
+                      <LuTrash2 aria-hidden className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
+          {!showHidden && entries.length > shown.length && (
+            <button onClick={toggleHidden} className="px-2 py-2 text-left text-xs text-fg-subtle underline-offset-2 hover:text-fg hover:underline">
+              {entries.length - shown.length} hidden {entries.length - shown.length === 1 ? "file" : "files"} — show
+            </button>
+          )}
           {truncated && <p className="px-2 py-2 text-xs text-fg-subtle">This folder has more than is listed here.</p>}
         </div>
       )}

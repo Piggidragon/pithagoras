@@ -13,11 +13,19 @@ that started there. Nothing outside it can be reached.
 - **Browse.** Click a folder to go in, the path at the top to go back.
   Folders come first; `.git` is not listed. A link that leads out of the folder
   is shown greyed out and cannot be opened.
+- **Hide or show dotfiles.** Names that start with a dot (`.env`, `.cache`, …) are
+  hidden to begin with, and a line under the list says how many. The eye icon at
+  the top turns them on and off, and the choice is remembered in the browser.
+  What the agent opens is shown either way.
 - **Read and change.** A text file opens as text. Edit it and choose **Save**
   (or press <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd>). A file that is not text, or is over
   1 MB, is not shown; download it instead.
-- **Download** one file, or the whole folder as a `.tar.gz` (without
-  `node_modules`, `.git`, `dist`, `build` and virtual environments).
+- **Download** without opening: every row has a download button, for a file or,
+  for a folder, as a `.tar.gz`. The button at the top downloads the folder you are
+  in (without `node_modules`, `.git`, `dist`, `build` and virtual environments).
+- **Rename** a file or a folder with the pencil on its row. Enter keeps the new
+  name, Escape leaves it. It is a new name in the same folder, and never replaces
+  something that is already there.
 - **Delete** a file or a folder and everything in it, after a confirmation. A
   link is removed as the link; what it points at stays.
 

@@ -8,8 +8,10 @@ import {
   baseDir,
   downloadPath,
   listDir,
+  folderPath,
   readText,
   removeEntry,
+  renameEntry,
   writeText,
 } from "../workspace-files.js";
 
@@ -23,7 +25,7 @@ import {
  * into its folder and a refusal into a status.
  */
 
-const STATUS = { invalid: 400, missing: 404, conflict: 409, too_large: 413 } as const;
+const STATUS = { invalid: 400, missing: 404, conflict: 409, exists: 409, too_large: 413 } as const;
 
 function fail(res: Response, e: unknown) {
   if (e instanceof FileError) return res.status(STATUS[e.code]).json({ error: e.message });
@@ -88,6 +90,16 @@ export function filesRouter(): Router {
     }
   });
 
+  router.patch("/sessions/:id/file", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    try {
+      res.json({ ok: true, path: renameEntry(base, req.query.path, req.body?.name) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
   router.delete("/sessions/:id/file", (req, res) => {
     const base = folderOf(req.params.id, res);
     if (!base) return;
@@ -100,12 +112,19 @@ export function filesRouter(): Router {
   });
 
   /**
-   * The whole folder as a .tar.gz, streamed out of `tar` rather than staged on
-   * disk first: a big project would need the space twice, and a clean-up.
+   * The folder — the chat's, or one inside it with `path` — as a .tar.gz,
+   * streamed out of `tar` rather than staged on disk first: a big project would
+   * need the space twice, and a clean-up.
    */
   router.get("/sessions/:id/archive", (req, res) => {
-    const base = folderOf(req.params.id, res);
-    if (!base) return;
+    const chat = folderOf(req.params.id, res);
+    if (!chat) return;
+    let base: string;
+    try {
+      base = folderPath(chat, req.query.path);
+    } catch (e) {
+      return fail(res, e);
+    }
     const name = path.basename(base).replace(/[^a-zA-Z0-9_.-]/g, "_") || "workspace";
     res.setHeader("Content-Type", "application/gzip");
     res.setHeader("Content-Disposition", `attachment; filename="${name}.tar.gz"`);

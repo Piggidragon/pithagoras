@@ -8,6 +8,7 @@ import {
   readSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeSync,
@@ -37,7 +38,7 @@ export const MAX_ENTRIES = 2_000;
 /** Left out of the whole-folder archive: regenerable, or huge, and not the work itself. */
 export const ARCHIVE_EXCLUDES = ["node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build"];
 
-export type FileErrorCode = "invalid" | "missing" | "conflict" | "too_large";
+export type FileErrorCode = "invalid" | "missing" | "conflict" | "exists" | "too_large";
 
 export class FileError extends Error {
   constructor(
@@ -273,4 +274,46 @@ export function removeEntry(base: string, rel: unknown): void {
   const target = path.join(parent, path.basename(lexical));
   if (!lexists(target)) throw new FileError("missing", "There is no such file or folder");
   rmSync(target, { recursive: true });
+}
+
+/** A name for one entry: no place in it, and not one of the two that mean a place. */
+function checkName(name: unknown): string {
+  if (typeof name !== "string" || !name.trim()) throw new FileError("invalid", "A name is required");
+  const clean = name.trim();
+  if (clean === "." || clean === ".." || /[/\\\0]/.test(clean)) throw new FileError("invalid", "A name cannot contain / or \\, or be . or ..");
+  if (Buffer.byteLength(clean, "utf8") > 255) throw new FileError("invalid", "That name is too long");
+  return clean;
+}
+
+/**
+ * Gives a file or a folder another name, in the folder it is in. It is a new
+ * name, not a new place, and it never replaces something that is already there.
+ * A link is renamed as the link it is. Returns the new path, from the folder.
+ */
+export function renameEntry(base: string, rel: unknown, newName: unknown): string {
+  const name = checkName(newName);
+  const text = String(rel ?? "");
+  if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
+  const lexical = path.resolve(base, text.replace(/^[/\\]+/, ""));
+  if (!isWithin(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
+  if (lexical === base) throw new FileError("invalid", "The folder itself is not renamed from here");
+  // The parent is followed and checked; the last name is not, so that a link
+  // is renamed and not what it leads to.
+  const parent = resolveInside(base, path.relative(base, path.dirname(lexical)));
+  const from = path.join(parent, path.basename(lexical));
+  if (!lexists(from)) throw new FileError("missing", "There is no such file or folder");
+  const to = path.join(parent, name);
+  if (to === from) return path.relative(base, to);
+  if (lexists(to)) throw new FileError("exists", `There is already something called "${name}" here`);
+  renameSync(from, to);
+  return path.relative(base, to);
+}
+
+/** The checked path of a folder, for archiving it. */
+export function folderPath(base: string, rel: unknown): string {
+  const dir = resolveInside(base, rel);
+  const st = lstatSync(dir, { throwIfNoEntry: false });
+  if (!st) throw new FileError("missing", "There is no such folder");
+  if (!st.isDirectory()) throw new FileError("invalid", "That is not a folder");
+  return dir;
 }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 const files = await import('../dist/workspace-files.js');
-const { FileError, baseDir, listDir, readText, writeText, removeEntry, resolveInside, downloadPath, MAX_EDIT_BYTES } = files;
+const { FileError, baseDir, listDir, readText, writeText, removeEntry, renameEntry, folderPath, resolveInside, downloadPath, MAX_EDIT_BYTES } = files;
 
 /** A folder to work in, and one beside it that nothing may reach. */
 function setup() {
@@ -226,5 +226,65 @@ test('a folder with more entries than the cap is cut off and says so', () => {
   const list = listDir(base, '');
   assert.equal(list.entries.length, files.MAX_ENTRIES);
   assert.equal(list.truncated, true);
+  done();
+});
+
+test('a file and a folder are renamed in the folder they are in, and the new path is returned', () => {
+  const { dir, base, done } = setup();
+  mkdirSync(path.join(dir, 'sub')); writeFileSync(path.join(dir, 'sub', 'a.txt'), 'x'); writeFileSync(path.join(dir, 'b.txt'), 'b');
+  assert.equal(renameEntry(base, 'sub/a.txt', 'c.txt'), path.join('sub', 'c.txt'));
+  assert.equal(readFileSync(path.join(dir, 'sub', 'c.txt'), 'utf8'), 'x');
+  assert.equal(existsSync(path.join(dir, 'sub', 'a.txt')), false);
+  assert.equal(renameEntry(base, 'sub', 'renamed'), 'renamed');
+  assert.equal(readFileSync(path.join(dir, 'renamed', 'c.txt'), 'utf8'), 'x');
+  assert.equal(renameEntry(base, 'b.txt', ' spaced name.txt '), 'spaced name.txt');
+  assert.equal(renameEntry(base, 'spaced name.txt', 'spaced name.txt'), 'spaced name.txt');
+  done();
+});
+
+test('a rename never replaces something that is there, and is a name, not a place', () => {
+  const { dir, base, outside, done } = setup();
+  writeFileSync(path.join(dir, 'a.txt'), 'a'); writeFileSync(path.join(dir, 'b.txt'), 'b');
+  assert.equal(code(() => renameEntry(base, 'a.txt', 'b.txt')), 'exists');
+  assert.equal(readFileSync(path.join(dir, 'b.txt'), 'utf8'), 'b');
+  for (const name of ['', '   ', '.', '..', 'x/y', '../outside/moved', '/etc/x', 'a\\b', 'x\0y', 'n'.repeat(300), undefined, 5]) {
+    assert.equal(code(() => renameEntry(base, 'a.txt', name)), 'invalid', JSON.stringify(name));
+  }
+  assert.equal(existsSync(path.join(dir, 'a.txt')), true);
+  assert.equal(existsSync(path.join(outside, 'moved')), false);
+  done();
+});
+
+test('only what is in the folder is renamed: not the folder, not a way out, not what is not there', () => {
+  const { base, outside, done } = setup();
+  for (const p of ['', '.', '/', '..', '../outside/secret', '/etc/passwd', 'a/../../outside/secret']) {
+    assert.match(code(() => renameEntry(base, p, 'x')), /invalid|missing/, JSON.stringify(p));
+  }
+  assert.equal(code(() => renameEntry(base, 'nope', 'x')), 'missing');
+  assert.equal(readFileSync(path.join(outside, 'secret'), 'utf8'), 'top secret');
+  done();
+});
+
+test('a link is renamed as the link, and what it leads to keeps its name; nothing is renamed through one', () => {
+  const { dir, base, outside, done } = setup();
+  symlinkSync(outside, path.join(dir, 'escape'));
+  assert.equal(renameEntry(base, 'escape', 'moved-link'), 'moved-link');
+  assert.equal(existsSync(path.join(outside, 'secret')), true);
+  symlinkSync(outside, path.join(dir, 'door'));
+  assert.equal(code(() => renameEntry(base, 'door/secret', 'x')), 'invalid');
+  assert.equal(existsSync(path.join(outside, 'secret')), true);
+  done();
+});
+
+test('a folder is found for archiving, and a file, a missing place and a way out are not', () => {
+  const { dir, base, outside, done } = setup();
+  mkdirSync(path.join(dir, 'sub')); writeFileSync(path.join(dir, 'a.txt'), 'x');
+  assert.equal(folderPath(base, 'sub'), path.join(base, 'sub'));
+  assert.equal(folderPath(base, ''), base);
+  assert.equal(code(() => folderPath(base, 'a.txt')), 'invalid');
+  assert.equal(code(() => folderPath(base, 'nope')), 'missing');
+  symlinkSync(outside, path.join(dir, 'escape'));
+  assert.equal(code(() => folderPath(base, 'escape')), 'invalid');
+  assert.equal(code(() => folderPath(base, '../outside')), 'invalid');
   done();
 });
