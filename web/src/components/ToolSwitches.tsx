@@ -25,6 +25,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
   const [off, setOff] = useState<string[]>([]);
   const [live, setLive] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState("");
   const groups = useOpenGroups();
 
   useEffect(() => {
@@ -37,7 +38,13 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
         setOff(r.off);
         setLive(r.live);
       })
-      .catch(() => !cancelled && setTools([]));
+      .catch((e) => {
+        if (cancelled) return;
+        // A deployment where this cannot work says so — a switch that silently
+        // does nothing is worse than one that is not there.
+        setRefusal(String(e).replace(/^Error:\s*/, ""));
+        setTools([]);
+      });
     return () => {
       cancelled = true;
     };
@@ -64,6 +71,10 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
   };
 
   if (!tools) return <p className="px-3 py-2 text-xs text-fg-subtle">Loading…</p>;
+
+  if (refusal) {
+    return <p className="px-3 py-2 text-xs text-fg-subtle">{refusal}</p>;
+  }
 
   if (!tools.length) {
     return (

@@ -17,11 +17,6 @@
  */
 export const BROWSER_MCP = "browser";
 
-/** Does this tool belong to the browser, and so to the grant rather than here? */
-export function browserTool(name: string): boolean {
-  return name.startsWith(`${BROWSER_MCP}_`);
-}
-
 /**
  * Which MCP server a tool came through, if any.
  *
@@ -42,6 +37,20 @@ export function mcpServerOf(name: string, servers: Iterable<string>): string | u
   }
   return best;
 }
+
+/**
+ * Does this tool come from the agent's browser?
+ *
+ * Asked through mcpServerOf rather than by prefix, because the prefix is
+ * ambiguous: a server called `browser_staging` names a tool
+ * `browser_staging_click`, which starts with `browser_` and is not the
+ * browser's. Whether a conversation may drive the signed-in Chromium hangs on
+ * this answer, so it is the careful one.
+ */
+export function browserTool(name: string, servers: Iterable<string>): boolean {
+  return mcpServerOf(name, servers) === BROWSER_MCP;
+}
+
 
 /** What to file a tool under: its MCP server where it has one, its package otherwise. */
 export function toolSource(name: string, source: string, servers: Iterable<string>): string {
@@ -92,7 +101,11 @@ export function exceptionsFor(
   const off = new Set(wantedOff);
   const defaults = new Set(defaultsOff);
   const exceptions: ToolExceptions = { off: [], on: [] };
-  for (const name of new Set([...known, ...off, ...defaults])) {
+  // Only the tools the caller answered about. Walking the defaults as well
+  // would write an "on" exception for every default-off tool the caller never
+  // saw — an extension that failed to load, a server that is not attached —
+  // and that exception outlives the default it was silently cancelling.
+  for (const name of new Set([...known, ...off])) {
     if (off.has(name) && !defaults.has(name)) exceptions.off.push(name);
     if (!off.has(name) && defaults.has(name)) exceptions.on.push(name);
   }

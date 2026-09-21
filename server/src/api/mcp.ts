@@ -91,6 +91,19 @@ export function readMcpFile(): { config: McpFile; raw: string; error?: string } 
   }
 }
 
+/**
+ * The names of the servers configured, which is what tells an MCP tool apart
+ * from any other: the adapter registers them all as one package and names each
+ * tool `<server>_<tool>`.
+ */
+export function mcpServerNames(): string[] {
+  try {
+    return Object.keys(readMcpFile().config.mcpServers ?? {});
+  } catch {
+    return [];
+  }
+}
+
 export function writeMcpFile(config: McpFile): void {
   const file = mcpConfigPath();
   mkdirSync(path.dirname(file), { recursive: true });

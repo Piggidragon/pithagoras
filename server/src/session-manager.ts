@@ -831,8 +831,13 @@ class SessionManager extends EventEmitter {
     return this.live.get(sessionId)?.client.respondUi(id, response) ?? false;
   }
 
-  /** Everything off for this conversation: the default, bent by its own exceptions. */
-  private offFor(sessionId: string, names: string[] = []): string[] {
+  /**
+   * Everything off for this conversation: the default, bent by its own
+   * exceptions. The whole picture, including tools that are not loaded right
+   * now — which is what the page has to be given, or its next answer would
+   * drop the exceptions it was never shown.
+   */
+  offFor(sessionId: string, names: string[] = []): string[] {
     return effectiveOff(
       [...names, ...knownTools().map((t) => t.name)],
       toolDefaultsOff(),
@@ -885,8 +890,14 @@ class SessionManager extends EventEmitter {
   async setTools(sessionId: string, wantedOff: string[]): Promise<string[]> {
     const client = this.live.get(sessionId)?.client;
     const listed = client?.getTools ? await client.getTools() : [];
-    const known = [...listed.map((t) => t.name), ...knownTools().map((t) => t.name)];
-    setSessionTools(sessionId, exceptionsFor(wantedOff, toolDefaultsOff(), known));
+    // What this call is answering about: the tools this session registered,
+    // plus the ones it already holds an exception for. Not the portal-wide
+    // catalogue — a tool that is merely not loaded in this run was not on the
+    // page, so nobody said anything about it and nothing should be written
+    // down in their name.
+    const held = sessionTools(sessionId);
+    const answered = [...listed.map((t) => t.name), ...held.off, ...held.on];
+    setSessionTools(sessionId, exceptionsFor(wantedOff, toolDefaultsOff(), answered));
     const off = this.offFor(sessionId, listed.map((t) => t.name));
     await client?.setToolsOff?.(off);
     return off;

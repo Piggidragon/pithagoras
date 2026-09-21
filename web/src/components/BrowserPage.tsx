@@ -288,10 +288,27 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
 
         <section>
           <h3 className="mb-2 text-sm font-medium text-fg">Who may drive it</h3>
+          {/* The default first, because with the browser switched like any
+              other package that is the answer for almost every conversation.
+              Listing them all would be a list of every chat ever opened. */}
+          <p className="mb-2 rounded-xl border border-line bg-raised/40 px-3 py-2 text-xs text-fg-muted">
+            {status.byDefault ? (
+              <>
+                Every conversation, unless its own tools say otherwise. Switch the browser's tools
+                off in <span className="text-fg">Settings → Tools</span> to change that everywhere,
+                or in one chat from the blocks icon beside the composer.
+              </>
+            ) : (
+              <>
+                No conversation, unless its own tools say otherwise. Switch the browser's tools on
+                in <span className="text-fg">Settings → Tools</span> to change that everywhere, or
+                in one chat from the blocks icon beside the composer.
+              </>
+            )}
+          </p>
           {status.sessions.length === 0 && status.routines.length === 0 ? (
             <p className="rounded-xl border border-dashed border-line px-3 py-5 text-center text-xs text-fg-faint">
-              Nobody yet. The browser is off by default; turn it on for a session under the chat
-              box, or for a routine on its own page.
+              Nothing has said otherwise. A routine gets it on its own page.
             </p>
           ) : (
             <ul className="space-y-1">
@@ -302,6 +319,9 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
                     className="flex w-full items-center gap-2 rounded-xl border border-line bg-raised/40 px-3 py-2 text-left transition hover:bg-fg/5"
                   >
                     <span className="min-w-0 flex-1 truncate text-sm text-fg">{s.title}</span>
+                    <span className="shrink-0 text-[11px] text-fg-faint">
+                      {s.allowed ? "on" : "off"}
+                    </span>
                     <span className="shrink-0 text-[11px] text-fg-faint">{s.kind}</span>
                   </button>
                 </li>

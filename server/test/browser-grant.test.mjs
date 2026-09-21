@@ -1,14 +1,26 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-// A database of its own, before anything opens the default one.
-process.env.DATA_DIR = mkdtempSync(path.join(tmpdir(), "pithagoras-browser-"));
+// A database and an agent directory of their own, before anything opens the
+// real ones.
+const home = mkdtempSync(path.join(tmpdir(), "pithagoras-browser-"));
+process.env.DATA_DIR = home;
+process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
+mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+// A server called `browser`, and one whose name merely starts with it.
+writeFileSync(
+  path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"),
+  JSON.stringify({ mcpServers: { browser: {}, browser_staging: {} } })
+);
 
 const {
+  adoptBrowserGrants,
   browserAllowed,
+  getDb,
+  toolDefaultsOff,
   createSession,
   getSession,
   rememberTools,
@@ -17,9 +29,11 @@ const {
 } = await import("../dist/db.js");
 
 const BROWSER = ["browser_browser_click", "browser_browser_navigate"];
+/** Another server's tools, which start with `browser_` and are not the browser. */
+const STAGING = ["browser_staging_click"];
 
 rememberTools([
-  ...BROWSER.map((name) => ({ name, source: "pi-mcp-adapter" })),
+  ...[...BROWSER, ...STAGING].map((name) => ({ name, source: "pi-mcp-adapter" })),
   { name: "web_search", source: "pi-web-access" },
 ]);
 
@@ -59,3 +73,36 @@ test("a tool that is not the browser's does not grant it", () => {
   setSessionTools("grant1", { off: BROWSER, on: ["web_search"] });
   assert.equal(browserAllowed(session()), false);
 });
+
+test("a server whose name merely starts with browser_ does not grant the browser", () => {
+  // browser_staging_click is on, the real browser's tools are off.
+  setSessionTools("grant1", { off: BROWSER, on: STAGING });
+  assert.equal(browserAllowed(session()), false);
+  setSessionTools("grant1", { off: [], on: [] });
+});
+
+test("an upgrade keeps the posture the portal had", () => {
+  // As it was before the browser became a server: off unless granted, and one
+  // conversation that had been granted it.
+  createSession({ id: "old-on", title: "granted", workspace: home, executor: "host" });
+  createSession({ id: "old-off", title: "not granted", workspace: home, executor: "host" });
+  getDb().prepare("UPDATE sessions SET browser = 1 WHERE id = 'old-on'").run();
+  setToolDefaultsOff([]);
+  setSessionTools("old-on", { off: [], on: [] });
+  setSessionTools("old-off", { off: [], on: [] });
+  getDb().prepare("DELETE FROM settings WHERE key = 'browser_tools_adopted'").run();
+
+  adoptBrowserGrants();
+
+  // Off by default now, so a chat that never asked does not suddenly have it.
+  for (const name of BROWSER) assert.ok(toolDefaultsOff().includes(name), name);
+  assert.equal(browserAllowed(getSession("old-off")), false);
+  // And the one that had it keeps it, as its own exception.
+  assert.equal(browserAllowed(getSession("old-on")), true);
+
+  // Run once: a later change by the operator is not undone.
+  setToolDefaultsOff([]);
+  adoptBrowserGrants();
+  assert.equal(browserAllowed(getSession("old-off")), true);
+});
+

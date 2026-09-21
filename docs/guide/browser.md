@@ -109,18 +109,48 @@ its own browser, no profile, no allowlist. If you have one, remove it.
 
 ## Who may drive it
 
-Off by default, everywhere. Turned on per session and per routine — a routine's
-own page has the switch.
+The browser reaches the agent as an MCP server, so it is switched where every
+other package is: the blocks icon beside the composer for one conversation,
+**Settings → Tools** for all of them. Having its tools is having the browser —
+a conversation with them all off is not offered them and does not reach the
+container. A routine still has its own switch on its own page.
+
+Like any other package, its tools are **on** unless something says otherwise.
+An installation that had the old per-session switch keeps what it had: on the
+first start after upgrading, the browser's tools are written into the defaults
+as off and the conversations that had been granted it are given it back. So an
+existing portal wakes up the way it went to sleep, and a new one starts like
+any other server.
+
+::: tip Turning it off everywhere
+**Settings → Tools → browser → all off**. That is the one switch; there is no
+second one to keep in step with it.
+:::
 
 Deliberately **not** gated on who is speaking. The agent has its own accounts and
 uses them as itself, including when it is helping a colleague. What balances
 that is visibility: every page it opens is recorded in [Audit](/guide/security).
 
+::: warning With `EXECUTOR=container`
+pi runs inside the container and never tells the portal what it registered, so
+there is no tool list to switch and the tools popover says so. The browser is
+granted per session over the API there (`PUT /api/sessions/:id/browser`), which
+is what the old switch wrote.
+:::
+
 ## Where it may go
 
 **Browser → Where it may go** takes one domain per line, `*.example.com` for
-subdomains. Empty means no restriction — the per-session switch is the gate, and
-a list nobody filled in should not quietly block everything.
+subdomains. Empty means no restriction.
+
+::: danger Read this one together with the section above
+That default was written when the browser was off until somebody turned it on,
+so an empty list blocked nothing that was not already blocked. It is on by
+default now. An empty allowlist and an untouched tools list means **every
+conversation can point the agent's signed-in browser anywhere** — so on a
+portal whose browser holds real logins, fill this in, or switch the browser's
+tools off by default and turn them on where you want them.
+:::
 
 ::: warning This is a check, not a wall
 It is applied when the agent asks for a URL. A page that redirects itself is not

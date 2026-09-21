@@ -872,6 +872,11 @@ export interface BrowserStatus {
   pages: { title: string; url: string }[];
   uiPort: string;
   allowlist: string;
-  sessions: { id: string; title: string; kind: string }[];
+  /** Is the browser wired up at all, whether or not it is running right now? */
+  configured: boolean;
+  /** Does a conversation that has never said anything about it get the browser? */
+  byDefault: boolean;
+  /** Only the conversations that disagree with that — see "Who may drive it". */
+  sessions: { id: string; title: string; kind: string; allowed: boolean }[];
   routines: { slug: string; name: string }[];
 }

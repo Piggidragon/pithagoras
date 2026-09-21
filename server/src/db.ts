@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting } from "./pi-settings.js";
 import { browserTool, toolEnabled } from "./tool-policy.js";
+import { mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
@@ -425,6 +426,8 @@ function migrate(d: Database.Database): void {
   if (noteCols.length && !noteCols.includes("pending_delivery")) {
     d.exec("ALTER TABLE notes ADD COLUMN pending_delivery INTEGER NOT NULL DEFAULT 0");
   }
+  // Last, because it reads the settings the tables above have to exist for.
+  adoptBrowserGrants(d);
 }
 
 export function createSession(row: {
@@ -984,6 +987,48 @@ export function routineGuards(slug: string | null | undefined): boolean {
 }
 
 /**
+ * Carry the old per-session browser grant into the tool switches.
+ *
+ * The browser used to be opt-in per conversation, stored in `sessions.browser`
+ * and off by default. It is an MCP server now, and a server's tools are on
+ * unless something says otherwise — which on an upgrade would hand every
+ * conversation that ever existed a browser signed into real accounts, because
+ * nobody had said otherwise about a switch that did not exist yet.
+ *
+ * So the posture is carried over rather than replaced: the browser's tools go
+ * into the defaults as off, and the conversations that had the grant get it
+ * back as their own exception. A new install is unaffected and starts the way
+ * any other server does. Run once, because after it the operator's own choices
+ * are the ones in there.
+ */
+export function adoptBrowserGrants(d: Database.Database = getDb()): void {
+  const done = d
+    .prepare("SELECT value FROM settings WHERE key = 'browser_tools_adopted'")
+    .get() as { value: string } | undefined;
+  if (done) return;
+
+  const servers = mcpServerNames();
+  const names = knownTools()
+    .map((t) => t.name)
+    .filter((name) => browserTool(name, servers));
+  // Nothing seen yet: no posture to carry, and the flag is set so a catalogue
+  // that fills in later is not retroactively switched off.
+  if (names.length) {
+    setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...names])]);
+    const granted = d
+      .prepare("SELECT id FROM sessions WHERE browser = 1 AND kind != 'routine'")
+      .all() as { id: string }[];
+    for (const { id } of granted) {
+      const tools = sessionTools(id);
+      setSessionTools(id, { off: tools.off, on: [...new Set([...tools.on, ...names])] });
+    }
+  }
+  d.prepare(
+    "INSERT INTO settings (key, value) VALUES ('browser_tools_adopted', '1') ON CONFLICT(key) DO UPDATE SET value = '1'"
+  ).run();
+}
+
+/**
  * Does this session get the browser? Routines answer for their own runs.
  *
  * For an ordinary conversation this is not stored any more: the browser is an
@@ -1001,11 +1046,37 @@ export function browserAllowed(session: SessionRow): boolean {
     ) as { browser: number } | undefined;
     return row ? row.browser === 1 : false;
   }
+  const servers = mcpServerNames();
+  const browserNames = knownTools()
+    .map((t) => t.name)
+    .filter((name) => browserTool(name, servers));
+  // Nothing registered to ask about — a container deployment, where pi is
+  // reached over RPC and never reports its registry. There the old per-session
+  // grant is still the only answer anyone has.
+  if (!browserNames.length) return session.browser === 1;
   const defaults = toolDefaultsOff();
   const exceptions = sessionTools(session.id);
-  return knownTools().some(
-    (tool) => browserTool(tool.name) && toolEnabled(tool.name, defaults, exceptions)
-  );
+  return browserNames.some((name) => toolEnabled(name, defaults, exceptions));
+}
+
+/** The conversations that disagree with the default about the browser. */
+export function browserExceptions(): SessionRow[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM sessions
+       WHERE tools_off LIKE '%browser%' OR tools_on LIKE '%browser%'
+       ORDER BY updated_at DESC`
+    )
+    .all() as SessionRow[];
+  const byDefault = browserByDefault();
+  return rows.filter((row) => browserAllowed(row) !== byDefault);
+}
+
+/** Is the browser on for a conversation that has never said anything about it? */
+export function browserByDefault(): boolean {
+  const servers = mcpServerNames();
+  const off = new Set(toolDefaultsOff());
+  return knownTools().some((t) => browserTool(t.name, servers) && !off.has(t.name));
 }
 
 /**

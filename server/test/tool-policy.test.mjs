@@ -69,11 +69,17 @@ test("but not one that did", () => {
   assert.equal(toolEnabled("a", ["a"], exceptions), true);
 });
 
-test("the browser's tools are known by the name the adapter gives them", () => {
-  assert.ok(browserTool("browser_browser_click"));
-  assert.ok(browserTool("browser_navigate"));
-  assert.ok(!browserTool("web_search"));
-  assert.ok(!browserTool("browserify"));
+test("the browser's tools are known by the server they came through", () => {
+  const servers = ["browser", "browser_staging"];
+  assert.ok(browserTool("browser_browser_click", servers));
+  assert.ok(browserTool("browser_navigate", servers));
+  assert.ok(!browserTool("web_search", servers));
+  assert.ok(!browserTool("browserify", servers));
+  // The one the prefix test used to get wrong, and it decides whether a
+  // conversation may drive a browser signed into real accounts.
+  assert.ok(!browserTool("browser_staging_click", servers));
+  // With no browser attached, nothing is the browser's.
+  assert.ok(!browserTool("browser_browser_click", ["jira"]));
 });
 
 test("a tool is filed under the MCP server it came through", () => {
@@ -89,4 +95,19 @@ test("the longer server name wins, so one does not claim another's tools", () =>
   assert.equal(mcpServerOf("browser_staging_click", ["browser", "browser_staging"]), "browser_staging");
   assert.equal(mcpServerOf("browser_click", ["browser", "browser_staging"]), "browser");
   assert.equal(mcpServerOf("web_search", ["browser"]), undefined);
+});
+
+test("a default-off tool nobody was shown is left alone, not switched on", () => {
+  // The page only ever lists what this run registered. Walking the defaults as
+  // well wrote an "on" exception for every tool that was merely not loaded —
+  // and that exception outlives the default it silently cancelled.
+  const exceptions = exceptionsFor(["web_search"], ["browser_browser_click"], ["web_search"]);
+  assert.deepEqual(exceptions.on, []);
+  assert.deepEqual(exceptions.off, ["web_search"]);
+});
+
+test("a default-off tool that was shown and left on is written down as on", () => {
+  const exceptions = exceptionsFor([], ["ast_grep_search"], ["ast_grep_search", "web_search"]);
+  assert.deepEqual(exceptions.on, ["ast_grep_search"]);
+  assert.deepEqual(exceptions.off, []);
 });

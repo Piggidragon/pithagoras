@@ -599,17 +599,30 @@ app.post("/api/sessions/:id/ui-response", (req, res) => {
  * that is idle says so, and the page offers to wake it rather than showing an
  * empty list as though there were no tools.
  */
+/**
+ * A container session reaches pi over RPC, which has no tool registry to ask
+ * and nothing to tell. Said plainly rather than answered with an empty list
+ * and a switch that does nothing.
+ */
+const TOOLS_UNSUPPORTED =
+  "Tools cannot be switched with EXECUTOR=container: pi runs inside the container and the portal never sees what it registered";
+
 app.get("/api/sessions/:id/tools", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   const { tools, live } = await sessions.getTools(session.id);
-  res.json({ tools, live, off: tools.filter((t) => !t.enabled).map((t) => t.name) });
+  // The whole off list, not only the tools loaded right now: the page sends
+  // this back on the next flip, and anything missing from it would read as
+  // "switch that one on again".
+  res.json({ tools, live, off: sessions.offFor(session.id) });
 });
 
 /** Switch tools off for this conversation. Everything not named is on. */
 app.put("/api/sessions/:id/tools", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   const off = req.body?.off;
   if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
     return res.status(400).json({ error: "off must be a list of tool names" });
@@ -645,6 +658,7 @@ app.get("/api/tools", (_req, res) => {
  * see working.
  */
 app.put("/api/tools", async (req, res) => {
+  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   const off = req.body?.off;
   if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
     return res.status(400).json({ error: "off must be a list of tool names" });

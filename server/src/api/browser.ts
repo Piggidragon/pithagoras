@@ -1,7 +1,15 @@
 import express, { type Router } from "express";
-import { browserAllowed, browserAllowlist, getDb, setBrowserAllowlist, type SessionRow } from "../db.js";
+import {
+  browserAllowed,
+  browserAllowlist,
+  browserByDefault,
+  browserExceptions,
+  getDb,
+  setBrowserAllowlist,
+  type SessionRow,
+} from "../db.js";
 import { BROWSER_MCP } from "../tool-policy.js";
-import { readMcpFile, writeMcpFile } from "./mcp.js";
+import { mcpServerNames, readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/browser-service.js";
 
 /**
@@ -142,11 +150,10 @@ export function browserRouter(): Router {
       // optional, and the portal works without it.
     }
 
-    // Asked of the tool switches rather than of a column: the browser is an
-    // MCP server like any other, and a conversation that has its tools has it.
-    const sessions = getDb()
-      .prepare("SELECT * FROM sessions ORDER BY updated_at DESC")
-      .all() as SessionRow[];
+    // The conversations that disagree with the default, not every one that
+    // may drive it: the browser is on unless switched off, so "all of them"
+    // is the answer almost always and it tells nobody anything.
+    const sessions = browserExceptions();
     const routines = getDb()
       .prepare("SELECT slug, name FROM routines WHERE browser = 1")
       .all() as { slug: string; name: string }[];
@@ -166,9 +173,16 @@ export function browserRouter(): Router {
       // The container itself, which the portal installs rather than compose.
       install: await service.status(),
       config: { user: service.config().user, hasPassword: Boolean(service.config().password) },
-      sessions: sessions
-        .filter((s) => browserAllowed(s))
-        .map((s) => ({ id: s.id, title: s.title, kind: s.kind })),
+      // Whether a conversation that has never said anything about it has it,
+      // and the ones that said otherwise.
+      byDefault: browserByDefault(),
+      configured: mcpServerNames().includes(MCP_NAME),
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        title: s.title,
+        kind: s.kind,
+        allowed: browserAllowed(s),
+      })),
       routines,
     });
   });
@@ -252,5 +266,28 @@ export function browserRouter(): Router {
    * Turn the browser on or off for one session. Takes effect on its next
    * launch: the tool list is fixed when pi starts.
    */
+  /**
+   * Grant the browser to one conversation, where the tool switches cannot.
+   *
+   * With EXECUTOR=container pi is reached over RPC and never reports what it
+   * registered, so the portal has no tool list to switch and browserAllowed()
+   * falls back to this column. On a host deployment the tools list is the
+   * answer and this would be a second one, so it is refused there rather than
+   * quietly writing a column nothing reads.
+   */
+  router.put("/sessions/:id/browser", (req, res) => {
+    if ((process.env.EXECUTOR || "host") !== "container") {
+      return res.status(400).json({
+        error:
+          "The browser is switched with its tools — open the tools list beside the composer, or Settings → Tools for every conversation",
+      });
+    }
+    const on = Boolean(req.body?.enabled);
+    const row = getDb().prepare("SELECT id FROM sessions WHERE id = ?").get(req.params.id);
+    if (!row) return res.status(404).json({ error: "Not found" });
+    getDb().prepare("UPDATE sessions SET browser = ? WHERE id = ?").run(on ? 1 : 0, req.params.id);
+    res.json({ enabled: on });
+  });
+
   return router;
 }

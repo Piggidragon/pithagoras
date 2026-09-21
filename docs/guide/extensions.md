@@ -101,10 +101,12 @@ disagree. It is now an MCP server like any other: its tools are in the list,
 switched one at a time or as a group, with a default like anything else.
 Having its tools is having the browser, so a conversation with them all off is
 not offered them and does not reach the container. Where it may go once it is
-there is still the [allowlist](/guide/add-ons)'s question, not this one.
-::: It takes effect from the next message — pi is told at once and there is
-no need to restart the conversation — and it is remembered per chat, including
-across a restart.
+there is still the [allowlist](/guide/browser#where-it-may-go)'s question, not this one.
+:::
+
+It takes effect from the next message — pi is told at once and there is no need
+to restart the conversation — and it is remembered per chat, including across a
+restart.
 
 The groups start shut, in both places. A handful of extensions is sixty tools,
 and sixty checkboxes is not a list anybody reads; each closed group says how
