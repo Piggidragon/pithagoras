@@ -172,6 +172,13 @@ inside a sentence belongs to the page that was fetched, not to a claim about
 where anything came from, and listing those would turn one fetched page into
 forty citations it never made.
 
+A tool that lists its own sources in the row it draws has said it better — it
+knows which of them it used — so those are left out here rather than said
+twice. Where it lists all of them the row disappears; where it lists none
+nothing changes. A drawing that is only an excerpt of the output does not
+count: a citation caught inside a preview is the output quoted back, not the
+tool claiming anything.
+
 The icons are each site's own favicon, asked for directly. No third-party icon
 service: that would tell someone else every domain the agent read, and the
 point of running this yourself is that nobody is told. A site without one gets

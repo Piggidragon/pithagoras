@@ -116,3 +116,84 @@ test("the shapes pi-web-access actually writes, together", () => {
     ["github.example", "Release notes"],
   ]);
 });
+
+// --- what the tool listed itself -------------------------------------------
+
+const link = (url: string, title?: string) => ({
+  url,
+  domain: url.replace(/^https?:\/\//, "").replace(/\/.*$/, ""),
+  ...(title ? { title } : {}),
+});
+
+test("a tool that listed no sources changes nothing", async () => {
+  const { omitDrawn } = await import("../web/src/tool-links.ts");
+  const links = [link("https://a.example/one", "The first thing")];
+  assert.deepEqual(omitDrawn(links, undefined, "out"), links);
+  assert.deepEqual(omitDrawn(links, ["5 sources", "a preview of the text"], "out"), links);
+});
+
+test("a source the tool listed by url is not listed twice", async () => {
+  const { omitDrawn } = await import("../web/src/tool-links.ts");
+  const links = [link("https://a.example/one"), link("https://b.example/two")];
+  const left = omitDrawn(links, ["  ▸ https://a.example/one"], "unrelated output");
+  assert.deepEqual(left.map((l) => l.url), ["https://b.example/two"]);
+});
+
+test("a source the tool listed by title is not listed twice either", async () => {
+  const { omitDrawn } = await import("../web/src/tool-links.ts");
+  const links = [link("https://a.example/one", "Write-Ahead Logging - SQLite")];
+  assert.deepEqual(omitDrawn(links, ["  ▸ Write-Ahead Logging - SQLite · a.example"], ""), []);
+});
+
+test("a title the tool truncated still counts as listed", async () => {
+  const { omitDrawn } = await import("../web/src/tool-links.ts");
+  const long = "Write-Ahead Logging and everything that follows from it in practice";
+  const links = [link("https://a.example/one", long)];
+  assert.deepEqual(omitDrawn(links, [`  ▸ ${long.slice(0, 47)}...`], ""), []);
+});
+
+test("colour in the drawing does not hide what it says", async () => {
+  const { omitDrawn } = await import("../web/src/tool-links.ts");
+  const links = [link("https://a.example/one", "The first thing here")];
+  const drawn = ["  \u001b[38;5;188m▸ The first thing here\u001b[39m\u001b[38;5;241m · a.example\u001b[39m"];
+  assert.deepEqual(omitDrawn(links, drawn, ""), []);
+});
+
+test("a title too short to be distinctive is matched on its url alone", async () => {
+  const { omitDrawn } = await import("../web/src/tool-links.ts");
+  const links = [link("https://a.example/one", "Docs")];
+  assert.equal(omitDrawn(links, ["reading the Docs for a while"], "").length, 1);
+  assert.equal(omitDrawn(links, ["▸ https://a.example/one"], "").length, 0);
+});
+
+test("a tool that listed every source leaves no row at all", async () => {
+  const { omitDrawn } = await import("../web/src/tool-links.ts");
+  const links = [link("https://a.example/one"), link("https://b.example/two")];
+  assert.deepEqual(omitDrawn(links, ["https://a.example/one", "https://b.example/two"], ""), []);
+});
+
+/**
+ * The one that matters: a tool with nothing better to draw shows the first of
+ * the output back, and a citation caught in that excerpt is not a claim.
+ */
+test("a citation inside a preview of the output is the output, not a list", async () => {
+  const { omitDrawn, extractLinks } = await import("../web/src/tool-links.ts");
+  const output = [
+    "Some description of the thing.",
+    "Source: Write-Ahead Logging - SQLite (https://www.sqlite.org/wal.html)",
+    "",
+    "More text.",
+    "Source: Pragma statements (https://www.sqlite.org/pragma.html)",
+  ].join("\n");
+  const drawn = ["5 sources", ...output.split("\n").slice(0, 2)];
+  const links = extractLinks(output);
+  assert.equal(links.length, 2);
+  assert.deepEqual(omitDrawn(links, drawn, output), links);
+});
+
+test("but a list the tool built out of the same sources still counts", async () => {
+  const { omitDrawn, extractLinks } = await import("../web/src/tool-links.ts");
+  const output = "Source: Write-Ahead Logging - SQLite (https://www.sqlite.org/wal.html)";
+  const drawn = ["── Curated Results ──", "  ▸ Write-Ahead Logging - SQLite · sqlite.org"];
+  assert.deepEqual(omitDrawn(extractLinks(output), drawn, output), []);
+});

@@ -1,5 +1,5 @@
 import type { PortalEvent } from "./api";
-import { extractLinks, type ToolLink } from "./tool-links";
+import { extractLinks, omitDrawn, type ToolLink } from "./tool-links";
 
 export type Item =
   | { kind: "user"; id: string; seq: number; text: string; audio?: boolean }
@@ -151,7 +151,13 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
             const drawn = toolRender(p);
             if (drawn) it.render = drawn;
             it.output = toolOutput(p);
-            const links = extractLinks(it.output);
+            // Only the ones the tool did not already list itself: it knows
+            // which of them it used, and saying it twice is saying it twice.
+            const links = omitDrawn(
+              extractLinks(it.output),
+              [...(it.render?.collapsed ?? []), ...(it.render?.expanded ?? [])],
+              it.output
+            );
             if (links.length) it.links = links;
             break;
           }

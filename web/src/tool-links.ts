@@ -145,3 +145,61 @@ function titleFor(
   }
   return undefined;
 }
+
+/**
+ * A title short enough to appear by accident in unrelated prose.
+ *
+ * "Home" or "Docs" would match somewhere in almost any page, so below this
+ * length only the URL itself counts as having been drawn already.
+ */
+const MIN_TITLE_MATCH = 12;
+
+/** How much of a title to compare on: renderers truncate long ones with an ellipsis. */
+const TITLE_PREFIX = 40;
+
+const flatten = (text: string): string =>
+  text
+    // CSI and OSC — colour and links, which the drawing is full of.
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+/**
+ * Drop the sources the tool listed itself.
+ *
+ * A tool that lists its sources in its own row has said it better than this can
+ * — it knows which of them it actually used — and saying it again underneath is
+ * saying it twice. What it left out is still worth carrying, so this removes
+ * links rather than the list: where a tool lists every source the row goes away
+ * entirely, and where it lists none nothing changes.
+ *
+ * The trap is that a drawing is often an excerpt of the very output these were
+ * read from. pi-web-access shows the first five hundred characters of the
+ * result when it has nothing better, and a citation inside that excerpt is the
+ * output quoted back, not the tool claiming anything. So a line only counts as
+ * the tool's own when it is not in the output verbatim.
+ */
+export function omitDrawn(
+  links: ToolLink[],
+  drawn: string[] | undefined,
+  output: string | undefined
+): ToolLink[] {
+  if (!drawn?.length) return links;
+  const lines = drawn.map(flatten).filter((line) => line.trim());
+  if (!lines.length) return links;
+  const source = flatten(output ?? "");
+  // A line the output already contains is the output being shown back, however
+  // it got there. Only what the tool composed itself is a claim.
+  const composed = lines.filter((line) => !source.includes(line.trim()));
+  if (!composed.length) return links;
+
+  return links.filter((link) => !composed.some((line) => mentions(line, link)));
+}
+
+function mentions(line: string, link: ToolLink): boolean {
+  if (line.includes(link.url.toLowerCase())) return true;
+  const title = link.title?.trim() ?? "";
+  if (title.length < MIN_TITLE_MATCH) return false;
+  return line.includes(flatten(title.slice(0, TITLE_PREFIX)));
+}
