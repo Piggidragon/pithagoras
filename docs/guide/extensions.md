@@ -96,6 +96,12 @@ one go. It takes effect from the next message — pi is told at once and there i
 no need to restart the conversation — and it is remembered per chat, including
 across a restart.
 
+The groups start shut, in both places. A handful of extensions is sixty tools,
+and sixty checkboxes is not a list anybody reads; each closed group says how
+many of its tools are off, which is the only thing worth knowing from outside
+it. The ones you open stay open, here and in the settings — they are the same
+groups asked about at two scopes.
+
 ### And what every chat starts with
 
 Per chat is right for "not this time" and wrong for "hardly ever" — nobody

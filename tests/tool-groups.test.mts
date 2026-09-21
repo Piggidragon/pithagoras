@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groupTools, nextOff } from "../web/src/tool-groups.ts";
+import { groupSummary, groupTools, nextOff, toggleOpen } from "../web/src/tool-groups.ts";
 
 const tool = (name: string, source: string, enabled = true) => ({
   name,
@@ -71,4 +71,24 @@ test("switching off what is already off changes nothing", () => {
  */
 test("a name the session has never heard of is kept", () => {
   assert.deepEqual(nextOff(["gone_tool"], ["web_search"], false), ["gone_tool", "web_search"]);
+});
+
+test("a group shut says whether anything in it is off", () => {
+  const [group] = groupTools([tool("a", "ext"), tool("b", "ext")]);
+  assert.equal(groupSummary(group), "2 on");
+});
+
+test("a group with something switched off says how much", () => {
+  const [group] = groupTools([tool("a", "ext"), tool("b", "ext", false)]);
+  assert.equal(groupSummary(group), "1 of 2 off");
+});
+
+test("a group switched off entirely says so without counting", () => {
+  const [group] = groupTools([tool("a", "ext", false), tool("b", "ext", false)]);
+  assert.equal(groupSummary(group), "2 off");
+});
+
+test("opening a group and shutting it again", () => {
+  assert.deepEqual(toggleOpen([], "pi-web-access"), ["pi-web-access"]);
+  assert.deepEqual(toggleOpen(["pi-lens", "pi-web-access"], "pi-lens"), ["pi-web-access"]);
 });

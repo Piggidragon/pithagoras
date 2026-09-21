@@ -62,3 +62,22 @@ export function nextOff(off: string[], names: string[], enabled: boolean): strin
   }
   return [...next].sort();
 }
+
+/**
+ * What a group says about itself while it is shut.
+ *
+ * A closed group has to answer the only question worth asking from the
+ * outside — is anything in here switched off — or closing them would hide the
+ * thing the list exists to show.
+ */
+export function groupSummary(group: ToolGroup): string {
+  const total = group.tools.length;
+  if (group.allOff) return `${total} off`;
+  const off = group.tools.filter((t) => !t.enabled).length;
+  return off ? `${off} of ${total} off` : `${total} on`;
+}
+
+/** Opening one group, or shutting it. */
+export function toggleOpen(open: string[], source: string): string[] {
+  return open.includes(source) ? open.filter((s) => s !== source) : [...open, source];
+}

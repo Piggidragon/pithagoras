@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { api, type PortalTool } from "../api";
-import { groupTools, nextOff } from "../tool-groups";
+import { groupSummary, groupTools, nextOff } from "../tool-groups";
+import { useOpenGroups } from "../use-open-groups";
 
 /**
  * Which tools this conversation may use.
@@ -20,6 +22,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
   const [off, setOff] = useState<string[]>([]);
   const [live, setLive] = useState(true);
   const [busy, setBusy] = useState(false);
+  const groups = useOpenGroups();
 
   useEffect(() => {
     let cancelled = false;
@@ -73,12 +76,27 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="max-h-80 overflow-y-auto">
-      {groupTools(tools).map((group) => (
+      {groupTools(tools).map((group) => {
+        const open = groups.isOpen(group.source);
+        return (
         <div key={group.source} className="border-b border-line/60 last:border-0">
-          <div className="flex items-center gap-2 px-3 py-1.5">
-            <p className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-muted">
-              {group.source}
-            </p>
+          <div className="flex items-center gap-1 px-1.5 py-1.5">
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={() => groups.toggle(group.source)}
+              className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left transition hover:bg-fg/5"
+            >
+              {open ? (
+                <LuChevronDown className="h-3 w-3 shrink-0 text-fg-faint" />
+              ) : (
+                <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
+              )}
+              <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-muted">
+                {group.source}
+              </span>
+              <span className="shrink-0 text-[10px] text-fg-faint">{groupSummary(group)}</span>
+            </button>
             <button
               type="button"
               disabled={busy}
@@ -88,7 +106,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
               {group.allOff ? "all on" : "all off"}
             </button>
           </div>
-          <ul className="pb-1">
+          <ul className={open ? "pb-1" : "hidden"}>
             {group.tools.map((tool) => (
               <li key={tool.name}>
                 <label
@@ -121,7 +139,8 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
             ))}
           </ul>
         </div>
-      ))}
+        );
+      })}
       <p className="px-3 py-1.5 text-[10px] text-fg-faint">
         Applies from the next message, for this conversation. Settings → Tools sets what every
         conversation starts with.

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { api } from "../api";
-import { groupTools, nextOff } from "../tool-groups";
+import { groupSummary, groupTools, nextOff } from "../tool-groups";
+import { useOpenGroups } from "../use-open-groups";
 
 /**
  * Which tools every conversation starts with.
@@ -20,6 +22,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   const [off, setOff] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const groups = useOpenGroups();
 
   useEffect(() => {
     api
@@ -71,12 +74,27 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
           {/* Read from the switches rather than from what was loaded: the list
               is what exists, `off` is what has been decided about it, and only
               the second changes while this is open. */}
-          {groupTools(tools.map((t) => ({ ...t, enabled: !off.includes(t.name) }))).map((group) => (
+          {groupTools(tools.map((t) => ({ ...t, enabled: !off.includes(t.name) }))).map((group) => {
+            const open = groups.isOpen(group.source);
+            return (
             <div key={group.source} className="border-b border-line last:border-0">
-              <div className="flex items-center gap-2 bg-raised/40 px-3 py-1.5">
-                <p className="min-w-0 flex-1 truncate text-xs font-medium text-fg-muted">
-                  {group.source}
-                </p>
+              <div className="flex items-center gap-1 bg-raised/40 px-1.5 py-1.5">
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => groups.toggle(group.source)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left transition hover:bg-fg/5"
+                >
+                  {open ? (
+                    <LuChevronDown className="h-3 w-3 shrink-0 text-fg-faint" />
+                  ) : (
+                    <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-fg-muted">
+                    {group.source}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-fg-faint">{groupSummary(group)}</span>
+                </button>
                 <button
                   type="button"
                   disabled={busy}
@@ -86,7 +104,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                   {group.allOff ? "all on" : "all off"}
                 </button>
               </div>
-              <ul className="py-1">
+              <ul className={open ? "py-1" : "hidden"}>
                 {group.tools.map((tool) => (
                   <li key={tool.name}>
                     <label className="flex cursor-pointer items-center gap-2 px-3 py-1 text-xs transition hover:bg-fg/5">
@@ -109,7 +127,8 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                 ))}
               </ul>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </>
