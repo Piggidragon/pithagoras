@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { LuCircleAlert, LuInfo, LuTriangleAlert, LuX } from "react-icons/lu";
 import type { ExtensionNotice, ExtensionStatus, ExtensionWidget } from "../extension-ui";
 
@@ -83,10 +83,16 @@ function Notice({
   onDismiss: (id: number) => void;
 }) {
   const Icon = ICONS[notice.level];
+  // Held in a ref rather than watched: the parent hands down a new closure on
+  // every render, and this page re-renders on every event the session streams.
+  // Depending on it would restart the timer faster than it could ever run out,
+  // and a notice raised mid-reply would never go away on its own.
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
   useEffect(() => {
-    const t = setTimeout(() => onDismiss(notice.id), LINGER[notice.level]);
+    const t = setTimeout(() => dismiss.current(notice.id), LINGER[notice.level]);
     return () => clearTimeout(t);
-  }, [notice.id, notice.level, onDismiss]);
+  }, [notice.id, notice.level]);
 
   return (
     <div

@@ -29,6 +29,36 @@ export type Item =
 const MAX_OUTPUT = 20_000;
 
 /**
+ * The sources a tool's output names, worked out once per tool call.
+ *
+ * The transcript is rebuilt from the whole event list on every streamed
+ * delta — tens of times a second while a reply is coming in. Reading the links
+ * out of every tool result each time means a regex pass over every output in
+ * the conversation per frame, on the thread that has to draw it. Nothing about
+ * the answer can change once the tool has ended, so it is kept against the
+ * event that produced it. Held weakly: the entry goes when the event does.
+ */
+const linkCache = new WeakMap<object, ToolLink[]>();
+
+function toolLinks(
+  event: object,
+  output: string | undefined,
+  render: { collapsed: string[]; expanded?: string[] } | undefined
+): ToolLink[] {
+  const seen = linkCache.get(event);
+  if (seen) return seen;
+  // Only the ones the tool did not already list itself: it knows which of them
+  // it used, and saying it twice is saying it twice.
+  const links = omitDrawn(
+    extractLinks(output),
+    [...(render?.collapsed ?? []), ...(render?.expanded ?? [])],
+    output
+  );
+  linkCache.set(event, links);
+  return links;
+}
+
+/**
  * What the tool handed back, as text.
  *
  * Two shapes, because pi has two: a content array like a message, and the
@@ -151,13 +181,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
             const drawn = toolRender(p);
             if (drawn) it.render = drawn;
             it.output = toolOutput(p);
-            // Only the ones the tool did not already list itself: it knows
-            // which of them it used, and saying it twice is saying it twice.
-            const links = omitDrawn(
-              extractLinks(it.output),
-              [...(it.render?.collapsed ?? []), ...(it.render?.expanded ?? [])],
-              it.output
-            );
+            const links = toolLinks(ev, it.output, it.render);
             if (links.length) it.links = links;
             break;
           }

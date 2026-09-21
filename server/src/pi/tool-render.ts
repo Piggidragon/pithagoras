@@ -37,11 +37,20 @@ const RENDER_COLS = 100;
 const MAX_LINES = 400;
 const MAX_CHARS = 40_000;
 
-/** Per tool call, because pi's contract shares it between the call and the result. */
+/**
+ * Per tool call, because pi's contract shares it between the call and the
+ * result.
+ *
+ * The two result views are kept apart. pi hands a renderer the component it
+ * built last time so it can update that one instead of building another, and
+ * what it built for the open row is not what it built for the closed one —
+ * handing over the wrong one would have it update the view nobody asked about.
+ */
 interface CallState {
   state: Record<string, unknown>;
   lastCall?: TuiComponent;
-  lastResult?: TuiComponent;
+  lastCollapsed?: TuiComponent;
+  lastExpanded?: TuiComponent;
 }
 
 export class ToolRenderer {
@@ -78,7 +87,7 @@ export class ToolRenderer {
         const component = definition.renderCall(
           event.args,
           this.runtime.theme,
-          this.context(call, event, false)
+          this.context(call, event, call.lastCall)
         );
         call.lastCall = component;
         return component ? { collapsed: draw(component) } : undefined;
@@ -89,10 +98,9 @@ export class ToolRenderer {
         const isPartial = event.type === "tool_execution_update";
         const result = isPartial ? event.partialResult : event.result;
         if (!result) return undefined;
-        const context = this.context(call, event, true);
-        const collapsed = this.draw(definition, result, { expanded: false, isPartial }, context);
+        const collapsed = this.drawResult(definition, result, isPartial, call, event, false);
         if (!collapsed) return undefined;
-        const expanded = this.draw(definition, result, { expanded: true, isPartial }, context);
+        const expanded = this.drawResult(definition, result, isPartial, call, event, true);
         // A tool that ignores the flag draws the same thing twice; offering to
         // open it would be offering nothing.
         return same(collapsed, expanded) ? { collapsed } : { collapsed, expanded };
@@ -114,24 +122,38 @@ export class ToolRenderer {
     this.calls.clear();
   }
 
-  private draw(
+  private drawResult(
     definition: any,
     result: unknown,
-    options: { expanded: boolean; isPartial: boolean },
-    context: Record<string, unknown>
+    isPartial: boolean,
+    call: CallState,
+    event: any,
+    expanded: boolean
   ): string[] | undefined {
-    const component = definition.renderResult(result, options, this.runtime.theme, context);
+    const last = expanded ? call.lastExpanded : call.lastCollapsed;
+    const component = definition.renderResult(
+      result,
+      { expanded, isPartial },
+      this.runtime.theme,
+      this.context(call, event, last)
+    );
+    if (expanded) call.lastExpanded = component;
+    else call.lastCollapsed = component;
     return component ? draw(component) : undefined;
   }
 
-  private context(call: CallState, event: any, isResult: boolean): Record<string, unknown> {
+  private context(
+    call: CallState,
+    event: any,
+    lastComponent: TuiComponent | undefined
+  ): Record<string, unknown> {
     return {
       args: event.args,
       toolCallId: String(event.toolCallId ?? ""),
       // Nothing here redraws on its own: an event produced this, and the next
       // event will produce the next one.
       invalidate: () => {},
-      lastComponent: isResult ? call.lastResult : call.lastCall,
+      lastComponent,
       state: call.state,
       cwd: this.cwd,
       executionStarted: true,
@@ -139,14 +161,19 @@ export class ToolRenderer {
   }
 }
 
-/** One render of a component that is only wanted for its lines. */
+/**
+ * One render of a component that is only wanted for its lines.
+ *
+ * Released rather than disposed: the component is the tool's, kept by it
+ * between renders, and this surface only borrowed it for a drawing.
+ */
 function draw(component: TuiComponent): string[] {
   const surface = new TuiSurface({ cols: RENDER_COLS, rows: MAX_LINES, onFrame: () => {} });
   try {
     surface.attach(component);
     return cap(surface.lines());
   } finally {
-    surface.dispose();
+    surface.release();
   }
 }
 

@@ -100,6 +100,7 @@ out of it, by `..` or by a link, is refused with 400.
 | `POST /api/sessions/:id/ui-response` | `{ id, value?, cancelled? }` — answer an extension dialog |
 | `POST /api/sessions/:id/ui-input` | `{ id, data }` — a keystroke for a screen an extension is drawing, as a terminal would have sent it |
 | `POST /api/sessions/:id/ui-size` | `{ id, cols, rows }` — how big that screen is here. Answers `{ ok, frame }`, the screen as it stands |
+| `GET /api/favicon?domain=` | A cited site's icon, fetched by the portal so your browser never touches the site. `404` when it has none |
 
 `prompt` returns as soon as pi accepts the message, **not** when the work
 finishes. Watch the event stream for progress.

@@ -43,6 +43,8 @@ interface Overlay {
   hidden: boolean;
   capturing: boolean;
   handle: OverlayHandle;
+  /** What had the focus when this overlay took it, so it can be given back. */
+  restore: TuiComponent | null;
 }
 
 /** What showOverlay() hands back, as pi-tui defines it. */
@@ -99,7 +101,6 @@ export class TuiSurface {
   private overlays: Overlay[] = [];
   private listeners: InputListener[] = [];
   private focused: TuiComponent | null = null;
-  private restore: TuiComponent | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastFrameAt = 0;
   private stopped = false;
@@ -193,13 +194,14 @@ export class TuiSurface {
       hidden: false,
       capturing: !options?.nonCapturing,
       handle: null as unknown as OverlayHandle,
+      restore: null,
     };
     entry.handle = {
       hide: () => {
         const at = this.overlays.indexOf(entry);
         if (at < 0) return;
         this.overlays.splice(at, 1);
-        if (this.focused === component) this.setFocus(this.restore);
+        if (this.focused === component) this.setFocus(this.live(entry.restore));
         this.requestRender();
       },
       setHidden: (hidden: boolean) => {
@@ -208,11 +210,11 @@ export class TuiSurface {
       },
       isHidden: () => entry.hidden,
       focus: () => {
-        if (this.focused !== component) this.restore = this.focused;
+        if (this.focused !== component) entry.restore = this.focused;
         this.setFocus(component);
       },
       unfocus: (opts?: { target: TuiComponent | null }) => {
-        this.setFocus(opts ? opts.target : this.restore);
+        this.setFocus(opts ? opts.target : this.live(entry.restore));
       },
       isFocused: () => this.focused === component,
     };
@@ -325,13 +327,38 @@ export class TuiSurface {
   }
 
   dispose(): void {
-    this.stop();
     for (const o of this.overlays) safely(() => o.component.dispose?.());
     for (const c of this.children) safely(() => c.dispose?.());
+    this.release();
+  }
+
+  /**
+   * Let go of the components without ending them.
+   *
+   * dispose() ends what it holds, which is right for a screen this surface was
+   * built around. A component that belongs to someone else — a tool's own row
+   * renderer, which pi's contract lets a tool keep and redraw — is borrowed for
+   * one drawing, and ending it would take it away from its owner.
+   */
+  release(): void {
+    this.stop();
     this.overlays = [];
     this.children = [];
     this.listeners = [];
     this.focused = null;
+  }
+
+  /**
+   * The saved focus, if it is still on screen. Overlays nest, so what an
+   * overlay took the focus from is often another overlay — and by the time it
+   * is handed back that one may have closed. Focus on a component that is no
+   * longer drawn takes every keystroke with it and the screen underneath goes
+   * dead while still looking fine.
+   */
+  private live(component: TuiComponent | null): TuiComponent | null {
+    if (!component) return null;
+    if (this.children.includes(component)) return component;
+    return this.overlays.some((o) => o.component === component) ? component : null;
   }
 
   private inputTarget(): TuiComponent | null {

@@ -56,3 +56,21 @@ test("a failed tool still shows what it said, as an error", () => {
   assert.equal(item.status, "error");
   assert.equal(item.output, "connection refused");
 });
+
+test("the sources of a tool call are worked out once, not on every rebuild", () => {
+  // The transcript is rebuilt from the whole event list on every streamed
+  // delta; reading the links out again each time is a regex pass over every
+  // tool result in the conversation, per frame.
+  const events = [
+    ev(1, "tool_execution_start", { toolName: "web_search", toolCallId: "c1", args: { q: "x" } }),
+    ev(2, "tool_execution_end", {
+      toolName: "web_search",
+      toolCallId: "c1",
+      result: { output: "Source: https://example.com" },
+    }),
+  ];
+  const first = (buildTranscript(events).find((i) => i.kind === "tool") as any).links;
+  const again = (buildTranscript(events).find((i) => i.kind === "tool") as any).links;
+  assert.equal(first.length, 1);
+  assert.equal(again, first);
+});

@@ -26,6 +26,7 @@ import {
   type WizardInput,
 } from "./agent-setup.js";
 import { sessions, EXECUTOR_KIND } from "./session-manager.js";
+import { favicon, validDomain } from "./favicons.js";
 import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
@@ -608,6 +609,27 @@ app.post("/api/sessions/:id/ui-size", (req, res) => {
   // yet — reloading mid-dialog otherwise showed an empty terminal until the
   // extension happened to redraw.
   res.json({ ok, frame: sessions.uiFrame(session.id, id) });
+});
+
+/**
+ * A site's icon for the sources list.
+ *
+ * Fetched here rather than by the page: see favicons.ts. A site with no icon
+ * gets a 404 and the page draws its initial instead.
+ */
+app.get("/api/favicon", async (req, res) => {
+  const domain = String(req.query.domain ?? "");
+  if (!validDomain(domain)) return res.status(400).json({ error: "domain required" });
+  const icon = await favicon(domain);
+  if (!icon) {
+    // Cached as a miss by the browser too, or every reopened conversation asks
+    // again for an icon that is not coming.
+    res.set("Cache-Control", "public, max-age=3600");
+    return res.status(404).end();
+  }
+  res.set("Content-Type", icon.type);
+  res.set("Cache-Control", "public, max-age=604800, immutable");
+  res.send(icon.body);
 });
 
 app.post("/api/sessions/:id/abort", async (req, res) => {

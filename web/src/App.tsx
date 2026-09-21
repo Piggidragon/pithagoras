@@ -434,9 +434,15 @@ function Shell({
           sessionId={active.id}
           request={uiQueue[0]}
           frames={frames}
+          // By id, not by position: a drawn screen is taken off the queue by
+          // the `extension_ui_done` event as well, which usually arrives
+          // first. Dropping whatever is at the front would drop the dialog
+          // queued behind it, and its extension would wait out the timeout
+          // for an answer nobody was ever shown the question for.
           onDone={() => {
-            frames.forget(uiQueue[0].id);
-            setUiQueue((q) => q.slice(1));
+            const { id } = uiQueue[0];
+            frames.forget(id);
+            setUiQueue((q) => q.filter((x) => x.id !== id));
           }}
         />
       )}

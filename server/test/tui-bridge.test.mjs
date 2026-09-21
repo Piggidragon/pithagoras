@@ -126,6 +126,47 @@ test("an overlay is drawn under the screen and takes the keyboard until it is hi
   surface.dispose();
 });
 
+test("closing nested overlays hands the keyboard back to the screen underneath", () => {
+  const surface = new TuiSurface({ cols: 20, rows: 10, onFrame: () => {} });
+  const base = stub(["base"]);
+  surface.attach(base);
+  // A picker that opens a confirmation, which is the shape that used to leave
+  // the keyboard on an overlay that had already closed.
+  const first = surface.showOverlay(stub(["picker"]));
+  const second = surface.showOverlay(stub(["confirm"]));
+  second.hide();
+  first.hide();
+  surface.input("y");
+  assert.deepEqual(base.typed, ["y"]);
+  surface.dispose();
+});
+
+test("overlays closed out of order do not leave the keyboard on one that has gone", () => {
+  const surface = new TuiSurface({ cols: 20, rows: 10, onFrame: () => {} });
+  const base = stub(["base"]);
+  surface.attach(base);
+  const first = surface.showOverlay(stub(["picker"]));
+  const second = surface.showOverlay(stub(["confirm"]));
+  // The one underneath goes first, so what the top one saved to hand back is
+  // no longer on the screen.
+  first.hide();
+  second.hide();
+  surface.input("k");
+  assert.deepEqual(base.typed, ["k"]);
+  surface.dispose();
+});
+
+test("a borrowed component survives the surface that drew it", () => {
+  const surface = new TuiSurface({ cols: 20, rows: 5, onFrame: () => {} });
+  const component = stub(["row"]);
+  surface.attach(component);
+  assert.deepEqual(surface.lines(), ["row"]);
+  surface.release();
+  assert.equal(component.disposed, 0);
+  surface.dispose();
+  assert.equal(component.disposed, 0);
+});
+
 test("a non-capturing overlay is drawn but leaves the keyboard alone", async () => {
   const surface = new TuiSurface({ cols: 20, rows: 10, onFrame: () => {} });
   const base = stub(["base"]);

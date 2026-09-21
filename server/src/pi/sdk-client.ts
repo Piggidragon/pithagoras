@@ -625,7 +625,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       const ms = typeof options?.timeout === "number" ? options.timeout : 300_000;
       timer = setTimeout(() => finish(undefined), ms);
       if (typeof timer.unref === "function") timer.unref();
-      options?.signal?.addEventListener?.("abort", () => finish(undefined));
+      // A signal that is already aborted never fires again, and the request
+      // has gone out by now: without this the screen opens anyway, blocks
+      // every dialog queued behind it, and can only be closed by hand.
+      const signal = options?.signal;
+      if (signal?.aborted) {
+        finish(undefined);
+        return;
+      }
+      signal?.addEventListener?.("abort", () => finish(undefined));
 
       let component: TuiComponent;
       try {

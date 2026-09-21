@@ -74,9 +74,13 @@ export function TuiSurface({
 
     // Subscribed before the size goes out, or the frame that the resize
     // produces arrives while nobody is listening.
+    // Grown before it is written into, never after. `scrollback: 0` means a
+    // line that scrolls off is gone, and what scrolls off writing a tall frame
+    // into a short terminal is the top of the screen — the title and the first
+    // options, not the part nobody was reading.
     const unsubscribe = frames.subscribe(requestId, (frame) => {
-      term.write(frame.data);
       fitTo(frame.lines);
+      term.write(frame.data);
     });
 
     const report = () => {
@@ -86,8 +90,8 @@ export function TuiSurface({
         // that has only just opened has instead of a frame it never saw.
         .then((r) => {
           if (!r.frame) return;
-          term.write(r.frame.data);
           fitTo(r.frame.lines);
+          term.write(r.frame.data);
         })
         .catch(() => {});
     };

@@ -12,11 +12,13 @@ const PREVIEW = 6;
  * real" answered without opening anything. Open, it is the list, each one a
  * link.
  *
- * The icons are each site's own favicon, asked for directly. No third-party
- * icon service: that would tell someone else every domain the agent read, and
- * the point of running this yourself is that nobody is told. A site without one
- * gets its initial instead, which is also what a site gets while its icon is
- * still arriving.
+ * The icons are each site's own favicon, fetched by the portal and served from
+ * its origin. Not from an icon service, which would learn every domain the
+ * agent read, and not from the sites themselves, which would have the reader's
+ * browser announce itself to each one of them on opening an old conversation.
+ * The portal has already been to those pages, so it is the one party that
+ * learns nothing by asking. A site without an icon gets its initial instead,
+ * which is also what it gets while the icon is still on its way.
  */
 export function ToolSources({ links }: { links: ToolLink[] }) {
   const [open, setOpen] = useState(false);
@@ -84,7 +86,7 @@ function Favicon({ domain }: { domain: string }) {
   }
   return (
     <img
-      src={`https://${domain}/favicon.ico`}
+      src={`/api/favicon?domain=${encodeURIComponent(domain)}`}
       alt=""
       width={14}
       height={14}

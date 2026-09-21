@@ -179,10 +179,14 @@ nothing changes. A drawing that is only an excerpt of the output does not
 count: a citation caught inside a preview is the output quoted back, not the
 tool claiming anything.
 
-The icons are each site's own favicon, asked for directly. No third-party icon
-service: that would tell someone else every domain the agent read, and the
-point of running this yourself is that nobody is told. A site without one gets
-its initial.
+The icons are each site's own favicon, fetched by the portal and served from
+its own address. Not from an icon service, which would learn every domain the
+agent read at once. And not from the sites themselves: pointing the page at
+each one would have your browser announce itself to every host the agent cited,
+from your address, the moment an old conversation is opened — and a favicon is
+an ordinary request that can set a cookie. The portal has already been to those
+pages, so it is the one party that learns nothing by asking. A site without an
+icon gets its initial.
 
 ::: warning Only host sessions
 Everything on this page that runs a component — a drawn screen, a widget built
