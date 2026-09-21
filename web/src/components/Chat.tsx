@@ -16,6 +16,8 @@ import { activity, buildTranscript, type Activity } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
+import { ExtensionWidgets } from "./ExtensionOutput";
+import type { ExtensionStatus, ExtensionWidget } from "../extension-ui";
 import { confirmDialog } from "./ConfirmDialog";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
@@ -87,6 +89,8 @@ function ContextChip({ label, body }: { label: string; body: string }) {
 export function Chat({
   session,
   events,
+  widgets = [],
+  statuses = [],
   onSend,
   onEditMessage,
   onDeleteMessage,
@@ -99,6 +103,10 @@ export function Chat({
 }: {
   session: Session;
   events: PortalEvent[];
+  /** Blocks extensions pinned near the composer, in the order they first appeared. */
+  widgets?: ExtensionWidget[];
+  /** One-line notes extensions keep current, shown under them. */
+  statuses?: ExtensionStatus[];
   /** The conversation is still arriving; drawing it now would show it half-built. */
   loading?: boolean;
   hasEarlier?: boolean;
@@ -766,7 +774,11 @@ export function Chat({
         }}
         className="px-4 pb-4 pt-2 sm:px-6 sm:pb-5"
       >
-        <div className="prompt-shell relative mx-auto w-full max-w-3xl">
+        <div className="relative mx-auto w-full max-w-3xl">
+        {/* Above the composer, which is where pi puts a widget by default and
+            the only place in this page with the same relationship to typing. */}
+        <ExtensionWidgets widgets={widgets} statuses={statuses} />
+        <div className="prompt-shell relative">
         {matches.length > 0 && (
           <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
             {matches.map((c) => (
@@ -833,6 +845,7 @@ export function Chat({
               </button>}
             </>}
           />
+        </div>
         </div>
       </form>
       </div>

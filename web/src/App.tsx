@@ -16,6 +16,14 @@ import { BrowserPage } from "./components/BrowserPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { FrameBus } from "./tui-frames";
+import { ExtensionNotices } from "./components/ExtensionOutput";
+import {
+  applyExtensionUi,
+  dismissNotice,
+  NO_EXTENSION_UI,
+  type ExtensionUi,
+  type ExtensionUiRequest,
+} from "./extension-ui";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 type Tab = "general" | "extensions" | "advanced";
@@ -108,6 +116,11 @@ function Shell({
    * drawing itself.
    */
   const frames = useMemo(() => new FrameBus(), []);
+  /**
+   * What extensions pin near the composer or say in passing. Belongs to the
+   * conversation being looked at, so it starts empty on every one.
+   */
+  const [extensionUi, setExtensionUi] = useState<ExtensionUi>(NO_EXTENSION_UI);
   const esRef = useRef<EventSource | null>(null);
 
   const refreshSessions = useCallback(async () => {
@@ -142,6 +155,7 @@ function Shell({
     setEvents([]);
     setMoreBefore(false);
     setUiQueue([]);
+    setExtensionUi(NO_EXTENSION_UI);
     frames.clear();
     setLoadedSession(null);
     if (!sessionId) return;
@@ -184,6 +198,10 @@ function Shell({
           if (["select", "confirm", "input", "editor", "custom"].includes(req.method)) {
             setUiQueue((q) => (q.some((x) => x.id === req.id) ? q : [...q, req]));
           }
+          // The one-way half — a widget, a status, something said once. The
+          // reducer hands back the same state for anything it does not want,
+          // so a stream of dialogs does not re-render the page for each.
+          setExtensionUi((prev) => applyExtensionUi(prev, ev.payload as ExtensionUiRequest));
         }
         // Given up waiting, or — for a screen the extension closed itself once
         // it had its answer — finished. Either way it is not on the page.
@@ -352,6 +370,8 @@ function Shell({
         ) : active ? (
           <Chat
             session={active}
+            widgets={extensionUi.widgets}
+            statuses={extensionUi.statuses}
             events={loadedSession === active.id ? events : []}
             loading={loadedSession !== active.id}
             hasEarlier={loadedSession === active.id && moreBefore}
@@ -403,6 +423,11 @@ function Shell({
           <EmptyState hasSessions={sessions.length > 0} />
         )}
       </main>
+
+      <ExtensionNotices
+        notices={extensionUi.notices}
+        onDismiss={(id) => setExtensionUi((prev) => dismissNotice(prev, id))}
+      />
 
       {active && uiQueue[0] && (
         <ExtensionDialog

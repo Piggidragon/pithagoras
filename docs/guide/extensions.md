@@ -78,11 +78,28 @@ directories only.
 
 Extensions can ask questions. `ctx.ui.select`, `confirm`, `input` and `editor`
 all render as a modal in the browser, standing in for the menu the TUI would
-draw. `notify`, `setStatus` and `setWidget` are one-way and do not open
-anything.
+draw.
 
 An unanswered dialog times out after five minutes rather than wedging the
 session forever.
+
+## What they say without being asked
+
+Three of pi's UI calls expect nowhere in particular to put them, and each has a
+place here:
+
+| Call | Where it goes |
+| --- | --- |
+| `setWidget(key, lines)` | A block above the composer, one per key. Cleared by passing `undefined` |
+| `setStatus(key, text)` | A line under the widgets |
+| `notify(message, type)` | A message in the corner, which goes on its own — sooner for `info` than for `error` |
+
+A widget may be a component rather than lines, and pi's contract is that the
+component is registered once and repaints itself afterwards. That works: the
+block follows it. What arrives is the text it drew, with the colour taken out —
+it sits in a page, not a terminal.
+
+`setTitle` is delivered and nothing reads it yet.
 
 ## Extensions that draw their own screen
 
@@ -121,9 +138,6 @@ Two differences from a terminal are worth knowing:
 - **The cursor is the component's own.** Components draw their cursor into the
   screen, so the terminal's hardware cursor stays hidden — which is what pi does
   by default too.
-
-`setWidget` also accepts a component. It is drawn once and shown as the text it
-came to, because a widget sits in the page rather than in a terminal.
 
 ::: warning Only host sessions
 This needs the component to run in the portal's own process. A session on the
