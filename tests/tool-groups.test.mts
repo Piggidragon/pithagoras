@@ -92,3 +92,18 @@ test("opening a group and shutting it again", () => {
   assert.deepEqual(toggleOpen([], "pi-web-access"), ["pi-web-access"]);
   assert.deepEqual(toggleOpen(["pi-lens", "pi-web-access"], "pi-lens"), ["pi-web-access"]);
 });
+
+test("a group whose tools answer to something else says so", () => {
+  const [group] = groupTools([
+    { name: "browser_browser_click", source: "browser", enabled: true, owner: "browser", description: undefined },
+    { name: "browser_browser_navigate", source: "browser", enabled: true, owner: "browser", description: undefined },
+  ]);
+  assert.equal(group.owner, "browser");
+  assert.equal(group.source, "browser");
+  assert.equal(groupSummary(group), "2 on");
+});
+
+test("an ordinary group has no owner", () => {
+  const [group] = groupTools([tool("web_search", "pi-web-access")]);
+  assert.equal(group.owner, undefined);
+});

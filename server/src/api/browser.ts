@@ -1,5 +1,12 @@
 import express, { type Router } from "express";
-import { browserAllowlist, getDb, setBrowserAllowlist, type SessionRow } from "../db.js";
+import {
+  browserAllowlist,
+  getDb,
+  setBrowserAllowlist,
+  setSessionBrowser,
+  type SessionRow,
+} from "../db.js";
+import { BROWSER_MCP } from "../tool-policy.js";
 import { readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/browser-service.js";
 
@@ -18,7 +25,7 @@ const CDP = process.env.BROWSER_CDP_URL || "http://127.0.0.1:9222";
  * protocol. `--cdp-endpoint` is the whole point — without it the Playwright
  * server launches its own throwaway Chromium, signed into nothing.
  */
-const MCP_NAME = "browser";
+const MCP_NAME = BROWSER_MCP;
 
 /**
  * The tools worth putting in the prompt, and the one worth hiding.
@@ -251,7 +258,7 @@ export function browserRouter(): Router {
     const on = Boolean(req.body?.enabled);
     const row = getDb().prepare("SELECT id FROM sessions WHERE id = ?").get(req.params.id);
     if (!row) return res.status(404).json({ error: "Not found" });
-    getDb().prepare("UPDATE sessions SET browser = ? WHERE id = ?").run(on ? 1 : 0, req.params.id);
+    setSessionBrowser(req.params.id, on);
     res.json({ enabled: on });
   });
 

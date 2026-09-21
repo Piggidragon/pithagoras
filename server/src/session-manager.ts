@@ -4,7 +4,14 @@ import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { PiClient, PiTool } from "./pi/types.js";
-import { effectiveOff, exceptionsFor, toolEnabled } from "./tool-policy.js";
+import {
+  browserTool,
+  effectiveOff,
+  exceptionsFor,
+  toolEnabled,
+  toolSource,
+} from "./tool-policy.js";
+import { readMcpFile } from "./api/mcp.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { removeSessionFiles } from "./session-files.js";
@@ -24,6 +31,7 @@ import {
   setSessionTools,
   toolDefaultsOff,
   rememberTools,
+  setSessionBrowser,
   knownTools,
   browserAllowlist,
   routineGuards,
@@ -832,11 +840,30 @@ class SessionManager extends EventEmitter {
 
   /** Everything off for this conversation: the default, bent by its own exceptions. */
   private offFor(sessionId: string, names: string[] = []): string[] {
-    return effectiveOff(
-      [...names, ...knownTools().map((t) => t.name)],
-      toolDefaultsOff(),
-      sessionTools(sessionId)
-    );
+    const all = [...names, ...knownTools().map((t) => t.name)];
+    const off = effectiveOff(all, toolDefaultsOff(), sessionTools(sessionId));
+    // The browser's tools follow the grant, not the switches: a conversation
+    // without the browser is not offered them at all, rather than offered them
+    // and refused by the guard when it tries.
+    if (this.browserOn(sessionId)) return off;
+    const set = new Set(off);
+    for (const name of all) if (browserTool(name)) set.add(name);
+    return [...set].sort();
+  }
+
+  /** Does this conversation have the browser? False for one that has gone. */
+  private browserOn(sessionId: string): boolean {
+    const row = getSession(sessionId);
+    return row ? browserAllowed(row) : false;
+  }
+
+  /** The MCP servers attached, so a tool can be filed under the one it came through. */
+  private mcpServers(): string[] {
+    try {
+      return Object.keys(readMcpFile().config.mcpServers ?? {});
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -853,11 +880,21 @@ class SessionManager extends EventEmitter {
     if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source })));
     const defaults = toolDefaultsOff();
     const exceptions = sessionTools(sessionId);
+    const servers = this.mcpServers();
+    const browser = this.browserOn(sessionId);
     return {
       tools: listed.map((tool) => ({
         ...tool,
-        enabled: toolEnabled(tool.name, defaults, exceptions),
-        defaultOn: !defaults.includes(tool.name),
+        source: toolSource(tool.name, tool.source, servers),
+        // The browser's tools are the browser. They move together, because the
+        // grant behind them is one thing: a conversation either reaches the
+        // container or it does not.
+        ...(browserTool(tool.name)
+          ? { owner: "browser" as const, enabled: browser, defaultOn: undefined }
+          : {
+              enabled: toolEnabled(tool.name, defaults, exceptions),
+              defaultOn: !defaults.includes(tool.name),
+            }),
       })),
       live: Boolean(listed.length),
     };
@@ -874,7 +911,20 @@ class SessionManager extends EventEmitter {
     const client = this.live.get(sessionId)?.client;
     const listed = client?.getTools ? await client.getTools() : [];
     const known = [...listed.map((t) => t.name), ...knownTools().map((t) => t.name)];
-    setSessionTools(sessionId, exceptionsFor(wantedOff, toolDefaultsOff(), known));
+
+    // The browser's own tools are not written down as exceptions; they set the
+    // grant. Off only when the whole group is off, since the grant is one
+    // thing — there is no half a browser.
+    const browserNames = known.filter(browserTool);
+    if (browserNames.length) {
+      const named = new Set(wantedOff.filter(browserTool));
+      setSessionBrowser(sessionId, !browserNames.every((name) => named.has(name)));
+    }
+
+    setSessionTools(
+      sessionId,
+      exceptionsFor(wantedOff.filter((n) => !browserTool(n)), toolDefaultsOff(), known.filter((n) => !browserTool(n)))
+    );
     const off = this.offFor(sessionId, listed.map((t) => t.name));
     await client?.setToolsOff?.(off);
     return off;

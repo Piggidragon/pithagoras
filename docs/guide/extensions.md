@@ -85,14 +85,24 @@ An unanswered dialog times out after five minutes rather than wedging the
 session forever.
 ## Switching tools off for one chat
 
-Beside the browser switch in the composer there is a second one, a level down:
-not whether the agent may go online at all, but which of the tools its
-extensions brought it may reach for **in this conversation**. "Look this up for
-me" and "do not go online, just read the repo" are both reasonable in the same
-week.
+The blocks icon in the composer says which tools the agent may reach for **in
+this conversation**. "Look this up for me" and "do not go online, just read the
+repo" are both reasonable in the same week.
 
 Tools are grouped by what installed them, so a package can be switched off in
-one go. It takes effect from the next message — pi is told at once and there is
+one go. An MCP server is its own group rather than a share of the adapter that
+attached it — three servers used to arrive as one pile of forty tools called
+`pi-mcp-adapter`, and nobody thinks of them that way.
+
+::: tip The browser is one of them
+It used to have a switch of its own beside the composer, which was a second
+answer to a question the tools list already asked. It is a group here like any
+other. The difference is that it is **granted** rather than switched: behind
+its tools is a container the conversation either reaches or does not, so they
+are listed together and the group's switch is what writes the grant. A
+conversation without it is not offered those tools at all, rather than offered
+them and refused when it tries.
+::: It takes effect from the next message — pi is told at once and there is
 no need to restart the conversation — and it is remembered per chat, including
 across a restart.
 

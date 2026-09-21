@@ -159,11 +159,19 @@ export type FileContent =
 export interface PortalTool {
   name: string;
   description?: string;
-  /** The package that registered it, for grouping. */
+  /** The package or MCP server that registered it, for grouping. */
   source: string;
   enabled: boolean;
   /** Whether it is on by default, so a chat can show where it disagrees. */
   defaultOn?: boolean;
+  /**
+   * Something other than the switches decides this one.
+   *
+   * "browser" for the tools the agent's browser brings: they move together,
+   * because what is behind them is one grant — a conversation either reaches
+   * the browser's container or it does not.
+   */
+  owner?: "browser";
 }
 
 export interface PortalEvent {

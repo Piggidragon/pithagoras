@@ -982,6 +982,16 @@ export function routineGuards(slug: string | null | undefined): boolean {
   return row ? row.guard === 1 : true;
 }
 
+/**
+ * Grant or revoke the browser for a conversation.
+ *
+ * Written from the tool switches: the browser's tools are the browser, and a
+ * second control for the same question was one too many.
+ */
+export function setSessionBrowser(id: string, on: boolean): void {
+  getDb().prepare("UPDATE sessions SET browser = ? WHERE id = ?").run(on ? 1 : 0, id);
+}
+
 /** Does this session get the browser? Routines answer for their own runs. */
 export function browserAllowed(session: SessionRow): boolean {
   if (session.kind === "routine" && session.routine_slug) {

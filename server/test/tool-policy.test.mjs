@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toolEnabled, effectiveOff, exceptionsFor } from "../dist/tool-policy.js";
+import {
+  toolEnabled,
+  effectiveOff,
+  exceptionsFor,
+  browserTool,
+  mcpServerOf,
+  toolSource,
+} from "../dist/tool-policy.js";
 
 const none = { off: [], on: [] };
 
@@ -60,4 +67,26 @@ test("but not one that did", () => {
   const exceptions = exceptionsFor([], ["a"], ["a"]);
   assert.deepEqual(exceptions, { off: [], on: ["a"] });
   assert.equal(toolEnabled("a", ["a"], exceptions), true);
+});
+
+test("the browser's tools are known by the name the adapter gives them", () => {
+  assert.ok(browserTool("browser_browser_click"));
+  assert.ok(browserTool("browser_navigate"));
+  assert.ok(!browserTool("web_search"));
+  assert.ok(!browserTool("browserify"));
+});
+
+test("a tool is filed under the MCP server it came through", () => {
+  const servers = ["browser", "jira"];
+  assert.equal(toolSource("browser_browser_click", "pi-mcp-adapter", servers), "browser");
+  assert.equal(toolSource("jira_create_issue", "pi-mcp-adapter", servers), "jira");
+  // The adapter's own tools are not any server's.
+  assert.equal(toolSource("mcp", "pi-mcp-adapter", servers), "pi-mcp-adapter");
+  assert.equal(toolSource("web_search", "pi-web-access", servers), "pi-web-access");
+});
+
+test("the longer server name wins, so one does not claim another's tools", () => {
+  assert.equal(mcpServerOf("browser_staging_click", ["browser", "browser_staging"]), "browser_staging");
+  assert.equal(mcpServerOf("browser_click", ["browser", "browser_staging"]), "browser");
+  assert.equal(mcpServerOf("web_search", ["browser"]), undefined);
 });

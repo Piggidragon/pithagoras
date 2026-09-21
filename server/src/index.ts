@@ -26,6 +26,17 @@ import {
   type WizardInput,
 } from "./agent-setup.js";
 import { sessions, EXECUTOR_KIND } from "./session-manager.js";
+import { browserTool, toolSource } from "./tool-policy.js";
+import { readMcpFile } from "./api/mcp.js";
+
+/** The MCP servers attached, so a tool is filed under the one it came through. */
+function mcpServerNames(): string[] {
+  try {
+    return Object.keys(readMcpFile().config.mcpServers ?? {});
+  } catch {
+    return [];
+  }
+}
 import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
@@ -615,9 +626,19 @@ app.put("/api/sessions/:id/tools", async (req, res) => {
  */
 app.get("/api/tools", (_req, res) => {
   const off = new Set(toolDefaultsOff());
+  const servers = mcpServerNames();
   res.json({
-    tools: knownTools().map((tool) => ({ ...tool, defaultOn: !off.has(tool.name) })),
-    off: [...off].sort(),
+    // The browser's tools are left out: they follow a conversation's own
+    // grant, and there is no default to set — a new conversation starts
+    // without the browser, and says so on its own switch.
+    tools: knownTools()
+      .filter((tool) => !browserTool(tool.name))
+      .map((tool) => ({
+        ...tool,
+        source: toolSource(tool.name, tool.source, servers),
+        defaultOn: !off.has(tool.name),
+      })),
+    off: [...off].filter((name) => !browserTool(name)).sort(),
   });
 });
 
@@ -633,7 +654,7 @@ app.put("/api/tools", async (req, res) => {
   if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
     return res.status(400).json({ error: "off must be a list of tool names" });
   }
-  const stored = setToolDefaultsOff(off);
+  const stored = setToolDefaultsOff(off.filter((name: string) => !browserTool(name)));
   await sessions.applyToolDefaults();
   res.json({ off: stored });
 });

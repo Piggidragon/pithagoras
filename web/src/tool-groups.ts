@@ -15,6 +15,11 @@ export interface ToolGroup {
   allOn: boolean;
   /** None of them are. */
   allOff: boolean;
+  /**
+   * Set where the whole group answers to something else — "browser" for the
+   * agent's browser, whose tools follow one grant rather than one switch each.
+   */
+  owner?: PortalTool["owner"];
 }
 
 /** What the portal registers itself, which is not an extension anyone installed. */
@@ -34,6 +39,7 @@ export function groupTools(tools: PortalTool[]): ToolGroup[] {
       tools: [...list].sort((a, b) => a.name.localeCompare(b.name)),
       allOn: list.every((t) => t.enabled),
       allOff: list.every((t) => !t.enabled),
+      owner: list.find((t) => t.owner)?.owner,
     }))
     // What the portal ships is last: somebody opening this came for the thing
     // they installed, not for the tools that were always there.
