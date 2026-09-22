@@ -141,6 +141,14 @@ export const forPi = (images: Attached[]): ImageContent[] => images.map(({ data,
 /** As the event log keeps them: without the bytes. */
 export const forLog = (images: Attached[]): StoredImage[] => images.map(({ name, mimeType }) => ({ name, mimeType }));
 
+/** Particular pictures, kept for a message that never made it into the conversation. */
+export function dropImages(root: string, sessionId: string, images: StoredImage[]): void {
+  for (const image of images) {
+    const file = imagePath(root, sessionId, image.name);
+    if (file) rmSync(file, { force: true });
+  }
+}
+
 /** Everything kept for a chat, when the chat goes. */
 export function removeImages(root: string, sessionId: string): void {
   rmSync(folderOf(root, sessionId), { recursive: true, force: true });

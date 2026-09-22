@@ -72,8 +72,10 @@ export function setPackageEnabled(
   if (now === enabled) return { packages, stash };
 
   const written: Entry = enabled ? ((next[source] as Entry | undefined) ?? source) : off(source);
-  if (enabled) delete next[source];
-  else if (entry && typeof entry === "object") next[source] = entry;
+  // Off keeps what is there now, and a plain entry is kept as nothing: a filter
+  // put aside some earlier time, since written over by hand, is not brought back.
+  if (enabled || !(entry && typeof entry === "object")) delete next[source];
+  else next[source] = entry;
 
   return { packages: packages.map((e, i) => (i === at ? written : e)), stash: next };
 }

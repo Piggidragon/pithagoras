@@ -145,13 +145,15 @@ class ChannelSupervisor {
     const wanted = new Map(rows.filter((r) => r.enabled).map((r) => [r.id, r]));
 
     // Anything running that should not be, or whose configuration moved. One
-    // that failed is tried again: a sync is the moment something may have
-    // changed — its package installed, or somebody pressing save to retry.
+    // that could not run is looked at again: a sync is the moment something
+    // may have changed — its package installed, or somebody pressing save.
+    // One that failed to start and is waiting on its own retry is left to it,
+    // or every other channel's sync would restart it early.
     for (const [id, live] of [...this.running]) {
       const row = wanted.get(id);
       // A changed configuration is a fresh start, not another failure.
       if (row && signature(row) !== live.signature) this.clearRetry(id);
-      if (!row || signature(row) !== live.signature || live.state === "error") {
+      if (!row || signature(row) !== live.signature || (live.state === "error" && !this.retries.has(id))) {
         await this.stopChannel(id);
       }
     }
@@ -181,7 +183,7 @@ class ChannelSupervisor {
     }
   }
 
-  private async startChannel(row: ChannelRow, kind: LoadedChannel): Promise<void> {
+  private async startChannel(row: ChannelRow, kind: LoadedChannel, history: Running["log"] = []): Promise<void> {
     const controller = new AbortController();
     const live: Running = {
       signature: signature(row),
@@ -189,7 +191,7 @@ class ChannelSupervisor {
       state: "starting",
       since: new Date().toISOString(),
       controller,
-      log: [],
+      log: history,
     };
     this.running.set(row.id, live);
 
@@ -220,10 +222,35 @@ class ChannelSupervisor {
       const delay = retryDelay(attempt);
       log(`failed to start: ${live.error} — trying again in ${Math.round(delay / 1000)}s`);
       this.clearRetry(row.id);
-      const timer = setTimeout(() => void this.sync().catch(() => {}), delay);
+      const timer = setTimeout(() => void this.retry(row.id).catch(() => {}), delay);
       timer.unref();
       this.retries.set(row.id, { attempt, timer });
     }
+  }
+
+  /**
+   * Another try at starting one channel that failed, and only that one.
+   * Queued behind any sync, for the same reason syncs are.
+   */
+  private retry(id: string): Promise<void> {
+    const next = (this.syncing ?? Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        const live = this.running.get(id);
+        const row = this.rows().find((r) => r.id === id && r.enabled);
+        const kind = row && (await loadChannels()).channels.find((k) => k.id === row.kind);
+        if (!live || !row || live.state !== "error" || signature(row) !== live.signature || !kind?.start) {
+          // Switched off, edited or uninstalled since: sorting that out is a sync's job.
+          this.clearRetry(id);
+          return this.syncNow();
+        }
+        await this.stopChannel(id);
+        // Keeps its count, so the wait before the next try grows, and its log,
+        // so what happened on the tries before can still be read.
+        await this.startChannel(row, kind, live.log);
+      });
+    this.syncing = next;
+    return next;
   }
 
   private clearRetry(id: string): void {

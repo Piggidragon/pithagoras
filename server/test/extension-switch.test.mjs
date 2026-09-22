@@ -77,3 +77,13 @@ test("other entries keep their place and their filters", () => {
   assert.equal(out.packages[1], other);
   assert.deepEqual(out.packages[2], OFF("npm:b"));
 });
+
+test("a filter put aside earlier is not brought back over a plain entry written since", () => {
+  const filtered = { source: "npm:a", extensions: ["!legacy.ts"] };
+  const stash = setPackageEnabled([filtered], "npm:a", false, {}).stash;
+  // settings.json edited by hand back to the plain entry, then switched off and on.
+  const off = setPackageEnabled(["npm:a"], "npm:a", false, stash);
+  assert.deepEqual(off.stash, {});
+  const on = setPackageEnabled(off.packages, "npm:a", true, off.stash);
+  assert.deepEqual(on.packages, ["npm:a"]);
+});

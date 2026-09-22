@@ -9,7 +9,7 @@ import { mcpServerNames } from "./api/mcp.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { removeSessionFiles } from "./session-files.js";
-import { forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
+import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
 import {
   appendEvent,
@@ -396,13 +396,19 @@ class SessionManager extends EventEmitter {
     // already claimed the session. Without this the composer loses its Stop
     // and isBusy() reads false for however long pi takes to answer.
     this.mark(sessionId, "running");
+    const logged = { images: false };
     try {
-      await this.submit(sessionId, message, options, insideEdit);
+      await this.submit(sessionId, message, options, insideEdit, logged);
     } catch (e) {
       const failure = (e as Error).message;
       updateSession(sessionId, { status: "error", last_error: failure });
       this.record(sessionId, "portal_status", { status: "error", error: failure });
       throw e;
+    } finally {
+      // Pictures no event names are never shown again, so they are not kept:
+      // a message that never got there, or a command that went to pi without a
+      // chat line. An edit's are the original message's, which an undo brings back.
+      if (!insideEdit && !logged.images && options?.images?.length) dropImages(IMAGE_ROOT, sessionId, options.images);
     }
   }
 
@@ -411,6 +417,7 @@ class SessionManager extends EventEmitter {
     message: string,
     options?: PromptOptions,
     insideEdit = false,
+    logged = { images: false },
   ): Promise<void> {
     const client = await this.ensureClient(sessionId, insideEdit);
     const images = options?.images ?? [];
@@ -426,6 +433,8 @@ class SessionManager extends EventEmitter {
     const builtin = /^\/([\w-]+)\s*(.*)$/.exec(message.trim());
     const serverBuiltin = builtin ? await findServerBuiltin(builtin[1]) : undefined;
     if (serverBuiltin) {
+      // Refused before getting here, where there is someone to tell.
+      if (images.length) throw new SessionEditError("unsupported", `/${serverBuiltin.name} does not take pictures`);
       // Not awaited: /compact is a model call and would hold the request open.
       // Same contract as a prompt — accept it, report through the event stream.
       void (async () => {
@@ -447,6 +456,7 @@ class SessionManager extends EventEmitter {
         ...(options?.voice ? { voice: true } : {}),
         ...(images.length ? { images: forLog(images) } : {}),
       });
+      logged.images = images.length > 0;
     }
     // pi sends a model that cannot see pictures a line saying one was left
     // out, and nothing else. The person is told here, where they can pick
@@ -591,6 +601,10 @@ class SessionManager extends EventEmitter {
       // message goes with the pictures it was sent with.
       const images = loadImages(IMAGE_ROOT, sessionId, storedIn(sentMessages(sessionId).find((m) => m.seq === seq)?.payload));
       if (!message.trim() && !images.length) throw new SessionEditError("empty", "A message needs words or a picture");
+      const builtin = images.length ? /^\/([\w-]+)/.exec(message.trim()) : null;
+      if (builtin && (await findServerBuiltin(builtin[1]))) {
+        throw new SessionEditError("unsupported", `/${builtin[1]} does not take pictures. Send them in a message of their own.`);
+      }
       const { removed, undo } = await this.cut(sessionId, seq, "tail");
       const before = latestSeq();
       try {

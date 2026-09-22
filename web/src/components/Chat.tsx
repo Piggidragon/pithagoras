@@ -416,11 +416,14 @@ export function Chat({
         () => [] as PiCommand[],
       );
       commandList.current = { key, list };
-      void list.then((found) => {
-        if (commandList.current?.key === key) setCommands(found);
-      });
     }
-    return commandList.current.list;
+    // Shown every time, not only when fetched: opening another chat empties
+    // the list, and coming back finds this chat's still here to be offered.
+    const { list } = commandList.current;
+    void list.then((found) => {
+      if (commandList.current?.key === key) setCommands(found);
+    });
+    return list;
   };
   // What was listed for another chat is not offered here.
   useEffect(() => setCommands([]), [session.id]);
@@ -547,6 +550,8 @@ export function Chat({
     setAttached(next);
   };
 
+  /** Pictures on their way into the box, by chat, which count against its room already. */
+  const preparing = useRef(new Map<string, number>());
   /**
    * Pictures and files pasted, dropped or picked. Pictures wait in the box to
    * go with the message; anything else is put in the chat's folder at once and
@@ -559,11 +564,15 @@ export function Chat({
     setActionError(null);
     setAdding((n) => n + 1);
     const problems: string[] = [];
+    // Room is taken as it is counted: pictures still being made ready from an
+    // earlier paste are not in the box yet, but will be.
+    const room = Math.max(0, MAX_IMAGES - pending.get(id).length - (preparing.current.get(id) ?? 0));
+    const taking = Math.min(images.length, room);
+    preparing.current.set(id, (preparing.current.get(id) ?? 0) + taking);
     try {
-      const room = MAX_IMAGES - pending.get(id).length;
       if (images.length > room) problems.push(`At most ${MAX_IMAGES} pictures can go with one message.`);
       const ready: Attachment[] = [];
-      for (const file of images.slice(0, Math.max(0, room))) {
+      for (const file of images.slice(0, taking)) {
         try {
           ready.push(await prepareImage(file, file.name || "Pasted picture"));
         } catch (e) {
@@ -590,6 +599,7 @@ export function Chat({
         else drafts.set(id, drafts.get(id).trim() ? `${drafts.get(id).trimEnd()}\n${note}` : note);
       }
     } finally {
+      preparing.current.set(id, (preparing.current.get(id) ?? 0) - taking);
       setAdding((n) => n - 1);
       if (problems.length && currentSession.current === id) setActionError(problems.join(" "));
     }

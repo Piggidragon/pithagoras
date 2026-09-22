@@ -54,7 +54,7 @@ import {
   writeCompactionSettings,
 } from "./pi-settings.js";
 import { eventTime, getDb } from "./db.js";
-import { getBuiltinCommands } from "./pi/builtins.js";
+import { findServerBuiltin, getBuiltinCommands } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
 import {
@@ -105,17 +105,17 @@ const BIN_DIR = path.resolve(process.env.BIN_DIR || "/data/bin");
 
 const app = express();
 // A message can carry pictures, which do not fit in what every other request is
-// allowed. Only that route gets the room, so nothing else can be sent a body
-// that size.
+// allowed. Only that route gets the room, and only once the password has been
+// checked, so nobody can make the server read a body that size without it.
 const PROMPT_ROUTE = /^\/api\/sessions\/[^/]+\/prompt$/;
-const smallJson = express.json({ limit: "2mb" });
 const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BYTES * 4) / 3 / 1024 / 1024) + 2}mb` });
 // An upload is the file itself, streamed to disk by its route, whatever type
 // the browser gave it — a .json file must not be read as a request.
 const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
+const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => {
-  if (UPLOAD_ROUTE.test(req.path)) return next();
-  (PROMPT_ROUTE.test(req.path) ? promptJson : smallJson)(req, res, next);
+  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path)) return next();
+  smallJson(req, res, next);
 });
 app.use(cookieParser());
 
@@ -557,7 +557,7 @@ app.delete("/api/sessions/:id", async (req, res) => {
 
 // --- prompting ---
 
-app.post("/api/sessions/:id/prompt", async (req, res) => {
+app.post("/api/sessions/:id/prompt", promptJson, async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const message = req.body?.message ?? "";
@@ -571,6 +571,13 @@ app.post("/api/sessions/:id/prompt", async (req, res) => {
   // A picture on its own is a message too.
   if (typeof message !== "string" || (!message.trim() && !parsed.length)) {
     return res.status(400).json({ error: "message required" });
+  }
+  // A portal command acts on the session and never reaches the model, so
+  // pictures sent with one would be lost without a word. Refused instead: the
+  // browser puts them back in the box.
+  const builtin = parsed.length ? /^\/([\w-]+)/.exec(message.trim()) : null;
+  if (builtin && (await findServerBuiltin(builtin[1]))) {
+    return res.status(400).json({ error: `/${builtin[1]} does not take pictures. Send them in a message of their own.` });
   }
   try {
     const images = saveImages(IMAGE_ROOT, session.id, parsed);

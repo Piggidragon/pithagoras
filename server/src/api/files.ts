@@ -157,7 +157,12 @@ export function filesRouter(): Router {
       req.unpipe(out);
       out.destroy();
       target.abandon();
-      if (!res.headersSent) res.status(status).json({ error });
+      // Nothing more of the body is read: the connection is closed once the
+      // answer is out, rather than taking in the rest of a file nobody keeps.
+      if (res.headersSent) return void req.destroy();
+      res.setHeader("Connection", "close");
+      res.on("finish", () => req.destroy());
+      res.status(status).json({ error });
     };
     req.on("data", (chunk: Buffer) => {
       received += chunk.length;
