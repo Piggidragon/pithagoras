@@ -484,7 +484,7 @@ export function Chat({
       }
       setSending(true);
       try {
-        await onSend(msg, voiceMode ? { voice: true } : images.length ? { images } : undefined);
+        await onSend(msg, voiceMode || images.length ? { voice: voiceMode || undefined, images: images.length ? images : undefined } : undefined);
       } finally {
         setSending(false);
       }

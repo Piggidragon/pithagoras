@@ -58,6 +58,15 @@ test("an upload lands whole, and a taken name gets a number instead of replacing
   });
 });
 
+test("a long name in a script of many bytes a letter is uploaded, not refused for its temporary file", async () => {
+  await withApi(async (base) => {
+    const name = `${"報".repeat(80)}.txt`; // 244 bytes: a name the system takes
+    const res = await upload(base, "", name, "long");
+    assert.deepEqual([res.status, res.path], [200, name]);
+    assert.equal(readFileSync(path.join(work, name), "utf8"), "long");
+  });
+});
+
 test("an upload cannot be sent out of the folder, by path or by name", async () => {
   symlinkSync(outside, path.join(work, "escape"));
   await withApi(async (base) => {

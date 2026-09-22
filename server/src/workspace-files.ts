@@ -330,7 +330,7 @@ export function writeText(
     existed = false;
   }
 
-  const temp = path.join(path.dirname(target), `.${path.basename(target).slice(0, 100)}.${randomBytes(6).toString("hex")}.tmp`);
+  const temp = path.join(path.dirname(target), `.${tempStem(path.basename(target))}.${randomBytes(6).toString("hex")}.tmp`);
   let fd: number | undefined;
   try {
     fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
@@ -459,6 +459,19 @@ export function makeFolder(base: string, dirRel: unknown, name: unknown): string
   return path.relative(base, target);
 }
 
+/**
+ * The start of a name, for a temporary file beside it: at most 100 bytes, so
+ * the dot and suffix around it stay inside the 255 bytes a name may have.
+ */
+function tempStem(name: string): string {
+  let stem = "";
+  for (const ch of name) {
+    if (Buffer.byteLength(stem + ch) > 100) break;
+    stem += ch;
+  }
+  return stem;
+}
+
 /** "report.pdf", then "report (2).pdf", "report (3).pdf"… */
 export function numbered(name: string, n: number): string {
   if (n < 2) return name;
@@ -483,7 +496,7 @@ export function uploadTarget(
 ): { fd: number; finish: () => string; abandon: () => void } {
   const clean = checkName(name);
   const parent = folderPath(base, dirRel);
-  const temp = path.join(parent, `.${clean.slice(0, 100)}.${randomBytes(6).toString("hex")}.upload`);
+  const temp = path.join(parent, `.${tempStem(clean)}.${randomBytes(6).toString("hex")}.upload`);
   let fd: number;
   try {
     fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
