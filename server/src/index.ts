@@ -378,6 +378,20 @@ app.delete("/api/projects/:name", async (req, res) => {
 
 // --- sessions ---
 
+/** The longest name a chat can be given: what the rename field takes. */
+const MAX_TITLE = 120;
+
+/**
+ * A name as it is kept: on one line and no longer than the field allows, however
+ * it came in — the rename field, /name, or a chat made through the API. By
+ * character, so an emoji at the cut is not left in halves. Empty when there is
+ * no name in it.
+ */
+const cleanTitle = (raw: unknown): string =>
+  typeof raw === "string"
+    ? Array.from(raw.replace(/\s+/g, " ").trim()).slice(0, MAX_TITLE).join("").trimEnd()
+    : "";
+
 /** SQLite stores pinned as 0/1; the API speaks booleans. */
 const toApi = (s: ReturnType<typeof getSession> & {}) => ({
   ...s,
@@ -427,7 +441,7 @@ app.get("/api/agent/sessions", (_req, res) => {
  * "browser" is a reserved slug so these group together on the Agent tab.
  */
 app.post("/api/agent/sessions", (req, res) => {
-  const title = typeof req.body?.title === "string" && req.body.title.trim() ? req.body.title.trim() : "";
+  const title = cleanTitle(req.body?.title);
   try {
     const { session } = resolveChannelSession({
       channelSlug: "browser",
@@ -476,7 +490,8 @@ app.put("/api/agent/files/:name", (req, res) => {
 });
 
 app.post("/api/sessions", (req, res) => {
-  const { title, workspace } = req.body ?? {};
+  const { workspace } = req.body ?? {};
+  const title = cleanTitle(req.body?.title);
   if (workspace !== undefined && (typeof workspace !== "string" || !workspace)) {
     return res.status(400).json({ error: "workspace must be a path" });
   }
@@ -504,11 +519,11 @@ app.post("/api/sessions", (req, res) => {
   createSession({
     id,
     // Named after its first message once there is one; see the prompt route.
-    title: (typeof title === "string" && title.trim()) || NEW_CHAT_TITLE,
+    title: title || NEW_CHAT_TITLE,
     workspace: resolved,
     executor: EXECUTOR_KIND,
     // Only a chat that was not given a name is named later.
-    auto_title: typeof title === "string" && title.trim() ? 0 : 1,
+    auto_title: title ? 0 : 1,
   });
   res.json(toApi(getSession(id)!));
 });
@@ -519,20 +534,14 @@ app.get("/api/sessions/:id", (req, res) => {
   res.json(toApi(session));
 });
 
-/** The longest name a chat can be given: what the rename field takes. */
-const MAX_TITLE = 120;
-
 app.patch("/api/sessions/:id", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const { title, pinned } = req.body ?? {};
   // A name somebody chose stays, whatever it says — up to the length the field
-  // allows, which /name and the API are held to as well. By character, so an
-  // emoji at the cut is not left in halves.
-  if (typeof title === "string" && title.trim()) {
-    const chars = Array.from(title.replace(/\s+/g, " ").trim());
-    updateSession(session.id, { title: chars.slice(0, MAX_TITLE).join("").trimEnd(), auto_title: 0 });
-  }
+  // allows, which /name and the API are held to as well.
+  const name = cleanTitle(title);
+  if (name) updateSession(session.id, { title: name, auto_title: 0 });
   if (typeof pinned === "boolean") updateSession(session.id, { pinned: pinned ? 1 : 0 });
   res.json(toApi(getSession(session.id)!));
 });
@@ -1078,6 +1087,15 @@ app.get("/api/sessions/:id/events", (req, res) => {
   });
 });
 
+/**
+ * Anything under /api that no route took. Answered in JSON, like every other
+ * API reply — Express's own page is HTML, and the page could only show
+ * "HTTP 404" for it, not which address was wrong.
+ */
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: `No such API route: ${req.method} ${req.originalUrl.split("?")[0]}` });
+});
+
 // --- static web UI ---
 
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
@@ -1085,6 +1103,31 @@ if (existsSync(webDist)) {
   app.use(express.static(webDist));
   app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
 }
+
+/**
+ * What a route did not catch, in JSON with its message.
+ *
+ * Express answers a thrown error, and a body it could not read, with an HTML
+ * page, and all the page could make of that was "HTTP 500" or "HTTP 413". A
+ * body that is too big or not JSON is said in words; the rest keeps its own
+ * message, as the routes' own catches already give it.
+ */
+app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Half an answer is already on its way — an event stream, a download.
+  if (res.headersSent) return next(err);
+  const e = err as { status?: number; statusCode?: number; type?: string; message?: string };
+  const status = Number(e.status ?? e.statusCode) || 500;
+  const error =
+    e.type === "entity.too.large"
+      ? PROMPT_ROUTE.test(req.path)
+        ? "The message and its pictures are more than the server takes in one go"
+        : "That is more than the server takes in one request"
+      : e.type === "entity.parse.failed"
+        ? "The request was not valid JSON"
+        : e.message || "Something went wrong on the server";
+  if (status >= 500) console.error(`[portal] ${req.method} ${req.path} failed:`, err);
+  res.status(status).json({ error });
+});
 
 // On PATH via the image, but a volume that predates it has no such directory —
 // docker only seeds a volume that is empty, so an existing deploy would carry a
