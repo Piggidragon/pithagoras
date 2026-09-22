@@ -12,7 +12,12 @@ home directory, not a workspace, and they share the agent's memory.
 Either a five-field cron expression (`0 9 * * 1-5`) or one of the `@shorthands`,
 **or** a single moment for a one-off. Never both — a routine that repeats and a
 routine that happens once are different things, and the form says so rather than
-guessing.
+guessing. As in cron, Sunday is `0` or `7`, and days and months can be written
+by name: `30 8 * * mon-fri`, `0 9 1 jan *`.
+
+**Run now** on a one-off whose moment is still to come is a try-out: the moment
+stays, and it runs then as well. Giving a one-off that has already run a new
+time switches it back on.
 
 A one-off catches up: if its moment passed while the portal was down, it still
 runs when the portal comes back. A recurring one does not — it simply waits for

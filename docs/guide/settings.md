@@ -28,6 +28,11 @@ It needs a secure connection — HTTPS, or `localhost` — because browsers do n
 offer notifications over plain HTTP; the switch says so where it is unavailable.
 A chat that is not open is noticed while the page is visible.
 
+**Sign out** is at the bottom of the panel when the portal has a password. It
+signs out this browser only. A login that runs out — after thirty days, or when
+the portal restarts without `PORTAL_SECRET` — brings the password screen back
+rather than failing every request with *Unauthorized*.
+
 ### Where a model comes from
 
 Resolved in order, first match wins:

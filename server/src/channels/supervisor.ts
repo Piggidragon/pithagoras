@@ -77,6 +77,15 @@ interface Running {
 const MAX_LOG = 50;
 
 /**
+ * How long before a channel that failed to start is tried again, by attempt.
+ *
+ * A token that is wrong stays wrong, but a network that was not up yet when the
+ * portal booted, or a platform having a bad minute, are the usual causes — and
+ * each used to leave the channel dead until somebody saved it again.
+ */
+const retryDelay = (attempt: number) => Math.min(30_000 * 2 ** (attempt - 1), 15 * 60_000);
+
+/**
  * Said on its own, these stop whatever the agent is doing.
  *
  * Matched only when the message is the word and nothing else: "stop" halts the
@@ -109,6 +118,8 @@ class ChannelSupervisor {
   private syncing: Promise<void> | null = null;
   /** Open dialogs, by session. The next message in that chat answers one. */
   private pendingUi = new Map<string, PendingUi>();
+  /** Channels waiting to try starting again, with how many times they have failed. */
+  private retries = new Map<string, { attempt: number; timer: NodeJS.Timeout }>();
 
   private rows(): ChannelRow[] {
     return getDb().prepare("SELECT * FROM channels").all() as ChannelRow[];
@@ -133,12 +144,19 @@ class ChannelSupervisor {
     const rows = this.rows();
     const wanted = new Map(rows.filter((r) => r.enabled).map((r) => [r.id, r]));
 
-    // Anything running that should not be, or whose configuration moved.
+    // Anything running that should not be, or whose configuration moved. One
+    // that failed is tried again: a sync is the moment something may have
+    // changed — its package installed, or somebody pressing save to retry.
     for (const [id, live] of [...this.running]) {
       const row = wanted.get(id);
-      if (!row || signature(row) !== live.signature) {
+      // A changed configuration is a fresh start, not another failure.
+      if (row && signature(row) !== live.signature) this.clearRetry(id);
+      if (!row || signature(row) !== live.signature || live.state === "error") {
         await this.stopChannel(id);
       }
+    }
+    for (const id of [...this.retries.keys()]) {
+      if (!wanted.has(id)) this.clearRetry(id);
     }
 
     for (const [id, row] of wanted) {
@@ -194,11 +212,25 @@ class ChannelSupervisor {
       live.prompt = handle?.prompt;
       live.state = "running";
       log("started");
+      this.clearRetry(row.id);
     } catch (e) {
       live.state = "error";
       live.error = (e as Error).message;
-      log(`failed to start: ${live.error}`);
+      const attempt = (this.retries.get(row.id)?.attempt ?? 0) + 1;
+      const delay = retryDelay(attempt);
+      log(`failed to start: ${live.error} — trying again in ${Math.round(delay / 1000)}s`);
+      this.clearRetry(row.id);
+      const timer = setTimeout(() => void this.sync().catch(() => {}), delay);
+      timer.unref();
+      this.retries.set(row.id, { attempt, timer });
     }
+  }
+
+  private clearRetry(id: string): void {
+    const retry = this.retries.get(id);
+    if (!retry) return;
+    clearTimeout(retry.timer);
+    this.retries.delete(id);
   }
 
   /** Can this channel speak first? Only running channels that implement send. */
@@ -622,6 +654,7 @@ class ChannelSupervisor {
   }
 
   async shutdown(): Promise<void> {
+    for (const id of [...this.retries.keys()]) this.clearRetry(id);
     await Promise.all([...this.running.keys()].map((id) => this.stopChannel(id)));
   }
 }

@@ -6,6 +6,7 @@ import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
 import {
+  oneOffDone,
   routineSupervisor,
   whenNext,
   type RoutineRow,
@@ -275,6 +276,8 @@ export function routineTools(sessionId?: string) {
               "last_status = NULL",
               "last_output = NULL",
             );
+            // It was switched off by having run; see the routes.
+            if (typeof p.enabled !== "boolean" && oneOffDone(row)) sets.push("enabled = 1");
           }
         }
         if (!sets.length)

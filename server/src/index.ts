@@ -28,7 +28,7 @@ import {
 import { sessions, EXECUTOR_KIND } from "./session-manager.js";
 import { toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
-import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth } from "./auth.js";
+import { authEnabled, checkPassword, clearCookie, isAuthed, issueCookie, requireAuth } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -118,6 +118,11 @@ app.post("/api/auth/login", (req, res) => {
     return res.status(401).json({ error: "Wrong password" });
   }
   issueCookie(res);
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  clearCookie(res);
   res.json({ ok: true });
 });
 
@@ -944,7 +949,8 @@ app.get("/api/sessions/:id/events/before", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const before = Number(req.query.before ?? 0) || 0;
-  const limit = Math.min(Number(req.query.limit) || 1200, 3000);
+  // At least one: SQLite takes a negative LIMIT as no limit at all.
+  const limit = Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 1200, 3000));
   const rows = eventsBefore(session.id, before, limit);
   res.json({
     events: rows.map((r) => ({
@@ -1093,6 +1099,10 @@ async function shutdown(signal: string) {
   await channelSupervisor.shutdown();
   await sessions.shutdown();
   server.close(() => process.exit(0));
+  // Every open page holds an event stream that never ends by itself, and
+  // close() waits for them — so a restart always sat out the full ten seconds
+  // below, which is as long as docker waits before it kills.
+  server.closeAllConnections();
   setTimeout(() => process.exit(0), 10_000).unref();
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

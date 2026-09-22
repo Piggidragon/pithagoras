@@ -19,7 +19,7 @@ import {
   LuTriangleAlert,
   LuUsers,
 } from "react-icons/lu";
-import { api, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
+import { api, SIGNED_OUT, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
@@ -397,6 +397,27 @@ function Confirmations() {
   );
 }
 
+/** Only where there is a password: without one there is nothing to sign out of. */
+function SignOut({ onError }: { onError: (e: string) => void }) {
+  const [required, setRequired] = useState(false);
+  useEffect(() => {
+    api.authStatus().then((s) => setRequired(s.authRequired)).catch(() => {});
+  }, []);
+  if (!required) return null;
+  const signOut = () =>
+    api
+      .logout()
+      .then(() => window.dispatchEvent(new Event(SIGNED_OUT)))
+      .catch((e) => onError((e as Error).message));
+  return (
+    <Section title="This browser" hint="Signing out asks for the password here again. Other browsers stay signed in.">
+      <button onClick={signOut} className={btnCls}>
+        Sign out
+      </button>
+    </Section>
+  );
+}
+
 /** Whether the browser may say so when a chat finishes or needs an answer. */
 function Notifications() {
   const [state, setOn] = useNotifyState();
@@ -668,6 +689,8 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
       <Confirmations />
 
       <Notifications />
+
+      <SignOut onError={onError} />
 
       <Section title="Deployment">
         <dl className="rounded-xl border border-line bg-raised/40 p-3 text-sm">

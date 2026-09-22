@@ -1,7 +1,7 @@
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { api, type PortalEvent, type Session, type SessionStatus } from "./api";
+import { api, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
@@ -31,6 +31,9 @@ export default function App() {
       .authStatus()
       .then((s) => setAuthed(s.authed))
       .catch(() => setAuthed(false));
+    const signedOut = () => setAuthed(false);
+    window.addEventListener(SIGNED_OUT, signedOut);
+    return () => window.removeEventListener(SIGNED_OUT, signedOut);
   }, []);
 
   if (authed === null) {

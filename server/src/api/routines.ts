@@ -4,7 +4,7 @@ import { getDb, getDefaultReportTo, listRoutineSessions, setDefaultReportTo } fr
 import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
-import { isOneOff, routineSupervisor, whenNext, type RoutineRow } from "../routines/supervisor.js";
+import { isOneOff, oneOffDone, routineSupervisor, whenNext, type RoutineRow } from "../routines/supervisor.js";
 
 /**
  * Scheduled work: a standing instruction, a cron expression, and a record of
@@ -21,7 +21,7 @@ const toApi = (row: RoutineRow) => ({
   /** "once" or "repeats" — the two are mutually exclusive. */
   mode: isOneOff(row) ? ("once" as const) : ("repeats" as const),
   /** A one-off that has already run. Kept so its result stays readable. */
-  done: isOneOff(row) && Boolean(row.last_run),
+  done: oneOffDone(row),
   instructions: row.instructions,
   freshSession: Boolean(row.fresh_session),
   guard: row.guard === 1,
@@ -216,9 +216,12 @@ export function routinesRouter(): Router {
       sets.push("schedule = ?", "run_at = ?");
       values.push(timing.schedule, timing.runAt);
       // Re-arming a one-off that already ran: forget the old outcome, or it
-      // would look done the moment it was saved.
+      // would look done the moment it was saved. Switched back on as well — it
+      // was switched off by having run, not by anybody, and a new time that
+      // then never fires is not what giving it one means.
       if (timing.runAt && timing.runAt !== row.run_at) {
         sets.push("last_run = NULL", "last_status = NULL", "last_output = NULL");
+        if (typeof enabled !== "boolean" && oneOffDone(row)) sets.push("enabled = 1");
       }
     }
     if (typeof instructions === "string") {

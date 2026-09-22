@@ -93,7 +93,7 @@ class RoutineSupervisor {
         // Deliberately catches up: a one-off whose moment passed while the
         // server was down should still happen, unlike a recurring one which
         // simply waits for its next slot.
-        if (row.last_run || new Date(row.run_at!) > now) continue;
+        if (oneOffDone(row) || new Date(row.run_at!) > now) continue;
         void this.run(row, "schedule");
         continue;
       }
@@ -121,11 +121,12 @@ class RoutineSupervisor {
     this.running.add(row.slug);
 
     const started = Date.now();
+    const lastRun = new Date(started).toISOString();
     // Written before the work, so a crash mid-run cannot make it fire again
     // the moment the server comes back.
     getDb()
       .prepare("UPDATE routines SET last_run = ?, last_status = 'running' WHERE id = ?")
-      .run(new Date().toISOString(), row.id);
+      .run(lastRun, row.id);
 
     try {
       const session = this.sessionFor(row);
@@ -139,7 +140,9 @@ class RoutineSupervisor {
       this.running.delete(row.slug);
       // A one-off has nothing left to do. Disabled rather than deleted, so the
       // result stays readable and it can be re-armed by giving it a new time.
-      if (isOneOff(row)) {
+      // Not one run by hand ahead of its moment: that was a try, and the
+      // moment it was set for is still to come.
+      if (oneOffDone({ ...row, last_run: lastRun })) {
         getDb().prepare("UPDATE routines SET enabled = 0 WHERE id = ?").run(row.id);
       }
       this.refreshSchedules();
@@ -213,10 +216,17 @@ function prompt(row: RoutineRow, trigger: "schedule" | "manual"): string {
 export const isOneOff = (row: { run_at: string | null; schedule: string }) =>
   Boolean(row.run_at) && !row.schedule.trim();
 
+/**
+ * A one-off that has had its run: one at or after the moment it was set for.
+ * A run before it — by hand, to try it out — does not count.
+ */
+export const oneOffDone = (row: { run_at: string | null; schedule: string; last_run: string | null }) =>
+  isOneOff(row) && Boolean(row.last_run) && new Date(row.last_run!) >= new Date(row.run_at!);
+
 /** When it fires next, or null if it never will again. */
 export function whenNext(row: RoutineRow): string | null {
   if (!row.enabled) return null;
-  if (isOneOff(row)) return row.last_run ? null : row.run_at;
+  if (isOneOff(row)) return oneOffDone(row) ? null : row.run_at;
   try {
     return nextRun(parseCron(row.schedule))?.toISOString() ?? null;
   } catch {

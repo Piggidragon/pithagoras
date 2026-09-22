@@ -20,6 +20,7 @@ curl -s -b jar localhost:4100/api/sessions
 | --- | --- |
 | `GET /api/auth/status` | `{ authRequired, authed }` |
 | `POST /api/auth/login` | `{ password }` → sets the cookie |
+| `POST /api/auth/logout` | clears the cookie |
 
 ## Workspaces
 

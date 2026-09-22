@@ -33,6 +33,15 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
     let id: string | null = null;
     let source: EventSource | null = null;
     let closed = false;
+    // Dragging the panel fires the observer for every pixel, and most of those
+    // leave the character grid as it was.
+    let sent = "";
+    const resize = () => {
+      const size = `${term.rows}x${term.cols}`;
+      if (!id || size === sent) return;
+      sent = size;
+      api.terminalResize(id, term.rows, term.cols).catch(() => {});
+    };
 
     api
       .openTerminal(sessionId)
@@ -52,14 +61,14 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
             term.write("\r\n[Connection to the shell lost — close this panel and open it again]\r\n");
           }),
         );
-        api.terminalResize(termId, term.rows, term.cols).catch(() => {});
+        resize();
       })
       .catch((e) => term.write(`\r\nCould not open a shell: ${e.message}\r\n`));
 
     // The panel is resizable, so the pty has to be told when it changes.
     const observer = new ResizeObserver(() => {
       fit.fit();
-      if (id) api.terminalResize(id, term.rows, term.cols).catch(() => {});
+      resize();
     });
     observer.observe(host.current);
 

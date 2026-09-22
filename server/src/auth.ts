@@ -47,6 +47,11 @@ export function issueCookie(res: Response): void {
   });
 }
 
+/** Forgets this browser's login. The cookie is all there is to forget. */
+export function clearCookie(res: Response): void {
+  res.clearCookie(COOKIE, { httpOnly: true, sameSite: "lax" });
+}
+
 export function checkPassword(candidate: unknown): boolean {
   if (typeof candidate !== "string" || !authEnabled) return false;
   const a = Buffer.from(candidate);

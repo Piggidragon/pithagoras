@@ -760,6 +760,11 @@ class SessionManager extends EventEmitter {
         settle = resolve;
         fail = reject;
       });
+      // A prompt that is refused — the model is down, pi will not start —
+      // publishes its error before it throws, and that rejects `finished` while
+      // nothing is waiting on it yet. The throw below is what reaches the
+      // caller; left unhandled, this one took the whole portal down with it.
+      finished.catch(() => {});
       await this.prompt(sessionId, message);
       await finished;
       // Already relayed piece by piece; handing it back would post it twice.

@@ -174,11 +174,19 @@ export interface PortalEvent {
   payload: any;
 }
 
+/**
+ * Fired when the server stops accepting this browser's login — it expired, or
+ * the portal restarted without PORTAL_SECRET — so the page can ask for the
+ * password again instead of failing every request with "Unauthorized".
+ */
+export const SIGNED_OUT = "pithagoras:signed-out";
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
+  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
   return res.json();
 }
@@ -229,6 +237,7 @@ export const api = {
   authStatus: () => json<{ authRequired: boolean; authed: boolean }>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
+  logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   createWorkspace: (name: string) =>
     json<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify({ name }) }),
