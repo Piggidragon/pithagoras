@@ -12,7 +12,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
-import { activity, buildTranscript, type Activity, type Item } from "../transcript";
+import { activity, buildTranscript, lastReplyId, type Activity, type Item } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
@@ -232,6 +232,7 @@ export function Chat({
     }
     return undefined;
   }, [items]);
+  const lastReply = useMemo(() => lastReplyId(items), [items]);
 
   // Only the end of a conversation is drawn to begin with. Drawing all of a long
   // one is what made opening it slow, and the top of it is not what anybody
@@ -796,9 +797,9 @@ export function Chat({
                     </Streamdown>
                   </div>
                 )}
-                {/* Once it is whole: what is copied from a half-written reply is
-                    a half-written reply. */}
-                {item.text && item.done && (
+                {/* Only the last bubble of the reply: one per tool call in
+                    between would be a Copy button after every paragraph. */}
+                {item.id === lastReply && (
                   <div className="mt-0.5 flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                     <CopyAction text={assistantText(item)} />
                   </div>

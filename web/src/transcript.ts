@@ -124,6 +124,23 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
   return items;
 }
 
+/**
+ * The bubble Copy belongs on: the last stretch of the agent's answer that has
+ * something to read and is not still changing under it.
+ *
+ * A turn with tool calls in the middle closes the assistant item before each
+ * one and opens a new one after, so a single answer can be several bubbles —
+ * one per paragraph around a tool. Offering Copy on all of them is a button
+ * under every paragraph; only the last has the whole of what was said.
+ */
+export function lastReplyId(items: readonly Item[]): string | undefined {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "assistant" && it.text) return it.done ? it.id : undefined;
+  }
+  return undefined;
+}
+
 function summarizeToolInput(p: any): string | undefined {
   const input = p.input ?? p.args ?? p.parameters;
   if (!input) return undefined;

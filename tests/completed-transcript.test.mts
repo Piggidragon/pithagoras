@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activity, buildTranscript } from '../web/src/transcript.ts';
+import { activity, buildTranscript, lastReplyId } from '../web/src/transcript.ts';
 import { appendLiveEvent, resetLiveEvents } from '../web/src/live-events.ts';
 const done = { seq: 12, type: 'message_end', payload: { streamId: 'reply', message: { role: 'assistant', content: [{type: 'thinking', thinking: 'Plan'}, {type: 'text', text: 'Hello world'}] } } };
 const update = {seq: -1, type: 'message_update', payload: {streamId: 'reply', assistantMessageEvent: {type: 'text_delta', delta: 'Hello'}}};
@@ -35,4 +35,31 @@ test('tool updates replace prior snapshots and disappear on completion', () => {
 
 test('restored live snapshots show writing activity instead of prefill', () => {
  assert.equal(activity([{seq:-4,type:'message_snapshot',payload:done.payload}]).label,'writing the reply');
+});
+
+test('Copy belongs only on the last stretch of an answer split by a tool call', () => {
+  const events = [
+    { seq: 1, type: 'message_end', payload: { streamId: 'a', message: { role: 'assistant', content: [{ type: 'text', text: 'Checking the file first.' }] } } },
+    { seq: 2, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'read' } },
+    { seq: 3, type: 'tool_execution_end', payload: { toolCallId: 't', toolName: 'read' } },
+    { seq: 4, type: 'message_end', payload: { streamId: 'b', message: { role: 'assistant', content: [{ type: 'text', text: 'It looks fine.' }] } } },
+  ];
+  const items = buildTranscript(events);
+  const replies = items.filter((i) => i.kind === 'assistant');
+  assert.equal(replies.length, 2);
+  assert.equal(lastReplyId(items), replies[1].id);
+});
+
+test('a reply still streaming after the last tool call is not offered yet', () => {
+  const events = [
+    { seq: 1, type: 'message_end', payload: { streamId: 'a', message: { role: 'assistant', content: [{ type: 'text', text: 'One.' }] } } },
+    { seq: 2, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'read' } },
+    { seq: 3, type: 'tool_execution_end', payload: { toolCallId: 't', toolName: 'read' } },
+    { seq: 4, type: 'message_update', payload: { streamId: 'b', assistantMessageEvent: { type: 'text_delta', delta: 'Still going' } } },
+  ];
+  assert.equal(lastReplyId(buildTranscript(events)), undefined);
+});
+
+test('nothing to copy before anything has been said', () => {
+  assert.equal(lastReplyId([]), undefined);
 });
