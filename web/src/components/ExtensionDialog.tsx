@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuCheck, LuTerminal, LuX } from "react-icons/lu";
 import { api } from "../api";
+import { isEnter } from "../shortcuts";
 
 export interface UiRequest {
   id: string;
@@ -109,7 +110,7 @@ export function ExtensionDialog({
                   autoFocus
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && respond({ value })}
+                  onKeyDown={(e) => isEnter(e) && respond({ value })}
                   placeholder={request.placeholder}
                   className="w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-faint focus:border-accent/60"
                 />

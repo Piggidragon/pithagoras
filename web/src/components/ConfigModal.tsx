@@ -32,6 +32,7 @@ import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
+import { isEnter } from "../shortcuts";
 
 export type Tab =
   | "general"
@@ -662,7 +663,7 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
             inputMode="numeric"
             onChange={(e) => setCtxText(e.target.value)}
             onBlur={saveContextDefault}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            onKeyDown={(e) => isEnter(e) && e.currentTarget.blur()}
             placeholder="what each model says"
             aria-label="Default context window in tokens"
             className={`${inputCls} font-mono`}
@@ -795,7 +796,7 @@ function ExtensionsPanel({
             value={spec}
             onChange={(e) => setSpec(e.target.value)}
             onKeyDown={(e) =>
-              e.key === "Enter" &&
+              isEnter(e) &&
               spec.trim() &&
               act("install", () => api.installPackage(spec.trim()))
             }
@@ -1029,7 +1030,7 @@ function ExtensionPanel({
                 <input
                   value={values[s.key] ?? ""}
                   onChange={(e) => setValues({ ...values, [s.key]: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && save(s.key)}
+                  onKeyDown={(e) => isEnter(e) && save(s.key)}
                   placeholder="empty to unset"
                   className={`${inputCls} font-mono text-xs`}
                 />

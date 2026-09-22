@@ -26,7 +26,7 @@ import { latestFileActivity } from "../file-activity";
 import { drafts, withUnsent } from "../drafts";
 import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
-import { opensComposer, stopsRun } from "../shortcuts";
+import { isEnter, opensComposer, stopsRun } from "../shortcuts";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -1096,7 +1096,7 @@ export function Chat({
               // The command that is lit runs, rather than the half of its name
               // that was typed going to the agent as a message. One that cannot
               // do anything without an argument waits for it instead.
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (isEnter(e) && !e.shiftKey) {
                 e.preventDefault();
                 if (sending) return;
                 if (chosen.needsArgument) complete(chosen);
@@ -1117,7 +1117,7 @@ export function Chat({
               void attempt(onAbort);
               return;
             }
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (isEnter(e) && !e.shiftKey) {
               e.preventDefault();
               send();
             }
@@ -1330,7 +1330,7 @@ function MessageEditor({
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") onCancel();
-          if (e.key === "Enter" && !e.shiftKey) {
+          if (isEnter(e) && !e.shiftKey) {
             e.preventDefault();
             save();
           }

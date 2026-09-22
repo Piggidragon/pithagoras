@@ -16,6 +16,7 @@ import {
 import { api, type BrokenChannelPackage, type Channel, type ChannelKind } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
+import { isEnter } from "../shortcuts";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -195,7 +196,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
           <input
             value={spec}
             onChange={(e) => setSpec(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && spec.trim() && install()}
+            onKeyDown={(e) => isEnter(e) && spec.trim() && install()}
             placeholder="user/repo"
             className={`${inputCls} font-mono text-xs`}
           />

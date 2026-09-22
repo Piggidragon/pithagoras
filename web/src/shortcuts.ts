@@ -43,3 +43,16 @@ export function stopsRun(ctx: {
 }): boolean {
   return ctx.key === "Escape" && ctx.running && ctx.empty && !ctx.composing && !ctx.paletteOpen;
 }
+
+/**
+ * Enter that means "done", not Enter that picks a word.
+ *
+ * With an input method — Japanese, Chinese, Korean — Enter first confirms the
+ * candidate being composed, and that keydown reaches the page too. Taken as
+ * "send", it sent half a sentence. Safari reports the confirming keydown after
+ * composition has ended, as keyCode 229, so that is checked as well.
+ */
+export function isEnter(e: { key: string; keyCode?: number; nativeEvent?: { isComposing?: boolean }; isComposing?: boolean }): boolean {
+  if (e.key !== "Enter") return false;
+  return !(e.nativeEvent?.isComposing ?? e.isComposing) && e.keyCode !== 229;
+}

@@ -5,6 +5,7 @@ import { bytesLabel, slugify } from "../projects";
 import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
+import { isEnter } from "../shortcuts";
 
 /**
  * The folders chats work in.
@@ -286,7 +287,7 @@ function NewProject({
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
+          onKeyDown={(e) => isEnter(e) && submit()}
           placeholder="Cool Project"
           className={`${FIELD} mt-1`}
         />

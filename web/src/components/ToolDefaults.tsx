@@ -3,6 +3,7 @@ import { LuChevronDown, LuChevronRight, LuCheck, LuPencil, LuX } from "react-ico
 import { api } from "../api";
 import { displayName, groupSummary, groupTools, nextOff } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
+import { isEnter } from "../shortcuts";
 
 /**
  * Which tools every conversation starts with.
@@ -123,7 +124,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                       value={renaming.value}
                       onChange={(e) => setRenaming({ source: group.source, value: e.target.value })}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") rename(group.source, renaming.value);
+                        if (isEnter(e)) rename(group.source, renaming.value);
                         if (e.key === "Escape") setRenaming(null);
                       }}
                       placeholder={displayName(group.source)}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { LuArrowRight, LuBot, LuCheck, LuRefreshCw, LuUser } from "react-icons/lu";
 import { api, type AgentSetup as Setup } from "../api";
+import { isEnter } from "../shortcuts";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -75,7 +76,7 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
               autoFocus
               value={agentName}
               onChange={(e) => setAgentName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && agentName.trim() && setStep(1)}
+              onKeyDown={(e) => isEnter(e) && agentName.trim() && setStep(1)}
               placeholder="Aria"
               className={`${inputCls} mt-1`}
             />

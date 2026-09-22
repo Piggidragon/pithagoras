@@ -15,6 +15,7 @@ import {
 } from "react-icons/lu";
 import { api, type FoundSkill, type Skill, type SkillDiagnostic } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
+import { isEnter } from "../shortcuts";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -559,7 +560,7 @@ function ImportSkills({
           autoFocus
           value={spec}
           onChange={(e) => setSpec(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && spec.trim() && look()}
+          onKeyDown={(e) => isEnter(e) && spec.trim() && look()}
           placeholder="anthropics/skills"
           className={`${inputCls} font-mono text-xs`}
         />

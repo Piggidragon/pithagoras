@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { opensComposer, stopsRun } from "../web/src/shortcuts.ts";
+import { isEnter, opensComposer, stopsRun } from "../web/src/shortcuts.ts";
 
 test("a slash on the bare page opens the message box", () => {
   assert.equal(opensComposer({ key: "/", target: { tagName: "BODY" } }), true);
@@ -43,4 +43,14 @@ test("Escape belongs to the input method and the command list first", () => {
 
 test("only Escape stops", () => {
   assert.equal(stopsRun({ ...base, key: "Enter" }), false);
+});
+
+test("Enter is Enter only when no input method is using it", () => {
+  assert.equal(isEnter({ key: "Enter", keyCode: 13, nativeEvent: { isComposing: false } }), true);
+  assert.equal(isEnter({ key: "Enter", keyCode: 13 }), true);
+  // Confirming a candidate: while composing, and Safari's late keydown.
+  assert.equal(isEnter({ key: "Enter", keyCode: 229, nativeEvent: { isComposing: true } }), false);
+  assert.equal(isEnter({ key: "Enter", keyCode: 229, nativeEvent: { isComposing: false } }), false);
+  assert.equal(isEnter({ key: "Enter", isComposing: true }), false);
+  assert.equal(isEnter({ key: "a", keyCode: 65 }), false);
 });
