@@ -10,7 +10,7 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuArrowDown, LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { MAX_IMAGES, pending, prepareImage, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Activity, type Item } from "../transcript";
@@ -400,18 +400,37 @@ export function Chat({
 
   // Commands come from pi at runtime, so anything a newly installed package
   // registers shows up here without the portal knowing about it in advance.
+  //
+  // Asked for only once a "/" is typed. Listing them starts pi for the chat,
+  // and it stays up — so fetching them on open started a runtime for every chat
+  // looked at, which the config route goes out of its way not to do.
   const [commands, setCommands] = useState<PiCommand[]>([]);
-  useEffect(() => {
-    api
-      .commands(session.id)
-      .then((r) => setCommands(r.commands))
-      .catch(() => setCommands([]));
-    // Refetch when a run ends: installing an extension mid-session should make
-    // its commands show up without a reload.
-  }, [session.id, running]);
+  const commandList = useRef<{ key: string; list: Promise<PiCommand[]> } | null>(null);
+  /** The commands for this chat, fetched once per chat and again after each run. */
+  const loadCommands = (): Promise<PiCommand[]> => {
+    // A run can install an extension, whose commands should then be offered.
+    const key = `${session.id}:${turns}`;
+    if (commandList.current?.key !== key) {
+      const list = api.commands(session.id).then(
+        (r) => r.commands,
+        () => [] as PiCommand[],
+      );
+      commandList.current = { key, list };
+      void list.then((found) => {
+        if (commandList.current?.key === key) setCommands(found);
+      });
+    }
+    return commandList.current.list;
+  };
+  // What was listed for another chat is not offered here.
+  useEffect(() => setCommands([]), [session.id]);
 
   // Show the palette while the composer holds a bare "/name" prefix.
   const slashText = slashToken(input);
+  const wantsCommands = slashText !== null;
+  useEffect(() => {
+    if (wantsCommands) void loadCommands();
+  }, [wantsCommands, session.id, turns]);
   const allMatches = useMemo(
     () => (slashText === null ? [] : paletteMatches(commands, slashText)),
     [commands, slashText],
@@ -471,12 +490,14 @@ export function Chat({
     // Some builtins are UI, not prompts: /model opens the picker the pill uses,
     // /settings opens the modal. Sending them to pi would just be a chat line.
     const parsed = /^\/([\w-]+)\s*(.*)$/.exec(msg);
-    const client = parsed
-      ? commands.find((c) => c.name === parsed[1] && c.where === "client")
-      : undefined;
 
     if (fromBox) clearBox();
     try {
+      // Waited for when a command is sent before the list has arrived, or /new
+      // typed fast would go to the agent as a message.
+      const client = parsed
+        ? (await loadCommands()).find((c) => c.name === parsed[1] && c.where === "client")
+        : undefined;
       if (client && parsed && !images.length) {
         if (client.name === "model") setPanelRequest("model");
         else await onClientCommand(client.name, parsed[2]);
@@ -680,6 +701,8 @@ export function Chat({
           {browserUp && (
             <button
               onClick={() => setWatching((v) => !v)}
+              aria-label="Browser"
+              aria-expanded={watching}
               title={
                 watching ? "Hide the browser" : "Watch the browser the agent is driving"
               }
@@ -694,6 +717,8 @@ export function Chat({
           )}
           <button
             onClick={() => setTerminal((v) => !v)}
+            aria-label="Terminal"
+            aria-expanded={terminal}
             title={terminal ? "Hide the terminal" : "Open a shell in this workspace"}
             className={`rounded-lg border px-2 py-1 text-xs transition ${
               terminal
@@ -859,7 +884,11 @@ export function Chat({
                     </MessageAction>
                   )}
                   <MessageAction
-                    label={running ? "Stop the run to edit" : "Edit — replaces this message and everything after it"}
+                    label={
+                      running
+                        ? "Stop the run to edit"
+                        : `Edit — replaces this message and everything after it${item.id === lastSaid ? " (↑ in an empty box)" : ""}`
+                    }
                     disabled={running}
                     onClick={() => setEditing(item.seq)}
                   >
@@ -991,6 +1020,21 @@ export function Chat({
         className="px-4 pb-4 pt-2 sm:px-6 sm:pb-5"
       >
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
+        {/* Scrolled up to read, the way back to the end is one click rather
+            than a long drag — and during a run, where the new output is. */}
+        {scroller.away && !loading && matches.length === 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              reading.current = null;
+              scroller.follow(true);
+            }}
+            className="absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
+          >
+            <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
+            {running ? "Latest output" : "Jump to the end"}
+          </button>
+        )}
         {matches.length > 0 && (
           <div
             ref={paletteRef}
@@ -1104,6 +1148,21 @@ export function Chat({
                 return;
               }
             }
+            // Up in an empty box opens what you last said for rewriting, as in
+            // most chat programs — the quick way to fix a typo just sent.
+            if (
+              e.key === "ArrowUp" &&
+              !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey &&
+              !e.nativeEvent.isComposing &&
+              !input && !attached.length && !running
+            ) {
+              const last = items.find((it) => it.id === lastSaid);
+              if (last?.kind === "user") {
+                e.preventDefault();
+                setEditing(last.seq);
+                return;
+              }
+            }
             if (
               stopsRun({
                 key: e.key,
@@ -1207,6 +1266,7 @@ export function Chat({
                     <button
                       onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? void closeFiles() : setTerminal(false))}
                       title="Collapse"
+                      aria-label={`Close the ${kind === "browser" ? "browser" : kind === "files" ? "files" : "terminal"}`}
                       className={`${kind === "browser" ? "" : "ml-auto "}rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg`}
                     >
                       ✕
