@@ -64,6 +64,12 @@ test("a long name in a script of many bytes a letter is uploaded, not refused fo
     const res = await upload(base, "", name, "long");
     assert.deepEqual([res.status, res.path], [200, name]);
     assert.equal(readFileSync(path.join(work, name), "utf8"), "long");
+    // The same name again at the limit: the number fits by giving up a letter.
+    const full = `${"報".repeat(83)}.pdf`; // 253 bytes
+    assert.equal((await upload(base, "", full, "one")).status, 200);
+    const again = await upload(base, "", full, "two");
+    assert.deepEqual([again.status, again.path], [200, `${"報".repeat(82)} (2).pdf`]);
+    assert.equal(readFileSync(path.join(work, again.path), "utf8"), "two");
   });
 });
 
@@ -106,4 +112,17 @@ test("numbers go before the extension, and on the end without one", () => {
   assert.equal(numbered("a.tar.gz", 2), "a.tar (2).gz");
   assert.equal(numbered("Makefile", 3), "Makefile (3)");
   assert.equal(numbered(".env", 2), ".env (2)");
+});
+
+test("a number never takes a name past 255 bytes: the stem gives way, and the extension stays", () => {
+  const bytes = (s) => Buffer.byteLength(s);
+  const long = `${"報".repeat(83)}.pdf`; // 253 bytes
+  const second = numbered(long, 2);
+  assert.ok(bytes(second) <= 255);
+  assert.ok(second.endsWith("報 (2).pdf"));
+  assert.ok(bytes(numbered("a".repeat(255), 12)) <= 255);
+  assert.ok(numbered("a".repeat(255), 12).endsWith("a (12)"));
+  const hugeExt = `a.${"x".repeat(252)}`;
+  assert.ok(bytes(numbered(hugeExt, 2)) <= 255);
+  assert.ok(numbered(hugeExt, 2).endsWith(" (2)"));
 });

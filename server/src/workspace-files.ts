@@ -459,24 +459,37 @@ export function makeFolder(base: string, dirRel: unknown, name: unknown): string
   return path.relative(base, target);
 }
 
+/** The start of a name that fits in `max` bytes, cut between letters, not inside one. */
+function fitBytes(name: string, max: number): string {
+  let start = "";
+  for (const ch of name) {
+    if (Buffer.byteLength(start + ch) > max) break;
+    start += ch;
+  }
+  return start;
+}
+
 /**
  * The start of a name, for a temporary file beside it: at most 100 bytes, so
  * the dot and suffix around it stay inside the 255 bytes a name may have.
  */
 function tempStem(name: string): string {
-  let stem = "";
-  for (const ch of name) {
-    if (Buffer.byteLength(stem + ch) > 100) break;
-    stem += ch;
-  }
-  return stem;
+  return fitBytes(name, 100);
 }
 
-/** "report.pdf", then "report (2).pdf", "report (3).pdf"… */
+/**
+ * "report.pdf", then "report (2).pdf", "report (3).pdf"… A name near the
+ * 255-byte limit loses the end of its stem to make room for the number.
+ */
 export function numbered(name: string, n: number): string {
   if (n < 2) return name;
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? `${name.slice(0, dot)} (${n})${name.slice(dot)}` : `${name} (${n})`;
+  const tail = dot > 0 ? ` (${n})${name.slice(dot)}` : ` (${n})`;
+  const room = 255 - Buffer.byteLength(tail);
+  // An extension too long to leave room for any of the stem is kept as part of it.
+  if (dot > 0 && room >= 4) return fitBytes(name.slice(0, dot), room) + tail;
+  if (dot > 0) return fitBytes(name, 255 - Buffer.byteLength(` (${n})`)) + ` (${n})`;
+  return fitBytes(name, room) + tail;
 }
 
 /**
