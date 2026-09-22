@@ -1,12 +1,14 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
+import { isSignedOut, recordSignOut } from "./db.js";
 
 /**
  * Shared-password gate.
  *
  * This portal can run arbitrary code on the host, so even on a Tailscale-only
  * network it should not be drivable by anything that happens to reach the port.
- * The cookie is an HMAC of an expiry stamp — no session store needed.
+ * The cookie is an HMAC of an expiry stamp — no session store needed, except
+ * for the ones signed out early, which are remembered until they would expire.
  */
 const PASSWORD = process.env.PORTAL_PASSWORD || "";
 const SECRET = process.env.PORTAL_SECRET || crypto.randomBytes(32).toString("hex");
@@ -41,15 +43,21 @@ function sign(expiry: number): string {
   return `${expiry}.${mac}`;
 }
 
-function verify(token: string | undefined): boolean {
-  if (!token) return false;
+/** The token's expiry and signature, if it is one this portal signed and it has not run out. */
+function genuine(token: string | undefined): { expiry: number; mac: string } | null {
+  if (!token) return null;
   const [expiryStr, mac] = token.split(".");
   const expiry = Number(expiryStr);
-  if (!Number.isFinite(expiry) || expiry < Date.now()) return false;
+  if (!Number.isFinite(expiry) || expiry < Date.now()) return null;
   const expected = crypto.createHmac("sha256", SECRET).update(expiryStr).digest("hex");
   const a = Buffer.from(mac ?? "");
   const b = Buffer.from(expected);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  return a.length === b.length && crypto.timingSafeEqual(a, b) ? { expiry, mac } : null;
+}
+
+function verify(token: string | undefined): boolean {
+  const login = genuine(token);
+  return login !== null && !isSignedOut(login.mac);
 }
 
 export function issueCookie(res: Response): void {
@@ -60,8 +68,13 @@ export function issueCookie(res: Response): void {
   });
 }
 
-/** Forgets this browser's login. The cookie is all there is to forget. */
-export function clearCookie(res: Response): void {
+/**
+ * Ends this browser's login: the cookie is cleared, and the login it held is
+ * refused from now on, so a copy of it taken elsewhere stops working too.
+ */
+export function signOut(req: Request, res: Response): void {
+  const login = genuine(req.cookies?.[COOKIE]);
+  if (login) recordSignOut(login.mac, login.expiry);
   res.clearCookie(COOKIE, { httpOnly: true, sameSite: "lax" });
 }
 

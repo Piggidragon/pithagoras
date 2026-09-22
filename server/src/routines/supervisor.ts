@@ -93,7 +93,9 @@ class RoutineSupervisor {
         // Deliberately catches up: a one-off whose moment passed while the
         // server was down should still happen, unlike a recurring one which
         // simply waits for its next slot.
-        if (oneOffDone(row) || new Date(row.run_at!) > now) continue;
+        // Not `> now`: a time that cannot be read compares false to anything,
+        // and would run on every tick. Such a one never fires, like a bad cron.
+        if (oneOffDone(row) || !(new Date(row.run_at!) <= now)) continue;
         void this.run(row, "schedule");
         continue;
       }
@@ -218,10 +220,14 @@ export const isOneOff = (row: { run_at: string | null; schedule: string }) =>
 
 /**
  * A one-off that has had its run: one at or after the moment it was set for.
- * A run before it — by hand, to try it out — does not count.
+ * A run before it — by hand, to try it out — does not count. If that moment
+ * cannot be read there is no "before" to tell apart, and any run is its run.
  */
-export const oneOffDone = (row: { run_at: string | null; schedule: string; last_run: string | null }) =>
-  isOneOff(row) && Boolean(row.last_run) && new Date(row.last_run!) >= new Date(row.run_at!);
+export const oneOffDone = (row: { run_at: string | null; schedule: string; last_run: string | null }) => {
+  if (!isOneOff(row) || !row.last_run) return false;
+  const at = new Date(row.run_at!).getTime();
+  return Number.isNaN(at) || new Date(row.last_run).getTime() >= at;
+};
 
 /** When it fires next, or null if it never will again. */
 export function whenNext(row: RoutineRow): string | null {

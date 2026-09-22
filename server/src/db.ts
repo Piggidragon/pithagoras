@@ -292,6 +292,15 @@ export function getDb(): Database.Database {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    -- Logins signed out before they ran out, by the signature of their cookie.
+    -- The cookie carries no state of its own, so without this a copy of one
+    -- would go on working for the rest of its thirty days.
+    CREATE TABLE IF NOT EXISTS signed_out (
+      mac TEXT PRIMARY KEY,
+      -- When the cookie would have stopped working anyway; past it, the row goes.
+      expires INTEGER NOT NULL
+    );
   `);
   migrate(db);
   return db;
@@ -597,6 +606,19 @@ export function sentMessages(sessionId: string): { seq: number; message: string;
     const payload = JSON.parse(r.payload) ?? {};
     return { seq: r.seq, message: String(payload.message ?? ""), payload };
   });
+}
+
+/** One message the portal sent to the agent, by its seq, or undefined if that is not one. */
+export function sentMessage(
+  sessionId: string,
+  seq: number,
+): { seq: number; message: string; payload: Record<string, unknown> } | undefined {
+  const row = getDb()
+    .prepare("SELECT payload FROM events WHERE session_id = ? AND seq = ? AND type = 'portal_prompt'")
+    .get(sessionId, seq) as { payload: string } | undefined;
+  if (!row) return undefined;
+  const payload = JSON.parse(row.payload) ?? {};
+  return { seq, message: String(payload.message ?? ""), payload };
 }
 
 /**
@@ -1201,6 +1223,17 @@ function putSetting(key: string, value: string): void {
       "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).run(key, value);
   else db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+}
+
+/** Remembers a login as signed out until it would have expired, and forgets those that have. */
+export function recordSignOut(mac: string, expires: number): void {
+  const d = getDb();
+  d.prepare("DELETE FROM signed_out WHERE expires < ?").run(Date.now());
+  d.prepare("INSERT OR IGNORE INTO signed_out (mac, expires) VALUES (?, ?)").run(mac, expires);
+}
+
+export function isSignedOut(mac: string): boolean {
+  return getDb().prepare("SELECT 1 FROM signed_out WHERE mac = ?").get(mac) !== undefined;
 }
 
 /**

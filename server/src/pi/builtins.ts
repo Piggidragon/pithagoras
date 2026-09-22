@@ -92,6 +92,21 @@ export async function findServerBuiltin(name: string): Promise<BuiltinCommand | 
   return (await getBuiltinCommands()).find((c) => c.name === name && c.where === "server");
 }
 
+/**
+ * Why `message` cannot be sent with pictures, or undefined if it can.
+ *
+ * A portal command acts on the session and never reaches the model, so
+ * pictures sent with one would be lost without a word. Asked before anything
+ * is done with them, so the refusal reaches someone who can put them back.
+ */
+export async function picturesRefused(message: string): Promise<string | undefined> {
+  const name = /^\/([\w-]+)/.exec(message.trim())?.[1];
+  if (name && (await findServerBuiltin(name))) {
+    return `/${name} does not take pictures. Send them in a message of their own.`;
+  }
+  return undefined;
+}
+
 /** Run a server-side builtin, returning the notice to show in the transcript. */
 export async function runBuiltin(name: string, args: string, client: PiClient): Promise<string> {
   switch (name) {

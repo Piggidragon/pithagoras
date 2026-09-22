@@ -41,6 +41,9 @@ test("a one-off is done only by a run at or after its moment", () => {
   assert.equal(oneOffDone({ ...row, last_run: "2026-09-22T10:00:00.000Z" }), false);
   assert.equal(oneOffDone({ ...row, last_run: "2026-10-01T09:00:10.000Z" }), true);
   assert.equal(oneOffDone({ schedule: "0 9 * * *", run_at: null, last_run: "2026-10-01T09:00:10.000Z" }), false);
+  // A moment that cannot be read: any run is its run, or it would never stop.
+  assert.equal(oneOffDone({ schedule: "", run_at: "next tuesday", last_run: "2026-09-22T10:00:00.000Z" }), true);
+  assert.equal(oneOffDone({ schedule: "", run_at: "next tuesday", last_run: null }), false);
 });
 
 async function withApi(fn) {

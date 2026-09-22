@@ -6,7 +6,7 @@ import path from "node:path";
 import type { PiClient, PiTool } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
-import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
+import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
@@ -18,6 +18,7 @@ import {
   getSession,
   latestSeq,
   restoreEvents,
+  sentMessage,
   sentMessages,
   getSettings,
   markOrphanedSessionsInterrupted,
@@ -386,6 +387,10 @@ class SessionManager extends EventEmitter {
    * nothing to show for them otherwise.
    */
   async prompt(sessionId: string, message: string, options?: PromptOptions, insideEdit = false): Promise<void> {
+    // Callers ask first, where there is someone to tell; this is so that one
+    // which did not is refused too, before the session is marked as anything.
+    const refused = options?.images?.length ? await picturesRefused(message) : undefined;
+    if (refused) throw new SessionEditError("unsupported", refused);
     // Behind an edit in progress, not through it: see withEdit.
     if (!insideEdit) await this.whenEditable(sessionId);
     this.mark(sessionId, "running");
@@ -433,8 +438,6 @@ class SessionManager extends EventEmitter {
     const builtin = /^\/([\w-]+)\s*(.*)$/.exec(message.trim());
     const serverBuiltin = builtin ? await findServerBuiltin(builtin[1]) : undefined;
     if (serverBuiltin) {
-      // Refused before getting here, where there is someone to tell.
-      if (images.length) throw new SessionEditError("unsupported", `/${serverBuiltin.name} does not take pictures`);
       // Not awaited: /compact is a model call and would hold the request open.
       // Same contract as a prompt — accept it, report through the event stream.
       void (async () => {
@@ -599,12 +602,11 @@ class SessionManager extends EventEmitter {
     await this.withEdit(sessionId, async () => {
       // Read before the cut takes the event away: a retried or rewritten
       // message goes with the pictures it was sent with.
-      const images = loadImages(IMAGE_ROOT, sessionId, storedIn(sentMessages(sessionId).find((m) => m.seq === seq)?.payload));
+      const images = loadImages(IMAGE_ROOT, sessionId, storedIn(sentMessage(sessionId, seq)?.payload));
       if (!message.trim() && !images.length) throw new SessionEditError("empty", "A message needs words or a picture");
-      const builtin = images.length ? /^\/([\w-]+)/.exec(message.trim()) : null;
-      if (builtin && (await findServerBuiltin(builtin[1]))) {
-        throw new SessionEditError("unsupported", `/${builtin[1]} does not take pictures. Send them in a message of their own.`);
-      }
+      // Before the cut, which would otherwise be done only to be undone.
+      const refused = images.length ? await picturesRefused(message) : undefined;
+      if (refused) throw new SessionEditError("unsupported", refused);
       const { removed, undo } = await this.cut(sessionId, seq, "tail");
       const before = latestSeq();
       try {
@@ -985,14 +987,15 @@ class SessionManager extends EventEmitter {
    * pi reads which packages to load when a conversation starts, so a package
    * switched on or off reaches the open ones by reloading them. Only the idle:
    * a reload rebinds every extension, which is not something to do under a run or a
-   * compaction. Those are counted rather than skipped in silence, since they
-   * keep what they had until they are reloaded.
+   * compaction — nor under an edit, whose rewrite of pi's file a reload could
+   * read half-done or write over. Those are counted rather than skipped in
+   * silence, since they keep what they had until they are reloaded.
    */
   async reloadIdle(): Promise<{ reloaded: number; waiting: number }> {
     let waiting = 0;
     const done = await Promise.all(
       [...this.live.entries()].map(async ([sessionId, { client }]) => {
-        if (this.isBusy(sessionId) || this.compacting.has(sessionId)) {
+        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId)) {
           waiting++;
           return false;
         }

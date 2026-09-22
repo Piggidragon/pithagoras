@@ -32,6 +32,13 @@ import { isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 const PAGE = 40;
 
 /**
+ * The commands the portal runs itself, by opening a piece of UI — the ones the
+ * server lists with `where: "client"` (see pi/builtins.ts). Known here without
+ * asking: listing commands starts pi for the chat, which /new has no need of.
+ */
+const CLIENT_COMMANDS = new Set(["model", "settings", "new", "clear", "name"]);
+
+/**
  * Context the portal attaches to a message, and what to call it.
  *
  * The agent needs to be told who is speaking and what it said while nobody was
@@ -488,22 +495,24 @@ export function Chat({
    */
   const submit = async (msg: string, fromBox: boolean) => {
     const sent = session.id;
-    // The pictures in the box go with what came from it, and nothing else.
-    const images = fromBox ? attached : [];
     // Some builtins are UI, not prompts: /model opens the picker the pill uses,
     // /settings opens the modal. Sending them to pi would just be a chat line.
     const parsed = /^\/([\w-]+)\s*(.*)$/.exec(msg);
+    const command = parsed && CLIENT_COMMANDS.has(parsed[1]) ? parsed : null;
+    // The pictures in the box go with what came from it, and nothing else. A
+    // command is run rather than sent, so they stay in the box for later.
+    const images = fromBox && !command ? attached : [];
 
-    if (fromBox) clearBox();
+    if (fromBox) {
+      if (command) {
+        caret.current = null;
+        changeInput("");
+      } else clearBox();
+    }
     try {
-      // Waited for when a command is sent before the list has arrived, or /new
-      // typed fast would go to the agent as a message.
-      const client = parsed
-        ? (await loadCommands()).find((c) => c.name === parsed[1] && c.where === "client")
-        : undefined;
-      if (client && parsed && !images.length) {
-        if (client.name === "model") setPanelRequest("model");
-        else await onClientCommand(client.name, parsed[2]);
+      if (command) {
+        if (command[1] === "model") setPanelRequest("model");
+        else await onClientCommand(command[1], command[2]);
         return;
       }
       setSending(true);

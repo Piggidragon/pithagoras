@@ -29,7 +29,7 @@ import { sessions, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
-import { authEnabled, checkPassword, clearCookie, isAuthed, issueCookie, requireAuth } from "./auth.js";
+import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth, signOut } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -54,7 +54,7 @@ import {
   writeCompactionSettings,
 } from "./pi-settings.js";
 import { eventTime, getDb } from "./db.js";
-import { findServerBuiltin, getBuiltinCommands } from "./pi/builtins.js";
+import { getBuiltinCommands, picturesRefused } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
 import {
@@ -134,8 +134,8 @@ app.post("/api/auth/login", (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/auth/logout", (_req, res) => {
-  clearCookie(res);
+app.post("/api/auth/logout", (req, res) => {
+  signOut(req, res);
   res.json({ ok: true });
 });
 
@@ -572,13 +572,9 @@ app.post("/api/sessions/:id/prompt", promptJson, async (req, res) => {
   if (typeof message !== "string" || (!message.trim() && !parsed.length)) {
     return res.status(400).json({ error: "message required" });
   }
-  // A portal command acts on the session and never reaches the model, so
-  // pictures sent with one would be lost without a word. Refused instead: the
-  // browser puts them back in the box.
-  const builtin = parsed.length ? /^\/([\w-]+)/.exec(message.trim()) : null;
-  if (builtin && (await findServerBuiltin(builtin[1]))) {
-    return res.status(400).json({ error: `/${builtin[1]} does not take pictures. Send them in a message of their own.` });
-  }
+  // Refused before they are saved: the browser puts them back in the box.
+  const refused = parsed.length ? await picturesRefused(message) : undefined;
+  if (refused) return res.status(400).json({ error: refused });
   try {
     const images = saveImages(IMAGE_ROOT, session.id, parsed);
     // Returns as soon as pi accepts the prompt. The run continues server-side

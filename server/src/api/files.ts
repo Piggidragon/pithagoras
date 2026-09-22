@@ -136,6 +136,13 @@ export function filesRouter(): Router {
    * file is never held in memory, and only put in place once all of it came.
    */
   router.post("/sessions/:id/upload", (req, res) => {
+    // Any answer given before the whole file came in closes the connection, the
+    // early refusals below included: kept open, Node would read the rest of the
+    // body — however big it said it was — just to throw it away.
+    res.setHeader("Connection", "close");
+    res.on("finish", () => {
+      if (!req.complete) req.destroy();
+    });
     const base = folderOf(req.params.id, res);
     if (!base) return;
     const announced = Number(req.headers["content-length"]);
@@ -160,8 +167,6 @@ export function filesRouter(): Router {
       // Nothing more of the body is read: the connection is closed once the
       // answer is out, rather than taking in the rest of a file nobody keeps.
       if (res.headersSent) return void req.destroy();
-      res.setHeader("Connection", "close");
-      res.on("finish", () => req.destroy());
       res.status(status).json({ error });
     };
     req.on("data", (chunk: Buffer) => {
@@ -178,6 +183,7 @@ export function filesRouter(): Router {
       if (done) return;
       done = true;
       try {
+        res.removeHeader("Connection");
         res.json({ ok: true, path: target.finish(), size: received });
       } catch (e) {
         fail(res, e);

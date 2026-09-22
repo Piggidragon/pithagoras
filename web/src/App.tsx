@@ -17,7 +17,7 @@ import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { pollWhileVisible, reconnectDelay } from "./poll";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
-import { notifyIfAway } from "./notify";
+import { notifyIfAway, notifyState } from "./notify";
 import { guardStrayDrops } from "./drop-guard";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
@@ -299,6 +299,19 @@ function Shell({
       document.title = APP_NAME;
     };
   }, [active?.title, active?.status, waiting]);
+
+  // The list stops being polled while the page is hidden, but a chat left
+  // running there can only be seen finishing through it — the open one has its
+  // stream, the rest do not. So while someone asked to be told and something
+  // is running, a hidden page keeps asking, more slowly.
+  const anyRunning = sessions.some((s) => s.status === "running");
+  useEffect(() => {
+    if (!anyRunning) return;
+    const timer = setInterval(() => {
+      if (document.hidden && notifyState() === "on") refreshSessions().catch(() => {});
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [anyRunning, refreshSessions]);
 
   const lastStatus = useRef(new Map<string, SessionStatus>());
   useEffect(() => {
