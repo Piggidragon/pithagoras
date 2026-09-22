@@ -5,7 +5,9 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      - portal-data:/data
+      # Database, pi's settings and packages, sessions. A named volume unless
+      # PORTAL_DATA_DIR is set to an absolute path, which mounts that directory.
+      - ${PORTAL_DATA_DIR:-portal-data}:/data
       # Certificates, when you have them. Empty by default.
       - ${PORTAL_TLS_DIR:-/dev/null}:/certs:ro
       # Workspaces pi works in. Read-write: the whole point is that it edits code.
@@ -17,7 +19,12 @@ services:
       PORTAL_CONTAINER_NAME: pithagoras
       # With host networking the portal binds PORT directly on the host.
       PORT: ${PORT:-4100}
-      PORTAL_PASSWORD: ${PORTAL_PASSWORD:?set PORTAL_PASSWORD in .env}
+      PORTAL_PASSWORD: ${PORTAL_PASSWORD:-}
+      # The portal refuses to start without a password unless this is set, so an
+      # empty or misspelt PORTAL_PASSWORD cannot quietly open the port. Set it
+      # only for a portal behind a reverse proxy which authenticates already;
+      # then nothing here stops whoever reaches the port.
+      PORTAL_ALLOW_NO_PASSWORD: ${PORTAL_ALLOW_NO_PASSWORD:-}
       # Keeps logins valid across restarts; generate with: openssl rand -hex 32
       PORTAL_SECRET: ${PORTAL_SECRET:-}
       # host = pi runs in this container | container = one container per task

@@ -14,12 +14,25 @@ const COOKIE = (process.env.VOICE_COMPARISON === "true" || process.env.VOICE_PIP
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export const authEnabled = PASSWORD.length > 0;
+/** Running without a login is a deliberate choice, never what an empty .env falls back to. */
+const allowNoPassword = /^(1|true|yes)$/i.test(process.env.PORTAL_ALLOW_NO_PASSWORD ?? "");
+
+if (!authEnabled && !allowNoPassword) {
+  console.error(
+    "\n  PORTAL_PASSWORD is not set. This portal runs arbitrary commands on the\n" +
+      "  host, so it refuses to start without a login rather than open the port.\n" +
+      "  Set PORTAL_PASSWORD (and PORTAL_SECRET to keep logins across restarts),\n" +
+      "  or set PORTAL_ALLOW_NO_PASSWORD=1 when a reverse proxy authenticates in\n" +
+      "  front of it and nothing else can reach the port.\n"
+  );
+  process.exit(1);
+}
 
 if (!authEnabled) {
   console.warn(
-    "\n  WARNING: PORTAL_PASSWORD is not set — the portal is open to anyone who\n" +
-      "  can reach it, and it can run arbitrary commands on this machine.\n" +
-      "  Set PORTAL_PASSWORD (and PORTAL_SECRET to keep logins across restarts).\n"
+    "\n  WARNING: PORTAL_ALLOW_NO_PASSWORD is set and PORTAL_PASSWORD is not — the\n" +
+      "  portal is open to anyone who can reach it, and it can run arbitrary\n" +
+      "  commands on this machine. Only the proxy in front of it stops them.\n"
   );
 }
 
