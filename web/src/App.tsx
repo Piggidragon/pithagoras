@@ -18,6 +18,7 @@ import { ConfirmHost } from "./components/ConfirmDialog";
 import { pollWhileVisible, reconnectDelay } from "./poll";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
 import { notifyIfAway } from "./notify";
+import { guardStrayDrops } from "./drop-guard";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 type Tab = "general" | "extensions" | "advanced";
@@ -35,6 +36,9 @@ export default function App() {
     window.addEventListener(SIGNED_OUT, signedOut);
     return () => window.removeEventListener(SIGNED_OUT, signedOut);
   }, []);
+
+  // A file dropped just beside the message box must not replace the portal.
+  useEffect(() => guardStrayDrops(), []);
 
   if (authed === null) {
     return (

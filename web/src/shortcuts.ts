@@ -52,7 +52,24 @@ export function stopsRun(ctx: {
  * "send", it sent half a sentence. Safari reports the confirming keydown after
  * composition has ended, as keyCode 229, so that is checked as well.
  */
-export function isEnter(e: { key: string; keyCode?: number; nativeEvent?: { isComposing?: boolean }; isComposing?: boolean }): boolean {
-  if (e.key !== "Enter") return false;
-  return !(e.nativeEvent?.isComposing ?? e.isComposing) && e.keyCode !== 229;
+export function isEnter(e: KeyEvent): boolean {
+  return e.key === "Enter" && !composing(e);
 }
+
+/**
+ * Escape that means "never mind", not Escape that dismisses an input method's
+ * candidates.
+ *
+ * The same keydown reaches the page, and taken as "cancel" it threw away the
+ * message being rewritten, or closed the dialog being typed into, along with
+ * the word that was only meant to be taken back.
+ */
+export function isEscape(e: KeyEvent): boolean {
+  return e.key === "Escape" && !composing(e);
+}
+
+/** A React event carries it on `nativeEvent`, a DOM one on itself. */
+type KeyEvent = { key: string; keyCode?: number; nativeEvent?: { isComposing?: boolean }; isComposing?: boolean };
+
+/** An input method has the key: composing, or Safari's keydown just after it ended. */
+const composing = (e: KeyEvent): boolean => Boolean(e.nativeEvent?.isComposing ?? e.isComposing) || e.keyCode === 229;

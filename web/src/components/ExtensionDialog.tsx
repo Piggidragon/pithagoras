@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuCheck, LuTerminal, LuX } from "react-icons/lu";
 import { api } from "../api";
-import { isEnter } from "../shortcuts";
+import { isEnter, isEscape } from "../shortcuts";
 
 export interface UiRequest {
   id: string;
@@ -41,7 +41,9 @@ export function ExtensionDialog({
   };
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && respond({ cancelled: true });
+    // Not the Escape that takes back an input method's word in its field:
+    // that would answer the extension "cancelled" for somebody still typing.
+    const onKey = (e: KeyboardEvent) => isEscape(e) && respond({ cancelled: true });
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [request.id]);

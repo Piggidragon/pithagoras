@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { LuX } from "react-icons/lu";
+import { isEscape } from "../shortcuts";
 
 /**
  * Centered dialog with a dimmed backdrop. Escape and backdrop clicks close it.
@@ -26,7 +27,8 @@ export function Modal({
   wide?: boolean;
 }) {
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // Not the Escape that takes back an input method's word in one of its fields.
+    const onKey = (e: KeyboardEvent) => isEscape(e) && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);

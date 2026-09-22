@@ -41,6 +41,10 @@ export function useFollowBottom<T extends HTMLElement>() {
     if (!el) return;
     if (force) following.current = true;
     if (following.current) el.scrollTop = el.scrollHeight;
+    // Said here as well as on scroll: a conversation too short to scroll fires
+    // no scroll event, and the way back to the end offered in the last one,
+    // scrolled up, stayed on screen in this one for good.
+    setAway(!atEnd(el));
   }, []);
 
   return { ref, onScroll, follow, following, away };

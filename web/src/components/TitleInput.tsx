@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { isEnter } from "../shortcuts";
+import { isEnter, isEscape } from "../shortcuts";
 
 /**
  * A title turned into a field, in the place it was standing.
@@ -46,7 +46,7 @@ export function TitleInput({
       onKeyDown={(e) => {
         e.stopPropagation();
         if (isEnter(e)) finish(e.currentTarget.value);
-        else if (e.key === "Escape") finish(null);
+        else if (isEscape(e)) finish(null);
       }}
       onBlur={(e) => finish(e.currentTarget.value)}
       className={`min-w-0 rounded bg-canvas px-1.5 py-0.5 text-fg outline-none ring-1 ring-accent/50 ${className}`}

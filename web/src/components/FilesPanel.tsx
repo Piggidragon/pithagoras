@@ -21,7 +21,7 @@ import {
 import { api, type FileEntry } from "../api";
 import type { FileActivity } from "../file-activity";
 import { confirmDialog } from "./ConfirmDialog";
-import { isEnter } from "../shortcuts";
+import { isEnter, isEscape } from "../shortcuts";
 
 /** What the server says when a save would put older text over newer. */
 const CHANGED = "The file changed after you opened it";
@@ -550,9 +550,8 @@ export function FilesPanel({
                 value={createName}
                 onChange={(e) => setCreateName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return;
                   if (isEnter(e)) void finishCreate();
-                  else if (e.key === "Escape") setCreating(null);
+                  else if (isEscape(e)) setCreating(null);
                 }}
                 onBlur={() => setCreating(null)}
                 placeholder={creating === "folder" ? "Folder name" : "File name, e.g. notes.md"}
@@ -591,9 +590,8 @@ export function FilesPanel({
                       e.target.setSelectionRange(0, dot > 0 ? dot : e.target.value.length);
                     }}
                     onKeyDown={(e) => {
-                      if (e.nativeEvent.isComposing) return;
                       if (isEnter(e)) void finishRename(entry);
-                      else if (e.key === "Escape") setRenaming(null);
+                      else if (isEscape(e)) setRenaming(null);
                     }}
                     onBlur={() => setRenaming(null)}
                     aria-label={`New name for ${entry.name}`}

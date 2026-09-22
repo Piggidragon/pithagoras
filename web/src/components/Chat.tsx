@@ -26,7 +26,7 @@ import { latestFileActivity } from "../file-activity";
 import { drafts, withUnsent } from "../drafts";
 import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
-import { isEnter, opensComposer, stopsRun } from "../shortcuts";
+import { isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -1389,7 +1389,7 @@ function MessageEditor({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Escape") onCancel();
+          if (isEscape(e)) onCancel();
           if (isEnter(e) && !e.shiftKey) {
             e.preventDefault();
             save();

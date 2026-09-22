@@ -22,6 +22,7 @@ import {
 import type { Session, SessionStatus } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
+import { isEscape } from "../shortcuts";
 
 const STATUS_STYLE: Record<SessionStatus, string> = {
   running: "bg-accent animate-pulse",
@@ -196,7 +197,7 @@ export function Sidebar({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+            onKeyDown={(e) => isEscape(e) && setQuery("")}
             placeholder="Search chats…"
             aria-label="Search chats"
             className="w-full rounded-lg border border-line bg-raised/60 py-1.5 pl-8 pr-2 text-xs outline-none placeholder:text-fg-faint focus:border-accent/60"
