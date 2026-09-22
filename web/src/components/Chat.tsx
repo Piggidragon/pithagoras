@@ -10,8 +10,9 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
-import { api, type PiCommand, type PortalEvent, type Session } from "../api";
+import { LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
+import { MAX_IMAGES, pending, prepareImage, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Activity, type Item } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
@@ -20,6 +21,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { moveHighlight, paletteMatches, slashToken } from "../slash-palette";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
+import { TitleInput } from "./TitleInput";
 import { latestFileActivity } from "../file-activity";
 import { drafts, withUnsent } from "../drafts";
 import { local } from "../safe-storage";
@@ -97,6 +99,7 @@ export function Chat({
   onDeleteMessage,
   onAbort,
   onClientCommand,
+  onRename,
   loading,
   hasEarlier,
   loadingEarlier,
@@ -109,7 +112,7 @@ export function Chat({
   hasEarlier?: boolean;
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
-  onSend: (message: string, options?: { voice?: boolean }) => Promise<void>;
+  onSend: (message: string, options?: PromptOptions) => Promise<void>;
   /** Replace a sent message: it and everything after it are dropped, and the new text is sent. */
   onEditMessage: (seq: number, message: string) => Promise<void>;
   /** Remove a sent message and the agent's answer to it. */
@@ -117,6 +120,8 @@ export function Chat({
   onAbort: () => Promise<void>;
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
+  /** Give the chat another name, from its header. */
+  onRename: (title: string) => Promise<void>;
 }) {
   const [input, setInput] = useState(() => drafts.get(session.id));
   // Where dictated words go. Kept beside the state because several phrases can
@@ -133,16 +138,25 @@ export function Chat({
   // Which sent message is being rewritten, and what went wrong with the last
   // thing done to one — shown in the transcript, where the message is.
   const [editing, setEditing] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   // This is one component for every chat, so what belongs to one must be put
   // away when another opens: the words half written in the box (kept, and
   // there again when you come back), the message being rewritten — a number
   // that would name a different message here — and the last complaint.
+  // Pictures waiting to go with the next message, kept per chat like the words.
+  const [attached, setAttached] = useState<Attachment[]>(() => pending.get(session.id));
+  // Pictures being read or files being uploaded: the message waits for them.
+  const [adding, setAdding] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
   const [boxOf, setBoxOf] = useState(session.id);
   if (boxOf !== session.id) {
     setBoxOf(session.id);
     setInput(drafts.get(session.id));
+    setAttached(pending.get(session.id));
     setEditing(null);
+    setRenaming(false);
     setActionError(null);
   }
   const currentSession = useRef(session.id);
@@ -228,7 +242,7 @@ export function Chat({
   const lastSaid = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
-      if (it.kind === "user" && splitContext(it.text).text) return it.id;
+      if (it.kind === "user" && (splitContext(it.text).text || it.images)) return it.id;
     }
     return undefined;
   }, [items]);
@@ -452,6 +466,8 @@ export function Chat({
    */
   const submit = async (msg: string, fromBox: boolean) => {
     const sent = session.id;
+    // The pictures in the box go with what came from it, and nothing else.
+    const images = fromBox ? attached : [];
     // Some builtins are UI, not prompts: /model opens the picker the pill uses,
     // /settings opens the modal. Sending them to pi would just be a chat line.
     const parsed = /^\/([\w-]+)\s*(.*)$/.exec(msg);
@@ -461,27 +477,33 @@ export function Chat({
 
     if (fromBox) clearBox();
     try {
-      if (client && parsed) {
+      if (client && parsed && !images.length) {
         if (client.name === "model") setPanelRequest("model");
         else await onClientCommand(client.name, parsed[2]);
         return;
       }
       setSending(true);
       try {
-        await onSend(msg, voiceMode ? { voice: true } : undefined);
+        await onSend(msg, voiceMode ? { voice: true } : images.length ? { images } : undefined);
       } finally {
         setSending(false);
       }
     } catch (e) {
-      if (fromBox) putBack(sent, msg);
+      if (fromBox) putBack(sent, msg, images);
       throw e;
     }
   };
 
   /** A message that did not go, back where it was typed — in that chat, if you have left it. */
-  const putBack = (id: string, msg: string) => {
-    if (currentSession.current === id) changeInput(withUnsent(draft.current, msg));
-    else drafts.set(id, withUnsent(drafts.get(id), msg));
+  const putBack = (id: string, msg: string, images: Attachment[] = []) => {
+    const back = [...images, ...pending.get(id)];
+    if (currentSession.current === id) {
+      changeInput(msg ? withUnsent(draft.current, msg) : draft.current);
+      changeAttached(back);
+    } else {
+      if (msg) drafts.set(id, withUnsent(drafts.get(id), msg));
+      pending.set(id, back);
+    }
   };
 
   const attempt = async (fn: () => Promise<void>) => {
@@ -495,8 +517,61 @@ export function Chat({
 
   const send = async () => {
     const msg = input.trim();
-    if (!msg || sending) return;
+    if ((!msg && !attached.length) || sending || adding) return;
     await attempt(() => submit(msg, true));
+  };
+
+  const changeAttached = (next: Attachment[]) => {
+    pending.set(session.id, next);
+    setAttached(next);
+  };
+
+  /**
+   * Pictures and files pasted, dropped or picked. Pictures wait in the box to
+   * go with the message; anything else is put in the chat's folder at once and
+   * the message says so, so the agent knows to look.
+   */
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return;
+    const id = session.id;
+    const { images, others } = sortFiles(files);
+    setActionError(null);
+    setAdding((n) => n + 1);
+    const problems: string[] = [];
+    try {
+      const room = MAX_IMAGES - pending.get(id).length;
+      if (images.length > room) problems.push(`At most ${MAX_IMAGES} pictures can go with one message.`);
+      const ready: Attachment[] = [];
+      for (const file of images.slice(0, Math.max(0, room))) {
+        try {
+          ready.push(await prepareImage(file, file.name || "Pasted picture"));
+        } catch (e) {
+          problems.push((e as Error).message);
+        }
+      }
+      const uploaded: string[] = [];
+      for (const file of others) {
+        try {
+          uploaded.push((await api.uploadFile(id, "", file)).path);
+        } catch (e) {
+          problems.push((e as Error).message);
+        }
+      }
+      // Into the chat they were added in, even if another has been opened since.
+      if (ready.length) {
+        const next = [...pending.get(id), ...ready];
+        if (currentSession.current === id) changeAttached(next);
+        else pending.set(id, next);
+      }
+      const note = uploadedNote(uploaded);
+      if (note) {
+        if (currentSession.current === id) changeInput(draft.current.trim() ? `${draft.current.trimEnd()}\n${note}` : note);
+        else drafts.set(id, drafts.get(id).trim() ? `${drafts.get(id).trimEnd()}\n${note}` : note);
+      }
+    } finally {
+      setAdding((n) => n - 1);
+      if (problems.length && currentSession.current === id) setActionError(problems.join(" "));
+    }
   };
 
   /** Every change to the box goes through here, so that the draft is kept as it is typed. */
@@ -508,6 +583,7 @@ export function Chat({
   const clearBox = () => {
     caret.current = null;
     changeInput("");
+    changeAttached([]);
   };
 
   /** Dictated words, put in the box where the cursor was and the cursor left after them. */
@@ -569,8 +645,30 @@ export function Chat({
       <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
       <header className={voiceMode ? "hidden" : "border-b border-line px-4 py-3"}>
         <div className="mx-auto flex w-full max-w-3xl items-center gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-medium text-fg">{session.title}</h2>
+        <div className="min-w-0 flex-1">
+          {renaming ? (
+            <TitleInput
+              value={session.title}
+              label="Chat name"
+              className="w-full text-sm font-medium"
+              onCommit={(next) => {
+                setRenaming(false);
+                void attempt(() => onRename(next));
+              }}
+              onCancel={() => setRenaming(false)}
+            />
+          ) : (
+            <h2 className="truncate text-sm font-medium text-fg">
+              <button
+                type="button"
+                onClick={() => setRenaming(true)}
+                title="Rename this chat"
+                className="max-w-full truncate rounded text-left hover:text-accent"
+              >
+                {session.title}
+              </button>
+            </h2>
+          )}
           <p className="truncate font-mono text-[11px] text-fg-faint">{session.workspace}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -670,7 +768,7 @@ export function Chat({
             const { text, blocks } = splitContext(item.text);
             // Nothing but framing: the portal spoke, not a person. Drawing it as
             // a message bubble with no message in it reads as something broken.
-            if (!text) {
+            if (!text && !item.images) {
               return (
                 <div key={item.id} className="flex flex-wrap justify-end gap-1">
                   {blocks.map((b, i) => (
@@ -684,6 +782,7 @@ export function Chat({
                 <div key={item.id} className="flex justify-end">
                   <MessageEditor
                     initial={text}
+                    hasImages={!!item.images}
                     onCancel={() => setEditing(null)}
                     onSave={(next) =>
                       attempt(async () => {
@@ -699,7 +798,21 @@ export function Chat({
               <div key={item.id} className="group flex flex-col items-end gap-1">
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
                   {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title="Sent in voice mode"><LuAudioLines size={13} aria-hidden="true" /><span>Audio</span></div>}
-                  <div className="whitespace-pre-wrap">{text}</div>
+                  {item.images && (
+                    <div className={`flex flex-wrap justify-end gap-1.5 ${text ? "mb-1.5" : ""}`}>
+                      {item.images.map((image) => (
+                        <a key={image.name} href={api.imageUrl(session.id, image.name)} target="_blank" rel="noreferrer" title="Open the picture">
+                          <img
+                            src={api.imageUrl(session.id, image.name)}
+                            alt="A picture sent with this message"
+                            loading="lazy"
+                            className="max-h-48 max-w-full rounded-lg object-contain ring-1 ring-line"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {text && <div className="whitespace-pre-wrap">{text}</div>}
                   {blocks.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap justify-end gap-1">
                       {blocks.map((b, i) => (
@@ -713,7 +826,7 @@ export function Chat({
                     something that no longer exists. Sending it again is fine —
                     it just queues, like any other message. */}
                 <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                  <CopyAction text={text} />
+                  {text && <CopyAction text={text} />}
                   {item.id === lastSaid ? (
                     // Retry: the same as editing without changing a word. After
                     // a Stop this is what clears the half-finished answer out of
@@ -733,7 +846,14 @@ export function Chat({
                   ) : (
                     <MessageAction
                       label="Send again as a new message"
-                      onClick={() => attempt(() => onSend(text))}
+                      onClick={() =>
+                        attempt(async () => {
+                          const images = await Promise.all(
+                            (item.images ?? []).map((image) => refetchImage(api.imageUrl(session.id, image.name), "A picture")),
+                          );
+                          await onSend(text, images.length ? { images } : undefined);
+                        })
+                      }
                     >
                       <LuRotateCw className="h-3 w-3" />
                     </MessageAction>
@@ -853,6 +973,21 @@ export function Chat({
           e.preventDefault();
           send();
         }}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDrop={(e) => {
+          if (!e.dataTransfer.files.length) return;
+          e.preventDefault();
+          setDragging(false);
+          void addFiles([...e.dataTransfer.files]);
+        }}
         className="px-4 pb-4 pt-2 sm:px-6 sm:pb-5"
       >
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
@@ -886,6 +1021,41 @@ export function Chat({
           </div>
         )}
         <DictationStrip dictation={dictation} />
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 text-xs text-accent">
+            Drop pictures to send them, or files to put them in the folder
+          </div>
+        )}
+        {(attached.length > 0 || adding > 0) && (
+          <div className="flex flex-wrap items-center gap-2 px-3 pt-3" aria-label="Pictures going with the message">
+            {attached.map((a) => (
+              <div key={a.id} className="group/att relative">
+                <img src={a.data} alt={a.name} title={a.name} className="h-14 w-14 rounded-lg object-cover ring-1 ring-line" />
+                <button
+                  type="button"
+                  onClick={() => changeAttached(attached.filter((x) => x.id !== a.id))}
+                  aria-label={`Remove ${a.name}`}
+                  title="Remove"
+                  className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-surface text-fg-muted shadow ring-1 ring-line transition hover:text-danger"
+                >
+                  <LuX aria-hidden className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+            {adding > 0 && <span role="status" className="text-[11px] text-fg-subtle">Adding…</span>}
+          </div>
+        )}
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = [...(e.target.files ?? [])];
+            e.target.value = "";
+            void addFiles(files);
+          }}
+        />
         <textarea
           ref={box}
           value={input}
@@ -895,6 +1065,15 @@ export function Chat({
           }}
           onSelect={(e) => {
             caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
+          }}
+          onPaste={(e) => {
+            // A screenshot, or "Copy image" in a browser. Where there is text as
+            // well — cells copied from a spreadsheet come with a picture of
+            // themselves — the text is what was meant.
+            const files = [...e.clipboardData.files];
+            if (!files.length || e.clipboardData.getData("text/plain")) return;
+            e.preventDefault();
+            void addFiles(files);
           }}
           onKeyDown={(e) => {
             if (matches.length > 0 && !e.nativeEvent.isComposing) {
@@ -929,7 +1108,7 @@ export function Chat({
               stopsRun({
                 key: e.key,
                 running,
-                empty: !input.trim(),
+                empty: !input.trim() && !attached.length,
                 composing: e.nativeEvent.isComposing,
                 paletteOpen: matches.length > 0,
               })
@@ -963,11 +1142,20 @@ export function Chat({
             panelRequest={panelRequest}
             onPanelConsumed={() => setPanelRequest(null)}
             actions={<>
+              <button
+                type="button"
+                onClick={() => picker.current?.click()}
+                aria-label="Attach pictures or files"
+                title="Attach pictures or files — or paste or drop them here. Pictures go to the model; other files go in the chat's folder."
+                className="prompt-action"
+              >
+                <LuPaperclip aria-hidden className="h-4 w-4" />
+              </button>
               <DictationButton dictation={dictation} />
               <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
-              {running && !input.trim() ? <button type="button" aria-label="Stop generation" title="Stop generation (Esc)" onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
+              {running && !input.trim() && !attached.length ? <button type="button" aria-label="Stop generation" title="Stop generation (Esc)" onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
                 <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />
-              </button> : <button type="submit" aria-label="Send message" title={running ? 'Send follow-up' : 'Send message'} disabled={sending || !input.trim()}
+              </button> : <button type="submit" aria-label="Send message" title={running ? 'Send follow-up' : 'Send message'} disabled={sending || adding > 0 || (!input.trim() && !attached.length)}
                 className="prompt-action prompt-send">
                 <LuArrowUp aria-hidden className="h-5 w-5" />
               </button>}
@@ -1109,19 +1297,23 @@ function MessageAction({
 /** A sent message, opened for rewriting in place. */
 function MessageEditor({
   initial,
+  hasImages,
   onSave,
   onCancel,
 }: {
   initial: string;
+  /** The message went with pictures: they go again, so the words may be left out. */
+  hasImages?: boolean;
   onSave: (text: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(initial);
   const [saving, setSaving] = useState(false);
   const changed = value.trim() !== initial.trim();
+  const empty = !value.trim() && !hasImages;
 
   const save = async () => {
-    if (!value.trim() || !changed || saving) return;
+    if (empty || !changed || saving) return;
     setSaving(true);
     try {
       await onSave(value.trim());
@@ -1148,7 +1340,9 @@ function MessageEditor({
         className="w-full resize-none bg-transparent px-1.5 py-1 text-sm text-fg outline-none"
       />
       <div className="mt-1 flex items-center gap-2 px-1">
-        <span className="text-[11px] text-fg-faint">Replaces this message and everything after it.</span>
+        <span className="text-[11px] text-fg-faint">
+          Replaces this message and everything after it.{hasImages && " The pictures go with it again."}
+        </span>
         <button
           type="button"
           onClick={onCancel}
@@ -1159,7 +1353,7 @@ function MessageEditor({
         <button
           type="button"
           onClick={save}
-          disabled={saving || !changed || !value.trim()}
+          disabled={saving || !changed || empty}
           className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/25 disabled:opacity-40"
         >
           {saving ? "Sending…" : "Send"}

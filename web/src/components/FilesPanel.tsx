@@ -6,14 +6,17 @@ import {
   LuDownload,
   LuEye,
   LuEyeOff,
+  LuFilePlus,
   LuFileText,
   LuFolder,
+  LuFolderPlus,
   LuLink,
   LuLocateFixed,
   LuPencil,
   LuRefreshCw,
   LuSave,
   LuTrash2,
+  LuUpload,
 } from "react-icons/lu";
 import { api, type FileEntry } from "../api";
 import type { FileActivity } from "../file-activity";
@@ -90,6 +93,13 @@ export function FilesPanel({
   // The entry being given a name, and the name so far.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
+  // Something being made here, and its name so far.
+  const [creating, setCreating] = useState<"file" | "folder" | null>(null);
+  const [createName, setCreateName] = useState("");
+  // Files on their way up, and whether some are being dragged over the list.
+  const [uploading, setUploading] = useState(0);
+  const [dropping, setDropping] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
 
   const dirty = !!file && !file.binary && !file.loading && draft !== file.saved;
   const dirtyRef = useRef(dirty);
@@ -295,6 +305,51 @@ export function FilesPanel({
     if (problem) setListError(problem);
   };
 
+  const startCreate = (kind: "file" | "folder") => {
+    setCreating(kind);
+    setCreateName("");
+  };
+
+  const finishCreate = async () => {
+    const kind = creating;
+    const name = createName.trim();
+    setCreating(null);
+    if (!kind || !name) return;
+    let problem: string | null = null;
+    try {
+      if (kind === "folder") await api.createFolder(sessionId, dir, name);
+      else await api.createFile(sessionId, join(dir, name));
+    } catch (e) {
+      problem = (e as Error).message;
+    }
+    await loadDir(dir);
+    if (problem) return setListError(problem);
+    // A new file is made to be written in.
+    if (kind === "file") {
+      setFollowing(false);
+      void loadFile(join(dir, name));
+    }
+  };
+
+  /** Into the folder being looked at. A name that is taken gets a number; nothing is replaced. */
+  const upload = async (files: File[]) => {
+    if (!files.length) return;
+    const into = dir;
+    setUploading((n) => n + files.length);
+    const problems: string[] = [];
+    for (const file of files) {
+      try {
+        await api.uploadFile(sessionId, into, file);
+      } catch (e) {
+        problems.push((e as Error).message);
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    }
+    await loadDir(dir);
+    if (problems.length) setListError(problems.join(" "));
+  };
+
   const crumbs = dir ? dir.split("/") : [];
   const shown = showHidden ? entries : entries.filter((e) => !e.name.startsWith("."));
 
@@ -326,6 +381,45 @@ export function FilesPanel({
           <LuLocateFixed aria-hidden className="h-3.5 w-3.5" />
           <span>{following ? "Following" : "Follow"}</span>
         </button>
+        {!file && (
+          <>
+            <button
+              onClick={() => startCreate("file")}
+              title="New file here"
+              aria-label="New file"
+              className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
+            >
+              <LuFilePlus aria-hidden className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => startCreate("folder")}
+              title="New folder here"
+              aria-label="New folder"
+              className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
+            >
+              <LuFolderPlus aria-hidden className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => picker.current?.click()}
+              title="Upload files here — or drop them on the list"
+              aria-label="Upload files"
+              className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
+            >
+              <LuUpload aria-hidden className="h-3.5 w-3.5" />
+            </button>
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                const files = [...(e.target.files ?? [])];
+                e.target.value = "";
+                void upload(files);
+              }}
+            />
+          </>
+        )}
         <button
           onClick={toggleHidden}
           aria-pressed={showHidden}
@@ -420,14 +514,60 @@ export function FilesPanel({
           )}
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+        <div
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            setDropping(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+          }}
+          onDrop={(e) => {
+            if (!e.dataTransfer.files.length) return;
+            e.preventDefault();
+            setDropping(false);
+            void upload([...e.dataTransfer.files]);
+          }}
+          className={`min-h-0 flex-1 overflow-y-auto p-1.5 ${dropping ? "bg-accent/5 ring-2 ring-inset ring-accent/40" : ""}`}
+        >
+          {uploading > 0 && (
+            <p role="status" className="px-2 py-1.5 text-xs text-fg-subtle">
+              Uploading {uploading} {uploading === 1 ? "file" : "files"}…
+            </p>
+          )}
+          {creating && (
+            <div className="flex items-center gap-2 px-2 py-1">
+              {creating === "folder" ? (
+                <LuFolder aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
+              ) : (
+                <LuFileText aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
+              )}
+              <input
+                autoFocus
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === "Enter") void finishCreate();
+                  else if (e.key === "Escape") setCreating(null);
+                }}
+                onBlur={() => setCreating(null)}
+                placeholder={creating === "folder" ? "Folder name" : "File name, e.g. notes.md"}
+                aria-label={creating === "folder" ? "Name of the new folder" : "Name of the new file"}
+                spellCheck={false}
+                className="min-w-0 flex-1 rounded border border-accent/40 bg-transparent px-1.5 py-0.5 text-sm text-fg outline-none"
+              />
+            </div>
+          )}
           {listError && (
             <p role="alert" className="flex items-start gap-1.5 rounded-lg border border-danger/25 bg-danger/10 px-2 py-2 text-xs text-danger">
               <LuCircleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {listError}
             </p>
           )}
-          {!listError && !listing && shown.length === 0 && (
-            <p className="px-2 py-3 text-xs text-fg-subtle">{entries.length === 0 ? "Nothing in this folder." : "Nothing here but hidden files."}</p>
+          {!listError && !listing && !creating && shown.length === 0 && (
+            <p className="px-2 py-3 text-xs text-fg-subtle">{entries.length === 0 ? "Nothing in this folder yet — drop files here to upload them." : "Nothing here but hidden files."}</p>
           )}
           {shown.map((entry) => (
             <div key={entry.name} className="group flex items-center rounded-lg px-1 transition hover:bg-fg/5 focus-within:bg-fg/5">
@@ -450,6 +590,7 @@ export function FilesPanel({
                       e.target.setSelectionRange(0, dot > 0 ? dot : e.target.value.length);
                     }}
                     onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing) return;
                       if (e.key === "Enter") void finishRename(entry);
                       else if (e.key === "Escape") setRenaming(null);
                     }}

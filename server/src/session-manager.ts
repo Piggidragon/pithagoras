@@ -9,6 +9,7 @@ import { mcpServerNames } from "./api/mcp.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { removeSessionFiles } from "./session-files.js";
+import { forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
 import {
   appendEvent,
@@ -59,6 +60,15 @@ function summarizeToolInput(p: any): string | undefined {
 }
 
 const SESSION_ROOT = path.resolve(process.env.SESSION_DIR || "./data/sessions");
+/** What can go with a message besides its text. */
+export interface PromptOptions {
+  voice?: boolean;
+  /** Pictures, already checked and kept: see prompt-images.ts. */
+  images?: Attached[];
+}
+
+/** Pictures sent with messages, a folder per chat: see prompt-images.ts. */
+const IMAGE_ROOT = path.resolve(process.env.DATA_DIR || "./data", "images");
 const EXECUTOR_KIND = (process.env.EXECUTOR || "host") as ExecutorKind;
 
 /**
@@ -375,7 +385,7 @@ class SessionManager extends EventEmitter {
    * for the first message in a session takes seconds and the composer has
    * nothing to show for them otherwise.
    */
-  async prompt(sessionId: string, message: string, options?: { voice?: boolean }, insideEdit = false): Promise<void> {
+  async prompt(sessionId: string, message: string, options?: PromptOptions, insideEdit = false): Promise<void> {
     // Behind an edit in progress, not through it: see withEdit.
     if (!insideEdit) await this.whenEditable(sessionId);
     this.mark(sessionId, "running");
@@ -399,10 +409,11 @@ class SessionManager extends EventEmitter {
   private async submit(
     sessionId: string,
     message: string,
-    options?: { voice?: boolean },
+    options?: PromptOptions,
     insideEdit = false,
   ): Promise<void> {
     const client = await this.ensureClient(sessionId, insideEdit);
+    const images = options?.images ?? [];
 
     // A slash command is an instruction to the agent, not something said in the
     // conversation, so it should not appear as a chat message — its dialog or
@@ -430,8 +441,27 @@ class SessionManager extends EventEmitter {
       return;
     }
 
-    if (!isCommand) this.record(sessionId, "portal_prompt", { message, ...(options?.voice ? { voice: true } : {}) });
-    await client.prompt(message, options);
+    if (!isCommand) {
+      this.record(sessionId, "portal_prompt", {
+        message,
+        ...(options?.voice ? { voice: true } : {}),
+        ...(images.length ? { images: forLog(images) } : {}),
+      });
+    }
+    // pi sends a model that cannot see pictures a line saying one was left
+    // out, and nothing else. The person is told here, where they can pick
+    // another model — and before the answer, which is where it explains it.
+    if (images.length) {
+      const model = await client.getState().catch(() => undefined);
+      const input = model?.model.input;
+      if (input && !input.includes("image")) {
+        this.record(sessionId, "portal_notice", {
+          text: `${model!.model.name} cannot see pictures, so ${images.length === 1 ? "the picture was" : "the pictures were"} left out. Pick a model that takes images to send ${images.length === 1 ? "it" : "them"}.`,
+          error: true,
+        });
+      }
+    }
+    await client.prompt(message, { voice: options?.voice, ...(images.length ? { images: forPi(images) } : {}) });
     // A slash command completes inside prompt() without ever starting an agent
     // turn, so no agent_settled arrives to clear the status. Settle it here
     // rather than leaving "working" on screen forever. Asking pi rather than
@@ -557,10 +587,14 @@ class SessionManager extends EventEmitter {
   /** Replace a message: everything from it onwards goes, and the new text is sent in its place. */
   async editMessage(sessionId: string, seq: number, message: string): Promise<void> {
     await this.withEdit(sessionId, async () => {
+      // Read before the cut takes the event away: a retried or rewritten
+      // message goes with the pictures it was sent with.
+      const images = loadImages(IMAGE_ROOT, sessionId, storedIn(sentMessages(sessionId).find((m) => m.seq === seq)?.payload));
+      if (!message.trim() && !images.length) throw new SessionEditError("empty", "A message needs words or a picture");
       const { removed, undo } = await this.cut(sessionId, seq, "tail");
       const before = latestSeq();
       try {
-        await this.prompt(sessionId, message, undefined, true);
+        await this.prompt(sessionId, message, images.length ? { images } : undefined, true);
       } catch (e) {
         // The replacement never got to the agent, so the conversation it was
         // meant to replace is still the conversation: nothing may be lost to a
@@ -1060,6 +1094,7 @@ class SessionManager extends EventEmitter {
   removeFiles(sessionId: string): void {
     try {
       removeSessionFiles(SESSION_ROOT, sessionId);
+      removeImages(IMAGE_ROOT, sessionId);
     } catch (e) {
       console.error(`[portal] could not remove the files of session ${sessionId}:`, (e as Error).message);
     }
@@ -1077,4 +1112,4 @@ class SessionManager extends EventEmitter {
 }
 
 export const sessions = new SessionManager();
-export { SESSION_ROOT, EXECUTOR_KIND };
+export { SESSION_ROOT, IMAGE_ROOT, EXECUTOR_KIND };

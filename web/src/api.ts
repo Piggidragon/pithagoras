@@ -166,6 +166,17 @@ export interface PortalTool {
   defaultOn?: boolean;
 }
 
+/** A picture going with a message: a data: URL, which the box also shows it from. */
+export interface PromptImage {
+  data: string;
+  mimeType: string;
+}
+
+export interface PromptOptions {
+  voice?: boolean;
+  images?: PromptImage[];
+}
+
 export interface PortalEvent {
   seq: number;
   type: string;
@@ -222,6 +233,33 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ name }),
     }),
+  /** A new, empty file; refused if something already has the name. */
+  createFile: (sessionId: string, file: string) =>
+    json<{ ok: true; size: number; mtime: number }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, {
+      method: "PUT",
+      body: JSON.stringify({ content: "", create: true }),
+    }),
+  createFolder: (sessionId: string, dir: string, name: string) =>
+    json<{ ok: true; path: string }>(`/api/sessions/${sessionId}/folder?path=${encodeURIComponent(dir)}`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  /**
+   * A file from this computer into the chat's folder. A taken name gets a
+   * number rather than replacing anything; the answer says what it is called.
+   */
+  uploadFile: async (sessionId: string, dir: string, file: File, name = file.name): Promise<{ path: string; size: number }> => {
+    const res = await fetch(`/api/sessions/${sessionId}/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`, {
+      method: "POST",
+      // Always a plain stream of bytes: what the file calls itself is not how it is sent.
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Could not upload ${name} (${res.status})`);
+    return body;
+  },
   deleteFile: (sessionId: string, file: string) =>
     json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, { method: "DELETE" }),
   fileDownloadUrl: (sessionId: string, file: string) =>
@@ -264,11 +302,17 @@ export const api = {
   renameSession: (id: string, title: string) =>
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
-  prompt: (id: string, message: string, options?: { voice?: boolean }) =>
+  prompt: (id: string, message: string, options?: PromptOptions) =>
     json<{ ok: true }>(`/api/sessions/${id}/prompt`, {
       method: "POST",
-      body: JSON.stringify({ message, ...(options?.voice ? { voice: true } : {}) }),
+      body: JSON.stringify({
+        message,
+        ...(options?.voice ? { voice: true } : {}),
+        ...(options?.images?.length ? { images: options.images.map(({ data, mimeType }) => ({ data, mimeType })) } : {}),
+      }),
     }),
+  /** A picture sent with a message, as the transcript shows it. */
+  imageUrl: (id: string, name: string) => `/api/sessions/${id}/images/${encodeURIComponent(name)}`,
   /** Removes a message and the agent's answer to it — from the agent's memory too. */
   deleteMessage: (id: string, seq: number) =>
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}`, { method: "DELETE" }),

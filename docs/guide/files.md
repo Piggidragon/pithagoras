@@ -23,6 +23,15 @@ that started there. Nothing outside it can be reached.
 - **Download** without opening: every row has a download button, for a file or,
   for a folder, as a `.tar.gz`. The button at the top downloads the folder you are
   in (without `node_modules`, `.git`, `dist`, `build` and virtual environments).
+- **Make a file or a folder** with the two buttons at the top, in the folder
+  you are in. A new file opens straight away, ready to write in. Neither ever
+  takes the place of something already there.
+- **Upload** with the arrow at the top, or by dropping files on the list: they
+  go in the folder you are in. A name that is taken gets a number —
+  `notes (2).md` — rather than replacing anything, and a file is only put in
+  place once all of it has arrived, so an upload cut short leaves nothing
+  behind. Up to 2 GB a file. Files dropped on the message box go to the chat's
+  folder as well — see [Pictures and files](/guide/sessions#pictures-and-files).
 - **Rename** a file or a folder with the pencil on its row. Enter keeps the new
   name, Escape leaves it. It is a new name in the same folder, and never replaces
   something that is already there.

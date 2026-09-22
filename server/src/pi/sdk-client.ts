@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import type { PiClient, PiCommand, PiState, PiStats, PiTool } from "./types.js";
+import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
@@ -510,13 +511,17 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return true;
   }
 
-  async prompt(message: string, options?: { voice?: boolean }): Promise<void> {
+  async prompt(message: string, options?: { voice?: boolean; images?: ImageContent[] }): Promise<void> {
     if (options?.voice) {
       this.voiceFirst?.arm(this.isIdle());
     } else {
       this.voiceFirst?.reset();
     }
-    const promptOptions = { expandPromptTemplates: true, streamingBehavior: "followUp" };
+    const promptOptions = {
+      expandPromptTemplates: true,
+      streamingBehavior: "followUp",
+      ...(options?.images?.length ? { images: options.images } : {}),
+    };
     try {
       if (options?.voice) {
         await acceptPrompt(
@@ -576,6 +581,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         name: model?.name ?? "unknown",
         provider: model?.provider ?? "unknown",
         contextWindow: model?.contextWindow,
+        input: Array.isArray(model?.input) ? model.input : undefined,
       },
       thinkingLevel: this.session.thinkingLevel ?? "medium",
       autoCompactionEnabled: callable(this.session, "autoCompactionEnabled") ?? true,
@@ -619,6 +625,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       name: m.name ?? m.id,
       provider: m.provider,
       contextWindow: m.contextWindow,
+      input: Array.isArray(m.input) ? m.input : undefined,
     }));
   }
 

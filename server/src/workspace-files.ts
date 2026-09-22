@@ -8,6 +8,7 @@ import {
   fsyncSync,
   linkSync,
   lstatSync,
+  mkdirSync,
   openSync,
   readSync,
   readdirSync,
@@ -288,7 +289,14 @@ const writeFailure = (e: unknown) => ioFailure(e, "The file could not be saved",
  * whatever is at the name and does not follow it, so a link put there after the
  * check is replaced, not written through.
  */
-export function writeText(base: string, rel: unknown, content: string, expected?: number): { size: number; mtime: number } {
+export function writeText(
+  base: string,
+  rel: unknown,
+  content: string,
+  expected?: number,
+  /** Only make it: a file already there is not replaced. What "New file" means. */
+  createOnly = false,
+): { size: number; mtime: number } {
   if (Buffer.byteLength(content, "utf8") > MAX_EDIT_BYTES) {
     throw new FileError("too_large", `Files over ${MAX_EDIT_BYTES / 1024 / 1024} MB are not edited here`);
   }
@@ -308,6 +316,7 @@ export function writeText(base: string, rel: unknown, content: string, expected?
     const fd = openPlain(target, constants.O_RDONLY);
     try {
       const st = fstatSync(fd);
+      if (createOnly) throw new FileError("exists", `There is already something called "${path.basename(target)}" here`);
       if (st.nlink > 1) throw new FileError("invalid", "That file is shared with another, so it is left alone");
       if (expected !== undefined && Math.abs(st.mtimeMs - expected) > 1) throw new FileError("conflict", CHANGED);
       mode = st.mode & 0o7777;
@@ -430,4 +439,80 @@ export function folderPath(base: string, rel: unknown): string {
   if (!st) throw new FileError("missing", "There is no such folder");
   if (!st.isDirectory()) throw new FileError("invalid", "That is not a folder");
   return dir;
+}
+
+/**
+ * Makes a folder inside `dir`. Like a new file, it never takes the place of
+ * something already there. Returns its path, from the chat's folder.
+ */
+export function makeFolder(base: string, dirRel: unknown, name: unknown): string {
+  const clean = checkName(name);
+  const parent = folderPath(base, dirRel);
+  const target = path.join(parent, clean);
+  if (lexists(target)) throw new FileError("exists", `There is already something called "${clean}" here`);
+  try {
+    mkdirSync(target);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new FileError("exists", `There is already something called "${clean}" here`);
+    throw ioFailure(e, "The folder could not be made", "Nothing was changed.");
+  }
+  return path.relative(base, target);
+}
+
+/** "report.pdf", then "report (2).pdf", "report (3).pdf"… */
+export function numbered(name: string, n: number): string {
+  if (n < 2) return name;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? `${name.slice(0, dot)} (${n})${name.slice(dot)}` : `${name} (${n})`;
+}
+
+/**
+ * Where an uploaded file goes: a temporary file beside its place, and the call
+ * that puts it there once all of it has arrived.
+ *
+ * An upload never replaces anything. A name that is taken becomes
+ * "name (2).ext", as a download folder does, because the person dropping a
+ * file wants it in, not a question. The name is settled only when the file is
+ * complete, and put in place by a link, which fails rather than replaces if
+ * something took the name in the meantime; then the next number is tried.
+ */
+export function uploadTarget(
+  base: string,
+  dirRel: unknown,
+  name: unknown,
+): { fd: number; finish: () => string; abandon: () => void } {
+  const clean = checkName(name);
+  const parent = folderPath(base, dirRel);
+  const temp = path.join(parent, `.${clean.slice(0, 100)}.${randomBytes(6).toString("hex")}.upload`);
+  let fd: number;
+  try {
+    fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+  } catch (e) {
+    throw ioFailure(e, "The file could not be uploaded", "Nothing was changed.");
+  }
+  const abandon = () => rmSync(temp, { force: true });
+  const finish = () => {
+    for (let n = 1; n < 1000; n++) {
+      const target = path.join(parent, numbered(clean, n));
+      try {
+        linkSync(temp, target);
+        unlinkSync(temp);
+        return path.relative(base, target);
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code === "EEXIST") continue;
+        // Where links are not possible: a rename, after looking, is the best there is.
+        if (code === "EPERM" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
+          if (lexists(target)) continue;
+          renameSync(temp, target);
+          return path.relative(base, target);
+        }
+        abandon();
+        throw ioFailure(e, "The file could not be uploaded", "Nothing was changed.");
+      }
+    }
+    abandon();
+    throw new FileError("exists", `Too many files called "${clean}" here`);
+  };
+  return { fd, finish, abandon };
 }

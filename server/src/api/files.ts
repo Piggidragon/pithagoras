@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, createReadStream } from "node:fs";
+import { closeSync, createReadStream, createWriteStream } from "node:fs";
 import path from "node:path";
 import express, { type Response, type Router } from "express";
 import { getSession } from "../db.js";
@@ -9,6 +9,8 @@ import {
   baseDir,
   listDir,
   folderPath,
+  makeFolder,
+  uploadTarget,
   openDownload,
   readText,
   removeEntry,
@@ -25,6 +27,9 @@ import {
  * decides what may be reached is in workspace-files.ts; this only turns a chat
  * into its folder and a refusal into a status.
  */
+
+/** An upload larger than this is cut off: the portal's disk is everyone's. */
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
 const STATUS = { invalid: 400, missing: 404, conflict: 409, exists: 409, too_large: 413, failed: 500 } as const;
 
@@ -104,14 +109,76 @@ export function filesRouter(): Router {
   router.put("/sessions/:id/file", (req, res) => {
     const base = folderOf(req.params.id, res);
     if (!base) return;
-    const { content, mtime } = req.body ?? {};
+    const { content, mtime, create } = req.body ?? {};
     if (typeof content !== "string") return res.status(400).json({ error: "content is required" });
     if (mtime !== undefined && typeof mtime !== "number") return res.status(400).json({ error: "mtime must be a number" });
     try {
-      res.json({ ok: true, ...writeText(base, req.query.path, content, mtime) });
+      res.json({ ok: true, ...writeText(base, req.query.path, content, mtime, create === true) });
     } catch (e) {
       fail(res, e);
     }
+  });
+
+  /** A new folder, named `name`, in the folder at `path`. */
+  router.post("/sessions/:id/folder", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    try {
+      res.json({ ok: true, path: makeFolder(base, req.query.path, req.body?.name) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  /**
+   * A file from the browser, as the request body, into the folder at `path`
+   * under `name` — or "name (2)" if that is taken. Streamed to disk, so a big
+   * file is never held in memory, and only put in place once all of it came.
+   */
+  router.post("/sessions/:id/upload", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    const announced = Number(req.headers["content-length"]);
+    if (announced > MAX_UPLOAD_BYTES) {
+      return res.status(413).json({ error: `Files over ${MAX_UPLOAD_BYTES / 1024 / 1024 / 1024} GB are not uploaded here` });
+    }
+    let target: ReturnType<typeof uploadTarget>;
+    try {
+      target = uploadTarget(base, req.query.path, req.query.name);
+    } catch (e) {
+      return fail(res, e);
+    }
+    const out = createWriteStream("", { fd: target.fd });
+    let received = 0;
+    let done = false;
+    const giveUp = (status: number, error: string) => {
+      if (done) return;
+      done = true;
+      req.unpipe(out);
+      out.destroy();
+      target.abandon();
+      if (!res.headersSent) res.status(status).json({ error });
+    };
+    req.on("data", (chunk: Buffer) => {
+      received += chunk.length;
+      if (received > MAX_UPLOAD_BYTES) giveUp(413, `Files over ${MAX_UPLOAD_BYTES / 1024 / 1024 / 1024} GB are not uploaded here`);
+    });
+    // The browser went away, or the connection dropped: half a file is not a file.
+    req.on("aborted", () => giveUp(400, "The upload was interrupted"));
+    out.on("error", (e) => {
+      console.error("[portal] files: upload failed:", e.message);
+      giveUp(500, "The file could not be written");
+    });
+    out.on("finish", () => {
+      if (done) return;
+      done = true;
+      try {
+        res.json({ ok: true, path: target.finish(), size: received });
+      } catch (e) {
+        fail(res, e);
+      }
+    });
+    req.pipe(out);
   });
 
   router.patch("/sessions/:id/file", (req, res) => {

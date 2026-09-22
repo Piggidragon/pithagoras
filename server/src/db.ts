@@ -589,11 +589,14 @@ export function replayStart(sessionId: string, keep: number): number {
 }
 
 /** Every message the portal sent to the agent in this session, oldest first. */
-export function sentMessages(sessionId: string): { seq: number; message: string }[] {
+export function sentMessages(sessionId: string): { seq: number; message: string; payload: Record<string, unknown> }[] {
   const rows = getDb()
     .prepare("SELECT seq, payload FROM events WHERE session_id = ? AND type = 'portal_prompt' ORDER BY seq ASC")
     .all(sessionId) as { seq: number; payload: string }[];
-  return rows.map((r) => ({ seq: r.seq, message: String(JSON.parse(r.payload)?.message ?? "") }));
+  return rows.map((r) => {
+    const payload = JSON.parse(r.payload) ?? {};
+    return { seq: r.seq, message: String(payload.message ?? ""), payload };
+  });
 }
 
 /**

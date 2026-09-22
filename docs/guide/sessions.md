@@ -32,6 +32,33 @@ A message that does not go — the portal is unreachable, or refuses it — goes
 in the box, in front of anything typed since, with the reason shown above it.
 Nothing is thrown away to be typed again.
 
+### Pictures and files
+
+Paste a screenshot into the box, drop pictures on it, or pick them with the
+paperclip, and they wait above the words as thumbnails — the × takes one back
+out. They go to the model with the message, up to eight of them, and a message
+can be a picture alone. The sent message shows them; click one to open it
+full size.
+
+A photo straight off a phone is made smaller in the browser before it goes:
+2048 pixels on its longer side, as a JPEG. Models scale anything bigger down on
+their side anyway, so those pixels would only cost upload time and context. A
+picture that already fits goes as it is, and a GIF always does. PNG, JPEG, GIF
+and WebP are taken; each must be under 5 MB once made ready.
+
+If the model cannot see pictures, pi leaves them out and tells it one was there,
+and the chat says so in a line above the answer — pick a model that takes images
+and **Retry**. Whether a model takes them is the `input` of its entry in
+`models.json` (`["text", "image"]`).
+
+Anything that is not a picture — a PDF, a spreadsheet, a zip — is put in the
+chat's folder instead, and the box gets a line naming it, so the agent knows to
+look. A name that is taken there gets a number (`report (2).pdf`); nothing is
+replaced. The agent has the tools for those files; the model on its own does not.
+
+Pictures waiting in the box stay with their chat like the words do, but only
+while the page is open: they are not kept across a reload.
+
 Two keys work from anywhere on the page:
 
 | Key | Does |
@@ -43,19 +70,20 @@ Two keys work from anywhere on the page:
 
 Hovering one of your messages gives it these actions:
 
-- **Copy** puts the text on the clipboard. The agent's replies have the same
+- **Copy** puts the text on the clipboard (a message that is only pictures has none to copy). The agent's replies have the same
   button, once they are whole. It works over plain HTTP too, where browsers
   withhold the clipboard API, by falling back to the older way.
 - **Retry**, on your last message, drops the agent's reply to it — a half-finished
   one after a Stop, say — and sends the same text again. It is editing without
   changing a word, so the agent's memory ends up as if the first attempt never
-  happened rather than holding it and a second copy of the question.
-- **Send again**, on an older message, sends its text as a new message at the
-  end. Retrying one of those would drop everything since. While a run is going
+  happened rather than holding it and a second copy of the question. Pictures
+  that went with it go again.
+- **Send again**, on an older message, sends its text and pictures as a new
+  message at the end. Retrying one of those would drop everything since. While a run is going
   it queues, like anything else you type.
 - **Edit** rewrites the message in place. It replaces that message *and
   everything after it* — the agent's answers were to a question that is no
-  longer the same one — and sends the new text.
+  longer the same one — and sends the new text, with the same pictures.
 - **Delete** removes the message and the agent's answer to it, tool calls
   included, and leaves the rest of the conversation as it was.
 
@@ -92,6 +120,9 @@ updated_at DESC`), so the sidebar and the Sessions page never disagree.
 With more chats than the sidebar lists, it has a search field above them. It looks
 through every chat by name and folder, not only the ones shown, and Escape clears
 it. The Sessions page has the same search with more room.
+
+The chat's name at the top of the conversation renames it too: click it.
+A name is at most 120 characters, wherever it is given — `/name` included.
 
 Hovering a session gives you pin, rename and delete. Renaming turns the name into
 a field where it stands — Enter or clicking away keeps the new one, Escape puts

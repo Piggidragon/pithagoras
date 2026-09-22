@@ -25,7 +25,8 @@ import {
   writeAgentFile,
   type WizardInput,
 } from "./agent-setup.js";
-import { sessions, EXECUTOR_KIND } from "./session-manager.js";
+import { sessions, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
+import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
 import { authEnabled, checkPassword, clearCookie, isAuthed, issueCookie, requireAuth } from "./auth.js";
@@ -103,7 +104,19 @@ const REPLAY_EVENTS = 1_200;
 const BIN_DIR = path.resolve(process.env.BIN_DIR || "/data/bin");
 
 const app = express();
-app.use(express.json({ limit: "2mb" }));
+// A message can carry pictures, which do not fit in what every other request is
+// allowed. Only that route gets the room, so nothing else can be sent a body
+// that size.
+const PROMPT_ROUTE = /^\/api\/sessions\/[^/]+\/prompt$/;
+const smallJson = express.json({ limit: "2mb" });
+const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BYTES * 4) / 3 / 1024 / 1024) + 2}mb` });
+// An upload is the file itself, streamed to disk by its route, whatever type
+// the browser gave it — a .json file must not be read as a request.
+const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
+app.use((req, res, next) => {
+  if (UPLOAD_ROUTE.test(req.path)) return next();
+  (PROMPT_ROUTE.test(req.path) ? promptJson : smallJson)(req, res, next);
+});
 app.use(cookieParser());
 
 // --- auth ---
@@ -506,12 +519,20 @@ app.get("/api/sessions/:id", (req, res) => {
   res.json(toApi(session));
 });
 
+/** The longest name a chat can be given: what the rename field takes. */
+const MAX_TITLE = 120;
+
 app.patch("/api/sessions/:id", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const { title, pinned } = req.body ?? {};
-  // A name somebody chose stays, whatever it says.
-  if (typeof title === "string" && title.trim()) updateSession(session.id, { title: title.trim(), auto_title: 0 });
+  // A name somebody chose stays, whatever it says — up to the length the field
+  // allows, which /name and the API are held to as well. By character, so an
+  // emoji at the cut is not left in halves.
+  if (typeof title === "string" && title.trim()) {
+    const chars = Array.from(title.replace(/\s+/g, " ").trim());
+    updateSession(session.id, { title: chars.slice(0, MAX_TITLE).join("").trimEnd(), auto_title: 0 });
+  }
   if (typeof pinned === "boolean") updateSession(session.id, { pinned: pinned ? 1 : 0 });
   res.json(toApi(getSession(session.id)!));
 });
@@ -530,14 +551,23 @@ app.delete("/api/sessions/:id", async (req, res) => {
 app.post("/api/sessions/:id/prompt", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  const message = req.body?.message;
-  if (typeof message !== "string" || !message.trim()) {
+  const message = req.body?.message ?? "";
+  let parsed;
+  try {
+    parsed = parseImages(req.body?.images);
+  } catch (e) {
+    if (e instanceof ImageError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  // A picture on its own is a message too.
+  if (typeof message !== "string" || (!message.trim() && !parsed.length)) {
     return res.status(400).json({ error: "message required" });
   }
   try {
+    const images = saveImages(IMAGE_ROOT, session.id, parsed);
     // Returns as soon as pi accepts the prompt. The run continues server-side
     // regardless of what this browser does next.
-    await sessions.prompt(session.id, message, { voice: req.body?.voice === true });
+    await sessions.prompt(session.id, message, { voice: req.body?.voice === true, images });
     // A chat that has no name yet is named after what it starts with — once pi
     // has taken the message, so one that never got there does not keep its name.
     // Read again: a rename that came in meanwhile is not overwritten.
@@ -551,7 +581,7 @@ app.post("/api/sessions/:id/prompt", async (req, res) => {
 
 // --- editing the conversation ---
 
-const editStatus = { busy: 409, missing: 404 } as const;
+const editStatus = { busy: 409, missing: 404, empty: 400 } as const;
 
 /** Removes a message and the agent's answer to it. */
 app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {
@@ -567,7 +597,9 @@ app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {
 /** Replaces a message: it and everything after it are dropped, and the new text is sent. */
 app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
   const message = req.body?.message;
-  if (typeof message !== "string" || !message.trim()) {
+  // Empty is allowed here: a message that was only a picture is retried as one.
+  // Whether it has one is for editMessage to say.
+  if (typeof message !== "string") {
     return res.status(400).json({ error: "message required" });
   }
   try {
@@ -577,6 +609,18 @@ app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
     if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
     res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
   }
+});
+
+/** A picture sent with a message, for the transcript to show. */
+app.get("/api/sessions/:id/images/:name", (req, res) => {
+  const file = imagePath(IMAGE_ROOT, req.params.id, req.params.name);
+  if (!file) return res.status(404).json({ error: "Not found" });
+  // Named by a random id and never rewritten, so it can be kept as long as a
+  // browser likes. The type is the one its bytes were checked against.
+  res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.type(mimeOf(req.params.name)!);
+  res.sendFile(file);
 });
 
 /** The browser answering a dialog an extension is waiting on. */

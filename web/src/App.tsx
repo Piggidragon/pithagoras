@@ -422,6 +422,10 @@ function Shell({
               await api.abort(active.id);
               refreshSessions();
             }}
+            onRename={async (title) => {
+              await api.renameSession(active.id, title);
+              await refreshSessions();
+            }}
             onClientCommand={async (name, args) => {
               if (name === "settings") {
                 navigate(`/s/${active.id}/settings/general`);
