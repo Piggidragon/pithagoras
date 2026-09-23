@@ -37,9 +37,12 @@ an empty field inherits, and clearing one hands the setting back.
 | `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. |
 | `PORTAL_SECRET` | random | Signs the cookie. Set it to survive restarts. |
 | `PORT` | `4100` | Listen port. |
-| `DATA_DIR` | `/data` | Where `portal.db` lives. |
-| `SESSION_DIR` | `/data/sessions` | One folder per session, holding pi's conversation file. Removed when the session is deleted — with the container executor, a file written by another user can keep a folder from going; that is logged. |
+| `DATA_DIR` | `./data` (image: `/data`) | Where `portal.db` lives. |
+| `SESSION_DIR` | `./data/sessions` (image: `/data/sessions`) | One folder per session, holding pi's conversation file. Removed when the session is deleted — with the container executor, a file written by another user can keep a folder from going; that is logged. |
 | `WORKSPACE_ROOT` | `/workspaces` | Directories sessions can be created against. |
+| `BIN_DIR` | `/data/bin` | Persistent CLI installation directory added to PATH. |
+| `PI_CODING_AGENT_DIR` | `$HOME/.pi/agent` | Override pi’s settings/package directory. |
+| `LLAMA_BASE_URL` | — | Read by pi’s installed llama extension; not by the portal directly. |
 | `CHANNELS_DIR` | `/data/channels` | Installed channel packages. |
 | `AGENT_HOME` | `/data/agent-home` | The agent session's directory. |
 | `HOME` | `/data/home` | pi's home — its settings and packages. |
@@ -52,8 +55,9 @@ an empty field inherits, and clearing one hands the setting back.
 | `PI_MODEL` | — | Override for pi's `defaultModel`. |
 | `PI_THINKING_LEVEL` | — | Override for pi's `defaultThinkingLevel`. |
 
-Provider credentials — `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` and anything
-else pi reads — pass through untouched.
+The host executor inherits the portal environment. The container executor currently forwards `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PI_PROVIDER`, and `PI_MODEL`; it does not forward arbitrary extension variables. Explicit session provider/model choices are passed as CLI arguments.
+
+Both Compose files forward `PI_IMAGE` and the three `TASK_*` limits. These limits apply only to `EXECUTOR=container`: memory must be an integer of at least 6 MiB, CPUs must be positive (fractions are allowed), and the process limit must be a positive integer. Empty values inherit defaults; zero, negative and non-numeric values are rejected explicitly.
 
 `HOME` on the data volume is load-bearing. Point it back at the container
 filesystem and every image rebuild silently wipes the pi packages you installed.

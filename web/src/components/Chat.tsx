@@ -32,6 +32,19 @@ import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shor
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
 
+const COMPOSER_HEIGHT_KEY = "pithagoras.composerHeight";
+const DEFAULT_COMPOSER_HEIGHT = 72;
+const MIN_COMPOSER_HEIGHT = 56;
+
+function storedComposerHeight(): number {
+  const stored = Number.parseInt(local.get(COMPOSER_HEIGHT_KEY) ?? "", 10);
+  return Number.isFinite(stored) && stored >= MIN_COMPOSER_HEIGHT ? stored : DEFAULT_COMPOSER_HEIGHT;
+}
+
+function persistComposerHeight(height: number) {
+  local.set(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
+}
+
 /**
  * Context the portal attaches to a message, and what to call it.
  *
@@ -163,6 +176,8 @@ export function Chat({
   const currentSession = useRef(session.id);
   currentSession.current = session.id;
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const [composerHeight, setComposerHeight] = useState(storedComposerHeight);
   // Whether there is a browser to watch, and whether you are watching it. Asked
   // once — the answer only changes when somebody installs or removes one.
   const [browserUp, setBrowserUp] = useState(false);
@@ -479,6 +494,36 @@ export function Chat({
     lastSpoken.current = said;
     scroller.follow(fresh);
   }, [items.length, events.length]);
+
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  const startComposerResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    resizeCleanupRef.current?.();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startY = event.clientY;
+    const maxHeight = Math.round(window.innerHeight * 0.45);
+    const startHeight = Math.min(maxHeight, box.current?.getBoundingClientRect().height ?? composerHeight);
+
+    const move = (moveEvent: PointerEvent) => {
+      setComposerHeight(Math.max(MIN_COMPOSER_HEIGHT, Math.min(maxHeight, startHeight + startY - moveEvent.clientY)));
+    };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      resizeCleanupRef.current = null;
+    };
+    const finish = () => {
+      cleanup();
+      persistComposerHeight(box.current?.getBoundingClientRect().height ?? composerHeight);
+    };
+
+    resizeCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+  };
 
   /**
    * Send `msg` as a message, or run it if it is one of the portal's own commands.
@@ -1057,7 +1102,7 @@ export function Chat({
             ref={paletteRef}
             role="listbox"
             aria-label="Commands"
-            className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-xl border border-line bg-surface shadow-pop"
+            className="absolute bottom-full left-0 right-0 mb-2 max-h-[min(18rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop"
           >
             {matches.map((c, i) => (
               <button
@@ -1081,6 +1126,27 @@ export function Chat({
             ))}
           </div>
         )}
+        <button
+          type="button"
+          onPointerDown={startComposerResize}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+            event.preventDefault();
+            const maxHeight = Math.round(window.innerHeight * 0.45);
+            const direction = event.key === "ArrowUp" ? 16 : -16;
+            const nextHeight = Math.max(MIN_COMPOSER_HEIGHT, Math.min(maxHeight, composerHeight + direction));
+            setComposerHeight(nextHeight);
+            persistComposerHeight(nextHeight);
+          }}
+          aria-label="Resize message composer vertically"
+          aria-valuemin={MIN_COMPOSER_HEIGHT}
+          aria-valuemax={Math.round(window.innerHeight * 0.45)}
+          aria-valuenow={Math.round(composerHeight)}
+          title="Drag up or down to resize"
+          className="group flex h-3 w-full touch-none cursor-ns-resize items-center justify-center"
+        >
+          <span className="h-1 w-12 rounded-full bg-fg/15 transition group-hover:bg-accent/60" />
+        </button>
         <DictationStrip dictation={dictation} />
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 text-xs text-accent">
@@ -1208,6 +1274,7 @@ export function Chat({
           }
           aria-label="Message"
           className="prompt-input"
+          style={{ height: composerHeight, minHeight: MIN_COMPOSER_HEIGHT, maxHeight: "45vh" }}
         />
           <ComposerBar
             sessionId={session.id}

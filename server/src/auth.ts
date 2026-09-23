@@ -34,7 +34,8 @@ if (!authEnabled) {
   console.warn(
     "\n  WARNING: PORTAL_ALLOW_NO_PASSWORD is set and PORTAL_PASSWORD is not — the\n" +
       "  portal is open to anyone who can reach it, and it can run arbitrary\n" +
-      "  commands on this machine. Only the proxy in front of it stops them.\n"
+      "  commands on this machine. Only the proxy in front of it stops them.\n" +
+      "  It binds loopback unless ALLOW_OPEN=1 explicitly exposes it.\n"
   );
 }
 
