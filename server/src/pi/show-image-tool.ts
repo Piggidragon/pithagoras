@@ -18,12 +18,20 @@ import { FileError, baseDir, openPicture } from "../workspace-files.js";
  * nothing outside it. A picture anywhere else is copied in first.
  */
 
+/** Where `p` is below `root`, relative to it; null when it is not below it. */
+function below(root: string, p: string): string | null {
+  const rel = path.relative(root, p);
+  return rel && rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel) ? rel : null;
+}
+
 /** Where `given` is inside `folder`, relative to it, or an explanation why it is not. */
 export function pictureIn(folder: string, given: string): string {
   const base = baseDir(folder);
-  const absolute = path.resolve(base, given);
-  const rel = path.relative(base, absolute);
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+  // The folder as the agent names it may reach the real one through a link:
+  // an absolute path is taken inside either. openPicture then checks what the
+  // path really leads to.
+  const rel = below(base, path.resolve(base, given)) ?? below(path.resolve(folder), path.resolve(folder, given));
+  if (!rel) {
     throw new FileError("invalid", "Only a picture in the chat's folder can be shown. Copy it there first.");
   }
   // Checked as the page will fetch it, so a call that succeeds is one that shows.

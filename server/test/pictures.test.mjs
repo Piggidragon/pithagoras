@@ -50,6 +50,22 @@ test("a picture in the folder is served as what its bytes say it is, and cannot 
   });
 });
 
+test("a picture already fetched and not changed since is not sent again", async () => {
+  await withApi(async (base) => {
+    const first = await fetch(base + encodeURIComponent("plots/chart.png"));
+    const etag = first.headers.get("etag");
+    assert.ok(etag);
+    assert.ok(first.headers.get("last-modified"));
+    await first.arrayBuffer();
+    // As a browser revalidating its cache asks: fetch() alone would add "no-cache", which asks for the whole file.
+    const again = await fetch(base + encodeURIComponent("plots/chart.png"), { headers: { "If-None-Match": etag, "Cache-Control": "max-age=0" } });
+    assert.equal(again.status, 304);
+    const changed = await fetch(base + encodeURIComponent("plots/chart.png"), { headers: { "If-None-Match": 'W/"0-0"', "Cache-Control": "max-age=0" } });
+    assert.equal(changed.status, 200);
+    assert.deepEqual(Buffer.from(await changed.arrayBuffer()), PNG);
+  });
+});
+
 test("a file that only has a picture's name, or lies outside, or is not there, is refused", async () => {
   await withApi(async (base) => {
     assert.equal((await fetch(base + "evil.png")).status, 400);
@@ -65,6 +81,21 @@ test("show_image takes a picture by a path relative to the folder or absolute in
   assert.throws(() => pictureIn(work, path.join(outside, "secret.png")), /chat's folder/);
   assert.throws(() => pictureIn(work, "evil.png"), /not a PNG/);
   assert.throws(() => pictureIn(work, "link.png"));
+  // A name that only starts with two dots is in the folder.
+  writeFileSync(path.join(work, "..preview.png"), PNG);
+  assert.equal(pictureIn(work, "..preview.png"), "..preview.png");
+  assert.equal(pictureIn(work, path.join(work, "..preview.png")), "..preview.png");
+  assert.throws(() => pictureIn(work, "../outside/secret.png"), /chat's folder/);
+});
+
+test("show_image takes an absolute path through a link to the folder, as the agent sees it", () => {
+  const linked = path.join(home, "linked-work");
+  symlinkSync(work, linked);
+  assert.equal(pictureIn(linked, path.join(linked, "plots", "chart.png")), "plots/chart.png");
+  assert.equal(pictureIn(linked, path.join(work, "plots", "chart.png")), "plots/chart.png");
+  assert.equal(pictureIn(linked, "plots/chart.png"), "plots/chart.png");
+  assert.throws(() => pictureIn(linked, path.join(linked, "..", "outside", "secret.png")), /chat's folder/);
+  assert.throws(() => pictureIn(linked, path.join(linked, "link.png")));
 });
 
 test("the tool answers with the path the page fetches the picture by", async () => {

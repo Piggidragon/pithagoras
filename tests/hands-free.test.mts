@@ -32,6 +32,9 @@ test('barge-in immediately cancels playback and ignores the interrupted reply re
   } });
   voice.observe([reply('a20'), reply('a21', false)]); await tick();
   voice.speechStart(); assert.equal(playbackSignal?.aborted, true); await tick();
+  // Not stopped for a sound; stopped once it is words for the agent.
+  assert.equal(aborted, 0);
+  voice.heard('hello'); await tick();
   assert.equal(aborted, 1);
   voice.observe([reply('a20'), reply('a21')]);
   voice.speechEnd(new Float32Array(16000)); await tick();
@@ -50,7 +53,7 @@ test('barge-in waits for an in-flight send before abort, then sends the next tur
   const accepted = deferred<void>(); const calls: string[] = [];
   const { voice } = setup({ send: async () => { calls.push('send'); if (calls.length === 1) await accepted.promise; }, abort: async () => { calls.push('abort'); } });
   voice.speechStart(); voice.speechEnd(new Float32Array(16000)); await tick();
-  voice.speechStart(); voice.speechEnd(new Float32Array(16000));
+  voice.speechStart(); voice.heard('hello'); voice.speechEnd(new Float32Array(16000));
   assert.deepEqual(calls, ['send']); accepted.resolve(); await tick(); await tick();
   assert.deepEqual(calls, ['send', 'abort', 'send']); voice.stop();
 });
@@ -281,4 +284,34 @@ test('speech taken back before it ends is not sent, and replies carry on', async
   assert.equal(phases.at(-1), 'Listening');
   voice.observe([reply('a10'), reply('a20')]); await tick();
   assert.equal(spoken.length, 1); voice.stop();
+});
+test('a noise that transcribes to nothing leaves the run going and its reply spoken', async () => {
+  let aborted = 0;
+  const { voice, sent, spoken } = setup({ agentRunning: () => true, transcribe: async () => '', abort: async () => { aborted++; } });
+  voice.observe([reply('a10'), reply('a20', false)]); await tick();
+  voice.speechStart(); voice.speechEnd(new Float32Array(16000)); await tick();
+  assert.equal(aborted, 0); assert.deepEqual(sent, []);
+  // What the agent says after the cough is heard.
+  voice.observe([reply('a10'), reply('a20', false), reply('a30')]); await tick();
+  assert.deepEqual(spoken, ['A spoken answer.']); voice.stop();
+});
+test('a run is stopped as soon as what is being said is plainly for the agent, and only once', async () => {
+  let aborted = 0;
+  const pending = deferred<string>();
+  const { voice, sent } = setup({ agentRunning: () => aborted === 0, abort: async () => { aborted++; }, transcribe: () => pending.promise,
+    couldBeCommand: partial => /^(say|say that)$/i.test(partial.trim()) });
+  voice.speechStart();
+  voice.heard('Say'); await tick();
+  assert.equal(aborted, 0);
+  voice.heard("Stop, don't"); await tick();
+  assert.equal(aborted, 1);
+  voice.heard("Stop, don't touch that file"); await tick();
+  voice.speechEnd(new Float32Array(16000)); pending.resolve("Stop, don't touch that file."); await tick(); await tick();
+  assert.equal(aborted, 1); assert.deepEqual(sent, ["Stop, don't touch that file."]); voice.stop();
+});
+test('what is heard mid-run does not stop it when steering or while it could still be for the page', async () => {
+  let aborted = 0;
+  const { voice } = setup({ agentRunning: () => true, abort: async () => { aborted++; }, steering: () => true });
+  voice.speechStart(); voice.heard('Also check the tests'); await tick();
+  assert.equal(aborted, 0); voice.stop();
 });

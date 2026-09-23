@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, createReadStream, createWriteStream } from "node:fs";
+import { closeSync, createReadStream, createWriteStream, fstatSync } from "node:fs";
 import path from "node:path";
 import express, { type Response, type Router } from "express";
 import { getSession } from "../db.js";
@@ -124,12 +124,20 @@ export function filesRouter(): Router {
       return fail(res, e);
     }
     const { fd, size, mimeType } = opened;
-    res.setHeader("Content-Type", mimeType);
-    res.setHeader("Content-Length", size);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
-    // The agent rewrites files in place; the page asks again with the file's time.
+    // The agent rewrites files in place, so the browser asks every time — and
+    // is told it already has it unless the file changed.
     res.setHeader("Cache-Control", "private, no-cache");
+    const modified = fstatSync(fd).mtime;
+    res.setHeader("ETag", `W/"${size.toString(16)}-${modified.getTime().toString(16)}"`);
+    res.setHeader("Last-Modified", modified.toUTCString());
+    if (req.fresh) {
+      closeSync(fd);
+      return void res.status(304).end();
+    }
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Content-Length", size);
     const stream = createReadStream("", { fd, start: 0, end: Math.max(0, size - 1) });
     stream.on("error", (e) => {
       console.error("[portal] files: picture failed:", e.message);

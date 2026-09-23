@@ -12,7 +12,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { LuArrowDown, LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
-import { MAX_IMAGES, pending, prepareImage, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
+import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Activity, type Item } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
@@ -175,6 +175,10 @@ export function Chat({
   }
   const currentSession = useRef(session.id);
   currentSession.current = session.id;
+  // Voice mode adds to and takes from the same pictures.
+  useEffect(() => pending.subscribe((id) => {
+    if (id === currentSession.current) setAttached(pending.get(id));
+  }), []);
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const [composerHeight, setComposerHeight] = useState(storedComposerHeight);
@@ -600,8 +604,6 @@ export function Chat({
     setAttached(next);
   };
 
-  /** Pictures on their way into the box, by chat, which count against its room already. */
-  const preparing = useRef(new Map<string, number>());
   /**
    * Pictures and files pasted, dropped or picked. Pictures wait in the box to
    * go with the message; anything else is put in the chat's folder at once and
@@ -614,21 +616,8 @@ export function Chat({
     setActionError(null);
     setAdding((n) => n + 1);
     const problems: string[] = [];
-    // Room is taken as it is counted: pictures still being made ready from an
-    // earlier paste are not in the box yet, but will be.
-    const room = Math.max(0, MAX_IMAGES - pending.get(id).length - (preparing.current.get(id) ?? 0));
-    const taking = Math.min(images.length, room);
-    preparing.current.set(id, (preparing.current.get(id) ?? 0) + taking);
     try {
-      if (images.length > room) problems.push(`At most ${MAX_IMAGES} pictures can go with one message.`);
-      const ready: Attachment[] = [];
-      for (const file of images.slice(0, taking)) {
-        try {
-          ready.push(await prepareImage(file, file.name || "Pasted picture"));
-        } catch (e) {
-          problems.push((e as Error).message);
-        }
-      }
+      problems.push(...(await pending.add(id, images)));
       const uploaded: string[] = [];
       for (const file of others) {
         try {
@@ -637,19 +626,12 @@ export function Chat({
           problems.push((e as Error).message);
         }
       }
-      // Into the chat they were added in, even if another has been opened since.
-      if (ready.length) {
-        const next = [...pending.get(id), ...ready];
-        if (currentSession.current === id) changeAttached(next);
-        else pending.set(id, next);
-      }
       const note = uploadedNote(uploaded);
       if (note) {
         if (currentSession.current === id) changeInput(draft.current.trim() ? `${draft.current.trimEnd()}\n${note}` : note);
         else drafts.set(id, drafts.get(id).trim() ? `${drafts.get(id).trimEnd()}\n${note}` : note);
       }
     } finally {
-      preparing.current.set(id, (preparing.current.get(id) ?? 0) - taking);
       setAdding((n) => n - 1);
       if (problems.length && currentSession.current === id) setActionError(problems.join(" "));
     }

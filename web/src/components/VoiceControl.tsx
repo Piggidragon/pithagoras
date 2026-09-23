@@ -14,12 +14,16 @@ import type { Item } from "../transcript";
 import { LiveTranscription } from "../live-transcription";
 import { preparePcmSpeech, readPcmStream, playAudioBuffer, bufferOf } from "../pcm-stream";
 import { stretch } from "../time-stretch";
-import { asksToRepeat } from "../voice-commands";
-import { MAX_IMAGES, isImage, prepareImage, type Attachment } from "../attachments";
+import { asksToRepeat, couldAskToRepeat } from "../voice-commands";
+import { isImage, pending, type Attachment } from "../attachments";
 import { VOICE_RATES } from "./VoiceSettings";
 import { describe, matches, useKeyLabels, useKeybindings } from "../keybindings";
 import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
+
+/** How much of the last reply Repeat keeps: two minutes is about 11 MB of samples. */
+const REPEAT_SECONDS = 120;
+const seconds = (phrase: { samples: Float32Array[]; sampleRate: number }) => phrase.samples.reduce((n, s) => n + s.length, 0) / phrase.sampleRate;
 
 export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, folder, items, running, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, terminalActivity, toolEvents }: {
   sessionId: string;
@@ -57,21 +61,15 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if(['portal_prompt','compaction_start','compaction_end','tool_execution_start','tool_execution_end','agent_end'].includes(event.type))profileMark(event.type);
     }
   },[toolEvents]);
-  // Pictures waiting to go with the next thing said. Kept when voice mode ends,
-  // so turning it on again still has them.
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const attached = useRef(attachments); attached.current = attachments;
+  // Pictures waiting to go with the next thing said: the same ones as in the
+  // chat's message box, so they are there before voice mode and after it.
+  const [attachments, setAttachments] = useState<Attachment[]>(() => pending.get(sessionId));
+  useEffect(() => pending.subscribe(id => { if (id === sessionId) setAttachments(pending.get(id)); }), [sessionId]);
   const addPictures = async (files: File[]) => {
     const pictures = files.filter(file => isImage(file.type));
-    if (pictures.length < files.length) setError("Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode. Put other files in Files.");
-    const room = MAX_IMAGES - attached.current.length;
-    if (pictures.length > room) setError(`Up to ${MAX_IMAGES} pictures go with one message.`);
-    for (const file of pictures.slice(0, Math.max(0, room))) {
-      try {
-        const picture = await prepareImage(file, file.name || "Pasted picture");
-        setAttachments(list => list.length < MAX_IMAGES ? [...list, picture] : list);
-      } catch (e) { setError((e as Error).message); }
-    }
+    const problems = pictures.length < files.length ? ["Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode. Put other files in Files."] : [];
+    problems.push(...await pending.add(sessionId, pictures));
+    if (problems.length && mounted.current) setError(problems.join(" "));
   };
   // What talking mid-run does, how fast replies are spoken, and push-to-talk:
   // read by the controller and the speech at the moment they matter.
@@ -86,7 +84,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const held = useRef<{ frames: Float32Array[]; releasing: boolean; heldFrames: number; speech: number; started: boolean; timer?: ReturnType<typeof setTimeout> } | null>(null);
   const holdLimit = useRef<ReturnType<typeof setTimeout>>();
   // The last reply as it was spoken, phrase by phrase, for Repeat. Samples as
-  // they came from the speech service, before the speed was applied.
+  // they came from the speech service, before the speed was applied. Only the
+  // last REPEAT_SECONDS of it: a long run that talks before every step would
+  // otherwise keep all of that audio.
   const replyAudio = useRef<{ samples: Float32Array[]; sampleRate: number }[]>([]);
   const [canRepeat, setCanRepeat] = useState(false);
   const replay = useRef<AbortController | null>(null);
@@ -121,6 +121,32 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   // Read once, as the chat opens: whether voice mode was on in this tab before a reload.
   const resume = useRef<boolean | null>(null);
   if (resume.current === null) resume.current = session.get('voiceActive') === sessionId;
+  // Held while voice mode is on in this tab. A duplicated tab gets a copy of
+  // session storage, so the flag alone would start a second voice session on
+  // the same chat; the lock is how it finds this one still going.
+  const lockName = `voice:${sessionId}`;
+  const releaseLock = useRef<(() => void) | undefined>();
+  /**
+   * Takes that lock for as long as voice mode is on here. False only when
+   * voice mode is being brought back and another tab has it: the tab this one
+   * was duplicated from. Turned on by hand, it goes on either way.
+   */
+  const claim = async (version: number, resuming: boolean): Promise<boolean> => {
+    if (!navigator.locks) return true;
+    for (let attempt = 0; ; attempt++) {
+      const got = await new Promise<boolean>(resolve => {
+        navigator.locks.request(lockName, { ifAvailable: true }, lock => {
+          resolve(!!lock);
+          if (!lock || epoch.current !== version) return;
+          return new Promise<void>(release => { releaseLock.current = release; });
+        }).catch(() => resolve(true));
+      });
+      if (got || !resuming) return true;
+      if (attempt >= 3 || epoch.current !== version) return false;
+      // The page before the reload may take a moment to let go of it.
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  };
   const voice = useRef<HandsFreeVoice | null>(null);
   const vad = useRef<MicVAD | null>(null);
   const vadSettings = useRef(DEFAULT_VAD);
@@ -147,6 +173,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     profiler.current?.close('stopped');
     // Ended, or left for another chat: a reload after this does not bring it back.
     if (session.get('voiceActive') === sessionId) session.remove('voiceActive');
+    releaseLock.current?.(); releaseLock.current = undefined;
     epoch.current++;
     clearInterval(heartbeat.current);
     const lease=connection.current;connection.current=null;
@@ -184,7 +211,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       setAvailable(config.enabled);
       if (!config.enabled) stop();
       // Voice mode was on in this tab when the page was reloaded: carry on.
-      else if (resume.current && !voice.current && !restoring.current) { restoring.current = true; void start(); }
+      else if (resume.current && !voice.current && !restoring.current) { restoring.current = true; void start(true); }
     }).catch(() => { if (mounted.current) { setAvailable(false); stop(); } });
     void load();
     window.addEventListener("voice-config-changed", load);
@@ -383,7 +410,13 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       playbackSignal.throwIfAborted();
       // A new reply takes over from one being repeated.
       replay.current?.abort(); replay.current = null;
-      if (kind === 'reply') { replyAudio.current.push(phrase); setCanRepeat(true); }
+      if (kind === 'reply') {
+        const kept = replyAudio.current;
+        kept.push(phrase);
+        let total = kept.reduce((n, p) => n + seconds(p), 0);
+        while (kept.length > 1 && total > REPEAT_SECONDS) total -= seconds(kept.shift()!);
+        setCanRepeat(true);
+      }
       await playThrough(audio, playbackSignal, (analyser, started) => stream ? stream.play(analyser, started) : playAudioBuffer(buffer!, audio, analyser, playbackSignal, started), scheduledAt => {
         mark('playback_scheduled');
         const outputMs=(audio.baseLatency+(audio.outputLatency||0))*1000;
@@ -392,13 +425,15 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     };
     return Object.assign(play, { completed: stream?.completed });
   };
-  const start = async () => {
+  const start = async (resuming = false) => {
     if (voice.current || starting) { stop(); return; }
     const version = ++epoch.current;
     const current = () => mounted.current && epoch.current === version;
     setStarting(true); setError(""); setMuted(false); mutedRef.current = false;
     // From the moment it is turned on: a reload while it connects brings it back too.
     session.set('voiceActive', sessionId);
+    // Alongside the rest of starting, which it ends if another tab has voice mode on.
+    void claim(version, resuming).then(ok => { if (!ok && epoch.current === version) stop(); });
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
         throw new Error("Microphone access requires HTTPS or localhost.");
@@ -407,15 +442,29 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (!current()) return;
       if (sound.state !== "running") {
         // Started without a click — after a reload — so the browser holds audio
-        // back until the page is touched. Any tap or key does.
+        // back until the page is touched. Not every event counts: a touch lets
+        // audio start when the finger is lifted, not when it lands, and Escape
+        // never does. So each one tries, and the wait is over once one has and
+        // audio is running.
         setWaitingForTap(true);
         await new Promise<void>(resolve => {
-          const go = () => { window.removeEventListener("pointerdown", go, true); window.removeEventListener("keydown", go, true); void sound.resume(); resolve(); };
-          window.addEventListener("pointerdown", go, true); window.addEventListener("keydown", go, true);
+          const events = ["pointerdown", "pointerup", "touchend", "click", "keydown", "keyup"] as const;
+          let touched = false;
+          const done = () => {
+            if (current() && !(touched && sound.state === "running")) return;
+            for (const name of events) window.removeEventListener(name, attempt, true);
+            sound.removeEventListener("statechange", done);
+            clearInterval(check);
+            resolve();
+          };
+          const attempt = () => { touched = true; void sound.resume().then(done, () => {}); };
+          for (const name of events) window.addEventListener(name, attempt, true);
+          sound.addEventListener("statechange", done);
+          // Ended or left while waiting: stop listening.
+          const check = setInterval(done, 1000);
         });
-        if (mounted.current) setWaitingForTap(false);
+        if (mounted.current && current()) setWaitingForTap(false);
         if (!current()) return;
-        await sound.resume();
       }
       const audio = new AudioContext(); context.current = audio;
       await audio.resume();
@@ -443,7 +492,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         if(trace)profiler.current!.mark('stt_result',{requestMs:performance.now()-started,serverTiming:response.headers.get('server-timing')??'',ok:response.ok},trace);
         if (!response.ok) throw new Error(result.error || "Transcription failed");
         return result.text;
-      }, text => { if (current()) setTranscript(text); }, !sequential.current);
+      }, text => { if (current()) { setTranscript(text); voice.current?.heard(text); } }, !sequential.current);
       transcription.current = live;
       const controller = new HandsFreeVoice({
         statusSpeech: statusSpeech.current,
@@ -453,16 +502,26 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         transcribe: async (samples, signal) => {const result=await live.finish(samples, signal);profileMark('transcript_ready');return result;},
         send: async text => {
           profileSeq.current=eventSeq.current;profileMark('send'); cue("sent");
-          // The pictures waiting now go with it, and only they leave the tray.
-          const images = attached.current;
+          // The pictures waiting now go with it, and only they leave the tray:
+          // at once, as from the message box, and back if it does not get there.
+          const images = pending.get(sessionId);
+          if (images.length) pending.set(sessionId, []);
           const steer = steering.current && latest.current.running;
-          await latest.current.onSend(text, { voice: true, ...(images.length ? { images } : {}), ...(steer ? { steer: true } : {}) });
-          if (images.length) setAttachments(list => list.filter(a => !images.includes(a)));
-          // What is said next answers this, so Repeat is for that.
+          // What is said next answers this, so Repeat is for that — from now, as
+          // its first words may be spoken before the send returns.
+          const before = replyAudio.current;
           replyAudio.current = []; setCanRepeat(false);
+          try {
+            await latest.current.onSend(text, { voice: true, ...(images.length ? { images } : {}), ...(steer ? { steer: true } : {}) });
+          } catch (e) {
+            if (images.length) pending.set(sessionId, [...images, ...pending.get(sessionId)]);
+            if (!replyAudio.current.length) { replyAudio.current = before; setCanRepeat(before.length > 0); }
+            throw e;
+          }
         },
         abort: () => latest.current.onAbort(),
         command: text => asksToRepeat(text) && repeatReply(),
+        couldBeCommand: couldAskToRepeat,
         steering: () => steering.current,
         agentRunning: () => latest.current.running,
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
@@ -564,7 +623,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         browserAvailable={browserAvailable} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={toolEvents} sounds={sounds} onSounds={toggleSounds} onCue={cue}
         levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode} waitingForTap={waitingForTap}
         items={items} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}
-        attachments={attachments} onAddPictures={files => { void addPictures(files); }} onRemovePicture={id => setAttachments(list => list.filter(a => a.id !== id))}
+        attachments={attachments} onAddPictures={files => { void addPictures(files); }} onRemovePicture={id => pending.set(sessionId, pending.get(sessionId).filter(a => a.id !== id))}
         canRepeat={canRepeat} onRepeat={() => { repeatReply(); }}
         rate={rate} onRate={value => { local.set('voiceRate', String(value)); setRate(value); }}
         steer={steer} onSteer={value => { local.set('voiceSteer', value ? 'on' : 'off'); setSteer(value); }}
@@ -573,7 +632,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     <div className="relative flex items-center gap-1">
       <button type="button" className="prompt-action" aria-label="Profile voice latency" title="Profile voice latency" aria-pressed={profileOpen} onClick={()=>{setProfileOpen(v=>!v);if(profileOpen)profiler.current!.close('disabled');}}><LuGauge/></button>
       {error && !enabled && !starting && <p role="alert" className="absolute bottom-full right-0 mb-3 w-64 rounded-xl border border-line bg-surface p-3 text-xs text-danger shadow-pop">{error}</p>}
-      <button ref={startButton} type="button" onClick={start} aria-label="Turn on hands-free voice" title={`Start voice conversation${bindings["voice.toggle"] ? ` (${describe(bindings["voice.toggle"], layout)})` : ""}`} className="prompt-action">
+      <button ref={startButton} type="button" onClick={() => { void start(); }} aria-label="Turn on hands-free voice" title={`Start voice conversation${bindings["voice.toggle"] ? ` (${describe(bindings["voice.toggle"], layout)})` : ""}`} className="prompt-action">
         {starting ? <LuLoaderCircle aria-hidden className="animate-spin" /> : <LuAudioLines aria-hidden />}
       </button>
     </div>

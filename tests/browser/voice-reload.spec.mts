@@ -15,9 +15,20 @@ test.beforeEach(async ({ page }) => {
 test('without any click on the page yet, it waits for one before audio', async ({ page }) => {
   // As a browser that does not carry the click across the reload finds it.
   await page.addInitScript(() => sessionStorage.setItem('voiceActive', 'test'));
+  // Nothing is asked of the page until it waits: Playwright's own checks count
+  // as a click, and one before voice mode comes back would let audio start.
+  await page.addInitScript(() => addEventListener('DOMContentLoaded', () => {
+    const seen = new MutationObserver(() => {
+      if (!document.querySelector('[role="status"]')?.textContent?.includes('Click or press a key to continue voice mode')) return;
+      seen.disconnect(); console.log('voice-waiting-for-tap');
+    });
+    seen.observe(document.body, { subtree: true, childList: true, characterData: true });
+  }));
+  const waiting = page.waitForEvent('console', { predicate: message => message.text() === 'voice-waiting-for-tap', timeout: 25000 });
   await page.goto('/tests/voice.html');
+  await waiting;
   const status = page.getByRole('status');
-  await expect(status).toContainText('Click or press a key to continue voice mode', { timeout: 25000 });
+  await expect(status).toContainText('Click or press a key to continue voice mode');
   await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-reload.png' });
   await page.keyboard.press('Shift');
   await expect(status).toContainText('Listening', { timeout: 25000 });

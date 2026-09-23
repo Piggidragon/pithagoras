@@ -38,3 +38,25 @@ export function asksToRepeat(text: string): boolean {
   if (!said || said.split(" ").length > 9) return false;
   return REPEAT.some((pattern) => pattern.test(said));
 }
+
+/**
+ * Every word the patterns above accept. Keep it in step with them: a word
+ * missing here makes that way of asking stop the agent before it is recognised.
+ */
+const REPEAT_WORDS = new Set(`
+  can could would you please say repeat that it this what said again once more sorry did just come pardon me one time
+  bitte sag sprich wiederhol wiederhole wiederholen das es mir noch nochmal nochein nocheinmal ein einmal mal erneut nochmals
+  kannst könntest würdest du sagen wie was hast gerade eben gesagt
+`.split(/\s+/).filter(Boolean));
+
+/**
+ * Whether what has been made out so far of an utterance could still be a
+ * request to hear the last reply again. False as soon as it has a word no such
+ * request has, or is too long to be one: then it is for the agent.
+ */
+export function couldAskToRepeat(partial: string): boolean {
+  const said = normalizeUtterance(partial);
+  if (!said) return true;
+  const words = said.split(" ");
+  return words.length <= 9 && words.every((word) => REPEAT_WORDS.has(word));
+}

@@ -26,6 +26,8 @@ export interface VoiceIO {
   abort: () => Promise<void>;
   /** Handles what was said on the page instead of sending it, when it is for the page ("say that again"). */
   command?: (text: string) => boolean;
+  /** Whether what has been heard so far could still turn out to be for the page. */
+  couldBeCommand?: (partial: string) => boolean;
   /** True when speaking mid-run should add to the run rather than stop it. */
   steering?: () => boolean;
   agentRunning: () => boolean;
@@ -56,6 +58,8 @@ export class HandsFreeVoice {
   private transcription = new AbortController();
   private operations: Promise<void> = Promise.resolve();
   private sending = false;
+  /** The run going when this utterance began has already been told to stop. */
+  private stopped = false;
   private thinkingTimer?: ReturnType<typeof setTimeout>;
   private thinkingAnnounced = false;
   private lastThinkingAt = -Infinity;
@@ -133,8 +137,22 @@ export class HandsFreeVoice {
     this.pipeline.cancel();
     this.thinkingPipeline.cancel();
     // The run is stopped only once what was said turns out to be for the agent:
-    // not a tap, not noise, not a command the page handles.
+    // not a tap, not noise, not a command the page handles. See heard().
     this.state();
+  }
+  /**
+   * What has been made out so far of what is being said. Once it is plainly
+   * for the agent, a run it would stop is stopped now, not when the speaker is
+   * done: "stop, don't touch that file" must not wait for the end of the sentence.
+   */
+  heard(partial: string) {
+    if (!this.alive || this.muted || !this.hearing || this.stopped || this.compacting) return;
+    if (!partial.trim() || this.io.couldBeCommand?.(partial) || this.io.steering?.() || !(this.io.agentRunning() || this.sending)) return;
+    this.stopped = true;
+    const generation = this.inputGeneration;
+    // Serialized like the stop in process(), and a failed one is tried again there before anything is sent.
+    this.operations = this.operations.then(async () => { if (this.alive && this.inputGeneration === generation) await this.io.abort(); })
+      .catch(error => { this.stopped = false; this.report(error); });
   }
   /** Speech that began and is not going to be sent after all: a push-to-talk press too short to be words. */
   speechCancel() {
@@ -143,6 +161,7 @@ export class HandsFreeVoice {
     this.compactionSpeech = false;
     if (!this.hearing) return;
     this.hearing = false;
+    this.stopped = false;
     this.acceptingReplies = true;
     this.state();
     void this.play();
@@ -168,17 +187,24 @@ export class HandsFreeVoice {
       }
       // If speech resumes during transcription, retain the text and combine it
       // with the next segment instead of sending half a thought or losing it.
-      if (this.hearing || !this.text.length) return;
+      if (this.hearing) return;
+      if (!this.text.length) {
+        // Nothing in it but noise: the run was not stopped, so what it says next is spoken.
+        if (valid() && !this.recordings.length) { this.stopped = false; this.acceptingReplies = true; }
+        return;
+      }
       const text = this.text.join(" ");
       if (this.io.command?.(text)) {
         this.text = [];
+        this.stopped = false;
         this.ignoreCurrent();
         this.acceptingReplies = true;
         return;
       }
       // Serialize abort behind an in-flight send so it cannot miss that new run.
-      // When steering, the run goes on and what is said is added to it.
-      const interrupt = (this.io.agentRunning() || this.sending) && !this.io.steering?.();
+      // When steering, the run goes on and what is said is added to it. When it
+      // was already stopped while this was being said, that is not done twice.
+      const interrupt = !this.stopped && (this.io.agentRunning() || this.sending) && !this.io.steering?.();
       const send = this.operations.then(async () => {
         if (!valid() || this.hearing || this.recordings.length) return;
         if (interrupt) {
@@ -192,7 +218,7 @@ export class HandsFreeVoice {
         this.state();
         try {
           await this.io.send(text);
-          if (valid()) this.text = [];
+          if (valid()) { this.text = []; this.stopped = false; }
         } catch (error) {
           this.acceptingReplies = false;
           throw new Error(`Could not send “${text}”: ${error instanceof Error ? error.message : error}`);
@@ -226,6 +252,7 @@ export class HandsFreeVoice {
       this.hearing = false;
       this.recordings = [];
       this.text = [];
+      this.stopped = false;
       this.transcription.abort();
       this.transcription = new AbortController();
       this.acceptingReplies = true;
