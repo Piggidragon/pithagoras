@@ -481,7 +481,7 @@ app.post("/api/sessions/:id/config", async (req, res) => {
   try {
     const client = await sessions.client(session.id);
     if (typeof modelId === "string" && modelId) {
-      await client.setModel(provider || getSettings().provider, modelId);
+      await client.setModel(provider || session.provider || getSettings().provider, modelId);
       applied.push("model");
     }
     if (typeof thinkingLevel === "string" && thinkingLevel) {
