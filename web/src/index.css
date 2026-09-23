@@ -435,3 +435,4 @@
   .is-browsing.is-terminal .voice-files-window.as-side { left: 12px; right: 12px; top: calc(62% - 34px); width: auto; height: calc(38% - 66px); }
 }
 @media (prefers-reduced-motion: reduce) { .voice-files-window { transition: none; } }
+@media (max-width: 767px) { .prompt-input { font-size: 16px; } }

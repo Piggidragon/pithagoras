@@ -66,6 +66,18 @@ Two keys work from anywhere on the page:
 | `/` | Jump to the message box with the command list open. Not while you are typing somewhere else, where it is a character |
 | `Esc` | In the message box, **stop the run**. Only when the box is empty — the moment the send button is a stop button — so it can never cost you words |
 
+## Queued channel messages and questions
+
+Channel messages wait for the current run to finish before applying a new
+speaker or role. Pending notes are included when that queued turn starts and
+are removed only after pi accepts the prompt. A failed startup leaves the
+notes available for the next attempt.
+
+When an extension asks a question, submitting a response closes the dialog only
+after the server accepts it. If submission fails, the dialog stays open with an
+error so you can retry or dismiss it. A timeout or cancellation resolves the
+original question; it does not cancel a newer question that has replaced it.
+
 ## Sent messages
 
 Hovering one of your messages gives it these actions:
@@ -132,6 +144,16 @@ General → Confirmations** turns that question off, for chats, messages, files,
 skills, routines, projects, voices and channels alike. It is kept per browser.
 Discarding unsaved changes is still asked about. The Agent tab's conversations
 can be renamed and deleted the same way, from the row.
+
+## Using a phone
+
+Tap the navigation icon in the header to open the sidebar, then choose a
+session or **New** to start a chat. Selecting an item closes the drawer;
+you can also close it with its close button or by tapping the dimmed backdrop.
+
+Use the send arrow beside the composer to submit a message. The keyboard's
+Return key can still insert a new line. Long slash-command lists scroll inside
+the picker, keeping the composer and navigation in view.
 
 ## Model and effort
 

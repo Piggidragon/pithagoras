@@ -351,7 +351,7 @@ export const api = {
       body: JSON.stringify({ off }),
     }),
   respondUi: (sessionId: string, id: string, payload: { value?: unknown; cancelled?: boolean }) =>
-    json<{ ok: boolean }>(`/api/sessions/${sessionId}/ui-response`, {
+    json<{ ok: boolean; note?: string }>(`/api/sessions/${sessionId}/ui-response`, {
       method: "POST",
       body: JSON.stringify({ id, ...payload }),
     }),

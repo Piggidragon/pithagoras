@@ -1,5 +1,10 @@
-import { spawn } from "node:child_process";
+import { executorLimits } from "./limits.js";
+import { mkdirSync, accessSync, constants } from "node:fs";
+import { promisify } from "node:util";
+import { hostMountPath, type DockerMount } from "./host-mounts.js";
+import { execFile, spawn } from "node:child_process";
 import path from "node:path";
+import { removeStoppedRunner } from "./stale-container.js";
 import { PiRpcClient } from "../pi/rpc-client.js";
 import { SdkPiClient } from "../pi/sdk-client.js";
 import type { PiClient } from "../pi/types.js";
@@ -105,6 +110,23 @@ export class ContainerExecutor implements Executor {
   async launch(opts: LaunchOptions): Promise<PiClient> {
     const containerName = `pithagoras-${opts.sessionId}`;
     const sessionDir = path.join(this.sessionRoot, opts.sessionId);
+    // Create it as the portal user, rather than letting Docker create a root-owned bind source.
+    // Before the mount translation below, so the directory exists as ours either way.
+    mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+    accessSync(sessionDir, constants.W_OK);
+    if (!process.getuid || !process.getgid) throw new Error("Container executor requires a POSIX user identity");
+    const runnerUser = `${process.getuid()}:${process.getgid()}`;
+
+    let workspaceMount = opts.workspacePath;
+    let sessionMount = sessionDir;
+    if (process.env.PORTAL_CONTAINER_NAME) {
+      const { stdout } = await promisify(execFile)("docker", ["inspect", "--format", "{{json .Mounts}}", process.env.PORTAL_CONTAINER_NAME]);
+      const mounts = JSON.parse(stdout) as DockerMount[];
+      workspaceMount = hostMountPath(opts.workspacePath, mounts);
+      sessionMount = hostMountPath(sessionDir, mounts);
+    }
+
+
 
     const passthrough = [
       "OPENROUTER_API_KEY",
@@ -118,6 +140,8 @@ export class ContainerExecutor implements Executor {
       "run",
       "-i",
       "--rm",
+      "--user",
+      runnerUser,
       "--name",
       containerName,
       "--label",
@@ -127,9 +151,9 @@ export class ContainerExecutor implements Executor {
       "-w",
       "/workspace",
       "-v",
-      `${opts.workspacePath}:/workspace`,
+      `${workspaceMount}:/workspace`,
       "-v",
-      `${sessionDir}:/sessions`,
+      `${sessionMount}:/sessions`,
       // Same hardening posture as the sandboxes: no extra capabilities, no
       // privilege escalation, and hard resource ceilings.
       "--cap-drop",
@@ -150,6 +174,7 @@ export class ContainerExecutor implements Executor {
       ...piArgs({ ...opts }, "/sessions"),
     ];
 
+    await removeStoppedRunner(opts.sessionId);
     const child = spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"] });
     return new PiRpcClient(child);
   }
@@ -168,11 +193,7 @@ export function buildExecutor(kind: ExecutorKind, sessionRoot: string): Executor
     return new ContainerExecutor(
       process.env.PI_IMAGE || "pithagoras-runner:latest",
       sessionRoot,
-      {
-        memoryMb: Number(process.env.TASK_MEMORY_MB) || 2048,
-        cpus: Number(process.env.TASK_CPUS) || 2,
-        pidsLimit: Number(process.env.TASK_PIDS_LIMIT) || 512,
-      }
+      executorLimits()
     );
   }
   return new HostExecutor(sessionRoot);
