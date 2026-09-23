@@ -95,6 +95,15 @@ test('settings, push-to-talk, adding to a running task, the conversation and rep
   expect(await page.evaluate(() => [localStorage.getItem('voiceRate'), localStorage.getItem('voiceSteer'), localStorage.getItem('voicePtt')])).toEqual(['1.5', 'on', 'on']);
   await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-settings.png' });
   await page.keyboard.press('Escape');
+  // With the canvas open beside the stage, the card is still on top of it.
+  await page.getByRole('button', { name: 'Session canvases' }).click();
+  await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
+  await page.getByRole('button', { name: 'Voice settings' }).click();
+  const card = await settings.boundingBox();
+  expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.voice-settings'), [card!.x + card!.width / 2, card!.y + 20])).toBe(true);
+  await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-settings-canvas.png' });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Close canvas' }).click();
   await expect(settings).toBeHidden();
   await expect(page.getByRole('button', { name: 'Hold to talk' })).toBeVisible();
   // Once the repeated reply (the fixture's long clip) has finished.
@@ -117,9 +126,17 @@ test('settings, push-to-talk, adding to a running task, the conversation and rep
   await expect(page.getByTestId('sent')).toHaveText('2');
 
   await page.getByRole('button', { name: 'Show the conversation' }).click();
-  const conversation = page.getByRole('complementary', { name: 'Conversation' });
+  const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
   await expect(conversation).toContainText('Also check the tests.');
   await expect(conversation).toContainText('Here is the spoken response.');
+  // A window beside the orb, not over it or over another window.
+  await page.waitForTimeout(800);
+  const box = await conversation.boundingBox(), orb = await page.locator('.voice-presence').boundingBox();
+  expect(orb!.x + orb!.width <= box!.x || box!.x + box!.width <= orb!.x).toBe(true);
+  await page.getByRole('button', { name: 'Show picture' }).click();
+  await page.waitForTimeout(800);
+  const pictures = await page.getByRole('region', { name: 'Pictures', exact: true }).boundingBox(), beside = await conversation.boundingBox();
+  expect(pictures!.x + pictures!.width <= beside!.x || beside!.x + beside!.width <= pictures!.x).toBe(true);
   await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-conversation.png' });
   await conversation.getByRole('button', { name: 'Close the conversation' }).click();
   await page.getByRole('button', { name: 'Stop the agent' }).click();

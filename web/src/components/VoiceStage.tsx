@@ -118,16 +118,17 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const terminal = useRef<HTMLElement>(null);
   const [shown, setShown] = useState(false), [terminalShown, setTerminalShown] = useState(false);
   const [filesShown, setFilesShown] = useState(false), [filesUsed, setFilesUsed] = useState(false), [filesSince, setFilesSince] = useState<number | undefined>(undefined);
-  const filesWindow = useRef<HTMLElement>(null), picturesWindow = useRef<HTMLElement>(null);
+  const filesWindow = useRef<HTMLElement>(null), picturesWindow = useRef<HTMLElement>(null), conversationWindow = useRef<HTMLElement>(null);
   // Pictures the agent showed with show_image. A new one opens the window on it.
   const pictures = useMemo(() => shownPictures(toolEvents), [toolEvents]);
   const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
   const [picturesShown, setPicturesShown] = useState(false), [pictureIndex, setPictureIndex] = useState(0);
   const [conversation, setConversation] = useState(false), [settings, setSettings] = useState(false);
+  const settingsToggle = useRef<HTMLButtonElement>(null);
   const [dropping, setDropping] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
-  useWorkPanels({ browser: shown, terminal: terminalShown, canvas: canvasOpen, files: filesShown, pictures: picturesShown }, panel => {
-    if (panel === "browser") setShown(false); else if (panel === "terminal") setTerminalShown(false); else if (panel === "files") setFilesShown(false); else if (panel === "pictures") setPicturesShown(false); else onCanvasMinimize();
+  useWorkPanels({ browser: shown, terminal: terminalShown, canvas: canvasOpen, files: filesShown, pictures: picturesShown, conversation }, panel => {
+    if (panel === "browser") setShown(false); else if (panel === "terminal") setTerminalShown(false); else if (panel === "files") setFilesShown(false); else if (panel === "pictures") setPicturesShown(false); else if (panel === "conversation") setConversation(false); else onCanvasMinimize();
   });
   // What the agent reads or changes in the chat's folder. Files opens on it as
   // the browser and terminal do, and follows it from there. A file opened from
@@ -141,8 +142,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // and Files and pictures wherever is left (see voice-windows.ts). The stage's
   // classes say whether there is a window in the middle and one at the side,
   // for where the orb goes; which window is open is the window's own `is-open`.
-  const place = placeWindows({ browser: shown, terminal: terminalShown, files: filesShown, pictures: picturesShown });
-  const filesMain = place.main === "files", picturesMain = place.main === "pictures";
+  const place = placeWindows({ browser: shown, terminal: terminalShown, files: filesShown, pictures: picturesShown, conversation });
+  const filesMain = place.main === "files", picturesMain = place.main === "pictures", conversationMain = place.main === "conversation";
   const browsing = !!place.main;
   const sideWindow = !!place.side;
   const [loaded, setLoaded] = useState(false);
@@ -161,14 +162,15 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     const observer = new ResizeObserver(follow);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [thought, shown, terminalShown, filesShown, picturesShown]);
+  }, [thought, shown, terminalShown, filesShown, picturesShown, conversation]);
   useEffect(() => { end.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     if (browser.current) browser.current.inert = !shown;
     if (terminal.current) terminal.current.inert = !terminalShown;
     if (filesWindow.current) filesWindow.current.inert = !filesShown;
     if (picturesWindow.current) picturesWindow.current.inert = !picturesShown;
-  }, [shown, terminalShown, filesShown, picturesShown]);
+    if (conversationWindow.current) conversationWindow.current.inert = !conversation;
+  }, [shown, terminalShown, filesShown, picturesShown, conversation]);
   useEffect(() => {
     if (!agentFile || agentFile.seq <= filesSeen.current) return;
     filesSeen.current = agentFile.seq;
@@ -250,28 +252,28 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
   const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
   const status = starting ? "Connecting" : input || holding ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : ptt ? (touch ? "Hold the microphone to talk" : "Hold Space to talk") : "Listening";
-  const anyPanel = shown || terminalShown || filesShown || picturesShown;
+  const anyPanel = shown || terminalShown || filesShown || picturesShown || conversation;
   const drop = (e: DragEvent) => {
     if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
     e.preventDefault(); setDropping(false);
     add.current([...e.dataTransfer.files]);
   };
-  return <section className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(canvasOpen)} data-mode={mode}
+  return <section className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen)} data-mode={mode}
     onDragOver={e => { if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); }}
     onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
     onDrop={drop}>
     <header className="voice-stage-header">
       <span className="voice-stage-session">{title}</span>
       <div className="voice-utilities">
-        <button type="button" onClick={() => setConversation(v => !v)} title="Conversation" aria-label="Show the conversation" aria-expanded={conversation}><LuMessageSquareText /></button>
+        {!conversation && <button type="button" onClick={() => { setConversation(true); onCue("focus"); }} title="Conversation" aria-label="Show the conversation"><LuMessageSquareText /></button>}
         <button type="button" onClick={onCanvasToggle} title="Session canvases" aria-label="Session canvases" aria-expanded={canvasOpen}><LuFileText /></button>
         {!filesShown && <button type="button" onClick={openFiles} title="Show files" aria-label="Show files"><LuFolderOpen /></button>}
         {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title="Show pictures" aria-label="Show pictures"><LuImage /></button>}
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title="Show browser" aria-label="Show browser"><LuGlobe /></button>}
         {terminalUsed && !terminalShown && <button type="button" aria-label="Show terminal" title="Show terminal" onClick={() => { setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
-        <button type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title="Voice settings" aria-label="Voice settings" aria-expanded={settings}><LuSlidersHorizontal /></button>
+        <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title="Voice settings" aria-label="Voice settings" aria-expanded={settings}><LuSlidersHorizontal /></button>
       </div>
-      {settings && <VoiceSettings sounds={sounds} onSounds={onSounds} rate={rate} onRate={onRate} steer={steer} onSteer={onSteer} ptt={ptt} onPtt={onPtt} onClose={() => setSettings(false)} />}
+      {settings && <VoiceSettings anchor={settingsToggle} sounds={sounds} onSounds={onSounds} rate={rate} onRate={onRate} steer={steer} onSteer={onSteer} ptt={ptt} onPtt={onPtt} onClose={() => setSettings(false)} />}
     </header>
     {attachments.length > 0 && <div className="voice-attachments" aria-label="Pictures for your next message">
       <div>{attachments.map(a => <figure key={a.id}>
@@ -282,7 +284,6 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     </div>}
     {dropping && <div className="voice-drop-hint" aria-hidden="true"><LuImagePlus />Drop pictures to send them with what you say next</div>}
     <input ref={picker} type="file" accept={IMAGE_TYPES.join(",")} multiple hidden onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) onAddPictures(files); }} />
-    {conversation && <VoiceConversation sessionId={sessionId} items={items} onClose={() => setConversation(false)} />}
     <section ref={browser} className={`voice-browser-window ${shown ? 'is-open' : ''}`} aria-label="Live browser" aria-hidden={!shown}>
       <header><span><i />Live browser</span><div>
         <button type="button" aria-label="Fullscreen browser" title="Fullscreen" onClick={() => { void browser.current?.requestFullscreen?.().catch(() => setBrowserError('Fullscreen is unavailable.')); }}><LuMaximize2 /></button>
@@ -301,6 +302,10 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     <section ref={picturesWindow} className={`voice-files-window voice-pictures-window ${picturesMain ? 'as-main' : 'as-side'} ${picturesShown ? 'is-open' : ''}`} aria-label="Pictures" aria-hidden={!picturesShown}>
       <header><span><LuImage />Pictures</span><div><button type="button" aria-label="Minimize pictures" title="Minimize pictures" onClick={() => { setPicturesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {picturesShown && <VoicePictures sessionId={sessionId} pictures={pictures} index={Math.min(pictureIndex, pictures.length - 1)} onIndex={setPictureIndex} />}
+    </section>
+    <section ref={conversationWindow} className={`voice-files-window voice-conversation-window ${conversationMain ? 'as-main' : 'as-side'} ${conversation ? 'is-open' : ''}`} aria-label="Conversation" aria-hidden={!conversation}>
+      <header><span><LuMessageSquareText />Conversation</span><div><button type="button" aria-label="Close the conversation" title="Close" onClick={() => { setConversation(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
+      {conversation && <VoiceConversation sessionId={sessionId} items={items} />}
     </section>
     <VoiceToolActivity events={toolEvents} folder={folder} onOpen={openCall} />
     <div className="voice-presence">

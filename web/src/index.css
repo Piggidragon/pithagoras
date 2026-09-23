@@ -496,11 +496,7 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
 .voice-pictures-count { font-variant-numeric: tabular-nums; color: rgb(var(--fg-muted)); padding: 0 4px; }
 .voice-pictures-empty { margin: auto; padding: 24px; text-align: center; font-size: 12px; color: rgb(var(--fg-muted)); }
 
-/* The conversation, slid in over the stage without leaving voice mode. */
-.voice-conversation { position: absolute; z-index: 25; left: 16px; top: 52px; bottom: 16px; width: min(380px, calc(100% - 32px)); display: flex; flex-direction: column; border: 1px solid #62718a; border-radius: 18px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 30px 90px #0005; overflow: hidden; animation: voice-conversation-in .45s cubic-bezier(.22,1,.36,1); }
-.voice-conversation > header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 8px 0 16px; border-bottom: 1px solid #62718a; font-size: 12px; font-weight: 500; }
-.voice-conversation > header button { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: rgb(var(--fg) / .09); border: 1px solid rgb(var(--fg) / .3); }
-.voice-conversation > header svg { width: 14px; height: 14px; }
+/* The conversation, in a window like Files: what was said, and what came back. */
 .voice-conversation-list { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.55; }
 .voice-conversation-empty { margin: auto; color: rgb(var(--fg-muted)); font-size: 12px; }
 .voice-said { max-width: 88%; }
@@ -509,10 +505,9 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
 .voice-said.is-agent { align-self: flex-start; color: rgb(var(--fg)); }
 .voice-said-pictures { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .voice-said-pictures img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; }
-@keyframes voice-conversation-in { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
 
 /* Voice settings, in a card above the buttons that open it. */
-.voice-settings { position: absolute; z-index: 30; right: 16px; bottom: 64px; width: min(320px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid #62718a; border-radius: 16px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 20px 60px #0006; }
+.voice-settings { position: fixed; z-index: 55; width: min(320px, calc(100vw - 16px)); display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid #62718a; border-radius: 16px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 20px 60px #0006; }
 .voice-setting > span { display: block; font-size: 12px; font-weight: 500; margin-bottom: 6px; }
 .voice-setting > p { margin-top: 6px; font-size: 11px; line-height: 1.45; color: rgb(var(--fg-muted)); }
 .voice-segments { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: rgb(var(--fg) / .07); }
@@ -520,10 +515,7 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
 .voice-segments button[aria-pressed="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 1px 4px #0003; }
 @media (max-width: 600px) {
   .voice-attachments { top: 44px; left: 16px; }
-  .voice-settings { right: 8px; bottom: 56px; }
-  .voice-conversation { left: 8px; top: 48px; bottom: 8px; width: calc(100% - 16px); }
 }
-@media (prefers-reduced-motion: reduce) { .voice-conversation { animation: none; } }
 
 /* Five controls beside a window: smaller, so the row stays within the orb's column. */
 @media (min-width: 601px) {

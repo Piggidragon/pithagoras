@@ -91,9 +91,9 @@ file in Files, the terminal, the browser, the document or the picture.
 | **Repeat** | Plays the last reply again from the audio already made, at the current speed, without asking the agent. Saying "say that again", "repeat that", "sag das nochmal", "wie bitte?" and the like does the same; only a sentence that is nothing but that request counts, so "say that again, but shorter" still goes to the agent. |
 | **Stop** | Shown while the agent works. Stops the task without ending voice mode. |
 
-The buttons at the bottom right open the **conversation** — what you said as it
-was transcribed and what came back as written, without leaving voice mode —
-the canvases, Files, pictures, the browser and the terminal, and the **voice
+The buttons at the bottom right open the **conversation** — a window like Files,
+with what you said as it was transcribed and what came back as written — the
+canvases, Files, pictures, the browser and the terminal, and the **voice
 settings**:
 
 | Setting | |

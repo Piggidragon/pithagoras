@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 
 /** The speeds offered. Faster than 1.75× stops being speech anyone follows. */
 export const VOICE_RATES = [1, 1.25, 1.5, 1.75];
@@ -7,15 +8,30 @@ export const VOICE_RATES = [1, 1.25, 1.5, 1.75];
  * How voice mode behaves, in a small card by its buttons: sound effects, how
  * fast the agent speaks, what talking mid-run does, and push-to-talk. Each is
  * remembered in this browser.
+ *
+ * Drawn over the whole page, not inside the voice stage: the stage is its own
+ * layer, and the canvas panel beside it would otherwise cover the card. It is
+ * placed above the button that opens it, and follows it when the window changes.
  */
-export function VoiceSettings({ sounds, onSounds, rate, onRate, steer, onSteer, ptt, onPtt, onClose }: {
+export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, onSteer, ptt, onPtt, onClose }: {
   sounds: boolean; onSounds: () => void;
   rate: number; onRate: (rate: number) => void;
   steer: boolean; onSteer: (steer: boolean) => void;
   ptt: boolean; onPtt: (ptt: boolean) => void;
   onClose: () => void;
+  anchor: RefObject<HTMLElement>;
 }) {
   const card = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<{ right: number; bottom: number } | null>(null);
+  useLayoutEffect(() => {
+    const place = () => {
+      const box = anchor.current?.getBoundingClientRect();
+      if (box) setAt({ right: Math.max(8, window.innerWidth - box.right), bottom: window.innerHeight - box.top + 8 });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [anchor]);
   const close = useRef(onClose); close.current = onClose;
   useEffect(() => {
     const outside = (e: PointerEvent) => {
@@ -30,7 +46,7 @@ export function VoiceSettings({ sounds, onSounds, rate, onRate, steer, onSteer, 
   }, []);
   const choice = <T,>(value: T, current: T, label: string, pick: (value: T) => void) =>
     <button type="button" aria-pressed={value === current} onClick={() => pick(value)}>{label}</button>;
-  return <div ref={card} className="voice-settings" role="dialog" aria-label="Voice settings">
+  return createPortal(<div ref={card} className="voice-settings" role="dialog" aria-label="Voice settings" style={at ? { right: at.right, bottom: at.bottom } : { visibility: "hidden" }}>
     <div className="voice-setting" role="group" aria-label="Speaking speed">
       <span aria-hidden="true">Speaking speed</span>
       <div className="voice-segments">{VOICE_RATES.map(r => <Fragment key={r}>{choice(r, rate, `${r}×`, onRate)}</Fragment>)}</div>
@@ -58,5 +74,5 @@ export function VoiceSettings({ sounds, onSounds, rate, onRate, steer, onSteer, 
         {choice(true, sounds, "On", () => !sounds && onSounds())}
       </div>
     </div>
-  </div>;
+  </div>, document.body);
 }
