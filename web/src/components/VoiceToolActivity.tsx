@@ -26,7 +26,7 @@ const SLOTS = 4;
  * the file in Files, the terminal, the browser, the document, the picture.
  */
 export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEvent[]; folder: string; onOpen: (call: ToolCall) => void }) {
-  const seen = useRef(Math.max(0, ...events.map(e => e.seq)));
+  const seen = useRef(events.reduce((n, e) => Math.max(n, e.seq), 0));
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const cards = useRef<Card[]>([]);
   const [shown, setShown] = useState<Card[]>([]);
@@ -44,7 +44,7 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
   useEffect(() => {
     const fresh = events.filter(e => e.seq > seen.current);
     if (!fresh.length) return;
-    seen.current = Math.max(seen.current, ...fresh.map(e => e.seq));
+    seen.current = fresh.reduce((n, e) => Math.max(n, e.seq), seen.current);
     let next = cards.current;
     for (const event of fresh) {
       const p = event.payload ?? {};
@@ -56,7 +56,11 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
           next = next.filter(c => c !== out);
           taken = new Set(next.filter(c => !c.leaving).map(c => c.slot));
         }
-        const slot = [0, 1, 2, 3].find(s => !taken.has(s)) ?? 0;
+        // A slot a card is still leaving from is taken last, and that card then
+        // goes at once rather than being flown over.
+        const leavingFrom = new Set(next.filter(c => c.leaving).map(c => c.slot));
+        const slot = [0, 1, 2, 3].find(s => !taken.has(s) && !leavingFrom.has(s)) ?? [0, 1, 2, 3].find(s => !taken.has(s)) ?? 0;
+        next = next.filter(c => !(c.leaving && c.slot === slot));
         next = [...next, { ...describeCall(p, folder), id: event.seq, callId: String(p.toolCallId ?? ''), start: p, startedAt: Date.now(), status: 'running', outcome: '', slot, leaving: false }];
       } else if (event.type === 'tool_execution_end') {
         const card = next.find(c => c.callId && c.callId === String(p.toolCallId ?? '') && c.status === 'running');

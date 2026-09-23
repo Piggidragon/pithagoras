@@ -50,6 +50,26 @@ test('a picture goes with what is said next, and the agent can show one back', a
   expect(failures).toEqual([]);
 });
 
+test('a file dropped on the voice stage is taken there once, not again by the chat behind it', async ({ page }) => {
+  let uploads = 0;
+  await page.route('**/api/sessions/test/upload?**', route => { uploads++; return route.fulfill({ json: { path: 'notes.pdf', size: 3 } }); });
+  await start(page);
+  const drop = (files: { name: string; type: string; base64: string }[]) => page.locator('.voice-stage').evaluate((stage, files) => {
+    const data = new DataTransfer();
+    for (const f of files) data.items.add(new File([Uint8Array.from(atob(f.base64), c => c.charCodeAt(0))], f.name, { type: f.type }));
+    stage.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data }));
+    stage.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }));
+  }, files);
+  await drop([{ name: 'photo.png', type: 'image/png', base64: png.toString('base64') }]);
+  await expect(page.getByLabel('Pictures for your next message').getByRole('img', { name: 'photo.png' })).toHaveCount(1);
+  await drop([{ name: 'notes.pdf', type: 'application/pdf', base64: 'JVBE' }]);
+  await expect(page.getByText('Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode')).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page.getByLabel('Pictures for your next message').getByRole('img', { name: 'photo.png' })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Add a picture' })).toContainText('1');
+  expect(uploads).toBe(0);
+});
+
 test('tool cards say what came of a call, and open what they are about', async ({ page }) => {
   await start(page);
   // The terminal can be opened before the agent has run anything.

@@ -117,7 +117,8 @@ export class PiRpcClient extends EventEmitter implements PiClient {
     const res = await this.send("prompt", {
       message,
       ...(options?.images?.length ? { images: options.images } : {}),
-      ...(options?.steer ? { streamingBehavior: "steer" } : {}),
+      // pi refuses a prompt during a run unless told how to queue it.
+      streamingBehavior: options?.steer ? "steer" : "followUp",
     });
     if (res.success === false) throw new Error(res.error || "pi rejected the prompt");
   }

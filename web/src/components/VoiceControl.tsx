@@ -13,7 +13,8 @@ import { api, type PortalEvent, type PromptOptions } from "../api";
 import type { Item } from "../transcript";
 import { LiveTranscription } from "../live-transcription";
 import { preparePcmSpeech, readPcmStream, playAudioBuffer, bufferOf } from "../pcm-stream";
-import { stretch } from "../time-stretch";
+import { stretch, stretchInSteps } from "../time-stretch";
+import { joinSamples } from "../samples";
 import { asksToRepeat, couldAskToRepeat } from "../voice-commands";
 import { isImage, pending, type Attachment } from "../attachments";
 import { VOICE_RATES } from "./VoiceSettings";
@@ -23,7 +24,9 @@ import { HandsFreeVoice, type VoicePhase } from "../hands-free";
 
 /** How much of the last reply Repeat keeps: two minutes is about 11 MB of samples. */
 const REPEAT_SECONDS = 120;
-const seconds = (phrase: { samples: Float32Array[]; sampleRate: number }) => phrase.samples.reduce((n, s) => n + s.length, 0) / phrase.sampleRate;
+/** A phrase of the last reply, and the last speed Repeat played it at, so a second Repeat need not work it out again. */
+type KeptPhrase = { samples: Float32Array[]; sampleRate: number; stretched?: { rate: number; samples: Promise<Float32Array>; signal: AbortSignal; ready?: boolean } };
+const seconds = (phrase: KeptPhrase) => phrase.samples.reduce((n, s) => n + s.length, 0) / phrase.sampleRate;
 
 export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, folder, items, running, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, terminalActivity, toolEvents }: {
   sessionId: string;
@@ -87,7 +90,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   // they came from the speech service, before the speed was applied. Only the
   // last REPEAT_SECONDS of it: a long run that talks before every step would
   // otherwise keep all of that audio.
-  const replyAudio = useRef<{ samples: Float32Array[]; sampleRate: number }[]>([]);
+  const replyAudio = useRef<KeptPhrase[]>([]);
   const [canRepeat, setCanRepeat] = useState(false);
   const replay = useRef<AbortController | null>(null);
   const [sounds, setSounds] = useState(() => local.get('voiceSounds') !== 'off');
@@ -292,9 +295,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       held.current = null;
       if (pushToTalk.current) stream.current?.getTracks().forEach(track => { track.enabled = false; });
       levels.current.input = 0;
-      const samples = new Float32Array(press.frames.reduce((n, f) => n + f.length, 0));
-      let offset = 0;
-      for (const frame of press.frames) { samples.set(frame, offset); offset += frame.length; }
+      const samples = joinSamples(press.frames);
       // Held for under a quarter of a second, or nothing in it the detector took
       // for speech: a tap or a cough, not something to send.
       const heldFor = press.frames.slice(0, press.heldFrames).reduce((n, f) => n + f.length, 0);
@@ -344,12 +345,23 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     if (!audio || !phrases.length) return false;
     replay.current?.abort();
     const controller = new AbortController(); replay.current = controller;
+    const rate = speed.current;
+    const prepare = (phrase: KeptPhrase) => {
+      const kept = phrase.stretched;
+      // One cut short by an earlier Repeat is worked out again.
+      if (kept?.rate === rate && (kept.ready || !kept.signal.aborted)) return kept.samples;
+      const stretched: NonNullable<KeptPhrase["stretched"]> = { rate, signal: controller.signal, samples: stretchInSteps(joinSamples(phrase.samples), rate, controller.signal) };
+      stretched.samples.then(() => { stretched.ready = true; }, () => {});
+      phrase.stretched = stretched;
+      return stretched.samples;
+    };
     void (async () => {
-      for (const phrase of phrases) {
-        const joined = new Float32Array(phrase.samples.reduce((n, s) => n + s.length, 0));
-        let offset = 0;
-        for (const s of phrase.samples) { joined.set(s, offset); offset += s.length; }
-        const buffer = bufferOf(audio, stretch(joined, speed.current), phrase.sampleRate);
+      // Each phrase is made faster while the one before it plays.
+      let next = prepare(phrases[0]);
+      for (let i = 0; i < phrases.length; i++) {
+        const samples = await next;
+        if (i + 1 < phrases.length) next = prepare(phrases[i + 1]);
+        const buffer = bufferOf(audio, samples, phrases[i].sampleRate);
         if (!buffer) continue;
         await playThrough(audio, controller.signal, (analyser, started) => playAudioBuffer(buffer, audio, analyser, controller.signal, started));
       }
@@ -438,18 +450,20 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
         throw new Error("Microphone access requires HTTPS or localhost.");
       const sound = new AudioContext(); soundContext.current = sound;
-      await Promise.race([sound.resume(), new Promise(resolve => setTimeout(resolve, 300))]);
+      // Started by a click, audio is allowed and only slow to start — a
+      // Bluetooth headset can take a while — so it gets longer to do it.
+      await Promise.race([sound.resume(), new Promise(resolve => setTimeout(resolve, resuming ? 300 : 2000))]);
       if (!current()) return;
       if (sound.state !== "running") {
         // Started without a click — after a reload — so the browser holds audio
         // back until the page is touched. Not every event counts: a touch lets
         // audio start when the finger is lifted, not when it lands, and Escape
         // never does. So each one tries, and the wait is over once one has and
-        // audio is running.
+        // audio is running. The click that started it already counts.
         setWaitingForTap(true);
         await new Promise<void>(resolve => {
           const events = ["pointerdown", "pointerup", "touchend", "click", "keydown", "keyup"] as const;
-          let touched = false;
+          let touched = !resuming;
           const done = () => {
             if (current() && !(touched && sound.state === "running")) return;
             for (const name of events) window.removeEventListener(name, attempt, true);

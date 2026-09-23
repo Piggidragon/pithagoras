@@ -14,6 +14,8 @@
  * early as it did. `flush` gives what is left at the end.
  */
 
+import { joinSamples } from "./samples";
+
 const FRAME = 960;
 const HOP = FRAME / 2;
 /** How far a piece may move to line up: 10 ms either way. */
@@ -89,16 +91,12 @@ export class TimeStretch {
       this.frame++;
       out.push(done);
     }
-    let total = out.reduce((n, a) => n + a.length, 0);
-    const joined = new Float32Array(total);
-    let offset = 0;
-    for (const a of out) { joined.set(a, offset); offset += a.length; }
-    let result = joined;
+    let result = joinSamples(out);
     if (this.skip) {
       const cut = Math.min(this.skip, result.length);
       this.skip -= cut; result = result.subarray(cut);
     }
-    total = result.length;
+    const total = result.length;
     if (end) {
       // As long as the input made faster, not a piece's worth longer.
       const wanted = Math.max(0, Math.round(this.taken / this.rate) - this.given);
@@ -127,8 +125,24 @@ export class TimeStretch {
 export function stretch(samples: Float32Array, rate: number): Float32Array {
   if (rate === 1) return samples;
   const s = new TimeStretch(rate);
-  const head = s.push(samples), rest = s.flush();
-  const all = new Float32Array(head.length + rest.length);
-  all.set(head); all.set(rest, head.length);
-  return all;
+  return joinSamples([s.push(samples), s.flush()]);
+}
+
+/** Half a second at 24 kHz: a few milliseconds of work at a time. */
+const STEP = 12000;
+
+/**
+ * `stretch` a little at a time, letting the page carry on in between: a
+ * whole reply in one go holds up the orb and the microphone for a moment.
+ */
+export async function stretchInSteps(samples: Float32Array, rate: number, signal: AbortSignal): Promise<Float32Array> {
+  if (rate === 1) return samples;
+  const s = new TimeStretch(rate), out: Float32Array[] = [];
+  for (let at = 0; at < samples.length; at += STEP) {
+    out.push(s.push(samples.subarray(at, at + STEP)));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    signal.throwIfAborted();
+  }
+  out.push(s.flush());
+  return joinSamples(out);
 }

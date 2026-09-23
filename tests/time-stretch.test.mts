@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TimeStretch, stretch } from '../web/src/time-stretch.js';
+import { TimeStretch, stretch, stretchInSteps } from '../web/src/time-stretch.js';
 
 const RATE = 24000;
 const tone = (seconds: number, hz: number) => Float32Array.from({ length: Math.round(seconds * RATE) }, (_, i) => 0.5 * Math.sin(2 * Math.PI * hz * i / RATE));
@@ -53,4 +53,14 @@ test('a very short phrase still comes out, at its shorter length', () => {
   const input = tone(0.05, 300);
   assert.ok(Math.abs(stretch(input, 1.5).length - input.length / 1.5) <= 1);
   assert.equal(stretch(new Float32Array(0), 1.5).length, 0);
+});
+
+test('stretching a little at a time gives what stretching it at once does', async () => {
+  const input = new Float32Array(24000 * 2).map((_, i) => Math.sin(i / 7) * 0.5);
+  const whole = stretch(input, 1.5);
+  const stepped = await stretchInSteps(input, 1.5, new AbortController().signal);
+  assert.equal(stepped.length, whole.length);
+  assert.ok(stepped.every((v, i) => Math.abs(v - whole[i]) < 1e-6));
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(stretchInSteps(input, 1.5, controller.signal));
 });

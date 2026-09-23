@@ -1060,7 +1060,9 @@ export function Chat({
           send();
         }}
         onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes("Files")) return;
+          // The voice stage is portaled from inside this form, and React
+          // bubbles its drags here too; whatever took them already handled it.
+          if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
           setDragging(true);
@@ -1072,7 +1074,7 @@ export function Chat({
           // Down whatever was dropped: a drag that looked like files can carry
           // none, and the overlay would stay up until the next one left.
           setDragging(false);
-          if (!e.dataTransfer.files.length) return;
+          if (e.defaultPrevented || !e.dataTransfer.files.length) return;
           e.preventDefault();
           void addFiles([...e.dataTransfer.files]);
         }}

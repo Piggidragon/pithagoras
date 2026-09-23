@@ -315,3 +315,46 @@ test('what is heard mid-run does not stop it when steering or while it could sti
   voice.speechStart(); voice.heard('Also check the tests'); await tick();
   assert.equal(aborted, 0); voice.stop();
 });
+test('a cough mid-reply cuts it off, then the cut-off sentence and what came meanwhile are spoken', async () => {
+  const started: string[] = [];
+  let release: (() => void) | undefined;
+  const { voice } = setup({ agentRunning: () => true, transcribe: async () => '', speak: async (text, signal) => {
+    started.push(text);
+    await new Promise<void>(resolve => { release = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
+  } });
+  voice.observe([reply('a10'), { ...reply('a20', false), text: 'First sentence here now. Second sentence here now. ' }]); await tick();
+  assert.deepEqual(started, ['First sentence here now.']);
+  voice.speechStart(); await tick();
+  voice.observe([reply('a10'), { ...reply('a20', false), text: 'First sentence here now. Second sentence here now. Third sentence here now. ' }]); await tick();
+  assert.deepEqual(started, ['First sentence here now.']);
+  voice.speechEnd(new Float32Array(16000)); await tick(); await tick();
+  for (let i = 0; i < 3; i++) { release?.(); await tick(); await tick(); }
+  assert.deepEqual(started, ['First sentence here now.', 'First sentence here now.', 'Second sentence here now.', 'Third sentence here now.']);
+  voice.stop();
+});
+test('a push-to-talk press taken back does not lose the reply it cut off', async () => {
+  const started: string[] = [];
+  const { voice } = setup({ agentRunning: () => true, speak: async (text, signal) => {
+    started.push(text); await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+  } });
+  voice.observe([reply('a10'), reply('a20')]); await tick();
+  voice.speechStart(); voice.speechCancel(); await tick(); await tick();
+  assert.deepEqual(started, ['A spoken answer.', 'A spoken answer.']); voice.stop();
+});
+test('what is sent drops the reply it cut off', async () => {
+  const { voice, spoken, sent } = setup();
+  voice.speechStart();
+  voice.observe([reply('a10'), reply('a20')]); await tick();
+  voice.speechEnd(new Float32Array(16000)); await tick(); await tick();
+  assert.deepEqual(sent, ['hello']); assert.deepEqual(spoken, []); voice.stop();
+});
+test('a stop that failed while speaking is tried again before what was said is sent', async () => {
+  const calls: string[] = []; const firstAbort = deferred<void>();
+  const { voice, sent } = setup({ agentRunning: () => true, send: async text => { calls.push('send'); sent.push(text); },
+    abort: async () => { calls.push('abort'); if (calls.filter(c => c === 'abort').length === 1) { await firstAbort.promise; throw new Error('offline'); } } });
+  voice.speechStart(); voice.heard('stop'); await tick();
+  voice.speechEnd(new Float32Array(16000)); await tick();
+  assert.deepEqual(calls, ['abort']);
+  firstAbort.resolve(); await tick(); await tick(); await tick();
+  assert.deepEqual(calls, ['abort', 'abort', 'send']); assert.deepEqual(sent, ['hello']); voice.stop();
+});

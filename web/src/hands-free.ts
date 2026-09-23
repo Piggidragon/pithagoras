@@ -44,6 +44,12 @@ export class HandsFreeVoice {
   private muted = false;
   private inputGeneration = 0;
   private acceptingReplies = true;
+  /**
+   * While what is being said is not yet known to be for the agent: the reply
+   * it cut off, and what the agent has written since. Spoken after all when
+   * it turns out to be a cough or a press taken back; dropped once it is sent.
+   */
+  private held: string[] | null = null;
   private items: Item[] = [];
   private speech: StreamingSpeech;
   private recordings: Float32Array[] = [];
@@ -113,7 +119,7 @@ export class HandsFreeVoice {
   observe(items: Item[]) {
     this.items = items;
     if (!this.alive) return;
-    if (!this.acceptingReplies) this.ignoreCurrent();
+    if (!this.acceptingReplies) { if (this.held) this.held.push(...this.speech.observe(items)); else this.ignoreCurrent(); }
     else if (!this.io.sequential || this.io.sentenceChunks || !this.io.agentRunning()) this.output.push(...this.speech.observe(items));
     this.state();
     void this.play();
@@ -132,9 +138,8 @@ export class HandsFreeVoice {
     this.clearThinkingTimer();
     this.hearing = true;
     this.acceptingReplies = false;
-    this.ignoreCurrent();
+    this.held = [...(this.held ?? []), ...this.pipeline.cancel(), ...this.output];
     this.output = [];
-    this.pipeline.cancel();
     this.thinkingPipeline.cancel();
     // The run is stopped only once what was said turns out to be for the agent:
     // not a tap, not noise, not a command the page handles. See heard().
@@ -162,9 +167,15 @@ export class HandsFreeVoice {
     if (!this.hearing) return;
     this.hearing = false;
     this.stopped = false;
-    this.acceptingReplies = true;
+    this.resumeReplies();
     this.state();
     void this.play();
+  }
+  /** What was said is not going to the agent: the reply it held back is spoken after all. */
+  private resumeReplies() {
+    if (this.held) this.output = [...this.held, ...this.output];
+    this.held = null;
+    this.acceptingReplies = true;
   }
   speechEnd(samples: Float32Array) {
     if (!this.alive || this.muted) return;
@@ -190,27 +201,30 @@ export class HandsFreeVoice {
       if (this.hearing) return;
       if (!this.text.length) {
         // Nothing in it but noise: the run was not stopped, so what it says next is spoken.
-        if (valid() && !this.recordings.length) { this.stopped = false; this.acceptingReplies = true; }
+        if (valid() && !this.recordings.length) { this.stopped = false; this.resumeReplies(); }
         return;
       }
       const text = this.text.join(" ");
       if (this.io.command?.(text)) {
         this.text = [];
         this.stopped = false;
+        this.held = null;
         this.ignoreCurrent();
         this.acceptingReplies = true;
         return;
       }
       // Serialize abort behind an in-flight send so it cannot miss that new run.
       // When steering, the run goes on and what is said is added to it. When it
-      // was already stopped while this was being said, that is not done twice.
-      const interrupt = !this.stopped && (this.io.agentRunning() || this.sending) && !this.io.steering?.();
+      // was already stopped while this was being said, that is not done twice —
+      // but whether it was is only known once that stop has settled.
+      const busy = (this.io.agentRunning() || this.sending) && !this.io.steering?.();
       const send = this.operations.then(async () => {
         if (!valid() || this.hearing || this.recordings.length) return;
-        if (interrupt) {
+        if (busy && !this.stopped) {
           await this.io.abort();
           if (!valid() || this.hearing || this.recordings.length) return;
         }
+        this.held = null;
         this.ignoreCurrent();
         this.acceptingReplies = true;
         this.sending = true;
@@ -255,7 +269,7 @@ export class HandsFreeVoice {
       this.stopped = false;
       this.transcription.abort();
       this.transcription = new AbortController();
-      this.acceptingReplies = true;
+      this.resumeReplies();
     }
     this.state();
     void this.play();
@@ -267,6 +281,7 @@ export class HandsFreeVoice {
     this.thinkingPipeline.cancel();
     this.transcription.abort();
     this.output = [];
+    this.held = null;
     this.recordings = [];
     this.text = [];
   }

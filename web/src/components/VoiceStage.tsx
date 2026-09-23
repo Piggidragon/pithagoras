@@ -192,7 +192,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   /** A tool card was tapped: bring up what it was about. */
   const openCall = (call: ToolCall) => {
     if (call.target === "files" && call.path) {
-      const seq = Math.max(fileActivity?.seq ?? 0, ...toolEvents.map(e => e.seq)) + 0.5;
+      const seq = toolEvents.reduce((n, e) => Math.max(n, e.seq), fileActivity?.seq ?? 0) + 0.5;
       if (!filesUsed) { setFilesSince(seq - 1); setFilesUsed(true); }
       setOpenedFile({ seq, path: call.path, tool: "read" }); setFilesShown(true); onCue("focus");
     } else if (call.target === "terminal") { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); }
@@ -310,7 +310,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   }, [arrangement]);
   const drop = (e: DragEvent) => {
     if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
-    e.preventDefault(); setDropping(false);
+    // Portaled from inside Chat's form, it would bubble on to the form's own drop.
+    e.preventDefault(); e.stopPropagation(); setDropping(false);
     add.current([...e.dataTransfer.files]);
   };
   return <section className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen)} data-mode={mode}
