@@ -1,5 +1,5 @@
 import { DEFAULT_VAD } from '../api';
-import { local } from '../safe-storage';
+import { local, session } from '../safe-storage';
 import { VoiceProfiler } from '../voice-profile';
 import { VoiceProfile } from './VoiceProfile';
 import { activity } from '../transcript';
@@ -96,6 +96,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const cue = useCallback((kind: VoiceCue) => { if (soundsEnabled.current && soundContext.current) voiceCue(soundContext.current, kind); }, []);
   const toggleSounds = () => setSounds(value => { local.set('voiceSounds', value ? 'off' : 'on'); return !value; });
   const [available, setAvailable] = useState(false);
+  // After a reload voice mode comes back, but audio may not start until the
+  // page has been touched: the stage is shown and waits for that.
+  const [waitingForTap, setWaitingForTap] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [starting, setStarting] = useState(false);
   const [phase, setPhase] = useState<VoicePhase>("Listening");
@@ -114,6 +117,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   latest.current = { items, running, onSend, onAbort, compacting };
   const epoch = useRef(0);
   const mounted = useRef(false);
+  const restoring = useRef(false);
+  // Read once, as the chat opens: whether voice mode was on in this tab before a reload.
+  const resume = useRef<boolean | null>(null);
+  if (resume.current === null) resume.current = session.get('voiceActive') === sessionId;
   const voice = useRef<HandsFreeVoice | null>(null);
   const vad = useRef<MicVAD | null>(null);
   const vadSettings = useRef(DEFAULT_VAD);
@@ -138,6 +145,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
 
   const stop = () => {
     profiler.current?.close('stopped');
+    // Ended, or left for another chat: a reload after this does not bring it back.
+    if (session.get('voiceActive') === sessionId) session.remove('voiceActive');
     epoch.current++;
     clearInterval(heartbeat.current);
     const lease=connection.current;connection.current=null;
@@ -156,7 +165,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     stream.current?.getTracks().forEach(track => track.stop()); stream.current = null;
     const audio = context.current; context.current = null;
     if (audio && audio.state !== "closed") void audio.close();
-    if (mounted.current) { setEnabled(false); setStarting(false); setMuted(false); setSpeaking(false); setTranscript(""); setHolding(false); }
+    if (mounted.current) { setEnabled(false); setStarting(false); setMuted(false); setSpeaking(false); setTranscript(""); setHolding(false); setWaitingForTap(false); }
   };
   useEffect(() => {
     mounted.current = true;
@@ -174,6 +183,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       vadSettings.current = { ...DEFAULT_VAD, ...config.vad };
       setAvailable(config.enabled);
       if (!config.enabled) stop();
+      // Voice mode was on in this tab when the page was reloaded: carry on.
+      else if (resume.current && !voice.current && !restoring.current) { restoring.current = true; void start(); }
     }).catch(() => { if (mounted.current) { setAvailable(false); stop(); } });
     void load();
     window.addEventListener("voice-config-changed", load);
@@ -373,12 +384,26 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     const version = ++epoch.current;
     const current = () => mounted.current && epoch.current === version;
     setStarting(true); setError(""); setMuted(false); mutedRef.current = false;
+    // From the moment it is turned on: a reload while it connects brings it back too.
+    session.set('voiceActive', sessionId);
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
         throw new Error("Microphone access requires HTTPS or localhost.");
       const sound = new AudioContext(); soundContext.current = sound;
-      await sound.resume();
+      await Promise.race([sound.resume(), new Promise(resolve => setTimeout(resolve, 300))]);
       if (!current()) return;
+      if (sound.state !== "running") {
+        // Started without a click — after a reload — so the browser holds audio
+        // back until the page is touched. Any tap or key does.
+        setWaitingForTap(true);
+        await new Promise<void>(resolve => {
+          const go = () => { window.removeEventListener("pointerdown", go, true); window.removeEventListener("keydown", go, true); void sound.resume(); resolve(); };
+          window.addEventListener("pointerdown", go, true); window.addEventListener("keydown", go, true);
+        });
+        if (mounted.current) setWaitingForTap(false);
+        if (!current()) return;
+        await sound.resume();
+      }
       const audio = new AudioContext(); context.current = audio;
       await audio.resume();
       if (!current()) return;
@@ -524,7 +549,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     {(starting || enabled) && stageTarget && createPortal(
       <VoiceStage sessionId={sessionId} folder={folder} workPhase={running ? activity(toolEvents) : null} canvasOpen={canvasOpen} onCanvasMinimize={onCanvasMinimize} onCanvasToggle={onCanvasToggle} title={sequentialMode ? `${title} · ${sentenceMode ? (prefetchMode ? "Sentence pipeline · buffered audio" : "Sentence chunks · buffered audio") : "Sequential baseline"}` : comparison ? `${title} · Streaming pipeline` : title} phase={phase} starting={starting} muted={muted} speaking={speaking}
         browserAvailable={browserAvailable} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={toolEvents} sounds={sounds} onSounds={toggleSounds} onCue={cue}
-        levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode}
+        levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode} waitingForTap={waitingForTap}
         items={items} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}
         attachments={attachments} onAddPictures={files => { void addPictures(files); }} onRemovePicture={id => setAttachments(list => list.filter(a => a.id !== id))}
         canRepeat={canRepeat} onRepeat={() => { repeatReply(); }}

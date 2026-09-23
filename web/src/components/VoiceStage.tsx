@@ -12,6 +12,7 @@ import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
 import { ACTIONS, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
 import { placeWindows } from "../voice-windows";
+import { ResizeHandles, clearSize } from "./ResizeHandles";
 import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
 import type { ToolCall } from "../tool-activity";
 import { VoiceTerminal } from "./VoiceTerminal";
@@ -99,13 +100,15 @@ function VoiceOrb({ mode, levels }: { mode: OrbMode; levels: MutableRefObject<Vo
 const editing = (target: EventTarget | null) => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
 
 export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, terminalActivity, toolEvents, sounds, onSounds, onCue,
-  items, running, onStop, attachments, onAddPictures, onRemovePicture, canRepeat, onRepeat, rate, onRate, steer, onSteer, ptt, onPtt, holding, onHold }: {
+  waitingForTap, items, running, onStop, attachments, onAddPictures, onRemovePicture, canRepeat, onRepeat, rate, onRate, steer, onSteer, ptt, onPtt, holding, onHold }: {
   sessionId: string; folder: string;
   workPhase?: Activity | null;
   canvasOpen: boolean; onCanvasMinimize: () => void; onCanvasToggle: () => void;
   title: string; phase: VoicePhase; starting: boolean; muted: boolean; speaking: boolean;
   levels: MutableRefObject<VoiceLevels>; transcript: string; error: string; onMute: () => void; onEnd: () => void;
   browserAvailable: boolean; browserActivity: number; terminalActivity: number; toolEvents: PortalEvent[]; sounds: boolean; onSounds: () => void; onCue: (kind: VoiceCue) => void;
+  /** Back after a reload, and waiting for a tap before audio may start. */
+  waitingForTap?: boolean;
   items: Item[]; running: boolean; onStop: () => void;
   /** Pictures waiting to go with the next thing said. */
   attachments: Attachment[]; onAddPictures: (files: File[]) => void; onRemovePicture: (id: string) => void;
@@ -296,8 +299,14 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
   const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
-  const status = starting ? "Connecting" : input || holding ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : ptt ? (touch || !bindings["voice.hold"] ? "Hold the microphone to talk" : `Hold ${describe(bindings["voice.hold"], layout)} to talk`) : "Listening";
+  const status = waitingForTap ? (touch ? "Tap to continue voice mode" : "Click or press a key to continue voice mode") : starting ? "Connecting" : input || holding ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : ptt ? (touch || !bindings["voice.hold"] ? "Hold the microphone to talk" : `Hold ${describe(bindings["voice.hold"], layout)} to talk`) : "Listening";
   const anyPanel = shown || terminalShown || filesShown || picturesShown || conversation;
+  // A window sized by hand keeps its size until the windows are arranged
+  // differently — one opens or closes — and then the layout places it again.
+  const arrangement = `${place.main}|${place.side}|${canvasOpen}`;
+  useEffect(() => {
+    for (const el of [browser.current, terminal.current, filesWindow.current, picturesWindow.current, conversationWindow.current]) clearSize(el);
+  }, [arrangement]);
   const drop = (e: DragEvent) => {
     if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
     e.preventDefault(); setDropping(false);
@@ -335,22 +344,27 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         <button type="button" aria-label="Minimize browser" title="Minimize browser" onClick={minimize}><LuMinus /></button>
       </div></header>
       {loaded && <iframe src="/browser-ui/" title="The agent's browser" allow="clipboard-read; clipboard-write; fullscreen" />}
+      <ResizeHandles target={browser} />
     </section>
     <section ref={terminal} className={`voice-terminal-window ${terminalShown ? 'is-open' : ''}`} aria-label="Live terminal" aria-hidden={!terminalShown}>
       <header><span><LuTerminal />Terminal</span><div><button type="button" aria-label="Minimize terminal" title="Minimize terminal" onClick={() => { setTerminalShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {terminalUsed && <VoiceTerminal events={toolEvents} />}
+      <ResizeHandles target={terminal} />
     </section>
     <section ref={filesWindow} className={`voice-files-window ${filesMain ? 'as-main' : 'as-side'} ${filesShown ? 'is-open' : ''}`} aria-label="Files" aria-hidden={!filesShown}>
       <header><span><LuFolderOpen />Files</span><div><button type="button" aria-label="Minimize files" title="Minimize files" onClick={() => { setFilesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {filesUsed && <FilesPanel sessionId={sessionId} folder={folder} activity={fileActivity} since={filesSince} />}
+      <ResizeHandles target={filesWindow} />
     </section>
     <section ref={picturesWindow} className={`voice-files-window voice-pictures-window ${picturesMain ? 'as-main' : 'as-side'} ${picturesShown ? 'is-open' : ''}`} aria-label="Pictures" aria-hidden={!picturesShown}>
       <header><span><LuImage />Pictures</span><div><button type="button" aria-label="Minimize pictures" title="Minimize pictures" onClick={() => { setPicturesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {picturesShown && <VoicePictures sessionId={sessionId} pictures={pictures} index={Math.min(pictureIndex, pictures.length - 1)} onIndex={setPictureIndex} />}
+      <ResizeHandles target={picturesWindow} />
     </section>
     <section ref={conversationWindow} className={`voice-files-window voice-conversation-window ${conversationMain ? 'as-main' : 'as-side'} ${conversation ? 'is-open' : ''}`} aria-label="Conversation" aria-hidden={!conversation}>
       <header><span><LuMessageSquareText />Conversation</span><div><button type="button" aria-label="Close the conversation" title="Close" onClick={() => { setConversation(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {conversation && <VoiceConversation sessionId={sessionId} items={items} />}
+      <ResizeHandles target={conversationWindow} />
     </section>
     <VoiceToolActivity events={toolEvents} folder={folder} onOpen={openCall} />
     <div className="voice-presence">

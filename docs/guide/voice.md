@@ -105,6 +105,17 @@ settings**:
 
 Each setting is remembered in this browser.
 
+**Resizing windows.** Drag a window's left, right or bottom edge, or a bottom
+corner, to make it the size you want; the canvas panel has the same grips. A
+window keeps that size until the windows are arranged differently — one opens
+or closes — and then the layout places them again. On a phone the windows take
+the width and cannot be resized.
+
+**Reloading.** A reload keeps voice mode on in that tab. Where the browser will
+not play audio before the page is touched, the voice screen says "Click or
+press a key to continue voice mode" and carries on after that. Ending voice
+mode, or opening another chat, ends this too.
+
 **Keyboard shortcuts.** Everything above has a key; the tooltip of each button
 names it. They work while voice mode is on, except while typing in a field, and
 can be changed under **Settings → Shortcuts**.

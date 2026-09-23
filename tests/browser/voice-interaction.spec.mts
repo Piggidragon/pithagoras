@@ -205,3 +205,26 @@ test('everything in voice mode has a key, and the keys can be changed', async ({
   await page.keyboard.press('Alt+v');
   await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
 });
+
+test('windows can be resized by their edges, until the windows are arranged anew', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Show terminal' }).click();
+  const terminal = page.locator('.voice-terminal-window');
+  await page.waitForTimeout(900);
+  const before = (await terminal.boundingBox())!;
+  const grip = (await terminal.locator('.resize-sw').boundingBox())!;
+  await page.mouse.move(grip.x + 8, grip.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(grip.x - 80, grip.y + 8 - 60, { steps: 6 });
+  await page.mouse.up();
+  const after = (await terminal.boundingBox())!;
+  expect(after.width).toBeGreaterThan(before.width + 60);
+  expect(after.height).toBeLessThan(before.height - 40);
+  // The right edge stayed where it was.
+  expect(Math.abs(after.x + after.width - (before.x + before.width))).toBeLessThan(2);
+  await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-resized.png' });
+  // Another window: the layout places both again.
+  await page.getByRole('button', { name: 'Show the conversation' }).click();
+  await page.waitForTimeout(900);
+  expect(await terminal.evaluate(el => el.style.width)).toBe('');
+});
