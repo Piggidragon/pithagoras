@@ -38,5 +38,5 @@ export function useFollowBottom<T extends HTMLElement>() {
     if (following.current) el.scrollTop = el.scrollHeight;
   }, []);
 
-  return { ref, onScroll, follow };
+  return { ref, onScroll, follow, following };
 }

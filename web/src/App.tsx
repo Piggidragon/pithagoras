@@ -96,6 +96,12 @@ function Shell({
   /** Whether anything older than what we hold is still on the server. */
   const [moreBefore, setMoreBefore] = useState(false);
   const [loadingBefore, setLoadingBefore] = useState(false);
+  /**
+   * Which session's replay has arrived, so it is not drawn half-built. A session
+   * id rather than a flag: the first render after switching still holds the
+   * previous session's events, and must not show them under the new title.
+   */
+  const [loadedSession, setLoadedSession] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uiQueue, setUiQueue] = useState<UiRequest[]>([]);
   const esRef = useRef<EventSource | null>(null);
@@ -136,6 +142,7 @@ function Shell({
     setEvents([]);
     setMoreBefore(false);
     setUiQueue([]);
+    setLoadedSession(null);
     if (!sessionId) return;
 
     let cancelled = false;
@@ -145,31 +152,32 @@ function Shell({
       const es = new EventSource(`/api/sessions/${sessionId}/events?since=${seq}`);
       esRef.current = es;
       es.addEventListener("live-reset", () => setEvents(resetLiveEvents));
-      es.onmessage = (m) => {
-        const ev: PortalEvent = JSON.parse(m.data);
-        // Live-only events (dialogs) use a negative seq and must not move the
-        // resume cursor, or reconnecting would skip real history.
-        if (ev.seq > 0) seq = ev.seq;
-        setEvents((prev) => appendLiveEvent(prev, ev));
-        // Applied straight from the event, not by re-fetching: the round trip
-        // is what made the Stop button appear a beat late, or not at all when
-        // the reply came back before the list did.
-        if (ev.type === "portal_status") {
-          const status = (ev.payload as { status?: SessionStatus }).status;
-          if (status) {
-            setSessions((prev) =>
-              prev.map((s) => (s.id === sessionId ? { ...s, status } : s)),
-            );
-            // An agent or routine session is not in that list at all — it is
-            // fetched once, on its own. Without this it kept whatever status
-            // the fetch happened to catch, so a chat either never started
-            // working or never stopped, and the activity line ran forever.
-            setOther((prev) => (prev?.id === sessionId ? { ...prev, status } : prev));
-          }
-          refreshSessions().catch(() => {});
+      // Until it has caught up, what arrives is history being replayed. It is
+      // gathered and applied in one go: drawing the conversation once per event
+      // is what made a long one open at the top, build downwards over seconds and
+      // then jump to the end.
+      let replay: PortalEvent[] | null = [];
+      // Applied straight from the event, not by re-fetching: the round trip
+      // is what made the Stop button appear a beat late, or not at all when
+      // the reply came back before the list did.
+      const applyStatus = (ev: PortalEvent) => {
+        if (ev.type !== "portal_status") return;
+        const status = (ev.payload as { status?: SessionStatus }).status;
+        if (status) {
+          setSessions((prev) =>
+            prev.map((s) => (s.id === sessionId ? { ...s, status } : s)),
+          );
+          // An agent or routine session is not in that list at all — it is
+          // fetched once, on its own. Without this it kept whatever status
+          // the fetch happened to catch, so a chat either never started
+          // working or never stopped, and the activity line ran forever.
+          setOther((prev) => (prev?.id === sessionId ? { ...prev, status } : prev));
         }
-        // Dialogs an extension is blocking on. notify/setStatus/setWidget are
-        // one-way and must not open a modal.
+        refreshSessions().catch(() => {});
+      };
+      // Dialogs an extension is blocking on. notify/setStatus/setWidget are
+      // one-way and must not open a modal.
+      const applyDialog = (ev: PortalEvent) => {
         if (ev.type === "extension_ui_request") {
           const req = ev.payload as UiRequest;
           if (["select", "confirm", "input", "editor"].includes(req.method)) {
@@ -181,7 +189,33 @@ function Shell({
           setUiQueue((q) => q.filter((x) => x.id !== id));
         }
       };
+      const flush = () => {
+        const batch = replay;
+        replay = null;
+        if (!batch?.length) return;
+        setEvents((prev) => batch.reduce(appendLiveEvent, prev));
+        // Only where the session ended up is news; the statuses it passed
+        // through on the way were each a request for the session list.
+        const last = [...batch].reverse().find((e) => e.type === "portal_status");
+        if (last) applyStatus(last);
+        batch.forEach(applyDialog);
+      };
+      es.onmessage = (m) => {
+        const ev: PortalEvent = JSON.parse(m.data);
+        // Live-only events (dialogs) use a negative seq and must not move the
+        // resume cursor, or reconnecting would skip real history.
+        if (ev.seq > 0) seq = ev.seq;
+        if (replay) {
+          replay.push(ev);
+          return;
+        }
+        setEvents((prev) => appendLiveEvent(prev, ev));
+        applyStatus(ev);
+        applyDialog(ev);
+      };
       es.addEventListener("caught-up", () => {
+        flush();
+        setLoadedSession(sessionId);
         // Only now do we know where the replayed window starts, and therefore
         // whether the conversation continues above it.
         setEvents((prev) => {
@@ -195,6 +229,8 @@ function Shell({
         });
       });
       es.onerror = () => {
+        // Keep what arrived: the resume cursor has already moved past it.
+        flush();
         es.close();
         setTimeout(connect, 2000);
       };
@@ -305,8 +341,9 @@ function Shell({
         ) : active ? (
           <Chat
             session={active}
-            events={events}
-            hasEarlier={moreBefore}
+            events={loadedSession === active.id ? events : []}
+            loading={loadedSession !== active.id}
+            hasEarlier={loadedSession === active.id && moreBefore}
             loadingEarlier={loadingBefore}
             onLoadEarlier={async () => {
               const oldest = events.find((e) => e.seq > 0)?.seq;
