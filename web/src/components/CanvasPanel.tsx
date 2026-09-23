@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { LuFileText, LuPlus, LuX, LuTrash2, LuCheck, LuPencil, LuEye, LuSave, LuDownload } from 'react-icons/lu';
 import { Streamdown } from 'streamdown';
 import { asksBeforeDeleting } from '../confirm-prefs';
+import { canvasPictures } from '../canvas-pictures';
+import { api } from '../api';
 
 type Canvas = { id:string; title:string; content:string; revision:number; status:string; active_call:string|null; updated_at:string; persisted:boolean };
 async function request(url:string,method:string,body?:unknown) {
   const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const data=await res.json();if(!res.ok)throw new Error(data.error||'Canvas request failed');return data;
 }
-export function CanvasPanel({sessionId,open,setOpen,showToggle=true}:{sessionId:string;open:boolean;setOpen:(open:boolean)=>void;showToggle?:boolean}) {
+export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{sessionId:string;folder:string;open:boolean;setOpen:(open:boolean)=>void;showToggle?:boolean}) {
   const [rows,setRows]=useState<Canvas[]>([]),[selected,setSelected]=useState('');
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(''),[title,setTitle]=useState(''),[base,setBase]=useState(0);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[connected,setConnected]=useState(false);
@@ -59,7 +61,7 @@ export function CanvasPanel({sessionId,open,setOpen,showToggle=true}:{sessionId:
       {canvas?<>
         <div className="canvas-document-heading">{editing?<input aria-label="Canvas title" maxLength={200} value={title} onChange={e=>setTitle(e.target.value)}/>:<h3>{canvas.title}</h3>}<span>{canvas.active_call?'Writing live':canvas.status==='edited'?'Edited by you':canvas.status==='interrupted'?'Partial draft retained':canvas.persisted?'Auto-saved':'Temporary'} · {canvas.persisted?"Stored":"Not stored — lost on server restart"} · r{canvas.revision}</span></div>
         {editing&&canvas.revision!==base&&<p className="canvas-error">This document changed. Your draft is preserved here; copy it before cancelling to read the latest version.</p>}
-        {editing?<textarea className="canvas-editor" aria-label="Edit canvas content" value={draft} onChange={e=>setDraft(e.target.value)} spellCheck/>:<div ref={viewport} className="canvas-document prose prose-sm max-w-none" onScroll={e=>{const el=e.currentTarget;follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<60}}>{canvas.content?<Streamdown>{canvas.content}</Streamdown>:<p className="canvas-empty">A blank page. Ask the agent to write here, or start editing.</p>}</div>}
+        {editing?<textarea className="canvas-editor" aria-label="Edit canvas content" value={draft} onChange={e=>setDraft(e.target.value)} spellCheck/>:<div ref={viewport} className="canvas-document prose prose-sm max-w-none" onScroll={e=>{const el=e.currentTarget;follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<60}}>{canvas.content?<Streamdown>{canvasPictures(canvas.content,folder,path=>api.pictureUrl(sessionId,path))}</Streamdown>:<p className="canvas-empty">A blank page. Ask the agent to write here, or start editing.</p>}</div>}
         <footer>{editing?<><button disabled={busy||!title.trim()||canvas.revision!==base||!!canvas.active_call} onClick={()=>void save()}><LuCheck/>{canvas.persisted?"Save changes":"Apply changes"}</button><button disabled={busy} onClick={()=>{setEditing(false);setError('')}}><LuEye/>Cancel edit</button></>:<><button disabled={!!canvas.active_call||busy} onClick={beginEdit}><LuPencil/>Edit inline</button><button disabled={!!canvas.active_call||busy} aria-label="Delete canvas" onClick={()=>asksBeforeDeleting()?setConfirmDelete(true):void remove()}><LuTrash2/></button></>}{confirmDelete&&!editing&&<span className="canvas-delete-confirm">Delete this document? <button disabled={busy} onClick={()=>void remove()}>Delete</button><button onClick={()=>setConfirmDelete(false)}>Keep</button></span>}</footer>
       </>:<div className="canvas-empty"><LuFileText/><h3>A place for your documents</h3><p>Ask the agent to create a canvas, or start a document here.</p><button disabled={busy} onClick={()=>void create()}>Create canvas</button></div>}
     </section>}

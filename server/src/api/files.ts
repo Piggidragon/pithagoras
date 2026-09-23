@@ -12,6 +12,7 @@ import {
   makeFolder,
   uploadTarget,
   openDownload,
+  openPicture,
   readText,
   removeEntry,
   renameEntry,
@@ -104,6 +105,38 @@ export function filesRouter(): Router {
     } catch (e) {
       fail(res, e);
     }
+  });
+
+  /**
+   * A picture in the folder, drawn in the page rather than downloaded: for the
+   * Files panel, a canvas that shows one, and what the agent puts in front of
+   * the person with show_image. Only what its bytes say is a picture is sent,
+   * with that type, and under a policy that would stop it running anything
+   * even if a browser disagreed.
+   */
+  router.get("/sessions/:id/picture", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    let opened: ReturnType<typeof openPicture>;
+    try {
+      opened = openPicture(base, req.query.path);
+    } catch (e) {
+      return fail(res, e);
+    }
+    const { fd, size, mimeType } = opened;
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Content-Length", size);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+    // The agent rewrites files in place; the page asks again with the file's time.
+    res.setHeader("Cache-Control", "private, no-cache");
+    const stream = createReadStream("", { fd, start: 0, end: Math.max(0, size - 1) });
+    stream.on("error", (e) => {
+      console.error("[portal] files: picture failed:", e.message);
+      res.destroy();
+    });
+    res.on("close", () => stream.destroy());
+    stream.pipe(res);
   });
 
   router.put("/sessions/:id/file", (req, res) => {

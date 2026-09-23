@@ -722,7 +722,7 @@ export function Chat({
 
   return (
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
-      <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} open={canvasOpen} setOpen={setCanvasOpen}/>
+      <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} folder={session.workspace} open={canvasOpen} setOpen={setCanvasOpen}/>
       <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
       <header className={voiceMode ? "hidden" : "border-b border-line px-4 py-3"}>
         <div className="mx-auto flex w-full max-w-3xl items-center gap-3">
@@ -1024,16 +1024,31 @@ export function Chat({
                   ? "text-accent"
                   : "text-fg-faint";
             return (
-              <div
-                key={item.id}
-                className="flex items-center gap-2 py-0.5 font-mono text-[11px] text-fg-faint"
-              >
+              <Fragment key={item.id}>
+              <div className="flex items-center gap-2 py-0.5 font-mono text-[11px] text-fg-faint">
                 <span className={`shrink-0 ${tone}`}>
                   {item.status === "running" ? "◇" : item.status === "error" ? "✕" : "◆"}
                 </span>
                 <span className="shrink-0 text-fg-subtle">{item.name}</span>
                 {item.detail && <span className="truncate opacity-60">{item.detail}</span>}
               </div>
+              {item.picture && (
+                <a
+                  href={api.pictureUrl(session.id, item.picture.path, item.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mb-1 mt-0.5 block w-fit"
+                  title={item.picture.title ?? item.picture.path}
+                >
+                  <img
+                    src={api.pictureUrl(session.id, item.picture.path, item.id)}
+                    alt={item.picture.title ?? item.picture.path}
+                    loading="lazy"
+                    className="max-h-80 max-w-full rounded-lg border border-line object-contain"
+                  />
+                </a>
+              )}
+              </Fragment>
             );
           }
           return (

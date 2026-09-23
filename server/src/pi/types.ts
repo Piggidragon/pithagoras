@@ -65,7 +65,8 @@ export interface PiClient extends EventEmitter {
    */
   readonly sessionFile?: string;
 
-  prompt(message: string, options?: { voice?: boolean; images?: ImageContent[] }): Promise<void>;
+  /** `steer` delivers a message sent mid-run into that run instead of after it. */
+  prompt(message: string, options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean }): Promise<void>;
   abort(): Promise<void>;
   /**
    * Whether the agent has stopped for good — not merely between turns.

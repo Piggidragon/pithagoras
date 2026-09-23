@@ -12,10 +12,24 @@ const sentImages = (raw: unknown): SentImage[] | undefined => {
   return list.length ? list : undefined;
 };
 
+/** A picture the agent put in front of the person with show_image: its path in the chat's folder. */
+export interface ShownPicture {
+  path: string;
+  title?: string;
+}
+
+/** The picture a show_image call ended with, when it succeeded. */
+export function shownPicture(payload: any): ShownPicture | undefined {
+  if (String(payload?.toolName ?? payload?.name ?? "") !== "show_image" || payload?.isError) return undefined;
+  const details = payload?.result?.details;
+  if (typeof details?.path !== "string" || !details.path) return undefined;
+  return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };
+}
+
 export type Item =
   | { kind: "user"; id: string; seq: number; text: string; audio?: boolean; images?: SentImage[] }
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
-  | { kind: "tool"; id: string; name: string; callId?: string; status: "running" | "done" | "error"; detail?: string }
+  | { kind: "tool"; id: string; name: string; callId?: string; status: "running" | "done" | "error"; detail?: string; picture?: ShownPicture }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
 
 /**
@@ -108,6 +122,8 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
           if (it.kind === "tool" && it.status === "running" &&
               (p.toolCallId ? it.callId === p.toolCallId : it.name === name)) {
             it.status = p.isError || p.error ? "error" : "done";
+            const picture = shownPicture(p);
+            if (picture) it.picture = picture;
             break;
           }
         }

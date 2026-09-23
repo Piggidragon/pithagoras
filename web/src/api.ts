@@ -175,6 +175,8 @@ export interface PromptImage {
 export interface PromptOptions {
   voice?: boolean;
   images?: PromptImage[];
+  /** Sent mid-run, go into that run instead of waiting for it to end. */
+  steer?: boolean;
 }
 
 export interface PortalEvent {
@@ -309,10 +311,17 @@ export const api = {
         message,
         ...(options?.voice ? { voice: true } : {}),
         ...(options?.images?.length ? { images: options.images.map(({ data, mimeType }) => ({ data, mimeType })) } : {}),
+        ...(options?.steer ? { steer: true } : {}),
       }),
     }),
   /** A picture sent with a message, as the transcript shows it. */
   imageUrl: (id: string, name: string) => `/api/sessions/${id}/images/${encodeURIComponent(name)}`,
+  /**
+   * A picture in the chat's folder, by its path there. `version` is anything
+   * that changes when the file does — the agent rewrites pictures in place.
+   */
+  pictureUrl: (id: string, path: string, version?: string | number) =>
+    `/api/sessions/${id}/picture?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /** Removes a message and the agent's answer to it — from the agent's memory too. */
   deleteMessage: (id: string, seq: number) =>
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}`, { method: "DELETE" }),

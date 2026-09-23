@@ -24,6 +24,10 @@ export interface VoiceIO {
   transcribe: (samples: Float32Array, signal: AbortSignal) => Promise<string>;
   send: (text: string) => Promise<void>;
   abort: () => Promise<void>;
+  /** Handles what was said on the page instead of sending it, when it is for the page ("say that again"). */
+  command?: (text: string) => boolean;
+  /** True when speaking mid-run should add to the run rather than stop it. */
+  steering?: () => boolean;
   agentRunning: () => boolean;
   synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status') => Promise<PreparedSpeech>;
   trace?: (name:string)=>void;
@@ -129,11 +133,20 @@ export class HandsFreeVoice {
     this.pipeline.cancel();
     this.thinkingPipeline.cancel();
     // Serialize abort behind an in-flight send so it cannot miss that new run.
-    if (this.io.agentRunning() || this.sending) {
+    // When steering, the run goes on and what is said is added to it.
+    if ((this.io.agentRunning() || this.sending) && !this.io.steering?.()) {
       this.operations = this.operations.then(async () => { if (this.alive) await this.io.abort(); });
       void this.operations.catch(error => this.report(error));
     }
     this.state();
+  }
+  /** Speech that began and is not going to be sent after all: a push-to-talk press too short to be words. */
+  speechCancel() {
+    if (!this.alive || !this.hearing) return;
+    this.hearing = false;
+    this.acceptingReplies = true;
+    this.state();
+    void this.play();
   }
   speechEnd(samples: Float32Array) {
     if (!this.alive || this.muted) return;
@@ -158,6 +171,12 @@ export class HandsFreeVoice {
       // with the next segment instead of sending half a thought or losing it.
       if (this.hearing || !this.text.length) return;
       const text = this.text.join(" ");
+      if (this.io.command?.(text)) {
+        this.text = [];
+        this.ignoreCurrent();
+        this.acceptingReplies = true;
+        return;
+      }
       const send = this.operations.then(async () => {
         if (!valid() || this.hearing || this.recordings.length) return;
         this.ignoreCurrent();

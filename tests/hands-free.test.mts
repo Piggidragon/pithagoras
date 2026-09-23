@@ -254,3 +254,31 @@ test('sentence comparison submits a completed sentence before the agent turn end
  voice.observe([{...reply('a20',false),text:'Here is the first complete sentence. More'}]);await tick();
  assert.deepEqual(generated,['Here is the first complete sentence.']);voice.stop();
 });
+test('what is for the page is handled there and never sent', async () => {
+  const handled: string[] = [];
+  const { voice, sent, spoken } = setup({ transcribe: async () => 'say that again', command: text => { handled.push(text); return true; } });
+  voice.speechStart(); voice.speechEnd(new Float32Array(16000)); await tick();
+  assert.deepEqual(handled, ['say that again']);
+  assert.deepEqual(sent, []);
+  // Replies after it are spoken as before.
+  voice.observe([reply('a10'), reply('a20')]); await tick();
+  assert.equal(spoken.length, 1); voice.stop();
+});
+test('when steering, speaking mid-run adds to the run instead of stopping it', async () => {
+  let aborted = 0, steering = true;
+  const { voice, sent } = setup({ agentRunning: () => true, abort: async () => { aborted++; }, steering: () => steering });
+  voice.speechStart(); voice.speechEnd(new Float32Array(16000)); await tick();
+  assert.equal(aborted, 0); assert.deepEqual(sent, ['hello']);
+  steering = false;
+  voice.speechStart(); voice.speechEnd(new Float32Array(16000)); await tick();
+  assert.equal(aborted, 1); voice.stop();
+});
+test('speech taken back before it ends is not sent, and replies carry on', async () => {
+  const phases: string[] = [];
+  const { voice, sent, spoken } = setup({ phase: phase => { phases.push(phase); } });
+  voice.speechStart(); voice.speechCancel(); await tick();
+  assert.deepEqual(sent, []);
+  assert.equal(phases.at(-1), 'Listening');
+  voice.observe([reply('a10'), reply('a20')]); await tick();
+  assert.equal(spoken.length, 1); voice.stop();
+});

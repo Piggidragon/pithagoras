@@ -2,11 +2,17 @@ import { ActivityProgress } from './ActivityProgress';
 import type { Activity } from '../transcript';
 import { useWorkPanels } from "../use-work-panels";
 import { FilesPanel } from "./FilesPanel";
-import { latestFileActivity } from "../file-activity";
+import { latestFileActivity, type FileActivity } from "../file-activity";
 import { VoiceToolActivity } from "./VoiceToolActivity";
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { buildTranscript } from "../transcript";
-import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinus, LuVolume2, LuVolumeX, LuTerminal, LuFileText, LuFolderOpen } from "react-icons/lu";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject } from "react";
+import { buildTranscript, type Item } from "../transcript";
+import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinus, LuTerminal, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
+import { VoicePictures, shownPictures } from "./VoicePictures";
+import { VoiceConversation } from "./VoiceConversation";
+import { VoiceSettings } from "./VoiceSettings";
+import { placeWindows } from "../voice-windows";
+import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
+import type { ToolCall } from "../tool-activity";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { api, type PortalEvent } from "../api";
 import type { VoiceCue } from "../voice-cues";
@@ -88,36 +94,57 @@ function VoiceOrb({ mode, levels }: { mode: OrbMode; levels: MutableRefObject<Vo
   return <canvas ref={canvas} aria-hidden="true" className="voice-orb" data-mode={mode} />;
 }
 
-export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, terminalActivity, toolEvents, sounds, onSounds, onCue }: {
+/** Where focus is typing, so Space and a paste belong to that and not to voice mode. */
+const editing = (target: EventTarget | null) => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+
+export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, terminalActivity, toolEvents, sounds, onSounds, onCue,
+  items, running, onStop, attachments, onAddPictures, onRemovePicture, canRepeat, onRepeat, rate, onRate, steer, onSteer, ptt, onPtt, holding, onHold }: {
   sessionId: string; folder: string;
   workPhase?: Activity | null;
   canvasOpen: boolean; onCanvasMinimize: () => void; onCanvasToggle: () => void;
   title: string; phase: VoicePhase; starting: boolean; muted: boolean; speaking: boolean;
   levels: MutableRefObject<VoiceLevels>; transcript: string; error: string; onMute: () => void; onEnd: () => void;
   browserAvailable: boolean; browserActivity: number; terminalActivity: number; toolEvents: PortalEvent[]; sounds: boolean; onSounds: () => void; onCue: (kind: VoiceCue) => void;
+  items: Item[]; running: boolean; onStop: () => void;
+  /** Pictures waiting to go with the next thing said. */
+  attachments: Attachment[]; onAddPictures: (files: File[]) => void; onRemovePicture: (id: string) => void;
+  canRepeat: boolean; onRepeat: () => void;
+  rate: number; onRate: (rate: number) => void;
+  steer: boolean; onSteer: (steer: boolean) => void;
+  ptt: boolean; onPtt: (ptt: boolean) => void; holding: boolean; onHold: (down: boolean) => void;
 }) {
   const end = useRef<HTMLButtonElement>(null), browser = useRef<HTMLElement>(null);
   const activity = useRef(browserActivity), terminalSeen = useRef(terminalActivity);
   const terminal = useRef<HTMLElement>(null);
   const [shown, setShown] = useState(false), [terminalShown, setTerminalShown] = useState(false);
   const [filesShown, setFilesShown] = useState(false), [filesUsed, setFilesUsed] = useState(false), [filesSince, setFilesSince] = useState<number | undefined>(undefined);
-  const filesWindow = useRef<HTMLElement>(null);
-  useWorkPanels({ browser: shown, terminal: terminalShown, canvas: canvasOpen, files: filesShown }, panel => {
-    if (panel === "browser") setShown(false); else if (panel === "terminal") setTerminalShown(false); else if (panel === "files") setFilesShown(false); else onCanvasMinimize();
+  const filesWindow = useRef<HTMLElement>(null), picturesWindow = useRef<HTMLElement>(null);
+  // Pictures the agent showed with show_image. A new one opens the window on it.
+  const pictures = useMemo(() => shownPictures(toolEvents), [toolEvents]);
+  const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
+  const [picturesShown, setPicturesShown] = useState(false), [pictureIndex, setPictureIndex] = useState(0);
+  const [conversation, setConversation] = useState(false), [settings, setSettings] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  useWorkPanels({ browser: shown, terminal: terminalShown, canvas: canvasOpen, files: filesShown, pictures: picturesShown }, panel => {
+    if (panel === "browser") setShown(false); else if (panel === "terminal") setTerminalShown(false); else if (panel === "files") setFilesShown(false); else if (panel === "pictures") setPicturesShown(false); else onCanvasMinimize();
   });
   // What the agent reads or changes in the chat's folder. Files opens on it as
-  // the browser and terminal do, and follows it from there.
-  const fileActivity = useMemo(() => latestFileActivity(toolEvents, folder), [toolEvents, folder]);
-  const filesSeen = useRef(fileActivity?.seq ?? 0);
-  // Where the two windows go: one takes the middle when the browser is up, the
-  // other the side. Files sits at the side, except beside the terminal, where
-  // it takes the middle and the terminal keeps the side. The stage's classes say
-  // whether there is a window in the middle and one at the side, for where the
-  // orb goes; which window is open is the window's own `is-open`, so Files being
-  // up does not bring the browser or the terminal up with it.
-  const filesMain = filesShown && terminalShown && !shown;
-  const browsing = shown || filesMain;
-  const sideWindow = terminalShown || (filesShown && !filesMain);
+  // the browser and terminal do, and follows it from there. A file opened from
+  // a tool card is put after everything that has happened, so that the panel
+  // takes it, and the agent's next file after that again.
+  const agentFile = useMemo(() => latestFileActivity(toolEvents, folder), [toolEvents, folder]);
+  const [openedFile, setOpenedFile] = useState<FileActivity | null>(null);
+  const fileActivity = openedFile && openedFile.seq > (agentFile?.seq ?? 0) ? openedFile : agentFile;
+  const filesSeen = useRef(agentFile?.seq ?? 0);
+  // Where the windows go: the browser in the middle, the terminal at the side,
+  // and Files and pictures wherever is left (see voice-windows.ts). The stage's
+  // classes say whether there is a window in the middle and one at the side,
+  // for where the orb goes; which window is open is the window's own `is-open`.
+  const place = placeWindows({ browser: shown, terminal: terminalShown, files: filesShown, pictures: picturesShown });
+  const filesMain = place.main === "files", picturesMain = place.main === "pictures";
+  const browsing = !!place.main;
+  const sideWindow = !!place.side;
   const [loaded, setLoaded] = useState(false);
   const [terminalUsed, setTerminalUsed] = useState(false);
   const [browserError, setBrowserError] = useState('');
@@ -134,20 +161,70 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     const observer = new ResizeObserver(follow);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [thought, shown, terminalShown, filesShown]);
+  }, [thought, shown, terminalShown, filesShown, picturesShown]);
   useEffect(() => { end.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     if (browser.current) browser.current.inert = !shown;
     if (terminal.current) terminal.current.inert = !terminalShown;
     if (filesWindow.current) filesWindow.current.inert = !filesShown;
-  }, [shown, terminalShown, filesShown]);
+    if (picturesWindow.current) picturesWindow.current.inert = !picturesShown;
+  }, [shown, terminalShown, filesShown, picturesShown]);
   useEffect(() => {
-    if (!fileActivity || fileActivity.seq <= filesSeen.current) return;
-    filesSeen.current = fileActivity.seq;
+    if (!agentFile || agentFile.seq <= filesSeen.current) return;
+    filesSeen.current = agentFile.seq;
     // The first time, the panel starts from just before this, so it shows it.
-    if (!filesUsed) { setFilesSince(fileActivity.seq - 1); setFilesUsed(true); }
+    if (!filesUsed) { setFilesSince(agentFile.seq - 1); setFilesUsed(true); }
     setFilesShown(true); onCue("focus");
-  }, [fileActivity?.seq, filesUsed, onCue]);
+  }, [agentFile?.seq, filesUsed, onCue]);
+  useEffect(() => {
+    const last = pictures.at(-1);
+    if (!last || last.seq <= picturesSeen.current) return;
+    picturesSeen.current = last.seq;
+    setPictureIndex(pictures.length - 1); setPicturesShown(true); onCue("focus");
+  }, [pictures, onCue]);
+  const openPictures = () => { setPictureIndex(Math.max(0, pictures.length - 1)); setPicturesShown(true); onCue("focus"); };
+  /** A tool card was tapped: bring up what it was about. */
+  const openCall = (call: ToolCall) => {
+    if (call.target === "files" && call.path) {
+      const seq = Math.max(fileActivity?.seq ?? 0, ...toolEvents.map(e => e.seq)) + 0.5;
+      if (!filesUsed) { setFilesSince(seq - 1); setFilesUsed(true); }
+      setOpenedFile({ seq, path: call.path, tool: "read" }); setFilesShown(true); onCue("focus");
+    } else if (call.target === "terminal") { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); }
+    else if (call.target === "browser") open();
+    else if (call.target === "canvas") { if (!canvasOpen) onCanvasToggle(); }
+    else if (call.target === "pictures") openPictures();
+  };
+  // Pictures pasted anywhere on the stage go with the next thing said; a paste
+  // into something being typed in is that field's.
+  const add = useRef(onAddPictures); add.current = onAddPictures;
+  useEffect(() => {
+    const paste = (e: ClipboardEvent) => {
+      if (editing(e.target)) return;
+      const files = [...(e.clipboardData?.files ?? [])].filter(f => isImage(f.type));
+      if (!files.length) return;
+      e.preventDefault(); add.current(files);
+    };
+    window.addEventListener("paste", paste);
+    return () => window.removeEventListener("paste", paste);
+  }, []);
+  // Push-to-talk: Space held anywhere but in a field. Taken before a focused
+  // button sees it, or holding Space would also press End.
+  const hold = useRef(onHold); hold.current = onHold;
+  useEffect(() => {
+    if (!ptt) return;
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || editing(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault(); e.stopPropagation();
+      if (!e.repeat) hold.current(true);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || editing(e.target)) return;
+      e.preventDefault(); e.stopPropagation(); hold.current(false);
+    };
+    const away = () => hold.current(false);
+    window.addEventListener("keydown", down, true); window.addEventListener("keyup", up, true); window.addEventListener("blur", away);
+    return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", away); away(); };
+  }, [ptt]);
   const openFiles = () => {
     setFilesUsed(true); setFilesShown(true); onCue("focus");
   };
@@ -171,20 +248,41 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const minimize = () => { setShown(false); end.current?.focus({ preventScroll: true }); };
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
-  const status = starting ? "Connecting" : input ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : "Listening";
-  const anyPanel = shown || terminalShown || filesShown;
-  return <section className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(filesShown) + Number(canvasOpen)} data-mode={mode}>
+  const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
+  const status = starting ? "Connecting" : input || holding ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : ptt ? (touch ? "Hold the microphone to talk" : "Hold Space to talk") : "Listening";
+  const anyPanel = shown || terminalShown || filesShown || picturesShown;
+  const drop = (e: DragEvent) => {
+    if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault(); setDropping(false);
+    add.current([...e.dataTransfer.files]);
+  };
+  return <section className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(canvasOpen)} data-mode={mode}
+    onDragOver={e => { if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); }}
+    onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
+    onDrop={drop}>
     <header className="voice-stage-header">
       <span className="voice-stage-session">{title}</span>
       <div className="voice-utilities">
+        <button type="button" onClick={() => setConversation(v => !v)} title="Conversation" aria-label="Show the conversation" aria-expanded={conversation}><LuMessageSquareText /></button>
         <button type="button" onClick={onCanvasToggle} title="Session canvases" aria-label="Session canvases" aria-expanded={canvasOpen}><LuFileText /></button>
         {!filesShown && <button type="button" onClick={openFiles} title="Show files" aria-label="Show files"><LuFolderOpen /></button>}
+        {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title="Show pictures" aria-label="Show pictures"><LuImage /></button>}
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title="Show browser" aria-label="Show browser"><LuGlobe /></button>}
         {terminalUsed && !terminalShown && <button type="button" aria-label="Show terminal" title="Show terminal" onClick={() => { setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
-        <button type="button" onClick={onSounds} title={sounds ? 'Mute sound effects' : 'Enable sound effects'} aria-label={sounds ? 'Mute sound effects' : 'Enable sound effects'} aria-pressed={sounds}>{sounds ? <LuVolume2 /> : <LuVolumeX />}</button>
-
+        <button type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title="Voice settings" aria-label="Voice settings" aria-expanded={settings}><LuSlidersHorizontal /></button>
       </div>
+      {settings && <VoiceSettings sounds={sounds} onSounds={onSounds} rate={rate} onRate={onRate} steer={steer} onSteer={onSteer} ptt={ptt} onPtt={onPtt} onClose={() => setSettings(false)} />}
     </header>
+    {attachments.length > 0 && <div className="voice-attachments" aria-label="Pictures for your next message">
+      <div>{attachments.map(a => <figure key={a.id}>
+        <img src={a.data} alt={a.name} />
+        <button type="button" aria-label={`Remove ${a.name}`} title="Remove" onClick={() => onRemovePicture(a.id)}><LuX /></button>
+      </figure>)}</div>
+      <span>Sent with what you say next</span>
+    </div>}
+    {dropping && <div className="voice-drop-hint" aria-hidden="true"><LuImagePlus />Drop pictures to send them with what you say next</div>}
+    <input ref={picker} type="file" accept={IMAGE_TYPES.join(",")} multiple hidden onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) onAddPictures(files); }} />
+    {conversation && <VoiceConversation sessionId={sessionId} items={items} onClose={() => setConversation(false)} />}
     <section ref={browser} className={`voice-browser-window ${shown ? 'is-open' : ''}`} aria-label="Live browser" aria-hidden={!shown}>
       <header><span><i />Live browser</span><div>
         <button type="button" aria-label="Fullscreen browser" title="Fullscreen" onClick={() => { void browser.current?.requestFullscreen?.().catch(() => setBrowserError('Fullscreen is unavailable.')); }}><LuMaximize2 /></button>
@@ -200,7 +298,11 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       <header><span><LuFolderOpen />Files</span><div><button type="button" aria-label="Minimize files" title="Minimize files" onClick={() => { setFilesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {filesUsed && <FilesPanel sessionId={sessionId} folder={folder} activity={fileActivity} since={filesSince} />}
     </section>
-    <VoiceToolActivity events={toolEvents} />
+    <section ref={picturesWindow} className={`voice-files-window voice-pictures-window ${picturesMain ? 'as-main' : 'as-side'} ${picturesShown ? 'is-open' : ''}`} aria-label="Pictures" aria-hidden={!picturesShown}>
+      <header><span><LuImage />Pictures</span><div><button type="button" aria-label="Minimize pictures" title="Minimize pictures" onClick={() => { setPicturesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
+      {picturesShown && <VoicePictures sessionId={sessionId} pictures={pictures} index={Math.min(pictureIndex, pictures.length - 1)} onIndex={setPictureIndex} />}
+    </section>
+    <VoiceToolActivity events={toolEvents} folder={folder} onOpen={openCall} />
     <div className="voice-presence">
       <div className="voice-avatar"><VoiceOrb mode={mode} levels={levels} /></div>
       <div className="voice-dock-center">
@@ -209,10 +311,17 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         {anyPanel && thought && phase !== 'Compacting context' && <div ref={thoughtViewport} className="voice-thought-stream" aria-label="Live model thinking">{thought.slice(-1200)}</div>}
         </>}
       </div>
-      {!anyPanel && transcript && (input || phase === "Transcribing") && <p className="voice-live-transcript" aria-label="Live transcription">{transcript}</p>}
+      {!anyPanel && transcript && (input || holding || phase === "Transcribing") && <p className="voice-live-transcript" aria-label="Live transcription">{transcript}</p>}
 
       <div className="voice-stage-controls">
-        <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={muted ? 'Unmute microphone' : 'Mute microphone'} aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>
+        {ptt
+          ? <button type="button" className={`voice-stage-action voice-hold ${holding ? "is-holding" : ""}`} title={touch ? "Hold to talk" : "Hold to talk (or hold Space)"} aria-label="Hold to talk" aria-pressed={holding} disabled={starting}
+              onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); onHold(true); }}
+              onPointerUp={() => onHold(false)} onPointerCancel={() => onHold(false)} onContextMenu={e => e.preventDefault()}><LuMic /></button>
+          : <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={muted ? 'Unmute microphone' : 'Mute microphone'} aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>}
+        <button type="button" className={`voice-stage-action ${attachments.length ? "has-pictures" : ""}`} title="Add a picture" aria-label="Add a picture" disabled={starting} onClick={() => picker.current?.click()}><LuImagePlus />{attachments.length > 0 && <i>{attachments.length}</i>}</button>
+        <button type="button" className="voice-stage-action" title="Repeat the last reply" aria-label="Repeat the last reply" disabled={starting || !canRepeat || speaking} onClick={onRepeat}><LuRotateCcw /></button>
+        {running && <button type="button" className="voice-stage-action voice-stop" title="Stop what the agent is doing" aria-label="Stop the agent" onClick={onStop}><LuSquare /></button>}
         <button ref={end} type="button" className="voice-stage-action voice-end" title="End voice mode" aria-label="End voice mode" onClick={onEnd}><LuX /></button>
       </div>
     </div>

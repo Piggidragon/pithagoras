@@ -21,6 +21,11 @@ silently overwriting newer text. While an AI write is streaming, finish or
 interrupt it before editing manually. A conflicting manual draft stays in the
 editor so you can copy it before reloading the document.
 
+A canvas can show pictures from the chat's folder: `![Sales by month](plots/sales.png)`
+draws `plots/sales.png`, by a path relative to the folder or an absolute one
+inside it. The agent is told it can do this, so a report can carry the chart it
+made. Web addresses work as usual; a path outside the folder is not shown.
+
 The agent has five tools: `canvas_create`, `canvas_list`, `canvas_read`,
 `canvas_write` (replace or append), and `canvas_delete`. Write arguments specify
 the document and revision before the content so live writes have an unambiguous

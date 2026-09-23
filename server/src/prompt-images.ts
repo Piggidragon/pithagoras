@@ -59,6 +59,9 @@ const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 export const mimeOf = (name: string): string | undefined => KINDS.find((k) => name.endsWith(`.${k.ext}`))?.mimeType;
 
+/** What picture `head` is the start of, by its bytes alone, or undefined for anything else. Twelve bytes are enough. */
+export const pictureType = (head: Buffer): string | undefined => KINDS.find((k) => k.is(head))?.mimeType;
+
 /**
  * The pictures in a request body, checked, or an empty list when there are none.
  * `data` may be plain base64 or a data: URL, which is what a browser has to hand.

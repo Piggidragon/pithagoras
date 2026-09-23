@@ -18,7 +18,8 @@ that started there. Nothing outside it can be reached.
   the top turns them on and off, and the choice is remembered in the browser.
   What the agent opens is shown either way.
 - **Read and change.** A text file opens as text. Edit it and choose **Save**
-  (or press <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd>). A file that is not text, or is over
+  (or press <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd>). A PNG, JPEG, GIF or WebP picture is
+  shown as a picture (up to 25 MB). Any other file that is not text, or is over
   1 MB, is not shown; download it instead.
 - **Download** without opening: every row has a download button, for a file or,
   for a folder, as a `.tar.gz`. The button at the top downloads the folder you are

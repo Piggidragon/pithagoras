@@ -9,10 +9,14 @@ import { createPortal } from "react-dom";
 import { VoiceStage, type VoiceLevels } from "./VoiceStage";
 import { LuAudioLines, LuLoaderCircle, LuGauge } from "react-icons/lu";
 import type { MicVAD } from "@ricky0123/vad-web";
-import { api, type PortalEvent } from "../api";
+import { api, type PortalEvent, type PromptOptions } from "../api";
 import type { Item } from "../transcript";
 import { LiveTranscription } from "../live-transcription";
-import { preparePcmSpeech, readPcmStream, playAudioBuffer } from "../pcm-stream";
+import { preparePcmSpeech, readPcmStream, playAudioBuffer, bufferOf } from "../pcm-stream";
+import { stretch } from "../time-stretch";
+import { asksToRepeat } from "../voice-commands";
+import { MAX_IMAGES, isImage, prepareImage, type Attachment } from "../attachments";
+import { VOICE_RATES } from "./VoiceSettings";
 import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
 
@@ -27,7 +31,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   browserAvailable: boolean; browserActivity: number; terminalActivity: number; toolEvents: PortalEvent[];
   items: Item[];
   running: boolean;
-  onSend: (text: string, options?: { voice?: boolean }) => Promise<void>;
+  onSend: (text: string, options?: PromptOptions) => Promise<void>;
   onAbort: () => Promise<void>;
 }) {
   const [profileOpen,setProfileOpen]=useState(false);
@@ -52,6 +56,39 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if(['portal_prompt','compaction_start','compaction_end','tool_execution_start','tool_execution_end','agent_end'].includes(event.type))profileMark(event.type);
     }
   },[toolEvents]);
+  // Pictures waiting to go with the next thing said. Kept when voice mode ends,
+  // so turning it on again still has them.
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const attached = useRef(attachments); attached.current = attachments;
+  const addPictures = async (files: File[]) => {
+    const pictures = files.filter(file => isImage(file.type));
+    if (pictures.length < files.length) setError("Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode. Put other files in Files.");
+    const room = MAX_IMAGES - attached.current.length;
+    if (pictures.length > room) setError(`Up to ${MAX_IMAGES} pictures go with one message.`);
+    for (const file of pictures.slice(0, Math.max(0, room))) {
+      try {
+        const picture = await prepareImage(file, file.name || "Pasted picture");
+        setAttachments(list => list.length < MAX_IMAGES ? [...list, picture] : list);
+      } catch (e) { setError((e as Error).message); }
+    }
+  };
+  // What talking mid-run does, how fast replies are spoken, and push-to-talk:
+  // read by the controller and the speech at the moment they matter.
+  const [steer, setSteer] = useState(() => local.get('voiceSteer') === 'on');
+  const steering = useRef(steer); steering.current = steer;
+  const [rate, setRate] = useState(() => { const saved = Number(local.get('voiceRate')); return VOICE_RATES.includes(saved) ? saved : 1; });
+  const speed = useRef(rate); speed.current = rate;
+  const [ptt, setPtt] = useState(() => local.get('voicePtt') === 'on');
+  const pushToTalk = useRef(ptt); pushToTalk.current = ptt;
+  const [holding, setHolding] = useState(false);
+  /** A push-to-talk press: what was heard, how much of it while still held, and the most speech-like frame. */
+  const held = useRef<{ frames: Float32Array[]; releasing: boolean; heldFrames: number; speech: number } | null>(null);
+  const holdLimit = useRef<ReturnType<typeof setTimeout>>();
+  // The last reply as it was spoken, phrase by phrase, for Repeat. Samples as
+  // they came from the speech service, before the speed was applied.
+  const replyAudio = useRef<{ samples: Float32Array[]; sampleRate: number }[]>([]);
+  const [canRepeat, setCanRepeat] = useState(false);
+  const replay = useRef<AbortController | null>(null);
   const [sounds, setSounds] = useState(() => local.get('voiceSounds') !== 'off');
   const soundsEnabled = useRef(sounds); soundsEnabled.current = sounds;
   const soundContext = useRef<AudioContext | null>(null);
@@ -109,6 +146,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     mutedRef.current = false;
     levels.current = { input: 0, output: 0 };
     clearTimeout(maxTurn.current);
+    clearTimeout(holdLimit.current); held.current = null;
+    replay.current?.abort(); replay.current = null;
     voice.current?.stop(); voice.current = null;
     transcription.current?.reset(); transcription.current = null;
     const detector = vad.current; vad.current = null;
@@ -116,7 +155,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     stream.current?.getTracks().forEach(track => track.stop()); stream.current = null;
     const audio = context.current; context.current = null;
     if (audio && audio.state !== "closed") void audio.close();
-    if (mounted.current) { setEnabled(false); setStarting(false); setMuted(false); setSpeaking(false); setTranscript(""); }
+    if (mounted.current) { setEnabled(false); setStarting(false); setMuted(false); setSpeaking(false); setTranscript(""); setHolding(false); }
   };
   useEffect(() => {
     mounted.current = true;
@@ -175,11 +214,96 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (epoch.current === version) { setError((e as Error).message); stop(); }
     } finally { muteBusy.current = false; }
   };
+  /** Push-to-talk pressed or let go. A press too short to hold a word is not sent. */
+  const hold = (down: boolean) => {
+    const controller = voice.current, live = transcription.current;
+    if (!pushToTalk.current || !controller || !live || !vad.current) return;
+    if (down) {
+      if (held.current && !held.current.releasing) return;
+      replay.current?.abort();
+      held.current = { frames: [], releasing: false, heldFrames: 0, speech: 0 };
+      stream.current?.getTracks().forEach(track => { track.enabled = true; });
+      setHolding(true); setError("");
+      if (profiling.current) profiler.current!.begin();
+      if (!latest.current.compacting) { live.begin(); live.confirm(); }
+      controller.speechStart();
+      // As long as a turn may be: the same bound as hands-free listening.
+      clearTimeout(holdLimit.current);
+      holdLimit.current = setTimeout(() => hold(false), 60000);
+      return;
+    }
+    const press = held.current;
+    if (!press || press.releasing) return;
+    press.releasing = true; clearTimeout(holdLimit.current);
+    setHolding(false);
+    // The last syllable is still on its way through the detector.
+    setTimeout(() => {
+      if (held.current !== press) return;
+      held.current = null;
+      if (pushToTalk.current) stream.current?.getTracks().forEach(track => { track.enabled = false; });
+      levels.current.input = 0;
+      const samples = new Float32Array(press.frames.reduce((n, f) => n + f.length, 0));
+      let offset = 0;
+      for (const frame of press.frames) { samples.set(frame, offset); offset += frame.length; }
+      // Held for under a quarter of a second, or nothing in it the detector took
+      // for speech: a tap or a cough, not something to send.
+      const heldFor = press.frames.slice(0, press.heldFrames).reduce((n, f) => n + f.length, 0);
+      if (heldFor < 4000 || press.speech < 0.5 || latest.current.compacting) { live.discard(); controller.speechCancel(); return; }
+      profileMark('endpoint'); live.end(samples); controller.speechEnd(samples);
+    }, 250);
+  };
+  const choosePtt = async (on: boolean) => {
+    local.set('voicePtt', on ? 'on' : 'off');
+    setPtt(on); pushToTalk.current = on;
+    if (!on && held.current) { held.current = null; setHolding(false); voice.current?.speechCancel(); transcription.current?.discard(); }
+    if (!vad.current) return;
+    // Push-to-talk has no mute of its own; it starts from an open detector.
+    if (on && mutedRef.current) await toggleMute();
+    stream.current?.getTracks().forEach(track => { track.enabled = !on && !mutedRef.current; });
+  };
   const endMode = () => {
     stop();
     requestAnimationFrame(() => startButton.current?.focus({ preventScroll: true }));
   };
 
+  /** Plays one prepared phrase through the orb's meter. Shared by replies and Repeat. */
+  const playThrough = async (audio: AudioContext, signal: AbortSignal, start: (analyser: AnalyserNode, started: (scheduledAt?: number) => void) => Promise<void>, onStarted?: (scheduledAt: number) => void) => {
+    signal.throwIfAborted();
+    const analyser = audio.createAnalyser(); analyser.fftSize = 256;
+    analyser.connect(audio.destination);
+    const samples = new Float32Array(analyser.fftSize);
+    let animation = 0;
+    const meter = () => {
+      analyser.getFloatTimeDomainData(samples);
+      levels.current.output = Math.min(1, Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length) * 5);
+      animation = requestAnimationFrame(meter);
+    };
+    try {
+      await start(analyser, (scheduledAt = audio.currentTime) => { onStarted?.(scheduledAt); setSpeaking(true); meter(); });
+    } finally {
+      analyser.disconnect(); cancelAnimationFrame(animation); levels.current.output = 0;
+      if (mounted.current) setSpeaking(false);
+    }
+  };
+  /** The last reply again, at the speed chosen now. False when there is none to play. */
+  const repeatReply = (): boolean => {
+    const audio = context.current;
+    const phrases = replyAudio.current.filter(p => p.samples.length);
+    if (!audio || !phrases.length) return false;
+    replay.current?.abort();
+    const controller = new AbortController(); replay.current = controller;
+    void (async () => {
+      for (const phrase of phrases) {
+        const joined = new Float32Array(phrase.samples.reduce((n, s) => n + s.length, 0));
+        let offset = 0;
+        for (const s of phrase.samples) { joined.set(s, offset); offset += s.length; }
+        const buffer = bufferOf(audio, stretch(joined, speed.current), phrase.sampleRate);
+        if (!buffer) continue;
+        await playThrough(audio, controller.signal, (analyser, started) => playAudioBuffer(buffer, audio, analyser, controller.signal, started));
+      }
+    })().catch(() => {}).finally(() => { if (replay.current === controller) replay.current = null; });
+    return true;
+  };
   const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'='reply') => {
     const trace=profiling.current?profiler.current!.current:undefined;
     const mark=(name:string,detail?:Record<string,number|string|boolean>,at?:number)=>{if(trace)profiler.current!.mark(kind+'_'+name,detail,trace,at);};
@@ -214,39 +338,32 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     if(body&&trace){let first=true;body=body.pipeThrough(new TransformStream<Uint8Array<ArrayBuffer>,Uint8Array<ArrayBuffer>>({transform(chunk,controller){if(first&&chunk.length){first=false;mark('first_bytes');}controller.enqueue(chunk);}}));}
     let buffer: AudioBuffer | undefined;
     let stream: Awaited<ReturnType<typeof preparePcmSpeech>> | undefined;
+    // Kept for Repeat once it is played; a phrase prepared and then cancelled was never heard.
+    const phrase = { samples: [] as Float32Array[], sampleRate: 24000 };
+    const options = { rate: speed.current, ...(kind === 'reply' ? { record: (samples: Float32Array) => { phrase.samples.push(samples); } } : {}) };
     if (response.headers.get("content-type")?.startsWith("audio/pcm")) {
       if (response.headers.get("x-sample-rate") !== "24000" || !body) throw new Error("Unsupported speech stream");
-      if (!sequential.current && response.headers.get("x-voice-streaming") === "true") stream = await preparePcmSpeech(body!, audio, signal);
-      else buffer = await readPcmStream(body!, audio, signal);
+      if (!sequential.current && response.headers.get("x-voice-streaming") === "true") stream = await preparePcmSpeech(body!, audio, signal, options);
+      else buffer = await readPcmStream(body!, audio, signal, options);
     } else {
       const bytes = await new Response(body).arrayBuffer(); signal.throwIfAborted();
-      buffer = await audio.decodeAudioData(bytes); signal.throwIfAborted();
+      const decoded = await audio.decodeAudioData(bytes); signal.throwIfAborted();
+      const samples = decoded.getChannelData(0).slice();
+      phrase.sampleRate = decoded.sampleRate; options.record?.(samples);
+      buffer = options.rate === 1 ? decoded : bufferOf(audio, stretch(samples, options.rate), decoded.sampleRate);
+      if (!buffer) throw new Error("Speech generation returned no audio");
     }
     mark('audio_ready');
     const play = async (playbackSignal: AbortSignal) => {
       playbackSignal.throwIfAborted();
-      const analyser = audio.createAnalyser(); analyser.fftSize = 256;
-      analyser.connect(audio.destination);
-      const samples = new Float32Array(analyser.fftSize);
-      let animation = 0;
-      const meter = () => {
-        analyser.getFloatTimeDomainData(samples);
-        levels.current.output = Math.min(1, Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length) * 5);
-        animation = requestAnimationFrame(meter);
-      };
-      try {
-        const started = (scheduledAt=audio.currentTime) => {
-          mark('playback_scheduled');
-          const outputMs=(audio.baseLatency+(audio.outputLatency||0))*1000;
-          mark('playback_estimate',{outputLatencyMs:outputMs},performance.now()+Math.max(0,scheduledAt-audio.currentTime)*1000+outputMs);
-          setSpeaking(true); meter();
-        };
-        if (stream) await stream.play(analyser, started);
-        else await playAudioBuffer(buffer!, audio, analyser, playbackSignal, started);
-      } finally {
-        analyser.disconnect(); cancelAnimationFrame(animation); levels.current.output = 0;
-        if (mounted.current) setSpeaking(false);
-      }
+      // A new reply takes over from one being repeated.
+      replay.current?.abort(); replay.current = null;
+      if (kind === 'reply') { replyAudio.current.push(phrase); setCanRepeat(true); }
+      await playThrough(audio, playbackSignal, (analyser, started) => stream ? stream.play(analyser, started) : playAudioBuffer(buffer!, audio, analyser, playbackSignal, started), scheduledAt => {
+        mark('playback_scheduled');
+        const outputMs=(audio.baseLatency+(audio.outputLatency||0))*1000;
+        mark('playback_estimate',{outputLatencyMs:outputMs},performance.now()+Math.max(0,scheduledAt-audio.currentTime)*1000+outputMs);
+      });
     };
     return Object.assign(play, { completed: stream?.completed });
   };
@@ -295,8 +412,19 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         sentenceChunks: sentenceChunks.current,
         ttsPrefetch: ttsPrefetch.current,
         transcribe: async (samples, signal) => {const result=await live.finish(samples, signal);profileMark('transcript_ready');return result;},
-        send: text => {profileSeq.current=eventSeq.current;profileMark('send'); cue("sent"); return latest.current.onSend(text, { voice: true }); },
+        send: async text => {
+          profileSeq.current=eventSeq.current;profileMark('send'); cue("sent");
+          // The pictures waiting now go with it, and only they leave the tray.
+          const images = attached.current;
+          const steer = steering.current && latest.current.running;
+          await latest.current.onSend(text, { voice: true, ...(images.length ? { images } : {}), ...(steer ? { steer: true } : {}) });
+          if (images.length) setAttachments(list => list.filter(a => !images.includes(a)));
+          // What is said next answers this, so Repeat is for that.
+          replyAudio.current = []; setCanRepeat(false);
+        },
         abort: () => latest.current.onAbort(),
+        command: text => asksToRepeat(text) && repeatReply(),
+        steering: () => steering.current,
         agentRunning: () => latest.current.running,
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
         trace: profileMark,
@@ -314,15 +442,29 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         resumeStream: async () => mic,
         ...vadSettings.current,
         submitUserSpeechOnPause: true,
-        onSpeechStart: () => { if (current() && !mutedRef.current && !latest.current.compacting) {if(profiling.current)profiler.current!.begin();live.begin();} },
-        onVADMisfire: () => { if (current()) {live.discard();if(profiling.current)profiler.current!.close('vad_misfire');} },
+        onSpeechStart: () => { if (current() && !pushToTalk.current && !mutedRef.current && !latest.current.compacting) {if(profiling.current)profiler.current!.begin();live.begin();} },
+        onVADMisfire: () => { if (current() && !pushToTalk.current) {live.discard();if(profiling.current)profiler.current!.close('vad_misfire');} },
         onFrameProcessed: (probabilities, frame) => {
+          if (pushToTalk.current) {
+            // Only what is said while the button or Space is held counts.
+            const press = held.current;
+            if (!current() || !press) { levels.current.input = 0; return; }
+            press.frames.push(frame.slice());
+            if (!press.releasing) press.heldFrames = press.frames.length;
+            press.speech = Math.max(press.speech, probabilities.isSpeech);
+            if (!latest.current.compacting) live.frame(probabilities.isSpeech, frame);
+            levels.current.input = Math.min(1, Math.sqrt(frame.reduce((sum, value) => sum + value * value, 0) / frame.length) * 7);
+            return;
+          }
           if(current()&&!mutedRef.current&&profiling.current&&probabilities.isSpeech>=0.35)profiler.current!.lastSpeech();
           if (current() && !mutedRef.current && !latest.current.compacting) live.frame(probabilities.isSpeech, frame);
           if (current() && !mutedRef.current) levels.current.input = Math.min(1, Math.sqrt(frame.reduce((sum, value) => sum + value * value, 0) / frame.length) * 7);
         },
         onSpeechRealStart: () => {
           if (!current() || mutedRef.current) return;
+          // Talking over a repeated reply stops it, as it does a new one.
+          replay.current?.abort();
+          if (pushToTalk.current) return;
           setError(""); if (latest.current.compacting) live.discard(); else live.confirm(); controller.speechStart();
           clearTimeout(maxTurn.current);
           maxTurn.current = setTimeout(async () => {
@@ -335,6 +477,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
           }, 60000);
         },
         onSpeechEnd: samples => {
+          if (pushToTalk.current) return;
           clearTimeout(maxTurn.current);
           if (current() && !mutedRef.current) { if (!latest.current.compacting) {profileMark('endpoint');live.end(samples);} controller.speechEnd(samples); }
         },
@@ -346,6 +489,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       };
       await detector.start();
       if (!current()) return;
+      // With push-to-talk the microphone is open only while held.
+      if (pushToTalk.current) mic.getTracks().forEach(track => { track.enabled = false; });
       setEnabled(true); setStarting(false); cue("start");
     } catch (e) {
       if (current()) { setError((e as Error).message); stop(); }
@@ -359,7 +504,13 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     {(starting || enabled) && stageTarget && createPortal(
       <VoiceStage sessionId={sessionId} folder={folder} workPhase={running ? activity(toolEvents) : null} canvasOpen={canvasOpen} onCanvasMinimize={onCanvasMinimize} onCanvasToggle={onCanvasToggle} title={sequentialMode ? `${title} · ${sentenceMode ? (prefetchMode ? "Sentence pipeline · buffered audio" : "Sentence chunks · buffered audio") : "Sequential baseline"}` : comparison ? `${title} · Streaming pipeline` : title} phase={phase} starting={starting} muted={muted} speaking={speaking}
         browserAvailable={browserAvailable} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={toolEvents} sounds={sounds} onSounds={toggleSounds} onCue={cue}
-        levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode} />, stageTarget,
+        levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode}
+        items={items} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}
+        attachments={attachments} onAddPictures={files => { void addPictures(files); }} onRemovePicture={id => setAttachments(list => list.filter(a => a.id !== id))}
+        canRepeat={canRepeat} onRepeat={() => { repeatReply(); }}
+        rate={rate} onRate={value => { local.set('voiceRate', String(value)); setRate(value); }}
+        steer={steer} onSteer={value => { local.set('voiceSteer', value ? 'on' : 'off'); setSteer(value); }}
+        ptt={ptt} onPtt={value => { void choosePtt(value); }} holding={holding} onHold={hold} />, stageTarget,
     )}
     <div className="relative flex items-center gap-1">
       <button type="button" className="prompt-action" aria-label="Profile voice latency" title="Profile voice latency" aria-pressed={profileOpen} onClick={()=>{setProfileOpen(v=>!v);if(profileOpen)profiler.current!.close('disabled');}}><LuGauge/></button>

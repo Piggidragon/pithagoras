@@ -37,9 +37,9 @@ at 60 seconds and listening resumes automatically.
 
 Microphone access needs HTTPS or localhost. Voice mode replaces the chat and
 composer with an audio-reactive orb: teal for your voice and violet for spoken
-replies. The screen keeps only status, microphone/end controls and live words
-while you speak. Quiet synthesized sound cues mark connection, submission, mute
-and tool focus; the sound toggle remembers your preference. Reduced-motion
+replies. The screen keeps only status, the controls and live words while you
+speak. Quiet synthesized sound cues mark connection, submission, mute and tool
+focus; they can be turned off in the voice settings. Reduced-motion
 preferences disable panel transitions.
 
 Browser tool calls bring the live browser into a floating window and dock the
@@ -57,6 +57,53 @@ Leaving the session also releases these resources. Ending voice does not stop
 an already accepted agent task. Existing transcript history is never read aloud
 on activation. Status text shows listening, speech detection, transcription,
 and playback; errors remain visible in the voice screen.
+
+## Pictures, tool cards and controls
+
+**Giving the agent a picture.** Choose the picture button beside the microphone
+(on a phone it offers the camera too), paste a picture anywhere on the voice
+screen, or drop one onto it. Pictures wait at the top as thumbnails and go with
+the next thing you say, so "what is wrong with this?" arrives with the picture.
+Up to eight go with one message; remove one with its ×. They are kept if you
+end voice mode before speaking, and are there again when you turn it back on.
+The model has to take images; if it does not, the chat says so.
+
+**The agent showing you a picture.** The agent has a `show_image` tool: it saves
+a chart, a diagram or a screenshot in the chat's folder and calls it, and a
+**Pictures** window opens on it, like the browser and terminal do. Tap the
+picture to see it at full size, use the arrows to go back through earlier ones,
+or open it in a new tab. Outside voice mode the picture appears under the tool
+line in the chat. Canvases can include pictures from the folder too (see
+[Canvases](/guide/canvases)).
+
+**Tool cards.** The cards that fly out of the orb say what the agent is doing
+in words — "Editing app.ts", "Searching for “retry”", "Opening a page ·
+example.com" — and stay while the call runs, counting its time. When it ends
+they say what came of it: `+12 −3` lines for an edit, "8 matches", "Nothing
+found", or the first line of an error. Tap a card to open what it is about: the
+file in Files, the terminal, the browser, the document or the picture.
+
+**Controls.** Beside the microphone and End:
+
+| | |
+| --- | --- |
+| **Add a picture** | As above. The number on it is how many are waiting. |
+| **Repeat** | Plays the last reply again from the audio already made, at the current speed, without asking the agent. Saying "say that again", "repeat that", "sag das nochmal", "wie bitte?" and the like does the same; only a sentence that is nothing but that request counts, so "say that again, but shorter" still goes to the agent. |
+| **Stop** | Shown while the agent works. Stops the task without ending voice mode. |
+
+The buttons at the bottom right open the **conversation** — what you said as it
+was transcribed and what came back as written, without leaving voice mode —
+the canvases, Files, pictures, the browser and the terminal, and the **voice
+settings**:
+
+| Setting | |
+| --- | --- |
+| **Speaking speed** | 1×, 1.25×, 1.5× or 1.75×. Speech is made faster in the browser without raising the voice (WSOLA time stretching), so it works with every speech runtime and a streamed reply starts as early as before. |
+| **Talking while the agent works** | **Stops it** (default): speaking interrupts the task, as before. **Adds to the task**: what you say goes into the running task after its current step, and the task carries on; use Stop to stop it. |
+| **Push to talk** | Only what you say while holding <kbd>Space</kbd> (outside a text field) or the microphone button is heard. A tap, or a press with no speech in it, is not sent. Useful with background noise or other people talking. |
+| **Sound effects** | The cues for connection, sending, mute and panels. |
+
+Each setting is remembered in this browser.
 
 ## Dictation
 

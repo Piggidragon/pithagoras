@@ -66,6 +66,8 @@ export interface PromptOptions {
   voice?: boolean;
   /** Pictures, already checked and kept: see prompt-images.ts. */
   images?: Attached[];
+  /** Mid-run, go into the run that is going instead of waiting for it to end. */
+  steer?: boolean;
 }
 
 /** Pictures sent with messages, a folder per chat: see prompt-images.ts. */
@@ -480,7 +482,11 @@ class SessionManager extends EventEmitter {
         });
       }
     }
-    await client.prompt(message, { voice: options?.voice, ...(images.length ? { images: forPi(images) } : {}) });
+    await client.prompt(message, {
+      voice: options?.voice,
+      ...(images.length ? { images: forPi(images) } : {}),
+      ...(options?.steer ? { steer: true } : {}),
+    });
     // A slash command completes inside prompt() without ever starting an agent
     // turn, so no agent_settled arrives to clear the status. Settle it here
     // rather than leaving "working" on screen forever. Asking pi rather than
