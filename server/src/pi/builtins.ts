@@ -52,7 +52,12 @@ const FALLBACK_DESCRIPTIONS: Record<string, string> = {
 export interface BuiltinCommand extends PiCommand {
   where: "server" | "client";
   argumentHint?: string;
+  /** Does nothing without an argument, so the menu completes it rather than running it. */
+  needsArgument?: boolean;
 }
+
+/** `/name` with no name is a command that silently does nothing. */
+const NEEDS_ARGUMENT = new Set(["name"]);
 
 let cached: BuiltinCommand[] | undefined;
 
@@ -76,6 +81,7 @@ export async function getBuiltinCommands(): Promise<BuiltinCommand[]> {
     name,
     description: PORTAL_DESCRIPTIONS[name] ?? bySdk.get(name)?.description ?? FALLBACK_DESCRIPTIONS[name],
     argumentHint: bySdk.get(name)?.argumentHint,
+    ...(NEEDS_ARGUMENT.has(name) ? { needsArgument: true } : {}),
     source: "builtin",
     where,
   }));
@@ -84,6 +90,21 @@ export async function getBuiltinCommands(): Promise<BuiltinCommand[]> {
 
 export async function findServerBuiltin(name: string): Promise<BuiltinCommand | undefined> {
   return (await getBuiltinCommands()).find((c) => c.name === name && c.where === "server");
+}
+
+/**
+ * Why `message` cannot be sent with pictures, or undefined if it can.
+ *
+ * A portal command acts on the session and never reaches the model, so
+ * pictures sent with one would be lost without a word. Asked before anything
+ * is done with them, so the refusal reaches someone who can put them back.
+ */
+export async function picturesRefused(message: string): Promise<string | undefined> {
+  const name = /^\/([\w-]+)/.exec(message.trim())?.[1];
+  if (name && (await findServerBuiltin(name))) {
+    return `/${name} does not take pictures. Send them in a message of their own.`;
+  }
+  return undefined;
 }
 
 /** Run a server-side builtin, returning the notice to show in the transcript. */

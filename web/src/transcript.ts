@@ -1,7 +1,19 @@
 import type { PortalEvent } from "./api";
 
+/** A picture that went with a message, by the name the server keeps it under. */
+export interface SentImage {
+  name: string;
+  mimeType: string;
+}
+
+const sentImages = (raw: unknown): SentImage[] | undefined => {
+  if (!Array.isArray(raw)) return undefined;
+  const list = raw.filter((i): i is SentImage => typeof i?.name === "string" && typeof i?.mimeType === "string");
+  return list.length ? list : undefined;
+};
+
 export type Item =
-  | { kind: "user"; id: string; seq: number; text: string; audio?: boolean }
+  | { kind: "user"; id: string; seq: number; text: string; audio?: boolean; images?: SentImage[] }
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
   | { kind: "tool"; id: string; name: string; status: "running" | "done" | "error"; detail?: string }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
@@ -34,7 +46,15 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         const raw = String(p.message ?? "");
         const tagged = raw.startsWith("[Audio mode]\n");
         audioReply = p.voice === true || tagged;
-        items.push({ kind: "user", id: `u${ev.seq}`, seq: ev.seq, text: tagged ? raw.slice("[Audio mode]\n".length) : raw, audio: p.voice === true || tagged });
+        const images = sentImages(p.images);
+        items.push({
+          kind: "user",
+          id: `u${ev.seq}`,
+          seq: ev.seq,
+          text: tagged ? raw.slice("[Audio mode]\n".length) : raw,
+          audio: p.voice === true || tagged,
+          ...(images ? { images } : {}),
+        });
         break;
       }
 
@@ -122,6 +142,23 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
 
   // Anything still open belongs to a run in flight.
   return items;
+}
+
+/**
+ * The bubble Copy belongs on: the last stretch of the agent's answer that has
+ * something to read and is not still changing under it.
+ *
+ * A turn with tool calls in the middle closes the assistant item before each
+ * one and opens a new one after, so a single answer can be several bubbles —
+ * one per paragraph around a tool. Offering Copy on all of them is a button
+ * under every paragraph; only the last has the whole of what was said.
+ */
+export function lastReplyId(items: readonly Item[]): string | undefined {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "assistant" && it.text) return it.done ? it.id : undefined;
+  }
+  return undefined;
 }
 
 function summarizeToolInput(p: any): string | undefined {

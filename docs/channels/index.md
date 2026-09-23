@@ -137,6 +137,12 @@ Each channel shows its real state on its page: `running`, `starting`,
 A channel enabled with a package that has no `start()` reports that rather than
 looking healthy.
 
+A channel whose `start()` fails — the network was not up yet when the portal
+booted, the platform had a bad minute — is tried again on its own: after 30
+seconds, then twice as long each time, up to every fifteen minutes. Saving it
+tries at once, and so does installing a channel package, so a channel set up
+before its package was there starts when the package arrives.
+
 ### What happens to a message
 
 1. The package receives it and calls `ctx.ask(text, { session, title })`.

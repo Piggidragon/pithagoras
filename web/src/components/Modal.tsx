@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { LuX } from "react-icons/lu";
+import { isEscape } from "../shortcuts";
 
 /**
  * Centered dialog with a dimmed backdrop. Escape and backdrop clicks close it.
@@ -26,7 +27,8 @@ export function Modal({
   wide?: boolean;
 }) {
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // Not the Escape that takes back an input method's word in one of its fields.
+    const onKey = (e: KeyboardEvent) => isEscape(e) && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -40,6 +42,9 @@ export function Modal({
           before they render anything, so without one the dialog opened as a
           bare title bar and snapped to full height a moment later. */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === "string" ? title : undefined}
         className={`flex max-h-[88vh] w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
           // Grows with the viewport rather than to it: the rail plus a settings
           // form has a comfortable width, and a 34-inch screen should not

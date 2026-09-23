@@ -19,17 +19,20 @@ import {
   LuTriangleAlert,
   LuUsers,
 } from "react-icons/lu";
-import { api, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
+import { api, SIGNED_OUT, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
 import { parseWindow } from "../context-window";
 import { KeepRecent, formatTokens, useKeepRecentSave } from "./KeepRecent";
 import { displayName } from "../tool-groups";
+import { useAsksBeforeDeleting } from "../confirm-prefs";
+import { useNotifyState } from "../notify";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
+import { isEnter } from "../shortcuts";
 
 export type Tab =
   | "general"
@@ -368,6 +371,92 @@ function ReportDefault({ onError }: { onError: (e: string) => void }) {
   );
 }
 
+/** The one question the portal asks before it deletes, and whether it asks it. */
+function Confirmations() {
+  const [ask, setAsk] = useAsksBeforeDeleting();
+  return (
+    <Section
+      title="Confirmations"
+      hint="Kept in this browser, so a phone can go on asking after the laptop stopped."
+    >
+      <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-line bg-raised/40 p-3">
+        <input
+          type="checkbox"
+          checked={ask}
+          onChange={(e) => setAsk(e.target.checked)}
+          className="mt-0.5 h-3.5 w-3.5 accent-accent"
+        />
+        <span className="text-sm text-fg">
+          Ask before deleting
+          <span className="mt-0.5 block text-xs text-fg-faint">
+            Chats, messages, files, skills, routines, projects, voices, channels. Unsaved changes are
+            still asked about: there is no other copy of them.
+          </span>
+        </span>
+      </label>
+    </Section>
+  );
+}
+
+/** Only where there is a password: without one there is nothing to sign out of. */
+function SignOut({ onError }: { onError: (e: string) => void }) {
+  const [required, setRequired] = useState(false);
+  useEffect(() => {
+    api.authStatus().then((s) => setRequired(s.authRequired)).catch(() => {});
+  }, []);
+  if (!required) return null;
+  const signOut = () =>
+    api
+      .logout()
+      .then(() => window.dispatchEvent(new Event(SIGNED_OUT)))
+      .catch((e) => onError((e as Error).message));
+  return (
+    <Section title="This browser" hint="Signing out asks for the password here again. Other browsers stay signed in.">
+      <button onClick={signOut} className={btnCls}>
+        Sign out
+      </button>
+    </Section>
+  );
+}
+
+/** Whether the browser may say so when a chat finishes or needs an answer. */
+function Notifications() {
+  const [state, setOn] = useNotifyState();
+  const note: Record<string, string> = {
+    unsupported:
+      "This browser does not offer them here — they need a secure connection (HTTPS, or localhost).",
+    denied: "The browser has blocked them for this site. Allow them in its site settings, then come back.",
+  };
+  return (
+    <Section
+      title="Notifications"
+      hint="Kept in this browser. The tab title shows what a chat is doing whether or not this is on."
+    >
+      <label
+        className={`flex items-start gap-2.5 rounded-xl border border-line bg-raised/40 p-3 ${
+          state === "unsupported" || state === "denied" ? "opacity-60" : "cursor-pointer"
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={state === "on"}
+          disabled={state === "unsupported" || state === "denied"}
+          onChange={(e) => void setOn(e.target.checked)}
+          className="mt-0.5 h-3.5 w-3.5 accent-accent"
+        />
+        <span className="text-sm text-fg">
+          Tell me when a chat is done or needs me
+          <span className="mt-0.5 block text-xs text-fg-faint">
+            Only while you are on another tab or window: nobody needs telling about the chat in front
+            of them. A chat that is not open is noticed while this page is on screen.
+          </span>
+          {note[state] && <span className="mt-1 block text-xs text-warn">{note[state]}</span>}
+        </span>
+      </label>
+    </Section>
+  );
+}
+
 function GeneralPanel({ onError }: { onError: (e: string) => void }) {
   /** Only the explicit overrides — an empty field means "inherit". */
   const [stored, setStored] = useState<Partial<GlobalSettings> | null>(null);
@@ -574,7 +663,7 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
             inputMode="numeric"
             onChange={(e) => setCtxText(e.target.value)}
             onBlur={saveContextDefault}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            onKeyDown={(e) => isEnter(e) && e.currentTarget.blur()}
             placeholder="what each model says"
             aria-label="Default context window in tokens"
             className={`${inputCls} font-mono`}
@@ -597,6 +686,12 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
       </Section>
 
       <ReportDefault onError={onError} />
+
+      <Confirmations />
+
+      <Notifications />
+
+      <SignOut onError={onError} />
 
       <Section title="Deployment">
         <dl className="rounded-xl border border-line bg-raised/40 p-3 text-sm">
@@ -650,6 +745,8 @@ function ExtensionsPanel({
 }) {
   const [spec, setSpec] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  /** What the last switch did to the conversations that were open. */
+  const [note, setNote] = useState<string | null>(null);
   // The names given in Settings → Tools. A package is one thing and should be
   // called the same thing wherever it appears; the spec underneath is what it
   // is installed and removed by, and that does not change.
@@ -663,6 +760,7 @@ function ExtensionsPanel({
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
+    setNote(null);
     try {
       await fn();
       await onRefresh();
@@ -673,6 +771,19 @@ function ExtensionsPanel({
       setBusy(null);
     }
   };
+
+  const switchPackage = (ext: ExtensionInfo) =>
+    act(ext.spec, async () => {
+      const on = !ext.enabled;
+      const r = await api.setExtensionEnabled(ext.spec, on);
+      const parts = [`${displayName(ext.name, names)} is ${on ? "on" : "off"}.`];
+      if (r.reloaded) parts.push(`${r.reloaded} open ${r.reloaded === 1 ? "conversation" : "conversations"} reloaded.`);
+      if (r.waiting)
+        parts.push(
+          `${r.waiting} still working — they keep it as it was until /reload, or their next start.`,
+        );
+      setNote(parts.join(" "));
+    });
 
   return (
     <>
@@ -685,7 +796,7 @@ function ExtensionsPanel({
             value={spec}
             onChange={(e) => setSpec(e.target.value)}
             onKeyDown={(e) =>
-              e.key === "Enter" &&
+              isEnter(e) &&
               spec.trim() &&
               act("install", () => api.installPackage(spec.trim()))
             }
@@ -734,9 +845,23 @@ function ExtensionsPanel({
               >
                 <div className="flex items-center gap-2">
                   <LuPuzzle className="h-4 w-4 shrink-0 text-fg-subtle" />
-                  <p title={ext.name} className="truncate text-sm text-fg">
+                  <p
+                    title={ext.name}
+                    className={`truncate text-sm ${ext.enabled === false ? "text-fg-subtle line-through decoration-fg-faint" : "text-fg"}`}
+                  >
                     {displayName(ext.name, names)}
                   </p>
+                  {ext.enabled === false && (
+                    <span className="shrink-0 rounded bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">off</span>
+                  )}
+                  {ext.filtered && (
+                    <span
+                      title="Some of what it brings is switched off in settings.json. Switching it off and on again keeps that."
+                      className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle"
+                    >
+                      filtered
+                    </span>
+                  )}
                   {ext.version && (
                     <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 font-mono text-[10px] text-fg-subtle">
                       v{ext.version}
@@ -747,11 +872,37 @@ function ExtensionsPanel({
                       {ext.scope}
                     </span>
                   )}
+                  {ext.enabled !== undefined && (
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={ext.enabled}
+                      aria-label={`${ext.enabled ? "Switch off" : "Switch on"} ${displayName(ext.name, names)}`}
+                      title={
+                        ext.enabled
+                          ? "On — click to switch it off without uninstalling it"
+                          : "Off — its commands, skills and tools are not loaded. Click to switch it on"
+                      }
+                      disabled={busy !== null}
+                      onClick={() => switchPackage(ext)}
+                      className="ml-auto shrink-0 disabled:opacity-40"
+                    >
+                      <span
+                        className={`relative block h-5 w-9 rounded-full transition ${ext.enabled ? "bg-accent" : "bg-raised"}`}
+                      >
+                        <span
+                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                            ext.enabled ? "left-[1.125rem]" : "left-0.5"
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  )}
                   <button
                     disabled={busy !== null}
                     onClick={() => act(ext.spec, () => api.removePackage(ext.spec))}
                     title="Remove"
-                    className="ml-auto shrink-0 rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                    className={`${ext.enabled === undefined ? "ml-auto " : ""}shrink-0 rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40`}
                   >
                     {busy === ext.spec ? (
                       <LuRefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -779,6 +930,12 @@ function ExtensionsPanel({
               </li>
             ))}
           </ul>
+        )}
+
+        {note && (
+          <p role="status" className="mt-2 text-xs text-fg-muted">
+            {note}
+          </p>
         )}
 
         <div className="mt-2.5 flex items-center gap-2">
@@ -873,7 +1030,7 @@ function ExtensionPanel({
                 <input
                   value={values[s.key] ?? ""}
                   onChange={(e) => setValues({ ...values, [s.key]: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && save(s.key)}
+                  onKeyDown={(e) => isEnter(e) && save(s.key)}
                   placeholder="empty to unset"
                   className={`${inputCls} font-mono text-xs`}
                 />

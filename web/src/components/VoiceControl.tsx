@@ -1,4 +1,5 @@
 import { DEFAULT_VAD } from '../api';
+import { local } from '../safe-storage';
 import { VoiceProfiler } from '../voice-profile';
 import { VoiceProfile } from './VoiceProfile';
 import { activity } from '../transcript';
@@ -51,11 +52,11 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if(['portal_prompt','compaction_start','compaction_end','tool_execution_start','tool_execution_end','agent_end'].includes(event.type))profileMark(event.type);
     }
   },[toolEvents]);
-  const [sounds, setSounds] = useState(() => localStorage.getItem('voiceSounds') !== 'off');
+  const [sounds, setSounds] = useState(() => local.get('voiceSounds') !== 'off');
   const soundsEnabled = useRef(sounds); soundsEnabled.current = sounds;
   const soundContext = useRef<AudioContext | null>(null);
   const cue = useCallback((kind: VoiceCue) => { if (soundsEnabled.current && soundContext.current) voiceCue(soundContext.current, kind); }, []);
-  const toggleSounds = () => setSounds(value => { localStorage.setItem('voiceSounds', value ? 'off' : 'on'); return !value; });
+  const toggleSounds = () => setSounds(value => { local.set('voiceSounds', value ? 'off' : 'on'); return !value; });
   const [available, setAvailable] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [starting, setStarting] = useState(false);

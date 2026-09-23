@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { piSettingsPath } from "../pi-settings.js";
+import { extensionStash, setExtensionStash } from "../db.js";
 import express, { type Router } from "express";
 
 const run = promisify(execFile);
@@ -62,6 +63,12 @@ export function packagesRouter(): Router {
     }
     try {
       const { stdout, stderr } = await pi(["remove", spec]);
+      // What was kept aside for switching it back on has nothing left to go to.
+      const stash = extensionStash();
+      if (spec in stash) {
+        delete stash[spec];
+        setExtensionStash(stash);
+      }
       res.json({ ok: true, output: (stdout + stderr).trim() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

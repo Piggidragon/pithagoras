@@ -166,6 +166,17 @@ export interface PortalTool {
   defaultOn?: boolean;
 }
 
+/** A picture going with a message: a data: URL, which the box also shows it from. */
+export interface PromptImage {
+  data: string;
+  mimeType: string;
+}
+
+export interface PromptOptions {
+  voice?: boolean;
+  images?: PromptImage[];
+}
+
 export interface PortalEvent {
   seq: number;
   type: string;
@@ -174,11 +185,19 @@ export interface PortalEvent {
   payload: any;
 }
 
+/**
+ * Fired when the server stops accepting this browser's login — it expired, or
+ * the portal restarted without PORTAL_SECRET — so the page can ask for the
+ * password again instead of failing every request with "Unauthorized".
+ */
+export const SIGNED_OUT = "pithagoras:signed-out";
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
+  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
   return res.json();
 }
@@ -214,6 +233,33 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ name }),
     }),
+  /** A new, empty file; refused if something already has the name. */
+  createFile: (sessionId: string, file: string) =>
+    json<{ ok: true; size: number; mtime: number }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, {
+      method: "PUT",
+      body: JSON.stringify({ content: "", create: true }),
+    }),
+  createFolder: (sessionId: string, dir: string, name: string) =>
+    json<{ ok: true; path: string }>(`/api/sessions/${sessionId}/folder?path=${encodeURIComponent(dir)}`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  /**
+   * A file from this computer into the chat's folder. A taken name gets a
+   * number rather than replacing anything; the answer says what it is called.
+   */
+  uploadFile: async (sessionId: string, dir: string, file: File, name = file.name): Promise<{ path: string; size: number }> => {
+    const res = await fetch(`/api/sessions/${sessionId}/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`, {
+      method: "POST",
+      // Always a plain stream of bytes: what the file calls itself is not how it is sent.
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Could not upload ${name} (${res.status})`);
+    return body;
+  },
   deleteFile: (sessionId: string, file: string) =>
     json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, { method: "DELETE" }),
   fileDownloadUrl: (sessionId: string, file: string) =>
@@ -229,6 +275,7 @@ export const api = {
   authStatus: () => json<{ authRequired: boolean; authed: boolean }>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
+  logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   createWorkspace: (name: string) =>
     json<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify({ name }) }),
@@ -255,11 +302,17 @@ export const api = {
   renameSession: (id: string, title: string) =>
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
-  prompt: (id: string, message: string, options?: { voice?: boolean }) =>
+  prompt: (id: string, message: string, options?: PromptOptions) =>
     json<{ ok: true }>(`/api/sessions/${id}/prompt`, {
       method: "POST",
-      body: JSON.stringify({ message, ...(options?.voice ? { voice: true } : {}) }),
+      body: JSON.stringify({
+        message,
+        ...(options?.voice ? { voice: true } : {}),
+        ...(options?.images?.length ? { images: options.images.map(({ data, mimeType }) => ({ data, mimeType })) } : {}),
+      }),
     }),
+  /** A picture sent with a message, as the transcript shows it. */
+  imageUrl: (id: string, name: string) => `/api/sessions/${id}/images/${encodeURIComponent(name)}`,
   /** Removes a message and the agent's answer to it — from the agent's memory too. */
   deleteMessage: (id: string, seq: number) =>
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}`, { method: "DELETE" }),
@@ -624,6 +677,11 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ spec }),
     }),
+  setExtensionEnabled: (spec: string, enabled: boolean) =>
+    json<{ ok: true; enabled: boolean; reloaded: number; waiting: number }>("/api/extensions/enabled", {
+      method: "PUT",
+      body: JSON.stringify({ spec, enabled }),
+    }),
   updatePackages: () =>
     json<{ ok: true; output: string }>("/api/packages/update", { method: "POST" }),
 };
@@ -750,6 +808,10 @@ export interface ExtensionInfo {
   homepage?: string;
   version?: string;
   settings: DetectedSetting[];
+  /** Whether pi loads it; absent where the portal cannot switch it. */
+  enabled?: boolean;
+  /** Narrowed by hand in settings.json: some of what it brings is off already. */
+  filtered?: boolean;
 }
 
 export interface GlobalSettings {
@@ -764,6 +826,8 @@ export interface PiCommand {
   source: "builtin" | "extension" | "prompt" | "skill" | string;
   /** Builtins only: "client" commands are handled here, not sent to pi. */
   where?: "server" | "client";
+  /** Builtins only: does nothing without one, so choosing it leaves the box open for it. */
+  needsArgument?: boolean;
   sourceInfo?: { path?: string; scope?: string; origin?: string };
 }
 

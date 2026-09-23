@@ -12,6 +12,7 @@ import {
 } from "react-icons/lu";
 import { api, type ReportTarget, type ReportTo, type Routine } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
+import { pollWhileVisible } from "../poll";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -169,8 +170,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
+    return pollWhileVisible(load, 5000);
   }, []);
 
   const open = routines.find((r) => r.id === openId);
@@ -803,6 +803,7 @@ function RoutineDetail({
                 message: "Its sessions are kept.",
                 confirmLabel: "Delete",
                 danger: true,
+                deletes: true,
               })
             ) {
               act("save", async () => {

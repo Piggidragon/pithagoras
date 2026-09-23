@@ -1,6 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import type { PiClient, PiCommand, PiState, PiStats } from "./types.js";
+import type { ImageContent } from "../prompt-images.js";
 
 /** A message pi emits on stdout. `type: 'response'` replies to a command; everything else is an event. */
 export interface PiMessage {
@@ -112,8 +113,8 @@ export class PiRpcClient extends EventEmitter implements PiClient {
    * back as events, which is what lets a task keep running after the browser
    * that started it has gone away.
    */
-  async prompt(message: string): Promise<void> {
-    const res = await this.send("prompt", { message });
+  async prompt(message: string, options?: { images?: ImageContent[] }): Promise<void> {
+    const res = await this.send("prompt", { message, ...(options?.images?.length ? { images: options.images } : {}) });
     if (res.success === false) throw new Error(res.error || "pi rejected the prompt");
   }
 

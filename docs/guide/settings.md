@@ -20,6 +20,21 @@ This matters more than it sounds. An earlier version prefilled each field with
 the *resolved* value, so one click of Save pinned an inherited setting forever —
 which is how a portal could end up permanently stuck on a model nobody chose.
 
+**Notifications** are a switch in the same panel, and kept in this browser like
+the confirmations. Turned on, the browser asks for permission once, and after
+that a chat that finishes or an extension that needs an answer says so while you
+are on another tab or window. Nobody is told about the chat in front of them.
+It needs a secure connection — HTTPS, or `localhost` — because browsers do not
+offer notifications over plain HTTP; the switch says so where it is unavailable.
+A chat that is not open is noticed too: while one is running and notifications
+are on, a hidden page keeps checking every fifteen seconds.
+
+**Sign out** is at the bottom of the panel when the portal has a password. It
+signs out this browser only, and the login it held stops working anywhere a
+copy of its cookie was taken. A login that runs out — after thirty days, or when
+the portal restarts without `PORTAL_SECRET` — brings the password screen back
+rather than failing every request with *Unauthorized*.
+
 ### Where a model comes from
 
 Resolved in order, first match wins:

@@ -17,6 +17,7 @@ import { AUDIO_MESSAGE_PREFIX } from "./voice-first.js";
 
 export type SessionEditCode =
   | "busy"
+  | "empty"
   | "missing"
   | "unsupported"
   | "unmatched"

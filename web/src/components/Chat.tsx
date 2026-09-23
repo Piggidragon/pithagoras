@@ -10,16 +10,24 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
-import { api, type PiCommand, type PortalEvent, type Session } from "../api";
-import { activity, buildTranscript, type Activity } from "../transcript";
+import { LuArrowDown, LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
+import { MAX_IMAGES, pending, prepareImage, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
+import { activity, buildTranscript, lastReplyId, type Activity, type Item } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { confirmDialog } from "./ConfirmDialog";
+import { moveHighlight, paletteMatches, slashToken } from "../slash-palette";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
+import { TitleInput } from "./TitleInput";
 import { latestFileActivity } from "../file-activity";
+import { drafts, withUnsent } from "../drafts";
+import { local } from "../safe-storage";
+import { copyText } from "../clipboard";
+import { isClientCommand, isCommand } from "../client-commands";
+import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -92,6 +100,7 @@ export function Chat({
   onDeleteMessage,
   onAbort,
   onClientCommand,
+  onRename,
   loading,
   hasEarlier,
   loadingEarlier,
@@ -104,7 +113,7 @@ export function Chat({
   hasEarlier?: boolean;
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
-  onSend: (message: string, options?: { voice?: boolean }) => Promise<void>;
+  onSend: (message: string, options?: PromptOptions) => Promise<void>;
   /** Replace a sent message: it and everything after it are dropped, and the new text is sent. */
   onEditMessage: (seq: number, message: string) => Promise<void>;
   /** Remove a sent message and the agent's answer to it. */
@@ -112,8 +121,10 @@ export function Chat({
   onAbort: () => Promise<void>;
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
+  /** Give the chat another name, from its header. */
+  onRename: (title: string) => Promise<void>;
 }) {
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(() => drafts.get(session.id));
   // Where dictated words go. Kept beside the state because several phrases can
   // arrive before React has drawn the first, and each must land after the last.
   const box = useRef<HTMLTextAreaElement>(null);
@@ -128,7 +139,29 @@ export function Chat({
   // Which sent message is being rewritten, and what went wrong with the last
   // thing done to one — shown in the transcript, where the message is.
   const [editing, setEditing] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // This is one component for every chat, so what belongs to one must be put
+  // away when another opens: the words half written in the box (kept, and
+  // there again when you come back), the message being rewritten — a number
+  // that would name a different message here — and the last complaint.
+  // Pictures waiting to go with the next message, kept per chat like the words.
+  const [attached, setAttached] = useState<Attachment[]>(() => pending.get(session.id));
+  // Pictures being read or files being uploaded: the message waits for them.
+  const [adding, setAdding] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const [boxOf, setBoxOf] = useState(session.id);
+  if (boxOf !== session.id) {
+    setBoxOf(session.id);
+    setInput(drafts.get(session.id));
+    setAttached(pending.get(session.id));
+    setEditing(null);
+    setRenaming(false);
+    setActionError(null);
+  }
+  const currentSession = useRef(session.id);
+  currentSession.current = session.id;
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   // Whether there is a browser to watch, and whether you are watching it. Asked
   // once — the answer only changes when somebody installs or removes one.
@@ -160,12 +193,10 @@ export function Chat({
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative.
-  const [asideWidth, setAsideWidth] = useState(() =>
-    Number(localStorage.getItem("panelWidth")) || 560
-  );
-  const [split, setSplit] = useState(() => Number(localStorage.getItem("panelSplit")) || 0.55);
-  useEffect(() => localStorage.setItem("panelWidth", String(asideWidth)), [asideWidth]);
-  useEffect(() => localStorage.setItem("panelSplit", String(split)), [split]);
+  const [asideWidth, setAsideWidth] = useState(() => Number(local.get("panelWidth")) || 560);
+  const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || 0.55);
+  useEffect(() => local.set("panelWidth", String(asideWidth)), [asideWidth]);
+  useEffect(() => local.set("panelSplit", String(split)), [split]);
 
   /**
    * Dragging, on pointer events rather than mouse ones.
@@ -212,10 +243,11 @@ export function Chat({
   const lastSaid = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
-      if (it.kind === "user" && splitContext(it.text).text) return it.id;
+      if (it.kind === "user" && (splitContext(it.text).text || it.images)) return it.id;
     }
     return undefined;
   }, [items]);
+  const lastReply = useMemo(() => lastReplyId(items), [items]);
 
   // Only the end of a conversation is drawn to begin with. Drawing all of a long
   // one is what made opening it slow, and the top of it is not what anybody
@@ -353,6 +385,12 @@ export function Chat({
     () => events.reduce((n, e) => n + (e.type === "turn_end" || e.type === "compaction_end" ? 1 : 0), 0),
     [events],
   );
+  // A notice is the portal speaking, not a message: only what a person or pi
+  // said counts. Earlier pages that are not loaded yet count as said.
+  const started = useMemo(
+    () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant"),
+    [items, hasEarlier],
+  );
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running) return;
@@ -363,21 +401,62 @@ export function Chat({
 
   // Commands come from pi at runtime, so anything a newly installed package
   // registers shows up here without the portal knowing about it in advance.
+  //
+  // Asked for only once a "/" is typed. Listing them starts pi for the chat,
+  // and it stays up — so fetching them on open started a runtime for every chat
+  // looked at, which the config route goes out of its way not to do.
   const [commands, setCommands] = useState<PiCommand[]>([]);
-  useEffect(() => {
-    api
-      .commands(session.id)
-      .then((r) => setCommands(r.commands))
-      .catch(() => setCommands([]));
-    // Refetch when a run ends: installing an extension mid-session should make
-    // its commands show up without a reload.
-  }, [session.id, running]);
+  const commandList = useRef<{ key: string; list: Promise<PiCommand[]> } | null>(null);
+  /** The commands for this chat, fetched once per chat and again after each run. */
+  const loadCommands = (): Promise<PiCommand[]> => {
+    // A run can install an extension, whose commands should then be offered.
+    const key = `${session.id}:${turns}`;
+    if (commandList.current?.key !== key) {
+      const list = api.commands(session.id).then(
+        (r) => r.commands,
+        () => [] as PiCommand[],
+      );
+      commandList.current = { key, list };
+    }
+    // Shown every time, not only when fetched: opening another chat empties
+    // the list, and coming back finds this chat's still here to be offered.
+    const { list } = commandList.current;
+    void list.then((found) => {
+      if (commandList.current?.key === key) setCommands(found);
+    });
+    return list;
+  };
+  // What was listed for another chat is not offered here.
+  useEffect(() => setCommands([]), [session.id]);
 
   // Show the palette while the composer holds a bare "/name" prefix.
-  const slashQuery = /^\/([\w:-]*)$/.exec(input.trimStart());
-  const matches = slashQuery
-    ? commands.filter((c) => c.name.toLowerCase().startsWith(slashQuery[1].toLowerCase())).slice(0, 8)
-    : [];
+  const slashText = slashToken(input);
+  const wantsCommands = slashText !== null;
+  useEffect(() => {
+    if (wantsCommands) void loadCommands();
+  }, [wantsCommands, session.id, turns]);
+  const allMatches = useMemo(
+    () => (slashText === null ? [] : paletteMatches(commands, slashText)),
+    [commands, slashText],
+  );
+  /** Escape puts the list away until something else is typed. */
+  const [paletteShut, setPaletteShut] = useState(false);
+  /** Which command Enter runs and Tab completes; the first until an arrow says otherwise. */
+  const [picked, setPicked] = useState(0);
+  useEffect(() => {
+    setPicked(0);
+    setPaletteShut(false);
+  }, [slashText]);
+  const matches = paletteShut ? [] : allMatches;
+  const paletteRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    paletteRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [picked, matches.length]);
+  /** What is left in the box once a command is chosen: its name, ready for arguments. */
+  const complete = (c: PiCommand) => {
+    caret.current = null;
+    changeInput(`/${c.name} `);
+  };
 
   useEffect(() => {
     // Only offered where it would work: an iframe needs a secure context, and
@@ -401,27 +480,58 @@ export function Chat({
     scroller.follow(fresh);
   }, [items.length, events.length]);
 
-  /** Send `msg` as a message, or run it if it is one of the portal's own commands. */
+  /**
+   * Send `msg` as a message, or run it if it is one of the portal's own commands.
+   *
+   * What came from the box is taken out of it at once, so that it does not sit
+   * there looking unsent while it is on its way — and put back if it does not
+   * get there. Throws, for the caller to say what went wrong.
+   */
   const submit = async (msg: string, fromBox: boolean) => {
+    const sent = session.id;
     // Some builtins are UI, not prompts: /model opens the picker the pill uses,
     // /settings opens the modal. Sending them to pi would just be a chat line.
-    const parsed = /^\/([\w-]+)\s*(.*)$/.exec(msg);
-    const client = parsed
-      ? commands.find((c) => c.name === parsed[1] && c.where === "client")
-      : undefined;
-    if (client && parsed) {
-      if (fromBox) clearBox();
-      if (client.name === "model") setPanelRequest("model");
-      else await onClientCommand(client.name, parsed[2]);
-      return;
-    }
+    const parsed = /^\/([\w:-]+)\s*(.*)$/.exec(msg);
+    const command = parsed && isClientCommand(parsed[1], commands) ? parsed : null;
+    // The pictures in the box go with what came from it, and nothing else. A
+    // command is run rather than said — this one here, any other by pi — so
+    // they stay in the box for later rather than going where nothing shows them.
+    const keepsPictures = parsed !== null && isCommand(parsed[1], commands);
+    const images = fromBox && !keepsPictures ? attached : [];
 
-    setSending(true);
-    if (fromBox) clearBox();
+    if (fromBox) {
+      if (keepsPictures) {
+        caret.current = null;
+        changeInput("");
+      } else clearBox();
+    }
     try {
-      await onSend(msg, voiceMode ? { voice: true } : undefined);
-    } finally {
-      setSending(false);
+      if (command) {
+        if (command[1] === "model") setPanelRequest("model");
+        else await onClientCommand(command[1], command[2]);
+        return;
+      }
+      setSending(true);
+      try {
+        await onSend(msg, voiceMode || images.length ? { voice: voiceMode || undefined, images: images.length ? images : undefined } : undefined);
+      } finally {
+        setSending(false);
+      }
+    } catch (e) {
+      if (fromBox) putBack(sent, msg, images);
+      throw e;
+    }
+  };
+
+  /** A message that did not go, back where it was typed — in that chat, if you have left it. */
+  const putBack = (id: string, msg: string, images: Attachment[] = []) => {
+    const back = [...images, ...pending.get(id)];
+    if (currentSession.current === id) {
+      changeInput(msg ? withUnsent(draft.current, msg) : draft.current);
+      changeAttached(back);
+    } else {
+      if (msg) drafts.set(id, withUnsent(drafts.get(id), msg));
+      pending.set(id, back);
     }
   };
 
@@ -436,13 +546,80 @@ export function Chat({
 
   const send = async () => {
     const msg = input.trim();
-    if (!msg || sending) return;
-    await submit(msg, true);
+    if ((!msg && !attached.length) || sending || adding) return;
+    await attempt(() => submit(msg, true));
+  };
+
+  const changeAttached = (next: Attachment[]) => {
+    pending.set(session.id, next);
+    setAttached(next);
+  };
+
+  /** Pictures on their way into the box, by chat, which count against its room already. */
+  const preparing = useRef(new Map<string, number>());
+  /**
+   * Pictures and files pasted, dropped or picked. Pictures wait in the box to
+   * go with the message; anything else is put in the chat's folder at once and
+   * the message says so, so the agent knows to look.
+   */
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return;
+    const id = session.id;
+    const { images, others } = sortFiles(files);
+    setActionError(null);
+    setAdding((n) => n + 1);
+    const problems: string[] = [];
+    // Room is taken as it is counted: pictures still being made ready from an
+    // earlier paste are not in the box yet, but will be.
+    const room = Math.max(0, MAX_IMAGES - pending.get(id).length - (preparing.current.get(id) ?? 0));
+    const taking = Math.min(images.length, room);
+    preparing.current.set(id, (preparing.current.get(id) ?? 0) + taking);
+    try {
+      if (images.length > room) problems.push(`At most ${MAX_IMAGES} pictures can go with one message.`);
+      const ready: Attachment[] = [];
+      for (const file of images.slice(0, taking)) {
+        try {
+          ready.push(await prepareImage(file, file.name || "Pasted picture"));
+        } catch (e) {
+          problems.push((e as Error).message);
+        }
+      }
+      const uploaded: string[] = [];
+      for (const file of others) {
+        try {
+          uploaded.push((await api.uploadFile(id, "", file)).path);
+        } catch (e) {
+          problems.push((e as Error).message);
+        }
+      }
+      // Into the chat they were added in, even if another has been opened since.
+      if (ready.length) {
+        const next = [...pending.get(id), ...ready];
+        if (currentSession.current === id) changeAttached(next);
+        else pending.set(id, next);
+      }
+      const note = uploadedNote(uploaded);
+      if (note) {
+        if (currentSession.current === id) changeInput(draft.current.trim() ? `${draft.current.trimEnd()}\n${note}` : note);
+        else drafts.set(id, drafts.get(id).trim() ? `${drafts.get(id).trimEnd()}\n${note}` : note);
+      }
+    } finally {
+      preparing.current.set(id, (preparing.current.get(id) ?? 0) - taking);
+      setAdding((n) => n - 1);
+      if (problems.length && currentSession.current === id) setActionError(problems.join(" "));
+    }
+  };
+
+  /** Every change to the box goes through here, so that the draft is kept as it is typed. */
+  const changeInput = (next: string) => {
+    drafts.set(session.id, next);
+    setInput(next);
   };
 
   const clearBox = () => {
     caret.current = null;
-    setInput("");
+    changeInput("");
+    changeAttached([]);
   };
 
   /** Dictated words, put in the box where the cursor was and the cursor left after them. */
@@ -452,13 +629,28 @@ export function Chat({
     draft.current = next.value;
     caret.current = { start: next.caret, end: next.caret };
     caretTo.current = next.caret;
-    setInput(next.value);
+    changeInput(next.value);
   };
   useLayoutEffect(() => {
     if (caretTo.current === null) return;
     box.current?.setSelectionRange(caretTo.current, caretTo.current);
     caretTo.current = null;
   }, [input]);
+
+  // "/" from anywhere on the page: the box, with the command list open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      // Not behind a dialog: the box is not what is being talked to.
+      if (voiceMode || document.querySelector('[aria-modal="true"]')) return;
+      if (!opensComposer({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, target })) return;
+      e.preventDefault();
+      box.current?.focus();
+      if (!draft.current.trim()) changeInput("/");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [voiceMode, session.id]);
 
   // Phrases sent as they are said go one at a time: a second must not overtake
   // the first, and one that fails goes back in the box rather than being lost.
@@ -489,8 +681,30 @@ export function Chat({
       <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
       <header className={voiceMode ? "hidden" : "border-b border-line px-4 py-3"}>
         <div className="mx-auto flex w-full max-w-3xl items-center gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-medium text-fg">{session.title}</h2>
+        <div className="min-w-0 flex-1">
+          {renaming ? (
+            <TitleInput
+              value={session.title}
+              label="Chat name"
+              className="w-full text-sm font-medium"
+              onCommit={(next) => {
+                setRenaming(false);
+                void attempt(() => onRename(next));
+              }}
+              onCancel={() => setRenaming(false)}
+            />
+          ) : (
+            <h2 className="truncate text-sm font-medium text-fg">
+              <button
+                type="button"
+                onClick={() => setRenaming(true)}
+                title="Rename this chat"
+                className="max-w-full truncate rounded text-left hover:text-accent"
+              >
+                {session.title}
+              </button>
+            </h2>
+          )}
           <p className="truncate font-mono text-[11px] text-fg-faint">{session.workspace}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -502,6 +716,8 @@ export function Chat({
           {browserUp && (
             <button
               onClick={() => setWatching((v) => !v)}
+              aria-label="Browser"
+              aria-expanded={watching}
               title={
                 watching ? "Hide the browser" : "Watch the browser the agent is driving"
               }
@@ -516,6 +732,8 @@ export function Chat({
           )}
           <button
             onClick={() => setTerminal((v) => !v)}
+            aria-label="Terminal"
+            aria-expanded={terminal}
             title={terminal ? "Hide the terminal" : "Open a shell in this workspace"}
             className={`rounded-lg border px-2 py-1 text-xs transition ${
               terminal
@@ -590,7 +808,7 @@ export function Chat({
             const { text, blocks } = splitContext(item.text);
             // Nothing but framing: the portal spoke, not a person. Drawing it as
             // a message bubble with no message in it reads as something broken.
-            if (!text) {
+            if (!text && !item.images) {
               return (
                 <div key={item.id} className="flex flex-wrap justify-end gap-1">
                   {blocks.map((b, i) => (
@@ -604,6 +822,7 @@ export function Chat({
                 <div key={item.id} className="flex justify-end">
                   <MessageEditor
                     initial={text}
+                    hasImages={!!item.images}
                     onCancel={() => setEditing(null)}
                     onSave={(next) =>
                       attempt(async () => {
@@ -619,7 +838,21 @@ export function Chat({
               <div key={item.id} className="group flex flex-col items-end gap-1">
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
                   {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title="Sent in voice mode"><LuAudioLines size={13} aria-hidden="true" /><span>Audio</span></div>}
-                  <div className="whitespace-pre-wrap">{text}</div>
+                  {item.images && (
+                    <div className={`flex flex-wrap justify-end gap-1.5 ${text ? "mb-1.5" : ""}`}>
+                      {item.images.map((image) => (
+                        <a key={image.name} href={api.imageUrl(session.id, image.name)} target="_blank" rel="noreferrer" title="Open the picture">
+                          <img
+                            src={api.imageUrl(session.id, image.name)}
+                            alt="A picture sent with this message"
+                            loading="lazy"
+                            className="max-h-48 max-w-full rounded-lg object-contain ring-1 ring-line"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {text && <div className="whitespace-pre-wrap">{text}</div>}
                   {blocks.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap justify-end gap-1">
                       {blocks.map((b, i) => (
@@ -633,6 +866,7 @@ export function Chat({
                     something that no longer exists. Sending it again is fine —
                     it just queues, like any other message. */}
                 <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                  {text && <CopyAction text={text} />}
                   {item.id === lastSaid ? (
                     // Retry: the same as editing without changing a word. After
                     // a Stop this is what clears the half-finished answer out of
@@ -652,13 +886,24 @@ export function Chat({
                   ) : (
                     <MessageAction
                       label="Send again as a new message"
-                      onClick={() => attempt(() => onSend(text))}
+                      onClick={() =>
+                        attempt(async () => {
+                          const images = await Promise.all(
+                            (item.images ?? []).map((image) => refetchImage(api.imageUrl(session.id, image.name), "A picture")),
+                          );
+                          await onSend(text, images.length ? { images } : undefined);
+                        })
+                      }
                     >
                       <LuRotateCw className="h-3 w-3" />
                     </MessageAction>
                   )}
                   <MessageAction
-                    label={running ? "Stop the run to edit" : "Edit — replaces this message and everything after it"}
+                    label={
+                      running
+                        ? "Stop the run to edit"
+                        : `Edit — replaces this message and everything after it${item.id === lastSaid ? " (↑ in an empty box)" : ""}`
+                    }
                     disabled={running}
                     onClick={() => setEditing(item.seq)}
                   >
@@ -675,6 +920,7 @@ export function Chat({
                           message: "The agent's reply to it goes too, and the agent forgets both.",
                           confirmLabel: "Delete",
                           danger: true,
+                          deletes: true,
                         })
                       )
                         attempt(() => onDeleteMessage(item.seq));
@@ -688,7 +934,7 @@ export function Chat({
           }
           if (item.kind === "assistant") {
             return (
-              <div key={item.id} className="max-w-[90%]">
+              <div key={item.id} className="group max-w-[90%]">
                 {item.thinking && (
                   <details className="mb-1 text-xs text-fg-subtle">
                     <summary className="cursor-pointer hover:text-fg-muted">thinking</summary>
@@ -711,8 +957,15 @@ export function Chat({
                       plugins={mermaid ? { mermaid } : undefined}
                       mermaid={mermaidOptions}
                     >
-                      {(item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "")}
+                      {assistantText(item)}
                     </Streamdown>
+                  </div>
+                )}
+                {/* Only the last bubble of the reply: one per tool call in
+                    between would be a Copy button after every paragraph. */}
+                {item.id === lastReply && (
+                  <div className="mt-0.5 flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                    <CopyAction text={assistantText(item)} />
                   </div>
                 )}
               </div>
@@ -764,21 +1017,62 @@ export function Chat({
           e.preventDefault();
           send();
         }}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDrop={(e) => {
+          // Down whatever was dropped: a drag that looked like files can carry
+          // none, and the overlay would stay up until the next one left.
+          setDragging(false);
+          if (!e.dataTransfer.files.length) return;
+          e.preventDefault();
+          void addFiles([...e.dataTransfer.files]);
+        }}
         className="px-4 pb-4 pt-2 sm:px-6 sm:pb-5"
       >
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
+        {/* Scrolled up to read, the way back to the end is one click rather
+            than a long drag — and during a run, where the new output is. */}
+        {scroller.away && !loading && matches.length === 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              reading.current = null;
+              scroller.follow(true);
+            }}
+            className="absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
+          >
+            <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
+            {running ? "Latest output" : "Jump to the end"}
+          </button>
+        )}
         {matches.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
-            {matches.map((c) => (
+          <div
+            ref={paletteRef}
+            role="listbox"
+            aria-label="Commands"
+            className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-xl border border-line bg-surface shadow-pop"
+          >
+            {matches.map((c, i) => (
               <button
                 key={c.name}
                 type="button"
+                role="option"
+                aria-selected={i === picked}
+                onMouseEnter={() => setPicked(i)}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  caret.current = null;
-                  setInput(`/${c.name} `);
+                  complete(c);
                 }}
-                className="flex w-full items-baseline gap-2 px-3 py-2 text-left transition hover:bg-fg/5"
+                className={`flex w-full items-baseline gap-2 px-3 py-2 text-left transition ${
+                  i === picked ? "bg-fg/5" : ""
+                }`}
               >
                 <span className="font-mono text-xs text-accent">/{c.name}</span>
                 <span className="truncate text-xs text-fg-subtle">{c.description}</span>
@@ -788,18 +1082,118 @@ export function Chat({
           </div>
         )}
         <DictationStrip dictation={dictation} />
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 text-xs text-accent">
+            Drop pictures to send them, or files to put them in the folder
+          </div>
+        )}
+        {(attached.length > 0 || adding > 0) && (
+          <div className="flex flex-wrap items-center gap-2 px-3 pt-3" aria-label="Pictures going with the message">
+            {attached.map((a) => (
+              <div key={a.id} className="group/att relative">
+                <img src={a.data} alt={a.name} title={a.name} className="h-14 w-14 rounded-lg object-cover ring-1 ring-line" />
+                <button
+                  type="button"
+                  onClick={() => changeAttached(attached.filter((x) => x.id !== a.id))}
+                  aria-label={`Remove ${a.name}`}
+                  title="Remove"
+                  className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-surface text-fg-muted shadow ring-1 ring-line transition hover:text-danger"
+                >
+                  <LuX aria-hidden className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+            {adding > 0 && <span role="status" className="text-[11px] text-fg-subtle">Adding…</span>}
+          </div>
+        )}
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = [...(e.target.files ?? [])];
+            e.target.value = "";
+            void addFiles(files);
+          }}
+        />
         <textarea
           ref={box}
           value={input}
           onChange={(e) => {
             caret.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
-            setInput(e.target.value);
+            changeInput(e.target.value);
           }}
           onSelect={(e) => {
             caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
           }}
+          onPaste={(e) => {
+            // A screenshot, or "Copy image" in a browser. Where there is text as
+            // well — cells copied from a spreadsheet come with a picture of
+            // themselves — the text is what was meant.
+            const files = [...e.clipboardData.files];
+            if (!files.length || e.clipboardData.getData("text/plain")) return;
+            e.preventDefault();
+            void addFiles(files);
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (matches.length > 0 && !isComposing(e)) {
+              const chosen = matches[Math.min(picked, matches.length - 1)];
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setPicked((i) => moveHighlight(i, e.key === "ArrowDown" ? 1 : -1, matches.length));
+                return;
+              }
+              if (e.key === "Tab" && !e.shiftKey) {
+                e.preventDefault();
+                complete(chosen);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setPaletteShut(true);
+                return;
+              }
+              // The command that is lit runs, rather than the half of its name
+              // that was typed going to the agent as a message. One that cannot
+              // do anything without an argument waits for it instead.
+              if (isEnter(e) && !e.shiftKey) {
+                e.preventDefault();
+                if (sending) return;
+                if (chosen.needsArgument) complete(chosen);
+                else void attempt(() => submit(`/${chosen.name}`, true));
+                return;
+              }
+            }
+            // Up in an empty box opens what you last said for rewriting, as in
+            // most chat programs — the quick way to fix a typo just sent.
+            if (
+              e.key === "ArrowUp" &&
+              !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey &&
+              !isComposing(e) &&
+              !input && !attached.length && !running
+            ) {
+              const last = items.find((it) => it.id === lastSaid);
+              if (last?.kind === "user") {
+                e.preventDefault();
+                setEditing(last.seq);
+                return;
+              }
+            }
+            if (
+              stopsRun({
+                key: e.key,
+                running,
+                empty: !input.trim() && !attached.length,
+                composing: isComposing(e),
+                paletteOpen: matches.length > 0,
+              })
+            ) {
+              e.preventDefault();
+              void attempt(onAbort);
+              return;
+            }
+            if (isEnter(e) && !e.shiftKey) {
               e.preventDefault();
               send();
             }
@@ -820,14 +1214,24 @@ export function Chat({
             session={session}
             running={running}
             turns={turns}
+            started={started}
             panelRequest={panelRequest}
             onPanelConsumed={() => setPanelRequest(null)}
             actions={<>
+              <button
+                type="button"
+                onClick={() => picker.current?.click()}
+                aria-label="Attach pictures or files"
+                title="Attach pictures or files — or paste or drop them here. Pictures go to the model; other files go in the chat's folder."
+                className="prompt-action"
+              >
+                <LuPaperclip aria-hidden className="h-4 w-4" />
+              </button>
               <DictationButton dictation={dictation} />
               <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
-              {running && !input.trim() ? <button type="button" aria-label="Stop generation" title="Stop generation" onClick={onAbort} className="prompt-action prompt-stop">
+              {running && !input.trim() && !attached.length ? <button type="button" aria-label="Stop generation" title="Stop generation (Esc)" onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
                 <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />
-              </button> : <button type="submit" aria-label="Send message" title={running ? 'Send follow-up' : 'Send message'} disabled={sending || !input.trim()}
+              </button> : <button type="submit" aria-label="Send message" title={running ? 'Send follow-up' : 'Send message'} disabled={sending || adding > 0 || (!input.trim() && !attached.length)}
                 className="prompt-action prompt-send">
                 <LuArrowUp aria-hidden className="h-5 w-5" />
               </button>}
@@ -879,6 +1283,7 @@ export function Chat({
                     <button
                       onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? void closeFiles() : setTerminal(false))}
                       title="Collapse"
+                      aria-label={`Close the ${kind === "browser" ? "browser" : kind === "files" ? "files" : "terminal"}`}
                       className={`${kind === "browser" ? "" : "ml-auto "}rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg`}
                     >
                       ✕
@@ -914,6 +1319,29 @@ export function Chat({
   );
 }
 
+/** What the agent said, as it is read — without the reasoning model's stray tags. */
+const assistantText = (item: Extract<Item, { kind: "assistant" }>) =>
+  (item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "");
+
+/** Copies a message, and for a moment says that it did. */
+function CopyAction({ text }: { text: string }) {
+  const [result, setResult] = useState<"done" | "failed" | null>(null);
+  const timer = useRef<number>();
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return (
+    <MessageAction
+      label={result === "done" ? "Copied" : result === "failed" ? "Could not copy" : "Copy"}
+      onClick={async () => {
+        setResult((await copyText(text)) ? "done" : "failed");
+        window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => setResult(null), 1500);
+      }}
+    >
+      {result === "done" ? <LuCheck className="h-3 w-3 text-ok" /> : <LuCopy className="h-3 w-3" />}
+    </MessageAction>
+  );
+}
+
 function MessageAction({
   label,
   onClick,
@@ -946,19 +1374,23 @@ function MessageAction({
 /** A sent message, opened for rewriting in place. */
 function MessageEditor({
   initial,
+  hasImages,
   onSave,
   onCancel,
 }: {
   initial: string;
+  /** The message went with pictures: they go again, so the words may be left out. */
+  hasImages?: boolean;
   onSave: (text: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(initial);
   const [saving, setSaving] = useState(false);
   const changed = value.trim() !== initial.trim();
+  const empty = !value.trim() && !hasImages;
 
   const save = async () => {
-    if (!value.trim() || !changed || saving) return;
+    if (empty || !changed || saving) return;
     setSaving(true);
     try {
       await onSave(value.trim());
@@ -974,8 +1406,8 @@ function MessageEditor({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Escape") onCancel();
-          if (e.key === "Enter" && !e.shiftKey) {
+          if (isEscape(e)) onCancel();
+          if (isEnter(e) && !e.shiftKey) {
             e.preventDefault();
             save();
           }
@@ -985,7 +1417,9 @@ function MessageEditor({
         className="w-full resize-none bg-transparent px-1.5 py-1 text-sm text-fg outline-none"
       />
       <div className="mt-1 flex items-center gap-2 px-1">
-        <span className="text-[11px] text-fg-faint">Replaces this message and everything after it.</span>
+        <span className="text-[11px] text-fg-faint">
+          Replaces this message and everything after it.{hasImages && " The pictures go with it again."}
+        </span>
         <button
           type="button"
           onClick={onCancel}
@@ -996,7 +1430,7 @@ function MessageEditor({
         <button
           type="button"
           onClick={save}
-          disabled={saving || !changed || !value.trim()}
+          disabled={saving || !changed || empty}
           className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/25 disabled:opacity-40"
         >
           {saving ? "Sending…" : "Send"}

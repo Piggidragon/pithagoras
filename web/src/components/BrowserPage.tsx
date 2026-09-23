@@ -9,6 +9,7 @@ import {
   LuShieldCheck,
 } from "react-icons/lu";
 import { api, type BrowserStatus } from "../api";
+import { pollWhileVisible } from "../poll";
 
 /**
  * The agent's browser.
@@ -45,8 +46,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 8000);
-    return () => clearInterval(t);
+    return pollWhileVisible(load, 8000);
   }, [dirty]);
 
   if (!status) {

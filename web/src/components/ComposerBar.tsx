@@ -143,6 +143,7 @@ export function ComposerBar({
   session,
   running,
   turns,
+  started = true,
   panelRequest,
   onPanelConsumed,
   actions,
@@ -153,6 +154,12 @@ export function ComposerBar({
   running: boolean;
   /** How many turns the transcript holds; each one that ends leaves pi with a new token count. */
   turns?: number;
+  /**
+   * Whether anything has been said in this conversation. Before that there is
+   * no context to measure — pi reports 0%, and a meter that reads 0% is not
+   * information, only a control that comes and goes with how the chat was made.
+   */
+  started?: boolean;
   /** Set by /model so the slash command opens the same picker as the pill. */
   panelRequest?: "model" | "effort" | null;
   onPanelConsumed?: () => void;
@@ -203,10 +210,14 @@ export function ComposerBar({
       })
       .catch(() => {});
 
+  /** Whether the chat had started when last looked at — see the effect on `started`. */
+  const wasStarted = useRef(started);
   useEffect(() => {
     setCfg(seed(session));
     setOpen(null);
     setDragEffort(null);
+    // Another chat, loaded here: its having started already is no change.
+    wasStarted.current = started;
     load();
   }, [sessionId]);
 
@@ -232,6 +243,19 @@ export function ComposerBar({
   useEffect(() => {
     if (!running) load();
   }, [running]);
+
+  // And when the first thing is said. The meter is not drawn before that, and
+  // what it would show is whatever was fetched while the chat was still empty —
+  // nothing, for a chat pi had not started. A run that ends before the page has
+  // seen it begin would otherwise leave it out until the next one.
+  //
+  // Only when it changes to started: a chat opened with messages in it is
+  // loaded by the effects above, and a third request for the same would be
+  // one more rebuild of the model catalogue.
+  useEffect(() => {
+    if (started && !wasStarted.current) load();
+    wasStarted.current = started;
+  }, [started]);
 
   // And after each turn of a run, when pi has the new token count: this used to
   // wait for the whole run to end, so the percentage sat still for as long as
@@ -415,7 +439,7 @@ export function ComposerBar({
         >
           <LuBlocks className="h-3.5 w-3.5" />
         </button>
-        {cfg.stats && (
+        {cfg.stats && started && (
           <ContextPill
             sessionId={sessionId}
             cfg={cfg as PiConfig & { stats: NonNullable<PiConfig["stats"]> }}

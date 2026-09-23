@@ -280,6 +280,8 @@ export function channelsRouter(): Router {
     try {
       const output = await installChannelPackage(spec.trim());
       const { channels, broken } = await loadChannels(true);
+      // A channel set up before its package was here has been waiting on it.
+      void channelSupervisor.sync().catch(() => {});
       res.json({ ok: true, output, kinds: channels.map(kindToApi), broken });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

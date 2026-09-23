@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuCheck, LuTerminal, LuX } from "react-icons/lu";
 import { api } from "../api";
+import { isEnter, isEscape } from "../shortcuts";
 
 export interface UiRequest {
   id: string;
@@ -40,7 +41,9 @@ export function ExtensionDialog({
   };
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && respond({ cancelled: true });
+    // Not the Escape that takes back an input method's word in its field:
+    // that would answer the extension "cancelled" for somebody still typing.
+    const onKey = (e: KeyboardEvent) => isEscape(e) && respond({ cancelled: true });
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [request.id]);
@@ -50,7 +53,12 @@ export function ExtensionDialog({
       className="fixed inset-0 z-[60] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && respond({ cancelled: true })}
     >
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-line bg-surface shadow-pop">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={request.title || "Extension"}
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-line bg-surface shadow-pop"
+      >
         <header className="flex items-start gap-3 border-b border-line px-4 py-3">
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/12 text-accent">
             <LuTerminal className="h-4 w-4" />
@@ -104,7 +112,7 @@ export function ExtensionDialog({
                   autoFocus
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && respond({ value })}
+                  onKeyDown={(e) => isEnter(e) && respond({ value })}
                   placeholder={request.placeholder}
                   className="w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-faint focus:border-accent/60"
                 />

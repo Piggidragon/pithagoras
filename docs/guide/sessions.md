@@ -21,20 +21,69 @@ not wait for the work to finish. Close the tab if you like.
 While a run is in progress you can keep typing; further messages are queued.
 **Stop** aborts the current run.
 
+## The message box
+
+What you have typed and not sent stays with its chat. Switching to another chat
+gives you that chat's box, and coming back gives you yours again — it survives a
+reload too, for as long as the tab is open. Nothing typed in one chat can be
+sent from another by accident.
+
+A message that does not go — the portal is unreachable, or refuses it — goes back
+in the box, in front of anything typed since, with the reason shown above it.
+Nothing is thrown away to be typed again.
+
+### Pictures and files
+
+Paste a screenshot into the box, drop pictures on it, or pick them with the
+paperclip, and they wait above the words as thumbnails — the × takes one back
+out. They go to the model with the message, up to eight of them, and a message
+can be a picture alone. The sent message shows them; click one to open it
+full size.
+
+A photo straight off a phone is made smaller in the browser before it goes:
+2048 pixels on its longer side, as a JPEG. Models scale anything bigger down on
+their side anyway, so those pixels would only cost upload time and context. A
+picture that already fits goes as it is, and a GIF always does. PNG, JPEG, GIF
+and WebP are taken; each must be under 5 MB once made ready.
+
+If the model cannot see pictures, pi leaves them out and tells it one was there,
+and the chat says so in a line above the answer — pick a model that takes images
+and **Retry**. Whether a model takes them is the `input` of its entry in
+`models.json` (`["text", "image"]`).
+
+Anything that is not a picture — a PDF, a spreadsheet, a zip — is put in the
+chat's folder instead, and the box gets a line naming it, so the agent knows to
+look. A name that is taken there gets a number (`report (2).pdf`); nothing is
+replaced. The agent has the tools for those files; the model on its own does not.
+
+Pictures waiting in the box stay with their chat like the words do, but only
+while the page is open: they are not kept across a reload.
+
+Two keys work from anywhere on the page:
+
+| Key | Does |
+| --- | --- |
+| `/` | Jump to the message box with the command list open. Not while you are typing somewhere else, where it is a character |
+| `Esc` | In the message box, **stop the run**. Only when the box is empty — the moment the send button is a stop button — so it can never cost you words |
+
 ## Sent messages
 
 Hovering one of your messages gives it these actions:
 
+- **Copy** puts the text on the clipboard (a message that is only pictures has none to copy). The agent's replies have the same
+  button, once they are whole. It works over plain HTTP too, where browsers
+  withhold the clipboard API, by falling back to the older way.
 - **Retry**, on your last message, drops the agent's reply to it — a half-finished
   one after a Stop, say — and sends the same text again. It is editing without
   changing a word, so the agent's memory ends up as if the first attempt never
-  happened rather than holding it and a second copy of the question.
-- **Send again**, on an older message, sends its text as a new message at the
-  end. Retrying one of those would drop everything since. While a run is going
+  happened rather than holding it and a second copy of the question. Pictures
+  that went with it go again.
+- **Send again**, on an older message, sends its text and pictures as a new
+  message at the end. Retrying one of those would drop everything since. While a run is going
   it queues, like anything else you type.
 - **Edit** rewrites the message in place. It replaces that message *and
   everything after it* — the agent's answers were to a question that is no
-  longer the same one — and sends the new text.
+  longer the same one — and sends the new text, with the same pictures.
 - **Delete** removes the message and the agent's answer to it, tool calls
   included, and leaves the rest of the conversation as it was.
 
@@ -68,11 +117,21 @@ paths.
 Pinning is stored server-side and drives the ordering (`pinned DESC,
 updated_at DESC`), so the sidebar and the Sessions page never disagree.
 
+With more chats than the sidebar lists, it has a search field above them. It looks
+through every chat by name and folder, not only the ones shown, and Escape clears
+it. The Sessions page has the same search with more room.
+
+The chat's name at the top of the conversation renames it too: click it.
+A name is at most 120 characters, wherever it is given — `/name` included.
+
 Hovering a session gives you pin, rename and delete. Renaming turns the name into
 a field where it stands — Enter or clicking away keeps the new one, Escape puts
 the old one back — and double-clicking the name does the same. Delete asks in the
-portal's own dialog, with the button saying what it will do. The Agent tab's
-conversations can be renamed and deleted the same way, from the row.
+portal's own dialog, with the button saying what it will do — and **Settings →
+General → Confirmations** turns that question off, for chats, messages, files,
+skills, routines, projects, voices and channels alike. It is kept per browser.
+Discarding unsaved changes is still asked about. The Agent tab's conversations
+can be renamed and deleted the same way, from the row.
 
 ## Model and effort
 
@@ -94,6 +153,31 @@ pi coerces the level on a model that does not reason — ask for `high` on a
 non-reasoning model and it lands on `off`. What gets stored is the level pi
 resolved to, not the one you asked for, so a rejected value is not reapplied on
 every restart.
+
+### When `off` does not switch thinking off
+
+The pill can say `off` and the model go on thinking. What `off` puts in the
+request is decided by pi from the model's entry in `models.json`, and for an
+OpenAI-compatible server it does not know how to switch reasoning off unless it
+is told. Left alone it sends `reasoning_effort: "off"`, which llama.cpp does not
+read: measured on a Qwen-family model, that answer reasons exactly as much as
+`medium` does.
+
+Those models switch thinking through their chat template, so say so:
+
+```json
+{
+  "id": "Ornith1.5-35b",
+  "reasoning": true,
+  "thinkingLevelMap": { "off": "off", "minimal": null, "low": null, "medium": "medium", "high": null, "xhigh": null, "max": null },
+  "compat": { "thinkingFormat": "qwen-chat-template" }
+}
+```
+
+pi then sends `chat_template_kwargs: { "enable_thinking": false }` for `off` and
+`true` for any other level — the request above went from 67 tokens to 4. A model
+with `"off": null` in its `thinkingLevelMap` has no off at all and the pill does
+not offer one; give it `"off": "off"` and the `compat` line to add it.
 
 ## Context
 
@@ -122,8 +206,10 @@ Set what one chat really holds in the pill's **Context window** field; **Reset**
 goes back to the default (below) or, without one, the model's own number. The
 setting belongs to the model, not the chat: it applies to every chat that uses
 that model, open ones included, and is kept in the portal's database —
-`models.json` is left alone. The pill appears once a chat has run; before that
-the window is the one in the model's entry, or the default below.
+`models.json` is left alone. The pill appears once something has been said in a chat, and not before: an
+empty conversation has nothing to measure, and a meter reading 0% is not
+information. Until then the window is the one in the model's entry, or the
+default below.
 
 For all models at once there is a **Context window** default under
 Settings → General. It is a ceiling: a model that declares more is held to it, a
@@ -148,6 +234,21 @@ before it was a feature:
 
 If the server restarts mid-run, that session is marked `interrupted` rather than
 left spinning. Send a message to carry on.
+
+## The tab
+
+The browser tab's title follows the chat you have open: `● Fix login · working`
+while it runs, `❓ Fix login · asks you` while an extension is waiting for an
+answer, and the plain name when it is done. Whether it is worth switching back
+to is then readable from the tab strip.
+
+The pages that refresh themselves — the sessions in the sidebar, Agent, Routines,
+Channels, Browser, Audit — do that only while the page is visible, and once at
+once when you come back to it. A tab left in the background asks for nothing.
+
+If the connection to a chat breaks, the page reconnects — after two seconds,
+then four, eight and at most fifteen — and says so once a second attempt has
+failed. It is not shown for a blip.
 
 ## Status dots
 

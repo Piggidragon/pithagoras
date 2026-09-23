@@ -20,6 +20,7 @@ curl -s -b jar localhost:4100/api/sessions
 | --- | --- |
 | `GET /api/auth/status` | `{ authRequired, authed }` |
 | `POST /api/auth/login` | `{ password }` → sets the cookie |
+| `POST /api/auth/logout` | clears the cookie, and refuses the login it held from then on |
 
 ## Workspaces
 
@@ -51,7 +52,7 @@ them. See [Projects](/guide/projects).
 | `GET /api/agent/sessions` | `{ sessions, agentHome }` — conversations reached through a channel, each with the channel that owns it |
 | `POST /api/sessions` | `{ workspace?, title? }` — no workspace means Home, the agent's directory; no title means "New chat", replaced by the first message |
 | `GET /api/sessions/:id` | One session |
-| `PATCH /api/sessions/:id` | `{ title?, pinned? }` |
+| `PATCH /api/sessions/:id` | `{ title?, pinned? }` — a title is cut to 120 characters |
 | `DELETE /api/sessions/:id` | Stops it if running, then deletes it, its events and pi's conversation file for it (in `SESSION_DIR`). The folder it worked in is left alone. |
 
 A session:
@@ -87,6 +88,9 @@ out of it, by `..` or by a link, is refused with 400.
 | `GET /api/sessions/:id/file?path=` | `{ binary: false, size, mtime, content }`, or `{ binary: true, size, mtime }` for what is not text or is over 1 MB |
 | `GET /api/sessions/:id/file?path=&download=1` | The file, as a download |
 | `PUT /api/sessions/:id/file?path=` | `{ content, mtime? }` → saves it. With `mtime`, the time it was read at, the save is refused with 409 if the file has changed since. 413 over 1 MB |
+| `PUT /api/sessions/:id/file?path=` with `create: true` | `{ content, create: true }` → makes the file, and refuses with 409 if something already has the name |
+| `POST /api/sessions/:id/folder?path=` | `{ name }` → makes a folder in the folder at `path`, answers `{ path }`. 409 if the name is taken |
+| `POST /api/sessions/:id/upload?path=&name=` | The file as the request body, sent as `application/octet-stream` → put in the folder at `path` as `name`, or `name (2)` and so on if that is taken; answers `{ path, size }`. Streamed to disk and put in place only once complete. 413 over 2 GB |
 | `PATCH /api/sessions/:id/file?path=` | `{ name }` → gives a file or folder another name in the same folder, and answers `{ path }`. 400 for a name with a `/` or `\`, or `.` or `..`; 409 if the name is taken. A link is renamed as the link |
 | `DELETE /api/sessions/:id/file?path=` | Removes a file, or a folder and all in it; a link is removed as the link. The folder itself is refused |
 | `GET /api/sessions/:id/archive?path=` | The folder — or, with `path`, a folder in it — as a `.tar.gz`, without `node_modules`, `.git`, `dist`, `build` and virtual environments. If `tar` cannot run the answer is a 500; if it fails part-way the download is cut off, so it does not end as if it were whole. A file that changes while it is read is not a failure |
@@ -95,7 +99,8 @@ out of it, by `..` or by a link, is refused with 400.
 
 | | |
 | --- | --- |
-| `POST /api/sessions/:id/prompt` | `{ message }` |
+| `POST /api/sessions/:id/prompt` | `{ message, images? }` — `images` is up to eight `{ data }`, each base64 or a `data:` URL of a PNG, JPEG, GIF or WebP under 5 MB. The type is read from the bytes. `message` may be empty when there are pictures |
+| `GET /api/sessions/:id/images/:name` | A picture sent with a message; `portal_prompt` events name them in `payload.images` |
 | `POST /api/sessions/:id/abort` | Stop the current run |
 | `POST /api/sessions/:id/ui-response` | `{ id, value?, cancelled? }` — answer an extension dialog |
 | `GET /api/tools` | `{ tools, off }` — every tool the portal has seen, and which are off by default |
@@ -189,6 +194,7 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `DELETE /api/packages` | `{ spec }` |
 | `POST /api/packages/update` | Update everything |
 | `GET /api/extensions` | Parsed packages with their recovered settings |
+| `PUT /api/extensions/enabled` | `{ spec, enabled }` — switch a package off or on without uninstalling it; reloads idle open sessions and says how many were left waiting |
 | `PUT /api/extensions/settings` | `{ key, value }` — empty value removes the key |
 | `GET /api/pi-settings` | Raw `settings.json` |
 | `PUT /api/pi-settings` | `{ content }` — refused unless it parses as JSON |

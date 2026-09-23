@@ -25,10 +25,11 @@ import {
   writeAgentFile,
   type WizardInput,
 } from "./agent-setup.js";
-import { sessions, EXECUTOR_KIND } from "./session-manager.js";
+import { sessions, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
+import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
-import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth } from "./auth.js";
+import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth, signOut } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -53,7 +54,7 @@ import {
   writeCompactionSettings,
 } from "./pi-settings.js";
 import { eventTime, getDb } from "./db.js";
-import { getBuiltinCommands } from "./pi/builtins.js";
+import { getBuiltinCommands, picturesRefused } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
 import {
@@ -103,7 +104,19 @@ const REPLAY_EVENTS = 1_200;
 const BIN_DIR = path.resolve(process.env.BIN_DIR || "/data/bin");
 
 const app = express();
-app.use(express.json({ limit: "2mb" }));
+// A message can carry pictures, which do not fit in what every other request is
+// allowed. Only that route gets the room, and only once the password has been
+// checked, so nobody can make the server read a body that size without it.
+const PROMPT_ROUTE = /^\/api\/sessions\/[^/]+\/prompt$/;
+const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BYTES * 4) / 3 / 1024 / 1024) + 2}mb` });
+// An upload is the file itself, streamed to disk by its route, whatever type
+// the browser gave it — a .json file must not be read as a request.
+const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
+const smallJson = express.json({ limit: "2mb" });
+app.use((req, res, next) => {
+  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path)) return next();
+  smallJson(req, res, next);
+});
 app.use(cookieParser());
 
 // --- auth ---
@@ -118,6 +131,11 @@ app.post("/api/auth/login", (req, res) => {
     return res.status(401).json({ error: "Wrong password" });
   }
   issueCookie(res);
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  signOut(req, res);
   res.json({ ok: true });
 });
 
@@ -360,6 +378,20 @@ app.delete("/api/projects/:name", async (req, res) => {
 
 // --- sessions ---
 
+/** The longest name a chat can be given: what the rename field takes. */
+const MAX_TITLE = 120;
+
+/**
+ * A name as it is kept: on one line and no longer than the field allows, however
+ * it came in — the rename field, /name, or a chat made through the API. By
+ * character, so an emoji at the cut is not left in halves. Empty when there is
+ * no name in it.
+ */
+const cleanTitle = (raw: unknown): string =>
+  typeof raw === "string"
+    ? Array.from(raw.replace(/\s+/g, " ").trim()).slice(0, MAX_TITLE).join("").trimEnd()
+    : "";
+
 /** SQLite stores pinned as 0/1; the API speaks booleans. */
 const toApi = (s: ReturnType<typeof getSession> & {}) => ({
   ...s,
@@ -409,7 +441,7 @@ app.get("/api/agent/sessions", (_req, res) => {
  * "browser" is a reserved slug so these group together on the Agent tab.
  */
 app.post("/api/agent/sessions", (req, res) => {
-  const title = typeof req.body?.title === "string" && req.body.title.trim() ? req.body.title.trim() : "";
+  const title = cleanTitle(req.body?.title);
   try {
     const { session } = resolveChannelSession({
       channelSlug: "browser",
@@ -458,7 +490,8 @@ app.put("/api/agent/files/:name", (req, res) => {
 });
 
 app.post("/api/sessions", (req, res) => {
-  const { title, workspace } = req.body ?? {};
+  const { workspace } = req.body ?? {};
+  const title = cleanTitle(req.body?.title);
   if (workspace !== undefined && (typeof workspace !== "string" || !workspace)) {
     return res.status(400).json({ error: "workspace must be a path" });
   }
@@ -486,11 +519,11 @@ app.post("/api/sessions", (req, res) => {
   createSession({
     id,
     // Named after its first message once there is one; see the prompt route.
-    title: (typeof title === "string" && title.trim()) || NEW_CHAT_TITLE,
+    title: title || NEW_CHAT_TITLE,
     workspace: resolved,
     executor: EXECUTOR_KIND,
     // Only a chat that was not given a name is named later.
-    auto_title: typeof title === "string" && title.trim() ? 0 : 1,
+    auto_title: title ? 0 : 1,
   });
   res.json(toApi(getSession(id)!));
 });
@@ -505,8 +538,10 @@ app.patch("/api/sessions/:id", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const { title, pinned } = req.body ?? {};
-  // A name somebody chose stays, whatever it says.
-  if (typeof title === "string" && title.trim()) updateSession(session.id, { title: title.trim(), auto_title: 0 });
+  // A name somebody chose stays, whatever it says — up to the length the field
+  // allows, which /name and the API are held to as well.
+  const name = cleanTitle(title);
+  if (name) updateSession(session.id, { title: name, auto_title: 0 });
   if (typeof pinned === "boolean") updateSession(session.id, { pinned: pinned ? 1 : 0 });
   res.json(toApi(getSession(session.id)!));
 });
@@ -522,17 +557,29 @@ app.delete("/api/sessions/:id", async (req, res) => {
 
 // --- prompting ---
 
-app.post("/api/sessions/:id/prompt", async (req, res) => {
+app.post("/api/sessions/:id/prompt", promptJson, async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  const message = req.body?.message;
-  if (typeof message !== "string" || !message.trim()) {
+  const message = req.body?.message ?? "";
+  let parsed;
+  try {
+    parsed = parseImages(req.body?.images);
+  } catch (e) {
+    if (e instanceof ImageError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  // A picture on its own is a message too.
+  if (typeof message !== "string" || (!message.trim() && !parsed.length)) {
     return res.status(400).json({ error: "message required" });
   }
+  // Refused before they are saved: the browser puts them back in the box.
+  const refused = parsed.length ? await picturesRefused(message) : undefined;
+  if (refused) return res.status(400).json({ error: refused });
   try {
+    const images = saveImages(IMAGE_ROOT, session.id, parsed);
     // Returns as soon as pi accepts the prompt. The run continues server-side
     // regardless of what this browser does next.
-    await sessions.prompt(session.id, message, { voice: req.body?.voice === true });
+    await sessions.prompt(session.id, message, { voice: req.body?.voice === true, images });
     // A chat that has no name yet is named after what it starts with — once pi
     // has taken the message, so one that never got there does not keep its name.
     // Read again: a rename that came in meanwhile is not overwritten.
@@ -546,7 +593,7 @@ app.post("/api/sessions/:id/prompt", async (req, res) => {
 
 // --- editing the conversation ---
 
-const editStatus = { busy: 409, missing: 404 } as const;
+const editStatus = { busy: 409, missing: 404, empty: 400 } as const;
 
 /** Removes a message and the agent's answer to it. */
 app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {
@@ -562,7 +609,9 @@ app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {
 /** Replaces a message: it and everything after it are dropped, and the new text is sent. */
 app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
   const message = req.body?.message;
-  if (typeof message !== "string" || !message.trim()) {
+  // Empty is allowed here: a message that was only a picture is retried as one.
+  // Whether it has one is for editMessage to say.
+  if (typeof message !== "string") {
     return res.status(400).json({ error: "message required" });
   }
   try {
@@ -572,6 +621,18 @@ app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
     if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
     res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
   }
+});
+
+/** A picture sent with a message, for the transcript to show. */
+app.get("/api/sessions/:id/images/:name", (req, res) => {
+  const file = imagePath(IMAGE_ROOT, req.params.id, req.params.name);
+  if (!file) return res.status(404).json({ error: "Not found" });
+  // Named by a random id and never rewritten, so it can be kept as long as a
+  // browser likes. The type is the one its bytes were checked against.
+  res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.type(mimeOf(req.params.name)!);
+  res.sendFile(file);
 });
 
 /** The browser answering a dialog an extension is waiting on. */
@@ -944,7 +1005,8 @@ app.get("/api/sessions/:id/events/before", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const before = Number(req.query.before ?? 0) || 0;
-  const limit = Math.min(Number(req.query.limit) || 1200, 3000);
+  // At least one: SQLite takes a negative LIMIT as no limit at all.
+  const limit = Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 1200, 3000));
   const rows = eventsBefore(session.id, before, limit);
   res.json({
     events: rows.map((r) => ({
@@ -1028,6 +1090,15 @@ app.get("/api/sessions/:id/events", (req, res) => {
   });
 });
 
+/**
+ * Anything under /api that no route took. Answered in JSON, like every other
+ * API reply — Express's own page is HTML, and the page could only show
+ * "HTTP 404" for it, not which address was wrong.
+ */
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: `No such API route: ${req.method} ${req.originalUrl.split("?")[0]}` });
+});
+
 // --- static web UI ---
 
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
@@ -1035,6 +1106,31 @@ if (existsSync(webDist)) {
   app.use(express.static(webDist));
   app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
 }
+
+/**
+ * What a route did not catch, in JSON with its message.
+ *
+ * Express answers a thrown error, and a body it could not read, with an HTML
+ * page, and all the page could make of that was "HTTP 500" or "HTTP 413". A
+ * body that is too big or not JSON is said in words; the rest keeps its own
+ * message, as the routes' own catches already give it.
+ */
+app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Half an answer is already on its way — an event stream, a download.
+  if (res.headersSent) return next(err);
+  const e = err as { status?: number; statusCode?: number; type?: string; message?: string };
+  const status = Number(e.status ?? e.statusCode) || 500;
+  const error =
+    e.type === "entity.too.large"
+      ? PROMPT_ROUTE.test(req.path)
+        ? "The message and its pictures are more than the server takes in one go"
+        : "That is more than the server takes in one request"
+      : e.type === "entity.parse.failed"
+        ? "The request was not valid JSON"
+        : e.message || "Something went wrong on the server";
+  if (status >= 500) console.error(`[portal] ${req.method} ${req.path} failed:`, err);
+  res.status(status).json({ error });
+});
 
 // On PATH via the image, but a volume that predates it has no such directory —
 // docker only seeds a volume that is empty, so an existing deploy would carry a
@@ -1093,6 +1189,10 @@ async function shutdown(signal: string) {
   await channelSupervisor.shutdown();
   await sessions.shutdown();
   server.close(() => process.exit(0));
+  // Every open page holds an event stream that never ends by itself, and
+  // close() waits for them — so a restart always sat out the full ten seconds
+  // below, which is as long as docker waits before it kills.
+  server.closeAllConnections();
   setTimeout(() => process.exit(0), 10_000).unref();
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

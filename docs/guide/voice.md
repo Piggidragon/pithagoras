@@ -251,6 +251,87 @@ The managed **Install voice** button still installs Breeze and Whisper; it does
 not know about this runtime. Do not run both on the same GPU unless it has the
 memory for both.
 
+### Behind llama-swap
+
+With [llama-swap](https://github.com/mostlygeek/llama-swap) as the only gateway
+on the host, audio.cpp does not need a port of its own: llama-swap starts it on
+the first speech request and routes `/v1/audio/speech` and
+`/v1/audio/transcriptions` to it by the request's `model`. One llama-swap entry
+serves both models, with the two model ids as aliases, so the request reaches
+audio.cpp with `chatterbox` or `qwen3-asr` unchanged:
+
+```yaml
+models:
+  audio-cpp:
+    cmd: |
+      /path/to/audiocpp_server --config /path/to/server.json
+      --host 127.0.0.1 --port ${PORT}
+    env: ["CUDA_DEVICE_ORDER=PCI_BUS_ID", "CUDA_VISIBLE_DEVICES=1"]
+    aliases: [chatterbox, qwen3-asr]
+    ttl: 900          # stop the process after 15 quiet minutes
+    unlisted: true    # not a chat model, so keep it out of /v1/models
+```
+
+Breeze, the English voice, is a third model in the same `server.json` (`"id":
+"breeze"`, `"family": "breeze_tts"`, `"mode": "streaming"`, the layout in
+`deploy/cortex-voice/audio-cpp.json`) with `breeze` added to the aliases. Choose
+**Breeze audio.cpp · streaming** as the speech runtime in the portal and it sends
+`model: breeze`. The
+audio.cpp build has to include the family: a build made with
+`--model-set custom --models chatterbox,qwen3_asr` cannot load it, so add
+`breeze_tts` to `--models` and rebuild. With `"max_loaded_models": 2` the server
+keeps Qwen3-ASR and whichever speaking voice was used last resident, and
+unloads the other. The Q8 file is published as
+`Breeze-TTS-2-GGUF/breeze-tts-2-q8_0.gguf` in `audio-cpp/audio.cpp-gguf`
+on Hugging Face, so no local quantizing step is needed.
+
+audio.cpp loads lazily on its own: with `"lazy_load": true` in `server.json` a
+model is read on the first request that names it, and `"idle_unload_ms"` frees
+it again after that long without use. llama-swap's `ttl` is the coarser layer
+above, ending the whole process and its CUDA context. A cold start through the
+gateway measured 6.5 s for a first spoken sentence.
+
+The gateway runs one model at a time unless told otherwise, so without a
+`routing` section every speech request would unload the language model. Put the
+audio entry in a matrix set with the LLM that leaves its GPU free. Speech lives
+on the second GPU, so it goes next to a model pinned to the first, and a model
+split across both stays alone:
+
+```yaml
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        vars: { o: Ornith1.5-35b, q: Qwen3.8-27b, a: audio-cpp }
+        sets:
+          pinned: "o & a"
+          split: "q"
+```
+
+In the portal, use the gateway for all three URLs. **Speech recognition URL**
+is `http://127.0.0.1:8080/v1/audio/transcriptions` and **Speech synthesis URL**
+is `http://127.0.0.1:8080/v1/audio/speech`; the model names stay `qwen3-asr` and
+`chatterbox`.
+
+The language model is a plain provider in pi's `models.json`, not the
+`pi-llama-cpp` package. That package asks `/props?model=<id>` about every model,
+and llama-swap answers such a request by loading the model, so registering three
+models swaps through all of them.
+
+```json
+{
+  "providers": {
+    "llama-swap": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "none",
+      "models": [{ "id": "Ornith1.5-35b", "reasoning": true, "contextWindow": 262144 }]
+    }
+  }
+}
+```
+
 ## First spoken response
 
 On the host executor with a llama.cpp provider, each voice prompt disables

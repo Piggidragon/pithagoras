@@ -3,6 +3,7 @@ import { LuChevronRight, LuRefreshCw } from "react-icons/lu";
 import { api, type PiConfig } from "../api";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
+import { isEnter } from "../shortcuts";
 
 /**
  * Context fill is the number that decides whether a long session keeps working,
@@ -117,7 +118,7 @@ function ContextWindow({
             setDirty(true);
           }}
           onBlur={commit}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          onKeyDown={(e) => isEnter(e) && e.currentTarget.blur()}
           className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2 py-1 text-sm tabular-nums text-fg disabled:opacity-50"
         />
         {limit ? (

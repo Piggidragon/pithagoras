@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import type { PiClient, PiCommand, PiState, PiStats, PiTool } from "./types.js";
+import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
@@ -124,14 +125,16 @@ function viaProgressProxy<T extends { provider?: string; baseUrl?: string }>(
 }
 
 /**
- * Both ways a llama.cpp server shows up.
+ * The ways a llama.cpp server shows up.
  *
  * pi has a built-in provider called `llama.cpp`, and the `pi-llama-cpp` package
- * registers one per server as `llama-server=<url>`. This deployment uses the
- * second, so matching only the first meant the reroute never once ran.
+ * registers one per server as `llama-server=<url>`. Behind a llama-swap gateway
+ * neither fits — pi-llama-cpp probes `/props?model=<id>` for every model, which
+ * llama-swap answers by loading it — so the gateway is a plain provider in
+ * models.json named `llama-swap`. It is still llama-server underneath.
  */
 function isLlama(provider: string | undefined): boolean {
-  return provider === "llama.cpp" || (provider?.startsWith("llama-server") ?? false);
+  return provider === "llama.cpp" || provider === "llama-swap" || (provider?.startsWith("llama-server") ?? false);
 }
 
 /**
@@ -510,13 +513,17 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return true;
   }
 
-  async prompt(message: string, options?: { voice?: boolean }): Promise<void> {
+  async prompt(message: string, options?: { voice?: boolean; images?: ImageContent[] }): Promise<void> {
     if (options?.voice) {
       this.voiceFirst?.arm(this.isIdle());
     } else {
       this.voiceFirst?.reset();
     }
-    const promptOptions = { expandPromptTemplates: true, streamingBehavior: "followUp" };
+    const promptOptions = {
+      expandPromptTemplates: true,
+      streamingBehavior: "followUp",
+      ...(options?.images?.length ? { images: options.images } : {}),
+    };
     try {
       if (options?.voice) {
         await acceptPrompt(
@@ -576,6 +583,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         name: model?.name ?? "unknown",
         provider: model?.provider ?? "unknown",
         contextWindow: model?.contextWindow,
+        input: Array.isArray(model?.input) ? model.input : undefined,
       },
       thinkingLevel: this.session.thinkingLevel ?? "medium",
       autoCompactionEnabled: callable(this.session, "autoCompactionEnabled") ?? true,
@@ -619,6 +627,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       name: m.name ?? m.id,
       provider: m.provider,
       contextWindow: m.contextWindow,
+      input: Array.isArray(m.input) ? m.input : undefined,
     }));
   }
 

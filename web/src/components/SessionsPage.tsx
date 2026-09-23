@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { LuMessagesSquare, LuPin, LuPinOff, LuSearch, LuTrash2 } from "react-icons/lu";
 import type { Session, SessionStatus } from "../api";
 import { when } from "../time";
+import { filterSessions } from "../session-filter";
 import { confirmDialog } from "./ConfirmDialog";
 
 const STATUS_STYLE: Record<SessionStatus, string> = {
@@ -41,11 +42,7 @@ export function SessionsPage({
   const running = sessions.filter((s) => s.status === "running").length;
   const pinnedCount = sessions.filter((s) => s.pinned).length;
 
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter((s) => (s.title + s.workspace).toLowerCase().includes(q));
-  }, [sessions, query]);
+  const matches = useMemo(() => filterSessions(sessions, query), [sessions, query]);
 
   return (
     <div className="flex h-full flex-col">
@@ -130,6 +127,7 @@ export function SessionsPage({
                             message: "It is stopped if it is running, and its transcript is removed.",
                             confirmLabel: "Delete",
                             danger: true,
+                            deletes: true,
                           })
                         ) {
                           onDelete(s.id);

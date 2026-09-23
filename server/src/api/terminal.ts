@@ -1,5 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFileSync, readlinkSync } from "node:fs";
 import express, { type Router } from "express";
 import { getSession } from "../db.js";
 
@@ -22,6 +23,15 @@ import { getSession } from "../db.js";
 
 const MAX_SCROLLBACK = 200_000;
 
+/**
+ * How long a shell is kept with nobody watching it.
+ *
+ * The panel closes its shell when it goes, but a tab that is closed or reloaded
+ * never gets to say so, and each one used to leave a shell running for as long
+ * as the portal did. Long enough to ride out a reload or a dropped connection.
+ */
+const UNWATCHED_MS = 5 * 60_000;
+
 interface Term {
   id: string;
   proc: ChildProcess;
@@ -29,9 +39,42 @@ interface Term {
   buffer: string;
   listeners: Set<(chunk: string) => void>;
   exited: boolean;
+  /** Set while nobody is attached; ends the shell if nobody comes back. */
+  reaper?: NodeJS.Timeout;
 }
 
 const terms = new Map<string, Term>();
+
+function end(term: Term): void {
+  clearTimeout(term.reaper);
+  if (!term.exited) term.proc.kill("SIGHUP");
+  terms.delete(term.id);
+}
+
+function watchUnattended(term: Term): void {
+  clearTimeout(term.reaper);
+  if (term.listeners.size) return;
+  term.reaper = setTimeout(() => end(term), UNWATCHED_MS);
+  term.reaper.unref();
+}
+
+/**
+ * The pty the shell is on: `script` holds the master, its child the other end.
+ *
+ * Linux only, through /proc, which is where the portal runs. Undefined anywhere
+ * it cannot be found, and the caller falls back.
+ */
+function ptyOf(term: Term): string | undefined {
+  const pid = term.proc.pid;
+  if (!pid) return undefined;
+  try {
+    const [child] = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/);
+    const tty = child ? readlinkSync(`/proc/${child}/fd/0`) : "";
+    return tty.startsWith("/dev/pts/") ? tty : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function create(cwd: string): Term {
   const id = randomUUID().slice(0, 8);
@@ -44,6 +87,14 @@ function create(cwd: string): Term {
   });
 
   const term: Term = { id, proc, buffer: "", listeners: new Set(), exited: false };
+  // A folder that is gone, or no `script` on this machine. Unhandled, the
+  // spawn failure is thrown from the process object and takes the portal down.
+  proc.on("error", (e) => {
+    term.exited = true;
+    const text = `\r\nCould not start a shell: ${e.message}\r\n`;
+    term.buffer += text;
+    for (const l of term.listeners) l(text);
+  });
 
   const push = (chunk: Buffer) => {
     const text = chunk.toString("utf8");
@@ -54,10 +105,13 @@ function create(cwd: string): Term {
   proc.stderr?.on("data", push);
   proc.on("exit", () => {
     term.exited = true;
-    for (const l of term.listeners) l("\r\n[session ended]\r\n");
+    const text = "\r\n[session ended]\r\n";
+    term.buffer += text;
+    for (const l of term.listeners) l(text);
   });
 
   terms.set(id, term);
+  watchUnattended(term);
   return term;
 }
 
@@ -87,7 +141,14 @@ export function terminalRouter(): Router {
     // What is already on screen, so reconnecting does not show an empty shell.
     if (term.buffer) send(term.buffer);
     term.listeners.add(send);
-    req.on("close", () => term.listeners.delete(send));
+    watchUnattended(term);
+    // Without traffic a proxy takes an idle shell for a dead connection.
+    const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      term.listeners.delete(send);
+      watchUnattended(term);
+    });
   });
 
   router.post("/terminal/:id/input", (req, res) => {
@@ -100,23 +161,33 @@ export function terminalRouter(): Router {
   /**
    * Tell the pty its new size.
    *
-   * Written as a command rather than an ioctl: there is no pty handle here to
-   * resize, but there is a real tty on the other end, and stty is how you tell
-   * one how big it is.
+   * With stty from outside, on the shell's own tty: the kernel then tells
+   * whatever is in front — the shell, vim, top — that the window changed.
+   * Typing `stty` into the shell instead put the command on the screen and in
+   * the history on every resize, and into whatever program had the keyboard.
+   * That remains the fallback where the tty cannot be found.
    */
   router.post("/terminal/:id/resize", (req, res) => {
     const term = terms.get(req.params.id);
-    const rows = Number(req.body?.rows) || 24;
-    const cols = Number(req.body?.cols) || 80;
+    const size = (v: unknown, fallback: number) => {
+      const n = Math.round(Number(v));
+      return Number.isFinite(n) && n >= 2 && n <= 1000 ? n : fallback;
+    };
+    const rows = size(req.body?.rows, 24);
+    const cols = size(req.body?.cols, 80);
     if (!term || term.exited) return res.status(404).json({ error: "No such terminal" });
-    term.proc.stdin?.write(`stty rows ${rows} cols ${cols} 2>/dev/null\n`);
+    const tty = ptyOf(term);
+    if (tty) {
+      execFile("stty", ["-F", tty, "rows", String(rows), "cols", String(cols)], () => {});
+    } else {
+      term.proc.stdin?.write(`stty rows ${rows} cols ${cols} 2>/dev/null\n`);
+    }
     res.json({ ok: true });
   });
 
   router.delete("/terminal/:id", (req, res) => {
     const term = terms.get(req.params.id);
-    term?.proc.kill("SIGHUP");
-    terms.delete(req.params.id);
+    if (term) end(term);
     res.json({ ok: true });
   });
 

@@ -1,7 +1,15 @@
 import type { EventEmitter } from "node:events";
+import type { ImageContent } from "../prompt-images.js";
 
 export interface PiState {
-  model: { id: string; name: string; provider: string; contextWindow?: number };
+  model: {
+    id: string;
+    name: string;
+    provider: string;
+    contextWindow?: number;
+    /** What the model takes: "text", and "image" if it can see pictures. Unknown when left out. */
+    input?: string[];
+  };
   thinkingLevel: string;
   autoCompactionEnabled?: boolean;
   messageCount?: number;
@@ -57,7 +65,7 @@ export interface PiClient extends EventEmitter {
    */
   readonly sessionFile?: string;
 
-  prompt(message: string, options?: { voice?: boolean }): Promise<void>;
+  prompt(message: string, options?: { voice?: boolean; images?: ImageContent[] }): Promise<void>;
   abort(): Promise<void>;
   /**
    * Whether the agent has stopped for good — not merely between turns.

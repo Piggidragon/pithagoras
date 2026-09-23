@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuBan, LuCircleCheck, LuKeyRound, LuRefreshCw, LuShield, LuUserX } from "react-icons/lu";
 import { api, type AuditEntry } from "../api";
+import { pollWhileVisible } from "../poll";
 
 /** What each kind means at a glance, without reading the reason. */
 const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> = {
@@ -83,8 +84,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
+    return pollWhileVisible(load, 10_000);
   }, []);
 
   const shown = entries.filter((e) =>

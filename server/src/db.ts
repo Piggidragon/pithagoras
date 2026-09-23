@@ -292,6 +292,15 @@ export function getDb(): Database.Database {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    -- Logins signed out before they ran out, by the signature of their cookie.
+    -- The cookie carries no state of its own, so without this a copy of one
+    -- would go on working for the rest of its thirty days.
+    CREATE TABLE IF NOT EXISTS signed_out (
+      mac TEXT PRIMARY KEY,
+      -- When the cookie would have stopped working anyway; past it, the row goes.
+      expires INTEGER NOT NULL
+    );
   `);
   migrate(db);
   return db;
@@ -589,11 +598,27 @@ export function replayStart(sessionId: string, keep: number): number {
 }
 
 /** Every message the portal sent to the agent in this session, oldest first. */
-export function sentMessages(sessionId: string): { seq: number; message: string }[] {
+export function sentMessages(sessionId: string): { seq: number; message: string; payload: Record<string, unknown> }[] {
   const rows = getDb()
     .prepare("SELECT seq, payload FROM events WHERE session_id = ? AND type = 'portal_prompt' ORDER BY seq ASC")
     .all(sessionId) as { seq: number; payload: string }[];
-  return rows.map((r) => ({ seq: r.seq, message: String(JSON.parse(r.payload)?.message ?? "") }));
+  return rows.map((r) => {
+    const payload = JSON.parse(r.payload) ?? {};
+    return { seq: r.seq, message: String(payload.message ?? ""), payload };
+  });
+}
+
+/** One message the portal sent to the agent, by its seq, or undefined if that is not one. */
+export function sentMessage(
+  sessionId: string,
+  seq: number,
+): { seq: number; message: string; payload: Record<string, unknown> } | undefined {
+  const row = getDb()
+    .prepare("SELECT payload FROM events WHERE session_id = ? AND seq = ? AND type = 'portal_prompt'")
+    .get(sessionId, seq) as { payload: string } | undefined;
+  if (!row) return undefined;
+  const payload = JSON.parse(row.payload) ?? {};
+  return { seq, message: String(payload.message ?? ""), payload };
 }
 
 /**
@@ -1198,6 +1223,38 @@ function putSetting(key: string, value: string): void {
       "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).run(key, value);
   else db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+}
+
+/** Remembers a login as signed out until it would have expired, and forgets those that have. */
+export function recordSignOut(mac: string, expires: number): void {
+  const d = getDb();
+  d.prepare("DELETE FROM signed_out WHERE expires < ?").run(Date.now());
+  d.prepare("INSERT OR IGNORE INTO signed_out (mac, expires) VALUES (?, ?)").run(mac, expires);
+}
+
+/** Asked on every request that carries a login, so prepared once. */
+let signedOutQuery: Database.Statement | undefined;
+
+export function isSignedOut(mac: string): boolean {
+  signedOutQuery ??= getDb().prepare("SELECT 1 FROM signed_out WHERE mac = ?");
+  return signedOutQuery.get(mac) !== undefined;
+}
+
+/**
+ * What a package's entry looked like before it was switched off, so switching
+ * it back on gives that back rather than a plain one.
+ */
+export function extensionStash(): Record<string, unknown> {
+  try {
+    const raw = JSON.parse((getStoredSettings() as Record<string, string>).extension_stash || "{}");
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setExtensionStash(stash: Record<string, unknown>): void {
+  putSetting("extension_stash", Object.keys(stash).length ? JSON.stringify(stash) : "");
 }
 
 /** Tools that are off unless a conversation says otherwise. */

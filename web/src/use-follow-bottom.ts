@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 
 /** How far from the end still counts as being at the end, in px. */
 const NEAR_END = 48;
@@ -23,11 +23,16 @@ export function atEnd(el: { scrollHeight: number; scrollTop: number; clientHeigh
 export function useFollowBottom<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const following = useRef(true);
+  // The same, for drawing: whether to offer a way back to the end. Kept apart
+  // from the ref, which is read on every update and must not wait for a render.
+  const [away, setAway] = useState(false);
 
   /** Wire to the box's onScroll. */
   const onScroll = useCallback(() => {
     const el = ref.current;
-    if (el) following.current = atEnd(el);
+    if (!el) return;
+    following.current = atEnd(el);
+    setAway(!following.current);
   }, []);
 
   /** Call after content changed; `force` to go to the end whatever they were doing. */
@@ -36,7 +41,11 @@ export function useFollowBottom<T extends HTMLElement>() {
     if (!el) return;
     if (force) following.current = true;
     if (following.current) el.scrollTop = el.scrollHeight;
+    // Said here as well as on scroll: a conversation too short to scroll fires
+    // no scroll event, and the way back to the end offered in the last one,
+    // scrolled up, stayed on screen in this one for good.
+    setAway(!atEnd(el));
   }, []);
 
-  return { ref, onScroll, follow, following };
+  return { ref, onScroll, follow, following, away };
 }

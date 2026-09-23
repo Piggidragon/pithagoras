@@ -1,7 +1,7 @@
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { api, type PortalEvent, type Session, type SessionStatus } from "./api";
+import { api, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
@@ -15,6 +15,10 @@ import { AuditPage } from "./components/AuditPanel";
 import { BrowserPage } from "./components/BrowserPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
+import { pollWhileVisible, reconnectDelay } from "./poll";
+import { APP_NAME, finishedRuns, tabTitle } from "./attention";
+import { notifyIfAway, notifyState } from "./notify";
+import { guardStrayDrops } from "./drop-guard";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 type Tab = "general" | "extensions" | "advanced";
@@ -28,7 +32,13 @@ export default function App() {
       .authStatus()
       .then((s) => setAuthed(s.authed))
       .catch(() => setAuthed(false));
+    const signedOut = () => setAuthed(false);
+    window.addEventListener(SIGNED_OUT, signedOut);
+    return () => window.removeEventListener(SIGNED_OUT, signedOut);
   }, []);
+
+  // A file dropped just beside the message box must not replace the portal.
+  useEffect(() => guardStrayDrops(), []);
 
   if (authed === null) {
     return (
@@ -102,6 +112,8 @@ function Shell({
   const [error, setError] = useState<string | null>(null);
   const [uiQueue, setUiQueue] = useState<UiRequest[]>([]);
   const esRef = useRef<EventSource | null>(null);
+  /** Connection attempts to the open conversation that have failed in a row. */
+  const [failures, setFailures] = useState(0);
 
   const refreshSessions = useCallback(async () => {
     const r = await api.sessions();
@@ -129,8 +141,7 @@ function Shell({
       // keep the nav after the add-on was removed.
       .then((b) => setHasBrowser(b.running || b.configured || b.routines.length > 0))
       .catch(() => setHasBrowser(false));
-    const t = setInterval(() => refreshSessions().catch(() => {}), 5000);
-    return () => clearInterval(t);
+    return pollWhileVisible(() => refreshSessions().catch(() => {}), 5000);
   }, [refreshSessions, sessionId, settings, view, navigate]);
 
   // Replay-then-tail for whichever session is in the URL.
@@ -140,14 +151,21 @@ function Shell({
     setMoreBefore(false);
     setUiQueue([]);
     setLoadedSession(null);
+    setFailures(0);
     if (!sessionId) return;
 
     let cancelled = false;
     let seq = 0;
+    let failed = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const connect = () => {
       if (cancelled) return;
       const es = new EventSource(`/api/sessions/${sessionId}/events?since=${seq}`);
       esRef.current = es;
+      es.onopen = () => {
+        failed = 0;
+        setFailures(0);
+      };
       es.addEventListener("live-reset", () => setEvents(resetLiveEvents));
       // Until it has caught up, what arrives is history being replayed. It is
       // gathered and applied in one go: drawing the conversation once per event
@@ -236,12 +254,15 @@ function Shell({
         // Keep what arrived: the resume cursor has already moved past it.
         flush();
         es.close();
-        setTimeout(connect, 2000);
+        failed += 1;
+        setFailures(failed);
+        retry = setTimeout(connect, reconnectDelay(failed));
       };
     };
     connect();
     return () => {
       cancelled = true;
+      clearTimeout(retry);
       esRef.current?.close();
     };
   }, [sessionId, refreshSessions]);
@@ -260,14 +281,53 @@ function Shell({
     // The same five seconds the task list gets. Events keep this current
     // between ticks; the poll is what stops a dropped one from stranding the
     // session on a status it left long ago.
-    const t = setInterval(load, 5000);
+    const stop = pollWhileVisible(load, 5000);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      stop();
     };
   }, [sessionId, listed]);
 
   const active = listed ?? (other?.id === sessionId ? other : null);
+
+  // What the tab says while you are looking at something else, and — if you
+  // asked for them — a notification when a chat you left running is done.
+  const waiting = Boolean(active && uiQueue[0]);
+  useEffect(() => {
+    document.title = tabTitle(active ? { title: active.title, status: active.status } : null, waiting);
+    return () => {
+      document.title = APP_NAME;
+    };
+  }, [active?.title, active?.status, waiting]);
+
+  // The list stops being polled while the page is hidden, but a chat left
+  // running there can only be seen finishing through it — the open one has its
+  // stream, the rest do not. So while someone asked to be told and something
+  // is running, a hidden page keeps asking, more slowly.
+  const anyRunning = sessions.some((s) => s.status === "running");
+  useEffect(() => {
+    if (!anyRunning) return;
+    const timer = setInterval(() => {
+      if (document.hidden && notifyState() === "on") refreshSessions().catch(() => {});
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [anyRunning, refreshSessions]);
+
+  const lastStatus = useRef(new Map<string, SessionStatus>());
+  useEffect(() => {
+    for (const s of finishedRuns(lastStatus.current, sessions)) {
+      notifyIfAway(s.title, s.status === "error" ? "Stopped with an error" : "Finished", s.id, () =>
+        navigate(`/s/${s.id}`),
+      );
+    }
+    lastStatus.current = new Map(sessions.map((s) => [s.id, s.status]));
+  }, [sessions]);
+
+  const askedId = active ? uiQueue[0]?.id : undefined;
+  useEffect(() => {
+    if (!active || !askedId) return;
+    notifyIfAway(active.title, "Waiting for your answer", `ask-${active.id}`, () => navigate(`/s/${active.id}`));
+  }, [askedId]);
 
   return (
     <div className="flex h-screen bg-canvas">
@@ -304,6 +364,13 @@ function Shell({
 
       <main className="flex min-w-0 flex-1 flex-col">
         {error && <div className="bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>}
+        {/* Not for the first miss: a server restarting, or a wifi that blinked,
+            is back before it can be read. Two in a row is an outage. */}
+        {sessionId && failures >= 2 && (
+          <div role="status" className="bg-warn/10 px-4 py-2 text-sm text-warn">
+            Lost the connection to the portal — trying again. What is shown may be out of date.
+          </div>
+        )}
         {view === "sessions" ? (
           <SessionsPage
             sessions={sessions}
@@ -371,6 +438,10 @@ function Shell({
             onAbort={async () => {
               await api.abort(active.id);
               refreshSessions();
+            }}
+            onRename={async (title) => {
+              await api.renameSession(active.id, title);
+              await refreshSessions();
             }}
             onClientCommand={async (name, args) => {
               if (name === "settings") {
