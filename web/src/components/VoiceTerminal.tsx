@@ -27,6 +27,7 @@ export function VoiceTerminal({ events }: { events: PortalEvent[] }) {
   // Before paint, so new lines are never shown at the old scroll position.
   useLayoutEffect(() => follow(), [events]);
   return <div ref={ref} onScroll={onScroll} className="voice-terminal-output" aria-label="Agent terminal output">
+    {!runs.length && <p className="voice-terminal-empty">No commands yet. What the agent runs shows up here as it runs.</p>}
     {runs.map(run => <div key={run.id} className="voice-terminal-run">
       <div className="voice-terminal-command"><span aria-hidden>$</span><code>{run.command}</code>{run.running && <i aria-label="Command running" />}</div>
       {run.output && <pre className={run.error ? 'is-error' : ''}>{run.output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')}</pre>}

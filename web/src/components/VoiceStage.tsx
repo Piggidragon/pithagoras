@@ -270,7 +270,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         {!filesShown && <button type="button" onClick={openFiles} title="Show files" aria-label="Show files"><LuFolderOpen /></button>}
         {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title="Show pictures" aria-label="Show pictures"><LuImage /></button>}
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title="Show browser" aria-label="Show browser"><LuGlobe /></button>}
-        {terminalUsed && !terminalShown && <button type="button" aria-label="Show terminal" title="Show terminal" onClick={() => { setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
+        {!terminalShown && <button type="button" aria-label="Show terminal" title="Show terminal" onClick={() => { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
         <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title="Voice settings" aria-label="Voice settings" aria-expanded={settings}><LuSlidersHorizontal /></button>
       </div>
       {settings && <VoiceSettings anchor={settingsToggle} sounds={sounds} onSounds={onSounds} rate={rate} onRate={onRate} steer={steer} onSteer={onSteer} ptt={ptt} onPtt={onPtt} onClose={() => setSettings(false)} />}

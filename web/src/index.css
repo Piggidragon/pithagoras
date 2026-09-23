@@ -536,3 +536,4 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
   .voice-stage:is(.is-browsing, .is-terminal) .voice-tool-float { --flight-y: -140px; }
   .voice-stage:is(.is-browsing, .is-terminal) .voice-tool-float.flight-lane-1 { --flight-y: -225px; }
 }
+.voice-terminal-empty { color: #8f9bb0; font-family: system-ui, sans-serif; }

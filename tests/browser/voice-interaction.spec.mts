@@ -52,6 +52,10 @@ test('a picture goes with what is said next, and the agent can show one back', a
 
 test('tool cards say what came of a call, and open what they are about', async ({ page }) => {
   await start(page);
+  // The terminal can be opened before the agent has run anything.
+  await page.getByRole('button', { name: 'Show terminal' }).click();
+  await expect(page.getByLabel('Agent terminal output')).toContainText('No commands yet');
+  await page.getByRole('button', { name: 'Minimize terminal' }).click();
   await page.getByRole('button', { name: 'Start search' }).click();
   const search = page.locator('.voice-tool-float', { hasText: 'Searching for “retry”' });
   await expect(search).toBeVisible();
