@@ -225,7 +225,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   };
   const actions: Partial<Record<ActionId, () => boolean | void>> = {
     "voice.mute": () => { if (ptt || starting) return false; onMute(); },
-    "voice.stop": () => { if (!running) return false; onStop(); },
+    // Stops the agent while it works; with nothing running, ends voice mode.
+    "voice.stop": () => { if (running) onStop(); else onEnd(); },
     "voice.picture": () => { picker.current?.click(); },
     "voice.repeat": () => { if (!canRepeat || speaking) return false; onRepeat(); },
     "voice.conversation": () => { if (!conversation) onCue("focus"); setConversation(v => !v); },
@@ -386,7 +387,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         <button type="button" className={`voice-stage-action ${attachments.length ? "has-pictures" : ""}`} title={`Add a picture${hint("voice.picture")}`} aria-label="Add a picture" disabled={starting} onClick={() => picker.current?.click()}><LuImagePlus />{attachments.length > 0 && <i>{attachments.length}</i>}</button>
         <button type="button" className="voice-stage-action" title={`Repeat the last reply${hint("voice.repeat")}`} aria-label="Repeat the last reply" disabled={starting || !canRepeat || speaking} onClick={onRepeat}><LuRotateCcw /></button>
         {running && <button type="button" className="voice-stage-action voice-stop" title={`Stop what the agent is doing${hint("voice.stop")}`} aria-label="Stop the agent" onClick={onStop}><LuSquare /></button>}
-        <button ref={end} type="button" className="voice-stage-action voice-end" title={`End voice mode${hint("voice.toggle")}`} aria-label="End voice mode" onClick={onEnd}><LuX /></button>
+        <button ref={end} type="button" className="voice-stage-action voice-end" title={`End voice mode${hint("voice.toggle")}${running || !bindings["voice.stop"] ? "" : ` or ${describe(bindings["voice.stop"], layout)}`}`} aria-label="End voice mode" onClick={onEnd}><LuX /></button>
       </div>
     </div>
     {(error || browserError) && <p role="alert" className="voice-stage-error">{error || browserError}</p>}

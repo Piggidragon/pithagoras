@@ -143,8 +143,10 @@ test('settings, push-to-talk, adding to a running task, the conversation and rep
   expect(pictures!.x + pictures!.width <= beside!.x || beside!.x + beside!.width <= pictures!.x).toBe(true);
   await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-conversation.png' });
   await conversation.getByRole('button', { name: 'Close the conversation' }).click();
-  await page.getByRole('button', { name: 'Stop the agent' }).click();
+  // Esc while the agent works stops it, and voice mode stays on.
+  await page.keyboard.press('Escape');
   await expect(page.getByTestId('aborted')).toHaveText('1');
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
 });
 
 test('everything in voice mode has a key, and the keys can be changed', async ({ page }) => {
@@ -197,6 +199,12 @@ test('everything in voice mode has a key, and the keys can be changed', async ({
   await page.getByRole('button', { name: 'Reset all' }).click();
   await expect(row.locator('kbd')).toHaveText('M');
   await page.getByRole('button', { name: 'Toggle shortcuts' }).click();
+
+  // Esc with nothing running ends voice mode.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toBeVisible();
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
 
   // Alt+V ends voice mode, and starts it again from the chat.
   await page.keyboard.press('Alt+v');

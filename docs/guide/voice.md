@@ -125,7 +125,7 @@ can be changed under **Settings → Shortcuts**.
 | <kbd>Alt</kbd>+<kbd>V</kbd> | Start or end voice mode, from the chat too |
 | <kbd>M</kbd> | Mute or unmute the microphone |
 | <kbd>Space</kbd> (held) | Talk, with push-to-talk on |
-| <kbd>Esc</kbd> | Stop what the agent is doing |
+| <kbd>Esc</kbd> | Stop what the agent is doing; with nothing running, end voice mode |
 | <kbd>P</kbd> / <kbd>R</kbd> | Add a picture / repeat the last reply |
 | <kbd>C</kbd> <kbd>D</kbd> <kbd>F</kbd> <kbd>I</kbd> <kbd>T</kbd> <kbd>B</kbd> | Conversation, canvases, files, pictures, terminal, browser |
 | <kbd>O</kbd> | Voice settings |

@@ -59,7 +59,7 @@ export const ACTIONS: Action[] = [
   { id: "voice.toggle", label: "Start or end voice mode", scope: "Voice mode", anywhere: true, default: { code: "KeyV", alt: true } },
   { id: "voice.mute", label: "Mute or unmute the microphone", scope: "Voice mode", default: { code: "KeyM" } },
   { id: "voice.hold", label: "Talk, with push-to-talk on (hold)", scope: "Voice mode", hold: true, default: { code: "Space" } },
-  { id: "voice.stop", label: "Stop what the agent is doing", scope: "Voice mode", default: { code: "Escape" } },
+  { id: "voice.stop", label: "Stop the agent, or end voice mode when it is idle", scope: "Voice mode", default: { code: "Escape" } },
   { id: "voice.picture", label: "Add a picture", scope: "Voice mode", default: { code: "KeyP" } },
   { id: "voice.repeat", label: "Repeat the last reply", scope: "Voice mode", default: { code: "KeyR" } },
   { id: "voice.conversation", label: "Show or hide the conversation", scope: "Voice mode", default: { code: "KeyC" } },
