@@ -83,7 +83,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const pushToTalk = useRef(ptt); pushToTalk.current = ptt;
   const [holding, setHolding] = useState(false);
   /** A push-to-talk press: what was heard, how much of it while still held, and the most speech-like frame. */
-  const held = useRef<{ frames: Float32Array[]; releasing: boolean; heldFrames: number; speech: number } | null>(null);
+  const held = useRef<{ frames: Float32Array[]; releasing: boolean; heldFrames: number; speech: number; started: boolean; timer?: ReturnType<typeof setTimeout> } | null>(null);
   const holdLimit = useRef<ReturnType<typeof setTimeout>>();
   // The last reply as it was spoken, phrase by phrase, for Repeat. Samples as
   // they came from the speech service, before the speed was applied.
@@ -156,7 +156,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     mutedRef.current = false;
     levels.current = { input: 0, output: 0 };
     clearTimeout(maxTurn.current);
-    clearTimeout(holdLimit.current); held.current = null;
+    clearTimeout(holdLimit.current); clearTimeout(held.current?.timer); held.current = null;
     replay.current?.abort(); replay.current = null;
     voice.current?.stop(); voice.current = null;
     transcription.current?.reset(); transcription.current = null;
@@ -231,14 +231,25 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     const controller = voice.current, live = transcription.current;
     if (!pushToTalk.current || !controller || !live || !vad.current) return;
     if (down) {
-      if (held.current && !held.current.releasing) return;
+      let press = held.current;
+      if (press && !press.releasing) return;
       replay.current?.abort();
-      held.current = { frames: [], releasing: false, heldFrames: 0, speech: 0 };
-      stream.current?.getTracks().forEach(track => { track.enabled = true; });
       setHolding(true); setError("");
-      if (profiling.current) profiler.current!.begin();
-      if (!latest.current.compacting) { live.begin(); live.confirm(); }
-      controller.speechStart();
+      if (press) {
+        // Pressed again before the last press was sent: the same utterance goes on.
+        clearTimeout(press.timer); press.releasing = false;
+      } else {
+        press = held.current = { frames: [], releasing: false, heldFrames: 0, speech: 0, started: false };
+        stream.current?.getTracks().forEach(track => { track.enabled = true; });
+        if (profiling.current) profiler.current!.begin();
+        if (!latest.current.compacting) { live.begin(); live.confirm(); }
+      }
+      // Only a press held long enough to be words interrupts what is being said.
+      const current = press;
+      if (!current.started) current.timer = setTimeout(() => {
+        if (held.current !== current || current.releasing) return;
+        current.started = true; controller.speechStart();
+      }, 250);
       // As long as a turn may be: the same bound as hands-free listening.
       clearTimeout(holdLimit.current);
       holdLimit.current = setTimeout(() => hold(false), 60000);
@@ -246,10 +257,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     }
     const press = held.current;
     if (!press || press.releasing) return;
-    press.releasing = true; clearTimeout(holdLimit.current);
+    press.releasing = true; clearTimeout(holdLimit.current); clearTimeout(press.timer);
     setHolding(false);
     // The last syllable is still on its way through the detector.
-    setTimeout(() => {
+    press.timer = setTimeout(() => {
       if (held.current !== press) return;
       held.current = null;
       if (pushToTalk.current) stream.current?.getTracks().forEach(track => { track.enabled = false; });
@@ -260,14 +271,16 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       // Held for under a quarter of a second, or nothing in it the detector took
       // for speech: a tap or a cough, not something to send.
       const heldFor = press.frames.slice(0, press.heldFrames).reduce((n, f) => n + f.length, 0);
-      if (heldFor < 4000 || press.speech < 0.5 || latest.current.compacting) { live.discard(); controller.speechCancel(); return; }
+      if (!press.started || heldFor < 4000 || press.speech < 0.5 || latest.current.compacting) { live.discard(); controller.speechCancel(); return; }
       profileMark('endpoint'); live.end(samples); controller.speechEnd(samples);
     }, 250);
   };
   const choosePtt = async (on: boolean) => {
     local.set('voicePtt', on ? 'on' : 'off');
     setPtt(on); pushToTalk.current = on;
-    if (!on && held.current) { held.current = null; setHolding(false); voice.current?.speechCancel(); transcription.current?.discard(); }
+    if (!on && held.current) { clearTimeout(held.current.timer); held.current = null; setHolding(false); voice.current?.speechCancel(); transcription.current?.discard(); }
+    // Anything said hands-free so far is dropped: its end is no longer listened for.
+    if (on && !held.current) { clearTimeout(maxTurn.current); voice.current?.speechCancel(); transcription.current?.discard(); }
     if (!vad.current) return;
     // Push-to-talk has no mute of its own; it starts from an open detector.
     if (on && mutedRef.current) await toggleMute();

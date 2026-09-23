@@ -132,17 +132,16 @@ export class HandsFreeVoice {
     this.output = [];
     this.pipeline.cancel();
     this.thinkingPipeline.cancel();
-    // Serialize abort behind an in-flight send so it cannot miss that new run.
-    // When steering, the run goes on and what is said is added to it.
-    if ((this.io.agentRunning() || this.sending) && !this.io.steering?.()) {
-      this.operations = this.operations.then(async () => { if (this.alive) await this.io.abort(); });
-      void this.operations.catch(error => this.report(error));
-    }
+    // The run is stopped only once what was said turns out to be for the agent:
+    // not a tap, not noise, not a command the page handles.
     this.state();
   }
   /** Speech that began and is not going to be sent after all: a push-to-talk press too short to be words. */
   speechCancel() {
-    if (!this.alive || !this.hearing) return;
+    if (!this.alive) return;
+    // A press during compaction is over; the next thing said is heard again.
+    this.compactionSpeech = false;
+    if (!this.hearing) return;
     this.hearing = false;
     this.acceptingReplies = true;
     this.state();
@@ -177,8 +176,15 @@ export class HandsFreeVoice {
         this.acceptingReplies = true;
         return;
       }
+      // Serialize abort behind an in-flight send so it cannot miss that new run.
+      // When steering, the run goes on and what is said is added to it.
+      const interrupt = (this.io.agentRunning() || this.sending) && !this.io.steering?.();
       const send = this.operations.then(async () => {
         if (!valid() || this.hearing || this.recordings.length) return;
+        if (interrupt) {
+          await this.io.abort();
+          if (!valid() || this.hearing || this.recordings.length) return;
+        }
         this.ignoreCurrent();
         this.acceptingReplies = true;
         this.sending = true;
