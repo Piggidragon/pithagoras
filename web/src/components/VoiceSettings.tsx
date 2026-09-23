@@ -65,7 +65,7 @@ export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, o
         {choice(false, ptt, "Off", onPtt)}
         {choice(true, ptt, "On", onPtt)}
       </div>
-      <p>{ptt ? "Only heard while you hold Space or the microphone button." : "Heard whenever you speak."}</p>
+      <p>{ptt ? "Only heard while you hold the push-to-talk key (Space unless changed) or the microphone button." : "Heard whenever you speak."}</p>
     </div>
     <div className="voice-setting" role="group" aria-label="Sound effects">
       <span aria-hidden="true">Sound effects</span>

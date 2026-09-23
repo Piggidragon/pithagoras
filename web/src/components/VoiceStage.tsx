@@ -9,7 +9,8 @@ import { buildTranscript, type Item } from "../transcript";
 import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinus, LuTerminal, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
 import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
-import { VoiceSettings } from "./VoiceSettings";
+import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
+import { ACTIONS, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
 import { placeWindows } from "../voice-windows";
 import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
 import type { ToolCall } from "../tool-activity";
@@ -209,24 +210,68 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     window.addEventListener("paste", paste);
     return () => window.removeEventListener("paste", paste);
   }, []);
-  // Push-to-talk: Space held anywhere but in a field. Taken before a focused
-  // button sees it, or holding Space would also press End.
-  const hold = useRef(onHold); hold.current = onHold;
+  // Keyboard shortcuts (see keybindings.ts). Each action says whether it did
+  // anything: one that did not — Stop with nothing running — leaves the key to
+  // whatever else wants it. Starting and ending voice mode is VoiceControl's.
+  const bindings = useKeybindings(), layout = useKeyLabels();
+  const hint = (id: ActionId) => bindings[id] ? ` (${describe(bindings[id], layout)})` : "";
+  const step = (by: number) => {
+    const at = VOICE_RATES.indexOf(rate), next = VOICE_RATES[Math.min(VOICE_RATES.length - 1, Math.max(0, (at < 0 ? 0 : at) + by))];
+    if (next === rate) return false;
+    onRate(next); return true;
+  };
+  const actions: Partial<Record<ActionId, () => boolean | void>> = {
+    "voice.mute": () => { if (ptt || starting) return false; onMute(); },
+    "voice.stop": () => { if (!running) return false; onStop(); },
+    "voice.picture": () => { picker.current?.click(); },
+    "voice.repeat": () => { if (!canRepeat || speaking) return false; onRepeat(); },
+    "voice.conversation": () => { if (!conversation) onCue("focus"); setConversation(v => !v); },
+    "voice.canvas": () => { onCanvasToggle(); },
+    "voice.files": () => { if (filesShown) setFilesShown(false); else openFiles(); },
+    "voice.pictures": () => { if (picturesShown) setPicturesShown(false); else if (pictures.length) openPictures(); else return false; },
+    "voice.terminal": () => { if (terminalShown) setTerminalShown(false); else { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); } },
+    "voice.browser": () => { if (shown) minimize(); else if (browserAvailable || loaded) open(); else return false; },
+    "voice.settings": () => { setSettings(v => !v); },
+    "voice.faster": () => step(1),
+    "voice.slower": () => step(-1),
+    "voice.steer": () => { onSteer(!steer); },
+    "voice.ptt": () => { onPtt(!ptt); },
+    "voice.sounds": () => { onSounds(); },
+  };
+  const keys = useRef({ bindings, actions, ptt, onHold }); keys.current = { bindings, actions, ptt, onHold };
   useEffect(() => {
-    if (!ptt) return;
+    // In the capture phase, before a focused button: holding Space for
+    // push-to-talk would otherwise also press whatever button has focus.
     const down = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || editing(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
-      e.preventDefault(); e.stopPropagation();
-      if (!e.repeat) hold.current(true);
+      const { bindings, actions, ptt, onHold } = keys.current;
+      // A dialog, or the voice settings card closing on Escape, has the key.
+      if (e.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
+      if (e.code === "Escape" && document.querySelector(".voice-settings")) return;
+      const typing = editing(e.target);
+      if (ptt && matches(bindings["voice.hold"], e) && !(typing && !e.ctrlKey && !e.altKey && !e.metaKey)) {
+        e.preventDefault(); e.stopPropagation();
+        if (!e.repeat) onHold(true);
+        return;
+      }
+      for (const action of ACTIONS) {
+        const act = actions[action.id];
+        if (!act || !matches(bindings[action.id], e)) continue;
+        const b = bindings[action.id]!;
+        if (typing && !(b.ctrl || b.alt || b.meta)) return;
+        if (e.repeat) { e.preventDefault(); return; }
+        if (act() !== false) { e.preventDefault(); e.stopPropagation(); }
+        return;
+      }
     };
     const up = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || editing(e.target)) return;
-      e.preventDefault(); e.stopPropagation(); hold.current(false);
+      const { bindings, ptt, onHold } = keys.current;
+      if (!ptt || !matches(bindings["voice.hold"], e)) return;
+      e.preventDefault(); e.stopPropagation(); onHold(false);
     };
-    const away = () => hold.current(false);
+    const away = () => { if (keys.current.ptt) keys.current.onHold(false); };
     window.addEventListener("keydown", down, true); window.addEventListener("keyup", up, true); window.addEventListener("blur", away);
-    return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", away); away(); };
-  }, [ptt]);
+    return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", away); };
+  }, []);
   const openFiles = () => {
     setFilesUsed(true); setFilesShown(true); onCue("focus");
   };
@@ -251,7 +296,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
   const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
-  const status = starting ? "Connecting" : input || holding ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : ptt ? (touch ? "Hold the microphone to talk" : "Hold Space to talk") : "Listening";
+  const status = starting ? "Connecting" : input || holding ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : ptt ? (touch || !bindings["voice.hold"] ? "Hold the microphone to talk" : `Hold ${describe(bindings["voice.hold"], layout)} to talk`) : "Listening";
   const anyPanel = shown || terminalShown || filesShown || picturesShown || conversation;
   const drop = (e: DragEvent) => {
     if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
@@ -265,13 +310,13 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     <header className="voice-stage-header">
       <span className="voice-stage-session">{title}</span>
       <div className="voice-utilities">
-        {!conversation && <button type="button" onClick={() => { setConversation(true); onCue("focus"); }} title="Conversation" aria-label="Show the conversation"><LuMessageSquareText /></button>}
-        <button type="button" onClick={onCanvasToggle} title="Session canvases" aria-label="Session canvases" aria-expanded={canvasOpen}><LuFileText /></button>
-        {!filesShown && <button type="button" onClick={openFiles} title="Show files" aria-label="Show files"><LuFolderOpen /></button>}
-        {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title="Show pictures" aria-label="Show pictures"><LuImage /></button>}
-        {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title="Show browser" aria-label="Show browser"><LuGlobe /></button>}
-        {!terminalShown && <button type="button" aria-label="Show terminal" title="Show terminal" onClick={() => { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
-        <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title="Voice settings" aria-label="Voice settings" aria-expanded={settings}><LuSlidersHorizontal /></button>
+        {!conversation && <button type="button" onClick={() => { setConversation(true); onCue("focus"); }} title={`Conversation${hint("voice.conversation")}`} aria-label="Show the conversation"><LuMessageSquareText /></button>}
+        <button type="button" onClick={onCanvasToggle} title={`Session canvases${hint("voice.canvas")}`} aria-label="Session canvases" aria-expanded={canvasOpen}><LuFileText /></button>
+        {!filesShown && <button type="button" onClick={openFiles} title={`Show files${hint("voice.files")}`} aria-label="Show files"><LuFolderOpen /></button>}
+        {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title={`Show pictures${hint("voice.pictures")}`} aria-label="Show pictures"><LuImage /></button>}
+        {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title={`Show browser${hint("voice.browser")}`} aria-label="Show browser"><LuGlobe /></button>}
+        {!terminalShown && <button type="button" aria-label="Show terminal" title={`Show terminal${hint("voice.terminal")}`} onClick={() => { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
+        <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title={`Voice settings${hint("voice.settings")}`} aria-label="Voice settings" aria-expanded={settings}><LuSlidersHorizontal /></button>
       </div>
       {settings && <VoiceSettings anchor={settingsToggle} sounds={sounds} onSounds={onSounds} rate={rate} onRate={onRate} steer={steer} onSteer={onSteer} ptt={ptt} onPtt={onPtt} onClose={() => setSettings(false)} />}
     </header>
@@ -320,14 +365,14 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
 
       <div className="voice-stage-controls">
         {ptt
-          ? <button type="button" className={`voice-stage-action voice-hold ${holding ? "is-holding" : ""}`} title={touch ? "Hold to talk" : "Hold to talk (or hold Space)"} aria-label="Hold to talk" aria-pressed={holding} disabled={starting}
+          ? <button type="button" className={`voice-stage-action voice-hold ${holding ? "is-holding" : ""}`} title={`Hold to talk${touch ? "" : hint("voice.hold")}`} aria-label="Hold to talk" aria-pressed={holding} disabled={starting}
               onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); onHold(true); }}
               onPointerUp={() => onHold(false)} onPointerCancel={() => onHold(false)} onContextMenu={e => e.preventDefault()}><LuMic /></button>
-          : <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={muted ? 'Unmute microphone' : 'Mute microphone'} aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>}
-        <button type="button" className={`voice-stage-action ${attachments.length ? "has-pictures" : ""}`} title="Add a picture" aria-label="Add a picture" disabled={starting} onClick={() => picker.current?.click()}><LuImagePlus />{attachments.length > 0 && <i>{attachments.length}</i>}</button>
-        <button type="button" className="voice-stage-action" title="Repeat the last reply" aria-label="Repeat the last reply" disabled={starting || !canRepeat || speaking} onClick={onRepeat}><LuRotateCcw /></button>
-        {running && <button type="button" className="voice-stage-action voice-stop" title="Stop what the agent is doing" aria-label="Stop the agent" onClick={onStop}><LuSquare /></button>}
-        <button ref={end} type="button" className="voice-stage-action voice-end" title="End voice mode" aria-label="End voice mode" onClick={onEnd}><LuX /></button>
+          : <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={`${muted ? 'Unmute' : 'Mute'} microphone${hint('voice.mute')}`} aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>}
+        <button type="button" className={`voice-stage-action ${attachments.length ? "has-pictures" : ""}`} title={`Add a picture${hint("voice.picture")}`} aria-label="Add a picture" disabled={starting} onClick={() => picker.current?.click()}><LuImagePlus />{attachments.length > 0 && <i>{attachments.length}</i>}</button>
+        <button type="button" className="voice-stage-action" title={`Repeat the last reply${hint("voice.repeat")}`} aria-label="Repeat the last reply" disabled={starting || !canRepeat || speaking} onClick={onRepeat}><LuRotateCcw /></button>
+        {running && <button type="button" className="voice-stage-action voice-stop" title={`Stop what the agent is doing${hint("voice.stop")}`} aria-label="Stop the agent" onClick={onStop}><LuSquare /></button>}
+        <button ref={end} type="button" className="voice-stage-action voice-end" title={`End voice mode${hint("voice.toggle")}`} aria-label="End voice mode" onClick={onEnd}><LuX /></button>
       </div>
     </div>
     {(error || browserError) && <p role="alert" className="voice-stage-error">{error || browserError}</p>}

@@ -8,6 +8,7 @@ import {
   LuExternalLink,
   LuFileJson,
   LuHammer,
+  LuKeyboard,
   LuPlug,
   LuPuzzle,
   LuRadio,
@@ -33,6 +34,7 @@ import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
 import { isEnter } from "../shortcuts";
+import { KeyboardShortcuts } from "./KeyboardShortcuts";
 
 export type Tab =
   | "general"
@@ -43,6 +45,7 @@ export type Tab =
   | "skills"
   | "mcp"
   | "extensions"
+  | "shortcuts"
   | "advanced";
 
 /** Either a fixed tab or one extension's own configuration page. */
@@ -92,6 +95,7 @@ const TABS: { id: Tab; label: string; icon: ReactNode; hint: string }[] = [
     hint: "Servers the agent can pull tools from",
   },
   { id: "extensions", label: "Extensions", icon: <LuBlocks />, hint: "Install and manage packages" },
+  { id: "shortcuts", label: "Shortcuts", icon: <LuKeyboard />, hint: "Keyboard shortcuts, and changing them" },
   { id: "advanced", label: "Advanced", icon: <LuFileJson />, hint: "pi's raw settings file" },
 ];
 
@@ -197,6 +201,7 @@ export function ConfigModal({
           onConfigure={(spec) => setNav({ kind: "ext", spec })}
         />
       )}
+      {nav.kind === "tab" && nav.id === "shortcuts" && <KeyboardShortcuts />}
       {nav.kind === "tab" && nav.id === "advanced" && (
         <AdvancedPanel settingsPath={settingsPath} onError={setError} />
       )}

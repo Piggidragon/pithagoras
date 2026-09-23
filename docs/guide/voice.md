@@ -105,6 +105,24 @@ settings**:
 
 Each setting is remembered in this browser.
 
+**Keyboard shortcuts.** Everything above has a key; the tooltip of each button
+names it. They work while voice mode is on, except while typing in a field, and
+can be changed under **Settings → Shortcuts**.
+
+| Key | |
+| --- | --- |
+| <kbd>Alt</kbd>+<kbd>V</kbd> | Start or end voice mode, from the chat too |
+| <kbd>M</kbd> | Mute or unmute the microphone |
+| <kbd>Space</kbd> (held) | Talk, with push-to-talk on |
+| <kbd>Esc</kbd> | Stop what the agent is doing |
+| <kbd>P</kbd> / <kbd>R</kbd> | Add a picture / repeat the last reply |
+| <kbd>C</kbd> <kbd>D</kbd> <kbd>F</kbd> <kbd>I</kbd> <kbd>T</kbd> <kbd>B</kbd> | Conversation, canvases, files, pictures, terminal, browser |
+| <kbd>O</kbd> | Voice settings |
+| <kbd>.</kbd> / <kbd>,</kbd> | Speak faster / slower |
+| <kbd>A</kbd> | Switch between stopping and adding to the task |
+| <kbd>H</kbd> | Push-to-talk on or off |
+| <kbd>Shift</kbd>+<kbd>M</kbd> | Sound effects on or off |
+
 ## Dictation
 
 Voice mode is a conversation. When you only want to get words into the message

@@ -17,6 +17,7 @@ import { stretch } from "../time-stretch";
 import { asksToRepeat } from "../voice-commands";
 import { MAX_IMAGES, isImage, prepareImage, type Attachment } from "../attachments";
 import { VOICE_RATES } from "./VoiceSettings";
+import { describe, matches, useKeyLabels, useKeybindings } from "../keybindings";
 import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
 
@@ -497,6 +498,25 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     }
   };
 
+  // Start and end voice mode from the keyboard, from the chat as well: the one
+  // voice shortcut that works with the message box focused, as it has a modifier.
+  const bindings = useKeybindings(), layout = useKeyLabels();
+  const toggleKey = useRef({ binding: bindings["voice.toggle"], on: false, start, end: endMode });
+  toggleKey.current = { binding: bindings["voice.toggle"], on: enabled || starting, start, end: endMode };
+  useEffect(() => {
+    if (!available) return;
+    const down = (e: KeyboardEvent) => {
+      const { binding, on, start, end } = toggleKey.current;
+      if (e.defaultPrevented || e.repeat || !matches(binding, e) || document.querySelector('[aria-modal="true"]')) return;
+      const b = binding!;
+      if (!(b.ctrl || b.alt || b.meta) && (e.target as Element | null)?.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]')) return;
+      e.preventDefault(); e.stopPropagation();
+      if (on) end(); else void start();
+    };
+    window.addEventListener("keydown", down, true);
+    return () => window.removeEventListener("keydown", down, true);
+  }, [available]);
+
   if (!available) return null;
   return <>
     {profileOpen&&createPortal(<VoiceProfile profiler={profiler.current!} onClose={()=>{setProfileOpen(false);profiler.current!.close('disabled');}}/>,document.body)}
@@ -515,7 +535,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     <div className="relative flex items-center gap-1">
       <button type="button" className="prompt-action" aria-label="Profile voice latency" title="Profile voice latency" aria-pressed={profileOpen} onClick={()=>{setProfileOpen(v=>!v);if(profileOpen)profiler.current!.close('disabled');}}><LuGauge/></button>
       {error && !enabled && !starting && <p role="alert" className="absolute bottom-full right-0 mb-3 w-64 rounded-xl border border-line bg-surface p-3 text-xs text-danger shadow-pop">{error}</p>}
-      <button ref={startButton} type="button" onClick={start} aria-label="Turn on hands-free voice" title="Start voice conversation" className="prompt-action">
+      <button ref={startButton} type="button" onClick={start} aria-label="Turn on hands-free voice" title={`Start voice conversation${bindings["voice.toggle"] ? ` (${describe(bindings["voice.toggle"], layout)})` : ""}`} className="prompt-action">
         {starting ? <LuLoaderCircle aria-hidden className="animate-spin" /> : <LuAudioLines aria-hidden />}
       </button>
     </div>

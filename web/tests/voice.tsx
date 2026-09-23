@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Chat } from '../src/components/Chat';
 import { ExtensionDialog } from '../src/components/ExtensionDialog';
+import { KeyboardShortcuts } from '../src/components/KeyboardShortcuts';
 import type { PortalEvent, Session } from '../src/api';
 import '../src/index.css';
 const microphone = new AudioContext();
@@ -24,6 +25,7 @@ function Fixture() {
   const [aborted, setAborted] = useState(0);
   const [options, setOptions] = useState(false);
   const [selected, setSelected] = useState(0);
+  const [shortcuts, setShortcuts] = useState(false);
   const session: Session = { id: 'test', title: 'A little room to think', workspace: '/workspaces/pithagoras', executor: 'host', status: running ? 'running' : 'idle', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' };
   return <>
     <main data-testid="workspace" style={{ maxWidth: 980, height: 'calc(100vh - 96px)', minHeight: 540, margin: '16px auto 0' }}>
@@ -38,6 +40,7 @@ function Fixture() {
         ]);
       }} />
     </main>
+    {shortcuts && <section aria-label="Shortcut settings" style={{ maxWidth: 700, margin: '8px auto' }}><KeyboardShortcuts /></section>}
     {options && <ExtensionDialog sessionId="test" request={{ id: 'choice', method: 'select', title: 'Choose the next step', options: ['Review changes', 'Run tests'] }} onDone={() => { setSelected(n => n + 1); setOptions(false); }} />}
     <aside style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 10, padding: 8 }}>
       <button onClick={async () => {
@@ -55,6 +58,7 @@ function Fixture() {
       <button onClick={() => { setRunning(true); setEvents(previous=>[...previous,{seq:previous.length+1,type:'compaction_start',at:Date.now()-15000,payload:{}}]); }}>Start compaction</button>
       <button onClick={() => { setRunning(false); setEvents(previous=>[...previous,{seq:previous.length+1,type:'compaction_end',at:Date.now(),payload:{}}]); }}>End compaction</button>
       <button onClick={() => setOptions(true)}>Show options</button>
+      <button onClick={() => setShortcuts(v => !v)}>Toggle shortcuts</button>
       <button onClick={() => setEvents(previous => [...previous,
         { seq: previous.length + 1, type: 'tool_execution_start', payload: { toolName: 'show_image', toolCallId: `pic-${previous.length}`, input: { path: 'plots/chart.png', title: 'Sales by month' } } },
         { seq: previous.length + 2, type: 'tool_execution_end', payload: { toolName: 'show_image', toolCallId: `pic-${previous.length}`, result: { content: [{ type: 'text', text: 'Shown to the user: plots/chart.png' }], details: { path: 'plots/chart.png', title: 'Sales by month' } } } }])}>Show picture</button>

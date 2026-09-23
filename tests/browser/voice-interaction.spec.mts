@@ -146,3 +146,62 @@ test('settings, push-to-talk, adding to a running task, the conversation and rep
   await page.getByRole('button', { name: 'Stop the agent' }).click();
   await expect(page.getByTestId('aborted')).toHaveText('1');
 });
+
+test('everything in voice mode has a key, and the keys can be changed', async ({ page }) => {
+  await start(page);
+  await expect(page.getByRole('status')).toContainText('Listening');
+  // Mute and unmute.
+  await page.keyboard.press('m');
+  await expect(page.getByRole('button', { name: 'Unmute microphone' })).toBeVisible();
+  await page.keyboard.press('m');
+  await expect(page.getByRole('button', { name: 'Mute microphone' })).toBeVisible();
+  // Windows open and close.
+  await page.keyboard.press('t');
+  await expect(page.getByLabel('Agent terminal output')).toBeVisible();
+  await page.keyboard.press('t');
+  await expect(page.getByRole('button', { name: 'Show terminal' })).toBeVisible();
+  await page.keyboard.press('c');
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toHaveClass(/is-open/);
+  await page.keyboard.press('c');
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toBeVisible();
+  // Settings: the speed follows . and ,
+  await page.keyboard.press('.');
+  await page.keyboard.press('o');
+  await expect(page.getByRole('group', { name: 'Speaking speed' }).getByRole('button', { name: '1.25×' })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press(',');
+  expect(await page.evaluate(() => localStorage.getItem('voiceRate'))).toBe('1');
+  // The tooltip names the key.
+  await expect(page.getByRole('button', { name: 'Mute microphone' })).toHaveAttribute('title', 'Mute microphone (M)');
+
+  // Changed in the settings: mute moves to K, and M is free.
+  await page.getByRole('button', { name: 'Toggle shortcuts' }).click();
+  await page.getByRole('region', { name: 'Shortcut settings' }).screenshot({ path: '/tmp/pithagoras-shortcuts.png' });
+  const row = page.getByRole('listitem', { name: 'Mute or unmute the microphone' });
+  await expect(row).toContainText('M');
+  await row.getByRole('button', { name: 'Change' }).click();
+  await expect(row).toContainText('Press the new keys');
+  await page.keyboard.press('k');
+  await expect(row.locator('kbd')).toHaveText('K');
+  await page.getByRole('button', { name: 'Toggle shortcuts' }).click();
+  await page.keyboard.press('m');
+  await expect(page.getByRole('button', { name: 'Mute microphone' })).toBeVisible();
+  await page.keyboard.press('k');
+  await expect(page.getByRole('button', { name: 'Unmute microphone' })).toBeVisible();
+  // A key another action has moves over, and the list says so.
+  await page.getByRole('button', { name: 'Toggle shortcuts' }).click();
+  await page.getByRole('listitem', { name: 'Repeat the last reply' }).getByRole('button', { name: 'Change' }).click();
+  await page.keyboard.press('k');
+  await expect(page.getByRole('status').filter({ hasText: 'which now has no shortcut' })).toContainText('Mute or unmute the microphone');
+  await expect(row).toContainText('None');
+  await page.getByRole('button', { name: 'Reset all' }).click();
+  await expect(row.locator('kbd')).toHaveText('M');
+  await page.getByRole('button', { name: 'Toggle shortcuts' }).click();
+
+  // Alt+V ends voice mode, and starts it again from the chat.
+  await page.keyboard.press('Alt+v');
+  await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Message' }).focus();
+  await page.keyboard.press('Alt+v');
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
+});
