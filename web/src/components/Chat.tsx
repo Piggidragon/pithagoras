@@ -26,17 +26,11 @@ import { latestFileActivity } from "../file-activity";
 import { drafts, withUnsent } from "../drafts";
 import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
-import { isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
+import { isClientCommand, isCommand } from "../client-commands";
+import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
-
-/**
- * The commands the portal runs itself, by opening a piece of UI — the ones the
- * server lists with `where: "client"` (see pi/builtins.ts). Known here without
- * asking: listing commands starts pi for the chat, which /new has no need of.
- */
-const CLIENT_COMMANDS = new Set(["model", "settings", "new", "clear", "name"]);
 
 /**
  * Context the portal attaches to a message, and what to call it.
@@ -497,14 +491,16 @@ export function Chat({
     const sent = session.id;
     // Some builtins are UI, not prompts: /model opens the picker the pill uses,
     // /settings opens the modal. Sending them to pi would just be a chat line.
-    const parsed = /^\/([\w-]+)\s*(.*)$/.exec(msg);
-    const command = parsed && CLIENT_COMMANDS.has(parsed[1]) ? parsed : null;
+    const parsed = /^\/([\w:-]+)\s*(.*)$/.exec(msg);
+    const command = parsed && isClientCommand(parsed[1], commands) ? parsed : null;
     // The pictures in the box go with what came from it, and nothing else. A
-    // command is run rather than sent, so they stay in the box for later.
-    const images = fromBox && !command ? attached : [];
+    // command is run rather than said — this one here, any other by pi — so
+    // they stay in the box for later rather than going where nothing shows them.
+    const keepsPictures = parsed !== null && isCommand(parsed[1], commands);
+    const images = fromBox && !keepsPictures ? attached : [];
 
     if (fromBox) {
-      if (command) {
+      if (keepsPictures) {
         caret.current = null;
         changeInput("");
       } else clearBox();
@@ -1031,9 +1027,11 @@ export function Chat({
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
         }}
         onDrop={(e) => {
+          // Down whatever was dropped: a drag that looked like files can carry
+          // none, and the overlay would stay up until the next one left.
+          setDragging(false);
           if (!e.dataTransfer.files.length) return;
           e.preventDefault();
-          setDragging(false);
           void addFiles([...e.dataTransfer.files]);
         }}
         className="px-4 pb-4 pt-2 sm:px-6 sm:pb-5"
@@ -1139,7 +1137,7 @@ export function Chat({
             void addFiles(files);
           }}
           onKeyDown={(e) => {
-            if (matches.length > 0 && !e.nativeEvent.isComposing) {
+            if (matches.length > 0 && !isComposing(e)) {
               const chosen = matches[Math.min(picked, matches.length - 1)];
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
@@ -1172,7 +1170,7 @@ export function Chat({
             if (
               e.key === "ArrowUp" &&
               !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey &&
-              !e.nativeEvent.isComposing &&
+              !isComposing(e) &&
               !input && !attached.length && !running
             ) {
               const last = items.find((it) => it.id === lastSaid);
@@ -1187,7 +1185,7 @@ export function Chat({
                 key: e.key,
                 running,
                 empty: !input.trim() && !attached.length,
-                composing: e.nativeEvent.isComposing,
+                composing: isComposing(e),
                 paletteOpen: matches.length > 0,
               })
             ) {

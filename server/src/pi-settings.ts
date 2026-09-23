@@ -78,8 +78,14 @@ export function readCompactionSettings(): CompactionSettings {
  */
 let writeChain: Promise<unknown> = Promise.resolve();
 
+/**
+ * `written` runs once the file is in place, still in turn with other writes:
+ * for what is kept elsewhere alongside it, which must not change when the
+ * file did not.
+ */
 export function updatePiSettings(
   mutate: (settings: Record<string, unknown>) => void,
+  written?: () => void,
 ): Promise<Record<string, unknown>> {
   const next = writeChain.then(() => {
     const all = readPiSettings();
@@ -89,6 +95,7 @@ export function updatePiSettings(
     const temp = `${file}.${process.pid}.tmp`;
     writeFileSync(temp, JSON.stringify(all, null, 2) + "\n", "utf8");
     renameSync(temp, file);
+    written?.();
     return all;
   });
   // Kept unbroken by a failure, or one bad write would wedge every later one.

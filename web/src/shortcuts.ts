@@ -53,7 +53,7 @@ export function stopsRun(ctx: {
  * composition has ended, as keyCode 229, so that is checked as well.
  */
 export function isEnter(e: KeyEvent): boolean {
-  return e.key === "Enter" && !composing(e);
+  return e.key === "Enter" && !isComposing(e);
 }
 
 /**
@@ -65,11 +65,15 @@ export function isEnter(e: KeyEvent): boolean {
  * the word that was only meant to be taken back.
  */
 export function isEscape(e: KeyEvent): boolean {
-  return e.key === "Escape" && !composing(e);
+  return e.key === "Escape" && !isComposing(e);
 }
 
 /** A React event carries it on `nativeEvent`, a DOM one on itself. */
 type KeyEvent = { key: string; keyCode?: number; nativeEvent?: { isComposing?: boolean }; isComposing?: boolean };
 
-/** An input method has the key: composing, or Safari's keydown just after it ended. */
-const composing = (e: KeyEvent): boolean => Boolean(e.nativeEvent?.isComposing ?? e.isComposing) || e.keyCode === 229;
+/**
+ * An input method has the key: composing, or Safari's keydown just after it
+ * ended. What every key rule of the message box asks, not `isComposing` alone,
+ * which misses the second.
+ */
+export const isComposing = (e: KeyEvent): boolean => Boolean(e.nativeEvent?.isComposing ?? e.isComposing) || e.keyCode === 229;

@@ -1232,8 +1232,12 @@ export function recordSignOut(mac: string, expires: number): void {
   d.prepare("INSERT OR IGNORE INTO signed_out (mac, expires) VALUES (?, ?)").run(mac, expires);
 }
 
+/** Asked on every request that carries a login, so prepared once. */
+let signedOutQuery: Database.Statement | undefined;
+
 export function isSignedOut(mac: string): boolean {
-  return getDb().prepare("SELECT 1 FROM signed_out WHERE mac = ?").get(mac) !== undefined;
+  signedOutQuery ??= getDb().prepare("SELECT 1 FROM signed_out WHERE mac = ?");
+  return signedOutQuery.get(mac) !== undefined;
 }
 
 /**

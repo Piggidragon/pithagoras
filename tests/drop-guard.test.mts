@@ -13,11 +13,12 @@ function host() {
   return h;
 }
 
-const drag = (type: string, types: string[], claimed = false) => {
+const drag = (type: string, types: string[], claimed = false, target: DragLike["target"] = null) => {
   const e = {
     type,
     defaultPrevented: claimed,
     dataTransfer: { types, dropEffect: "copy" },
+    target,
     preventDefault() {
       e.defaultPrevented = true;
     },
@@ -43,6 +44,23 @@ test("what a drop target took is left to it", () => {
   const over = drag("dragover", ["Files"], true);
   h.fire(over);
   assert.equal(over.dataTransfer.dropEffect, "copy");
+});
+
+test("a file field takes a file dropped on it, and is left to", () => {
+  const h = host();
+  guardStrayDrops(h);
+  const field = { tagName: "INPUT", type: "file" };
+  const over = drag("dragover", ["Files"], false, field);
+  h.fire(over);
+  assert.equal(over.defaultPrevented, false);
+  assert.equal(over.dataTransfer.dropEffect, "copy");
+  const drop = drag("drop", ["Files"], false, field);
+  h.fire(drop);
+  assert.equal(drop.defaultPrevented, false);
+  // Any other field is not a place for a file.
+  const text = drag("drop", ["Files"], false, { tagName: "INPUT", type: "text" });
+  h.fire(text);
+  assert.equal(text.defaultPrevented, true);
 });
 
 test("dragging text around the page is not a file, and is left alone", () => {

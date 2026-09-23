@@ -210,10 +210,14 @@ export function ComposerBar({
       })
       .catch(() => {});
 
+  /** Whether the chat had started when last looked at — see the effect on `started`. */
+  const wasStarted = useRef(started);
   useEffect(() => {
     setCfg(seed(session));
     setOpen(null);
     setDragEffort(null);
+    // Another chat, loaded here: its having started already is no change.
+    wasStarted.current = started;
     load();
   }, [sessionId]);
 
@@ -244,8 +248,13 @@ export function ComposerBar({
   // what it would show is whatever was fetched while the chat was still empty —
   // nothing, for a chat pi had not started. A run that ends before the page has
   // seen it begin would otherwise leave it out until the next one.
+  //
+  // Only when it changes to started: a chat opened with messages in it is
+  // loaded by the effects above, and a third request for the same would be
+  // one more rebuild of the model catalogue.
   useEffect(() => {
-    if (started) load();
+    if (started && !wasStarted.current) load();
+    wasStarted.current = started;
   }, [started]);
 
   // And after each turn of a run, when pi has the new token count: this used to

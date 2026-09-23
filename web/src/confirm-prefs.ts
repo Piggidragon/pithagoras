@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { local } from "./safe-storage";
 
 const KEY = "confirmDeletes";
 
@@ -10,19 +11,12 @@ const KEY = "confirmDeletes";
  * made safer by the laptop having turned the question off.
  */
 export function asksBeforeDeleting(): boolean {
-  try {
-    return localStorage.getItem(KEY) !== "off";
-  } catch {
-    return true;
-  }
+  // Storage blocked reads as unset: the question keeps being asked, the safe side.
+  return local.get(KEY) !== "off";
 }
 
 export function setAsksBeforeDeleting(ask: boolean): void {
-  try {
-    localStorage.setItem(KEY, ask ? "on" : "off");
-  } catch {
-    // Storage blocked: the question keeps being asked, which is the safe side.
-  }
+  local.set(KEY, ask ? "on" : "off");
 }
 
 export function useAsksBeforeDeleting() {

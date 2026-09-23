@@ -990,6 +990,10 @@ class SessionManager extends EventEmitter {
    * compaction — nor under an edit, whose rewrite of pi's file a reload could
    * read half-done or write over. Those are counted rather than skipped in
    * silence, since they keep what they had until they are reloaded.
+   *
+   * Held like an edit while it runs, so a message arriving in the middle — from
+   * another tab, a channel — waits for the extensions to be back rather than
+   * starting a run among half of them.
    */
   async reloadIdle(): Promise<{ reloaded: number; waiting: number }> {
     let waiting = 0;
@@ -1000,7 +1004,7 @@ class SessionManager extends EventEmitter {
           return false;
         }
         try {
-          await client.reload();
+          await this.withEdit(sessionId, () => client.reload());
           return true;
         } catch (e) {
           console.error(`[portal] could not reload ${sessionId}: ${(e as Error).message}`);

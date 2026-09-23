@@ -200,18 +200,21 @@ export function extensionsRouter(): Router {
       return res.status(400).json({ error: "spec and enabled are required" });
     }
     try {
-      let found = false;
-      await updatePiSettings((all) => {
-        // The stash is read and written in here, in turn with the settings
-        // file: two switches at once would otherwise both start from the same
-        // stash, and the later write would drop what the earlier one kept.
-        const stash = extensionStash();
-        const changed = setPackageEnabled(Array.isArray(all.packages) ? all.packages : [], spec, enabled, stash);
-        if (!changed) return;
-        found = true;
-        all.packages = changed.packages;
-        setExtensionStash(changed.stash);
-      });
+      let stashed: ReturnType<typeof extensionStash> | undefined;
+      await updatePiSettings(
+        (all) => {
+          // The stash is read and written in turn with the settings file: two
+          // switches at once would otherwise both start from the same stash,
+          // and the later write would drop what the earlier one kept.
+          const changed = setPackageEnabled(Array.isArray(all.packages) ? all.packages : [], spec, enabled, extensionStash());
+          if (!changed) return;
+          all.packages = changed.packages;
+          stashed = changed.stash;
+        },
+        // Written only once the file is: a failed write leaves both as they were.
+        () => stashed && setExtensionStash(stashed),
+      );
+      const found = stashed !== undefined;
       if (!found) return res.status(404).json({ error: "That package is not installed for this user" });
       const { reloaded, waiting } = await sessions.reloadIdle();
       res.json({ ok: true, enabled, reloaded, waiting });
