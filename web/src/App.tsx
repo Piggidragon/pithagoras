@@ -202,6 +202,17 @@ function Shell({
       };
       es.onmessage = (m) => {
         const ev: PortalEvent = JSON.parse(m.data);
+        // A message was taken out of the conversation: drop what it covered,
+        // rather than reloading everything to find out what is left. While the
+        // replay is still being gathered that buffer is where they are, so it
+        // is filtered instead of the rendered list.
+        if (ev.type === "portal_removed") {
+          const { from, to } = ev.payload as { from: number; to: number | null };
+          const covered = (at: number) => at >= from && (to == null || at < to);
+          if (replay) replay = replay.filter((e) => !covered(e.seq));
+          else setEvents((prev) => prev.filter((e) => !covered(e.seq)));
+          return;
+        }
         // Live-only events (dialogs) use a negative seq and must not move the
         // resume cursor, or reconnecting would skip real history.
         if (ev.seq > 0) seq = ev.seq;
@@ -362,6 +373,13 @@ function Shell({
             onSend={async (msg, options) => {
               await api.prompt(active.id, msg, options);
               refreshSessions();
+            }}
+            onEditMessage={async (seq, message) => {
+              await api.editMessage(active.id, seq, message);
+              refreshSessions();
+            }}
+            onDeleteMessage={async (seq) => {
+              await api.deleteMessage(active.id, seq);
             }}
             onAbort={async () => {
               await api.abort(active.id);
