@@ -206,3 +206,9 @@ When the portal itself runs in Docker, set `PORTAL_CONTAINER_NAME` to its Docker
 With `EXECUTOR=container`, the portal inspects its own mounts and translates workspace and session paths to their actual host locations, including named volumes and nested bind mounts. Paths outside those mounts are rejected rather than silently creating an empty host directory. The runtime image includes the Docker CLI and needs the Docker socket mount.
 
 For a native portal talking to a Docker daemon on the same machine, leave `PORTAL_CONTAINER_NAME` unset: its paths already refer to the host. A remote daemon needs the same filesystem available on that daemon; local paths are not uploaded automatically. Set `PI_IMAGE` to an available runner image containing the `pi` CLI.
+
+## Runner session permissions
+
+The container executor creates each session directory before starting Docker and runs the runner with the portal process's numeric UID:GID. This overrides an image's `USER` directive so the process writing session files matches the owner of the mounted directory. It is root only when the portal itself runs as root. Capability dropping and `no-new-privileges` remain enabled.
+
+Existing session directories must be writable by that portal user. For a custom non-root runner, ensure its executable and required configuration are readable by the portal UID, and any additional cache/home paths are writable. Fix ownership on the host rather than making the session directory world-writable.

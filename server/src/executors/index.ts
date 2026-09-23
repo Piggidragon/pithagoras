@@ -1,3 +1,4 @@
+import { mkdirSync, accessSync, constants } from "node:fs";
 import { promisify } from "node:util";
 import { hostMountPath, type DockerMount } from "./host-mounts.js";
 import { execFile, spawn } from "node:child_process";
@@ -105,6 +106,13 @@ export class ContainerExecutor implements Executor {
   async launch(opts: LaunchOptions): Promise<PiClient> {
     const containerName = `pithagoras-${opts.sessionId}`;
     const sessionDir = path.join(this.sessionRoot, opts.sessionId);
+    // Create it as the portal user, rather than letting Docker create a root-owned bind source.
+    // Before the mount translation below, so the directory exists as ours either way.
+    mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+    accessSync(sessionDir, constants.W_OK);
+    if (!process.getuid || !process.getgid) throw new Error("Container executor requires a POSIX user identity");
+    const runnerUser = `${process.getuid()}:${process.getgid()}`;
+
     let workspaceMount = opts.workspacePath;
     let sessionMount = sessionDir;
     if (process.env.PORTAL_CONTAINER_NAME) {
@@ -113,6 +121,7 @@ export class ContainerExecutor implements Executor {
       workspaceMount = hostMountPath(opts.workspacePath, mounts);
       sessionMount = hostMountPath(sessionDir, mounts);
     }
+
 
 
     const passthrough = [
@@ -127,6 +136,8 @@ export class ContainerExecutor implements Executor {
       "run",
       "-i",
       "--rm",
+      "--user",
+      runnerUser,
       "--name",
       containerName,
       "--label",
