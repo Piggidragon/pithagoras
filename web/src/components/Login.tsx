@@ -24,7 +24,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
     <div className="flex h-screen items-center justify-center px-4">
       <form onSubmit={submit} className="w-full max-w-[19rem]">
         <div className="mb-6 flex flex-col items-center text-center">
-          <img src="/logo-512.png" alt="" className="h-16 w-16 object-contain" draggable={false} />
+          <img src="/icon-512.png" alt="" className="h-16 w-16 object-contain" draggable={false} />
           <h1 className="mt-3 text-base font-semibold tracking-tight text-fg">Pithagoras</h1>
           <p className="mt-1 text-xs text-fg-subtle">
             Give it a task, close the browser, come back later.
