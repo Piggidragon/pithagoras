@@ -145,6 +145,7 @@ export function ConfigModal({
       title="Settings"
       subtitle="Applies to the whole portal"
       onClose={onClose}
+      startInRail={initialTab === "general"}
       rail={
         <div className="space-y-4">
           <RailGroup>

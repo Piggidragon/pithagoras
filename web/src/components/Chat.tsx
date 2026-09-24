@@ -854,7 +854,7 @@ export function Chat({
         </div>
       </header>
 
-      <div className={voiceMode ? "hidden" : "flex min-h-0 flex-1"}>
+      <div className={voiceMode ? "hidden" : "relative flex min-h-0 flex-1"}>
       <div className="flex min-w-0 flex-1 flex-col">
       <div
         ref={scroller.ref}
@@ -1420,12 +1420,14 @@ export function Chat({
           <div
             onPointerDown={dragWidth}
             title="Drag to resize"
-            className="w-1 shrink-0 cursor-col-resize bg-line transition hover:bg-accent/40"
+            className="w-1 shrink-0 cursor-col-resize bg-line transition hover:bg-accent/40 max-md:hidden"
           />
           <aside
             ref={browserPane}
             style={{ width: asideWidth }}
-            className="flex shrink-0 flex-col overflow-hidden border-l border-line [&:fullscreen]:w-screen"
+            // On a phone there is no room beside the conversation: the panels
+            // cover it, under the header that opened them, until closed.
+            className="flex shrink-0 flex-col overflow-hidden border-l border-line [&:fullscreen]:w-screen max-md:absolute max-md:inset-0 max-md:z-20 max-md:!w-full max-md:border-l-0 max-md:bg-surface"
           >
             {asidePanels.map((kind, i) => (
               <Fragment key={kind}>
