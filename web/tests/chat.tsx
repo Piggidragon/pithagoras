@@ -48,7 +48,7 @@ if (phase === 'agents') {
     ev('portal_subagent', { op: 'event', id: 'sub1', event: { type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'rm -rf on the old dir runs before the copy is verified.' }, { type: 'text', text: 'The script deletes `/opt/pithagoras.old` **before** checking that the new build started. I will look at the restart step next.' }] } } }, 20),
     ev('portal_subagent_live', { op: 'event', id: 'sub1', event: { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'Now the systemd restart: does it wait for health?' } } }, 2),
   );
-  const jobs = { supported: true, statuses: [{ key: 'background-tasks', text: 'bg 1 running' }], widgets: [], jobs: [
+  const jobs = { supported: true, statuses: [{ key: 'background-tasks', text: 'bg 1 running' }, { key: 'bg-update', text: 'bg ⬆ v2.6.5 /bg-update' }, { key: 'paths', text: 'logs in /tmp/bg' }], widgets: [], jobs: [
     { key: 'j1', sid: 4242, pids: [4242, 4250], command: 'npm run dev -- --port 5173', startedAt: now - 754_000, state: 'running', hasOutput: true, attached: false },
     { key: 'j2', sid: 4300, pids: [], command: 'python -m http.server 8000', startedAt: now - 3_600_000, exitedAt: now - 1_200_000, state: 'exited', hasOutput: true, attached: false },
   ] };
@@ -57,6 +57,7 @@ if (phase === 'agents') {
     const u = String(url);
     const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
     if (u.endsWith('/background')) return reply(jobs);
+    if (u.endsWith('/commands')) return reply({ commands: [{ name: 'bg-update', description: 'Update pi-background', source: 'extension' }] });
     if (u.includes('/background/') && u.includes('/output')) return reply({ text: u.includes('from=') ? '' : '> vite\n\n  VITE v5.4  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host to expose\n', from: 0, size: 120 });
     return realFetch(url, init);
   }) as typeof fetch;
@@ -68,7 +69,7 @@ function Fixture() {
   const [v, setV] = React.useState('b');
   return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
     <div style={{ padding: 8, display: 'flex', gap: 8 }}><Select aria-label="Preview select" size="sm" className="w-64" value={v} onChange={setV} options={[{ value: 'a', label: 'Project notes' }, { value: 'b', label: 'Release plan', hint: 'Temporary — not stored' }, { value: 'c', label: 'Meeting summary' }]} /><label className="flex items-center gap-2 text-xs"><input type="checkbox" defaultChecked />Checkbox</label><input type="range" defaultValue={40} /></div>
-    <div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={events} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
+    <div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={events} onSend={async (message) => { (window as any).sent = [...((window as any).sent ?? []), message]; }} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
   </div>;
 }
 createRoot(document.getElementById('root')!).render(<Fixture />);

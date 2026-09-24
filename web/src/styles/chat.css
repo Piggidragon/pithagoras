@@ -176,6 +176,12 @@ button.chat-compaction-pill:disabled { cursor: default; }
 .running-chip { display: inline-flex; align-items: center; gap: 6px; max-width: min(100%, 22rem); padding: 3px 10px 3px 6px; border-radius: 999px; border: 1px solid rgb(var(--line)); background: rgb(var(--raised) / .55); font-size: 11.5px; color: rgb(var(--fg-muted)); animation: chat-pill-in .4s var(--ease-out) both; transition: background .18s, border-color .18s, color .18s; }
 button.running-chip:hover { background: rgb(var(--raised)); border-color: rgb(var(--fg-faint)); color: rgb(var(--fg)); }
 .running-chip.is-status { padding-left: 10px; color: rgb(var(--fg-subtle)); border-style: dashed; }
+/* A status that names a command runs it: solid, and the command in the accent. */
+.running-chip.is-status.is-action { border-style: solid; border-color: rgb(var(--accent) / .3); color: rgb(var(--fg-muted)); cursor: pointer; }
+button.running-chip.is-action:hover { border-color: rgb(var(--accent) / .6); background: rgb(var(--accent) / .08); }
+.running-chip.is-action:disabled { opacity: .7; cursor: default; }
+.running-chip-command { color: rgb(var(--accent)); font: 500 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+button.running-chip-command:hover { text-decoration: underline; }
 .running-chip-icon { display: grid; place-items: center; width: 14px; height: 14px; flex-shrink: 0; }
 .running-chip-icon .chat-ring { width: 12px; height: 12px; }
 .running-chip-kind { width: 12px; height: 12px; flex-shrink: 0; opacity: .7; }

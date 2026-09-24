@@ -1,6 +1,7 @@
 import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
+import { mentionsCommand } from "../status-commands";
 import { SubagentPanel } from "./SubagentPanel";
 import { BackgroundJobs } from "./BackgroundJobs";
 import { subagents } from "../subagents";
@@ -521,6 +522,13 @@ export function Chat({
   };
   // What was listed for another chat is not offered here.
   useEffect(() => setCommands([]), [session.id]);
+  // A status line that names a command can run it — once it is known to be
+  // one of this chat's. A status means pi is up, so asking starts nothing.
+  const statusNamesCommand = background.statuses.some((s) => mentionsCommand(s.text));
+  useEffect(() => {
+    if (statusNamesCommand) void loadCommands();
+  }, [statusNamesCommand, session.id, turns]);
+  const commandNames = useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
 
   // Show the palette while the composer holds a bare "/name" prefix.
   const slashText = slashToken(input);
@@ -1273,7 +1281,15 @@ export function Chat({
         >
           <span className="h-1 w-12 rounded-full bg-fg/15 transition group-hover:bg-accent/60" />
         </button>
-        <RunningTray agents={agents} jobs={background.jobs} statuses={background.statuses} onAgent={openAgent} onJob={openJob} />
+        <RunningTray
+          agents={agents}
+          jobs={background.jobs}
+          statuses={background.statuses}
+          commands={commandNames}
+          onAgent={openAgent}
+          onJob={openJob}
+          onCommand={(command) => attempt(() => submit(command, false))}
+        />
         <DictationStrip dictation={dictation} />
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 text-xs text-accent">
