@@ -25,14 +25,13 @@ test("other keys open nothing", () => {
   assert.equal(opensComposer({ key: "a" }), false);
 });
 
-const base = { key: "Escape", running: true, empty: true, composing: false, paletteOpen: false };
+const base = { key: "Escape", running: true, composing: false, paletteOpen: false };
 
-test("Escape stops a run when there is nothing typed", () => {
+test("Escape stops a run", () => {
   assert.equal(stopsRun(base), true);
 });
 
-test("Escape never costs typed words, and does nothing when nothing runs", () => {
-  assert.equal(stopsRun({ ...base, empty: false }), false);
+test("Escape stops with words typed too, and does nothing when nothing runs", () => {
   assert.equal(stopsRun({ ...base, running: false }), false);
 });
 

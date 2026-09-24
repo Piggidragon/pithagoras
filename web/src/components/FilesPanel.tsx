@@ -371,14 +371,14 @@ export function FilesPanel({
   return (
     <div className="flex h-full min-h-0 flex-col text-sm">
       <div className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1.5 text-xs text-fg-subtle">
-        <nav aria-label="Folder" className="flex min-w-0 flex-1 flex-wrap items-center gap-x-0.5">
-          <button onClick={() => void goTo("")} className="rounded px-1 py-0.5 hover:bg-fg/5 hover:text-fg" title={folder}>
+        <nav aria-label="Folder" className="flex min-w-0 flex-1 flex-wrap items-center gap-x-0.5 overflow-hidden">
+          <button onClick={() => void goTo("")} className="max-w-full truncate rounded px-1 py-0.5 hover:bg-fg/5 hover:text-fg" title={folder}>
             {root}
           </button>
           {crumbs.map((name, i) => (
-            <span key={i} className="flex items-center gap-0.5">
+            <span key={i} className="flex min-w-0 max-w-full items-center gap-0.5">
               <LuChevronRight aria-hidden className="h-3 w-3 shrink-0 text-fg-faint" />
-              <button onClick={() => void goTo(crumbs.slice(0, i + 1).join("/"))} className="rounded px-1 py-0.5 hover:bg-fg/5 hover:text-fg">
+              <button onClick={() => void goTo(crumbs.slice(0, i + 1).join("/"))} className="min-w-0 truncate rounded px-1 py-0.5 hover:bg-fg/5 hover:text-fg" title={name}>
                 {name}
               </button>
             </span>

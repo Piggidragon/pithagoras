@@ -230,8 +230,11 @@ function Shell({
         // replay is still being gathered that buffer is where they are, so it
         // is filtered instead of the rendered list.
         if (ev.type === "portal_removed") {
-          const { from, to } = ev.payload as { from: number; to: number | null };
-          const covered = (at: number) => at >= from && (to == null || at < to);
+          // `also` and `kept`: messages sent into a run go with the stretch the
+          // agent read them in, not the one whose seq range they were sent in.
+          const { from, to, also = [], kept = [] } = ev.payload as { from: number; to: number | null; also?: number[]; kept?: number[] };
+          const covered = (at: number) =>
+            also.includes(at) || (at >= from && (to == null || at < to) && !kept.includes(at));
           if (replay) replay = replay.filter((e) => !covered(e.seq));
           else setEvents((prev) => prev.filter((e) => !covered(e.seq)));
           return;

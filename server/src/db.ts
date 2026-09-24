@@ -415,6 +415,18 @@ function migrate(d: Database.Database): void {
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_grants_open ON grants(session_id, tool, used_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC)");
+  // Messages sent into a run, and what settled them. Looked for across every
+  // chat at startup (unsettledMessages) and through a whole chat by every
+  // edit: the few among tens of thousands of events per chat, read without
+  // reading the rest. A query finds them only by repeating the same WHERE.
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_queued ON events(session_id, seq)
+       WHERE type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1`,
+  );
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_settled ON events(session_id, seq)
+       WHERE type IN ('portal_taken', 'portal_unsent')`,
+  );
   const ruleCols = (d.prepare("PRAGMA table_info(tool_rules)").all() as { name: string }[]).map(
     (c) => c.name
   );
@@ -597,15 +609,103 @@ export function replayStart(sessionId: string, keep: number): number {
   return row?.seq ?? 0;
 }
 
-/** Every message the portal sent to the agent in this session, oldest first. */
-export function sentMessages(sessionId: string): { seq: number; message: string; payload: Record<string, unknown> }[] {
+/**
+ * Where each message sent into a run was settled, by the seq it was sent at:
+ * the portal_taken that put it into the conversation, or the portal_unsent
+ * that dropped it. One missing from both is still waiting.
+ */
+function settledAt(sessionId: string): { taken: Map<number, number>; unsent: Map<number, number> } {
+  const taken = new Map<number, number>();
+  const unsent = new Map<number, number>();
   const rows = getDb()
-    .prepare("SELECT seq, payload FROM events WHERE session_id = ? AND type = 'portal_prompt' ORDER BY seq ASC")
-    .all(sessionId) as { seq: number; payload: string }[];
-  return rows.map((r) => {
-    const payload = JSON.parse(r.payload) ?? {};
-    return { seq: r.seq, message: String(payload.message ?? ""), payload };
-  });
+    .prepare("SELECT seq, type, payload FROM events WHERE session_id = ? AND type IN ('portal_taken', 'portal_unsent')")
+    .all(sessionId) as { seq: number; type: string; payload: string }[];
+  for (const r of rows) {
+    const p = JSON.parse(r.payload) ?? {};
+    if (r.type === "portal_taken") taken.set(Number(p.seq), r.seq);
+    else if (Array.isArray(p.seqs)) for (const seq of p.seqs) unsent.set(Number(seq), r.seq);
+  }
+  return { taken, unsent };
+}
+
+/**
+ * Where an event sits in the conversation.
+ *
+ * Its own seq, except for a message sent into a run: that one was written down
+ * when it was sent, in the middle of a reply, and read by the agent later — so
+ * it sits where it was taken in or dropped, which is where the transcript
+ * shows it. One still waiting sits after everything.
+ */
+function placeOf(
+  row: { seq: number; type: string; payload: string },
+  settled: ReturnType<typeof settledAt>,
+): number {
+  if (row.type !== "portal_prompt" || !(JSON.parse(row.payload) ?? {}).queued) return row.seq;
+  return settled.taken.get(row.seq) ?? settled.unsent.get(row.seq) ?? Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Every message the portal sent to the agent in this session, in the order the
+ * agent read them — which is the order of pi's file. `at` is where each sits in
+ * the transcript: see placeOf.
+ */
+export function sentMessages(
+  sessionId: string,
+): { seq: number; at: number; message: string; payload: Record<string, unknown> }[] {
+  const rows = getDb()
+    .prepare("SELECT seq, type, payload FROM events WHERE session_id = ? AND type = 'portal_prompt' ORDER BY seq ASC")
+    .all(sessionId) as { seq: number; type: string; payload: string }[];
+  const settled = settledAt(sessionId);
+  // One sent mid-run and stopped before pi took it in never reached pi's
+  // file, and counted here it would put every later message one out.
+  return rows
+    .filter((r) => !settled.unsent.has(r.seq))
+    .map((r) => {
+      const payload = JSON.parse(r.payload) ?? {};
+      return { seq: r.seq, at: placeOf(r, settled), message: String(payload.message ?? ""), payload };
+    })
+    .sort((a, b) => a.at - b.at || a.seq - b.seq);
+}
+
+/**
+ * Messages sent into a run that were neither taken in nor dropped: what a
+ * server that died mid-run left behind. By session, oldest first, each with
+ * the payload it was sent with.
+ *
+ * Read once at startup, so in two passes that each read a row once — the
+ * queued messages, then what settled them in the sessions that have any —
+ * rather than a lookup through a session's events per message.
+ */
+export function unsettledMessages(): {
+  sessionId: string;
+  seq: number;
+  message: string;
+  images: number;
+  prompt: Record<string, unknown>;
+}[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT session_id, seq, payload FROM events
+       WHERE type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1
+       ORDER BY session_id, seq`,
+    )
+    .all() as { session_id: string; seq: number; payload: string }[];
+  const settled = new Map<string, ReturnType<typeof settledAt>>();
+  const out: ReturnType<typeof unsettledMessages> = [];
+  for (const r of rows) {
+    if (!settled.has(r.session_id)) settled.set(r.session_id, settledAt(r.session_id));
+    const { taken, unsent } = settled.get(r.session_id)!;
+    if (taken.has(r.seq) || unsent.has(r.seq)) continue;
+    const prompt = JSON.parse(r.payload) ?? {};
+    out.push({
+      sessionId: r.session_id,
+      seq: r.seq,
+      message: String(prompt.message ?? ""),
+      images: Array.isArray(prompt.images) ? prompt.images.length : 0,
+      prompt,
+    });
+  }
+  return out;
 }
 
 /** One message the portal sent to the agent, by its seq, or undefined if that is not one. */
@@ -622,22 +722,46 @@ export function sentMessage(
 }
 
 /**
- * Drops a stretch of a session's transcript: `from` up to, not including, `to` — or to the end.
- * Returns what it removed, so the caller can put it back.
+ * Drops a stretch of a session's transcript: what sits from `from` up to, not
+ * including, `to` — or to the end. Placed as placeOf places it, so a message
+ * sent into a run goes with the stretch it was read in, not the one it was
+ * typed during.
+ *
+ * Returns what it removed, so the caller can put it back, and how that differs
+ * from the plain seq range — `also` outside it, `kept` inside it — so a page
+ * holding the events can drop the same ones.
  */
-export function deleteEventsBetween(sessionId: string, from: number, to: number | null): EventRow[] {
+export function deleteEventsBetween(
+  sessionId: string,
+  from: number,
+  to: number | null,
+): { rows: EventRow[]; also: number[]; kept: number[] } {
   const db = getDb();
   return db.transaction(() => {
+    const settled = settledAt(sessionId);
+    const inRange = (at: number) => at >= from && (to === null || at < to);
     const rows = db
-      .prepare("SELECT * FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?) ORDER BY seq ASC")
+      .prepare(
+        `SELECT * FROM events WHERE session_id = ?
+           AND ((seq >= ? AND (? IS NULL OR seq < ?))
+                OR (type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1))
+         ORDER BY seq ASC`,
+      )
       .all(sessionId, from, to, to) as EventRow[];
-    db.prepare("DELETE FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)").run(
-      sessionId,
-      from,
-      to,
-      to,
-    );
-    return rows;
+    const gone = rows.filter((r) => inRange(placeOf(r, settled)));
+    const going = new Set(gone);
+    const also = gone.filter((r) => !inRange(r.seq)).map((r) => r.seq);
+    const kept = rows.filter((r) => inRange(r.seq) && !going.has(r)).map((r) => r.seq);
+    // The range in one statement, less the few messages placed outside it;
+    // then the few placed inside it from outside. A long chat's tail is tens
+    // of thousands of rows, and one statement per row held up the server.
+    db.prepare(
+      `DELETE FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)
+         AND seq NOT IN (SELECT value FROM json_each(?))`,
+    ).run(sessionId, from, to, to, JSON.stringify(kept));
+    const drop = db.prepare("DELETE FROM events WHERE seq = ?");
+    for (const seq of also) drop.run(seq);
+    return { rows: gone, also, kept };
   })();
 }
 
@@ -664,9 +788,34 @@ export function latestSeq(): number {
   return row?.seq ?? 0;
 }
 
+/**
+ * Adds to what a portal_prompt says, once pi has said what it did with the
+ * message: that it queued one sent as starting a run, or the words it queued.
+ */
+export function notePromptQueued(seq: number, fields: Record<string, unknown>): void {
+  getDb()
+    .prepare("UPDATE events SET payload = json_patch(payload, ?) WHERE seq = ? AND type = 'portal_prompt'")
+    .run(JSON.stringify(fields), seq);
+}
+
 /** Drops one event. */
 export function deleteEvent(seq: number): void {
   getDb().prepare("DELETE FROM events WHERE seq = ?").run(seq);
+}
+
+/**
+ * Drops what a session recorded after `seq`, but for its status changes — an
+ * error among them is what says why the rest is gone. Returns the seqs dropped.
+ */
+export function deleteEventsAfter(sessionId: string, seq: number): number[] {
+  const db = getDb();
+  return db.transaction(() => {
+    const gone = db
+      .prepare("SELECT seq FROM events WHERE session_id = ? AND seq > ? AND type != 'portal_status' ORDER BY seq")
+      .all(sessionId, seq) as { seq: number }[];
+    db.prepare("DELETE FROM events WHERE session_id = ? AND seq > ? AND type != 'portal_status'").run(sessionId, seq);
+    return gone.map((r) => r.seq);
+  })();
 }
 
 /** The page before a cursor, oldest first — what a transcript scrolls back into. */

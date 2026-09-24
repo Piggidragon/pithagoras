@@ -42,6 +42,17 @@ export interface PiTool {
   owner?: "browser";
 }
 
+/**
+ * What pi did with a message it took: queued it into the run that is going —
+ * `text` is the words as pi queued them, a template or skill expanded and an
+ * input handler's rewrite applied, which is what the message is when the agent
+ * reads it — started a run with it, or had an extension handle it outright.
+ */
+export type PromptTaken =
+  | { outcome: "queued"; lane: "steering" | "followUp"; text: string }
+  | { outcome: "started" }
+  | { outcome: "handled" };
+
 export interface PiCommand {
   name: string;
   description?: string;
@@ -65,8 +76,15 @@ export interface PiClient extends EventEmitter {
    */
   readonly sessionFile?: string;
 
-  /** `steer` delivers a message sent mid-run into that run instead of after it. */
-  prompt(message: string, options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean }): Promise<void>;
+  /**
+   * `steer` delivers a message sent mid-run into that run instead of after it.
+   * Resolves once pi has taken the message, with what it did with it where the
+   * executor can tell: see PromptTaken.
+   */
+  prompt(
+    message: string,
+    options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean },
+  ): Promise<PromptTaken | void>;
   abort(): Promise<void>;
   /**
    * Whether the agent has stopped for good — not merely between turns.
@@ -74,6 +92,13 @@ export interface PiClient extends EventEmitter {
    * the run's own lifecycle events are then the only signal.
    */
   isIdle?(): boolean;
+  /**
+   * Drops the messages sent mid-run that the agent has not taken in yet.
+   * Stopping a run leaves them queued otherwise, and they are slipped into
+   * whatever runs next. Optional, like isIdle. Returns the words of what it
+   * dropped, as pi had queued them.
+   */
+  clearQueue?(): string[];
   dispose(): void;
 
   getState(): Promise<PiState>;
