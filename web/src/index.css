@@ -212,7 +212,8 @@
 /*
  * The rest is split by where it is drawn, and imported after this file in
  * styles.ts, so it keeps its place in the cascade after the utilities:
- *   styles/controls.css  the portal's own dropdown and tooltips
+ *   styles/controls.css  the portal's own dropdown, tooltips and status dots
+ *   styles/shell.css     dialogs, the drawer, the sidebar rail, pages, skeletons
  *   styles/stage.css     voice mode's stage, canvases, and the windows on it
  *   styles/chat.css      the transcript, the tray, jobs and subagents
  */

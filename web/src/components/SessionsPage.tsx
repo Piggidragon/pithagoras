@@ -71,7 +71,7 @@ export function SessionsPage({
               {sessions.length === 0 ? "No sessions yet." : "Nothing matches that."}
             </p>
           ) : (
-            <ul className="mt-3 space-y-1">
+            <ul className="stagger-in mt-3 space-y-1">
               {matches.map((s) => (
                 <li
                   key={s.id}

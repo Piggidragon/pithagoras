@@ -144,7 +144,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
           through on a rule or an approval, or turns a stranger away.
         </p>
       ) : (
-        <ul className="space-y-1">
+        <ul className="stagger-in space-y-1">
           {shown.map((e) => {
             const k = KIND[e.kind] ?? {
               label: e.kind,

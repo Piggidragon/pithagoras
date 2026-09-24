@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
+import { RowsSkeleton } from "./Skeleton";
 import { api, type Project, type Session } from "../api";
 import { bytesLabel, slugify } from "../projects";
 import { when } from "../time";
@@ -123,9 +124,9 @@ export function ProjectsPage({
           {error && <p className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
 
           {projects === null ? (
-            <p className="py-12 text-center text-sm text-fg-subtle">Loading…</p>
+            <RowsSkeleton />
           ) : (
-            <ul className="mt-4 space-y-1">
+            <ul className="stagger-in mt-4 space-y-1">
               {projects.length === 0 && (
                 <li className="py-12 text-center text-sm text-fg-subtle">
                   No projects yet. New chats start in Home; make a project for work that should stay together.

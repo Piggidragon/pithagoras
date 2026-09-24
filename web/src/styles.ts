@@ -3,5 +3,6 @@
 import "streamdown/styles.css";
 import "./index.css";
 import "./styles/controls.css";
+import "./styles/shell.css";
 import "./styles/stage.css";
 import "./styles/chat.css";

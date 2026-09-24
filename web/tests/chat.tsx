@@ -1,5 +1,6 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|compacting|tools to see each state.
+// Open /tests/chat.html?phase=model|prefill|thinking|compacting|tools|agents|interrupted to see each state,
+// and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Chat } from '../src/components/Chat';
@@ -33,14 +34,16 @@ if (phase === 'model') events.push(ev('turn_start', {}, 8), ev('portal_model', {
 if (phase === 'prefill') events.push(ev('turn_start', {}, 8), ev('message_start', { message: { role: 'assistant' } }, 7), ev('portal_prefill', { total: 48000, processed: 20160, cache: 12000 }, 1));
 if (phase === 'thinking') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'The test fails because the regex expects the status at the very end.\nI should check how pi appends it' } }, 5), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: ' — it adds two newlines before "Command exited".' } }, 1));
 if (phase === 'compacting') events.push(ev('compaction_start', {}, 6));
+// The portal restarted mid-command: nothing says the call ended, only that the chat was interrupted.
+if (phase === 'interrupted') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run test:e2e', 'Running 42 tests using 4 workers\n  ✓ login (1.2s)\n', undefined, 12));
 
-const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
+const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 function Fixture() {
   const [v, setV] = React.useState('b');
   return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
     <div style={{ padding: 8, display: 'flex', gap: 8 }}><Select aria-label="Preview select" size="sm" className="w-64" value={v} onChange={setV} options={[{ value: 'a', label: 'Project notes' }, { value: 'b', label: 'Release plan', hint: 'Temporary — not stored' }, { value: 'c', label: 'Meeting summary' }]} /><label className="flex items-center gap-2 text-xs"><input type="checkbox" defaultChecked />Checkbox</label><input type="range" defaultValue={40} /></div>
-    <div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={events} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} /></div>
+    <div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={events} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
   </div>;
 }
 createRoot(document.getElementById('root')!).render(<Fixture />);

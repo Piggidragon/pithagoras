@@ -44,7 +44,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-2 backdrop-blur-sm sm:p-4"
+      className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-2 backdrop-blur-sm sm:p-4"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       {/* The rail layout gets a floor as well as a ceiling: its panels fetch
@@ -54,7 +54,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === "string" ? title : undefined}
-        className={`flex max-h-[94dvh] w-full sm:max-h-[88vh] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
+        className={`ui-dialog flex max-h-[94dvh] w-full sm:max-h-[88vh] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
           // Grows with the viewport rather than to it: the rail plus a settings
           // form has a comfortable width, and a 34-inch screen should not
           // stretch a two-column form across all of it.

@@ -872,14 +872,11 @@ export function Chat({
           </div>
         )}
 
-        {loading && (
-          <p role="status" className="pt-16 text-center text-sm text-fg-muted">
-            Loading the conversation…
-          </p>
-        )}
+        {loading && <TranscriptSkeleton />}
 
         {!loading && items.length === 0 && (
-          <div className="pt-16 text-center">
+          <div className="chat-empty pt-16 text-center">
+            <img src="/logo-192.png" alt="" draggable={false} className="chat-empty-mark mx-auto mb-4 h-11 w-11 object-contain" />
             <p className="text-sm text-fg-muted">Give pi a task.</p>
             <p className="mt-1 text-xs text-fg-faint">You can close this tab — it keeps working.</p>
           </div>
@@ -1184,7 +1181,7 @@ export function Chat({
               reading.current = null;
               scroller.follow(true);
             }}
-            className="absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
+            className="float-in absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
           >
             <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
             {running ? "Latest output" : "Jump to the end"}
@@ -1195,7 +1192,7 @@ export function Chat({
             ref={paletteRef}
             role="listbox"
             aria-label="Commands"
-            className="absolute bottom-full left-0 right-0 mb-2 max-h-[min(18rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop"
+            className="float-in absolute bottom-full left-0 right-0 mb-2 max-h-[min(18rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop"
           >
             {matches.map((c, i) => (
               <button
@@ -1249,7 +1246,7 @@ export function Chat({
         {(attached.length > 0 || adding > 0) && (
           <div className="flex flex-wrap items-center gap-2 px-3 pt-3" aria-label="Pictures going with the message">
             {attached.map((a) => (
-              <div key={a.id} className="group/att relative">
+              <div key={a.id} className="pop-in group/att relative">
                 <img src={a.data} alt={a.name} title={a.name} className="h-14 w-14 rounded-lg object-cover ring-1 ring-line" />
                 <button
                   type="button"
@@ -1419,7 +1416,7 @@ export function Chat({
             style={{ width: asideWidth }}
             // On a phone there is no room beside the conversation: the panels
             // cover it, under the header that opened them, until closed.
-            className="flex shrink-0 flex-col overflow-hidden border-l border-line [&:fullscreen]:w-screen max-md:absolute max-md:inset-0 max-md:z-20 max-md:!w-full max-md:border-l-0 max-md:bg-surface"
+            className="chat-aside flex shrink-0 flex-col overflow-hidden border-l border-line [&:fullscreen]:w-screen max-md:absolute max-md:inset-0 max-md:z-20 max-md:!w-full max-md:border-l-0 max-md:bg-surface"
           >
             {asidePanels.map((kind, i) => (
               <Fragment key={kind}>
@@ -1431,7 +1428,7 @@ export function Chat({
                   />
                 )}
                 <div
-                  className={`flex min-h-0 flex-col ${kind === "browser" ? "bg-black" : ""}`}
+                  className={`chat-aside-panel flex min-h-0 flex-col ${kind === "browser" ? "bg-black" : ""}`}
                   style={{ flex: asidePanels.length === 1 ? "1 1 0%" : `${i === 0 ? split : 1 - split} 1 0%` }}
                 >
                   <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
@@ -1506,6 +1503,35 @@ export function Chat({
 /** What the agent said, as it is read — without the reasoning model's stray tags. */
 const assistantText = (item: Extract<Item, { kind: "assistant" }>) =>
   (item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "");
+
+/**
+ * The shape of a conversation while it is fetched: a question, an answer,
+ * a couple of steps. What arrives replaces it where it stood, rather than
+ * a line of text that jumps away.
+ */
+function TranscriptSkeleton() {
+  return (
+    <div role="status" className="skeleton-group space-y-5 pt-6">
+      <span className="sr-only">Loading the conversation…</span>
+      <div className="flex justify-end">
+        <div className="skeleton h-10 w-[55%] rounded-2xl rounded-br-md" />
+      </div>
+      <div className="space-y-2">
+        <div className="skeleton h-3 w-[88%]" />
+        <div className="skeleton h-3 w-[72%]" />
+        <div className="skeleton h-3 w-[80%]" />
+      </div>
+      <div className="space-y-1.5">
+        <div className="skeleton h-6 w-40" />
+        <div className="skeleton h-6 w-52" />
+      </div>
+      <div className="space-y-2">
+        <div className="skeleton h-3 w-[64%]" />
+        <div className="skeleton h-3 w-[46%]" />
+      </div>
+    </div>
+  );
+}
 
 /** One of the buttons in the chat's header that opens a panel beside it. */
 function PanelToggle({

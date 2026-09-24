@@ -13,6 +13,7 @@ import {
   LuTrash2,
 } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
+import { RowsSkeleton } from "./Skeleton";
 import { api, type AgentSession, type AgentSetup as Setup } from "../api";
 import { AgentSetup } from "./AgentSetup";
 import { confirmDialog } from "./ConfirmDialog";
@@ -203,7 +204,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
           )}
 
           {loading ? (
-            <p className="py-12 text-center text-sm text-fg-subtle">Loading…</p>
+            <RowsSkeleton />
           ) : sessions.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-line px-4 py-10 text-center">
               <p className="text-sm text-fg-muted">Nothing has reached the agent yet.</p>
@@ -241,7 +242,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
                     </span>
                   </div>
 
-                  <ul className="mt-1.5 space-y-1">
+                  <ul className="stagger-in mt-1.5 space-y-1">
                     {group.items.map((s) => (
                       <li key={s.id} className="group relative">
                         {renaming === s.id ? (

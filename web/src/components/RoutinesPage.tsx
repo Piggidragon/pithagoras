@@ -12,6 +12,7 @@ import {
   LuTrash2,
 } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
+import { RowsSkeleton } from "./Skeleton";
 import { api, type ReportTarget, type ReportTo, type Routine } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
@@ -247,7 +248,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
         )}
 
         {loading ? (
-          <p className="py-10 text-center text-sm text-fg-subtle">Loading…</p>
+          <RowsSkeleton />
         ) : routines.length === 0 ? (
           <div className="mt-3 rounded-xl border border-dashed border-line px-4 py-10 text-center">
             <p className="text-sm text-fg-muted">No routines yet.</p>
@@ -257,7 +258,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
             </p>
           </div>
         ) : (
-          <ul className="mt-3 space-y-1.5">
+          <ul className="stagger-in mt-3 space-y-1.5">
             {routines.map((r) => (
               <li key={r.id}>
                 <button
