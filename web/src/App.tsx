@@ -384,7 +384,9 @@ function Shell({
 
       </div>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
+        {/* In a chat the chat's own header has the menu button, and this bar
+            would only repeat its title; in voice mode that header is gone. */}
+        <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
           <button type="button" aria-label="Open navigation" aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
           <span className="truncate text-sm text-fg">{active?.title || "Pithagoras"}</span>
         </header>
@@ -468,6 +470,7 @@ function Shell({
               await api.renameSession(active.id, title);
               await refreshSessions();
             }}
+            onOpenNavigation={() => setMobileNav(true)}
             onClientCommand={async (name, args) => {
               if (name === "settings") {
                 navigate(`/s/${active.id}/settings/general`);

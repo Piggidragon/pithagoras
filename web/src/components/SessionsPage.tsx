@@ -107,7 +107,7 @@ export function SessionsPage({
                     <p className="truncate font-mono text-[11px] text-fg-faint">{s.workspace}</p>
                   </div>
                   <span className="shrink-0 text-[11px] text-fg-faint">{when(s.updated_at)}</span>
-                  <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+                  <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();

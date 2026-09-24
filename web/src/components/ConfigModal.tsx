@@ -146,6 +146,7 @@ export function ConfigModal({
       subtitle="Applies to the whole portal"
       onClose={onClose}
       startInRail={initialTab === "general"}
+      section={nav.kind === "tab" ? TABS.find((t) => t.id === nav.id)?.label : activeExt?.name}
       rail={
         <div className="space-y-4">
           <RailGroup>

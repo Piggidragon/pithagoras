@@ -11,7 +11,7 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuArrowDown, LuCheck, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuMenu, LuArrowDown, LuCheck, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
@@ -115,6 +115,7 @@ export function Chat({
   onAbort,
   onClientCommand,
   onRename,
+  onOpenNavigation,
   loading,
   hasEarlier,
   loadingEarlier,
@@ -137,6 +138,8 @@ export function Chat({
   onClientCommand: (name: string, args: string) => void | Promise<void>;
   /** Give the chat another name, from its header. */
   onRename: (title: string) => Promise<void>;
+  /** On a phone, where the sidebar is a drawer: opens it. */
+  onOpenNavigation?: () => void;
 }) {
   const [input, setInput] = useState(() => drafts.get(session.id));
   // Where dictated words go. Kept beside the state because several phrases can
@@ -769,8 +772,13 @@ export function Chat({
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
       <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} folder={session.workspace} open={canvasOpen} setOpen={setCanvasOpen}/>
       <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
-      <header className={voiceMode ? "hidden" : "border-b border-line px-4 py-3"}>
-        <div className="mx-auto flex w-full max-w-3xl items-center gap-3">
+      <header className={voiceMode ? "hidden" : "chat-header border-b border-line px-4 py-3 max-md:px-3 max-md:py-2"}>
+        <div className="mx-auto flex w-full max-w-3xl items-center gap-3 max-md:gap-2">
+        {onOpenNavigation && (
+          <button type="button" aria-label="Open navigation" aria-controls="mobile-navigation" onClick={onOpenNavigation} className="-ml-1 rounded-lg p-2 text-fg hover:bg-fg/10 md:hidden">
+            <LuMenu size={20} aria-hidden />
+          </button>
+        )}
         <div className="min-w-0 flex-1">
           {renaming ? (
             <TitleInput
@@ -1456,7 +1464,7 @@ export function Chat({
                     ) : (
                       <span className="text-[11px] text-fg-subtle">{kind === "browser" ? "Browser" : "Files"}</span>
                     )}
-                    {kind === "terminal" && terminalTab === "shell" && <span className="truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
+                    {kind === "terminal" && terminalTab === "shell" && <span className="max-md:hidden truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
                     {kind === "browser" && (
                       <button
                         onClick={() => browserPane.current?.requestFullscreen?.()}

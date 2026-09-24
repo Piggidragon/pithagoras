@@ -20,6 +20,7 @@ export function Modal({
   footer,
   wide,
   startInRail = true,
+  section,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
@@ -29,6 +30,8 @@ export function Modal({
   footer?: ReactNode;
   wide?: boolean;
   startInRail?: boolean;
+  /** The rail's chosen section: the title on a phone, where the rail is out of sight. */
+  section?: ReactNode;
 }) {
   // Only read below `sm`; wider, both panes are always there.
   const [inRail, setInRail] = useState(startInRail);
@@ -70,8 +73,18 @@ export function Modal({
             </button>
           )}
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold text-fg">{title}</h2>
-            {subtitle && <p className="truncate text-xs text-fg-subtle">{subtitle}</p>}
+            {rail && section && !inRail ? (
+              <>
+                <h2 className="truncate text-sm font-semibold text-fg sm:hidden">{section}</h2>
+                <h2 className="hidden truncate text-sm font-semibold text-fg sm:block">{title}</h2>
+                {subtitle && <p className="hidden truncate text-xs text-fg-subtle sm:block">{subtitle}</p>}
+              </>
+            ) : (
+              <>
+                <h2 className="truncate text-sm font-semibold text-fg">{title}</h2>
+                {subtitle && <p className="truncate text-xs text-fg-subtle">{subtitle}</p>}
+              </>
+            )}
           </div>
           <button
             onClick={onClose}

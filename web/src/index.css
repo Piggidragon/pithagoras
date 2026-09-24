@@ -820,3 +820,24 @@ button.chat-compaction-pill:disabled { cursor: default; }
 .ui-tooltip[data-side="below"] { transform: translateY(-3px) scale(.97); }
 .ui-tooltip.is-shown { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { .ui-tooltip { transition: opacity .1s; transform: none; } }
+
+/* ---- Phones ---------------------------------------------------------- */
+
+/* In a chat, its header carries the menu button: the portal's bar would only
+   say the title a second time. Voice mode drops that header, and the bar is back. */
+@media (max-width: 767px) {
+  main:has(.chat-header) > .app-mobile-bar { display: none; }
+  .session-canvases { right: 8px; }
+  .canvas-panel { width: calc(100vw - 16px); }
+}
+.chat-tabs button { white-space: nowrap; }
+
+@media (pointer: coarse) {
+  /* iOS zooms the page into any field under 16px and leaves it zoomed. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea:not(.xterm-helper-textarea),
+  [contenteditable="true"] { font-size: max(16px, 1em); }
+  /* A fingertip, not a pointer: room around the small icon buttons of a row. */
+  .files-row-actions > a,
+  .files-row-actions > button { padding: 7px; }
+}

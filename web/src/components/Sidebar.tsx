@@ -349,7 +349,8 @@ function SessionItem({
           </span>
         )}
 
-        <div className="ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex">
+        {/* Without a mouse there is no hover: the open chat's row keeps them. */}
+        <div className={`ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex ${active ? "[@media(hover:none)]:flex" : ""}`}>
           <button
             onClick={(e) => {
               e.stopPropagation();

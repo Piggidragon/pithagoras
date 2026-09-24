@@ -296,7 +296,7 @@ function ServerRow({
         On
       </label>
       <button
-        className="shrink-0 rounded-lg p-1.5 text-fg-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+        className="shrink-0 rounded-lg p-1.5 text-fg-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100 [@media(hover:none)]:opacity-100"
         title="Remove"
         onClick={onDelete}
       >
