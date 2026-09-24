@@ -814,52 +814,34 @@ export function Chat({
             </span>
           )}
           {browserUp && (
-            <button
+            <PanelToggle
+              open={watching}
               onClick={() => setWatching((v) => !v)}
-              aria-label="Browser"
-              aria-expanded={watching}
-              title={
-                watching ? "Hide the browser" : "Watch the browser the agent is driving"
-              }
-              className={`rounded-lg border px-2 py-1 text-xs transition ${
-                watching
-                  ? "border-accent/40 bg-accent/10 text-accent"
-                  : "border-line text-fg-muted hover:bg-fg/5 hover:text-fg"
-              }`}
+              label="Browser"
+              title={watching ? "Hide the browser" : "Watch the browser the agent is driving"}
             >
-              <LuGlobe className="h-3.5 w-3.5" />
-            </button>
+              <LuGlobe />
+            </PanelToggle>
           )}
-          <button
+          <PanelToggle
+            open={terminal}
             onClick={() => setTerminal((v) => !v)}
-            aria-label="Terminal"
-            aria-expanded={terminal}
+            label="Terminal"
             title={terminal ? "Hide the terminal" : "The agent's terminal, and a shell of your own in this workspace"}
-            className={`rounded-lg border px-2 py-1 text-xs transition ${
-              terminal
-                ? "border-accent/40 bg-accent/10 text-accent"
-                : "border-line text-fg-muted hover:bg-fg/5 hover:text-fg"
-            }`}
           >
-            <LuSquareTerminal className="h-3.5 w-3.5" />
-          </button>
-          <button
+            <LuSquareTerminal />
+          </PanelToggle>
+          <PanelToggle
+            open={files}
             onClick={() => (files ? void closeFiles() : setFiles(true))}
-            aria-label="Files"
-            aria-expanded={files}
+            label="Files"
             title={files ? "Hide the files" : "Browse the files in this chat's folder"}
-            className={`rounded-lg border px-2 py-1 text-xs transition ${
-              files
-                ? "border-accent/40 bg-accent/10 text-accent"
-                : "border-line text-fg-muted hover:bg-fg/5 hover:text-fg"
-            }`}
           >
-            <LuFolderOpen className="h-3.5 w-3.5" />
-          </button>
-          <button onClick={() => setCanvasOpen(v => !v)} aria-label="Session canvases" title="Session canvases" aria-expanded={canvasOpen}
-            className={`rounded-lg border px-2 py-1 text-xs transition ${canvasOpen ? 'border-accent/40 bg-accent/10 text-accent' : 'border-line text-fg-muted hover:bg-fg/5 hover:text-fg'}`}>
-            <LuFileText className="h-3.5 w-3.5" />
-          </button>
+            <LuFolderOpen />
+          </PanelToggle>
+          <PanelToggle open={canvasOpen} onClick={() => setCanvasOpen((v) => !v)} label="Session canvases" title="Session canvases">
+            <LuFileText />
+          </PanelToggle>
         </div>
         </div>
       </header>
@@ -1524,6 +1506,36 @@ export function Chat({
 /** What the agent said, as it is read — without the reasoning model's stray tags. */
 const assistantText = (item: Extract<Item, { kind: "assistant" }>) =>
   (item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "");
+
+/** One of the buttons in the chat's header that opens a panel beside it. */
+function PanelToggle({
+  open,
+  onClick,
+  label,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClick: () => void;
+  label: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-expanded={open}
+      title={title}
+      className={`panel-toggle relative rounded-lg border px-2 py-1 text-xs transition [&>svg]:h-3.5 [&>svg]:w-3.5 ${
+        open ? "is-open border-accent/40 bg-accent/10 text-accent" : "border-line text-fg-muted hover:bg-fg/5 hover:text-fg"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 /** Copies a message, and for a moment says that it did. */
 function CopyAction({ text }: { text: string }) {

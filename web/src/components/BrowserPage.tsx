@@ -8,6 +8,7 @@ import {
   LuRefreshCw,
   LuShieldCheck,
 } from "react-icons/lu";
+import { PageHeader } from "./PageHeader";
 import { api, type BrowserStatus } from "../api";
 import { pollWhileVisible } from "../poll";
 
@@ -84,21 +85,18 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
 
         <InstallPanel status={status} onAct={act} />
 
-        <header className="mb-5 rounded-2xl border border-line bg-gradient-to-br from-accent/10 via-transparent to-transparent px-5 py-5">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/12 text-accent">
-              <LuGlobe className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-base font-semibold text-fg">Browser</h2>
-              <p className="mt-0.5 max-w-xl text-sm text-fg-muted">
-                A real browser with a profile that stays logged in. Sign into it once here; every
-                run after that finds the accounts already there, and no password reaches the
-                model.
-              </p>
-            </div>
-          </div>
-
+        <PageHeader
+          icon={<LuGlobe />}
+          title="Browser"
+          className="mb-5"
+          description={
+            <>
+              A real browser with a profile that stays logged in. Sign into it once here; every
+              run after that finds the accounts already there, and no password reaches the
+              model.
+            </>
+          }
+        >
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <span
               className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ${
@@ -138,7 +136,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
               {embeddable ? "New tab" : "Open browser"}
             </a>
           </div>
-        </header>
+        </PageHeader>
 
         {/* Two failures that each look fine on their own: a browser nobody can
             drive, and tools pointing at a browser that is gone. */}

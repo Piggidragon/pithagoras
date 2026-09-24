@@ -5,8 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { Chat } from '../src/components/Chat';
 import { Select } from '../src/components/Select';
 import type { PortalEvent, Session } from '../src/api';
-import 'streamdown/styles.css';
-import '../src/index.css';
+import '../src/styles';
 import { installTooltips } from '../src/tooltips';
 installTooltips();
 

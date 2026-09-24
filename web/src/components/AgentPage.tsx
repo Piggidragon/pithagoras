@@ -12,18 +12,13 @@ import {
   LuRefreshCw,
   LuTrash2,
 } from "react-icons/lu";
-import { api, type AgentSession, type AgentSetup as Setup, type SessionStatus } from "../api";
+import { PageHeader, Stat } from "./PageHeader";
+import { api, type AgentSession, type AgentSetup as Setup } from "../api";
 import { AgentSetup } from "./AgentSetup";
 import { confirmDialog } from "./ConfirmDialog";
+import { StatusDot } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { pollWhileVisible } from "../poll";
-
-const STATUS_STYLE: Record<SessionStatus, string> = {
-  running: "bg-accent animate-pulse",
-  idle: "bg-fg-faint",
-  error: "bg-danger",
-  interrupted: "bg-warn",
-};
 
 const when = (iso: string) => {
   const then = new Date(iso + (iso.endsWith("Z") ? "" : "Z")).getTime();
@@ -155,57 +150,46 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl">
-          <header className="rounded-2xl border border-line bg-gradient-to-br from-accent/10 via-transparent to-transparent px-5 py-5">
-            <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/12 text-accent">
-                <LuBot className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-fg">Agent</h2>
-                <p className="mt-0.5 max-w-xl text-sm text-fg-muted">
-                  Conversations that reached the agent through a channel. Each chat gets its own
-                  session, so a group and a DM never share a memory.
-                </p>
-              </div>
-            </div>
-
-            <button
-              onClick={async () => {
-                setStarting(true);
-                try {
-                  onSelect((await api.startAgentChat()).id);
-                } finally {
-                  setStarting(false);
-                }
-              }}
-              disabled={starting}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
-            >
-              {starting ? (
-                <LuRefreshCw className="h-4 w-4 animate-spin" />
-              ) : (
-                <LuPlus className="h-4 w-4" />
-              )}
-              New conversation
-            </button>
-
+          <PageHeader
+            icon={<LuBot />}
+            title="Agent"
+            description={
+              <>
+                Conversations that reached the agent through a channel. Each chat gets its own
+                session, so a group and a DM never share a memory.
+              </>
+            }
+            action={
+              <button
+                onClick={async () => {
+                  setStarting(true);
+                  try {
+                    onSelect((await api.startAgentChat()).id);
+                  } finally {
+                    setStarting(false);
+                  }
+                }}
+                disabled={starting}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
+              >
+                {starting ? (
+                  <LuRefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <LuPlus className="h-4 w-4" />
+                )}
+                New conversation
+              </button>
+            }
+          >
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <div className="flex items-baseline gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
-                <span className="text-sm tabular-nums text-fg">{sessions.length}</span>
-                <span className="text-[11px] text-fg-subtle">conversations</span>
-              </div>
-              <div className="flex items-baseline gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
-                <span className="text-sm tabular-nums text-accent">
-                  {sessions.filter((s) => s.status === "running").length}
-                </span>
-                <span className="text-[11px] text-fg-subtle">running</span>
-              </div>
+              <Stat value={sessions.length} label="conversations" />
+              <Stat value={sessions.filter((s) => s.status === "running").length} label="running" tone="text-accent" />
               <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
                 <LuFolder className="h-3 w-3 shrink-0 text-fg-faint" />
                 <span className="truncate font-mono text-[11px] text-fg-subtle">{home}</span>
               </div>
             </div>
-          </header>
+          </PageHeader>
 
           {setup?.initialised && <AgentFiles setup={setup} onSaved={setSetup} />}
 
@@ -328,7 +312,7 @@ const ROW =
 function RowBody({ s, title }: { s: AgentSession; title: ReactNode }) {
   return (
     <>
-      <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[s.status]}`} />
+      <StatusDot status={s.status} />
       <div className="min-w-0 flex-1">
         {title}
         <p className="truncate font-mono text-[10px] text-fg-faint">{s.channel_key}</p>

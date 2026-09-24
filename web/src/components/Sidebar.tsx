@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { StatusDot } from "./StatusDot";
 import {
   LuBot,
   LuPanelLeftClose,
@@ -19,24 +20,10 @@ import {
   LuShield,
   LuTrash2,
 } from "react-icons/lu";
-import type { Session, SessionStatus } from "../api";
+import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
-
-const STATUS_STYLE: Record<SessionStatus, string> = {
-  running: "bg-accent animate-pulse",
-  idle: "bg-fg-faint",
-  error: "bg-danger",
-  interrupted: "bg-warn",
-};
-
-const STATUS_LABEL: Record<SessionStatus, string> = {
-  running: "running",
-  idle: "idle",
-  error: "error",
-  interrupted: "interrupted — server restarted mid-run",
-};
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
 const RECENTS_LIMIT = 12;
@@ -333,10 +320,7 @@ function SessionItem({
       }`}
     >
       <div className="flex items-center gap-2">
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[s.status]}`}
-          title={STATUS_LABEL[s.status]}
-        />
+        <StatusDot status={s.status} />
         {renaming ? (
           <TitleInput
             value={s.title}

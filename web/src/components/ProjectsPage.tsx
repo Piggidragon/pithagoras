@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
+import { PageHeader } from "./PageHeader";
 import { api, type Project, type Session } from "../api";
 import { bytesLabel, slugify } from "../projects";
 import { when } from "../time";
@@ -100,26 +101,24 @@ export function ProjectsPage({
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl">
-          <header className="rounded-2xl border border-line bg-gradient-to-br from-accent/10 via-transparent to-transparent px-5 py-5">
-            <div className="flex flex-wrap items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/12 text-accent">
-                <LuFolderKanban className="h-5 w-5" />
-              </div>
-              <div className="min-w-0 flex-1 basis-52">
-                <h2 className="text-base font-semibold text-fg">Projects</h2>
-                <p className="mt-0.5 max-w-xl text-sm text-fg-muted">
-                  New chats start in Home. A project is a folder of its own with instructions for the
-                  agent — saved as its AGENTS.md — for work that should stay together.
-                </p>
-              </div>
+          <PageHeader
+            icon={<LuFolderKanban />}
+            title="Projects"
+            description={
+              <>
+                New chats start in Home. A project is a folder of its own with instructions for the
+                agent — saved as its AGENTS.md — for work that should stay together.
+              </>
+            }
+            action={
               <button
                 onClick={() => setCreating(true)}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent max-sm:ml-[3.25rem] ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
               >
                 <LuPlus className="h-4 w-4" /> New project
               </button>
-            </div>
-          </header>
+            }
+          />
 
           {error && <p className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
 

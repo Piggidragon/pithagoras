@@ -11,6 +11,7 @@ import {
   LuRefreshCw,
   LuTrash2,
 } from "react-icons/lu";
+import { PageHeader, Stat } from "./PageHeader";
 import { api, type ReportTarget, type ReportTo, type Routine } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
@@ -195,20 +196,16 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
   return (
     <div className="h-full overflow-y-auto px-4 py-6">
       <div className="mx-auto w-full max-w-3xl">
-        <header className="rounded-2xl border border-line bg-gradient-to-br from-accent/10 via-transparent to-transparent px-5 py-5">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/12 text-accent">
-              <LuClock className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-base font-semibold text-fg">Routines</h2>
-              <p className="mt-0.5 max-w-xl text-sm text-fg-muted">
-                Work the agent does on a schedule instead of because you asked. It wakes up, follows
-                its instructions, and goes quiet again.
-              </p>
-            </div>
-          </div>
-
+        <PageHeader
+          icon={<LuClock />}
+          title="Routines"
+          description={
+            <>
+              Work the agent does on a schedule instead of because you asked. It wakes up, follows
+              its instructions, and goes quiet again.
+            </>
+          }
+        >
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Stat value={routines.length} label="routines" />
             <Stat value={routines.filter((r) => r.enabled).length} label="enabled" tone="text-accent" />
@@ -218,7 +215,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
               tone="text-danger"
             />
           </div>
-        </header>
+        </PageHeader>
 
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -302,15 +299,6 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
           still running when its next slot comes round is skipped rather than stacked.
         </p>
       </div>
-    </div>
-  );
-}
-
-function Stat({ value, label, tone }: { value: number; label: string; tone?: string }) {
-  return (
-    <div className="flex items-baseline gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
-      <span className={`text-sm tabular-nums ${tone ?? "text-fg"}`}>{value}</span>
-      <span className="text-[11px] text-fg-subtle">{label}</span>
     </div>
   );
 }

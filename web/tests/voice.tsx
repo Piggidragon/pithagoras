@@ -5,7 +5,7 @@ import { Chat } from '../src/components/Chat';
 import { ExtensionDialog } from '../src/components/ExtensionDialog';
 import { KeyboardShortcuts } from '../src/components/KeyboardShortcuts';
 import type { PortalEvent, Session } from '../src/api';
-import '../src/index.css';
+import '../src/styles';
 const microphone = new AudioContext();
 let destination = microphone.createMediaStreamDestination();
 Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { value: async () => {
