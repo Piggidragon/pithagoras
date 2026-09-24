@@ -620,7 +620,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
   ];
   const offered = byProvider.get(provider ?? "") ?? [];
   const modelOptions = [
-    { value: "", label: defaults.model && (!stored.provider || stored.provider === defaults.provider) ? `pi's default — ${defaults.model}` : "pi's default", hint: "Whatever pi picks for the provider" },
+    { value: "", label: defaults.model && (!stored.provider || stored.provider === defaults.provider) ? `pi's default — ${offered.find((m) => m.id === defaults.model)?.name ?? defaults.model}` : "pi's default", hint: "Whatever pi picks for the provider" },
     ...offered.map((m) => ({ value: m.id, label: m.name, text: `${m.name} ${m.id}`, hint: modelHint(m) || undefined })),
     ...(stored.model && !offered.some((m) => m.id === stored.model)
       ? [{ value: stored.model, label: stored.model, hint: "Not offered by this provider now" }]
