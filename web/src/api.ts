@@ -80,6 +80,8 @@ export interface Routine {
   guard: boolean;
   /** True lets this routine's runs drive the agent's browser. */
   browser: boolean;
+  /** Where its runs happen: null for Home, else a project's directory. */
+  workspace: string | null;
   /** null inherits the portal default; "" means this one never reports. */
   reportChannel: string | null;
   reportTarget: string | null;
@@ -502,6 +504,7 @@ export const api = {
     instructions?: string;
     reportChannel?: string | null;
     reportTarget?: string | null;
+    workspace?: string | null;
   }) =>
     json<Routine>("/api/routines", { method: "POST", body: JSON.stringify(input) }),
   updateRoutine: (
@@ -518,6 +521,7 @@ export const api = {
       browser?: boolean;
       reportChannel?: string | null;
       reportTarget?: string | null;
+      workspace?: string | null;
     }
   ) => json<Routine>(`/api/routines/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteRoutine: (id: string) => json<{ ok: true }>(`/api/routines/${id}`, { method: "DELETE" }),

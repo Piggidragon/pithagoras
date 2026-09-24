@@ -413,6 +413,10 @@ function Shell({
               await api.pinSession(id, pinned);
               refreshSessions();
             }}
+            onRename={async (id, title) => {
+              await api.renameSession(id, title);
+              await refreshSessions();
+            }}
           />
         ) : view === "projects" ? (
           <ProjectsPage

@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { createSession, findRoutineSession, getDb, type SessionRow } from "../db.js";
 import { agentHome } from "../agent.js";
+import { checkWorkspace } from "../workspaces.js";
 import { sessions, EXECUTOR_KIND } from "../session-manager.js";
 import { isDue, nextRun, parseCron } from "./cron.js";
 import { reportFraming, reportToFor } from "../pi/report-tool.js";
@@ -28,6 +29,8 @@ export interface RoutineRow {
   guard: number;
   /** 1 lets this routine's runs drive the agent's browser. */
   browser: number;
+  /** Where its runs happen: null for Home, else a project's directory. */
+  workspace: string | null;
   /**
    * Where this routine's reports go. null inherits the portal default; the
    * empty string means it never reports, whatever the default is.
@@ -167,8 +170,14 @@ class RoutineSupervisor {
    * run a clean one instead, for work where history is only noise.
    */
   private sessionFor(row: RoutineRow): SessionRow {
+    // Its project, or Home. One that has gone is a failed run, said as such:
+    // falling back to Home would do the work somewhere it was never meant for.
+    const where = row.workspace ? checkWorkspace(row.workspace) : { path: agentHome() };
+    if ("error" in where) {
+      throw new Error(`Its project ${row.workspace} cannot be used (${where.error}). Choose where it runs in the routine.`);
+    }
     if (!row.fresh_session) {
-      const existing = findRoutineSession(row.slug);
+      const existing = findRoutineSession(row.slug, where.path);
       if (existing) return existing;
     }
 
@@ -177,7 +186,7 @@ class RoutineSupervisor {
     createSession({
       id,
       title: row.fresh_session ? `${row.name} — ${stamp}` : row.name,
-      workspace: agentHome(),
+      workspace: where.path,
       executor: EXECUTOR_KIND,
       kind: "routine",
       routine_slug: row.slug,

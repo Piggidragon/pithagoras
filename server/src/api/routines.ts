@@ -5,6 +5,8 @@ import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
 import { isOneOff, oneOffDone, routineSupervisor, whenNext, type RoutineRow } from "../routines/supervisor.js";
+import { agentHome } from "../agent.js";
+import { checkWorkspace } from "../workspaces.js";
 
 /**
  * Scheduled work: a standing instruction, a cron expression, and a record of
@@ -26,6 +28,8 @@ const toApi = (row: RoutineRow) => ({
   freshSession: Boolean(row.fresh_session),
   guard: row.guard === 1,
   browser: row.browser === 1,
+  /** Where its runs happen: null for Home, else a project's directory. */
+  workspace: row.workspace ?? null,
   /** null inherits the portal default; "" is an explicit "never report". */
   reportChannel: row.report_channel,
   reportTarget: row.report_target,
@@ -75,6 +79,20 @@ function readReport(body: any): { channel: string | null; target: string | null 
     return { channel, target: body.reportTarget };
   }
   return { channel: null, target: null };
+}
+
+/**
+ * Where a routine runs, as sent: absent leaves it as it is, null or "" is
+ * Home, and anything else must be a place a chat could run.
+ */
+export function readWorkspace(body: any): { workspace: string | null } | { error: string } | undefined {
+  if (!body || !("workspace" in body)) return undefined;
+  const raw = body.workspace;
+  if (raw === null || raw === "") return { workspace: null };
+  if (typeof raw !== "string") return { error: "workspace must be a path, or null for Home" };
+  const where = checkWorkspace(raw);
+  if ("error" in where) return where;
+  return { workspace: where.path === agentHome() ? null : where.path };
 }
 
 /** Slugs own the sessions, so two routines must never share one. */
@@ -162,6 +180,8 @@ export function routinesRouter(): Router {
 
     const timing = readTiming({ schedule, runAt });
     if ("error" in timing) return res.status(400).json({ error: timing.error });
+    const place = readWorkspace(req.body);
+    if (place && "error" in place) return res.status(400).json({ error: place.error });
 
     const id = nanoid(10);
     const slug = freeSlug(typeof req.body?.slug === "string" && req.body.slug ? req.body.slug : name);
@@ -169,8 +189,8 @@ export function routinesRouter(): Router {
       .prepare(
         `INSERT INTO routines
            (id, slug, name, schedule, run_at, instructions, fresh_session, next_run,
-            report_channel, report_target)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            report_channel, report_target, workspace)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -182,7 +202,8 @@ export function routinesRouter(): Router {
         freshSession ? 1 : 0,
         timing.schedule ? (nextRun(parseCron(timing.schedule))?.toISOString() ?? null) : timing.runAt,
         report.channel,
-        report.target
+        report.target,
+        place?.workspace ?? null
       );
     res.json(toApi(rowById(id)!));
   });
@@ -248,6 +269,12 @@ export function routinesRouter(): Router {
     if (typeof freshSession === "boolean") {
       sets.push("fresh_session = ?");
       values.push(freshSession ? 1 : 0);
+    }
+    const place = readWorkspace(req.body);
+    if (place && "error" in place) return res.status(400).json({ error: place.error });
+    if (place) {
+      sets.push("workspace = ?");
+      values.push(place.workspace);
     }
 
     if (sets.length) {

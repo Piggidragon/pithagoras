@@ -6,6 +6,8 @@ import {
   LuChevronRight,
   LuCircleAlert,
   LuClock,
+  LuFolder,
+  LuHouse,
   LuPlay,
   LuPlus,
   LuRefreshCw,
@@ -13,7 +15,7 @@ import {
 } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
-import { api, type ReportTarget, type ReportTo, type Routine } from "../api";
+import { api, type ReportTarget, type ReportTo, type Routine, type Workspace } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
 
@@ -276,6 +278,8 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
                           ? `once · ${r.runAt ? new Date(r.runAt).toLocaleString() : "no time set"}`
                           : r.schedule}
                       </span>
+                      {" · "}
+                      <span title={r.workspace ?? "Home — the agent's own directory"}>{placeName(r.workspace)}</span>
                       {r.done ? " · done" : r.enabled ? ` · ${until(r.nextRun)}` : " · disabled"}
                       {r.lastStatus && (
                         <>
@@ -301,6 +305,52 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
         </p>
       </div>
     </div>
+  );
+}
+
+/** Home, or the project's folder name. */
+const placeName = (workspace: string | null) => (workspace ? workspace.split("/").filter(Boolean).pop() ?? workspace : "Home");
+
+/**
+ * Where a routine's runs happen: Home — the agent's own directory, with its
+ * notes and memory — or one of the projects. "" is Home.
+ */
+function WorkspacePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [list, setList] = useState<Workspace[] | null>(null);
+  useEffect(() => {
+    api.workspaces().then((r) => setList(r.workspaces)).catch(() => setList([]));
+  }, []);
+  const known = list?.some((w) => w.path === value);
+  return (
+    <label className="block">
+      <span className="text-xs text-fg-muted">Runs in</span>
+      <Select
+        className="mt-1 w-full"
+        aria-label="Where it runs"
+        value={value}
+        onChange={onChange}
+        placeholder="Loading…"
+        options={[
+          {
+            value: "",
+            label: <span className="inline-flex items-center gap-2"><LuHouse className="h-3.5 w-3.5 text-accent" />Home</span>,
+            text: "Home",
+            hint: "The agent's own directory, with its notes and memory",
+          },
+          ...(list ?? []).map((w) => ({
+            value: w.path,
+            label: <span className="inline-flex items-center gap-2"><LuFolder className="h-3.5 w-3.5 text-fg-subtle" />{w.name}</span>,
+            text: w.name,
+            hint: `${w.path}${w.isGit ? " · git" : ""}`,
+          })),
+          // A project that is gone is still shown for what it is, rather than as nothing.
+          ...(value && list && !known ? [{ value, label: placeName(value), hint: "Not there any more — runs fail until another is chosen" }] : []),
+        ]}
+      />
+      <p className="mt-1 text-[11px] text-fg-faint">
+        Its runs work in this directory. Each place keeps its own session, so moving it back picks up where it left off.
+      </p>
+    </label>
   );
 }
 
@@ -373,6 +423,7 @@ function NewRoutine({
   const [schedule, setSchedule] = useState("0 9 * * *");
   const [runAt, setRunAt] = useState(toLocalInput(null));
   const [instructions, setInstructions] = useState("");
+  const [workspace, setWorkspace] = useState("");
   const [busy, setBusy] = useState(false);
 
   const create = async () => {
@@ -381,8 +432,8 @@ function NewRoutine({
       await onCreated(
         await api.createRoutine(
           mode === "repeats"
-            ? { name, schedule, instructions }
-            : { name, runAt: new Date(runAt).toISOString(), instructions }
+            ? { name, schedule, instructions, workspace: workspace || null }
+            : { name, runAt: new Date(runAt).toISOString(), instructions, workspace: workspace || null }
         )
       );
     } catch (e) {
@@ -425,6 +476,8 @@ function NewRoutine({
         />
       </label>
 
+      <WorkspacePicker value={workspace} onChange={setWorkspace} />
+
       <div className="flex items-center gap-2">
         <button disabled={!name.trim() || busy} onClick={create} className={primaryCls}>
           {busy ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : <LuCheck className="h-4 w-4" />}
@@ -459,6 +512,7 @@ function RoutineDetail({
   const [fresh, setFresh] = useState(r.freshSession);
   const [guard, setGuard] = useState(r.guard);
   const [browser, setBrowser] = useState(r.browser);
+  const [workspace, setWorkspace] = useState(r.workspace ?? "");
   // "" = inherit the portal default, "off" = stay quiet, else "channel\u0000target".
   const [report, setReport] = useState(reportValue(r));
   const [targets, setTargets] = useState<ReportTarget[]>([]);
@@ -476,6 +530,7 @@ function RoutineDetail({
     setFresh(r.freshSession);
     setGuard(r.guard);
     setBrowser(r.browser);
+    setWorkspace(r.workspace ?? "");
     setReport(reportValue(r));
   }, [r.id, r.updatedAt]);
 
@@ -504,6 +559,7 @@ function RoutineDetail({
     fresh !== r.freshSession ||
     guard !== r.guard ||
     browser !== r.browser ||
+    workspace !== (r.workspace ?? "") ||
     report !== reportValue(r);
 
   const act = async (which: "save" | "run", fn: () => Promise<unknown>) => {
@@ -585,6 +641,8 @@ function RoutineDetail({
             nobody is waiting on a reply.
           </p>
         </label>
+
+        <WorkspacePicker value={workspace} onChange={setWorkspace} />
 
         <button
           type="button"
@@ -750,6 +808,7 @@ function RoutineDetail({
                 freshSession: fresh,
                 guard,
                 browser,
+                workspace: workspace || null,
                 ...reportPatch(report),
               });
               setSaved(true);

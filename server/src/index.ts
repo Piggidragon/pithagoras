@@ -1,6 +1,6 @@
 import { bindHost, loginThrottle, portalSecurityHeaders } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import path from "node:path";
@@ -19,6 +19,7 @@ import {
   listSessions,
   updateSession,
 } from "./db.js";
+import { checkWorkspace, workspaceRoot } from "./workspaces.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import {
   agentFileStatus,
@@ -87,10 +88,7 @@ import {
   setSettings,
 } from "./db.js";
 
-// WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys.
-const WORKSPACE_ROOT = path.resolve(
-  process.env.WORKSPACE_ROOT || process.env.WORKSPACES_DIR || "/workspaces"
-);
+const WORKSPACE_ROOT = workspaceRoot();
 const PORT = Number(process.env.PORT || 4100);
 /**
  * How much of a long conversation a fresh page load replays.
@@ -497,24 +495,11 @@ app.post("/api/sessions", (req, res) => {
     return res.status(400).json({ error: "workspace must be a path" });
   }
   // Without one, a chat starts in Home: the agent's own directory, where its
-  // SOUL.md, PrimaryUser.md and MEMORY.md are.
-  const home = agentHome();
-  const resolved = workspace === undefined ? home : path.resolve(workspace);
-  // Keep pi inside the mounted workspace area — no escaping to the rest of the
-  // FS. Home is the one place outside it a chat may start.
-  if (resolved !== home && resolved !== WORKSPACE_ROOT && !resolved.startsWith(WORKSPACE_ROOT + path.sep)) {
-    return res.status(400).json({ error: "workspace must be inside the workspace root" });
-  }
-  if (!existsSync(resolved)) return res.status(400).json({ error: "workspace does not exist" });
-  // The check above is on the text of the path, and a link inside the root
-  // passes it while leading anywhere. Where it really points must be inside too.
-  if (resolved !== home) {
-    const real = realpathSync(resolved);
-    const realRoot = realpathSync(WORKSPACE_ROOT);
-    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
-      return res.status(400).json({ error: "workspace must be inside the workspace root" });
-    }
-  }
+  // SOUL.md, PrimaryUser.md and MEMORY.md are. Home is the one place outside
+  // the workspace root a chat may start.
+  const where = workspace === undefined ? { path: agentHome() } : checkWorkspace(workspace);
+  if ("error" in where) return res.status(400).json({ error: where.error });
+  const resolved = where.path;
 
   const id = nanoid(12);
   createSession({

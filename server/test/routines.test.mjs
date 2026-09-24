@@ -80,6 +80,46 @@ test("running a future one-off by hand leaves its moment in place", async () => 
   });
 });
 
+test("a routine runs in Home or in the project it is given, with a session for each place", async () => {
+  const project = path.join(process.env.WORKSPACE_ROOT, "site");
+  mkdirSync(project, { recursive: true });
+  const asked = [];
+  sessions.ask = async (id) => {
+    asked.push(getDb().prepare("SELECT workspace FROM sessions WHERE id = ?").get(id).workspace);
+    return "ok";
+  };
+  await withApi(async (call) => {
+    const made = await call("POST", "/routines", { name: "Build", schedule: "@daily", instructions: "x" });
+    assert.equal(made.workspace, null, "Home unless told otherwise");
+    await call("POST", `/routines/${made.id}/run`);
+
+    const moved = await call("PATCH", `/routines/${made.id}`, { workspace: "site" });
+    assert.equal(moved.workspace, project, "a bare name is a project under the root");
+    await call("POST", `/routines/${made.id}/run`);
+
+    const back = await call("PATCH", `/routines/${made.id}`, { workspace: null });
+    assert.equal(back.workspace, null);
+    await call("POST", `/routines/${made.id}/run`);
+
+    assert.deepEqual(asked, [process.env.AGENT_HOME, project, process.env.AGENT_HOME]);
+    const own = getDb().prepare("SELECT DISTINCT workspace FROM sessions WHERE routine_slug = ?").all(made.slug);
+    assert.equal(own.length, 2, "back in Home, it picks up its Home session again");
+
+    assert.match((await call("PATCH", `/routines/${made.id}`, { workspace: "/etc" })).error, /inside the workspace root/);
+    assert.match((await call("POST", "/routines", { name: "Nowhere", schedule: "@daily", workspace: "missing" })).error, /does not exist/);
+
+    // A project that has gone fails the run, rather than doing the work in Home.
+    const gone = path.join(process.env.WORKSPACE_ROOT, "gone");
+    mkdirSync(gone);
+    const there = await call("POST", "/routines", { name: "Gone", schedule: "@daily", instructions: "x", workspace: gone });
+    const { rmSync } = await import("node:fs");
+    rmSync(gone, { recursive: true });
+    const failed = await call("POST", `/routines/${there.id}/run`);
+    assert.equal(failed.lastStatus, "error");
+    assert.match(failed.lastOutput, /cannot be used/);
+  });
+});
+
 test("giving a finished one-off a new time switches it back on", async () => {
   sessions.ask = async () => "did it";
   await withApi(async (call) => {

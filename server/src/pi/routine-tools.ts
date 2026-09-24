@@ -1,7 +1,8 @@
 import { Type } from "typebox";
 import { nanoid } from "nanoid";
 import { getDb, type SessionRow } from "../db.js";
-import { unscopeKey } from "../agent.js";
+import { agentHome, unscopeKey } from "../agent.js";
+import { checkWorkspace } from "../workspaces.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
@@ -60,7 +61,24 @@ const describe = (r: RoutineRow) => ({
   lastRun: r.last_run,
   lastStatus: r.last_status,
   instructions: r.instructions,
+  runsIn: r.workspace ?? "Home",
 });
+
+/** A project to run in, by name or path, or Home when there is none. */
+function place(raw: unknown): { workspace: string | null } | { error: string } {
+  if (raw === undefined || raw === null || raw === "" || (typeof raw === "string" && /^home$/i.test(raw.trim()))) return { workspace: null };
+  if (typeof raw !== "string") return { error: "workspace must be a project's name or path" };
+  const where = checkWorkspace(raw.trim());
+  if ("error" in where) return { error: `Cannot run in "${raw}": ${where.error}` };
+  return { workspace: where.path === agentHome() ? null : where.path };
+}
+
+const WORKSPACE_PARAM = Type.Optional(
+  Type.String({
+    description:
+      "Where its runs happen: a project's name or path under the workspace root, or 'home' for Home — the agent's own directory, which is the default.",
+  }),
+);
 
 /** Same rule as the HTTP API: a schedule or a moment, never both. */
 function timing(schedule?: string, runAt?: string) {
@@ -176,11 +194,14 @@ export function routineTools(sessionId?: string) {
               "Start each run with no memory of the last one. Defaults to false.",
           }),
         ),
+        workspace: WORKSPACE_PARAM,
       }),
       async execute(_id: string, p: any) {
         if (!p.name?.trim()) return bad("A routine needs a name");
         const t = timing(p.schedule, p.runAt);
         if ("error" in t) return bad(t.error!);
+        const where = place(p.workspace);
+        if ("error" in where) return bad(where.error);
 
         const id = nanoid(10);
         const slug = freeSlug(p.name);
@@ -189,8 +210,8 @@ export function routineTools(sessionId?: string) {
           .prepare(
             `INSERT INTO routines
            (id, slug, name, schedule, run_at, instructions, fresh_session, next_run,
-            report_channel, report_target)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            report_channel, report_target, workspace)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -205,6 +226,7 @@ export function routineTools(sessionId?: string) {
               : t.runAt,
             back.channel,
             back.target,
+            where.workspace,
           );
         routineSupervisor.refreshSchedules();
 
@@ -244,6 +266,7 @@ export function routineTools(sessionId?: string) {
               "False stops it running while keeping it. This is how you cancel one.",
           }),
         ),
+        workspace: WORKSPACE_PARAM,
       }),
       async execute(_id: string, p: any) {
         const row = byName(p.routine ?? "");
@@ -263,6 +286,12 @@ export function routineTools(sessionId?: string) {
         if (typeof p.enabled === "boolean") {
           sets.push("enabled = ?");
           values.push(p.enabled ? 1 : 0);
+        }
+        if (p.workspace !== undefined) {
+          const where = place(p.workspace);
+          if ("error" in where) return bad(where.error);
+          sets.push("workspace = ?");
+          values.push(where.workspace);
         }
         if (p.schedule !== undefined || p.runAt !== undefined) {
           const t = timing(p.schedule, p.runAt);
