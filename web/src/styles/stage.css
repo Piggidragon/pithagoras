@@ -202,13 +202,18 @@
 .session-workspace { container-type: inline-size; }
 .canvas-panel { transition: width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1); }
 .session-canvases { transition: top .7s cubic-bezier(.22,1,.36,1), right .7s cubic-bezier(.22,1,.36,1); }
-/* Opacity and a slide only, on a layer of its own from the first frame to
-   the last. A scale made the browser re-rasterise the panel and its wide
-   shadow as it grew, and the layer being made at the start and dropped at
-   the end, with a transform transition fighting the animation, showed as a
-   flicker against the darker chat behind it. */
-.session-canvases.is-open .canvas-panel { animation: canvas-enter .5s cubic-bezier(.22,1,.36,1) both; will-change: opacity, transform; backface-visibility: hidden; }
-@keyframes canvas-enter { from { opacity: 0; transform: translate3d(28px, 0, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
+/* Revealed and slid in, never faded. In Chromium on the GPU (Brave, with
+   Vulkan) any fade of this panel — opacity, filter: opacity(), an overlay
+   fading off it — stepped back once or twice on the way in, and the darker
+   chat showed through: a flicker. A wipe with clip-path does not. The clip
+   reaches well past the box, so the shadow is not cut off once in, and stays
+   that way (fill both), so nothing changes when the animation ends; the
+   shadow grows in with the wipe, so its edge does not show while it runs. */
+.session-canvases.is-open .canvas-panel { animation: canvas-enter .5s cubic-bezier(.22,1,.36,1) both; }
+@keyframes canvas-enter {
+  from { transform: translate3d(28px, 0, 0); clip-path: inset(-120px -120px -120px 35% round 18px); box-shadow: 0 20px 70px #0000; }
+  to { transform: translate3d(0, 0, 0); clip-path: inset(-120px round 18px); box-shadow: 0 20px 70px #0005; }
+}
 @media (min-width: 601px) {
   .session-workspace:has(.voice-stage) .session-canvases { top: 52px; }
   .session-workspace:has(.voice-stage) .canvas-panel { width: 57cqw; height: calc(100dvh - 250px); }
