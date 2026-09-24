@@ -111,6 +111,24 @@ function locate(path: Entry[], sent: string[], ordinal: number): string {
 }
 
 /**
+ * What the person said, as pi's file has it, oldest first: the words of each
+ * user entry on the conversation's path, without the voice-turn prefix.
+ */
+export function userTexts(raw: string): string[] {
+  const body = raw
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line) as Entry)
+    .filter((e) => e.type !== "session");
+  const leaf = body.at(-1)?.id;
+  if (!leaf) return [];
+  return pathTo(new Map(body.map((e) => [e.id!, e])), leaf)
+    .filter(isUser)
+    .map((e) => textOf(e.message?.content))
+    .map((text) => (text.startsWith(AUDIO_MESSAGE_PREFIX) ? text.slice(AUDIO_MESSAGE_PREFIX.length) : text));
+}
+
+/**
  * The session file with one message taken out.
  *
  * Refuses rather than guesses. If the tree has branches this cannot reason

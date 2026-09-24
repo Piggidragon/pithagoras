@@ -28,10 +28,21 @@ export function shownPicture(payload: any): ShownPicture | undefined {
 
 export type Item =
   /**
-   * `queued`: sent into a run, and not taken in by pi yet. `unsent`: the run was
-   * stopped first, so it never reached pi.
+   * `queued`: sent into a run, and not taken in by pi yet — after the current
+   * step when `steer`, at the end of the run otherwise. `unsent`: the run was
+   * stopped first, or the portal restarted, so it never reached pi.
    */
-  | { kind: "user"; id: string; seq: number; text: string; audio?: boolean; images?: SentImage[]; queued?: boolean; unsent?: boolean }
+  | {
+      kind: "user";
+      id: string;
+      seq: number;
+      text: string;
+      audio?: boolean;
+      images?: SentImage[];
+      queued?: boolean;
+      steer?: boolean;
+      unsent?: "stopped" | "restarted";
+    }
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
   | { kind: "tool"; id: string; name: string; callId?: string; status: "running" | "done" | "error"; detail?: string; picture?: ShownPicture }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
@@ -74,6 +85,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
           text: tagged ? raw.slice("[Audio mode]\n".length) : raw,
           audio: p.voice === true || tagged,
           ...(images ? { images } : {}),
+          ...(p.steer === true ? { steer: true } : {}),
         };
         if (p.queued === true) {
           waiting.set(ev.seq, item);
@@ -104,7 +116,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
           if (!item) continue;
           waiting.delete(item.seq);
           closeCurrent();
-          items.push({ ...item, unsent: true });
+          items.push({ ...item, unsent: p.restarted === true ? "restarted" : "stopped" });
         }
         break;
 

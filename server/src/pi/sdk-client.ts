@@ -365,7 +365,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // registry's whenever an extension registers a provider, and that undoes it.
       if (event?.type === "agent_start") client.applyLimitQuietly();
       canvases?.observe(event);
-      client.emit("event", event);
+      client.forward(event);
     });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};
@@ -539,18 +539,69 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // starts is over — as the RPC client does. `session.prompt()` holds on to
     // the whole run, and so did the request that sent it: the browser was
     // still "sending" for as long as the agent worked, and its Send stayed
-    // greyed out, with no way to steer. What fails after that is told in the
-    // chat, and pi settles the run either way.
+    // greyed out, with no way to steer. What fails after that is reported as
+    // portal_failed, ahead of the run's agent_settled: see forward().
+    let over!: () => void;
+    const run = new Promise<void>((resolve) => (over = resolve));
     try {
       await acceptPrompt(
-        preflightResult => this.session.prompt(options?.voice ? audioMessage(message) : message, { ...promptOptions, preflightResult }),
+        preflightResult =>
+          this.session.prompt(options?.voice ? audioMessage(message) : message, {
+            ...promptOptions,
+            preflightResult: (ok: boolean) => {
+              // Accepted with pi idle: this message starts a run, and pi's
+              // prompt() holds on until that run is over. Queued into one
+              // that is going, it returns at once and has no run to follow.
+              if (ok && !this.session.isStreaming) this.run = run;
+              preflightResult(ok);
+            },
+          }),
         error => {
           if (options?.voice) this.voiceFirst?.reset();
           const reason = error instanceof Error ? error.message : String(error);
-          this.emit("event", { type: "portal_notice", text: `${options?.voice ? "Voice turn" : "The run"} failed: ${reason}`, error: true });
+          this.emit("event", { type: "portal_failed", error: `${options?.voice ? "Voice turn" : "The run"} failed: ${reason}` });
+        },
+        () => {
+          if (this.run === run) this.run = undefined;
+          over();
         },
       );
     } catch (error) { if (options?.voice) this.voiceFirst?.reset(); throw error; }
+  }
+
+  /** The run the last prompt started, until pi's prompt() has returned or thrown. */
+  private run?: Promise<void>;
+  /** Events held back behind an agent_settled, in order: see forward(). */
+  private held?: any[];
+
+  /**
+   * Hands pi's events on, keeping one order the portal depends on.
+   *
+   * pi settles a run in the finally of its prompt(), and only after that does
+   * the prompt() throw for a run that failed. Passed on as they come, the
+   * portal saw the run settle cleanly — idle, and an ask() answered with
+   * whatever had been said — and heard about the failure afterwards, when
+   * nothing was listening. So the settling of a run a prompt started waits the
+   * few microtasks until that prompt is over, with anything after it.
+   */
+  forward(event: any): void {
+    if (this.held) {
+      this.held.push(event);
+      return;
+    }
+    if (event?.type === "agent_settled" && this.run) {
+      const held = (this.held = [event]);
+      void this.run.then(() => {
+        this.held = undefined;
+        // The settle itself goes straight out: a run started in the meantime
+        // is not the one it belongs to.
+        const [settled, ...after] = held;
+        this.emit("event", settled);
+        for (const e of after) this.forward(e);
+      });
+      return;
+    }
+    this.emit("event", event);
   }
 
   async abort(): Promise<void> {

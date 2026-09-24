@@ -32,7 +32,7 @@ test('stopped before it was taken in, it shows as not sent, where the run stoppe
     { seq: 5, type: 'portal_status', payload: { status: 'idle', aborted: true } },
   ] as any);
   assert.deepEqual(items.map((i) => i.kind), ['user', 'assistant', 'user', 'notice']);
-  assert.equal((items[2] as any).unsent, true);
+  assert.equal((items[2] as any).unsent, "stopped");
 });
 
 test('a waiting message does not reset what the agent is doing', () => {

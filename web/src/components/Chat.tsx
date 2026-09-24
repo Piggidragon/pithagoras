@@ -598,7 +598,9 @@ export function Chat({
     const images = await Promise.all(
       (item.images ?? []).map((image) => refetchImage(api.imageUrl(session.id, image.name), "A picture")),
     );
-    await onSend(text, images.length ? { images } : undefined);
+    // Into a run that is going, the same as typing it again would.
+    const steer = running && !voiceMode;
+    await onSend(text, images.length || steer ? { images: images.length ? images : undefined, steer: steer || undefined } : undefined);
   };
 
   const attempt = async (fn: () => Promise<void>) => {
@@ -894,10 +896,12 @@ export function Chat({
                     {waits ? (
                       <>
                         <LuClock aria-hidden className="h-3 w-3" />
-                        <span>Waiting — goes in after the current step</span>
+                        <span>Waiting — goes in {item.steer ? "after the current step" : "when the run ends"}</span>
                       </>
                     ) : (
-                      <span>Not sent — the run {item.unsent ? "was stopped" : "ended"} before the agent took it in</span>
+                      <span>
+                        Not sent — {item.unsent === "restarted" ? "the portal restarted" : `the run ${item.unsent ? "was stopped" : "ended"}`} before the agent took it in
+                      </span>
                     )}
                     {text && <CopyAction text={text} />}
                     {!waits && (

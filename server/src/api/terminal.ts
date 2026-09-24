@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { readFileSync, readlinkSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import express, { type Router } from "express";
 import { getSession } from "../db.js";
 
@@ -53,18 +54,29 @@ const terms = new Map<string, Term>();
  * running — and the test that closes one waited on it forever. The shell is in
  * a session of its own on the pty, jobs included, so a hangup to all of it is
  * what closing a real terminal does, and the shell is gone at once. What
- * ignores that, a `nohup` job, is killed a moment later. Where the session
- * cannot be found, `script` is terminated and the rest left to the hangup.
+ * ignores that, a `nohup` job, is killed a moment later — only what the
+ * hangup found, and only if it is still there. Where the session cannot be
+ * found, `script` is terminated and the rest left to the hangup.
  */
 function end(term: Term): void {
   clearTimeout(term.reaper);
   if (!term.exited) {
     const session = sessionOf(term);
-    if (session) signalSession(session, "SIGHUP");
+    const members = session ? signalSession(session, "SIGHUP") : Promise.resolve([]);
     term.proc.kill("SIGTERM");
     setTimeout(() => {
-      if (session) signalSession(session, "SIGKILL");
       if (!term.exited) term.proc.kill("SIGKILL");
+      void members.then((pids) => {
+        for (const pid of pids) {
+          // Still in that session: a pid given to something else since is not.
+          if (Number(statOf(pid)?.[3]) !== session) continue;
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Gone in the meantime.
+          }
+        }
+      });
     }, 2000).unref();
   }
   terms.delete(term.id);
@@ -83,10 +95,11 @@ function shellOf(term: Term): number | undefined {
 }
 
 /** Fields of /proc/<pid>/stat after the command name, which may hold spaces. */
+const fieldsOf = (stat: string): string[] => stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+
 function statOf(pid: string | number): string[] | undefined {
   try {
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    return stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return fieldsOf(readFileSync(`/proc/${pid}/stat`, "utf8"));
   } catch {
     return undefined;
   }
@@ -102,21 +115,37 @@ function sessionOf(term: Term): number | undefined {
   return session > 0 && session !== Number(statOf(process.pid)?.[3]) ? session : undefined;
 }
 
-function signalSession(session: number, signal: NodeJS.Signals): void {
+/**
+ * Signals every process in a session, and says which they were.
+ *
+ * A walk of /proc — every process on the host — so it is read without holding
+ * up the event loop: a busy host has thousands, and a closing panel is no
+ * reason for every open stream to stall.
+ */
+async function signalSession(session: number, signal: NodeJS.Signals): Promise<number[]> {
   let pids: string[];
   try {
-    pids = readdirSync("/proc").filter((name) => /^\d+$/.test(name));
+    pids = (await readdir("/proc")).filter((name) => /^\d+$/.test(name));
   } catch {
-    return;
+    return [];
   }
+  const members: number[] = [];
   for (const pid of pids) {
-    if (Number(statOf(pid)?.[3]) !== session) continue;
+    let stat: string;
+    try {
+      stat = await readFile(`/proc/${pid}/stat`, "utf8");
+    } catch {
+      continue;
+    }
+    if (Number(fieldsOf(stat)[3]) !== session) continue;
     try {
       process.kill(Number(pid), signal);
+      members.push(Number(pid));
     } catch {
       // Gone already, or not ours to signal.
     }
   }
+  return members;
 }
 
 function watchUnattended(term: Term): void {
