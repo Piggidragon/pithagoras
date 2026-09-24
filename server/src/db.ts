@@ -842,13 +842,14 @@ export function eventsSince(sessionId: string, since = 0, limit = 5000): EventRo
  * that owned it died with the previous server. Mark them interrupted so the UI
  * can offer a resume instead of showing a spinner forever.
  */
-export function markOrphanedSessionsInterrupted(): number {
-  const info = getDb()
+/** The ids of the sessions it marked. */
+export function markOrphanedSessionsInterrupted(): string[] {
+  const rows = getDb()
     .prepare(
-      "UPDATE sessions SET status = 'interrupted', updated_at = datetime('now') WHERE status = 'running'"
+      "UPDATE sessions SET status = 'interrupted', updated_at = datetime('now') WHERE status = 'running' RETURNING id"
     )
-    .run();
-  return info.changes;
+    .all() as { id: string }[];
+  return rows.map((r) => r.id);
 }
 
 // --- global settings ---

@@ -83,3 +83,17 @@ test('tool calls keep their arguments, output and timing; compaction shows where
   assert.deepEqual([tool.args, tool.output, tool.status, tool.until - tool.since], [{ command: 'ls -la' }, 'a\nb', 'done', 500]);
   assert.deepEqual(items[1], { kind: 'compaction', id: 'c4', status: 'done', since: 2000, until: 3000, tokensBefore: 90000, summary: 'S' });
 });
+test('a finished reply keeps how long it thought, though the deltas that timed it are gone', async () => {
+ const { LiveEvents } = await import('../server/src/live-events.ts');
+ let stored: any;
+ const live = new LiveEvents((session, type, payload) => (stored = { seq: 1, session_id: session, type, payload: JSON.stringify(payload), created_at: '' }));
+ const t0 = Date.now();
+ live.record('s', 'message_update', { assistantMessageEvent: { type: 'thinking_delta', delta: 'Hm' } });
+ live.record('s', 'message_end', { message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Hm' }] } });
+ const payload = JSON.parse(stored.payload);
+ assert.ok(payload.thinkingSince >= t0 && payload.thinkingUntil >= payload.thinkingSince);
+ // As a reload has it: the stored end alone, stamped well after the thinking.
+ const [item] = buildTranscript([{ seq: 1, at: 99_000, type: 'message_end', payload: { ...payload, thinkingSince: 1_000, thinkingUntil: 13_000 } }]) as any[];
+ assert.equal(item.thinkingSince, 1_000);
+ assert.equal(item.thinkingUntil, 13_000);
+});

@@ -193,9 +193,12 @@ class SessionManager extends EventEmitter {
    */
   recoverOrphans(): void {
     const orphaned = markOrphanedSessionsInterrupted();
-    if (orphaned > 0) {
-      console.log(`[portal] marked ${orphaned} session(s) interrupted (server restarted mid-run)`);
+    if (orphaned.length > 0) {
+      console.log(`[portal] marked ${orphaned.length} session(s) interrupted (server restarted mid-run)`);
     }
+    // Said in the conversation too, so what the run left open is settled
+    // there for good, and not taken up again as running by the next run.
+    for (const id of orphaned) this.record(id, "portal_status", { status: "interrupted", restarted: true });
     this.settleOrphanedMessages();
   }
 

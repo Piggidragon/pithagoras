@@ -92,5 +92,23 @@ export function installTooltips(): void {
     },
     true,
   );
-  for (const type of ["pointerdown", "keydown", "scroll", "blur"]) window.addEventListener(type, release, true);
+  // Where the pointer is, for a scroll that moves things under it.
+  let pointer = { x: -1, y: -1 };
+  window.addEventListener("pointermove", (e) => { pointer = { x: e.clientX, y: e.clientY }; }, { capture: true, passive: true });
+  // Only a scroll that moves the element matters — not the chat following a
+  // reply while the pointer rests on a header button. Moved from under the
+  // pointer, it lets go; still under it, the tip goes with it.
+  window.addEventListener(
+    "scroll",
+    (e) => {
+      if (!owner) return;
+      const scrolled = e.target instanceof Document ? e.target.documentElement : e.target;
+      if (!(scrolled instanceof Node) || !scrolled.contains(owner)) return;
+      const under = document.elementFromPoint(pointer.x, pointer.y);
+      if (!under || !owner.contains(under)) return release();
+      if (tip.classList.contains("is-shown")) place();
+    },
+    { capture: true, passive: true },
+  );
+  for (const type of ["pointerdown", "keydown", "blur"]) window.addEventListener(type, release, true);
 }

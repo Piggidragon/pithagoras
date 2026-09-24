@@ -72,6 +72,9 @@ export type Item =
 /** Enough of a tool's output to read in the transcript; the whole of it is in the agent terminal. */
 const TOOL_OUTPUT_MAX = 60_000;
 
+/** Text without the colour and cursor codes a terminal would act on. */
+export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+
 /** The text of a tool result, however pi shaped it. */
 export function toolOutputText(result: any): string | undefined {
   if (typeof result === "string") return result;
@@ -218,7 +221,12 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             items.push(current);
           }
           current.text = text;
-          if (ev.at !== undefined && thinking !== current.thinking) {
+          // The server keeps when the reasoning ran: the deltas that timed it
+          // are gone once the message ends, and after a reload.
+          if (typeof p.thinkingSince === "number" && typeof p.thinkingUntil === "number") {
+            current.thinkingSince = Math.min(current.thinkingSince ?? p.thinkingSince, p.thinkingSince);
+            current.thinkingUntil = Math.max(current.thinkingUntil ?? p.thinkingUntil, p.thinkingUntil);
+          } else if (ev.at !== undefined && thinking !== current.thinking) {
             current.thinkingSince ??= ev.at;
             current.thinkingUntil = ev.at;
           }
@@ -312,6 +320,17 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
 
       case "agent_end":
         settle();
+        break;
+
+      // A new run: a tool still open from before it can only be one whose run
+      // died without saying so (a portal restart that recorded nothing).
+      case "agent_start":
+        for (const it of items) {
+          if (it.kind === "tool" && it.status === "running") {
+            it.status = "error";
+            it.interrupted = true;
+          }
+        }
         break;
 
       default:

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   LuBrain,
   LuChevronRight,
@@ -18,7 +18,7 @@ import {
   LuX,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
-import type { Activity, Item } from "../transcript";
+import { stripAnsi, type Activity, type Item } from "../transcript";
 import { SHELL_TOOL, toolName } from "../tool-activity";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -95,12 +95,7 @@ export function ThinkingBlock({
 }) {
   const [open, setOpen] = useState(false);
   const body = useRef<HTMLDivElement>(null);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!streaming) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [streaming]);
+  const now = useNow(streaming);
   useLayoutEffect(() => {
     const el = body.current;
     if (el && streaming && open) el.scrollTop = el.scrollHeight;
@@ -245,7 +240,7 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
   const args = item.args && typeof item.args === "object" ? (item.args as Record<string, unknown>) : undefined;
   const command = shell ? String(args?.command ?? args?.cmd ?? (typeof item.args === "string" ? item.args : "")) : "";
   const took = item.since && item.until ? item.until - item.since : undefined;
-  const output = item.output?.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "") ?? "";
+  const output = useMemo(() => stripAnsi(item.output ?? ""), [item.output]);
   const clipped = output.length > INLINE_OUTPUT;
   const running = item.status === "running";
   const now = useNow(running);
@@ -278,6 +273,8 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
           )}
         </span>
         <span className="chat-tool-name" title={name !== item.name ? `${item.name} → ${name}` : undefined}>{running ? <Shimmer>{name}</Shimmer> : name}</span>
+        {/* What it acted on — the command, the file — readable without opening each call. */}
+        {item.detail && <span className="chat-tool-detail" title={item.detail}>{item.detail}</span>}
         {outcome && <span className={`chat-tool-badge is-${outcome.tone}`}>{outcome.label}</span>}
         {timed && (
           <span className="chat-faint tabular-nums">
@@ -360,13 +357,8 @@ function ToolArgs({ args }: { args: unknown }) {
  */
 export function CompactionMarker({ item }: { item: CompactionItem }) {
   const [open, setOpen] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
   const running = item.status === "running";
-  useEffect(() => {
-    if (!running) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [running]);
+  const now = useNow(running);
   const seconds = item.since ? Math.max(0, Math.floor((now - item.since) / 1000)) : 0;
 
   if (running) {

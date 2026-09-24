@@ -76,6 +76,7 @@
 .chat-tool.is-running .chat-tool-icon { background: rgb(var(--accent) / .1); }
 @keyframes chat-pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .chat-tool-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-tool-detail { min-width: 0; flex-shrink: 10; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(var(--fg-faint)); }
 .tool-row + .tool-row::before { content: ""; position: absolute; left: 5px; top: -3px; width: 20px; height: 4px; background: linear-gradient(rgb(var(--line)), rgb(var(--line))) center / 1px 100% no-repeat; }
 .chat-tool-body { margin: 4px 0 8px 5px; padding: 10px 12px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--surface)); display: flex; flex-direction: column; gap: 10px; }
 .chat-tool-label { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: rgb(var(--fg-faint)); margin-bottom: 4px; }
