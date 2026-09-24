@@ -285,11 +285,13 @@ class SessionManager extends EventEmitter {
     if (EPHEMERAL_EVENTS.has(type)) {
       // Still deliver it to anyone attached right now, with a negative seq so
       // it can never be confused with a stored event during replay.
+      // Timed like a stored one, so a page can say how long it has lasted.
       this.emit(`session:${sessionId}`, {
         seq: -Date.now(),
         session_id: sessionId,
         type,
         payload: JSON.stringify(payload),
+        created_at: new Date().toISOString(),
       });
       return undefined;
     }
@@ -846,7 +848,10 @@ class SessionManager extends EventEmitter {
         } catch (e) {
           this.record(sessionId, "portal_notice", { text: (e as Error).message, error: true });
         } finally {
-          this.mark(sessionId, "idle");
+          // Sent into a run that is still going, it must not end it: the run
+          // settles the session itself, and a page told idle would take every
+          // call still open for one that was cut off.
+          if (client.isIdle?.() !== false && !this.compacting.has(sessionId)) this.mark(sessionId, "idle");
         }
       })();
       return;

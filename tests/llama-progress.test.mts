@@ -79,3 +79,25 @@ test('a server that wants a key is asked with the request\'s key, and a refusal 
   assert.equal(seen.at(-1),'Bearer k');
  }finally{upstream.closeAllConnections();upstream.close();}
 });
+test('a model found loaded is not asked about again on every step of a run, and a swap asks again',async()=>{
+ let asked=0;
+ const upstream=http.createServer((req,res)=>{
+  asked++;
+  if(req.url==='/models'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[{id:'a',status:{value:'loaded'}},{id:'b',status:{value:'loaded'}}]}));return;}
+  res.writeHead(404).end();
+ });
+ upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const origin=`http://127.0.0.1:${(upstream.address() as any).port}`;
+ try{
+  assert.equal(await modelLoaded(origin,'a'),true);
+  assert.equal(await modelLoaded(origin,'a'),true);
+  assert.equal(asked,1);
+  assert.equal(await modelLoaded(origin,'b'),true);
+  assert.equal(await modelLoaded(origin,'a'),true);
+  assert.equal(asked,3,'another model in between may have swapped it out');
+  assert.equal(await modelLoaded(origin,'alias'),undefined);
+  const after=asked;
+  assert.equal(await modelLoaded(origin,'alias'),undefined);
+  assert.equal(asked,after,'a model the router does not list is left alone for a while');
+ }finally{upstream.closeAllConnections();upstream.close();}
+});

@@ -18,14 +18,11 @@ import {
   LuX,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
-import { stripAnsi, type Activity, type Item } from "../transcript";
-import { SHELL_TOOL, toolName } from "../tool-activity";
+import { formatElapsed, prefillShare, promptLabel, stripAnsi, type Activity, type Item } from "../transcript";
+import { SHELL_TOOL, unwrapCall } from "../tool-activity";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
-
-export const formatElapsed = (s: number) =>
-  s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 
 const formatDuration = (ms: number) =>
   ms < 1000 ? `${Math.max(0.1, ms / 1000).toFixed(1)}s` : ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : formatElapsed(Math.round(ms / 1000));
@@ -234,12 +231,18 @@ const INLINE_OUTPUT = 6000;
 export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTerminal?: (callId: string) => void }) {
   const [open, setOpen] = useState(false);
   // Whatever extension it came from: nothing below is keyed to one tool but
-  // the shell, which is shown as a terminal would show it.
-  const name = toolName(item.name, item.args);
+  // the shell, which is shown as a terminal would show it. Called through the
+  // MCP adapter, it is the tool inside, with what that was given.
+  const call = unwrapCall(item.name, item.args);
+  const name = call.name;
+  const wrapped = name !== item.name;
   const shell = SHELL_TOOL.test(name);
-  const args = item.args && typeof item.args === "object" ? (item.args as Record<string, unknown>) : undefined;
+  const args = wrapped ? call.input : item.args && typeof item.args === "object" ? (item.args as Record<string, unknown>) : undefined;
   const command = shell ? String(args?.command ?? args?.cmd ?? (typeof item.args === "string" ? item.args : "")) : "";
   const took = item.since && item.until ? item.until - item.since : undefined;
+  // Stored before times were kept to the millisecond: both on a whole second,
+  // so only whole seconds can be said of it.
+  const coarse = took !== undefined && item.since! % 1000 === 0 && item.until! % 1000 === 0;
   const output = useMemo(() => stripAnsi(item.output ?? ""), [item.output]);
   const clipped = output.length > INLINE_OUTPUT;
   const running = item.status === "running";
@@ -282,7 +285,7 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
             {timeout ? ` / ${formatElapsed(timeout)}` : ""}
           </span>
         )}
-        {took !== undefined && <span className="chat-faint tabular-nums">{formatDuration(took)}</span>}
+        {took !== undefined && <span className="chat-faint tabular-nums">{coarse ? (took < 1000 ? "<1s" : formatElapsed(Math.round(took / 1000))) : formatDuration(took)}</span>}
         {shell && lines > 0 && (
           <span className="chat-faint tabular-nums">
             {lines.toLocaleString()} {lines === 1 ? "line" : "lines"}
@@ -307,7 +310,7 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
               {command || "(no command)"}
             </pre>
           ) : (
-            <ToolArgs args={item.args} />
+            <ToolArgs args={wrapped ? call.input : item.args} />
           )}
           {output ? (
             <div className="chat-tool-output-wrap">
@@ -409,8 +412,6 @@ export function CompactionMarker({ item }: { item: CompactionItem }) {
   );
 }
 
-const promptLabels = ["Reading the conversation", "Reviewing the context", "Preparing to respond"];
-
 /**
  * What the agent is doing between the things that show for themselves.
  *
@@ -424,9 +425,8 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
   const elapsed = seconds >= 2 ? formatElapsed(seconds) : null;
   const p = phase.prefill;
   // `processed` already counts the cached prefix.
-  const percent = p && p.total > 0 ? Math.round((Math.min(p.total, p.processed) / p.total) * 100) : undefined;
-
-  const detail = p ? `${p.processed.toLocaleString()} / ${p.total.toLocaleString()} tokens${p.cache ? ` · ${p.cache.toLocaleString()} from cache` : ""}` : undefined;
+  const { done, percent } = prefillShare(p);
+  const detail = p ? `${done.toLocaleString()} / ${p.total.toLocaleString()} tokens${p.cache ? ` · ${p.cache.toLocaleString()} from cache` : ""}` : undefined;
   let kind: string;
   let icon: ReactNode;
   let text: ReactNode;
@@ -447,7 +447,7 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
     case "processing the prompt": {
       kind = "prefill";
       icon = <Ring value={percent !== undefined ? percent / 100 : undefined} />;
-      const label = promptLabels[Math.floor(seconds / 4) % promptLabels.length];
+      const label = promptLabel(seconds);
       text = (
         <span key={label} className="chat-status-swap">
           <Shimmer>{label}</Shimmer>

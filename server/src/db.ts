@@ -579,15 +579,19 @@ export function eventTime(createdAt: string | undefined): number | undefined {
 
 export function appendEvent(sessionId: string, type: string, payload: unknown): EventRow {
   const encodedPayload = JSON.stringify(payload);
+  // To the millisecond, and the same time live and after a reload: SQLite's
+  // own default keeps whole seconds, and a call timed from it took 0.1s or
+  // 1.0s depending on where the seconds fell.
+  const createdAt = new Date().toISOString();
   const info = getDb()
-    .prepare("INSERT INTO events (session_id, type, payload) VALUES (?, ?, ?)")
-    .run(sessionId, type, encodedPayload);
+    .prepare("INSERT INTO events (session_id, type, payload, created_at) VALUES (?, ?, ?, ?)")
+    .run(sessionId, type, encodedPayload, createdAt);
   return {
     seq: Number(info.lastInsertRowid),
     session_id: sessionId,
     type,
     payload: encodedPayload,
-    created_at: new Date().toISOString(),
+    created_at: createdAt,
   };
 }
 

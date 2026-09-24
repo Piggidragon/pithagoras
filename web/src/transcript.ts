@@ -1,4 +1,5 @@
 import type { PortalEvent } from "./api";
+import { unwrap } from "./tool-activity";
 
 /** A picture that went with a message, by the name the server keeps it under. */
 export interface SentImage {
@@ -135,6 +136,20 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
     return prompt && typeof prompt === "object" ? userItem(seq, prompt) : undefined;
   };
 
+  // A reply to write into. The one with this id when it is the last thing
+  // shown: it was closed early — a status that said the run was over while it
+  // was not — and a second item with its id would split it in two.
+  const openReply = (id: string): Extract<Item, { kind: "assistant" }> => {
+    const last = items.at(-1);
+    if (last?.kind === "assistant" && last.id === id) {
+      last.done = false;
+      return last;
+    }
+    const reply = { kind: "assistant" as const, id, text: "", thinking: "", done: false, audio: audioReply };
+    items.push(reply);
+    return reply;
+  };
+
   const closeCurrent = () => {
     if (current) {
       current.done = true;
@@ -195,10 +210,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         const inner = p.assistantMessageEvent ?? {};
         const delta = typeof inner.delta === "string" ? inner.delta : "";
         if (!delta) break;
-        if (!current) {
-          current = { kind: "assistant", id: `a${p.streamId ?? ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
-          items.push(current);
-        }
+        if (!current) current = openReply(`a${p.streamId ?? ev.seq}`);
         if (inner.type === "thinking_delta") {
           current.thinking += delta;
           if (ev.at !== undefined) {
@@ -216,10 +228,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         if (message?.role === "assistant" && Array.isArray(message.content)) {
           const text = message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("");
           const thinking = message.content.filter((c: any) => c?.type === "thinking").map((c: any) => c.thinking ?? "").join("");
-          if (!current) {
-            current = { kind: "assistant", id: `a${p.streamId ?? ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
-            items.push(current);
-          }
+          if (!current) current = openReply(`a${p.streamId ?? ev.seq}`);
           current.text = text;
           // The server keeps when the reasoning ran: the deltas that timed it
           // are gone once the message ends, and after a reload.
@@ -280,13 +289,15 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
       }
 
       case "tool_execution_end": {
-        // Close the most recent still-running tool of the same name.
+        // Close the most recent still-running tool of the same name. By its id,
+        // one taken for cut off too: its end is what really happened.
         const name = String(p.toolName ?? p.name ?? "tool");
         for (let i = items.length - 1; i >= 0; i--) {
           const it = items[i];
-          if (it.kind === "tool" && it.status === "running" &&
-              (p.toolCallId ? it.callId === p.toolCallId : it.name === name)) {
+          if (it.kind === "tool" &&
+              (p.toolCallId ? it.callId === p.toolCallId && (it.status === "running" || it.interrupted) : it.status === "running" && it.name === name)) {
             it.status = p.isError || p.error ? "error" : "done";
+            delete it.interrupted;
             if (ev.at !== undefined) it.until = ev.at;
             const text = toolOutputText(p.result);
             if (typeof text === "string" && text) it.output = text.slice(-TOOL_OUTPUT_MAX);
@@ -382,7 +393,9 @@ function findRunningTool(items: Item[], p: any): Extract<Item, { kind: "tool" }>
 }
 
 function summarizeToolInput(p: any): string | undefined {
-  const input = p.input ?? p.args ?? p.parameters;
+  const raw = p.input ?? p.args ?? p.parameters;
+  // Through the MCP adapter, what the tool inside was given.
+  const input = String(p.toolName ?? p.name ?? "") === "mcp" && raw && typeof raw === "object" && typeof raw.tool === "string" ? unwrap(p).input : raw;
   if (!input) return undefined;
   if (typeof input === "string") return truncate(input);
   if (typeof input === "object") {
@@ -413,6 +426,22 @@ export interface Activity {
   prefill?: { total: number; cache: number; processed: number };
   /** The model being loaded, while `label` is "loading the model". */
   model?: string;
+}
+
+/** "12s", "2m 05s": how long a phase has been going. */
+export const formatElapsed = (s: number) =>
+  s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+
+const PROMPT_LABELS = ["Reading the conversation", "Reviewing the context", "Preparing to respond"];
+
+/** What reading the prompt is called `seconds` in: it moves on every few seconds, so a long one is seen to be going. */
+export const promptLabel = (seconds: number) => PROMPT_LABELS[Math.floor(seconds / 4) % PROMPT_LABELS.length];
+
+/** How far prefill has got: tokens read, counting the cached prefix, and that as a percentage when there is a total. */
+export function prefillShare(prefill: Activity["prefill"]): { done: number; percent?: number } {
+  const total = prefill?.total ?? 0;
+  const done = Math.max(0, Math.min(total, prefill?.processed ?? 0));
+  return { done, ...(total > 0 ? { percent: Math.round((done / total) * 100) } : {}) };
 }
 
 /**

@@ -72,3 +72,21 @@ test('the interrupted status recorded after a restart settles what the run left 
   const items = buildTranscript([start(1, 't1'), ev(2, 'portal_status', { status: 'interrupted', restarted: true })] as any);
   assert.equal((items[0] as any).interrupted, true);
 });
+
+test('a call taken for cut off by an early idle takes its real end, and the reply stays one', () => {
+  const delta = (seq: number, text: string) => ev(seq, 'message_update', { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta: text } });
+  const items = buildTranscript([
+    start(1, 't1'),
+    ev(2, 'portal_status', { status: 'idle' }),
+    ev(3, 'tool_execution_end', { toolCallId: 't1', toolName: 'bash', result: { content: [{ type: 'text', text: 'ok' }] } }),
+    delta(4, 'Hel'),
+    ev(5, 'portal_status', { status: 'idle' }),
+    delta(6, 'lo'),
+  ] as any);
+  const tool = items[0] as any;
+  assert.equal(tool.status, 'done');
+  assert.equal(tool.interrupted, undefined);
+  const replies = items.filter((i: any) => i.kind === 'assistant') as any[];
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].text, 'Hello');
+});

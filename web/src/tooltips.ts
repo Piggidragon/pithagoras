@@ -3,9 +3,13 @@
  *
  * The browser's tooltip is a system-grey box that arrives a second late and
  * ignores the theme. Rather than rewrite hundreds of `title`s, the attribute
- * is lifted off an element while the pointer is on it — so the native one
- * never shows — and put back when it leaves, so screen readers and React's
+ * is emptied on an element while the pointer is on it — so the native one
+ * never shows — and filled again when it leaves, so screen readers and React's
  * own bookkeeping see it as it was.
+ *
+ * Emptied rather than removed: React taking a title away is then a removal
+ * that can be seen, where on a missing attribute it would do nothing, and the
+ * old text would come back.
  */
 const DELAY = 450;
 
@@ -24,8 +28,8 @@ export function installTooltips(): void {
   const release = () => {
     window.clearTimeout(timer);
     window.clearInterval(watch);
-    // Put back only if nothing set a new one meanwhile.
-    if (owner && text && !owner.hasAttribute("title")) owner.setAttribute("title", text);
+    // Put back only if nothing set a new one, or took it away, meanwhile.
+    if (owner && text && owner.getAttribute("title") === "") owner.setAttribute("title", text);
     owner = null;
     text = "";
     tip.classList.remove("is-shown");
@@ -37,6 +41,8 @@ export function installTooltips(): void {
     // a run starts, a row that was deleted. No pointerout comes for it, and its
     // box is all zeros: the tip would appear in the corner and stay there.
     if (!owner.isConnected) return release();
+    // Its title was taken away before the tip was due: nothing to say.
+    if (!owner.hasAttribute("title")) return release();
     const r = owner.getBoundingClientRect();
     tip.textContent = text;
     tip.style.left = "0px";
@@ -53,11 +59,13 @@ export function installTooltips(): void {
     watch = window.setInterval(() => {
       if (!owner) return;
       if (!owner.isConnected) return release();
+      // React took its title away: there is nothing to say any more.
+      if (!owner.hasAttribute("title")) return release();
       // React gave it a new title while it was lifted ("Copy" to "Copied"):
       // lifted again, and said instead, or the browser's own would show too.
       const next = owner.getAttribute("title")?.trim();
       if (next) {
-        owner.removeAttribute("title");
+        owner.setAttribute("title", "");
         if (next !== text) {
           text = next;
           place();
@@ -69,10 +77,10 @@ export function installTooltips(): void {
   document.addEventListener(
     "pointerover",
     (e) => {
-      // Still within the one whose title is lifted: its title is not on it now,
-      // so looking it up again would find nothing, or an ancestor's.
-      if (owner?.contains(e.target as Node)) return;
+      // The lifted one keeps its emptied title, so from anywhere inside it this
+      // finds it — or something in it with a title of its own, whose is said.
       const el = (e.target as Element | null)?.closest?.<HTMLElement>("[title]");
+      if (el && el === owner) return;
       release();
       if (!el) return;
       const t = el.getAttribute("title")?.trim();
@@ -80,7 +88,7 @@ export function installTooltips(): void {
       if (!t || el.closest(".xterm")) return;
       owner = el;
       text = t;
-      el.removeAttribute("title");
+      el.setAttribute("title", "");
       timer = window.setTimeout(place, DELAY);
     },
     true,

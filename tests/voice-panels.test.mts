@@ -22,6 +22,20 @@ test('terminal follows cumulative streamed output and final tool errors by call 
   assert.deepEqual(terminalRuns(events), [{ id: 'a', command: 'npm test', output: 'Starting\nFailed', running: false, error: true }]);
 });
 
+test('a shell tool called through MCP is a run, and one its run left open is settled, not spinning', () => {
+  const events = [
+    { seq: 1, type: 'tool_execution_start', payload: { toolName: 'mcp', toolCallId: 'm', input: { tool: 'shell', args: { command: 'ls' } } } },
+    { seq: 2, type: 'tool_execution_start', payload: { toolName: 'bash', toolCallId: 'b', input: { command: 'sleep 99' } } },
+    { seq: 3, type: 'tool_execution_end', payload: { toolName: 'mcp', toolCallId: 'm', result: { content: [{ type: 'text', text: 'a\nb' }] } } },
+    { seq: 4, type: 'agent_end', payload: {} },
+  ];
+  assert.deepEqual(terminalRuns(events), [
+    { id: 'm', command: 'ls', output: 'a\nb', running: false, error: false },
+    { id: 'b', command: 'sleep 99', output: '', running: false, error: false, interrupted: true },
+  ]);
+  assert.equal(terminalRuns(events.slice(0, 2), 6, 20000, true)[1].interrupted, true, 'ended with no event to say so');
+});
+
 test('files and pictures take the side first, and the middle when the side is taken', async () => {
   const { placeWindows } = await import('../web/src/voice-windows.js');
   const none = { browser: false, terminal: false, files: false, pictures: false };
