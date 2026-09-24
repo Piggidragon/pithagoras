@@ -27,6 +27,13 @@ const isAsset = (response) => response.ok && !isHtml(response);
 /** The built assets a page loads before it paints: its entry, preloads and styles. */
 const assetsOf = (html) => [...new Set(Array.from(html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g), (m) => m[1]))];
 
+/**
+ * The portal's own page, not whatever HTML came back: a login proxy or a
+ * captive portal answers 200 too, and kept as the shell it would open offline
+ * in the portal's place.
+ */
+const isShell = (html) => /<div id="root">/.test(html) && assetsOf(html).length > 0;
+
 /** Keeps the worker alive until `work` is done. A failed write only costs a copy. */
 const keep = (event, work) => event.waitUntil(Promise.resolve(work).catch(noop));
 
@@ -44,25 +51,49 @@ async function saveAsset(path, response) {
   await touch(path);
 }
 
+const loading = new Map();
+/**
+ * A built asset, from the cache or else the network, and kept. The page and
+ * storeShell both ask for the entry after a deploy; whoever asks second
+ * shares the first one's download rather than starting another.
+ */
+function loadAsset(path) {
+  if (!loading.has(path)) {
+    const load = async () => {
+      const stored = await caches.match(path, { cacheName: ASSETS });
+      if (stored) {
+        await touch(path)?.catch(noop);
+        return stored;
+      }
+      const response = await fetch(path);
+      if (isAsset(response)) await saveAsset(path, response.clone()).catch(noop);
+      return response;
+    };
+    loading.set(path, load().finally(() => loading.delete(path)));
+  }
+  return loading.get(path).then((response) => response.clone());
+}
+
 /**
  * Keeps a page as the one every route opens with — every route is the same
  * index.html — along with what it loads. A worker registers after the first
- * page has already fetched its assets, so they are fetched again here.
+ * page has already fetched its assets, so they are fetched again here. The
+ * page replaces the kept one only once all of them are stored: a shell whose
+ * entry is missing opens offline as a blank page, where the one before it
+ * would have opened.
  */
 async function storeShell(response) {
   const html = await response.clone().text();
+  if (!isShell(html)) throw new Error("not the portal's page");
+  const paths = assetsOf(html);
+  await Promise.all(paths.map((path) => loadAsset(path).catch(noop)));
+  const assets = await caches.open(ASSETS);
+  const stored = await Promise.all(paths.map((path) => assets.match(path)));
+  if (stored.some((copy) => !copy)) throw new Error("the page's assets did not all arrive");
   const shell = await caches.open(SHELL);
   const before = await shell.match("/");
-  const newBuild = !before || assetsOf(await before.text()).join() !== assetsOf(html).join();
+  const newBuild = !before || assetsOf(await before.text()).join() !== paths.join();
   await shell.put("/", response);
-  const assets = await caches.open(ASSETS);
-  await Promise.allSettled(
-    assetsOf(html).map(async (path) => {
-      if (await assets.match(path)) return;
-      const fetched = await fetch(path);
-      if (isAsset(fetched)) await saveAsset(path, fetched);
-    }),
-  );
   if (newBuild) await prune();
 }
 
@@ -144,18 +175,7 @@ self.addEventListener("fetch", (event) => {
 
   // Built assets are named by their content: a stored one is never stale.
   if (path.startsWith("/assets/")) {
-    event.respondWith(
-      caches.match(path, { cacheName: ASSETS }).then((stored) => {
-        if (stored) {
-          keep(event, touch(path));
-          return stored;
-        }
-        return fetch(request).then((response) => {
-          if (isAsset(response)) keep(event, saveAsset(path, response.clone()));
-          return response;
-        });
-      }),
-    );
+    event.respondWith(loadAsset(path));
     return;
   }
 

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
+import { registerServiceWorker } from "../web/src/register-sw.ts";
 
 const pub = new URL("../web/public/", import.meta.url);
 const read = (name: string) => readFileSync(new URL(name, pub));
@@ -22,17 +23,55 @@ test("the manifest makes the portal installable", () => {
   assert.ok(manifest.icons.some((i: { purpose?: string }) => i.purpose === "maskable"));
 });
 
-test("the page links the manifest and registers the worker in a build", () => {
+test("the page links the manifest", () => {
   const html = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
   assert.match(html, /<link rel="manifest" href="\/manifest.webmanifest"/);
-  const main = readFileSync(new URL("../web/src/main.tsx", import.meta.url), "utf8");
-  assert.match(main, /import\.meta\.env\.PROD && "serviceWorker" in navigator/);
-  assert.match(main, /serviceWorker\.register\("\/sw\.js"\)/);
+});
+
+/** A window whose `load` can be fired, and what the worker registration saw. */
+function fakeWindow(withWorkers = true) {
+  const registered: string[] = [];
+  const onLoad: (() => void)[] = [];
+  const navigator = withWorkers ? { serviceWorker: { register: async (url: string) => void registered.push(url) } } : {};
+  const win = { navigator, addEventListener: (type: string, f: () => void) => type === "load" && onLoad.push(f) };
+  return { win: win as unknown as Window, registered, load: () => onLoad.forEach((f) => f()) };
+}
+
+test("a build registers the worker once the page has loaded", () => {
+  const { win, registered, load } = fakeWindow();
+  registerServiceWorker(true, win);
+  assert.deepEqual(registered, []);
+  load();
+  assert.deepEqual(registered, ["/sw.js"]);
+});
+
+test("the dev server and browsers without workers register nothing", () => {
+  const dev = fakeWindow();
+  registerServiceWorker(false, dev.win);
+  dev.load();
+  assert.deepEqual(dev.registered, []);
+  const none = fakeWindow(false);
+  registerServiceWorker(true, none.win);
+  none.load();
+  assert.deepEqual(none.registered, []);
+});
+
+test("every copy of the canvas colour matches --canvas in index.css", () => {
+  const css = readFileSync(new URL("../web/src/index.css", import.meta.url), "utf8");
+  const canvas = (theme: string) => {
+    const block = css.slice(css.indexOf(`[data-theme="${theme}"]`));
+    const [r, g, b] = block.match(/--canvas:\s*(\d+) (\d+) (\d+)/)!.slice(1).map(Number);
+    return "#" + [r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("");
+  };
+  const html = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+  assert.equal(html.match(/<meta name="theme-color" content="([^"]+)"/)![1], canvas("dark"));
+  assert.equal(JSON.parse(read("manifest.webmanifest").toString()).background_color, canvas("dark"));
+  assert.match(read("theme-init.js").toString(), new RegExp(`meta\\.content = "${canvas("light")}"`));
 });
 
 const ORIGIN = "https://portal.test";
 const html = (...assets: string[]) =>
-  new Response(`<script type="module" src="${assets[0]}"></script>${assets.slice(1).map((a) => `<link rel="stylesheet" href="${a}">`).join("")}`, {
+  new Response(`<div id="root"></div><script type="module" src="${assets[0]}"></script>${assets.slice(1).map((a) => `<link rel="stylesheet" href="${a}">`).join("")}`, {
     headers: { "content-type": "text/html" },
   });
 const js = (body = "export {}") => new Response(body, { headers: { "content-type": "text/javascript" } });
@@ -193,4 +232,35 @@ test("a new deploy evicts the assets used longest ago, never the page's own", as
   assert.ok(kept.includes("/assets/index-b.js"));
   assert.ok(kept.includes("/assets/old-0.js"));
   assert.ok(!kept.includes("/assets/old-1.js"));
+});
+
+test("a deploy whose assets do not all arrive keeps the last page, which still opens offline", async () => {
+  const sw = await installed({ ...deployed });
+  sw.routes["/"] = () => html("/assets/index-b.js", "/assets/index-b.css");
+  sw.routes["/assets/index-b.css"] = () => new Response("", { headers: { "content-type": "text/css" } });
+  // The entry never arrives: the connection drops.
+  await sw.get("/", { mode: "navigate" });
+  for (const path of Object.keys(sw.routes)) delete (sw.routes as Record<string, Route>)[path];
+  const page = await (await sw.get("/sessions", { mode: "navigate" }))!.text();
+  assert.match(page, /index-a\.js/);
+  assert.equal((await sw.get("/assets/index-a.js"))!.status, 200);
+});
+
+test("a page that is not the portal's, like a login proxy's, is never kept as the shell", async () => {
+  const sw = await installed({ ...deployed });
+  sw.routes["/"] = () => new Response("<form>Sign in</form>", { headers: { "content-type": "text/html" } });
+  await sw.get("/", { mode: "navigate" });
+  delete (sw.routes as Record<string, Route>)["/"];
+  assert.match(await (await sw.get("/", { mode: "navigate" }))!.text(), /index-a\.js/);
+  assert.deepEqual(sw.stored("pithagoras-assets-v1"), ["/assets/index-a.css", "/assets/index-a.js"]);
+});
+
+test("the first load after a deploy downloads each asset once, though the page and the worker both want it", async () => {
+  const sw = await installed({ ...deployed });
+  sw.routes["/"] = () => html("/assets/index-b.js");
+  // A download slow enough that both ask before either has it stored.
+  sw.routes["/assets/index-b.js"] = () => new Promise((done) => setTimeout(() => done(js()), 20));
+  sw.fetched.length = 0;
+  await Promise.all([sw.get("/", { mode: "navigate" }), sw.get("/assets/index-b.js")]);
+  assert.deepEqual(sw.fetched.filter((path) => path === "/assets/index-b.js"), ["/assets/index-b.js"]);
 });
