@@ -66,8 +66,10 @@ const terms = new Map<string, Term>();
 function end(term: Term): void {
   clearTimeout(term.reaper);
   if (!term.exited) {
+    // Read once: a second look could find the shell gone, and the two
+    // answers disagree.
     const shell = shellOf(term);
-    const session = sessionOf(term);
+    const session = shell ? sessionOf(shell) : undefined;
     if (shell && session) {
       try {
         process.kill(shell, "SIGHUP");
@@ -124,9 +126,8 @@ function statOf(pid: string | number): string[] | undefined {
  * The session the shell leads — the id stays after the shell itself is gone.
  * Never the portal's own: signalled, that would take the portal down with it.
  */
-function sessionOf(term: Term): number | undefined {
-  const shell = shellOf(term);
-  const session = shell ? Number(statOf(shell)?.[3]) : NaN;
+function sessionOf(shell: number): number | undefined {
+  const session = Number(statOf(shell)?.[3]);
   return session > 0 && session !== Number(statOf(process.pid)?.[3]) ? session : undefined;
 }
 

@@ -415,6 +415,18 @@ function migrate(d: Database.Database): void {
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_grants_open ON grants(session_id, tool, used_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC)");
+  // Messages sent into a run, and what settled them. Looked for across every
+  // chat at startup (unsettledMessages) and through a whole chat by every
+  // edit: the few among tens of thousands of events per chat, read without
+  // reading the rest. A query finds them only by repeating the same WHERE.
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_queued ON events(session_id, seq)
+       WHERE type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1`,
+  );
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_settled ON events(session_id, seq)
+       WHERE type IN ('portal_taken', 'portal_unsent')`,
+  );
   const ruleCols = (d.prepare("PRAGMA table_info(tool_rules)").all() as { name: string }[]).map(
     (c) => c.name
   );
@@ -774,6 +786,16 @@ export function latestSeq(): number {
     | { seq: number }
     | undefined;
   return row?.seq ?? 0;
+}
+
+/**
+ * Adds to what a portal_prompt says, once pi has said what it did with the
+ * message: that it queued one sent as starting a run, or the words it queued.
+ */
+export function notePromptQueued(seq: number, fields: Record<string, unknown>): void {
+  getDb()
+    .prepare("UPDATE events SET payload = json_patch(payload, ?) WHERE seq = ? AND type = 'portal_prompt'")
+    .run(JSON.stringify(fields), seq);
 }
 
 /** Drops one event. */

@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { PiClient, PiCommand, PiState, PiStats, PiTool } from "./types.js";
+import type { PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
@@ -16,6 +16,16 @@ import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { contextWindowFor } from "../db.js";
+
+/** A message on its way into pi: see SdkPiClient.prompt(). */
+interface Handoff {
+  /** Its words as handed to pi. */
+  text: string;
+  /** The queue it goes into if a run is going. */
+  lane: "steering" | "followUp";
+  /** Its words as pi queued them, once it has. */
+  queued?: string;
+}
 
 function asArray(v: any): any[] {
   const resolved = typeof v === "function" ? v() : v;
@@ -365,6 +375,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // registry's whenever an extension registers a provider, and that undoes it.
       if (event?.type === "agent_start") client.applyLimitQuietly();
       canvases?.observe(event);
+      // As pi emits it, not as forward() passes it on: a queue_update held
+      // behind a settle would be too late for the prompt() that caused it.
+      client.noteQueue(event);
       client.forward(event);
     });
     // Replace the placeholder now that we have the real unsubscribe.
@@ -522,7 +535,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return true;
   }
 
-  async prompt(message: string, options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean }): Promise<void> {
+  async prompt(
+    message: string,
+    options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean },
+  ): Promise<PromptTaken> {
     if (options?.voice) {
       this.voiceFirst?.arm(this.isIdle());
     } else {
@@ -541,12 +557,22 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // still "sending" for as long as the agent worked, and its Send stayed
     // greyed out, with no way to steer. What fails after that is reported as
     // portal_failed, ahead of the run's agent_settled: see forward().
+    const text = options?.voice ? audioMessage(message) : message;
+    const handoff: Handoff = { text, lane: options?.steer ? "steering" : "followUp" };
+    this.handoffs.push(handoff);
+    // pi says it has the message just before it either returns — queued, or
+    // handled by an extension — or starts the run: idle then and running a
+    // moment later is a run this message started.
+    let idleWhenTaken = false;
     try {
       await acceptPrompt(
         preflightResult =>
-          this.session.prompt(options?.voice ? audioMessage(message) : message, {
+          this.session.prompt(text, {
             ...promptOptions,
-            preflightResult,
+            preflightResult: (success: boolean) => {
+              idleWhenTaken = this.session.isIdle;
+              preflightResult(success);
+            },
           }),
         error => {
           if (options?.voice) this.voiceFirst?.reset();
@@ -555,6 +581,42 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         },
       );
     } catch (error) { if (options?.voice) this.voiceFirst?.reset(); throw error; }
+    finally {
+      this.handoffs.splice(this.handoffs.indexOf(handoff), 1);
+    }
+    if (handoff.queued !== undefined) return { outcome: "queued", lane: handoff.lane, text: handoff.queued };
+    return idleWhenTaken && !this.session.isIdle ? { outcome: "started" } : { outcome: "handled" };
+  }
+
+  /** Messages being handed to pi right now, oldest first: see noteQueue(). */
+  private handoffs: Handoff[] = [];
+
+  /** pi's queue as its last queue_update had it. */
+  private queue: Record<Handoff["lane"], string[]> = { steering: [], followUp: [] };
+
+  /**
+   * Which message pi just queued, and as what.
+   *
+   * pi queues the words it ends up with — a template or skill expanded, an
+   * input handler's rewrite applied — and says so in a queue_update with the
+   * one entry added at the end. That is the message it hands the agent later,
+   * word for word, so it is what the portal knows the message by. Given to the
+   * message being handed over into that lane that says the same, or else the
+   * oldest one: pi queues them in the order it is given them.
+   */
+  noteQueue(event: any): void {
+    if (event?.type !== "queue_update") return;
+    for (const lane of ["steering", "followUp"] as const) {
+      const now = (Array.isArray(event[lane]) ? event[lane] : []).map(String);
+      const was = this.queue[lane];
+      if (now.length === was.length + 1 && was.every((text, i) => now[i] === text)) {
+        const added = now[now.length - 1];
+        const open = this.handoffs.filter((h) => h.lane === lane && h.queued === undefined);
+        const handoff = open.find((h) => h.text === added) ?? open[0];
+        if (handoff) handoff.queued = added;
+      }
+      this.queue[lane] = now;
+    }
   }
 
   /** Events held back behind an agent_settled, in order: see forward(). */
@@ -571,10 +633,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * after it, with anything behind it: nothing but promises stand between it
    * and that throw, and all of them are through by then.
    *
-   * Not held for as long as a run the portal started is going. A prompt can
-   * start the next run in the moment pi has marked itself idle but not yet
-   * settled the last one, and the settle then waited behind the whole of the
-   * new run, and every event of that run behind it.
+   * Held for that one turn and no longer, with whatever pi emits in it: a
+   * prompt can start the next run in the moment pi has marked itself idle but
+   * not yet settled the last one, and events of that run are passed on after
+   * the settle rather than before it.
    */
   forward(event: any): void {
     if (this.held) {
@@ -615,8 +677,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return this.session.isIdle;
   }
 
-  clearQueue(): void {
-    this.session.clearQueue();
+  clearQueue(): string[] {
+    const { steering, followUp } = this.session.clearQueue();
+    return [...steering, ...followUp].map(String);
   }
 
   dispose(): void {

@@ -67,3 +67,14 @@ test('once the prompt itself is loaded, the message is shown once', () => {
   ] as any);
   assert.equal(items.filter((i: any) => i.kind === 'user' && i.text === 'use the other file').length, 1);
 });
+
+test('one sent as starting a run, that pi queued into another, moves to where it was read', () => {
+  const items = buildTranscript([
+    { seq: 1, type: 'portal_prompt', payload: { message: 'after all' } },
+    delta(2, 'A routine answering'),
+    { seq: 3, type: 'portal_taken', payload: { seq: 1, prompt: { message: 'after all', queued: true } } },
+    delta(4, 'Now yours'),
+  ] as any);
+  assert.deepEqual(items.map((i) => i.kind), ['assistant', 'user', 'assistant']);
+  assert.equal((items[1] as any).text, 'after all');
+});

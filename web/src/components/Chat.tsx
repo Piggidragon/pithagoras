@@ -883,9 +883,12 @@ export function Chat({
             // Sent into the run and waiting for the agent to take it in: shown
             // as sent, at the foot of the conversation, and moved to where it
             // was read once it has been. Nothing to edit or retry until then —
-            // and one that never got there can only be sent again.
+            // and one that never got there can only be sent again. Waiting
+            // until the server says otherwise, run or no run: pi can still
+            // hold one after its run is over, or be taking it in, and offered
+            // again it would be read twice.
             if (item.queued || item.unsent) {
-              const waits = item.queued && running;
+              const waits = !item.unsent;
               return (
                 <div key={item.id} className="group flex flex-col items-end gap-1">
                   <div className="max-w-[80%] rounded-2xl rounded-br-md border border-dashed border-accent/30 bg-accent/5 px-3.5 py-2 text-sm text-fg-muted">
@@ -896,13 +899,17 @@ export function Chat({
                     {waits ? (
                       <>
                         <LuClock aria-hidden className="h-3 w-3" />
-                        <span>Waiting — goes in {item.steer ? "after the current step" : "when the run ends"}</span>
+                        <span>
+                          {running
+                            ? `Waiting — goes in ${item.steer ? "after the current step" : "when the run ends"}`
+                            : "Waiting — the agent has it, and reads it next"}
+                        </span>
                       </>
                     ) : (
                       <span>
                         {item.unsent === "unsure"
                           ? "May not have been sent — the portal restarted, and could not tell whether the agent took it in"
-                          : `Not sent — ${item.unsent === "restarted" ? "the portal restarted" : `the run ${item.unsent ? "was stopped" : "ended"}`} before the agent took it in`}
+                          : `Not sent — ${item.unsent === "restarted" ? "the portal restarted" : "the run was stopped"} before the agent took it in`}
                       </span>
                     )}
                     {text && <CopyAction text={text} />}

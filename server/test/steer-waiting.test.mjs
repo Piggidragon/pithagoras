@@ -349,7 +349,7 @@ test("a pi whose queue cannot be cleared keeps what it holds, and it is placed w
   }
   assert.deepEqual(payloads("noclear", "portal_unsent"), [], "not shown as never sent: pi still has it");
   // pi says it still holds it when the stopped run settles: not taken in yet.
-  sessions.piQueue.set("noclear", ["keep going with this"]);
+  sessions.piQueue.set("noclear", { steering: [], followUp: ["keep going with this"] });
   sessions.settleWaiting("noclear");
   assert.deepEqual(payloads("noclear", "portal_taken"), []);
   sessions.piQueue.delete("noclear");
@@ -397,10 +397,237 @@ test("an edit whose run fails before answering puts the conversation back", asyn
     },
   };
   sessions.ensureClient = async () => client;
-  await assert.rejects(sessions.editMessage("editfail", asked.seq, "second"), /gone/);
-  assert.equal(readFileSync(file, "utf8"), original);
+  // Answered once pi has the replacement; the run fails after.
+  await sessions.editMessage("editfail", asked.seq, "second");
+  await until(() => readFileSync(file, "utf8") === original);
   assert.deepEqual(sentMessages("editfail").map((m) => m.message), ["first"]);
   assert.ok(eventsSince("editfail").some((e) => e.type === "message_end"), "the old answer is back");
+  assert.match(payloads("editfail", "portal_notice").at(-1).text, /no answer \(The run failed: gone\)/);
+});
+
+/** Waits for something the server does in the background. */
+async function until(check, what = "the server to catch up") {
+  for (let i = 0; i < 200; i++) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail(`timed out waiting for ${what}`);
+}
+
+/** What a page is told to drop: said live, never stored. */
+function removals(id) {
+  const seen = [];
+  sessions.on(`session:${id}`, (row) => row.type === "portal_removed" && seen.push(JSON.parse(row.payload)));
+  return seen;
+}
+
+/** A conversation of one message and its answer, in pi's file and the transcript. */
+function answered(id) {
+  createSession({ id, title: id, workspace: home, executor: "host" });
+  const file = path.join(home, `${id}.jsonl`);
+  const entry = (eid, parentId, role, text) =>
+    JSON.stringify({ type: "message", id: eid, parentId, message: { role, content: [{ type: "text", text }] } });
+  const original =
+    [JSON.stringify({ type: "session", id: "s" }), entry("a", null, "user", "first"), entry("b", "a", "assistant", "an answer")].join("\n") + "\n";
+  writeFileSync(file, original);
+  updateSession(id, { pi_session_file: file, status: "idle" });
+  const asked = appendEvent(id, "portal_prompt", { message: "first" });
+  appendEvent(id, "message_end", { message: { role: "assistant", content: [{ type: "text", text: "an answer" }] } });
+  return { file, original, asked };
+}
+
+test("an edit whose model is down puts the conversation back, though nothing threw", async () => {
+  const { file, original, asked } = answered("editdown");
+  const client = {
+    ...busyClient(),
+    // pi's way with a model that is down: the run starts, retries end in an
+    // error reply, and it settles — prompt() itself never fails.
+    prompt: async () => {
+      setImmediate(() => {
+        sessions.record("editdown", "agent_start", {});
+        sessions.record("editdown", "message_end", {
+          message: { role: "assistant", stopReason: "error", errorMessage: "connect ECONNREFUSED", content: [] },
+        });
+        sessions.record("editdown", "agent_settled", {});
+      });
+    },
+  };
+  sessions.ensureClient = async () => client;
+  await sessions.editMessage("editdown", asked.seq, "second");
+  await until(() => readFileSync(file, "utf8") === original);
+  assert.deepEqual(sentMessages("editdown").map((m) => m.message), ["first"]);
+  assert.match(payloads("editdown", "portal_notice").at(-1).text, /ECONNREFUSED/);
+});
+
+test("an edit lets the chat go once pi has the replacement, and stands once it is answered", async () => {
+  const { file, original, asked } = answered("editlong");
+  const removed = removals("editlong");
+  const client = { ...busyClient(), prompt: async (message) => void client.sent.push(message) };
+  client.sent = [];
+  sessions.ensureClient = async () => client;
+  // The model is still reading: no answer yet, and the edit is done with.
+  await sessions.editMessage("editlong", asked.seq, "second");
+  await sessions.prompt("editlong", "and also this", { steer: true });
+  assert.deepEqual(client.sent, ["second", "and also this"], "a steer is not held behind the edit");
+  assert.notEqual(readFileSync(file, "utf8"), original);
+  assert.deepEqual(removed, [], "the page keeps the old turn until the answer");
+  sessions.record("editlong", "agent_start", {});
+  sessions.record("editlong", "message_end", { message: { role: "assistant", stopReason: "stop", content: [] } });
+  await until(() => removed.length === 1);
+  assert.equal(removed[0].from, asked.seq);
+  sessions.waiting.delete("editlong");
+});
+
+test("an edit whose run fails after the chat has gone on from it is not undone", async () => {
+  const { file, original, asked } = answered("editon");
+  const removed = removals("editon");
+  const client = { ...busyClient(), prompt: async () => {} };
+  sessions.ensureClient = async () => client;
+  await sessions.editMessage("editon", asked.seq, "second");
+  await sessions.prompt("editon", "and then this", { steer: true });
+  sessions.record("editon", "agent_start", {});
+  sessions.record("editon", "portal_status", { status: "error", error: "gone" });
+  await until(() => removed.length === 1);
+  assert.notEqual(readFileSync(file, "utf8"), original, "what was said since stays");
+  assert.ok(sentMessages("editon").some((m) => m.message === "and then this"));
+  sessions.waiting.delete("editon");
+});
+
+test("a message pi queued as something else is placed by what pi queued", async () => {
+  createSession({ id: "rewritten", title: "rewritten", workspace: home, executor: "host" });
+  const client = busyClient();
+  // An input handler rewrote it, or a skill expanded it.
+  client.prompt = async () => ({ outcome: "queued", lane: "steering", text: "the rewritten words" });
+  sessions.ensureClient = async () => client;
+  await sessions.prompt("rewritten", "the words as typed", { steer: true });
+  const [prompt] = payloads("rewritten", "portal_prompt");
+  sessions.takeIn("rewritten", [{ type: "text", text: "the rewritten words" }]);
+  assert.deepEqual(payloads("rewritten", "portal_taken").map((p) => p.seq), [prompt.seq]);
+  // Kept with the message for after a restart, and for an edit.
+  assert.equal(sentMessages("rewritten")[0].payload.queuedAs, "the rewritten words");
+});
+
+test("after a restart, a message pi queued as something else is found by those words", () => {
+  createSession({ id: "restart2", title: "restart2", workspace: home, executor: "host" });
+  const file = path.join(home, "restart2.jsonl");
+  const entry = (id, parentId, text) =>
+    JSON.stringify({ type: "message", id, parentId, message: { role: "user", content: [{ type: "text", text }] } });
+  writeFileSync(file, [JSON.stringify({ type: "session", id: "s" }), entry("a", null, "go"), entry("b", "a", "expanded")].join("\n") + "\n");
+  updateSession("restart2", { pi_session_file: file });
+  appendEvent("restart2", "portal_prompt", { message: "go" });
+  const read = appendEvent("restart2", "portal_prompt", { message: "/skill:x", queued: true, queuedAs: "expanded" });
+  sessions.recoverOrphans();
+  assert.deepEqual(payloads("restart2", "portal_taken").map((p) => p.seq), [read.seq]);
+  assert.deepEqual(payloads("restart2", "portal_unsent"), []);
+});
+
+test("a message an extension handles mid-run is placed at once, not left waiting", async () => {
+  createSession({ id: "handled", title: "handled", workspace: home, executor: "host" });
+  const client = busyClient();
+  client.prompt = async () => ({ outcome: "handled" });
+  sessions.ensureClient = async () => client;
+  await sessions.prompt("handled", "note this", { steer: true });
+  const [prompt] = payloads("handled", "portal_prompt");
+  assert.deepEqual(payloads("handled", "portal_taken").map((p) => p.seq), [prompt.seq]);
+  assert.equal(sessions.waiting.get("handled"), undefined);
+});
+
+test("a message sent to an idle pi that a run beat to it waits like one sent mid-run", async () => {
+  createSession({ id: "beaten", title: "beaten", workspace: home, executor: "host" });
+  const client = { ...busyClient(), isIdle: () => true };
+  // A run began while pi was in this message's preflight, and it was queued.
+  client.prompt = async () => {
+    client.isIdle = () => false;
+    return { outcome: "queued", lane: "followUp", text: "after all" };
+  };
+  sessions.ensureClient = async () => client;
+  await sessions.prompt("beaten", "after all");
+  const [prompt] = payloads("beaten", "portal_prompt");
+  assert.equal(prompt.queued, true, "written down as waiting");
+  assert.equal(sessions.fresh.get("beaten"), undefined, "its start is not expected");
+  // The run's own first message is not it.
+  sessions.takeIn("beaten", "the routine's question");
+  assert.deepEqual(payloads("beaten", "portal_taken"), []);
+  sessions.takeIn("beaten", "after all");
+  assert.deepEqual(payloads("beaten", "portal_taken").map((p) => p.seq), [prompt.seq]);
+});
+
+test("a message that waited behind another and then started its own run is placed by its start", async () => {
+  createSession({ id: "ownrun", title: "ownrun", workspace: home, executor: "host" });
+  let accept;
+  let idle = true;
+  const client = {
+    ...busyClient(),
+    isIdle: () => idle,
+    prompt: async (message) => {
+      // The first was handled by an extension; the second starts a run.
+      if (message === "first") {
+        await new Promise((resolve) => (accept = resolve));
+        return { outcome: "handled" };
+      }
+      idle = false;
+      return { outcome: "started" };
+    },
+  };
+  sessions.ensureClient = async () => client;
+  const first = sessions.prompt("ownrun", "first");
+  await tick();
+  const second = sessions.prompt("ownrun", "/expanded-by-pi");
+  for (let i = 0; i < 5; i++) await tick();
+  accept();
+  await Promise.all([first, second]);
+  const [, waited] = payloads("ownrun", "portal_prompt");
+  assert.equal(waited.queued, true);
+  // pi starts it with words of its own making.
+  sessions.takeIn("ownrun", "something pi made of it");
+  assert.deepEqual(payloads("ownrun", "portal_taken").map((p) => p.seq), [waited.seq]);
+});
+
+test("Stop says so when it drops a slash command pi had queued", async () => {
+  createSession({ id: "cmdstop", title: "cmdstop", workspace: home, executor: "host" });
+  const client = busyClient();
+  client.getCommands = async () => [{ name: "review", source: "prompt" }];
+  client.prompt = async () => ({ outcome: "queued", lane: "steering", text: "Review this carefully: all of it" });
+  sessions.ensureClient = async () => client;
+  await sessions.prompt("cmdstop", "/review all of it", { steer: true });
+  assert.deepEqual(payloads("cmdstop", "portal_prompt"), [], "a command is no chat message");
+  sessions.live.set("cmdstop", { client, executor: {} });
+  try {
+    await sessions.abort("cmdstop");
+  } finally {
+    sessions.live.delete("cmdstop");
+  }
+  assert.equal(client.cleared, 1);
+  assert.match(payloads("cmdstop", "portal_notice").at(-1).text, /\/review all of it was dropped before the agent read it/);
+});
+
+test("pi's client says what it queued, as pi queued it", async () => {
+  let listener;
+  const steering = [];
+  const session = {
+    getAllTools: () => [],
+    getActiveToolNames: () => [],
+    setActiveToolsByName() {},
+    isIdle: false,
+    subscribe: (l) => (listener = l),
+    // A template, expanded before pi queues it.
+    prompt: async (text, options) => {
+      steering.push(`expanded ${text}`);
+      client.noteQueue({ type: "queue_update", steering: [...steering], followUp: [] });
+      options.preflightResult?.(true);
+    },
+  };
+  const client = new SdkPiClient(session, {}, () => {});
+  assert.deepEqual(await client.prompt("/tmpl", { steer: true }), { outcome: "queued", lane: "steering", text: "expanded /tmpl" });
+  session.prompt = async (_text, options) => options.preflightResult?.(true);
+  assert.deepEqual(await client.prompt("/handled"), { outcome: "handled" });
+  session.isIdle = true;
+  session.prompt = (_text, options) => {
+    options.preflightResult?.(true);
+    session.isIdle = false;
+    return new Promise(() => {});
+  };
+  assert.deepEqual(await client.prompt("go"), { outcome: "started" });
 });
 
 test("after a restart, a torn last line in pi's file does not hide what it took in", () => {

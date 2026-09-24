@@ -85,12 +85,17 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
   // Where a message sent into a run was placed. The prompt it was sent as can
   // be older than the events loaded — a long run, and a page that loads only
   // the end — so the placing event carries it too, and it stands in.
+  //
+  // One sent as starting a run of its own, that pi queued into a run begun in
+  // the same moment, is already in the list where it was sent, and moves.
   const placed = (seq: number, prompt: unknown): UserItem | undefined => {
     const item = waiting.get(seq);
     if (item) {
       waiting.delete(seq);
       return item;
     }
+    const shown = items.findIndex((it) => it.kind === "user" && it.seq === seq);
+    if (shown >= 0) return items.splice(shown, 1)[0] as UserItem;
     return prompt && typeof prompt === "object" ? userItem(seq, prompt) : undefined;
   };
 
