@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Select } from "./Select";
 import {
   LuBlocks,
   LuCheck,
@@ -345,10 +346,15 @@ function ReportDefault({ onError }: { onError: (e: string) => void }) {
       title="Routine reports"
       hint="Where a scheduled run reaches you when it has something worth saying. The agent decides whether a run is worth reporting; a routine can point somewhere else of its own."
     >
-      <select
+      <Select
+        className="w-full"
         value={value}
-        onChange={async (e) => {
-          const [channel, target] = e.target.value.split("\u0000");
+        options={[
+          { value: "", label: "Nowhere — routines stay silent" },
+          ...targets.map((t) => ({ value: `${t.channel}\u0000${t.target}`, label: `${t.channel} — ${t.label}` })),
+        ]}
+        onChange={async (next) => {
+          const [channel, target] = next.split("\u0000");
           try {
             await api.setReportDefault(channel && target ? { channel, target } : null);
             await load();
@@ -356,15 +362,7 @@ function ReportDefault({ onError }: { onError: (e: string) => void }) {
             onError((err as Error).message);
           }
         }}
-        className={inputCls}
-      >
-        <option value="">Nowhere — routines stay silent</option>
-        {targets.map((t) => (
-          <option key={`${t.channel}\u0000${t.target}`} value={`${t.channel}\u0000${t.target}`}>
-            {t.channel} — {t.label}
-          </option>
-        ))}
-      </select>
+      />
       {targets.length === 0 && (
         <p className="mt-1.5 text-xs text-fg-faint">
           Nothing to pick yet. A destination is a conversation that already exists on a channel

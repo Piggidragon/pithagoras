@@ -71,3 +71,15 @@ test('a paragraph followed by a tool call is not offered Copy', () => {
 test('nothing to copy before anything has been said', () => {
   assert.equal(lastReplyId([]), undefined);
 });
+test('tool calls keep their arguments, output and timing; compaction shows where it happened', () => {
+  const items = buildTranscript([
+    { seq: 1, at: 1000, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'bash', args: { command: 'ls -la' } } },
+    { seq: 2, at: 1200, type: 'tool_execution_update', payload: { toolCallId: 't', partialResult: { content: [{ type: 'text', text: 'a' }] } } },
+    { seq: 3, at: 1500, type: 'tool_execution_end', payload: { toolCallId: 't', toolName: 'bash', result: { content: [{ type: 'text', text: 'a\nb' }] } } },
+    { seq: 4, at: 2000, type: 'compaction_start', payload: {} },
+    { seq: 5, at: 3000, type: 'compaction_end', payload: { result: { summary: 'S', tokensBefore: 90000 } } },
+  ] as any);
+  const tool = items[0] as any;
+  assert.deepEqual([tool.args, tool.output, tool.status, tool.until - tool.since], [{ command: 'ls -la' }, 'a\nb', 'done', 500]);
+  assert.deepEqual(items[1], { kind: 'compaction', id: 'c4', status: 'done', since: 2000, until: 3000, tokensBefore: 90000, summary: 'S' });
+});

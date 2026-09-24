@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Select } from "./Select";
 import {
   LuCheck,
   LuChevronLeft,
@@ -676,23 +677,19 @@ function RoutineDetail({
 
         <label className="block pt-1">
           <span className="mb-1 block text-xs text-fg-subtle">Report to</span>
-          <select
+          <Select
+            className="w-full"
             value={report}
-            onChange={(e) => setReport(e.target.value)}
-            className="w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition focus:border-accent/60"
-          >
-            <option value="">
-              {fallback
-                ? `Default — ${labelFor(targets, fallback) ?? fallback.channel}`
-                : "Default — none set"}
-            </option>
-            <option value="off">Never report</option>
-            {targets.map((t) => (
-              <option key={`${t.channel}\u0000${t.target}`} value={`${t.channel}\u0000${t.target}`}>
-                {t.channel} — {t.label}
-              </option>
-            ))}
-          </select>
+            onChange={setReport}
+            options={[
+              {
+                value: "",
+                label: fallback ? `Default — ${labelFor(targets, fallback) ?? fallback.channel}` : "Default — none set",
+              },
+              { value: "off", label: "Never report" },
+              ...targets.map((t) => ({ value: `${t.channel}\u0000${t.target}`, label: `${t.channel} — ${t.label}` })),
+            ]}
+          />
           <p className="mt-1 text-[11px] text-fg-faint">
             The agent decides whether a run is worth reporting and writes the message itself. It
             only has somewhere to send it if this points at a conversation.

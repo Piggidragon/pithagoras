@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Select } from "./Select";
 import { LuFileText, LuPlus, LuX, LuTrash2, LuCheck, LuPencil, LuEye, LuSave, LuDownload } from 'react-icons/lu';
 import { Streamdown } from 'streamdown';
 import { asksBeforeDeleting } from '../confirm-prefs';
@@ -57,7 +58,7 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
     {showToggle && <button className="canvas-toggle" onClick={()=>setOpen(!open)} aria-expanded={open} aria-label="Session canvases" title="Session canvases"><LuFileText/></button>}
     {open&&<section ref={panel} className="canvas-panel" aria-label="Session canvas workspace">
       <header><div><LuFileText/><strong>Session canvases</strong></div><div className="canvas-frame-actions"><button aria-label={canvas?.persisted?"Canvas stored":"Store canvas"} title={canvas?.persisted?"Stored — edits auto-save":"Store canvas permanently"} disabled={!canvas||canvas.persisted||busy||editing} onClick={()=>void store()}>{canvas?.persisted?<LuCheck/>:<LuSave/>}</button><button aria-label="Download canvas" title="Download Markdown" disabled={!canvas} onClick={download}><LuDownload/></button><button aria-label="Close canvas" disabled={editing} onClick={()=>setOpen(false)}><LuX/></button></div></header>
-      <div className="canvas-picker"><select aria-label="Select canvas" value={selected} disabled={editing} onChange={e=>{setSelected(e.target.value);setConfirmDelete(false);setError('');follow.current=true}}><option value="" disabled>Choose a document</option>{rows.map(row=><option key={row.id} value={row.id}>{row.title}{row.persisted?"":" (temporary)"}</option>)}</select><button disabled={editing||busy} aria-label="New canvas" onClick={()=>void create()}><LuPlus/></button></div>
+      <div className="canvas-picker"><Select aria-label="Select canvas" className="flex-1 min-w-0" size="sm" value={selected} disabled={editing} placeholder="Choose a document" onChange={v=>{setSelected(v);setConfirmDelete(false);setError('');follow.current=true}} options={rows.map(row=>({value:row.id,label:row.title,text:row.title,hint:row.persisted?undefined:"Temporary — not stored"}))}/><button disabled={editing||busy} aria-label="New canvas" onClick={()=>void create()}><LuPlus/></button></div>
       {!connected&&<p className="canvas-notice">Reconnecting to live canvas…</p>}
       {error&&<p role="alert" className="canvas-error">{error}</p>}
       {canvas?<>

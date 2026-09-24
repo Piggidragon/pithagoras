@@ -130,6 +130,8 @@ const EPHEMERAL_EVENTS = new Set([
   // Prefill progress: a hundred rows per long prompt, and meaningless once the
   // answer has arrived. Delivered to whoever is watching, never stored.
   "portal_prefill",
+  // A model being loaded before the prompt can be read: news only while it lasts.
+  "portal_model",
   // Tells a page which stretch of its transcript is gone. Stored, it would be
   // replayed to a reader who never saw what it refers to.
   "portal_removed",
@@ -560,6 +562,11 @@ class SessionManager extends EventEmitter {
   /** How far llama.cpp has got through the prompt. Straight out to the browser. */
   reportPrefill(sessionId: string, prefill: unknown): void {
     this.record(sessionId, "portal_prefill", prefill);
+  }
+
+  /** The session's model is being loaded, or has finished loading. */
+  reportModelLoad(sessionId: string, load: unknown): void {
+    this.record(sessionId, "portal_model", load);
   }
 
   /**

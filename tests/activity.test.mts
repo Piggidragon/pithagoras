@@ -14,3 +14,11 @@ test('compaction stays identified through model events and ends cleanly',()=>{
  events.push(event('compaction_end',140));assert.equal(activity(events).label,'thinking');
  events.push(event('portal_prompt',150));assert.deepEqual(activity(events),{label:'processing the prompt',since:150,prefill:undefined});
 });
+test('a model being loaded is said before the prompt is read, and gives way to prefill',()=>{
+ const events:any[]=[event('portal_prompt',100),event('agent_start',105),event('portal_model',110,{model:'qwen',state:'loading'})];
+ assert.deepEqual(activity(events),{label:'loading the model',since:110,model:'qwen'});
+ events.push(event('portal_model',150,{model:'qwen',state:'ready'}));
+ assert.equal(activity(events).label,'processing the prompt');
+ events.push(event('portal_prefill',160,{total:100,processed:50}));
+ assert.equal(activity(events).prefill?.processed,50);
+});

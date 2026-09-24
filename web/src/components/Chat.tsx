@@ -1,4 +1,5 @@
-import { ActivityProgress } from './ActivityProgress';
+import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
+import { VoiceTerminal } from "./VoiceTerminal";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
@@ -13,7 +14,7 @@ import { Streamdown, type DiagramPlugin } from "streamdown";
 import { LuArrowDown, LuCheck, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
-import { activity, buildTranscript, lastReplyId, type Activity, type Item, type SentImage } from "../transcript";
+import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
@@ -187,6 +188,23 @@ export function Chat({
   const [browserUp, setBrowserUp] = useState(false);
   const [watching, setWatching] = useState(false);
   const [terminal, setTerminal] = useState(false);
+  // The terminal panel holds two: what the agent ran, and a shell of your own.
+  // The shell is only started once asked for, and kept while the panel is open.
+  const [terminalTab, setTerminalTab] = useState<"agent" | "shell">("agent");
+  const [shellStarted, setShellStarted] = useState(false);
+  const [terminalFocus, setTerminalFocus] = useState<{ id: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!terminal) setShellStarted(false);
+  }, [terminal]);
+  useEffect(() => {
+    if (terminalTab === "shell" && terminal) setShellStarted(true);
+  }, [terminalTab, terminal]);
+  /** A command from the chat, found in the agent terminal. */
+  const showInTerminal = (callId: string) => {
+    setTerminalTab("agent");
+    setTerminal(true);
+    setTerminalFocus({ id: callId, at: Date.now() });
+  };
   const [files, setFiles] = useState(false);
   // Whether Files has an edit that is not saved: closing it would lose it.
   const [filesDirty, setFilesDirty] = useState(false);
@@ -257,6 +275,24 @@ export function Chat({
   const scroller = useFollowBottom<HTMLDivElement>();
   const lastSpoken = useRef<string | null>(null);
   const items = useMemo(() => buildTranscript(events), [events]);
+  // What arrived while the chat was open slides in; what was there when it
+  // opened, or was loaded from further up, is simply there.
+  const entered = useRef<{ session: string; ready: boolean; at: Map<string, number> }>({ session: session.id, ready: false, at: new Map() });
+  if (entered.current.session !== session.id) entered.current = { session: session.id, ready: false, at: new Map() };
+  const arriving = (id: string, index: number) => {
+    const e = entered.current;
+    let at = e.at.get(id);
+    if (at === undefined) {
+      at = e.ready && index >= items.length - 3 ? performance.now() : 0;
+      e.at.set(id, at);
+    }
+    return at > 0 && performance.now() - at < 700;
+  };
+  useEffect(() => {
+    if (loading) return;
+    for (const it of items) if (!entered.current.at.has(it.id)) entered.current.at.set(it.id, 0);
+    entered.current.ready = true;
+  }, [items, loading]);
   // The last thing the person said. Retrying it replaces it and what came of
   // it, which is only safe where nothing follows that would go too.
   const lastSaid = useMemo(() => {
@@ -398,6 +434,14 @@ export function Chat({
   // What it is doing, and for how long. The clock ticks only while something is
   // running, so an idle session re-renders no more than it used to.
   const phase = useMemo(() => (running ? activity(events) : null), [running, events]);
+  // The thinking block and the compaction marker already say so, animated,
+  // where it is happening; the status pill would say it twice.
+  const statusShownElsewhere = useMemo(() => {
+    const last = items[items.length - 1];
+    if (!last) return false;
+    if (last.kind === "compaction" && last.status === "running") return true;
+    return phase?.label === "thinking" && last.kind === "assistant" && !last.done && !!last.thinking && !last.text;
+  }, [items, phase]);
   // What tells the composer that pi has a new token count to show. A compaction
   // moves it too, and it is not a turn.
   const turns = useMemo(
@@ -780,7 +824,7 @@ export function Chat({
             onClick={() => setTerminal((v) => !v)}
             aria-label="Terminal"
             aria-expanded={terminal}
-            title={terminal ? "Hide the terminal" : "Open a shell in this workspace"}
+            title={terminal ? "Hide the terminal" : "The agent's terminal, and a shell of your own in this workspace"}
             className={`rounded-lg border px-2 py-1 text-xs transition ${
               terminal
                 ? "border-accent/40 bg-accent/10 text-accent"
@@ -822,7 +866,7 @@ export function Chat({
         onPointerDown={() => (reading.current = null)}
         className="flex-1 overflow-y-auto px-4 py-6"
       >
-        <div ref={list} className="mx-auto w-full max-w-3xl space-y-3">
+        <div ref={list} className="chat-list mx-auto w-full max-w-3xl space-y-3">
         <div ref={topEdge} aria-hidden className="h-px" />
         {!loading && hasEarlier && hiddenHere === 0 && (
           <div data-earlier="" className="flex justify-center pb-2">
@@ -849,7 +893,8 @@ export function Chat({
           </div>
         )}
 
-        {(loading ? [] : visible).map((item) => {
+        {(loading ? [] : visible).map((item, index) => {
+          const enter = arriving(item.id, hiddenHere + index) ? " chat-enter" : "";
           if (item.kind === "user") {
             const { text, blocks } = splitContext(item.text);
             // Nothing but framing: the portal spoke, not a person. Drawing it as
@@ -890,7 +935,7 @@ export function Chat({
             if (item.queued || item.unsent) {
               const waits = !item.unsent;
               return (
-                <div key={item.id} className="group flex flex-col items-end gap-1">
+                <div key={item.id} className={`group flex flex-col items-end gap-1${enter}`}>
                   <div className="max-w-[80%] rounded-2xl rounded-br-md border border-dashed border-accent/30 bg-accent/5 px-3.5 py-2 text-sm text-fg-muted">
                     {text && <div className="whitespace-pre-wrap">{text}</div>}
                     {item.images && <div className="mt-1 text-[11px] text-fg-subtle">{item.images.length === 1 ? "1 picture" : `${item.images.length} pictures`}</div>}
@@ -923,7 +968,7 @@ export function Chat({
               );
             }
             return (
-              <div key={item.id} className="group flex flex-col items-end gap-1">
+              <div key={item.id} className={`group flex flex-col items-end gap-1${enter}`}>
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
                   {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title="Sent in voice mode"><LuAudioLines size={13} aria-hidden="true" /><span>Audio</span></div>}
                   {item.images && (
@@ -1017,14 +1062,14 @@ export function Chat({
             return (
               // Never closer than 2rem to the edge: Copy sits in that margin,
               // and 10% of a phone is less than the button.
-              <div key={item.id} className="group max-w-[min(90%,calc(100%_-_2rem))]">
+              <div key={item.id} className={`group max-w-[min(90%,calc(100%_-_2rem))]${enter}`}>
                 {item.thinking && (
-                  <details className="mb-1 text-xs text-fg-subtle">
-                    <summary className="cursor-pointer hover:text-fg-muted">thinking</summary>
-                    <div className="mt-1 whitespace-pre-wrap border-l border-line pl-2">
-                      {item.thinking}
-                    </div>
-                  </details>
+                  <ThinkingBlock
+                    thinking={item.thinking}
+                    streaming={running && !item.done && !item.text}
+                    since={item.thinkingSince}
+                    until={item.thinkingUntil}
+                  />
                 )}
                 {item.text && (
                   <div className="md relative text-sm leading-relaxed text-fg">
@@ -1036,6 +1081,9 @@ export function Chat({
                         the answer; that stray tag is noise to whoever reads it. */}
                     <Streamdown
                       parseIncompleteMarkdown
+                      animated={{ animation: "blurIn", duration: 240, sep: "word" }}
+                      isAnimating={running && !item.done}
+                      caret={running && !item.done ? "circle" : undefined}
                       shikiTheme={["github-light", "github-dark"]}
                       plugins={mermaid ? { mermaid } : undefined}
                       mermaid={mermaidOptions}
@@ -1057,22 +1105,17 @@ export function Chat({
               </div>
             );
           }
-          if (item.kind === "tool") {
-            const tone =
-              item.status === "error"
-                ? "text-danger"
-                : item.status === "running"
-                  ? "text-accent"
-                  : "text-fg-faint";
+          if (item.kind === "compaction") {
             return (
-              <Fragment key={item.id}>
-              <div className="flex items-center gap-2 py-0.5 font-mono text-[11px] text-fg-faint">
-                <span className={`shrink-0 ${tone}`}>
-                  {item.status === "running" ? "◇" : item.status === "error" ? "✕" : "◆"}
-                </span>
-                <span className="shrink-0 text-fg-subtle">{item.name}</span>
-                {item.detail && <span className="truncate opacity-60">{item.detail}</span>}
+              <div key={item.id} className={`chat-row${enter}`}>
+                <CompactionMarker item={item} />
               </div>
+            );
+          }
+          if (item.kind === "tool") {
+            return (
+              <div key={item.id} className={`tool-row${enter}`}>
+              <ToolCall item={item} onOpenTerminal={showInTerminal} />
               {item.picture && (
                 <a
                   href={api.pictureUrl(session.id, item.picture.path, item.id)}
@@ -1089,13 +1132,13 @@ export function Chat({
                   />
                 </a>
               )}
-              </Fragment>
+              </div>
             );
           }
           return (
             <div
               key={item.id}
-              className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs ${
+              className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs${enter} ${
                 item.tone === "error"
                   ? "bg-danger/10 text-danger"
                   : "bg-raised/60 text-fg-muted"
@@ -1109,7 +1152,7 @@ export function Chat({
           {actionError && (
             <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
           )}
-          {!loading && running && phase && <ActivityLine phase={phase} now={now} />}
+          {!loading && running && phase && !statusShownElsewhere && <StatusIndicator phase={phase} now={now} />}
         </div>
       </div>
 
@@ -1398,8 +1441,20 @@ export function Chat({
                   style={{ flex: asidePanels.length === 1 ? "1 1 0%" : `${i === 0 ? split : 1 - split} 1 0%` }}
                 >
                   <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
-                    <span className="text-[11px] text-fg-subtle">{kind === "browser" ? "Browser" : kind === "files" ? "Files" : "Terminal"}</span>
-                    {kind === "terminal" && <span className="truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
+                    {kind === "terminal" ? (
+                      <div className="chat-tabs" role="tablist" aria-label="Terminals">
+                        <button type="button" role="tab" aria-selected={terminalTab === "agent"} onClick={() => setTerminalTab("agent")}>
+                          Agent
+                          {running && <i className="chat-tab-live" aria-label="Running" />}
+                        </button>
+                        <button type="button" role="tab" aria-selected={terminalTab === "shell"} onClick={() => setTerminalTab("shell")}>
+                          Your shell
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] text-fg-subtle">{kind === "browser" ? "Browser" : "Files"}</span>
+                    )}
+                    {kind === "terminal" && terminalTab === "shell" && <span className="truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
                     {kind === "browser" && (
                       <button
                         onClick={() => browserPane.current?.requestFullscreen?.()}
@@ -1432,8 +1487,15 @@ export function Chat({
                     </div>
                   )}
                   {kind === "terminal" && (
-                    <div className="min-h-0 flex-1">
-                      <TerminalPanel sessionId={session.id} />
+                    <div className="relative min-h-0 flex-1 bg-[#0b0b0d]">
+                      <div className={terminalTab === "agent" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
+                        <VoiceTerminal events={events} limit={500} maxOutput={200_000} focus={terminalFocus} />
+                      </div>
+                      {shellStarted && (
+                        <div className={terminalTab === "shell" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
+                          <TerminalPanel sessionId={session.id} />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1567,52 +1629,3 @@ function MessageEditor({
     </div>
   );
 }
-
-/**
- * The line that says what the agent is doing.
- *
- * The elapsed count is the point of it: "processing the prompt" for four
- * seconds is normal and "processing the prompt" for four minutes is a question,
- * and only one of those is worth interrupting. Where llama.cpp reports its own
- * prefill, the bar is its numbers rather than an animation standing in for
- * progress — a cached prefix shows as already done, because it is.
- */
-function ActivityLine({ phase, now }: { phase: Activity; now: number }) {
-  if (phase.label === 'processing the prompt' || phase.label === 'compacting the conversation') return <ActivityProgress phase={phase} />;
-  const seconds = phase.since ? Math.floor((now - phase.since) / 1000) : 0;
-  const p = phase.prefill;
-  // `processed` already counts the cached prefix — llama.cpp reports the first
-  // batch as processed == cache, so adding them overshoots the total.
-  const done = p ? Math.min(p.total, p.processed) : 0;
-  const percent = p && p.total > 0 ? Math.round((done / p.total) * 100) : null;
-
-  return (
-    <div className="py-1 text-xs text-fg-subtle">
-      <div className="flex items-center gap-1.5">
-        <span className="h-1 w-1 animate-pulse rounded-full bg-accent" />
-        <span>{phase.label}</span>
-        {percent !== null && <span className="text-fg-muted">{percent}%</span>}
-        {seconds >= 2 && <span className="text-fg-faint">· {formatElapsed(seconds)}</span>}
-      </div>
-      {p && p.total > 0 && (
-        <div className="mt-1 flex items-center gap-2">
-          <div className="h-1 w-40 overflow-hidden rounded-full bg-fg/10">
-            <div
-              className="h-full rounded-full bg-accent transition-[width] duration-500"
-              style={{ width: `${Math.min(100, (done / p.total) * 100)}%` }}
-            />
-          </div>
-          <span className="font-mono text-[10px] text-fg-faint">
-            {tokens(done)}/{tokens(p.total)} tokens
-            {p.cache > 0 && ` · ${tokens(p.cache)} from cache`}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const formatElapsed = (s: number) =>
-  s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
-
-const tokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));

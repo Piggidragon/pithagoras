@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Select } from "./Select";
 import {
   LuChevronLeft,
   LuChevronRight,
@@ -551,16 +552,17 @@ function ServerForm({
               />
             </Field>
             <Field label="Authentication">
-              <select
-                className={inputCls}
+              <Select
+                className="w-full"
                 value={auth}
-                onChange={(ev) => setAuth(ev.target.value)}
-              >
-                <option value="auto">Detect (OAuth if the server offers it)</option>
-                <option value="oauth">OAuth</option>
-                <option value="bearer">Bearer token</option>
-                <option value="none">None</option>
-              </select>
+                onChange={setAuth}
+                options={[
+                  { value: "auto", label: "Detect", hint: "OAuth if the server offers it" },
+                  { value: "oauth", label: "OAuth" },
+                  { value: "bearer", label: "Bearer token" },
+                  { value: "none", label: "None" },
+                ]}
+              />
             </Field>
             {auth === "bearer" && (
               <Field
@@ -590,16 +592,17 @@ function ServerForm({
         )}
 
         <Field label="Lifecycle" hint="Lazy connects on first use, which is usually what you want">
-          <select
-            className={inputCls}
+          <Select
+            className="w-full"
             value={lifecycle}
-            onChange={(ev) => setLifecycle(ev.target.value as McpServerEntry["lifecycle"] & string)}
-          >
-            <option value="lazy">Lazy</option>
-            <option value="lazy-keep-alive">Lazy, then keep alive</option>
-            <option value="eager">Eager</option>
-            <option value="keep-alive">Keep alive</option>
-          </select>
+            onChange={(v) => setLifecycle(v as McpServerEntry["lifecycle"] & string)}
+            options={[
+              { value: "lazy", label: "Lazy" },
+              { value: "lazy-keep-alive", label: "Lazy, then keep alive" },
+              { value: "eager", label: "Eager" },
+              { value: "keep-alive", label: "Keep alive" },
+            ]}
+          />
         </Field>
 
         <Field label="Only these tools" hint="One name or glob per line; leave empty for all">
@@ -695,16 +698,17 @@ function GlobalSettings({
       </div>
       <div className="grid gap-3 rounded-xl border border-line bg-raised/40 p-3 sm:grid-cols-3">
         <Field label="Tool naming">
-          <select
-            className={inputCls}
+          <Select
+            className="w-full"
             value={prefix}
-            onChange={(ev) => track(setPrefix)(ev.target.value)}
-          >
-            <option value="server">server_tool</option>
-            <option value="short">short</option>
-            <option value="mcp">mcp_tool</option>
-            <option value="none">tool</option>
-          </select>
+            onChange={(v) => track(setPrefix)(v)}
+            options={[
+              { value: "server", label: "server_tool" },
+              { value: "short", label: "short" },
+              { value: "mcp", label: "mcp_tool" },
+              { value: "none", label: "tool" },
+            ]}
+          />
         </Field>
         <Field label="Idle timeout" hint="Minutes; 0 never disconnects">
           <input

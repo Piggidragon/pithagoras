@@ -30,12 +30,28 @@ export interface Prefill {
 
 type OnProgress = (sessionId: string, prefill: Prefill) => void;
 
+/**
+ * Whether a session's model is being loaded before it can answer.
+ *
+ * Behind llama-server's router or llama-swap, the first request for a model
+ * that is not resident starts it — tens of seconds in which nothing streams and
+ * the chat looked as if it were reading the prompt. `ready` follows the first
+ * byte of the answer, and only after a `loading`.
+ */
+export interface ModelLoad {
+  model: string;
+  state: "loading" | "ready";
+}
+
+type OnModel = (sessionId: string, load: ModelLoad) => void;
+
 /** Upstream origin per session, captured when the model is rewritten. */
 const upstreams = new Map<string, string>();
 
 let server: http.Server | undefined;
 let port = 0;
 let notify: OnProgress = () => {};
+let notifyModel: OnModel = () => {};
 
 const PREFIX = "/s/";
 const diskCache = new LlamaSessionCache();
@@ -77,6 +93,37 @@ function withProgress(body: Buffer): Buffer {
   }
 }
 
+async function probe(url: URL): Promise<any> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return undefined;
+    }
+    return await response.json();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether `model` is loaded on `upstream`: false when it is not, undefined when
+ * the server does not say — a plain llama-server has one model, always loaded.
+ */
+export async function modelLoaded(upstream: string, model: string): Promise<boolean | undefined> {
+  // llama-server's router: every preset, with its status.
+  const router = await probe(new URL("/models", upstream));
+  const entry = Array.isArray(router?.data) ? router.data.find((m: any) => m?.id === model) : undefined;
+  const status = entry?.status?.value ?? entry?.status;
+  if (typeof status === "string") return status === "loaded";
+  // llama-swap: the models that are up, and whether they are ready yet.
+  const swap = await probe(new URL("/running", upstream));
+  if (Array.isArray(swap?.running)) {
+    return swap.running.some((m: any) => m?.model === model && (m.state === undefined || m.state === "ready"));
+  }
+  return undefined;
+}
+
 function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
   const url = req.url ?? "";
   if (!url.startsWith(PREFIX)) {
@@ -103,8 +150,29 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
     const headers = { ...req.headers, host: target.host };
     if (body.length) headers["content-length"] = String(body.length);
 
+    let model = "";
+    try { model = JSON.parse(body.toString()).model ?? ""; } catch { /* Non-completion route. */ }
+    const completion = !!model && target.pathname.endsWith("/chat/completions");
+
+    // Asked alongside the request rather than before it: a loaded model must
+    // not wait on the question, and the request is what starts the load.
+    let answered = false;
+    let loading = false;
+    const answering = () => {
+      if (answered) return;
+      answered = true;
+      if (loading) notifyModel(sessionId, { model, state: "ready" });
+    };
+    if (completion) {
+      void modelLoaded(upstream, model).then(loaded => {
+        if (loaded !== false || answered || res.destroyed) return;
+        loading = true;
+        notifyModel(sessionId, { model, state: "loading" });
+      });
+    }
+
     const controller = new AbortController();
-    res.on("close", () => controller.abort());
+    res.on("close", () => { controller.abort(); answering(); });
     const forward = () => new Promise<boolean>((resolve, reject) => {
       const out = client.request(
         { protocol: target.protocol, hostname: target.hostname, port: target.port,
@@ -114,6 +182,7 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
           const streaming = (upstreamRes.headers["content-type"] ?? "").includes("event-stream");
           let progressBuffer = "";
           upstreamRes.on("data", (c: Buffer) => {
+            answering();
             if (streaming) {
               progressBuffer += c.toString("utf8");
               const end = progressBuffer.lastIndexOf("\n");
@@ -128,10 +197,9 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
       out.on("error", reject);
       out.end(body);
     });
-    let model = "";
-    try { model = JSON.parse(body.toString()).model ?? ""; } catch { /* Non-completion route. */ }
-    const enabled = (process.env.LLAMA_DISK_CACHE_MODELS ?? "").split(",").includes(model) && !!model && target.pathname.endsWith("/chat/completions");
+    const enabled = (process.env.LLAMA_DISK_CACHE_MODELS ?? "").split(",").includes(model) && completion;
     void (enabled ? diskCache.run(upstream, model, sessionId, controller.signal, forward) : forward())
+      .finally(answering)
       .then(() => res.end())
       .catch(error => {
         if (res.destroyed) return;
@@ -142,9 +210,10 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
 }
 
 /** Loopback only: this exists for the pi process in front of it, nobody else. */
-export function startLlamaProxy(onProgress: OnProgress): void {
+export function startLlamaProxy(onProgress: OnProgress, onModel?: OnModel): void {
   if (server) return;
   notify = onProgress;
+  if (onModel) notifyModel = onModel;
   server = http.createServer(handle);
   server.listen(0, "127.0.0.1", () => {
     port = (server!.address() as AddressInfo).port;
