@@ -602,7 +602,17 @@ export function sentMessages(sessionId: string): { seq: number; message: string;
   const rows = getDb()
     .prepare("SELECT seq, payload FROM events WHERE session_id = ? AND type = 'portal_prompt' ORDER BY seq ASC")
     .all(sessionId) as { seq: number; payload: string }[];
-  return rows.map((r) => {
+  // One sent mid-run and stopped before pi took it in never reached pi's
+  // file, and counted here it would put every later message one out.
+  const unsent = new Set<number>();
+  const drops = getDb()
+    .prepare("SELECT payload FROM events WHERE session_id = ? AND type = 'portal_unsent'")
+    .all(sessionId) as { payload: string }[];
+  for (const d of drops) {
+    const seqs = (JSON.parse(d.payload) ?? {}).seqs;
+    if (Array.isArray(seqs)) for (const seq of seqs) unsent.add(Number(seq));
+  }
+  return rows.filter((r) => !unsent.has(r.seq)).map((r) => {
     const payload = JSON.parse(r.payload) ?? {};
     return { seq: r.seq, message: String(payload.message ?? ""), payload };
   });

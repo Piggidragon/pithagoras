@@ -125,20 +125,25 @@ class SessionManager extends EventEmitter {
    */
   private speaker = new Map<string, PersonRow>();
 
+  /**
+   * Touches nothing outside itself: anything that imports this module builds
+   * the manager, a test the agent runs from inside a chat among them, with the
+   * portal's DATA_DIR and SESSION_DIR in its environment. Each session's folder
+   * is made when its pi starts.
+   */
   constructor() {
     super();
     this.setMaxListeners(0);
-    mkdirSync(SESSION_ROOT, { recursive: true });
   }
 
   /**
    * Chats left running by the previous server, marked interrupted.
    *
-   * Called by the server on startup, not by the constructor: anything that
-   * imports this module builds the manager, and a test the agent runs from
-   * inside a chat inherits the portal's DATA_DIR. Done on construction, that
-   * test marked the very chat running it as interrupted — which took away its
-   * Stop button while it was still waiting on the command.
+   * Called by the server on startup, before any pi is launched, rather than by
+   * the constructor. Done on construction, a test run from inside a chat marked
+   * the very chat running it as interrupted — which took away its Stop button
+   * while it was still waiting on the command. Only a run that died with the
+   * previous server is marked, so an interrupted chat has nothing running.
    */
   recoverOrphans(): void {
     const orphaned = markOrphanedSessionsInterrupted();
@@ -152,7 +157,7 @@ class SessionManager extends EventEmitter {
   }
 
   /** Stream updates in memory; persist completed messages and lifecycle metadata. */
-  private record(sessionId: string, type: string, payload: unknown): void {
+  private record(sessionId: string, type: string, payload: unknown): EventRow | undefined {
     if (EPHEMERAL_EVENTS.has(type)) {
       // Still deliver it to anyone attached right now, with a negative seq so
       // it can never be confused with a stored event during replay.
@@ -162,10 +167,70 @@ class SessionManager extends EventEmitter {
         type,
         payload: JSON.stringify(payload),
       });
-      return;
+      return undefined;
     }
     const row = this.stream.record(sessionId, type, payload);
     this.emit(`session:${sessionId}`, row);
+    return row;
+  }
+
+  /**
+   * Messages sent mid-run that pi has not taken in yet, oldest first.
+   *
+   * Shown waiting at the foot of the conversation until pi takes one in —
+   * after the step it is on for a steer, at the end of the run for a
+   * follow-up — and then where that happened, which is where the agent read
+   * it. A Stop drops what is still waiting: pi would keep it queued and slip
+   * it into the next run, unasked.
+   */
+  private waiting = new Map<string, { seq: number; message: string }[]>();
+
+  /** pi started a message from the person: the waiting one it is, now in place. */
+  private takeIn(sessionId: string, content: unknown): void {
+    const list = this.waiting.get(sessionId);
+    if (!list?.length) return;
+    const text =
+      typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content.map((c: any) => (c?.type === "text" && typeof c.text === "string" ? c.text : "")).join("")
+          : "";
+    // By its words, as pi finds it in its own queue, not by order: the message
+    // that started the run can arrive after one sent right behind it. Ending
+    // with them rather than equal to them, for the note a spoken turn carries.
+    const at = list.findIndex((m) => text === m.message || text.endsWith(m.message));
+    if (at < 0) return;
+    const [taken] = list.splice(at, 1);
+    this.record(sessionId, "portal_taken", { seq: taken.seq });
+  }
+
+  /**
+   * The run is over and pi's queue with it. Anything not matched by its words —
+   * a template pi expanded — was taken in all the same, and is put here.
+   */
+  private settleWaiting(sessionId: string): void {
+    const list = this.waiting.get(sessionId);
+    this.waiting.delete(sessionId);
+    for (const m of list ?? []) this.record(sessionId, "portal_taken", { seq: m.seq });
+  }
+
+  /**
+   * Stopped before pi took them in: out of pi's queue, and marked as never
+   * sent. Without a client, pi is gone and its queue with it.
+   */
+  private dropWaiting(sessionId: string, client?: PiClient): void {
+    const list = this.waiting.get(sessionId);
+    if (!list?.length) return;
+    if (client) {
+      if (!client.clearQueue) return;
+      try {
+        client.clearQueue();
+      } catch {
+        return;
+      }
+    }
+    this.waiting.delete(sessionId);
+    this.record(sessionId, "portal_unsent", { seqs: list.map((m) => m.seq) });
   }
 
   /**
@@ -347,14 +412,15 @@ class SessionManager extends EventEmitter {
       // nobody here asked for — a queued follow-up picked up on its own, a
       // routine, a message that arrived through a channel.
       if (msg.type === "agent_start") this.mark(sessionId, "running");
-      // Output from a chat marked interrupted means it is not: the run is
-      // still going here, and it needs its Stop button back.
-      else if (msg.type !== "agent_settled" && getSession(sessionId)?.status === "interrupted") this.mark(sessionId, "running");
+      if (msg.type === "message_start" && msg.message?.role === "user") this.takeIn(sessionId, msg.message.content);
       // agent_settled, not agent_end: agent_end fires once per agent run, and
       // a run is followed by retries, auto-compaction and any queued message,
       // all of it still the model working. Settling on agent_end is what made
       // the Stop button disappear halfway through.
-      if (msg.type === "agent_settled") this.mark(sessionId, "idle");
+      if (msg.type === "agent_settled") {
+        this.settleWaiting(sessionId);
+        this.mark(sessionId, "idle");
+      }
     });
 
     client.on("stderr", (chunk: string) => {
@@ -367,6 +433,7 @@ class SessionManager extends EventEmitter {
       if (this.live.get(sessionId)?.client && this.live.get(sessionId)?.client !== client) return;
       this.live.delete(sessionId);
       this.stream.clear(sessionId);
+      this.dropWaiting(sessionId);
       const current = getSession(sessionId);
       // A clean exit after a finished run is normal; anything else is a failure
       // worth surfacing in the UI rather than leaving as a silent stall.
@@ -476,13 +543,21 @@ class SessionManager extends EventEmitter {
       return;
     }
 
+    // Into a run that is going: it waits for pi to take it in.
+    const queued = client.isIdle ? !client.isIdle() : false;
+    let waiting: { seq: number; message: string } | undefined;
     if (!isCommand) {
-      this.record(sessionId, "portal_prompt", {
+      const row = this.record(sessionId, "portal_prompt", {
         message,
         ...(options?.voice ? { voice: true } : {}),
         ...(images.length ? { images: forLog(images) } : {}),
+        ...(queued ? { queued: true } : {}),
       });
       logged.images = images.length > 0;
+      if (queued && row) {
+        waiting = { seq: row.seq, message };
+        this.waiting.set(sessionId, [...(this.waiting.get(sessionId) ?? []), waiting]);
+      }
     }
     // pi sends a model that cannot see pictures a line saying one was left
     // out, and nothing else. The person is told here, where they can pick
@@ -497,11 +572,17 @@ class SessionManager extends EventEmitter {
         });
       }
     }
-    await client.prompt(message, {
-      voice: options?.voice,
-      ...(images.length ? { images: forPi(images) } : {}),
-      ...(options?.steer ? { steer: true } : {}),
-    });
+    try {
+      await client.prompt(message, {
+        voice: options?.voice,
+        ...(images.length ? { images: forPi(images) } : {}),
+        ...(options?.steer ? { steer: true } : {}),
+      });
+    } catch (e) {
+      // Refused, so never queued: nothing for pi to take in.
+      if (waiting) this.waiting.set(sessionId, (this.waiting.get(sessionId) ?? []).filter((m) => m !== waiting));
+      throw e;
+    }
     // A slash command completes inside prompt() without ever starting an agent
     // turn, so no agent_settled arrives to clear the status. Settle it here
     // rather than leaving "working" on screen forever. Asking pi rather than
@@ -1072,14 +1153,11 @@ class SessionManager extends EventEmitter {
       // had finished starting — the same bounded wait, so the answer arrives
       // when the thing it describes is actually over.
       await this.settleCompaction(sessionId);
-      // Interrupted by a restart: nothing is running, and Stop is how the
-      // chat is put back to rest without having to send it something.
-      if (getSession(sessionId)?.status === "interrupted") {
-        updateSession(sessionId, { status: "idle" });
-        this.record(sessionId, "portal_status", { status: "idle", aborted: true });
-      }
       return;
     }
+    // Before the abort, which waits for the run to settle and would find them
+    // still in pi's queue, ready for the next run.
+    this.dropWaiting(sessionId, live.client);
     await live.client.abort().catch(() => {});
     // Cancelling a compaction does not end it. pi detaches the session from
     // agent events for the whole of compact() and reattaches in its own
@@ -1132,6 +1210,7 @@ class SessionManager extends EventEmitter {
     live.client.dispose();
     this.live.delete(sessionId);
     this.stream.clear(sessionId);
+    this.dropWaiting(sessionId);
     await live.executor.cleanup?.(sessionId).catch(() => {});
   }
 

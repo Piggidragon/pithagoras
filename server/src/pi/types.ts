@@ -74,6 +74,12 @@ export interface PiClient extends EventEmitter {
    * the run's own lifecycle events are then the only signal.
    */
   isIdle?(): boolean;
+  /**
+   * Drops the messages sent mid-run that the agent has not taken in yet.
+   * Stopping a run leaves them queued otherwise, and they are slipped into
+   * whatever runs next. Optional, like isIdle.
+   */
+  clearQueue?(): void;
   dispose(): void;
 
   getState(): Promise<PiState>;

@@ -10,10 +10,10 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuArrowDown, LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuArrowDown, LuCheck, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
-import { activity, buildTranscript, lastReplyId, type Activity, type Item } from "../transcript";
+import { activity, buildTranscript, lastReplyId, type Activity, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
@@ -262,7 +262,7 @@ export function Chat({
   const lastSaid = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
-      if (it.kind === "user" && (splitContext(it.text).text || it.images)) return it.id;
+      if (it.kind === "user" && !it.queued && !it.unsent && (splitContext(it.text).text || it.images)) return it.id;
     }
     return undefined;
   }, [items]);
@@ -394,10 +394,6 @@ export function Chat({
     };
   }, [wantsMermaid, mermaid]);
   const running = session.status === "running";
-  // Interrupted is what a restart leaves, but a chat can be marked it while its
-  // run is still going here. Stop is offered either way: on a chat with nothing
-  // running it only puts it back to rest.
-  const stoppable = running || session.status === "interrupted";
 
   // What it is doing, and for how long. The clock ticks only while something is
   // running, so an idle session re-renders no more than it used to.
@@ -595,6 +591,14 @@ export function Chat({
       if (msg) drafts.set(id, withUnsent(drafts.get(id), msg));
       pending.set(id, back);
     }
+  };
+
+  /** A message from the conversation, with its pictures, sent as a new one. */
+  const sendAgain = async (item: { images?: SentImage[] }, text: string) => {
+    const images = await Promise.all(
+      (item.images ?? []).map((image) => refetchImage(api.imageUrl(session.id, image.name), "A picture")),
+    );
+    await onSend(text, images.length ? { images } : undefined);
   };
 
   const attempt = async (fn: () => Promise<void>) => {
@@ -874,6 +878,37 @@ export function Chat({
                 </div>
               );
             }
+            // Sent into the run and waiting for the agent to take it in: shown
+            // as sent, at the foot of the conversation, and moved to where it
+            // was read once it has been. Nothing to edit or retry until then —
+            // and one that never got there can only be sent again.
+            if (item.queued || item.unsent) {
+              const waits = item.queued && running;
+              return (
+                <div key={item.id} className="group flex flex-col items-end gap-1">
+                  <div className="max-w-[80%] rounded-2xl rounded-br-md border border-dashed border-accent/30 bg-accent/5 px-3.5 py-2 text-sm text-fg-muted">
+                    {text && <div className="whitespace-pre-wrap">{text}</div>}
+                    {item.images && <div className="mt-1 text-[11px] text-fg-subtle">{item.images.length === 1 ? "1 picture" : `${item.images.length} pictures`}</div>}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
+                    {waits ? (
+                      <>
+                        <LuClock aria-hidden className="h-3 w-3" />
+                        <span>Waiting — goes in after the current step</span>
+                      </>
+                    ) : (
+                      <span>Not sent — the run {item.unsent ? "was stopped" : "ended"} before the agent took it in</span>
+                    )}
+                    {text && <CopyAction text={text} />}
+                    {!waits && (
+                      <MessageAction label="Send again as a new message" onClick={() => attempt(() => sendAgain(item, text))}>
+                        <LuRotateCw className="h-3 w-3" />
+                      </MessageAction>
+                    )}
+                  </div>
+                </div>
+              );
+            }
             return (
               <div key={item.id} className="group flex flex-col items-end gap-1">
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
@@ -926,14 +961,7 @@ export function Chat({
                   ) : (
                     <MessageAction
                       label="Send again as a new message"
-                      onClick={() =>
-                        attempt(async () => {
-                          const images = await Promise.all(
-                            (item.images ?? []).map((image) => refetchImage(api.imageUrl(session.id, image.name), "A picture")),
-                          );
-                          await onSend(text, images.length ? { images } : undefined);
-                        })
-                      }
+                      onClick={() => attempt(() => sendAgain(item, text))}
                     >
                       <LuRotateCw className="h-3 w-3" />
                     </MessageAction>
@@ -974,7 +1002,9 @@ export function Chat({
           }
           if (item.kind === "assistant") {
             return (
-              <div key={item.id} className="group relative max-w-[90%]">
+              // Never closer than 2rem to the edge: Copy sits in that margin,
+              // and 10% of a phone is less than the button.
+              <div key={item.id} className="group max-w-[min(90%,calc(100%_-_2rem))]">
                 {item.thinking && (
                   <details className="mb-1 text-xs text-fg-subtle">
                     <summary className="cursor-pointer hover:text-fg-muted">thinking</summary>
@@ -984,7 +1014,7 @@ export function Chat({
                   </details>
                 )}
                 {item.text && (
-                  <div className="md text-sm leading-relaxed text-fg">
+                  <div className="md relative text-sm leading-relaxed text-fg">
                     {/* Streamdown rather than plain markdown: a reply arrives a
                         token at a time, so half of it is briefly malformed —
                         an unclosed fence, a half-written link — and a strict
@@ -999,14 +1029,16 @@ export function Chat({
                     >
                       {assistantText(item)}
                     </Streamdown>
-                  </div>
-                )}
-                {/* Only the last bubble of the reply: one per tool call in
-                    between would be a Copy button after every paragraph. Beside
-                    it rather than under it, so it adds no line of its own. */}
-                {item.id === lastReply && (
-                  <div className="absolute -right-7 top-0 flex items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                    <CopyAction text={assistantText(item)} />
+                    {/* Only the last bubble of the reply: one per tool call in
+                        between would be a Copy button after every paragraph.
+                        Beside the words rather than under them, so it adds no
+                        line of its own — and beside the words, not the
+                        thinking above them. */}
+                    {item.id === lastReply && (
+                      <div className="absolute -right-7 top-0 flex items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                        <CopyAction text={assistantText(item)} />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1262,8 +1294,7 @@ export function Chat({
             if (
               stopsRun({
                 key: e.key,
-                running: stoppable,
-                empty: !input.trim() && !attached.length,
+                running,
                 composing: isComposing(e),
                 paletteOpen: matches.length > 0,
               })
@@ -1309,9 +1340,13 @@ export function Chat({
               </button>
               <DictationButton dictation={dictation} />
               <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
-              {stoppable && !input.trim() && !attached.length ? <button type="button" aria-label="Stop generation" title="Stop generation (Esc)" onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
+              {/* Mid-run, Stop stays while a message is written: it is the
+                  moment the agent is seen going the wrong way, and whether to
+                  steer it or stop it is still open. */}
+              {running && <button type="button" aria-label="Stop generation" title="Stop generation (Esc)" onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
                 <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />
-              </button> : <button type="submit" aria-label="Send message" title={running ? 'Send into the running task' : 'Send message'} disabled={sending || adding > 0 || (!input.trim() && !attached.length)}
+              </button>}
+              {(!running || input.trim() || attached.length > 0) && <button type="submit" aria-label="Send message" title={running ? 'Send into the running task — it goes in after the current step' : 'Send message'} disabled={sending || adding > 0 || (!input.trim() && !attached.length)}
                 className="prompt-action prompt-send">
                 <LuArrowUp aria-hidden className="h-5 w-5" />
               </button>}

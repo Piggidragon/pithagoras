@@ -535,16 +535,21 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       streamingBehavior: options?.steer ? "steer" : "followUp",
       ...(options?.images?.length ? { images: options.images } : {}),
     };
+    // Answered once pi has taken it, typed or spoken, not once the run it
+    // starts is over — as the RPC client does. `session.prompt()` holds on to
+    // the whole run, and so did the request that sent it: the browser was
+    // still "sending" for as long as the agent worked, and its Send stayed
+    // greyed out, with no way to steer. What fails after that is told in the
+    // chat, and pi settles the run either way.
     try {
-      if (options?.voice) {
-        await acceptPrompt(
-          preflightResult => this.session.prompt(audioMessage(message), { ...promptOptions, preflightResult }),
-          error => {
-            this.voiceFirst?.reset();
-            this.emit("event", { type: "portal_notice", text: `Voice turn failed: ${error instanceof Error ? error.message : error}`, error: true });
-          },
-        );
-      } else await this.session.prompt(message, promptOptions);
+      await acceptPrompt(
+        preflightResult => this.session.prompt(options?.voice ? audioMessage(message) : message, { ...promptOptions, preflightResult }),
+        error => {
+          if (options?.voice) this.voiceFirst?.reset();
+          const reason = error instanceof Error ? error.message : String(error);
+          this.emit("event", { type: "portal_notice", text: `${options?.voice ? "Voice turn" : "The run"} failed: ${reason}`, error: true });
+        },
+      );
     } catch (error) { if (options?.voice) this.voiceFirst?.reset(); throw error; }
   }
 
@@ -567,6 +572,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    */
   isIdle(): boolean {
     return this.session.isIdle;
+  }
+
+  clearQueue(): void {
+    this.session.clearQueue();
   }
 
   dispose(): void {
@@ -679,16 +688,34 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       this.wanted = new Set();
     }
     session.setActiveToolsByName = (names: string[]) => {
-      // pi builds the next set from `getActiveToolNames()`, which the switches
-      // have already thinned. Taken as it came, every refresh — an extension
-      // registering a tool, an MCP server connecting — dropped whatever was
-      // switched off from what pi wants: gone from the chat's list, and with
-      // no way to switch it back on. What is missing only because it is off
-      // is still wanted.
-      const held = [...this.wanted].filter((name) => this.switchedOff.has(name) && !names.includes(name));
-      this.wanted = new Set([...names, ...held]);
+      this.wanted = new Set([...names, ...this.heldBack(session, names)]);
       original(names.filter((name) => !this.switchedOff.has(name)));
     };
+  }
+
+  /**
+   * What is switched off and still wanted, though `names` leaves it out.
+   *
+   * pi refreshes — an extension registering a tool, an MCP server connecting, a
+   * reload — by adding to `getActiveToolNames()`, which the switches have
+   * already thinned. Taken as it came, every refresh dropped whatever was off
+   * from what pi wants: gone from the chat's list, with no way to switch it
+   * back on. Such a list keeps everything that is active; one that leaves an
+   * active tool out is a choice — an extension narrowing the tools — and means
+   * what it says. Either way a tool pi no longer has, its extension unloaded,
+   * is not wanted any more.
+   */
+  private heldBack(session: any, names: string[]): string[] {
+    let active: string[];
+    let known: Set<string>;
+    try {
+      active = session.getActiveToolNames?.() ?? [];
+      known = new Set((session.getAllTools?.() ?? []).map((tool: any) => String(tool.name)));
+    } catch {
+      return [];
+    }
+    if (!active.every((name) => names.includes(name))) return [];
+    return [...this.wanted].filter((name) => this.switchedOff.has(name) && !names.includes(name) && known.has(name));
   }
 
   /**

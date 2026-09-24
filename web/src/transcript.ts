@@ -27,7 +27,11 @@ export function shownPicture(payload: any): ShownPicture | undefined {
 }
 
 export type Item =
-  | { kind: "user"; id: string; seq: number; text: string; audio?: boolean; images?: SentImage[] }
+  /**
+   * `queued`: sent into a run, and not taken in by pi yet. `unsent`: the run was
+   * stopped first, so it never reached pi.
+   */
+  | { kind: "user"; id: string; seq: number; text: string; audio?: boolean; images?: SentImage[]; queued?: boolean; unsent?: boolean }
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
   | { kind: "tool"; id: string; name: string; callId?: string; status: "running" | "done" | "error"; detail?: string; picture?: ShownPicture }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
@@ -44,6 +48,10 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
   const items: Item[] = [];
   let audioReply = false;
   let current: Extract<Item, { kind: "assistant" }> | null = null;
+  // Sent mid-run and not yet taken in. Put where pi took it in — where the
+  // agent read it — rather than where it was sent, which is the middle of a
+  // reply it had nothing to do with.
+  const waiting = new Map<number, Extract<Item, { kind: "user" }>>();
 
   const closeCurrent = () => {
     if (current) {
@@ -56,21 +64,49 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
     const p = ev.payload ?? {};
     switch (ev.type) {
       case "portal_prompt": {
-        closeCurrent();
         const raw = String(p.message ?? "");
         const tagged = raw.startsWith("[Audio mode]\n");
-        audioReply = p.voice === true || tagged;
         const images = sentImages(p.images);
-        items.push({
+        const item: Extract<Item, { kind: "user" }> = {
           kind: "user",
           id: `u${ev.seq}`,
           seq: ev.seq,
           text: tagged ? raw.slice("[Audio mode]\n".length) : raw,
           audio: p.voice === true || tagged,
           ...(images ? { images } : {}),
-        });
+        };
+        if (p.queued === true) {
+          waiting.set(ev.seq, item);
+          break;
+        }
+        closeCurrent();
+        audioReply = item.audio === true;
+        items.push(item);
         break;
       }
+
+      case "portal_taken": {
+        const item = waiting.get(Number(p.seq));
+        if (!item) break;
+        waiting.delete(item.seq);
+        closeCurrent();
+        audioReply = item.audio === true;
+        items.push(item);
+        break;
+      }
+
+      // Stopped before pi took them in: they never reached it. Shown where the
+      // run was stopped, as not sent, so the words are not simply gone.
+      case "portal_unsent":
+        if (!Array.isArray(p.seqs)) break;
+        for (const seq of p.seqs) {
+          const item = waiting.get(Number(seq));
+          if (!item) continue;
+          waiting.delete(item.seq);
+          closeCurrent();
+          items.push({ ...item, unsent: true });
+        }
+        break;
 
       case "message_update": {
         const inner = p.assistantMessageEvent ?? {};
@@ -158,7 +194,9 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
     }
   }
 
-  // Anything still open belongs to a run in flight.
+  // Anything still open belongs to a run in flight, and what is waiting to go
+  // into it comes after.
+  for (const item of waiting.values()) items.push({ ...item, queued: true });
   return items;
 }
 
@@ -280,7 +318,10 @@ export function activity(events: PortalEvent[]): Activity {
       // Nothing has come back yet, so the model is still reading the prompt.
       case "turn_start":
       case "agent_start":
+        return { label: "processing the prompt", since: ev.at, prefill };
+      // One sent into the run has not been read yet; the run goes on as it was.
       case "portal_prompt":
+        if (p.queued === true) break;
         return { label: "processing the prompt", since: ev.at, prefill };
     }
   }

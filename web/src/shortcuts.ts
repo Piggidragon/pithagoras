@@ -29,19 +29,19 @@ export function opensComposer(e: KeyInfo): boolean {
 /**
  * Escape in the message box stops the run.
  *
- * Only when there is nothing typed — the same moment the send button turns
- * into a stop button — so that it can never cost anybody words; not while an
- * input method is composing, where Escape is how a candidate is dismissed; and
- * not when the command list is open, where it closes that instead.
+ * With words typed too: stopping leaves them in the box, so it costs nothing,
+ * and half-way through writing the agent a correction is exactly when it is
+ * seen going the wrong way. Not while an input method is composing, where
+ * Escape is how a candidate is dismissed; and not when the command list is
+ * open, where it closes that instead.
  */
 export function stopsRun(ctx: {
   key: string;
   running: boolean;
-  empty: boolean;
   composing: boolean;
   paletteOpen: boolean;
 }): boolean {
-  return ctx.key === "Escape" && ctx.running && ctx.empty && !ctx.composing && !ctx.paletteOpen;
+  return ctx.key === "Escape" && ctx.running && !ctx.composing && !ctx.paletteOpen;
 }
 
 /**

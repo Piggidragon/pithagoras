@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync, readlinkSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import express, { type Router } from "express";
 import { getSession } from "../db.js";
 
@@ -45,18 +45,78 @@ interface Term {
 
 const terms = new Map<string, Term>();
 
+/**
+ * Ends the shell, and whatever it started.
+ *
+ * Signalled directly rather than through `script`: util-linux 2.39 (Debian,
+ * the LXC image) ignores a hangup, so every closed panel left its shell
+ * running — and the test that closes one waited on it forever. The shell is in
+ * a session of its own on the pty, jobs included, so a hangup to all of it is
+ * what closing a real terminal does, and the shell is gone at once. What
+ * ignores that, a `nohup` job, is killed a moment later. Where the session
+ * cannot be found, `script` is terminated and the rest left to the hangup.
+ */
 function end(term: Term): void {
   clearTimeout(term.reaper);
-  // SIGTERM, not SIGHUP: `script` from util-linux 2.39 (Debian, the LXC
-  // image) ignores a hangup, so every closed panel left its shell running —
-  // and the test that closes one waited on it forever.
   if (!term.exited) {
+    const session = sessionOf(term);
+    if (session) signalSession(session, "SIGHUP");
     term.proc.kill("SIGTERM");
     setTimeout(() => {
+      if (session) signalSession(session, "SIGKILL");
       if (!term.exited) term.proc.kill("SIGKILL");
     }, 2000).unref();
   }
   terms.delete(term.id);
+}
+
+/** The shell `script` started: the child that leads the session on the pty. */
+function shellOf(term: Term): number | undefined {
+  const pid = term.proc.pid;
+  if (!pid) return undefined;
+  try {
+    const [child] = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/);
+    return child ? Number(child) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Fields of /proc/<pid>/stat after the command name, which may hold spaces. */
+function statOf(pid: string | number): string[] | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The session the shell leads — the id stays after the shell itself is gone.
+ * Never the portal's own: signalled, that would take the portal down with it.
+ */
+function sessionOf(term: Term): number | undefined {
+  const shell = shellOf(term);
+  const session = shell ? Number(statOf(shell)?.[3]) : NaN;
+  return session > 0 && session !== Number(statOf(process.pid)?.[3]) ? session : undefined;
+}
+
+function signalSession(session: number, signal: NodeJS.Signals): void {
+  let pids: string[];
+  try {
+    pids = readdirSync("/proc").filter((name) => /^\d+$/.test(name));
+  } catch {
+    return;
+  }
+  for (const pid of pids) {
+    if (Number(statOf(pid)?.[3]) !== session) continue;
+    try {
+      process.kill(Number(pid), signal);
+    } catch {
+      // Gone already, or not ours to signal.
+    }
+  }
 }
 
 function watchUnattended(term: Term): void {
@@ -73,11 +133,9 @@ function watchUnattended(term: Term): void {
  * it cannot be found, and the caller falls back.
  */
 function ptyOf(term: Term): string | undefined {
-  const pid = term.proc.pid;
-  if (!pid) return undefined;
+  const shell = shellOf(term);
   try {
-    const [child] = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/);
-    const tty = child ? readlinkSync(`/proc/${child}/fd/0`) : "";
+    const tty = shell ? readlinkSync(`/proc/${shell}/fd/0`) : "";
     return tty.startsWith("/dev/pts/") ? tty : undefined;
   } catch {
     return undefined;

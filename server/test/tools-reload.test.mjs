@@ -110,3 +110,29 @@ test("a tool switched off stays listed, and can come back, after pi refreshes it
   await c.setToolsOff([]);
   assert.ok(session.active.includes("web_search"));
 });
+
+test("an extension narrowing the tools is taken at its word, switched-off ones included", async () => {
+  const session = fakeSession();
+  const c = client(session);
+  await c.setToolsOff(["web_search"]);
+  // `ctx.setActiveTools(["read", "grep"])`, a plan mode: bash and the rest are
+  // dropped on purpose, and so is web_search.
+  session.setActiveToolsByName(["read", "grep"]);
+  await c.setToolsOff([]);
+  assert.deepEqual([...session.active].sort(), ["grep", "read"]);
+  assert.ok(!(await c.getTools()).some((t) => t.name === "web_search"));
+});
+
+test("a switched-off tool whose extension is gone is not wanted any more", async () => {
+  const session = fakeSession();
+  const c = client(session);
+  await c.setToolsOff(["web_search"]);
+  session.registry = session.registry.filter((name) => name !== "web_search");
+  session.extension = session.extension.filter((name) => name !== "web_search");
+  await c.reload();
+  assert.ok(!(await c.getTools()).some((t) => t.name === "web_search"));
+  // Were it back tomorrow, it would come up like any new tool: not from here.
+  session.registry.push("web_search");
+  await c.setToolsOff([]);
+  assert.ok(!session.active.includes("web_search"));
+});
