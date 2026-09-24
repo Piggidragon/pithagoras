@@ -828,7 +828,7 @@ button.chat-compaction-pill:disabled { cursor: default; }
 @media (max-width: 767px) {
   main:has(.chat-header) > .app-mobile-bar { display: none; }
   .session-canvases { right: 8px; }
-  .session-canvases .canvas-panel { width: calc(100vw - 16px); }
+  .session-canvases .canvas-panel { width: calc(100vw - 16px); max-width: none; }
 }
 .chat-tabs button { white-space: nowrap; }
 
