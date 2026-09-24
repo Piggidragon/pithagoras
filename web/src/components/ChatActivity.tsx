@@ -107,8 +107,8 @@ export function ThinkingBlock({
 
   const seconds = since ? Math.max(0, Math.round(((streaming ? now : until ?? since) - since) / 1000)) : undefined;
   const label = streaming ? "Thinking" : seconds && seconds >= 1 ? `Thought for ${formatElapsed(seconds)}` : "Thought process";
-  // The last line that says something, for the ticker under a closed header.
-  const tail = streaming && !open ? lastLine(thinking) : "";
+  // The end of what it is thinking, under a closed header.
+  const tail = streaming && !open ? recentText(thinking) : "";
 
   return (
     <div className={`chat-thinking ${streaming ? "is-streaming" : ""} ${open ? "is-open" : ""}`}>
@@ -121,8 +121,8 @@ export function ThinkingBlock({
         <LuChevronRight className="chat-chevron" aria-hidden />
       </button>
       {tail && (
-        <div className="chat-thinking-ticker" aria-hidden>
-          <span key={tail}>{tail}</span>
+        <div className="chat-thinking-stream" aria-hidden>
+          <div>{tail}</div>
         </div>
       )}
       <Collapse open={open}>
@@ -134,10 +134,29 @@ export function ThinkingBlock({
   );
 }
 
-function lastLine(text: string): string {
-  const lines = text.trim().split(/\n+/);
-  const line = lines[lines.length - 1]?.trim() ?? "";
-  return line.length > 140 ? "…" + line.slice(-139) : line;
+/**
+ * The end of a text that is still being written, for a window a few lines
+ * high that shows its last lines: enough to fill it, cut at a word.
+ *
+ * It is one block that grows, not a line swapped for the next: that one was
+ * drawn anew, and faded in, with every token, which at a fast model's speed
+ * was a flicker rather than something to read.
+ */
+function recentText(text: string, chars = 600): string {
+  const trimmed = text.replace(/\n{2,}/g, "\n").trimEnd();
+  if (trimmed.length <= chars) return trimmed.trimStart();
+  const cut = trimmed.slice(-chars);
+  const space = cut.search(/\s/);
+  return (space >= 0 && space < 40 ? cut.slice(space + 1) : cut).trimStart();
+}
+
+/** The last few lines of a command's output that say something, oldest first. */
+function lastLines(text: string, n = 3): string[] {
+  return text
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim())
+    .slice(-n);
 }
 
 /** What a tool is, as a picture. Guessed from its name — pi's tools and whatever an extension adds. */
@@ -211,7 +230,7 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
       ? ({ label: "interrupted", tone: "warn" } as const)
       : undefined;
   const lines = shell ? lineCount(output) : 0;
-  const lastOutput = shell && running && !open ? lastLine(output) : "";
+  const recent = shell && running && !open ? lastLines(output) : [];
 
   return (
     <div className={`chat-tool is-${item.status} ${item.interrupted ? "is-interrupted" : ""} ${open ? "is-open" : ""}`}>
@@ -243,9 +262,13 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
         )}
         <LuChevronRight className="chat-chevron" aria-hidden />
       </button>
-      {lastOutput && (
-        <div className="chat-tool-ticker" aria-hidden>
-          <span key={lastOutput}>{lastOutput}</span>
+      {recent.length > 0 && (
+        // Keyed by place, not by text: a new line moves the others up
+        // without anything being drawn afresh.
+        <div className="chat-tool-stream" aria-hidden>
+          {recent.map((line, i) => (
+            <span key={i}>{line}</span>
+          ))}
         </div>
       )}
       <Collapse open={open}>

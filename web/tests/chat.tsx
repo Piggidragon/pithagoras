@@ -1,5 +1,5 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|compacting|tools|agents|interrupted to see each state,
+// Open /tests/chat.html?phase=model|prefill|thinking|compacting|tools|interrupted to see each state,
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';

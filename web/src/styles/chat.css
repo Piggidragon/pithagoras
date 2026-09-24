@@ -51,8 +51,14 @@
 .chat-thinking.is-streaming .chat-thinking-icon::before { content: ""; position: absolute; inset: -2px; border-radius: 50%; background: radial-gradient(circle, rgb(var(--accent) / .35), transparent 70%); animation: chat-halo 1.8s ease-in-out infinite; }
 @keyframes chat-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
 @keyframes chat-halo { 0%, 100% { opacity: .2; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.35); } }
-.chat-thinking-ticker { position: relative; overflow: hidden; height: 20px; margin: 1px 0 0 25px; font-size: 12px; color: rgb(var(--fg-faint)); white-space: nowrap; text-overflow: ellipsis; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
-.chat-thinking-ticker > span { display: block; overflow: hidden; text-overflow: ellipsis; animation: chat-ticker .45s var(--ease-out) both; }
+/* The end of the reasoning while it is written: a window three lines high
+   that the text runs up through, newest at the bottom, older lines fading
+   out at the top. The block only grows; nothing in it is redrawn or animated
+   per token, so a fast model reads as text moving, not as a flicker.
+   justify-content: flex-end with overflow hidden cuts what does not fit off
+   the top. */
+.chat-thinking-stream > div { flex-shrink: 0; }
+.chat-thinking-stream { display: flex; flex-direction: column; justify-content: flex-end; height: calc(3 * 1.6em); overflow: hidden; margin: 2px 0 2px 25px; font-size: 12px; line-height: 1.6; color: rgb(var(--fg-faint)); white-space: pre-line; overflow-wrap: anywhere; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 60%); mask-image: linear-gradient(to bottom, transparent, #000 60%); }
 @keyframes chat-ticker { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
 .chat-thinking-body { max-height: 22rem; overflow-y: auto; margin: 6px 0 4px 12px; padding: 2px 0 2px 14px; border-left: 2px solid rgb(var(--line)); white-space: pre-wrap; font-size: 12.5px; line-height: 1.65; color: rgb(var(--fg-subtle)); }
 
@@ -149,7 +155,7 @@ button.chat-compaction-pill:disabled { cursor: default; }
 @keyframes chat-run-focus { 0%, 30% { background: rgb(63 225 198 / .12); box-shadow: 0 0 0 6px rgb(63 225 198 / .12); } 100% { background: transparent; box-shadow: 0 0 0 6px transparent; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-enter, .chat-status-pill, .chat-status-swap, .chat-thinking-ticker > span, .chat-tool.is-done .chat-tool-icon > svg, .chat-compaction-pill, .chat-terminal-pane, .voice-terminal-run.is-focused { animation: none; }
+  .chat-enter, .chat-status-pill, .chat-status-swap, .chat-tool.is-done .chat-tool-icon > svg, .chat-compaction-pill, .chat-terminal-pane, .voice-terminal-run.is-focused { animation: none; }
   .chat-shimmer { animation: none; color: rgb(var(--fg-muted)); background: none; }
   .chat-ring.is-spinning, .chat-orbit, .chat-model-load i, .chat-squeeze i, .chat-compaction-rule, .chat-thinking-icon svg, .chat-thinking-icon::before { animation: none !important; }
   .chat-collapse, .chat-chevron { transition: none; }
@@ -160,9 +166,11 @@ button.chat-compaction-pill:disabled { cursor: default; }
 .chat-tool-badge.is-ok { color: rgb(var(--ok)); background: rgb(var(--ok) / .1); }
 .chat-tool-badge.is-error { color: rgb(var(--danger)); background: rgb(var(--danger) / .1); }
 .chat-tool-badge.is-warn { color: rgb(var(--warn)); background: rgb(var(--warn) / .12); }
-.chat-tool-ticker { overflow: hidden; height: 18px; margin: 0 0 2px 27px; font: 11px/18px ui-monospace, SFMono-Regular, Menlo, monospace; color: rgb(var(--fg-faint)); white-space: nowrap; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
-.chat-tool-ticker > span { display: block; overflow: hidden; text-overflow: ellipsis; animation: chat-ticker .35s var(--ease-out) both; }
-@media (prefers-reduced-motion: reduce) { .chat-tool-badge, .chat-tool-ticker > span { animation: none; } }
+/* A running command's last lines, the same way: the newest at the bottom,
+   each line cut at the edge, nothing redrawn as output streams in. */
+.chat-tool-stream { display: flex; flex-direction: column; justify-content: flex-end; height: 54px; overflow: hidden; margin: 0 0 2px 27px; font: 11px/18px ui-monospace, SFMono-Regular, Menlo, monospace; color: rgb(var(--fg-faint)); -webkit-mask-image: linear-gradient(to bottom, transparent, #000 65%); mask-image: linear-gradient(to bottom, transparent, #000 65%); }
+.chat-tool-stream > span { display: block; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+@media (prefers-reduced-motion: reduce) { .chat-tool-badge { animation: none; } }
 
 /* ── A chat with nothing in it yet: the mark floats, lit from behind ── */
 .chat-empty { animation: chat-enter .6s var(--ease-out) both; }
