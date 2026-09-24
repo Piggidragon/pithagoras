@@ -516,7 +516,7 @@ function Shell({
 function EmptyState({ hasSessions }: { hasSessions: boolean }) {
   return (
     <div className="chat-empty flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-      <img src="/logo-192.png" alt="" draggable={false} className="chat-empty-mark mb-2 h-12 w-12 object-contain" />
+      <img src="/icon-192.png" alt="" draggable={false} className="chat-empty-mark mb-2 h-12 w-12 object-contain" />
       <p className="text-sm text-fg-muted">
         {/* On a phone the list is behind the menu, not on the left. */}
         {hasSessions ? "Pick a session from the list." : "Start a session to get going."}

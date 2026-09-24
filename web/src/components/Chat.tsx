@@ -876,7 +876,7 @@ export function Chat({
 
         {!loading && items.length === 0 && (
           <div className="chat-empty pt-16 text-center">
-            <img src="/logo-192.png" alt="" draggable={false} className="chat-empty-mark mx-auto mb-4 h-11 w-11 object-contain" />
+            <img src="/icon-192.png" alt="" draggable={false} className="chat-empty-mark mx-auto mb-4 h-11 w-11 object-contain" />
             <p className="text-sm text-fg-muted">Give pi a task.</p>
             <p className="mt-1 text-xs text-fg-faint">You can close this tab — it keeps working.</p>
           </div>
