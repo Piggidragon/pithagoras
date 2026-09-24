@@ -900,7 +900,9 @@ export function Chat({
                       </>
                     ) : (
                       <span>
-                        Not sent — {item.unsent === "restarted" ? "the portal restarted" : `the run ${item.unsent ? "was stopped" : "ended"}`} before the agent took it in
+                        {item.unsent === "unsure"
+                          ? "May not have been sent — the portal restarted, and could not tell whether the agent took it in"
+                          : `Not sent — ${item.unsent === "restarted" ? "the portal restarted" : `the run ${item.unsent ? "was stopped" : "ended"}`} before the agent took it in`}
                       </span>
                     )}
                     {text && <CopyAction text={text} />}

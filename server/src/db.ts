@@ -657,29 +657,43 @@ export function sentMessages(
 
 /**
  * Messages sent into a run that were neither taken in nor dropped: what a
- * server that died mid-run left behind. By session, oldest first.
+ * server that died mid-run left behind. By session, oldest first, each with
+ * the payload it was sent with.
+ *
+ * Read once at startup, so in two passes that each read a row once — the
+ * queued messages, then what settled them in the sessions that have any —
+ * rather than a lookup through a session's events per message.
  */
-export function unsettledMessages(): { sessionId: string; seq: number; message: string; images: number }[] {
+export function unsettledMessages(): {
+  sessionId: string;
+  seq: number;
+  message: string;
+  images: number;
+  prompt: Record<string, unknown>;
+}[] {
   const rows = getDb()
     .prepare(
-      `SELECT p.session_id, p.seq, p.payload FROM events p
-       WHERE p.type = 'portal_prompt' AND json_extract(p.payload, '$.queued') = 1
-         AND NOT EXISTS (SELECT 1 FROM events t WHERE t.session_id = p.session_id AND t.type = 'portal_taken'
-                         AND json_extract(t.payload, '$.seq') = p.seq)
-         AND NOT EXISTS (SELECT 1 FROM events u, json_each(u.payload, '$.seqs') s
-                         WHERE u.session_id = p.session_id AND u.type = 'portal_unsent' AND s.value = p.seq)
-       ORDER BY p.session_id, p.seq`,
+      `SELECT session_id, seq, payload FROM events
+       WHERE type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1
+       ORDER BY session_id, seq`,
     )
     .all() as { session_id: string; seq: number; payload: string }[];
-  return rows.map((r) => {
-    const p = JSON.parse(r.payload) ?? {};
-    return {
+  const settled = new Map<string, ReturnType<typeof settledAt>>();
+  const out: ReturnType<typeof unsettledMessages> = [];
+  for (const r of rows) {
+    if (!settled.has(r.session_id)) settled.set(r.session_id, settledAt(r.session_id));
+    const { taken, unsent } = settled.get(r.session_id)!;
+    if (taken.has(r.seq) || unsent.has(r.seq)) continue;
+    const prompt = JSON.parse(r.payload) ?? {};
+    out.push({
       sessionId: r.session_id,
       seq: r.seq,
-      message: String(p.message ?? ""),
-      images: Array.isArray(p.images) ? p.images.length : 0,
-    };
-  });
+      message: String(prompt.message ?? ""),
+      images: Array.isArray(prompt.images) ? prompt.images.length : 0,
+      prompt,
+    });
+  }
+  return out;
 }
 
 /** One message the portal sent to the agent, by its seq, or undefined if that is not one. */
@@ -723,13 +737,19 @@ export function deleteEventsBetween(
       )
       .all(sessionId, from, to, to) as EventRow[];
     const gone = rows.filter((r) => inRange(placeOf(r, settled)));
+    const going = new Set(gone);
+    const also = gone.filter((r) => !inRange(r.seq)).map((r) => r.seq);
+    const kept = rows.filter((r) => inRange(r.seq) && !going.has(r)).map((r) => r.seq);
+    // The range in one statement, less the few messages placed outside it;
+    // then the few placed inside it from outside. A long chat's tail is tens
+    // of thousands of rows, and one statement per row held up the server.
+    db.prepare(
+      `DELETE FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)
+         AND seq NOT IN (SELECT value FROM json_each(?))`,
+    ).run(sessionId, from, to, to, JSON.stringify(kept));
     const drop = db.prepare("DELETE FROM events WHERE seq = ?");
-    for (const r of gone) drop.run(r.seq);
-    return {
-      rows: gone,
-      also: gone.filter((r) => !inRange(r.seq)).map((r) => r.seq),
-      kept: rows.filter((r) => inRange(r.seq) && !gone.includes(r)).map((r) => r.seq),
-    };
+    for (const seq of also) drop.run(seq);
+    return { rows: gone, also, kept };
   })();
 }
 
@@ -759,6 +779,21 @@ export function latestSeq(): number {
 /** Drops one event. */
 export function deleteEvent(seq: number): void {
   getDb().prepare("DELETE FROM events WHERE seq = ?").run(seq);
+}
+
+/**
+ * Drops what a session recorded after `seq`, but for its status changes — an
+ * error among them is what says why the rest is gone. Returns the seqs dropped.
+ */
+export function deleteEventsAfter(sessionId: string, seq: number): number[] {
+  const db = getDb();
+  return db.transaction(() => {
+    const gone = db
+      .prepare("SELECT seq FROM events WHERE session_id = ? AND seq > ? AND type != 'portal_status' ORDER BY seq")
+      .all(sessionId, seq) as { seq: number }[];
+    db.prepare("DELETE FROM events WHERE session_id = ? AND seq > ? AND type != 'portal_status'").run(sessionId, seq);
+    return gone.map((r) => r.seq);
+  })();
 }
 
 /** The page before a cursor, oldest first — what a transcript scrolls back into. */

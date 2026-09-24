@@ -57,13 +57,28 @@ const terms = new Map<string, Term>();
  * ignores that, a `nohup` job, is killed a moment later — only what the
  * hangup found, and only if it is still there. Where the session cannot be
  * found, `script` is terminated and the rest left to the hangup.
+ *
+ * The shell has its hangup at once, and passes it on to the jobs it knows of;
+ * the rest of the session has it once the walk has found them. `script` is
+ * terminated only after that: gone first, it takes the pty with it, and what
+ * the walk is still looking for has been left to itself in the meantime.
  */
 function end(term: Term): void {
   clearTimeout(term.reaper);
   if (!term.exited) {
+    const shell = shellOf(term);
     const session = sessionOf(term);
+    if (shell && session) {
+      try {
+        process.kill(shell, "SIGHUP");
+      } catch {
+        // Gone already; the walk finds whatever it left.
+      }
+    }
     const members = session ? signalSession(session, "SIGHUP") : Promise.resolve([]);
-    term.proc.kill("SIGTERM");
+    void members.then(() => {
+      if (!term.exited) term.proc.kill("SIGTERM");
+    });
     setTimeout(() => {
       if (!term.exited) term.proc.kill("SIGKILL");
       void members.then((pids) => {
@@ -120,7 +135,9 @@ function sessionOf(term: Term): number | undefined {
  *
  * A walk of /proc — every process on the host — so it is read without holding
  * up the event loop: a busy host has thousands, and a closing panel is no
- * reason for every open stream to stall.
+ * reason for every open stream to stall. Read a batch at a time rather than
+ * one after another, which on such a host kept the hangup waiting on
+ * thousands of reads in turn.
  */
 async function signalSession(session: number, signal: NodeJS.Signals): Promise<number[]> {
   let pids: string[];
@@ -130,23 +147,25 @@ async function signalSession(session: number, signal: NodeJS.Signals): Promise<n
     return [];
   }
   const members: number[] = [];
-  for (const pid of pids) {
-    let stat: string;
-    try {
-      stat = await readFile(`/proc/${pid}/stat`, "utf8");
-    } catch {
-      continue;
-    }
-    if (Number(fieldsOf(stat)[3]) !== session) continue;
-    try {
-      process.kill(Number(pid), signal);
-      members.push(Number(pid));
-    } catch {
-      // Gone already, or not ours to signal.
+  for (let i = 0; i < pids.length; i += STAT_BATCH) {
+    const stats = await Promise.all(
+      pids.slice(i, i + STAT_BATCH).map((pid) => readFile(`/proc/${pid}/stat`, "utf8").then((stat) => ({ pid, stat }), () => undefined)),
+    );
+    for (const found of stats) {
+      if (!found || Number(fieldsOf(found.stat)[3]) !== session) continue;
+      try {
+        process.kill(Number(found.pid), signal);
+        members.push(Number(found.pid));
+      } catch {
+        // Gone already, or not ours to signal.
+      }
     }
   }
   return members;
 }
+
+/** How many /proc entries signalSession reads at once: well under any open-file limit. */
+const STAT_BATCH = 256;
 
 function watchUnattended(term: Term): void {
   clearTimeout(term.reaper);

@@ -39,3 +39,31 @@ test('a waiting message does not reset what the agent is doing', () => {
   const now = { ...delta(2, 'Looking'), at: 't2' };
   assert.equal(activity([first, now, { ...steer, at: 't3' }] as any).label, 'writing the reply');
 });
+
+test('a message whose prompt is older than the events loaded is still shown where it was read', () => {
+  const items = buildTranscript([
+    delta(40, 'Still going'),
+    { seq: 41, type: 'portal_taken', payload: { seq: 3, prompt: { message: 'use the other file', queued: true, steer: true } } },
+    delta(42, 'Switching'),
+  ] as any);
+  assert.deepEqual(items.map((i) => i.kind), ['assistant', 'user', 'assistant']);
+  assert.equal((items[1] as any).id, 'u3');
+  assert.equal((items[1] as any).text, 'use the other file');
+  assert.equal((items[1] as any).queued, undefined);
+});
+
+test('so is one that was never sent, and one the portal could not tell about says so', () => {
+  const items = buildTranscript([
+    { seq: 50, type: 'portal_unsent', payload: { seqs: [7], prompts: { 7: { message: 'stop that' } } } },
+    { seq: 51, type: 'portal_unsent', payload: { seqs: [8], prompts: { 8: { message: 'maybe' } }, restarted: true, unsure: true } },
+  ] as any);
+  assert.deepEqual(items.map((i: any) => [i.text, i.unsent]), [['stop that', 'stopped'], ['maybe', 'unsure']]);
+});
+
+test('once the prompt itself is loaded, the message is shown once', () => {
+  const items = buildTranscript([
+    first, steer,
+    { seq: 5, type: 'portal_taken', payload: { seq: 3, prompt: { message: 'use the other file', queued: true } } },
+  ] as any);
+  assert.equal(items.filter((i: any) => i.kind === 'user' && i.text === 'use the other file').length, 1);
+});

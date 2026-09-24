@@ -541,36 +541,22 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // still "sending" for as long as the agent worked, and its Send stayed
     // greyed out, with no way to steer. What fails after that is reported as
     // portal_failed, ahead of the run's agent_settled: see forward().
-    let over!: () => void;
-    const run = new Promise<void>((resolve) => (over = resolve));
     try {
       await acceptPrompt(
         preflightResult =>
           this.session.prompt(options?.voice ? audioMessage(message) : message, {
             ...promptOptions,
-            preflightResult: (ok: boolean) => {
-              // Accepted with pi idle: this message starts a run, and pi's
-              // prompt() holds on until that run is over. Queued into one
-              // that is going, it returns at once and has no run to follow.
-              if (ok && !this.session.isStreaming) this.run = run;
-              preflightResult(ok);
-            },
+            preflightResult,
           }),
         error => {
           if (options?.voice) this.voiceFirst?.reset();
           const reason = error instanceof Error ? error.message : String(error);
           this.emit("event", { type: "portal_failed", error: `${options?.voice ? "Voice turn" : "The run"} failed: ${reason}` });
         },
-        () => {
-          if (this.run === run) this.run = undefined;
-          over();
-        },
       );
     } catch (error) { if (options?.voice) this.voiceFirst?.reset(); throw error; }
   }
 
-  /** The run the last prompt started, until pi's prompt() has returned or thrown. */
-  private run?: Promise<void>;
   /** Events held back behind an agent_settled, in order: see forward(). */
   private held?: any[];
 
@@ -581,20 +567,24 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * the prompt() throw for a run that failed. Passed on as they come, the
    * portal saw the run settle cleanly — idle, and an ask() answered with
    * whatever had been said — and heard about the failure afterwards, when
-   * nothing was listening. So the settling of a run a prompt started waits the
-   * few microtasks until that prompt is over, with anything after it.
+   * nothing was listening. So a settle waits for the turn of the event loop
+   * after it, with anything behind it: nothing but promises stand between it
+   * and that throw, and all of them are through by then.
+   *
+   * Not held for as long as a run the portal started is going. A prompt can
+   * start the next run in the moment pi has marked itself idle but not yet
+   * settled the last one, and the settle then waited behind the whole of the
+   * new run, and every event of that run behind it.
    */
   forward(event: any): void {
     if (this.held) {
       this.held.push(event);
       return;
     }
-    if (event?.type === "agent_settled" && this.run) {
+    if (event?.type === "agent_settled") {
       const held = (this.held = [event]);
-      void this.run.then(() => {
+      setImmediate(() => {
         this.held = undefined;
-        // The settle itself goes straight out: a run started in the meantime
-        // is not the one it belongs to.
         const [settled, ...after] = held;
         this.emit("event", settled);
         for (const e of after) this.forward(e);
