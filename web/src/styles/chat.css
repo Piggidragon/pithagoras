@@ -170,13 +170,17 @@ button.chat-compaction-pill:disabled { cursor: default; }
 @keyframes chat-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 @media (prefers-reduced-motion: reduce) { .chat-empty, .chat-empty-mark { animation: none; } }
 
-/* ── Panels beside the conversation: they come in from the side they sit on ── */
-.chat-aside { animation: aside-in .38s var(--ease-out) both; }
-.chat-aside-panel { animation: fade-in .3s ease both; }
-@keyframes aside-in { from { opacity: 0; translate: 24px 0; } to { opacity: 1; translate: 0 0; } }
+/* ── Panels beside the conversation: they come in from the side they sit on ──
+ * Slid and wiped in, never faded: in Chromium on the GPU (Brave, Vulkan) a
+ * fading panel stepped back a frame on the way in, and the chat behind it
+ * showed through. No fill: once in, nothing of the animation stays on it. */
+.chat-aside { animation: aside-in .38s var(--ease-out); }
+.chat-aside-panel { animation: aside-panel-in .32s var(--ease-out); }
+@keyframes aside-in { from { translate: 24px 0; clip-path: inset(0 0 0 30%); } to { translate: 0 0; clip-path: inset(0); } }
+@keyframes aside-panel-in { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
 /* On a phone they cover the chat, so they rise over it instead. */
 @media (max-width: 767px) { .chat-aside { animation-name: aside-up; } }
-@keyframes aside-up { from { opacity: 0; translate: 0 24px; } to { opacity: 1; translate: 0 0; } }
+@keyframes aside-up { from { translate: 0 24px; clip-path: inset(30% 0 0 0); } to { translate: 0 0; clip-path: inset(0); } }
 /* The header's panel buttons give a little under a press. */
 .panel-toggle:active { transform: scale(.93); }
 @media (prefers-reduced-motion: reduce) { .chat-aside, .chat-aside-panel { animation: none; } .panel-toggle:active { transform: none; } }

@@ -3,14 +3,28 @@
    here says where a thing came from, then gets out of the way; all of it
    steps aside for prefers-reduced-motion. Tokens are in index.css. */
 
-/* ── Dialogs (Modal, ConfirmHost): the page dims, the dialog rises into place ── */
-.ui-backdrop { animation: ui-backdrop-in .22s ease both; }
+/* ── Dialogs (Modal, ConfirmHost): the page dims, the dialog rises into place ──
+ * Nothing here fades. In Chromium on the GPU (Brave, Vulkan) an opacity
+ * animation stepped back a frame on the way in — the page behind showed
+ * through for a moment — measured frame by frame. So the dimming animates
+ * its colour (linear, no fill: an easing that flattens out at the end
+ * stepped back too), with its blur there from the first frame, and the
+ * dialog is revealed with a clip. */
+.ui-backdrop { animation: ui-backdrop-in .2s linear; }
+@keyframes ui-backdrop-in { from { background-color: transparent; } }
+/* It opens out from its middle as it rises. The clip reaches past the box,
+   so the shadow is whole once it is open. */
 .ui-dialog { animation: ui-dialog-in .32s var(--ease-out) both; }
-@keyframes ui-backdrop-in { from { opacity: 0; backdrop-filter: blur(0); } to { opacity: 1; } }
-@keyframes ui-dialog-in { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes ui-dialog-in {
+  from { translate: 0 10px; clip-path: inset(40% -60px 40% -60px round 16px); }
+  to { translate: 0 0; clip-path: inset(-60px round 16px); }
+}
 /* An alert asks something now: it arrives a little quicker and with a small overshoot. */
-.ui-dialog.is-alert { animation: ui-alert-in .28s var(--ease-spring) both; }
-@keyframes ui-alert-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+.ui-dialog.is-alert { animation: ui-alert-in .3s var(--ease-spring) both; }
+@keyframes ui-alert-in {
+  from { scale: .94; clip-path: inset(35% -60px 35% -60px round 16px); }
+  to { scale: 1; clip-path: inset(-60px round 16px); }
+}
 
 /* ── The phone's navigation drawer ── */
 @media (max-width: 767px) { .mobile-drawer { animation: drawer-in .3s var(--ease-out) both; box-shadow: 12px 0 40px -12px #0008; } }
@@ -52,9 +66,15 @@
 /* ── Small things that arrive: pictures in the box, a list over the box ── */
 .pop-in { animation: pop-in .3s var(--ease-spring) both; }
 @keyframes pop-in { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: none; } }
-.float-in { animation: float-in .22s var(--ease-out) both; }
-/* `translate`, not `transform`: what it is put on may already be moved with a transform. */
-@keyframes float-in { from { opacity: 0; translate: 0 6px; scale: .98; } to { opacity: 1; translate: 0 0; scale: 1; } }
+/* Unrolls upwards from where it opens, rather than fading: a fade here
+   flickered in Brave on the GPU, a clip does not. The clip reaches past the
+   box, so its shadow is whole once it is in. `translate`, not `transform`:
+   what it is put on may already be moved with a transform. */
+.float-in { animation: float-in .24s var(--ease-out) both; }
+@keyframes float-in {
+  from { translate: 0 6px; clip-path: inset(100% -48px -48px -48px round 12px); }
+  to { translate: 0 0; clip-path: inset(-48px round 12px); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .ui-backdrop, .ui-dialog, .ui-dialog.is-alert, .mobile-drawer, .app-main > :last-child, .sidebar-rail, .sidebar-content,
