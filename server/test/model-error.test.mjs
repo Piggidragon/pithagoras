@@ -153,6 +153,20 @@ function transcript(id) {
   return eventsSince(id).map((r) => ({ type: r.type, payload: JSON.parse(r.payload) }));
 }
 
+test("a failed model call is not answered by silence", async () => {
+  // What PR #13 is about: llama-swap says "model is busy", pi closes the turn
+  // as an empty assistant message with stopReason "error", and nothing else.
+  createSession({ id: "busy", title: "busy model", workspace: home, executor: "host" });
+  answerWith(scenarios.plain);
+  const reply = await sessions.ask("busy", "hi", { streamText: false });
+
+  assert.equal(reply, "Model error: model is busy");
+  assert.deepEqual(
+    transcript("busy").filter((r) => r.type === "portal_notice").map((r) => r.payload),
+    [{ text: "Model error: model is busy", error: true }]
+  );
+});
+
 test("a recovered retry reaches neither the transcript nor the channel as an error", async () => {
   createSession({ id: "recovered", title: "flaky", workspace: home, executor: "host" });
   answerWith(scenarios.recoveredRetry);
