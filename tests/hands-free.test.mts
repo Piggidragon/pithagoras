@@ -267,6 +267,18 @@ test('what is for the page is handled there and never sent', async () => {
   voice.observe([reply('a10'), reply('a20')]); await tick();
   assert.equal(spoken.length, 1); voice.stop();
 });
+test('a page command heard over an interrupted reply keeps its remainder spoken', async () => {
+  const handled: string[] = [];
+  const { voice, sent, spoken } = setup({ agentRunning: () => true, transcribe: async () => 'say that again', command: text => { handled.push(text); return true; } });
+  voice.speechStart();
+  // The reply it cut off is held back while what is said may still be for the page.
+  voice.observe([reply('a10'), reply('a20')]); await tick();
+  voice.speechEnd(new Float32Array(16000)); await tick();
+  assert.deepEqual(handled, ['say that again']);
+  assert.deepEqual(sent, []);
+  // What the interruption cut off is spoken after all, not dropped with it.
+  assert.deepEqual(spoken, ['A spoken answer.']); voice.stop();
+});
 test('when steering, speaking mid-run adds to the run instead of stopping it', async () => {
   let aborted = 0, steering = true;
   const { voice, sent } = setup({ agentRunning: () => true, abort: async () => { aborted++; }, steering: () => steering });

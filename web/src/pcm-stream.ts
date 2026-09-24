@@ -1,4 +1,5 @@
-import { TimeStretch, stretch } from "./time-stretch";
+import { joinSamples } from "./samples";
+import { TimeStretch } from "./time-stretch";
 
 /**
  * How a phrase is played: `rate` makes it faster without raising the voice
@@ -28,8 +29,12 @@ export async function readPcmStream(
 ): Promise<AudioBuffer> {
   signal.throwIfAborted();
   const reader = body.getReader();
+  // The stretch is worked on each chunk as it arrives, so the whole buffer
+  // does not have to wait for one long stretch pass over everything.
+  const stretcher = new TimeStretch(options.rate ?? 1);
   const chunks: Uint8Array[] = [];
-  let length = 0;
+  const stretched: Float32Array[] = [];
+  let length = 0, carry: number | undefined;
   const cancelRead = () => { void reader.cancel().catch(() => {}); };
   signal.addEventListener('abort', cancelRead, { once: true });
   try {
@@ -38,18 +43,24 @@ export async function readPcmStream(
       signal.throwIfAborted();
       if (done) break;
       chunks.push(value); length += value.length;
+      const bytes = new Uint8Array(value.length + (carry === undefined ? 0 : 1));
+      if (carry !== undefined) bytes[0] = carry;
+      bytes.set(value, carry === undefined ? 0 : 1);
+      carry = bytes.length % 2 ? bytes[bytes.length - 1] : undefined;
+      const count = Math.floor(bytes.length / 2);
+      if (count) stretched.push(stretcher.push(samplesOf(bytes, count)));
     }
   } finally {
     signal.removeEventListener('abort', cancelRead);
     await reader.cancel().catch(() => {}); reader.releaseLock();
   }
-  if (!length || length % 2) throw new Error('Breeze returned incomplete PCM audio');
+  if (!length || carry !== undefined) throw new Error('Breeze returned incomplete PCM audio');
+  stretched.push(stretcher.flush());
   const bytes = new Uint8Array(length);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-  const samples = samplesOf(bytes, length / 2);
-  options.record?.(samples);
-  const buffer = bufferOf(audio, stretch(samples, options.rate ?? 1));
+  options.record?.(samplesOf(bytes, length / 2));
+  const buffer = bufferOf(audio, joinSamples(stretched));
   if (!buffer) throw new Error('Breeze returned incomplete PCM audio');
   signal.throwIfAborted();
   return buffer;

@@ -47,7 +47,8 @@ export class HandsFreeVoice {
   /**
    * While what is being said is not yet known to be for the agent: the reply
    * it cut off, and what the agent has written since. Spoken after all when
-   * it turns out to be a cough or a press taken back; dropped once it is sent.
+   * it turns out to be a cough, a press taken back, or a page command; dropped
+   * only once it goes to the agent.
    */
   private held: string[] | null = null;
   private items: Item[] = [];
@@ -206,11 +207,13 @@ export class HandsFreeVoice {
       }
       const text = this.text.join(" ");
       if (this.io.command?.(text)) {
+        // For the page ("say that again") and handled there, not sent to the
+        // agent. The interruption cut its reply off, so what was left unsaid is
+        // spoken after all instead of dropped.
         this.text = [];
         this.stopped = false;
-        this.held = null;
+        this.resumeReplies();
         this.ignoreCurrent();
-        this.acceptingReplies = true;
         return;
       }
       // Serialize abort behind an in-flight send so it cannot miss that new run.
