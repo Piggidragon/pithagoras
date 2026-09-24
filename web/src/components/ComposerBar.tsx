@@ -549,6 +549,14 @@ export function ComposerBar({
               </div>
             </>
           )}
+          <div className="my-1 border-t border-line" />
+          <button
+            type="button"
+            onClick={() => { setOpen(null); openProviders(sessionId); }}
+            className="flex w-full items-center px-3 py-1.5 text-left text-xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+          >
+            Add or change providers…
+          </button>
         </div>
       )}
 
@@ -612,4 +620,13 @@ export function ComposerBar({
       )}
     </div>
   );
+}
+
+/**
+ * Settings → Providers, over this chat. Through the router's own history, so
+ * the page is not loaded again: it listens for popstate.
+ */
+function openProviders(sessionId: string) {
+  window.history.pushState(null, "", `/s/${sessionId}/settings/models`);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }

@@ -365,6 +365,15 @@ export const api = {
       body: JSON.stringify({ id, ...payload }),
     }),
 
+  /** Where models come from: servers in pi's models.json, keys in its auth.json. */
+  providers: () => json<ProvidersView>("/api/providers"),
+  probeProvider: (body: { kind: ProviderKind; baseUrl: string; apiKey?: string; id?: string }) =>
+    json<{ baseUrl: string; models: ProviderModel[] }>("/api/providers/probe", { method: "POST", body: JSON.stringify(body) }),
+  saveProvider: (id: string, body: { kind: ProviderKind; baseUrl?: string; api?: string; apiKey?: string; models?: ProviderModel[] }) =>
+    json<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
+  removeProvider: (id: string) => json<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Every model pi can use now, outside any chat — for the defaults. */
+  allModels: () => json<{ models: AvailableModel[]; providers: Record<string, string> }>("/api/models"),
   mcp: () => json<McpConfigView>("/api/mcp"),
   saveMcpServer: (name: string, entry: McpServerEntry, from?: string) =>
     json<{ ok: true }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
@@ -963,4 +972,56 @@ export interface BrowserStatus {
   /** Only the conversations that disagree with that — see "Who may drive it". */
   sessions: { id: string; title: string; kind: string; allowed: boolean }[];
   routines: { slug: string; name: string }[];
+}
+
+export type ProviderKind = "llama-cpp" | "llama-swap" | "ollama" | "openrouter" | "hosted" | "custom";
+
+/** One kind of provider the Models page offers. */
+export interface ProviderPreset {
+  kind: ProviderKind;
+  label: string;
+  description: string;
+  id: string;
+  endpoint: boolean;
+  baseUrl?: string;
+  key: "none" | "optional" | "required";
+}
+
+/** A model as a server lists it, or as models.json keeps it. */
+export interface ProviderModel {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  input?: string[];
+  reasoning?: boolean;
+}
+
+export interface ProviderInfo {
+  id: string;
+  kind: ProviderKind;
+  label: string;
+  baseUrl?: string;
+  api?: string;
+  /** The key itself never leaves the server: only whether there is one, and how to tell it apart. */
+  key: { set: boolean; hint?: string; source?: string };
+  models: ProviderModel[];
+  endpoint: boolean;
+}
+
+export interface ProvidersView {
+  presets: ProviderPreset[];
+  apis: string[];
+  providers: ProviderInfo[];
+  /** The hosted services pi knows, by its own names. */
+  hosted: { id: string; name: string }[];
+}
+
+export interface AvailableModel {
+  provider: string;
+  id: string;
+  name: string;
+  contextWindow?: number;
+  input?: string[];
+  reasoning: boolean;
 }

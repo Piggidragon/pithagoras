@@ -59,3 +59,15 @@ test('a call through the MCP adapter is named by the tool it asked for', async (
   assert.equal(toolName('mcp', { server: 'exa' }), 'mcp');
   assert.equal(toolName('web_search', { query: 'x' }), 'web_search');
 });
+
+test('an extension setting is named as a person would, and kept as the kind of value it was', async () => {
+  const { humanKey, typed } = await import('../web/src/setting-values.ts');
+  assert.equal(humanKey('llamaServerUrl'), 'Llama server URL');
+  assert.equal(humanKey('mcp_timeout_ms'), 'MCP timeout ms');
+  assert.equal(humanKey('HTTPProxy'), 'HTTP proxy');
+  assert.equal(typed(5, ' 12 '), 12);
+  assert.equal(typed(true, 'false'), false);
+  assert.deepEqual(typed({ a: 1 }, '{"a":2}'), { a: 2 });
+  assert.equal(typed('x', ''), '');
+  assert.equal(typed(undefined, '42'), '42', 'a key never set stays text: nothing says it is a number');
+});

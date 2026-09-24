@@ -76,7 +76,24 @@
   to { translate: 0 0; clip-path: inset(-48px round 12px); }
 }
 
+/* ── Settings: a page that is switched to rises into place, and its sections follow ── */
+.settings-page { animation: view-in .28s var(--ease-out) both; }
+.settings-page > .settings-section:nth-of-type(2) { animation: view-in .34s var(--ease-out) both; animation-delay: 40ms; }
+.settings-page > .settings-section:nth-of-type(n+3) { animation: view-in .38s var(--ease-out) both; animation-delay: 80ms; }
+
+/* A glimpse of each theme on its card: a page, a sidebar, a line of text. */
+.theme-swatch { position: relative; display: block; height: 52px; overflow: hidden; border-radius: 8px; border: 1px solid rgb(var(--line)); }
+.theme-swatch i { position: absolute; display: block; border-radius: 3px; }
+.theme-swatch i:nth-child(1) { inset: 0 auto 0 0; width: 28%; border-radius: 0; }
+.theme-swatch i:nth-child(2) { left: 36%; top: 12px; width: 44%; height: 6px; }
+.theme-swatch i:nth-child(3) { left: 36%; top: 24px; width: 30%; height: 6px; }
+.theme-swatch-light { background: #f6f7f9; } .theme-swatch-light i:nth-child(1) { background: #e8ebf0; } .theme-swatch-light i:nth-child(n+2) { background: #c9d0db; }
+.theme-swatch-dark { background: #0f1115; } .theme-swatch-dark i:nth-child(1) { background: #181b21; } .theme-swatch-dark i:nth-child(n+2) { background: #343a46; }
+.theme-swatch-system { background: linear-gradient(115deg, #f6f7f9 50%, #0f1115 50%); } .theme-swatch-system i:nth-child(1) { background: #e8ebf0; } .theme-swatch-system i:nth-child(n+2) { background: #7d8594; }
+button:hover > .theme-swatch { border-color: rgb(var(--fg) / .2); }
+
 @media (prefers-reduced-motion: reduce) {
+  .settings-page, .settings-page > .settings-section,
   .ui-backdrop, .ui-dialog, .ui-dialog.is-alert, .mobile-drawer, .app-main > :last-child, .sidebar-rail, .sidebar-content,
   .skeleton-group, .pop-in, .float-in, .stagger-in > * { animation: none; }
   .skeleton::after { animation: none; display: none; }
