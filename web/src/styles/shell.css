@@ -76,10 +76,42 @@
   to { translate: 0 0; clip-path: inset(-48px round 12px); }
 }
 
-/* ── Settings: a page that is switched to rises into place, and its sections follow ── */
-.settings-page { animation: view-in .28s var(--ease-out) both; }
-.settings-page > .settings-section:nth-of-type(2) { animation: view-in .34s var(--ease-out) both; animation-delay: 40ms; }
-.settings-page > .settings-section:nth-of-type(n+3) { animation: view-in .38s var(--ease-out) both; animation-delay: 80ms; }
+/* ── Settings: what a page shows rises into place as it arrives ──
+ * Each part of the page, not the page: a page is often a placeholder first,
+ * and animating the wrapper moved the placeholder while what replaced it
+ * just appeared. Parts arriving together move together — staggered, the
+ * lower ones were still sliding when the upper had stopped, and read as a
+ * jolt. The placeholder waits a moment, so a page that is quick never shows it. */
+.settings-page > :not(.skeleton-group) { animation: view-in .3s var(--ease-out) both; }
+.settings-page > .skeleton-group { animation-delay: .18s; }
+/* The heading a search went to, lit for a moment. */
+.setting-flash { animation: setting-flash 1.6s var(--ease-out); border-radius: 14px; }
+@keyframes setting-flash {
+  0%, 30% { box-shadow: 0 0 0 2px rgb(var(--accent) / .55), 0 0 0 8px rgb(var(--accent) / .12); background: rgb(var(--accent) / .05); }
+  100% { box-shadow: 0 0 0 2px rgb(var(--accent) / 0), 0 0 0 8px rgb(var(--accent) / 0); background: transparent; }
+}
+
+/* ── Whether a provider's server answers: a dot that breathes while it does ── */
+.provider-status { background: rgb(var(--fg) / .05); color: rgb(var(--fg-faint)); transition: background .3s, color .3s; min-width: 5.5rem; }
+.provider-status i { position: relative; width: 6px; height: 6px; border-radius: 99px; background: currentColor; }
+.provider-status.is-up { background: rgb(var(--ok) / .1); color: rgb(var(--ok)); }
+.provider-status.is-up i::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: currentColor; animation: status-ping 2.4s var(--ease-out) infinite; }
+.provider-status.is-down { background: rgb(var(--danger) / .1); color: rgb(var(--danger)); }
+.provider-status.is-checking i { animation: status-wait 1s ease-in-out infinite alternate; }
+@keyframes status-ping { 0% { transform: scale(1); opacity: .6; } 70%, 100% { transform: scale(2.8); opacity: 0; } }
+@keyframes status-wait { from { opacity: .25; } to { opacity: 1; } }
+.provider-loaded-dot { display: inline-block; width: 5px; height: 5px; border-radius: 99px; background: currentColor; }
+
+/* ── The setup assistant: where you are, as a line that fills ── */
+.setup-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.setup-step { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: rgb(var(--fg-faint)); transition: color .3s; }
+.setup-step::before { content: ""; height: 3px; border-radius: 99px; background: linear-gradient(90deg, rgb(var(--accent)) 50%, rgb(var(--fg) / .08) 50%) right / 200% 100%; transition: background-position .5s var(--ease-out); }
+.setup-step.is-done, .setup-step.is-current { color: rgb(var(--fg)); }
+.setup-step.is-done::before, .setup-step.is-current::before { background-position: left; }
+.setup-pane { animation: setup-in .34s var(--ease-out) both; }
+.setup-pane.is-back { animation-name: setup-back; }
+@keyframes setup-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+@keyframes setup-back { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
 
 /* A glimpse of each theme on its card: a page, a sidebar, a line of text. */
 .theme-swatch { position: relative; display: block; height: 52px; overflow: hidden; border-radius: 8px; border: 1px solid rgb(var(--line)); }
@@ -93,8 +125,9 @@
 button:hover > .theme-swatch { border-color: rgb(var(--fg) / .2); }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-page, .settings-page > .settings-section,
+  .settings-page > *, .setting-flash, .setup-pane, .provider-status i, .provider-status i::after,
   .ui-backdrop, .ui-dialog, .ui-dialog.is-alert, .mobile-drawer, .app-main > :last-child, .sidebar-rail, .sidebar-content,
   .skeleton-group, .pop-in, .float-in, .stagger-in > * { animation: none; }
   .skeleton::after { animation: none; display: none; }
+  .setup-step::before { transition: none; }
 }

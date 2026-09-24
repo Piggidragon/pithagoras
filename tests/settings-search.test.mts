@@ -1,0 +1,55 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { SETTINGS_INDEX, fold, searchSettings } from "../web/src/settings-search.ts";
+import { ago, compactCount, packageName } from "../web/src/package-names.ts";
+import { forget, load, peek } from "../web/src/settings-cache.ts";
+
+test("a setting is found by its title first, then by what it is about", () => {
+  const titles = (q: string) => searchSettings(q, SETTINGS_INDEX).map((e) => e.title);
+  assert.equal(titles("theme")[0], "Theme");
+  assert.equal(titles("context")[0], "Context window");
+  assert.deepEqual(titles("dunkel"), ["Theme"], "a German word finds it too");
+  assert.equal(titles("schlussel")[0], "API keys", "without its umlaut as well");
+  assert.deepEqual(titles("openrouter key"), ["API keys"], "every word must match somewhere");
+  assert.deepEqual(titles("   "), []);
+  assert.deepEqual(titles("nothing like this"), []);
+});
+
+test("where an entry is, is searched too", () => {
+  const found = searchSettings("web access brave", [{ tab: "extensions", ext: "npm:pi-web-access", title: "Brave API key", where: "pi-web-access" }]);
+  assert.equal(found.length, 1);
+  assert.equal(fold("Schlüssel Ärger"), "schlussel arger");
+});
+
+test("a package spec is told apart by its npm name", () => {
+  assert.equal(packageName("npm:pi-web-access"), "pi-web-access");
+  assert.equal(packageName("npm:pi-web-access@0.31.0"), "pi-web-access");
+  assert.equal(packageName("npm:@scope/pkg@1.2.0"), "@scope/pkg");
+  assert.equal(packageName("npm:@scope/pkg"), "@scope/pkg");
+  assert.equal(packageName("git:github.com/u/r"), "git:github.com/u/r");
+});
+
+test("counts and ages are said in one short word", () => {
+  assert.equal(compactCount(950), "950");
+  assert.equal(compactCount(1500), "1.5k");
+  assert.equal(compactCount(198311), "198k");
+  assert.equal(compactCount(1013749), "1M");
+  const now = Date.parse("2026-09-24T12:00:00Z");
+  assert.equal(ago("2026-09-24T11:59:30Z", now), "just now");
+  assert.equal(ago("2026-09-22T12:00:00Z", now), "2 days ago");
+  assert.equal(ago("2025-08-01T00:00:00Z", now), "1 year ago");
+  assert.equal(ago(undefined, now), "");
+});
+
+test("what Settings keeps is fetched once for everyone asking, and again once forgotten", async () => {
+  let fetched = 0;
+  const fetcher = async () => ++fetched;
+  const [a, b] = await Promise.all([load("k", fetcher), load("k", fetcher)]);
+  assert.deepEqual([a, b, fetched], [1, 1, 1], "two at once share one fetch");
+  assert.equal(await load("k", fetcher, 60_000), 1, "a fresh one is not fetched again");
+  forget("k");
+  assert.equal(peek("k"), 1, "forgotten, it is still shown until the new one comes");
+  assert.equal(await load("k", fetcher, 60_000), 2);
+  await assert.rejects(load("k", async () => { throw new Error("down"); }), /down/);
+  assert.equal(peek("k"), 2, "a failed fetch keeps the last value");
+});

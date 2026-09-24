@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import {
-  APIS, PRESETS, ProbeError, configStamp, listProviders, probeModels, removeProvider, saveProvider, storedKey,
+  APIS, PRESETS, ProbeError, checkProviders, configStamp, listProviders, probeModels, removeProvider, saveProvider, storedKey,
   type ProviderKind,
 } from "../providers.js";
 
@@ -48,6 +48,11 @@ export function providersRouter(): Router {
   router.get("/providers", async (_req, res) => {
     const { names, envKeyed, hosted } = await services();
     res.json({ presets: PRESETS, apis: APIS, providers: listProviders(names, envKeyed), hosted });
+  });
+
+  /** Whether each server answers now: for the dot beside it. */
+  router.get("/providers/status", async (_req, res) => {
+    res.json({ status: await checkProviders() });
   });
 
   /** Asks a server for its models, before or after it is saved. */

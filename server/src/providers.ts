@@ -348,6 +348,68 @@ export async function probeModels(kind: ProviderKind, baseUrl: string, key?: str
   return { baseUrl: at, models };
 }
 
+// --- whether a server answers now ---
+
+export interface ProviderStatus {
+  state: "up" | "down";
+  /** How long it took to list its models. */
+  ms?: number;
+  message?: string;
+  /** How many models it lists. */
+  listed?: number;
+  /** Chosen models it no longer lists: picking one would fail. */
+  missing?: string[];
+  /** What llama-swap has loaded now, when it says. */
+  loaded?: string[];
+}
+
+/** Which models llama-swap has loaded: its own /running, beside the API. */
+async function swapRunning(base: string, key?: string): Promise<string[] | undefined> {
+  try {
+    const r = (await getJson(base.replace(/\/v1$/, "") + "/running", key, 2000)) as Json;
+    if (!Array.isArray(r?.running)) return undefined;
+    return r.running
+      .filter((x: Json) => x && typeof x.model === "string" && (!x.state || x.state === "ready"))
+      .map((x: Json) => x.model as string);
+  } catch {
+    return undefined;
+  }
+}
+
+async function checkOne(id: string, raw: Json): Promise<ProviderStatus> {
+  const base = String(raw.baseUrl).replace(/\/+$/, "");
+  const key = resolveKey(storedKey(id));
+  const started = performance.now();
+  try {
+    const listed = parseModels(await getJson(`${base}/models`, key, 4000));
+    const ms = Math.round(performance.now() - started);
+    const ids = new Set(listed.map((m) => m.id));
+    const chosen: string[] = raw.models.map((m: Json) => m?.id).filter((m: unknown): m is string => typeof m === "string");
+    // A server that lists nothing is not saying the chosen ones are gone.
+    const status: ProviderStatus = { state: "up", ms, listed: listed.length, missing: listed.length ? chosen.filter((m) => !ids.has(m)) : [] };
+    if (inferKind(id, base) === "llama-swap") status.loaded = await swapRunning(base, key);
+    return status;
+  } catch (e) {
+    return { state: "down", message: (e as Error).message };
+  }
+}
+
+/**
+ * Whether each server in models.json answers now. Only those with an
+ * address: a hosted service is not asked, since asking costs a request on
+ * someone's key.
+ */
+export async function checkProviders(): Promise<Record<string, ProviderStatus>> {
+  const providers = readModelsJson().providers ?? {};
+  const out: Record<string, ProviderStatus> = {};
+  await Promise.all(
+    Object.entries<Json>(providers)
+      .filter(([, raw]) => raw && Array.isArray(raw.models) && typeof raw.baseUrl === "string")
+      .map(async ([id, raw]) => { out[id] = await checkOne(id, raw); }),
+  );
+  return out;
+}
+
 // --- writing ---
 
 const ID_RE = /^[A-Za-z0-9][\w.:=-]{0,63}$/;

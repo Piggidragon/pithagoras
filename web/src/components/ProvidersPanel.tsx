@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { IconType } from "react-icons";
 import {
-  LuBrain, LuCheck, LuCloud, LuCpu, LuEye, LuHardDrive, LuKeyRound, LuPencil, LuPlus,
-  LuRefreshCw, LuRoute, LuSearch, LuServer, LuShuffle, LuTrash2, LuX,
+  LuBrain, LuCheck, LuCloud, LuCpu, LuEye, LuHardDrive, LuKeyRound, LuPackage, LuPencil, LuPlus,
+  LuRefreshCw, LuRoute, LuSearch, LuServer, LuShuffle, LuTrash2, LuWandSparkles, LuX,
 } from "react-icons/lu";
-import { api, type ProviderInfo, type ProviderKind, type ProviderModel, type ProvidersView } from "../api";
+import { api, type ProviderInfo, type ProviderKind, type ProviderModel, type ProviderStatus, type ProvidersView } from "../api";
+import { forget, useCached } from "../settings-cache";
+import { packageName } from "../package-names";
+import { PackageCatalog } from "./PackageCatalog";
 import { parseWindow } from "../context-window";
 import { confirmDialog } from "./ConfirmDialog";
 import { formatTokens } from "./KeepRecent";
@@ -30,14 +33,21 @@ export function KindIcon({ kind, className = "h-4 w-4" }: { kind: ProviderKind; 
  * as its address is typed, so what it has can be ticked rather than spelled
  * out. Everything lands in pi's own files, as pi would write it.
  */
-export function ProvidersPanel({ onError }: { onError: (e: string) => void }) {
-  const [view, setView] = useState<ProvidersView | null>(null);
+export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => void; onSetup?: () => void }) {
+  const { value: view, reload } = useCached("providers", api.providers, { onError: (e) => onError(e.message) });
+  const status = useProviderStatus();
   /** The provider being edited, or "new" for one being added. */
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [browsing, setBrowsing] = useState(false);
+  const installed = useInstalledPackages();
 
-  const load = () => api.providers().then(setView).catch((e) => onError((e as Error).message));
-  useEffect(() => { void load(); }, []);
+  const load = async () => {
+    // What the defaults offer changes with the providers.
+    forget("models");
+    await reload();
+    status.check();
+  };
 
   const remove = async (p: ProviderInfo) => {
     const ok = await confirmDialog({
@@ -72,9 +82,16 @@ export function ProvidersPanel({ onError }: { onError: (e: string) => void }) {
         title="Providers"
         hint="Where the agent's models come from. Each one's models appear in the model menu under the chat box."
         action={editing !== "new" && (
-          <button type="button" onClick={() => setEditing("new")} className={primaryCls}>
-            <LuPlus className="h-4 w-4" /> Add a provider
-          </button>
+          <div className="flex items-center gap-1.5">
+            {onSetup && (
+              <button type="button" onClick={onSetup} className={ghostCls} title="Provider, model and what the agent can do, one step at a time">
+                <LuWandSparkles className="h-3.5 w-3.5" /> Setup assistant
+              </button>
+            )}
+            <button type="button" onClick={() => setEditing("new")} className={primaryCls}>
+              <LuPlus className="h-4 w-4" /> Add a provider
+            </button>
+          </div>
         )}
       >
         {editing === "new" && (
@@ -94,6 +111,7 @@ export function ProvidersPanel({ onError }: { onError: (e: string) => void }) {
                 ) : (
                   <ProviderCard
                     provider={p}
+                    status={status.of[p.id]}
                     busy={busy === p.id}
                     onEdit={p.key.source === "environment" || p.key.source === "account" ? undefined : () => setEditing(p.id)}
                     onRemove={p.key.source === "environment" ? undefined : () => void remove(p)}
@@ -104,8 +122,44 @@ export function ProvidersPanel({ onError }: { onError: (e: string) => void }) {
           </ul>
         )}
       </Section>
+
+      <Section
+        title="Provider packages"
+        hint="A service pi does not know of on its own — a gateway, a proxy, a new host — often comes as a package that adds it."
+        action={!browsing && (
+          <button type="button" onClick={() => setBrowsing(true)} className={ghostCls}>
+            <LuPackage className="h-3.5 w-3.5" /> Browse
+          </button>
+        )}
+      >
+        {browsing ? (
+          <div className="float-in">
+            <PackageCatalog topic="provider" installed={installed.names} onInstalled={() => void installed.reload()} onError={onError} limit={6} />
+          </div>
+        ) : null}
+      </Section>
     </>
   );
+}
+
+/** Whether each server answers, asked on opening and every half minute while the page is open. */
+export function useProviderStatus() {
+  const { value, reload } = useCached("provider-status", () => api.providerStatus().then((r) => r.status), { freshMs: 10_000 });
+  useEffect(() => {
+    const t = setInterval(() => document.visibilityState === "visible" && void reload(), 30_000);
+    return () => clearInterval(t);
+  }, [reload]);
+  return { of: value ?? {}, known: value !== undefined, check: () => void reload() };
+}
+
+/** The npm names of what is installed, to mark in a catalogue. */
+export function useInstalledPackages() {
+  const { value, reload } = useCached("extensions", api.extensions, { freshMs: 30_000 });
+  const names = useMemo(
+    () => new Set((value?.extensions ?? []).flatMap((e) => [e.name, packageName(e.spec)])),
+    [value],
+  );
+  return { names, reload };
 }
 
 function ProvidersSkeleton() {
@@ -121,7 +175,7 @@ function ProvidersSkeleton() {
 const presetLabel = (kind: ProviderKind) =>
   ({ "llama-cpp": "llama.cpp", "llama-swap": "llama-swap", ollama: "Ollama", openrouter: "OpenRouter", hosted: "Hosted", custom: "Custom" })[kind];
 
-function ProviderCard({ provider: p, busy, onEdit, onRemove }: { provider: ProviderInfo; busy: boolean; onEdit?: () => void; onRemove?: () => void }) {
+function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provider: ProviderInfo; status?: ProviderStatus; busy: boolean; onEdit?: () => void; onRemove?: () => void }) {
   const [open, setOpen] = useState(false);
   const shown = open ? p.models : p.models.slice(0, 6);
   return (
@@ -143,7 +197,18 @@ function ProviderCard({ provider: p, busy, onEdit, onRemove }: { provider: Provi
               </span>
             )}
           </div>
-          {p.baseUrl && <p className="mt-0.5 truncate font-mono text-[11px] text-fg-faint">{p.baseUrl}</p>}
+          {p.baseUrl && (
+            <div className="mt-0.5 flex min-w-0 items-center gap-2">
+              <p className="min-w-0 truncate font-mono text-[11px] text-fg-faint">{p.baseUrl}</p>
+              <StatusBadge status={status} />
+            </div>
+          )}
+          {status?.state === "down" && status.message && <p className="float-in mt-1 text-[11px] text-danger/90">{status.message}</p>}
+          {status?.state === "up" && !!status.missing?.length && (
+            <p className="float-in mt-1 text-[11px] text-warn">
+              {status.missing.length === 1 ? `${status.missing[0]} is` : `${status.missing.length} chosen models are`} not listed by the server any more.
+            </p>
+          )}
           {!p.endpoint && <p className="mt-0.5 text-[11px] text-fg-faint">Every model pi knows of from this service is in the model menu.</p>}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition group-hover:opacity-100">
@@ -162,7 +227,7 @@ function ProviderCard({ provider: p, busy, onEdit, onRemove }: { provider: Provi
       {p.endpoint && (
         <div className="mt-2.5 flex flex-wrap gap-1.5 pl-12">
           {p.models.length === 0 && <span className="text-xs text-warn">No models chosen yet — edit it to pick some.</span>}
-          {shown.map((m) => <ModelChip key={m.id} model={m} />)}
+          {shown.map((m) => <ModelChip key={m.id} model={m} loaded={status?.loaded?.includes(m.id)} missing={status?.missing?.includes(m.id)} />)}
           {p.models.length > 6 && (
             <button type="button" onClick={() => setOpen(!open)} className="rounded-md px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/10">
               {open ? "Fewer" : `${p.models.length - 6} more`}
@@ -174,9 +239,31 @@ function ProviderCard({ provider: p, busy, onEdit, onRemove }: { provider: Provi
   );
 }
 
-function ModelChip({ model: m }: { model: ProviderModel }) {
+/**
+ * Whether a server answers: a dot and a word, and how quickly. The same width
+ * whether it is known yet or not, so nothing beside it moves when it is.
+ */
+export function StatusBadge({ status }: { status?: ProviderStatus }) {
+  const state = status?.state ?? "checking";
+  const text = state === "up" ? `Online${status?.ms !== undefined ? ` · ${status.ms} ms` : ""}` : state === "down" ? "Offline" : "Checking…";
   return (
-    <span className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-fg/5 px-2 py-0.5 text-[11px] text-fg-muted" title={m.id}>
+    <span
+      className={`provider-status is-${state} inline-flex shrink-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px]`}
+      title={state === "down" ? status?.message : state === "up" ? `Answered in ${status?.ms} ms, listing ${status?.listed ?? 0} models` : "Asking the server"}
+    >
+      <i aria-hidden="true" />
+      {text}
+    </span>
+  );
+}
+
+function ModelChip({ model: m, loaded, missing }: { model: ProviderModel; loaded?: boolean; missing?: boolean }) {
+  return (
+    <span
+      className={`inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] ${loaded ? "bg-ok/10 text-ok" : missing ? "bg-warn/10 text-warn line-through decoration-warn/50" : "bg-fg/5 text-fg-muted"}`}
+      title={loaded ? `${m.id} — loaded now` : missing ? `${m.id} — the server does not list it now` : m.id}
+    >
+      {loaded && <i className="provider-loaded-dot" aria-hidden="true" />}
       <span className="truncate">{m.name ?? m.id}</span>
       {m.contextWindow && <span className="font-mono text-[10px] text-fg-faint">{formatTokens(m.contextWindow)}</span>}
       {m.input?.includes("image") && <LuEye className="h-3 w-3 text-fg-faint" aria-label="Sees images" />}
@@ -195,17 +282,24 @@ function uniqueId(base: string, taken: Set<string>): string {
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
 }
 
-function ProviderEditor({ view, provider, taken, onCancel, onSaved, onError }: {
+/** Not a kind of server: a package that brings its own. */
+type EditorKind = ProviderKind | "package";
+
+export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onError, embedded }: {
   view: ProvidersView;
   provider?: ProviderInfo;
   taken: Set<string>;
   onCancel: () => void;
   onSaved: () => void;
   onError: (e: string) => void;
+  /** Part of another page — the setup assistant — rather than a card in the list. */
+  embedded?: boolean;
 }) {
   const editing = !!provider;
-  const [kind, setKind] = useState<ProviderKind>(provider?.kind ?? "llama-cpp");
+  const [choice, setChoice] = useState<EditorKind>(provider?.kind ?? "llama-cpp");
+  const kind: ProviderKind = choice === "package" ? "custom" : choice;
   const preset = view.presets.find((p) => p.kind === kind)!;
+  const installed = useInstalledPackages();
   const hostedChoices = view.hosted.filter((h) => h.id !== "openrouter");
   const [id, setId] = useState(provider?.id ?? uniqueId(preset.id, taken));
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? preset.baseUrl ?? "");
@@ -218,9 +312,11 @@ function ProviderEditor({ view, provider, taken, onCancel, onSaved, onError }: {
   const probeSeq = useRef(0);
 
   // A new provider's name and address follow the kind picked, until they are typed in.
-  const pickKind = (next: ProviderKind) => {
+  const pickKind = (picked: EditorKind) => {
+    setChoice(picked);
+    if (picked === "package") return;
+    const next = picked;
     const p = view.presets.find((x) => x.kind === next)!;
-    setKind(next);
     if (!editing) {
       setId(next === "hosted" ? "" : uniqueId(p.id, taken));
       setBaseUrl(p.baseUrl ?? "");
@@ -257,7 +353,7 @@ function ProviderEditor({ view, provider, taken, onCancel, onSaved, onError }: {
 
   // Asked as soon as there is an address: while typing, a moment after the last key.
   useEffect(() => {
-    if (!preset.endpoint || !/^(https?:\/\/)?[\w.-]+(:\d+)?/.test(baseUrl.trim())) return;
+    if (choice === "package" || !preset.endpoint || !/^(https?:\/\/)?[\w.-]+(:\d+)?/.test(baseUrl.trim())) return;
     const t = setTimeout(() => void ask(), editing && probe.state === "idle" ? 0 : 700);
     return () => clearTimeout(t);
   }, [baseUrl, kind]);
@@ -297,27 +393,50 @@ function ProviderEditor({ view, provider, taken, onCancel, onSaved, onError }: {
     }
   };
 
-  const kindOptions = view.presets.map((p) => ({
-    value: p.kind,
-    label: <span className="inline-flex items-center gap-2"><KindIcon kind={p.kind} className="h-3.5 w-3.5 text-accent" />{p.label}</span>,
-    text: p.label,
-    hint: p.description,
-  }));
+  const kindOptions: { value: EditorKind; label: ReactNode; text: string; hint: string }[] = [
+    ...view.presets.map((p) => ({
+      value: p.kind as EditorKind,
+      label: <span className="inline-flex items-center gap-2"><KindIcon kind={p.kind} className="h-3.5 w-3.5 text-accent" />{p.label}</span>,
+      text: p.label,
+      hint: p.description,
+    })),
+    {
+      value: "package",
+      label: <span className="inline-flex items-center gap-2"><LuPackage className="h-3.5 w-3.5 text-accent" />From a package</span>,
+      text: "From a package",
+      hint: "A service pi does not know of, added by a pi package from npm — LiteLLM, Cohere, gateways.",
+    },
+  ];
 
   return (
-    <div className="float-in mb-2 rounded-xl border border-accent/30 bg-raised/50 p-4 shadow-lg shadow-black/10">
-      <div className="mb-3 flex items-center gap-2">
-        <h4 className="text-sm font-medium text-fg">{editing ? `Edit ${provider!.label}` : "Add a provider"}</h4>
-        <button type="button" onClick={onCancel} aria-label="Cancel" className="ml-auto rounded-lg p-1 text-fg-subtle transition hover:bg-fg/10 hover:text-fg">
-          <LuX className="h-4 w-4" />
-        </button>
-      </div>
+    <div className={embedded ? "" : "float-in mb-2 rounded-xl border border-accent/30 bg-raised/50 p-4 shadow-lg shadow-black/10"}>
+      {!embedded && (
+        <div className="mb-3 flex items-center gap-2">
+          <h4 className="text-sm font-medium text-fg">{editing ? `Edit ${provider!.label}` : "Add a provider"}</h4>
+          <button type="button" onClick={onCancel} aria-label="Cancel" className="ml-auto rounded-lg p-1 text-fg-subtle transition hover:bg-fg/10 hover:text-fg">
+            <LuX className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Kind" className="sm:col-span-2">
-          <Select<ProviderKind> className="w-full" aria-label="Kind of provider" value={kind} options={kindOptions} onChange={pickKind} disabled={editing} />
-          {!editing && <p className="mt-1 text-[11px] text-fg-faint">{preset.description}</p>}
+          <Select<EditorKind> className="w-full" aria-label="Kind of provider" value={choice} options={kindOptions} onChange={pickKind} disabled={editing} />
+          {!editing && <p className="mt-1 text-[11px] text-fg-faint">{kindOptions.find((o) => o.value === choice)?.hint}</p>}
         </Field>
+      </div>
+
+      {choice === "package" ? (
+        <div key="package" className="float-in mt-3">
+          <PackageCatalog topic="provider" installed={installed.names} onInstalled={() => void installed.reload()} onError={onError} limit={5} />
+          <p className="mt-2 text-[11px] text-fg-faint">
+            A package's models show in the model menu of chats started after it is installed. Most want a key or an
+            address of their own: they appear under Extension settings when it can be set there.
+          </p>
+        </div>
+      ) : (
+      <>
+      <div key={kind} className="mt-3 grid gap-3 sm:grid-cols-2">
 
         {kind === "hosted" ? (
           <Field label="Service" className="sm:col-span-2">
@@ -397,12 +516,17 @@ function ProviderEditor({ view, provider, taken, onCancel, onSaved, onError }: {
         </div>
       )}
 
+      </>
+      )}
+
       <div className="mt-4 flex items-center gap-2">
-        <button type="button" onClick={() => void save()} disabled={!canSave} className={primaryCls}>
-          {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : <LuCheck className="h-4 w-4" />}
-          {editing ? "Save" : "Add"}
-        </button>
-        <button type="button" onClick={onCancel} className={ghostCls}>Cancel</button>
+        {choice !== "package" && (
+          <button type="button" onClick={() => void save()} disabled={!canSave} className={primaryCls}>
+            {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : <LuCheck className="h-4 w-4" />}
+            {editing ? "Save" : "Add"}
+          </button>
+        )}
+        {!embedded && <button type="button" onClick={onCancel} className={ghostCls}>{choice === "package" ? "Done" : "Cancel"}</button>}
         <span className="ml-auto text-[11px] text-fg-faint">
           {badCtx ? `${badCtx.id}: the window is a whole number of tokens.` : needsKey ? "It needs a key." : preset.endpoint && kept.length === 0 && rows.length > 0 ? "Tick at least one model." : ""}
         </span>

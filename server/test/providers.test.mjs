@@ -100,3 +100,31 @@ test("a llama-server is asked for its models, and for the window it really gives
   }
   await assert.rejects(p.probeModels("llama-cpp", `http://127.0.0.1:${port}`), /Nothing answered/);
 });
+
+test("each server is asked whether it answers, and which chosen models it no longer lists", async () => {
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "A" }, { id: "B" }] }));
+    if (req.url === "/running") return res.end(JSON.stringify({ running: [{ model: "A", state: "ready" }, { model: "B", state: "starting" }] }));
+    res.statusCode = 404; res.end("{}");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const port = server.address().port;
+  try {
+    writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: {
+      "llama-swap": { baseUrl: `http://127.0.0.1:${port}/v1`, api: "openai-completions", models: [{ id: "A" }, { id: "Old" }] },
+      down: { baseUrl: "http://127.0.0.1:1/v1", models: [{ id: "x" }] },
+      anthropic: { baseUrl: "https://proxy.example/v1" },
+    } }));
+    const status = await p.checkProviders();
+    assert.deepEqual(Object.keys(status).sort(), ["down", "llama-swap"], "an override of a hosted service is not asked");
+    const swap = status["llama-swap"];
+    assert.equal(swap.state, "up");
+    assert.equal(typeof swap.ms, "number");
+    assert.deepEqual([swap.listed, swap.missing, swap.loaded], [2, ["Old"], ["A"]]);
+    assert.equal(status.down.state, "down");
+    assert.match(status.down.message, /Nothing answered/);
+  } finally {
+    server.close();
+  }
+});

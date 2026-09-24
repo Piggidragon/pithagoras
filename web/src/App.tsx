@@ -7,7 +7,9 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
-import { ConfigModal } from "./components/ConfigModal";
+import { ConfigModal, prefetchSettings } from "./components/ConfigModal";
+import { SetupAssistant, setupDismissed } from "./components/SetupAssistant";
+import { load as loadCached } from "./settings-cache";
 import { ExtensionDialog, type UiRequest } from "./components/ExtensionDialog";
 import { SessionsPage } from "./components/SessionsPage";
 import { ProjectsPage } from "./components/ProjectsPage";
@@ -82,6 +84,9 @@ export default function App() {
   );
 }
 
+/** Once per page load, not once per page: the Shell is drawn again on every route. */
+let setupAsked = false;
+
 function Shell({
   settings = false,
   view = "chat",
@@ -93,6 +98,20 @@ function Shell({
   const navigate = useNavigate();
   const [mobileNav, setMobileNav] = useState(false);
   useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
+
+  // A moment after the portal has drawn: fetch what Settings opens on, and
+  // offer the setup assistant while there is no model to talk to.
+  const [setup, setSetup] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (setupAsked) return;
+      setupAsked = true;
+      prefetchSettings();
+      if (setupDismissed()) return;
+      loadCached("models", api.allModels, 30_000).then((r) => r.models.length === 0 && setSetup(true), () => {});
+    }, 1200);
+    return () => clearTimeout(t);
+  }, []);
   useEffect(() => {
     const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileNav(false); };
     document.addEventListener("keydown", escape);
@@ -507,6 +526,21 @@ function Shell({
         <ConfigModal
           initialTab={LEGACY_TABS[tab ?? ""] ?? (tab as Tab) ?? "general"}
           onClose={() => navigate(active ? `/s/${active.id}` : "/")}
+          onSetup={() => {
+            navigate(active ? `/s/${active.id}` : "/");
+            setSetup(true);
+          }}
+        />
+      )}
+
+      {setup && (
+        <SetupAssistant
+          onClose={() => setSetup(false)}
+          onStartChat={async () => {
+            const s = await api.createSession();
+            await refreshSessions();
+            navigate(`/s/${s.id}`);
+          }}
         />
       )}
     </div>

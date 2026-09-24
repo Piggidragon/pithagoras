@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Select } from "./Select";
 import {
   LuBlocks,
@@ -20,6 +20,7 @@ import {
   LuRadio,
   LuWrench,
   LuRefreshCw,
+  LuSearch,
   LuServer,
   LuSlidersHorizontal,
   LuSun,
@@ -43,7 +44,11 @@ import { ToolDefaults } from "./ToolDefaults";
 import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { ProvidersPanel } from "./ProvidersPanel";
-import { Empty, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { EffortPicker, Empty, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { PackageCatalog } from "./PackageCatalog";
+import { packageName } from "../package-names";
+import { load, useCached } from "../settings-cache";
+import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
 import { useTheme, type Theme } from "../theme";
 import { humanKey, typed } from "../setting-values";
 
@@ -109,44 +114,113 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
 ];
 const TABS = GROUPS.flatMap((g) => g.tabs);
 
+/**
+ * What Settings needs first, fetched before it is opened — a moment after the
+ * portal loads — so that opening it draws the page rather than a placeholder.
+ */
+export function prefetchSettings() {
+  const quietly = (p: Promise<unknown>) => void p.catch(() => {});
+  quietly(load("extensions", api.extensions, 30_000));
+  quietly(load("settings", api.settings, 30_000));
+  quietly(load("models", api.allModels, 30_000));
+  quietly(load("report-targets", api.reportTargets, 30_000));
+  quietly(load("providers", api.providers, 30_000));
+}
+
+/** The rail's extension pages as last seen, so a reload does not start without them. */
+const RAIL_KEY = "pithagoras.settings.extension-rail";
+function railSnapshot(): { spec: string; name: string }[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(RAIL_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((e) => e && typeof e.spec === "string" && typeof e.name === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export function ConfigModal({
   onClose,
   initialTab = "general",
+  onSetup,
 }: {
   onClose: () => void;
   initialTab?: Tab;
+  /** Opens the setup assistant in its place. */
+  onSetup?: () => void;
 }) {
   const [nav, setNav] = useState<Nav>({ kind: "tab", id: TABS.some((t) => t.id === initialTab) ? initialTab : "general" });
   const [error, setError] = useState<string | null>(null);
+  /** A section a search went to, to scroll to once its page has drawn it. */
+  const [target, setTarget] = useState<{ section: string; n: number } | null>(null);
+  const page = useRef<HTMLDivElement>(null);
 
   // Loaded here rather than inside the Extensions tab: the rail lists every
   // extension that exposes settings, so it needs them before anything is shown.
-  const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
-  const [settingsPath, setSettingsPath] = useState("");
-  const [loadingExts, setLoadingExts] = useState(true);
+  const exts = useCached("extensions", api.extensions, { onError: (e) => setError(e.message) });
+  const extensions = exts.value?.extensions ?? [];
+  const settingsPath = exts.value?.settingsPath ?? "";
+  const loadingExts = !exts.value && !exts.failed;
+  const loadExtensions = async () => (await exts.reload())?.extensions ?? [];
 
-  const loadExtensions = async () => {
-    setLoadingExts(true);
-    try {
-      const r = await api.extensions();
-      setExtensions(r.extensions);
-      setSettingsPath(r.settingsPath);
-      return r.extensions;
-    } catch (e) {
-      setError((e as Error).message);
-      return [];
-    } finally {
-      setLoadingExts(false);
-    }
-  };
+  useEffect(() => prefetchSettings(), []);
 
+  const configurable = exts.value ? extensions.filter((e) => e.settings.length > 0) : railSnapshot().map((e) => ({ ...e, settings: [] as ExtensionInfo["settings"], placeholder: true }));
   useEffect(() => {
-    loadExtensions();
-  }, []);
-
-  const configurable = extensions.filter((e) => e.settings.length > 0);
+    if (!exts.value) return;
+    try {
+      localStorage.setItem(RAIL_KEY, JSON.stringify(configurable.map((e) => ({ spec: e.spec, name: e.name }))));
+    } catch {
+      // Only a head start for next time.
+    }
+  }, [exts.value]);
   const activeExt =
     nav.kind === "ext" ? extensions.find((e) => e.spec === nav.spec) : undefined;
+  // The extension pages rise in when they arrive late; drawn from what was
+  // kept, they are simply there. Once in, a refresh does not replay it.
+  // Not over names already drawn from the snapshot: they would rise a second time.
+  const railShown = useRef(!!exts.value || railSnapshot().length > 0);
+  useEffect(() => {
+    if (!exts.value) return;
+    const t = setTimeout(() => (railShown.current = true), 600);
+    return () => clearTimeout(t);
+  }, [exts.value]);
+
+  // Every setting there is, the extensions' own among them, to search.
+  const index = useMemo(() => {
+    const label = (id: string) => TABS.find((t) => t.id === id)?.label ?? id;
+    const fixed = SETTINGS_INDEX.map((e) => ({ ...e, where: label(e.tab) }));
+    const own = extensions.flatMap((x) => [
+      { tab: "extensions", ext: x.spec, title: x.name, words: `${x.description ?? ""} extension settings`, where: "Extension settings" },
+      ...x.settings.map((st) => ({ tab: "extensions", ext: x.spec, section: "Settings", title: humanKey(st.key), words: `${st.key} ${x.name}`, where: x.name })),
+    ]);
+    return [...fixed, ...own];
+  }, [extensions]);
+
+  const go = (entry: SettingEntry) => {
+    setNav(entry.ext ? { kind: "ext", spec: entry.ext } : { kind: "tab", id: entry.tab as Tab });
+    if (entry.section) setTarget({ section: entry.section, n: Date.now() });
+  };
+
+  // Its page may still be fetching: look for the heading until it is there, for a few seconds.
+  useEffect(() => {
+    if (!target) return;
+    let frame = 0;
+    const until = performance.now() + 4000;
+    const seek = () => {
+      const el = findSection(page.current, target.section);
+      if (el) {
+        el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        el.classList.remove("setting-flash");
+        void el.offsetWidth;
+        el.classList.add("setting-flash");
+        setTimeout(() => el.classList.remove("setting-flash"), 1700);
+        return;
+      }
+      if (performance.now() < until) frame = requestAnimationFrame(seek);
+    };
+    frame = requestAnimationFrame(seek);
+    return () => cancelAnimationFrame(frame);
+  }, [target]);
 
   return (
     <Modal
@@ -157,6 +231,7 @@ export function ConfigModal({
       startInRail={initialTab === "general"}
       section={nav.kind === "tab" ? TABS.find((t) => t.id === nav.id)?.label : activeExt?.name}
       rail={
+        <SettingsSearch index={index} onPick={go}>
         <div className="space-y-4">
           {GROUPS.map((g) => (
             <RailGroup key={g.label} label={g.label}>
@@ -175,7 +250,7 @@ export function ConfigModal({
 
           {/* Only appears for extensions that actually read settings. */}
           {configurable.length > 0 && (
-            <RailGroup label="Extension settings">
+            <RailGroup label="Extension settings" className={exts.value && !railShown.current ? "stagger-in" : ""}>
               {configurable.map((e) => (
                 <RailItem
                   key={e.spec}
@@ -188,6 +263,7 @@ export function ConfigModal({
             </RailGroup>
           )}
         </div>
+        </SettingsSearch>
       }
     >
       {error && (
@@ -200,8 +276,8 @@ export function ConfigModal({
         </div>
       )}
 
-      <div key={nav.kind === "tab" ? nav.id : nav.spec} className="settings-page">
-      {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} />}
+      <div key={nav.kind === "tab" ? nav.id : nav.spec} ref={page} className="settings-page">
+      {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} onSetup={onSetup} />}
       {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
       {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "about" && <AboutPanel onError={setError} />}
@@ -227,6 +303,8 @@ export function ConfigModal({
       {nav.kind === "ext" &&
         (activeExt ? (
           <ExtensionPanel ext={activeExt} onError={setError} onSaved={loadExtensions} />
+        ) : loadingExts ? (
+          <div className="skeleton-group space-y-2"><div className="skeleton h-9 w-1/2" /><div className="skeleton h-16 w-full" /><div className="skeleton h-16 w-full" /></div>
         ) : (
           <Empty>That extension is no longer installed.</Empty>
         ))}
@@ -237,7 +315,7 @@ export function ConfigModal({
 
 // --- rail ---
 
-function RailGroup({ label, children }: { label?: string; children: ReactNode }) {
+function RailGroup({ label, children, className = "" }: { label?: string; children: ReactNode; className?: string }) {
   return (
     <div>
       {label && (
@@ -245,7 +323,100 @@ function RailGroup({ label, children }: { label?: string; children: ReactNode })
           {label}
         </p>
       )}
-      <div className="space-y-0.5">{children}</div>
+      <div className={`space-y-0.5 ${className}`}>{children}</div>
+    </div>
+  );
+}
+
+/** The heading a search names: a Section says its title; other pages have only their headings. */
+function findSection(root: HTMLElement | null, name: string): HTMLElement | null {
+  if (!root) return null;
+  const tagged = [...root.querySelectorAll<HTMLElement>("[data-setting]")].find((el) => el.dataset.setting === name);
+  if (tagged) return tagged;
+  const want = name.trim().toLowerCase();
+  const heading = [...root.querySelectorAll<HTMLElement>("h3")].find((h) => (h.textContent ?? "").trim().toLowerCase().startsWith(want));
+  return heading ? (heading.closest("section") as HTMLElement | null) ?? heading : null;
+}
+
+/**
+ * A search above the rail. While something is typed the rail shows what
+ * matches instead of its pages; arrows move through them, Enter goes to one,
+ * and Escape clears the search before it closes anything. "/" anywhere in
+ * Settings that is not a field comes here.
+ */
+function SettingsSearch({ index, onPick, children }: { index: (SettingEntry & { where?: string })[]; onPick: (e: SettingEntry) => void; children: ReactNode }) {
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const field = useRef<HTMLInputElement>(null);
+  const hits = useMemo(() => searchSettings(query, index), [query, index]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      e.preventDefault();
+      field.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  const pick = (e: SettingEntry) => {
+    onPick(e);
+    field.current?.blur();
+  };
+
+  return (
+    <div>
+      <div className="relative mb-3">
+        <LuSearch className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint" />
+        <input
+          ref={field}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setActive(0); }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, hits.length - 1)); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
+            else if (e.key === "Enter" && hits[active]) { e.preventDefault(); pick(hits[active]); }
+            else if (e.key === "Escape" && query) { e.preventDefault(); e.stopPropagation(); setQuery(""); }
+          }}
+          placeholder="Search settings"
+          aria-label="Search settings"
+          role="combobox"
+          aria-expanded={!!query}
+          aria-controls="settings-search-results"
+          aria-activedescendant={query && hits[active] ? `settings-hit-${active}` : undefined}
+          className="w-full rounded-lg border border-line bg-surface/70 py-1.5 pl-8 pr-7 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60"
+        />
+        {!query && <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-line px-1 font-mono text-[10px] text-fg-faint">/</kbd>}
+      </div>
+      {query ? (
+        <div id="settings-search-results" role="listbox" aria-label="Settings found" className="float-in space-y-0.5">
+          {hits.length === 0 ? (
+            <p className="px-2 py-3 text-xs text-fg-faint">Nothing called that. Try another word.</p>
+          ) : (
+            hits.map((h, i) => (
+              <button
+                key={`${h.ext ?? h.tab}:${h.title}`}
+                id={`settings-hit-${i}`}
+                role="option"
+                aria-selected={i === active}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => pick(h)}
+                className={`block w-full rounded-lg px-2.5 py-1.5 text-left transition ${i === active ? "bg-accent/10 text-accent" : "text-fg-muted hover:bg-fg/5"}`}
+              >
+                <span className="block truncate text-sm">{h.title}</span>
+                <span className="block truncate text-[10px] text-fg-faint">
+                  {h.where}{h.section && h.section !== h.title && h.section !== h.where ? ` › ${h.section}` : ""}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 }
@@ -280,10 +451,6 @@ function RailItem({
   );
 }
 
-// --- shared bits ---
-
-const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
 // --- general ---
 
 /**
@@ -294,25 +461,10 @@ const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
  * opening a form.
  */
 function ReportDefault({ onError }: { onError: (e: string) => void }) {
-  const [targets, setTargets] = useState<ReportTarget[]>([]);
-  const [current, setCurrent] = useState<ReportTo | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  const load = () =>
-    api
-      .reportTargets()
-      .then((r) => {
-        setTargets(r.targets);
-        setCurrent(r.default);
-        setLoaded(true);
-      })
-      .catch((e) => onError((e as Error).message));
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  if (!loaded) return null;
+  const { value: kept, reload: load } = useCached("report-targets", api.reportTargets, { onError: (e) => onError(e.message) });
+  if (!kept) return null;
+  const targets: ReportTarget[] = kept.targets;
+  const current: ReportTo | null = kept.default;
 
   const value = current ? `${current.channel}\u0000${current.target}` : "";
 
@@ -507,37 +659,40 @@ function modelHint(m: AvailableModel): string {
 }
 
 function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; onProviders: () => void }) {
+  // All three are fetched ahead and kept, and the page waits for all three:
+  // drawn part by part, the model menus filled in and a warning pushed the
+  // context settings down after the page was already on screen.
+  const settings = useCached("settings", api.settings, { onError: (e) => onError(e.message) });
+  const modelsQuery = useCached("models", api.allModels);
+  const reports = useCached("report-targets", api.reportTargets);
+  const r = settings.value;
+  const models = modelsQuery.value ?? null;
+  const modelsFailed = !!modelsQuery.failed;
+  const defaults: GlobalSettings | null = r?.defaults ?? null;
+  const executor = r?.executor ?? "";
+
   /** Only the explicit overrides — an empty value means "inherit". */
-  const [stored, setStored] = useState<Partial<GlobalSettings> | null>(null);
-  const [defaults, setDefaults] = useState<GlobalSettings | null>(null);
-  const [executor, setExecutor] = useState("");
+  const [stored, setStored] = useState<Partial<GlobalSettings> | null>(r?.stored ?? null);
   const [saved, setSaved] = useState<string | null>(null);
-  const [keepRecent, setKeepRecent] = useState<number | null>(null);
+  const [keepRecent, setKeepRecent] = useState<number | null>(r?.compaction.keepRecentTokens ?? null);
   const [applied, setApplied] = useState<string | null>(null);
   /** Typed text, so that a half-written number is not turned into a request. */
-  const [ctxText, setCtxText] = useState("");
-  const [ctxSaved, setCtxSaved] = useState<number | null>(null);
+  const [ctxText, setCtxText] = useState(r?.contextDefault ? String(r.contextDefault) : "");
+  const [ctxSaved, setCtxSaved] = useState<number | null>(r?.contextDefault ?? null);
   const [ctxNote, setCtxNote] = useState<string | null>(null);
-  const [models, setModels] = useState<{ models: AvailableModel[]; providers: Record<string, string> } | null>(null);
-  const [modelsFailed, setModelsFailed] = useState(false);
 
-  const load = () =>
-    api
-      .settings()
-      .then((r) => {
-        setStored(r.stored);
-        setDefaults(r.defaults);
-        setKeepRecent(r.compaction.keepRecentTokens);
-        setCtxSaved(r.contextDefault);
-        setCtxText(r.contextDefault ? String(r.contextDefault) : "");
-        setExecutor(r.executor);
-      })
-      .catch((e) => onError((e as Error).message));
-
+  // What was kept is brought up to date when the page opens, or after a save.
   useEffect(() => {
-    load();
-    api.allModels().then(setModels).catch(() => setModelsFailed(true));
-  }, []);
+    if (!r) return;
+    setStored(r.stored);
+    setKeepRecent(r.compaction.keepRecentTokens);
+    setCtxSaved(r.contextDefault);
+    if (document.activeElement?.getAttribute("aria-label") !== "Default context window in tokens") {
+      setCtxText(r.contextDefault ? String(r.contextDefault) : "");
+    }
+  }, [r]);
+
+  const load = () => settings.reload();
 
   /**
    * Saved on release, on its own.
@@ -552,6 +707,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
       setApplied(
         refreshed > 0 ? `Applied to ${refreshed} open session${refreshed === 1 ? "" : "s"}` : "Saved",
       );
+      void load();
       setTimeout(() => setApplied(null), 3000);
     },
     (error) => {
@@ -574,6 +730,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
       setCtxSaved(r.contextDefault);
       setCtxText(r.contextDefault ? String(r.contextDefault) : "");
       setCtxNote(n === null ? "Removed" : "Saved");
+      void load();
       setTimeout(() => setCtxNote(null), 3000);
     } catch (e) {
       onError((e as Error).message);
@@ -587,8 +744,20 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
     return map;
   }, [models]);
 
-  if (!stored || !defaults) {
-    return <div className="skeleton-group space-y-2"><div className="skeleton h-4 w-40" /><div className="skeleton h-10 w-full" /><div className="skeleton h-10 w-full" /><div className="skeleton h-8 w-2/3" /></div>;
+  const ready = stored && defaults && (models || modelsFailed) && (reports.value || reports.failed);
+  if (!ready) {
+    // The shape of the page, so it does not jump when the page replaces it.
+    return (
+      <div className="skeleton-group space-y-7" aria-label="Loading">
+        {[56, 44].map((h) => (
+          <div key={h} className="space-y-2.5">
+            <div className="skeleton h-3 w-28" />
+            <div className="skeleton h-3 w-3/4" />
+            <div className="skeleton w-full" style={{ height: `${h / 4}rem` }} />
+          </div>
+        ))}
+      </div>
+    );
   }
 
   /** Each change is saved as it is made: there is no form to forget to submit. */
@@ -603,6 +772,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
       });
       setSaved("Saved");
       setTimeout(() => setSaved(null), 2000);
+      void load();
     } catch (e) {
       onError((e as Error).message);
       void load();
@@ -686,29 +856,14 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
                 {stored.thinkingLevel ? "click again to go back to pi's default" : defaults.thinkingLevel ? `pi's default: ${defaults.thinkingLevel}` : ""}
               </span>
             </div>
-            <div className="mt-1 flex flex-wrap gap-1" role="radiogroup" aria-label="Default effort">
-              {LEVELS.map((lvl) => {
-                const on = stored.thinkingLevel === lvl;
-                const inherited = !stored.thinkingLevel && defaults.thinkingLevel === lvl;
-                return (
-                  <button
-                    key={lvl}
-                    role="radio"
-                    aria-checked={on}
-                    // Clicking the active level again hands it back to pi.
-                    onClick={() => void save({ ...stored, thinkingLevel: on ? "" : lvl })}
-                    className={`rounded-lg px-2.5 py-1 text-xs capitalize transition ${
-                      on
-                        ? "bg-warn/12 text-warn ring-1 ring-inset ring-warn/30"
-                        : inherited
-                          ? "bg-fg/5 text-fg ring-1 ring-inset ring-fg/15"
-                          : "bg-fg/5 text-fg-muted hover:bg-fg/10"
-                    }`}
-                  >
-                    {lvl}
-                  </button>
-                );
-              })}
+            <div className="mt-1">
+              <EffortPicker
+                label="Default effort"
+                value={stored.thinkingLevel ?? ""}
+                inherited={defaults.thinkingLevel}
+                // Clicking the active level again hands it back to pi.
+                onChange={(lvl) => void save({ ...stored, thinkingLevel: lvl })}
+              />
             </div>
           </div>
           <p className="flex items-center gap-3 text-[11px] text-fg-faint">
@@ -835,11 +990,20 @@ function ExtensionsPanel({
       setNote(parts.join(" "));
     });
 
+  const installed = useMemo(() => new Set(extensions.flatMap((e) => [e.name, packageName(e.spec)])), [extensions]);
+
   return (
     <>
       <Section
-        title="Install"
-        hint="Extensions, skills, prompt templates and themes. They persist across restarts."
+        title="Find packages"
+        hint="Published for pi on npm: tools, skills, providers and themes. The most used first."
+      >
+        <PackageCatalog installed={installed} onInstalled={() => void onRefresh()} onError={onError} limit={6} />
+      </Section>
+
+      <Section
+        title="Install by name"
+        hint="From npm, git, a URL or a folder on the server. They persist across restarts."
       >
         <div className="flex gap-2">
           <input
@@ -1072,7 +1236,7 @@ function ExtensionPanel({
       </div>
 
       <Section title="Settings" hint="Saved into pi's settings.json. An extension reads them when a chat starts.">
-        <div className="space-y-2">
+        <div className="stagger-in space-y-2">
           {ext.settings.map((s) => {
             const flag = typeof s.value === "boolean" || s.value === "true" || s.value === "false";
             return (

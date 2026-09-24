@@ -130,14 +130,44 @@ function detectSettingKeys(pkgPath: string): string[] {
   return [...keys].sort();
 }
 
+/**
+ * What `pi list` says, kept until the packages in settings.json change.
+ *
+ * Starting pi to ask takes a second or more, and Settings asks each time it
+ * opens: its rail lists the extensions that have settings, and they arrived
+ * after everything else had settled. What is installed only changes with the
+ * packages list, which install, remove and switching all rewrite.
+ */
+let listed: { stamp: string; value: Promise<{ spec: string; path?: string; scope?: string }[]> } | undefined;
+function installedPackages(settings: Record<string, unknown>) {
+  const stamp = JSON.stringify(settings.packages ?? null);
+  if (listed?.stamp !== stamp) {
+    const value = run("pi", ["list"], { timeout: 60_000 }).then(({ stdout }) => parseList(stdout));
+    listed = { stamp, value };
+    value.catch(() => { if (listed?.value === value) listed = undefined; });
+  }
+  return listed.value;
+}
+
+/** The keys a package reads, found once per version of it rather than on every look. */
+const keysFound = new Map<string, { stamp: number; keys: string[] }>();
+function settingKeysOf(dir: string): string[] {
+  let stamp = 0;
+  try { stamp = statSync(path.join(dir, "package.json")).mtimeMs; } catch { /* scanned anyway */ }
+  const had = keysFound.get(dir);
+  if (had && had.stamp === stamp) return had.keys;
+  const keys = detectSettingKeys(dir);
+  keysFound.set(dir, { stamp, keys });
+  return keys;
+}
+
 export function extensionsRouter(): Router {
   const router = express.Router();
 
   router.get("/extensions", async (_req, res) => {
     try {
-      const { stdout } = await run("pi", ["list"], { timeout: 60_000 });
       const settings = readSettings();
-      const packages = parseList(stdout);
+      const packages = await installedPackages(settings);
       const listed = Array.isArray(settings.packages) ? settings.packages : [];
 
       const infos: ExtensionInfo[] = packages.map((pkg) => {
@@ -171,7 +201,7 @@ export function extensionsRouter(): Router {
           // settings.json. The key scanner finds them all the same, and a form
           // built from them would write keys the adapter never reads — so it
           // gets no config page here. Settings → MCP edits the real file.
-          const keys = info.name === "pi-mcp-adapter" ? [] : detectSettingKeys(pkg.path);
+          const keys = info.name === "pi-mcp-adapter" ? [] : settingKeysOf(pkg.path);
           for (const key of keys) {
             info.settings.push({
               key,

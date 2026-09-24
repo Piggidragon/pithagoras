@@ -8,7 +8,8 @@ import type { ReactNode } from "react";
 
 export function Section({ title, hint, action, children }: { title: string; hint?: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="settings-section mb-7">
+    // Named so Settings' search can scroll to it.
+    <section className="settings-section mb-7" data-setting={title}>
       <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1 basis-60">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{title}</h3>
@@ -81,3 +82,38 @@ export const primaryCls =
   "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";
 export const ghostCls =
   "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-fg-muted transition hover:bg-fg/5 hover:text-fg disabled:opacity-40";
+
+export const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * How hard a model thinks, as a row of levels. `inherited` is the level that
+ * applies when none is picked; clicking the picked one again hands it back.
+ */
+export function EffortPicker({ value, inherited, onChange, label = "Effort" }: { value: string; inherited?: string; onChange: (level: string) => void; label?: string }) {
+  return (
+    <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={label}>
+      {LEVELS.map((lvl) => {
+        const on = value === lvl;
+        const fallback = !value && inherited === lvl;
+        return (
+          <button
+            key={lvl}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(on ? "" : lvl)}
+            className={`rounded-lg px-2.5 py-1 text-xs capitalize transition ${
+              on
+                ? "bg-warn/12 text-warn ring-1 ring-inset ring-warn/30"
+                : fallback
+                  ? "bg-fg/5 text-fg ring-1 ring-inset ring-fg/15"
+                  : "bg-fg/5 text-fg-muted hover:bg-fg/10"
+            }`}
+          >
+            {lvl}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

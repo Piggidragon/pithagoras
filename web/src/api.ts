@@ -372,6 +372,8 @@ export const api = {
   saveProvider: (id: string, body: { kind: ProviderKind; baseUrl?: string; api?: string; apiKey?: string; models?: ProviderModel[] }) =>
     json<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
   removeProvider: (id: string) => json<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Whether each server answers now. */
+  providerStatus: () => json<{ status: Record<string, ProviderStatus> }>("/api/providers/status"),
   /** Every model pi can use now, outside any chat — for the defaults. */
   allModels: () => json<{ models: AvailableModel[]; providers: Record<string, string> }>("/api/models"),
   mcp: () => json<McpConfigView>("/api/mcp"),
@@ -685,6 +687,9 @@ export const api = {
     }),
 
   packages: () => json<{ output: string }>("/api/packages"),
+  /** pi packages published on npm; `topic` "provider" for the ones that bring models. */
+  catalog: (q = "", topic?: "provider") =>
+    json<{ packages: CatalogPackage[] }>(`/api/packages/catalog?${new URLSearchParams({ q, ...(topic ? { topic } : {}) })}`),
   installPackage: (spec: string) =>
     json<{ ok: true; output: string }>("/api/packages", {
       method: "POST",
@@ -1015,6 +1020,30 @@ export interface ProvidersView {
   providers: ProviderInfo[];
   /** The hosted services pi knows, by its own names. */
   hosted: { id: string; name: string }[];
+}
+
+export interface ProviderStatus {
+  state: "up" | "down";
+  ms?: number;
+  message?: string;
+  listed?: number;
+  /** Chosen models the server no longer lists. */
+  missing?: string[];
+  /** What llama-swap has loaded now. */
+  loaded?: string[];
+}
+
+export interface CatalogPackage {
+  name: string;
+  version: string;
+  description?: string;
+  date?: string;
+  weekly?: number;
+  author?: string;
+  keywords: string[];
+  npm?: string;
+  homepage?: string;
+  provider: boolean;
 }
 
 export interface AvailableModel {
