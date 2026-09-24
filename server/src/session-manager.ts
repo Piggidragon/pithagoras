@@ -740,6 +740,21 @@ class SessionManager extends EventEmitter {
       if (modelFailure) this.record(sessionId, "portal_notice", { text: modelFailure, error: true });
       if (msg.type === "extension_ui_request") this.noteExtensionUi(sessionId, msg);
       this.record(sessionId, msg.type, msg);
+      // What an extension says with notify — the answer to a command like
+      // /bg-update, or news from a job — is a line pi's TUI prints and then
+      // forgets. Here the request is live-only, so without this nothing showed
+      // and the command seemed to do nothing. Kept in the chat like the
+      // output of a builtin.
+      if (msg.type === "extension_ui_request" && msg.method === "notify") {
+        const text = String(msg.message ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim();
+        if (text) {
+          this.record(sessionId, "portal_notice", {
+            text,
+            ...(msg.notifyType === "error" ? { error: true } : msg.notifyType === "warning" ? { warning: true } : {}),
+            from: "extension",
+          });
+        }
+      }
       // Status follows pi's own run state rather than being guessed at the
       // moments the portal happens to know about. agent_start covers a run
       // nobody here asked for — a queued follow-up picked up on its own, a

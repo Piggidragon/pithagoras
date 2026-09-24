@@ -71,7 +71,7 @@ export type Item =
     }
   /** The conversation summarized to make room, while that runs and after. */
   | { kind: "compaction"; id: string; status: "running" | "done" | "failed"; tokensBefore?: number; summary?: string; since?: number; until?: number }
-  | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
+  | { kind: "notice"; id: string; text: string; tone: "info" | "warn" | "error" };
 
 /** Enough of a tool's output to read in the transcript; the whole of it is in the agent terminal. */
 const TOOL_OUTPUT_MAX = 60_000;
@@ -306,7 +306,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           kind: "notice",
           id: `n${ev.seq}`,
           text: String(p.text ?? ""),
-          tone: p.error ? "error" : "info",
+          tone: p.error ? "error" : p.warning ? "warn" : "info",
         });
         break;
 

@@ -1174,7 +1174,9 @@ export function Chat({
               className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs${enter} ${
                 item.tone === "error"
                   ? "bg-danger/10 text-danger"
-                  : "bg-raised/60 text-fg-muted"
+                  : item.tone === "warn"
+                    ? "bg-warn/10 text-warn"
+                    : "bg-raised/60 text-fg-muted"
               }`}
             >
               {item.text}
