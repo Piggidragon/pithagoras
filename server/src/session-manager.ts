@@ -1,4 +1,5 @@
 import { LiveEvents } from "./live-events.js";
+import { ModelErrors } from "./model-errors.js";
 import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -153,6 +154,8 @@ class SessionManager extends EventEmitter {
   private live = new Map<string, LiveSession>();
   private stopping = new WeakSet<PiClient>();
   private stream = new LiveEvents(appendEvent);
+  /** Model failures pi has not recovered from: see model-errors.ts. */
+  private modelErrors = new ModelErrors();
 
   liveSnapshot(sessionId: string) { return this.stream.snapshot(sessionId); }
   /** In-flight ask() per session, so messages in one chat are answered in turn. */
@@ -652,6 +655,8 @@ class SessionManager extends EventEmitter {
         // simply stays as it was.
       });
 
+    // A new pi process knows nothing of what the last one was retrying.
+    this.modelErrors.forget(sessionId);
     client.on("event", (msg) => {
       // A client stopped for an edit or a restart can still have a settle in
       // hand; it speaks for a conversation that is no longer this one.
@@ -675,6 +680,10 @@ class SessionManager extends EventEmitter {
         if (queue.steering.length || queue.followUp.length) this.piQueue.set(sessionId, queue);
         else this.piQueue.delete(sessionId);
       }
+      // A model failure reaches no other place in the stream. Noted before the
+      // event that settles it, so an ask() finishing on agent_settled has it.
+      const modelFailure = this.modelErrors.take(sessionId, msg);
+      if (modelFailure) this.record(sessionId, "portal_notice", { text: modelFailure, error: true });
       this.record(sessionId, msg.type, msg);
       // Status follows pi's own run state rather than being guessed at the
       // moments the portal happens to know about. agent_start covers a run
@@ -1353,8 +1362,9 @@ class SessionManager extends EventEmitter {
           relay(detail ? `⚙ ${name} · ${detail}` : `⚙ ${name}`);
           break;
         }
-        // Output from a builtin like /session or /compact. It is the answer as
-        // far as whoever asked is concerned, so it goes back like any other.
+        // Output from a builtin like /session or /compact, or a model failure
+        // pi gave up on. It is the answer as far as whoever asked is concerned,
+        // so it goes back like any other. One pi recovered from never gets here.
         case "portal_notice":
           flush();
           if (typeof payload.text === "string" && payload.text.trim()) {
