@@ -4,6 +4,7 @@ import { api, type PiConfig } from "../api";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { isEnter } from "../shortcuts";
+import { anchorLeft } from "../menu-anchor";
 
 /**
  * Context fill is the number that decides whether a long session keeps working,
@@ -188,6 +189,7 @@ export function ContextPill({
   /** pi refuses to compact a short session, so its reason has to be visible. */
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const pill = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open || keepRecent !== null) return;
@@ -256,8 +258,11 @@ export function ContextPill({
   ];
 
   return (
-    <div ref={ref} className="relative">
+    // Not positioned itself: the card is placed in the toolbar, over this pill
+    // (see menu-anchor.ts), rather than hanging leftwards off its right edge.
+    <div ref={ref}>
       <button
+        ref={pill}
         type="button"
         onClick={() => setOpen(!open)}
         title={`Context ${pct.toFixed(1)}% full`}
@@ -270,7 +275,7 @@ export function ContextPill({
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div style={{ left: anchorLeft(pill.current, 288) }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           <div className="flex items-baseline justify-between">
             <p className="text-sm text-fg-muted">Context</p>
             <p className={`text-sm tabular-nums ${t.text}`}>{pct.toFixed(1)}% full</p>

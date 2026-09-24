@@ -1,6 +1,7 @@
 import { LuBlocks } from "react-icons/lu";
 import { ToolSwitches } from "./ToolSwitches";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { anchorLeft } from "../menu-anchor";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
 import { ContextPill } from "./ContextPill";
@@ -12,6 +13,9 @@ import { ContextPill } from "./ContextPill";
  * having levels, and waiting for the catalogue meant the popover opened empty.
  * Replaced by whatever pi actually reports once that arrives.
  */
+/** The menus above the toolbar: w-72. */
+const MENU_WIDTH = 288;
+
 const DEFAULT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
@@ -190,6 +194,16 @@ export function ComposerBar({
   /** Where the handle sits mid-drag, before the change is sent. */
   const [dragEffort, setDragEffort] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  // Each menu opens over its own button; see menu-anchor.ts.
+  const pills = { model: useRef<HTMLButtonElement>(null), effort: useRef<HTMLButtonElement>(null), tools: useRef<HTMLButtonElement>(null) };
+  const [menuLeft, setMenuLeft] = useState<number | undefined>();
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => setMenuLeft(anchorLeft(pills[open].current, MENU_WIDTH));
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
 
   const load = () =>
     api
@@ -389,6 +403,7 @@ export function ComposerBar({
     <div ref={ref} className="composer-toolbar relative text-xs">
       <div className="composer-settings">
         <button
+          ref={pills.model}
           type="button"
           disabled={busy}
           onClick={() => setOpen(open === "model" ? null : "model")}
@@ -405,6 +420,7 @@ export function ComposerBar({
           </span>
         </button>
         <button
+          ref={pills.effort}
           type="button"
           disabled={busy || fixed}
           // On/off models flip right here; there is no scale to open a panel for.
@@ -431,6 +447,8 @@ export function ComposerBar({
             browser included — it brings tools like any other package, and a
             second switch of its own was two answers to one question. */}
         <button
+          ref={pills.tools}
+          type="button"
           onClick={() => setOpen(open === "tools" ? null : "tools")}
           className={`rounded-lg px-2 py-1 transition ${
             open === "tools" ? "bg-fg/10 text-fg" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
@@ -455,7 +473,7 @@ export function ComposerBar({
 
       {/* Tools */}
       {open === "tools" && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <p className="px-3 py-1 text-[11px] text-fg-subtle">Tools in this chat</p>
           <ToolSwitches sessionId={sessionId} />
         </div>
@@ -463,7 +481,7 @@ export function ComposerBar({
 
       {/* Models */}
       {open === "model" && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <div className="flex items-center gap-2 px-3 py-1">
             <p className="text-[11px] text-fg-subtle">Models</p>
             <button
@@ -536,7 +554,7 @@ export function ComposerBar({
 
       {/* Effort */}
       {open === "effort" && levels.length > 1 && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           {onOff ? (
             // Reached through /effort; the pill flips the same switch directly.
             <button
