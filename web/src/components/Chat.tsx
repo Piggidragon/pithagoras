@@ -277,7 +277,9 @@ export function Chat({
   };
   const scroller = useFollowBottom<HTMLDivElement>();
   const lastSpoken = useRef<string | null>(null);
-  const items = useMemo(() => buildTranscript(events), [events]);
+  // Interrupted or failed, the process is gone: nothing it started is still going.
+  const ended = session.status === "interrupted" || session.status === "error";
+  const items = useMemo(() => buildTranscript(events, { ended }), [events, ended]);
   // What arrived while the chat was open slides in; what was there when it
   // opened, or was loaded from further up, is simply there.
   const entered = useRef<{ session: string; ready: boolean; at: Map<string, number> }>({ session: session.id, ready: false, at: new Map() });

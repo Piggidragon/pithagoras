@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import {
   LuBrain,
   LuChevronRight,
+  LuCircleSlash,
   LuFilePen,
   LuFilePlus,
   LuFileSearch,
@@ -169,8 +170,9 @@ function useNow(on: boolean) {
  * How a shell command ended, read from what pi's bash tool appends to its
  * output: an exit code, a timeout, or a stop.
  */
-export function shellOutcome(status: ToolItem["status"], output: string): { label: string; tone: "ok" | "error" | "warn" } | undefined {
+export function shellOutcome(status: ToolItem["status"], output: string, interrupted?: boolean): { label: string; tone: "ok" | "error" | "warn" } | undefined {
   if (status === "running") return undefined;
+  if (interrupted) return { label: "interrupted", tone: "warn" };
   if (status === "done") return { label: "exit 0", tone: "ok" };
   const code = /Command exited with code (-?\d+)\s*$/.exec(output);
   if (code) return { label: `exit ${code[1]}`, tone: "error" };
@@ -203,16 +205,22 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
   const elapsed = running && item.since ? Math.max(0, Math.floor((now - item.since) / 1000)) : undefined;
   // A command given a timeout has an end to measure against; the ring fills towards it.
   const timeout = typeof args?.timeout === "number" && args.timeout > 0 ? args.timeout : undefined;
-  const outcome = shell ? shellOutcome(item.status, output) : undefined;
+  const outcome = shell
+    ? shellOutcome(item.status, output, item.interrupted)
+    : item.interrupted
+      ? ({ label: "interrupted", tone: "warn" } as const)
+      : undefined;
   const lines = shell ? lineCount(output) : 0;
   const lastOutput = shell && running && !open ? lastLine(output) : "";
 
   return (
-    <div className={`chat-tool is-${item.status} ${open ? "is-open" : ""}`}>
+    <div className={`chat-tool is-${item.status} ${item.interrupted ? "is-interrupted" : ""} ${open ? "is-open" : ""}`}>
       <button type="button" className="chat-tool-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className="chat-tool-icon" aria-hidden>
           {running ? (
             <Ring value={timeout && elapsed !== undefined ? elapsed / timeout : undefined} />
+          ) : item.interrupted ? (
+            <LuCircleSlash className="text-warn" />
           ) : item.status === "error" ? (
             <LuX className="text-danger" />
           ) : (
@@ -253,10 +261,10 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
           {output ? (
             <div className="chat-tool-output-wrap">
               <div className="chat-tool-label">
-                {item.status === "error" ? "Error" : "Output"}
+                {item.status === "error" && !item.interrupted ? "Error" : "Output"}
                 {clipped && <span className="chat-faint"> · last {tokens(INLINE_OUTPUT)} characters</span>}
               </div>
-              <pre className={`chat-tool-output ${item.status === "error" ? "is-error" : ""}`}>{clipped ? output.slice(-INLINE_OUTPUT) : output}</pre>
+              <pre className={`chat-tool-output ${item.status === "error" && !item.interrupted ? "is-error" : ""}`}>{clipped ? output.slice(-INLINE_OUTPUT) : output}</pre>
             </div>
           ) : (
             item.status === "running" && <div className="chat-tool-label"><Shimmer>Waiting for output…</Shimmer></div>

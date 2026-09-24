@@ -19,9 +19,11 @@ export function installTooltips(): void {
   let owner: HTMLElement | null = null;
   let text = "";
   let timer = 0;
+  let watch = 0;
 
   const release = () => {
     window.clearTimeout(timer);
+    window.clearInterval(watch);
     // Put back only if nothing set a new one meanwhile.
     if (owner && text && !owner.hasAttribute("title")) owner.setAttribute("title", text);
     owner = null;
@@ -31,6 +33,10 @@ export function installTooltips(): void {
 
   const place = () => {
     if (!owner) return;
+    // Gone from the page while the pointer was on it — a button that goes when
+    // a run starts, a row that was deleted. No pointerout comes for it, and its
+    // box is all zeros: the tip would appear in the corner and stay there.
+    if (!owner.isConnected) return release();
     const r = owner.getBoundingClientRect();
     tip.textContent = text;
     tip.style.left = "0px";
@@ -43,6 +49,21 @@ export function installTooltips(): void {
     tip.style.top = `${top}px`;
     tip.dataset.side = below ? "below" : "above";
     tip.classList.add("is-shown");
+    window.clearInterval(watch);
+    watch = window.setInterval(() => {
+      if (!owner) return;
+      if (!owner.isConnected) return release();
+      // React gave it a new title while it was lifted ("Copy" to "Copied"):
+      // lifted again, and said instead, or the browser's own would show too.
+      const next = owner.getAttribute("title")?.trim();
+      if (next) {
+        owner.removeAttribute("title");
+        if (next !== text) {
+          text = next;
+          place();
+        }
+      }
+    }, 250);
   };
 
   document.addEventListener(

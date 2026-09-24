@@ -111,6 +111,8 @@ async function probe(url: URL): Promise<any> {
  * the server does not say — a plain llama-server has one model, always loaded.
  */
 export async function modelLoaded(upstream: string, model: string): Promise<boolean | undefined> {
+  const quietUntil = silent.get(upstream);
+  if (quietUntil !== undefined && quietUntil > Date.now()) return undefined;
   // llama-server's router: every preset, with its status.
   const router = await probe(new URL("/models", upstream));
   const entry = Array.isArray(router?.data) ? router.data.find((m: any) => m?.id === model) : undefined;
@@ -121,8 +123,19 @@ export async function modelLoaded(upstream: string, model: string): Promise<bool
   if (Array.isArray(swap?.running)) {
     return swap.running.some((m: any) => m?.model === model && (m.state === undefined || m.state === "ready"));
   }
+  // Neither: a plain llama-server, which has its one model loaded and lists
+  // it without a status. Asking it twice more on every request would learn
+  // nothing new, so it is left alone for a while — a router put in front of
+  // it later is noticed after that. A router that simply does not know this
+  // model says so with statuses on the others, and is asked again.
+  const routerSpeaks = Array.isArray(router?.data) && router.data.some((m: any) => m?.status !== undefined);
+  if (!routerSpeaks) silent.set(upstream, Date.now() + SILENT_MS);
   return undefined;
 }
+
+/** Upstreams that say nothing about loading, and until when they are not asked. */
+const silent = new Map<string, number>();
+const SILENT_MS = 10 * 60_000;
 
 function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
   const url = req.url ?? "";

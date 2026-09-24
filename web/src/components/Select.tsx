@@ -185,6 +185,9 @@ export function Select<T extends string | number = string>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
+        // Focus stays on the button while the list is open: this is how a
+        // screen reader hears which option the arrows are on.
+        aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
         aria-label={ariaLabel}
         disabled={disabled}
         onClick={() => (open ? hide() : show())}
@@ -215,6 +218,7 @@ export function Select<T extends string | number = string>({
             {options.map((o, i) => (
               <div
                 key={String(o.value)}
+                id={`${listId}-${i}`}
                 data-index={i}
                 role="option"
                 aria-selected={o.value === value}

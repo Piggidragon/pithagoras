@@ -315,9 +315,20 @@ function SessionItem({
 }) {
   const [renaming, setRenaming] = useState(false);
   return (
+    // A row with buttons in it, so not a button itself: reachable with Tab and
+    // opened with Enter all the same, which a bare div with a click was not.
     <div
       onClick={onSelect}
-      className={`group mb-0.5 cursor-pointer rounded-lg px-2.5 py-1.5 transition ${
+      tabIndex={0}
+      aria-current={active ? "page" : undefined}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget || renaming) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`group mb-0.5 cursor-pointer rounded-lg px-2.5 py-1.5 transition focus-visible:outline-offset-0 ${
         active ? "bg-fg/[0.07]" : "hover:bg-fg/5"
       }`}
     >
@@ -350,7 +361,7 @@ function SessionItem({
         )}
 
         {/* Without a mouse there is no hover: the open chat's row keeps them. */}
-        <div className={`ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex ${active ? "[@media(hover:none)]:flex" : ""}`}>
+        <div className={`ml-auto hidden shrink-0 items-center gap-0.5 group-focus-within:flex group-hover:flex ${active ? "[@media(hover:none)]:flex" : ""}`}>
           <button
             onClick={(e) => {
               e.stopPropagation();

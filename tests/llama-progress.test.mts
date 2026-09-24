@@ -31,3 +31,19 @@ test('a model that is not loaded yet is reported as loading, then ready once it 
   assert.equal(await modelLoaded(origin,'other'),undefined);
  }finally{forgetSession('test-load');upstream.closeAllConnections();upstream.close();}
 });
+test('a plain llama-server that reports no load state is not asked again on every request',async()=>{
+ let asked=0;
+ const upstream=http.createServer((req,res)=>{
+  asked++;
+  if(req.url==='/models'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[{id:'one'}]}));return;}
+  res.writeHead(404).end();
+ });
+ upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const origin=`http://127.0.0.1:${(upstream.address() as any).port}`;
+ try{
+  assert.equal(await modelLoaded(origin,'one'),undefined);
+  assert.equal(asked,2,'the router and llama-swap routes, once');
+  assert.equal(await modelLoaded(origin,'one'),undefined);
+  assert.equal(asked,2);
+ }finally{upstream.closeAllConnections();upstream.close();}
+});

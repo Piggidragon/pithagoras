@@ -60,6 +60,8 @@ export type Item =
       picture?: ShownPicture;
       args?: unknown;
       output?: string;
+      /** The run ended with this call still open: it never said how it came out. */
+      interrupted?: boolean;
       since?: number;
       until?: number;
     }
@@ -105,7 +107,7 @@ function userItem(seq: number, p: any): UserItem {
  * transcript — a task that ran fine shouldn't look broken because of one
  * unexpected field.
  */
-export function buildTranscript(events: PortalEvent[]): Item[] {
+export function buildTranscript(events: PortalEvent[], options: { ended?: boolean } = {}): Item[] {
   const items: Item[] = [];
   let audioReply = false;
   let current: Extract<Item, { kind: "assistant" }> | null = null;
@@ -134,6 +136,19 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
     if (current) {
       current.done = true;
       current = null;
+    }
+  };
+
+  // The run is over, so nothing in it is still going. A call whose end never
+  // came — the process died, the portal restarted, a stop cut it short — would
+  // otherwise spin for good; it says it was cut off instead.
+  const settle = () => {
+    closeCurrent();
+    for (const it of items) {
+      if (it.kind === "tool" && it.status === "running") {
+        it.status = "error";
+        it.interrupted = true;
+      } else if (it.kind === "compaction" && it.status === "running") it.status = "failed";
     }
   };
 
@@ -292,16 +307,21 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         if (p.status === "idle" && p.aborted) {
           items.push({ kind: "notice", id: `n${ev.seq}`, text: "Aborted", tone: "info" });
         }
+        if (typeof p.status === "string" && p.status !== "running") settle();
         break;
 
       case "agent_end":
-        closeCurrent();
+        settle();
         break;
 
       default:
         break;
     }
   }
+
+  // The caller knows the run is over even where no event says so: a portal
+  // restarted mid-run records nothing.
+  if (options.ended) settle();
 
   // Anything still open belongs to a run in flight, and what is waiting to go
   // into it comes after.
