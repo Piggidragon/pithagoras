@@ -44,3 +44,18 @@ test('an interrupted shell command says so rather than "failed"', () => {
   assert.deepEqual(shellOutcome('error', ''), { label: 'failed', tone: 'error' });
 });
 
+test('a tool is pictured from the words in its name, whichever extension it comes from', async () => {
+  const { toolIconKind } = await import('../web/src/components/ChatActivity.tsx');
+  const kinds = Object.fromEntries(['Bash', 'brave_web_search', 'webFetch', 'tavily_search', 'github.list_issues', 'read', 'apply_patch', 'get_details', 'call_tools', 'mystery'].map((n) => [n, toolIconKind(n)]));
+  assert.deepEqual(kinds, {
+    Bash: 'shell', brave_web_search: 'web', webFetch: 'web', tavily_search: 'search', 'github.list_issues': 'find',
+    read: 'read', apply_patch: 'edit', get_details: 'tool', call_tools: 'tool', mystery: 'tool',
+  });
+});
+
+test('a call through the MCP adapter is named by the tool it asked for', async () => {
+  const { toolName } = await import('../web/src/tool-activity.ts');
+  assert.equal(toolName('mcp', { tool: 'web_search_exa', args: { query: 'x' } }), 'web_search_exa');
+  assert.equal(toolName('mcp', { server: 'exa' }), 'mcp');
+  assert.equal(toolName('web_search', { query: 'x' }), 'web_search');
+});

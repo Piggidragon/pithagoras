@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { PortalEvent } from '../api';
 import { useFollowBottom } from '../use-follow-bottom';
-
-export const SHELL_TOOL = /^(bash|shell|terminal|exec_command)$/;
+import { SHELL_TOOL } from '../tool-activity';
 
 export function terminalRuns(events: PortalEvent[], limit = 6, maxOutput = 20000) {
   const runs: { id: string; command: string; output: string; running: boolean; error: boolean }[] = [];

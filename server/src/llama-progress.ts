@@ -224,9 +224,9 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
 
 /** Loopback only: this exists for the pi process in front of it, nobody else. */
 export function startLlamaProxy(onProgress: OnProgress, onModel?: OnModel): void {
-  if (server) return;
   notify = onProgress;
   if (onModel) notifyModel = onModel;
+  if (server) return;
   server = http.createServer(handle);
   server.listen(0, "127.0.0.1", () => {
     port = (server!.address() as AddressInfo).port;

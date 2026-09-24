@@ -47,3 +47,19 @@ test('a plain llama-server that reports no load state is not asked again on ever
   assert.equal(asked,2);
  }finally{upstream.closeAllConnections();upstream.close();}
 });
+test('a load that fails before a byte comes back still ends, so the chat does not wait on it for ever',async()=>{
+ const upstream=http.createServer((req,res)=>{
+  if(req.url==='/models'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[{id:'gone',status:{value:'unloaded'}}]}));return;}
+  req.resume();req.on('end',()=>setTimeout(()=>res.destroy(),150));
+ });
+ upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const models:any[]=[];startLlamaProxy(()=>{},(id,load)=>models.push({id,...load}));
+ await new Promise(resolve=>setTimeout(resolve,20));
+ const origin=`http://127.0.0.1:${(upstream.address() as any).port}`;
+ try{
+  const base=proxyBaseUrl('test-fail',origin)!;
+  const r=await fetch(base+'/v1/chat/completions',{method:'POST',body:JSON.stringify({stream:true,model:'gone'})});
+  assert.equal(r.status,502);await r.text();
+  assert.deepEqual(models.filter(m=>m.id==='test-fail').map(m=>m.state),['loading','ready']);
+ }finally{forgetSession('test-fail');upstream.closeAllConnections();upstream.close();}
+});

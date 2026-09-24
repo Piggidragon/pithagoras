@@ -17,8 +17,9 @@ import {
   LuWrench,
   LuX,
 } from "react-icons/lu";
+import type { IconType } from "react-icons";
 import type { Activity, Item } from "../transcript";
-import { SHELL_TOOL } from "./VoiceTerminal";
+import { SHELL_TOOL, toolName } from "../tool-activity";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
@@ -159,18 +160,42 @@ function lastLines(text: string, n = 3): string[] {
     .slice(-n);
 }
 
-/** What a tool is, as a picture. Guessed from its name — pi's tools and whatever an extension adds. */
+/**
+ * What a tool is, as a picture. Guessed from the words in its name — pi's tools
+ * and whatever an extension adds — so `brave_web_search`, `webFetch` and
+ * `github.list_issues` each find theirs, and anything else gets a wrench.
+ */
+export function toolIconKind(name: string): string {
+  if (SHELL_TOOL.test(name)) return "shell";
+  const words = new Set(name.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  const has = (...w: string[]) => w.some((x) => words.has(x));
+  if (has("web", "browser", "fetch", "http", "url", "navigate", "scrape", "crawl")) return "web";
+  if (has("edit", "multiedit", "patch", "replace")) return "edit";
+  if (has("write", "create")) return "write";
+  if (has("grep", "search", "query", "lookup")) return "search";
+  if (has("find", "glob", "ls", "list")) return "find";
+  if (has("read", "view", "cat", "open")) return "read";
+  if (has("image", "picture", "screenshot", "photo")) return "image";
+  if (has("todo", "todos", "task", "tasks", "plan")) return "todo";
+  return "tool";
+}
+
+const TOOL_ICONS: Record<string, IconType> = {
+  shell: LuSquareTerminal,
+  web: LuGlobe,
+  edit: LuFilePen,
+  write: LuFilePlus,
+  search: LuSearch,
+  find: LuFileSearch,
+  read: LuFileText,
+  image: LuImage,
+  todo: LuListTodo,
+  tool: LuWrench,
+};
+
 function ToolIcon({ name }: { name: string }) {
-  const n = name.toLowerCase();
-  if (SHELL_TOOL.test(n)) return <LuSquareTerminal />;
-  if (/^(edit|multi_?edit|patch|apply_patch)/.test(n)) return <LuFilePen />;
-  if (/^(write|create)/.test(n)) return <LuFilePlus />;
-  if (/^(read|view|cat|open)/.test(n)) return <LuFileText />;
-  if (/(grep|find|glob|search|ls|list)/.test(n) && !/web/.test(n)) return /grep|search/.test(n) ? <LuSearch /> : <LuFileSearch />;
-  if (/(web|browser|fetch|http|url|navigate)/.test(n)) return <LuGlobe />;
-  if (/(image|picture|screenshot)/.test(n)) return <LuImage />;
-  if (/(todo|task|plan)/.test(n)) return <LuListTodo />;
-  return <LuWrench />;
+  const Icon = TOOL_ICONS[toolIconKind(name)];
+  return <Icon />;
 }
 
 /** A clock that ticks once a second while `on`. */
@@ -213,15 +238,20 @@ const INLINE_OUTPUT = 6000;
  */
 export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTerminal?: (callId: string) => void }) {
   const [open, setOpen] = useState(false);
-  const shell = SHELL_TOOL.test(item.name);
+  // Whatever extension it came from: nothing below is keyed to one tool but
+  // the shell, which is shown as a terminal would show it.
+  const name = toolName(item.name, item.args);
+  const shell = SHELL_TOOL.test(name);
   const args = item.args && typeof item.args === "object" ? (item.args as Record<string, unknown>) : undefined;
   const command = shell ? String(args?.command ?? args?.cmd ?? (typeof item.args === "string" ? item.args : "")) : "";
   const took = item.since && item.until ? item.until - item.since : undefined;
   const output = item.output?.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "") ?? "";
   const clipped = output.length > INLINE_OUTPUT;
   const running = item.status === "running";
-  const now = useNow(running && shell);
+  const now = useNow(running);
   const elapsed = running && item.since ? Math.max(0, Math.floor((now - item.since) / 1000)) : undefined;
+  // A quick call would only flash "0 s"; a command is worth timing from the start.
+  const timed = elapsed !== undefined && (shell || elapsed >= 2);
   // A command given a timeout has an end to measure against; the ring fills towards it.
   const timeout = typeof args?.timeout === "number" && args.timeout > 0 ? args.timeout : undefined;
   const outcome = shell
@@ -230,7 +260,8 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
       ? ({ label: "interrupted", tone: "warn" } as const)
       : undefined;
   const lines = shell ? lineCount(output) : 0;
-  const recent = shell && running && !open ? lastLines(output) : [];
+  // Any tool that streams what it is doing shows its newest lines while it runs.
+  const recent = running && !open ? lastLines(output) : [];
 
   return (
     <div className={`chat-tool is-${item.status} ${item.interrupted ? "is-interrupted" : ""} ${open ? "is-open" : ""}`}>
@@ -243,14 +274,14 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
           ) : item.status === "error" ? (
             <LuX className="text-danger" />
           ) : (
-            <ToolIcon name={item.name} />
+            <ToolIcon name={name} />
           )}
         </span>
-        <span className="chat-tool-name">{running ? <Shimmer>{item.name}</Shimmer> : item.name}</span>
+        <span className="chat-tool-name" title={name !== item.name ? `${item.name} → ${name}` : undefined}>{running ? <Shimmer>{name}</Shimmer> : name}</span>
         {outcome && <span className={`chat-tool-badge is-${outcome.tone}`}>{outcome.label}</span>}
-        {shell && running && elapsed !== undefined && (
+        {timed && (
           <span className="chat-faint tabular-nums">
-            {formatElapsed(elapsed)}
+            {formatElapsed(elapsed!)}
             {timeout ? ` / ${formatElapsed(timeout)}` : ""}
           </span>
         )}
