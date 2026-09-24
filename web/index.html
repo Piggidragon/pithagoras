@@ -7,12 +7,21 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/logo-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Installable: on a phone's home screen it opens as an app of its own. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0a0c" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fafafb" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Pithagoras" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Pithagoras</title>
     <!--
       Runs before anything paints. Without it the page renders in the default
       theme and then corrects itself — a white flash on every load in dark mode.
     -->
     <script src="/theme-init.js"></script>
+    <script src="/register-sw.js" defer></script>
   </head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
 </html>
