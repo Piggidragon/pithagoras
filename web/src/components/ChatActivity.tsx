@@ -380,6 +380,7 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
   // `processed` already counts the cached prefix.
   const percent = p && p.total > 0 ? Math.round((Math.min(p.total, p.processed) / p.total) * 100) : undefined;
 
+  const detail = p ? `${p.processed.toLocaleString()} / ${p.total.toLocaleString()} tokens${p.cache ? ` · ${p.cache.toLocaleString()} from cache` : ""}` : undefined;
   let kind: string;
   let icon: ReactNode;
   let text: ReactNode;
@@ -407,7 +408,7 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
         </span>
       );
       extra = percent !== undefined ? (
-        <span className="chat-status-percent" title={p ? `${p.processed.toLocaleString()} / ${p.total.toLocaleString()} tokens${p.cache ? ` · ${p.cache.toLocaleString()} from cache` : ""}` : undefined}>
+        <span className="chat-status-percent" title={detail}>
           {percent}%
         </span>
       ) : null;
@@ -442,7 +443,15 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
 
   return (
     <div className="chat-status" role="status" aria-live="polite">
-      <span key={kind} className="chat-status-pill">
+      {/* Reading the prompt has a measure, and says it as one: a screen reader
+          hears how far it has got, not only that something is going on. */}
+      <span
+        key={kind}
+        className="chat-status-pill"
+        {...(kind === "prefill" && percent !== undefined
+          ? { role: "progressbar", "aria-label": "Prompt processing", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-valuetext": `${percent}% — ${detail}` }
+          : {})}
+      >
         <span className="chat-status-icon">{icon}</span>
         {text}
         {extra}

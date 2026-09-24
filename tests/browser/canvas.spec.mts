@@ -44,11 +44,12 @@ test('canvas streams on the stage, retains a partial draft and supports inline e
  await page.getByTestId('workspace').screenshot({path:'/tmp/pithagoras-canvas.png'});
  await page.setViewportSize({width:390,height:844});
  await page.getByTestId('workspace').screenshot({path:'/tmp/pithagoras-canvas-mobile.png'});
- const box=await page.getByLabel('Session canvas workspace').boundingBox();expect(box!.x).toBeGreaterThanOrEqual(0);expect(box!.x+box!.width).toBeLessThanOrEqual(390);
+ // Its width animates to the new viewport: measured once it has got there.
+ await expect.poll(async()=>{const box=await page.getByLabel('Session canvas workspace').boundingBox();return box!.x>=0&&box!.x+box!.width<=390;}).toBe(true);
  await page.getByLabel('Delete canvas').click();await page.getByRole('button',{name:'Delete',exact:true}).click();
  await expect(page.getByText('A place for your documents')).toBeVisible();
  await page.evaluate(()=>(window as any).canvasStream.onmessage({data:JSON.stringify({type:'focus',canvas:{id:'read-doc',title:'Document being read',content:'The AI is reading this document.',revision:1,status:'saved',active_call:null}})}));
- await expect(page.getByLabel('Select canvas')).toHaveValue('read-doc');
+ await expect(page.getByLabel('Select canvas')).toHaveText('Document being read');
  await expect(page.locator('.canvas-document')).toContainText('The AI is reading this document.');expect(failures).toEqual([]);
 });
 
@@ -61,7 +62,7 @@ test('saved canvas list loads even when its live stream is disconnected',async({
  await page.addInitScript(()=>{(window as any).EventSource=class{close(){}};});
  await page.goto('/tests/voice.html');
  await page.getByLabel('Session canvases',{exact:true}).click();
- await expect(page.getByLabel('Select canvas')).toHaveValue('saved');
+ await expect(page.getByLabel('Select canvas')).toHaveText('Saved document');
  await expect(page.locator('.canvas-document')).toContainText('Persisted words');
  await expect(page.getByText('Reconnecting to live canvas…')).toBeVisible();
 });

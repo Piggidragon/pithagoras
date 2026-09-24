@@ -3,6 +3,7 @@ import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { api, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
@@ -398,6 +399,8 @@ function Shell({
             Lost the connection to the portal — trying again. What is shown may be out of date.
           </div>
         )}
+        {/* One page failing to draw takes down that page, not the portal. */}
+        <ErrorBoundary resetKey={`${view}:${sessionId ?? ""}`}>
         {view === "sessions" ? (
           <SessionsPage
             sessions={sessions}
@@ -489,6 +492,7 @@ function Shell({
         ) : (
           <EmptyState hasSessions={sessions.length > 0} />
         )}
+        </ErrorBoundary>
       </main>
 
       {active && uiQueue[0] && (

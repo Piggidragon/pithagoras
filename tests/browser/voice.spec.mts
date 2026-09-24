@@ -323,9 +323,9 @@ test('prompt and compaction progress remain visible in chat and voice',async({pa
  await page.route('**/voice/speech',r=>r.fulfill({body:sample,contentType:'audio/wav'}));
  await page.goto('/tests/voice.html');
  await page.getByRole('button',{name:'Show prefill',exact:true}).click();
- await expect(page.getByRole('progressbar',{name:'Prompt processing'})).toHaveCount(0);
+ // In the chat it is the status pill, there at once like the other phases rather than after two seconds.
  await expect(page.getByRole('progressbar',{name:'Prompt processing'})).toHaveAttribute('aria-valuenow','40');
- await expect(page.getByText('16,000 / 40,000 tokens · 8,000 cached')).toBeVisible();
+ await expect(page.getByRole('progressbar',{name:'Prompt processing'})).toHaveAttribute('aria-valuetext','40% — 16,000 / 40,000 tokens · 8,000 from cache');
  await page.getByRole('button',{name:'Turn on hands-free voice'}).click();
  await expect(page.locator('.voice-stage').getByRole('progressbar',{name:'Prompt processing'})).toBeVisible({timeout:25000});
  await page.getByRole('button',{name:'Start compaction',exact:true}).click();
@@ -337,14 +337,16 @@ test('prompt and compaction progress remain visible in chat and voice',async({pa
  await page.getByRole('button',{name:'End voice mode'}).click();
 });
 
-test('composer switches stop to send for a follow-up and canvas lives in the header',async({page})=>{
+test('composer offers send beside stop for a follow-up and canvas lives in the header',async({page})=>{
  await page.goto('/tests/voice.html');
  const input=page.locator('textarea').first();
  await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
  await page.getByRole('button',{name:'Stream reply',exact:true}).click();
  await expect(page.getByRole('button',{name:'Stop generation',exact:true})).toBeVisible();
  await input.fill('Change direction');
- await expect(page.getByRole('button',{name:'Stop generation',exact:true})).toHaveCount(0);
+ // Stop stays while a follow-up is written: steering and stopping are both still open.
+ await expect(page.getByRole('button',{name:'Stop generation',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'Send message',exact:true}).click();
  await expect(page.getByTestId('sent')).toHaveText('1');
  await expect(page.getByRole('button',{name:'Stop generation',exact:true})).toBeVisible();
