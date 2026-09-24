@@ -1106,7 +1106,10 @@ const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.
 if (existsSync(webDist)) {
   app.use(portalSecurityHeaders);
   app.use(express.static(webDist));
-  app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
+  // A built file that is not there is a 404, not the page: a tab from before a
+  // deploy asking for a chunk the deploy removed would otherwise be handed
+  // HTML under a script's name, and the service worker would keep it.
+  app.get(/^(?!\/api|\/assets\/).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
 }
 
 /**

@@ -132,9 +132,9 @@ export function Sidebar({
 
       <div className="flex items-center gap-2 pl-3 pr-12 pb-3 pt-4">
         <img
-          src="/logo-192.png"
+          src="/icon-192.png"
           alt=""
-          className="h-6 w-6 shrink-0 object-contain"
+          className="h-6 w-6 shrink-0 object-contain p-[5px]"
           draggable={false}
         />
         <h1 className="text-sm font-semibold tracking-tight text-fg">Pithagoras</h1>

@@ -5,8 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/logo-192.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Installable: on a phone's home screen it opens as an app of its own. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Set to the theme in effect by theme-init.js, and again on every switch. -->
+    <meta name="theme-color" content="#0a0a0c" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Pithagoras" />
+    <!-- iOS ignores theme-color here: a black bar over the dark default rather
+         than a white one. theme-init.js asks for the light bar in light mode. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <title>Pithagoras</title>
     <!--
       Runs before anything paints. Without it the page renders in the default

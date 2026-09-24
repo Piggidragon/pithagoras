@@ -59,7 +59,7 @@ export function notifyIfAway(title: string, body: string, tag: string, onOpen: (
   if (notifyState() !== "on" || !away()) return;
   try {
     // One per chat: a second replaces the first instead of stacking.
-    const n = new Notification(title, { body, tag, icon: "/logo-192.png" });
+    const n = new Notification(title, { body, tag, icon: "/icon-192.png" });
     n.onclick = () => {
       window.focus();
       onOpen();
