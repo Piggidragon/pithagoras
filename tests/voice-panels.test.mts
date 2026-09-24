@@ -35,3 +35,16 @@ test('files and pictures take the side first, and the middle when the side is ta
   assert.deepEqual(placeWindows({ ...none, conversation: true, terminal: true }), { main: 'conversation', side: 'terminal' });
   assert.deepEqual(placeWindows({ ...none, conversation: true, pictures: true }), { main: 'pictures', side: 'conversation' });
 });
+
+test('the orb stands in the widest gap the windows leave, when it fits', async () => {
+  const { freeStrip } = await import('../web/src/voice-windows.ts');
+  const stage = { left: 100, right: 1100 };
+  // Two windows with 400px between them: the orb goes in the middle of it.
+  assert.deepEqual(freeStrip(stage, [{ left: 100, right: 400 }, { left: 800, right: 1100 }]), { center: 600, width: 400 });
+  // One window at the right: the gap is everything to its left.
+  assert.deepEqual(freeStrip(stage, [{ left: 600, right: 1100 }]), { center: 350, width: 500 });
+  // Too narrow anywhere: back to the dock.
+  assert.equal(freeStrip(stage, [{ left: 100, right: 600 }, { left: 700, right: 1100 }]), null);
+  // Windows that overlap, or reach past the stage, are taken as they cover it.
+  assert.deepEqual(freeStrip(stage, [{ left: 0, right: 300 }, { left: 250, right: 450 }, { left: 900, right: 1300 }]), { center: 675, width: 450 });
+});

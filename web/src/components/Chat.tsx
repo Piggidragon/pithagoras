@@ -1455,7 +1455,7 @@ export function Chat({
                       </button>
                     )}
                     <button
-                      onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? void closeFiles() : setTerminal(false))}
+                      onClick={() => (kind === "browser" ? (exitFullscreen(browserPane.current), setWatching(false)) : kind === "files" ? void closeFiles() : setTerminal(false))}
                       title="Collapse"
                       aria-label={`Close the ${kind === "browser" ? "browser" : kind === "files" ? "files" : "terminal"}`}
                       className={`${kind === "browser" ? "" : "ml-auto "}rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg`}
@@ -1678,4 +1678,9 @@ function MessageEditor({
       </div>
     </div>
   );
+}
+
+/** Collapsing a pane that is fullscreen hands the screen back too, or the page would stay fullscreen with nothing in it. */
+function exitFullscreen(el: Element | null) {
+  if (el && document.fullscreenElement === el) void document.exitFullscreen().catch(() => {});
 }

@@ -6,12 +6,12 @@ import { latestFileActivity, type FileActivity } from "../file-activity";
 import { VoiceToolActivity } from "./VoiceToolActivity";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject } from "react";
 import { buildTranscript, type Item } from "../transcript";
-import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinus, LuTerminal, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
+import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuTerminal, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
 import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
 import { ACTIONS, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
-import { placeWindows } from "../voice-windows";
+import { freeStrip, placeWindows } from "../voice-windows";
 import { ResizeHandles, clearSize } from "./ResizeHandles";
 import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
 import type { ToolCall } from "../tool-activity";
@@ -117,7 +117,13 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   steer: boolean; onSteer: (steer: boolean) => void;
   ptt: boolean; onPtt: (ptt: boolean) => void; holding: boolean; onHold: (down: boolean) => void;
 }) {
-  const end = useRef<HTMLButtonElement>(null), browser = useRef<HTMLElement>(null);
+  const end = useRef<HTMLButtonElement>(null), browser = useRef<HTMLElement>(null), stage = useRef<HTMLElement>(null);
+  // The browser made as large as the stage allows. Not the browser's own
+  // fullscreen: that took the whole of the person's browser with it, and
+  // closing the window here did not give it back.
+  const [browserMax, setBrowserMax] = useState(false);
+  // Where the orb stands once a window has been sized by hand: in a gap, or in its dock.
+  const [presence, setPresence] = useState<"free" | "dock" | null>(null);
   const activity = useRef(browserActivity), terminalSeen = useRef(terminalActivity);
   const terminal = useRef<HTMLElement>(null);
   const [shown, setShown] = useState(false), [terminalShown, setTerminalShown] = useState(false);
@@ -242,7 +248,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     "voice.ptt": () => { onPtt(!ptt); },
     "voice.sounds": () => { onSounds(); },
   };
-  const keys = useRef({ bindings, actions, ptt, onHold }); keys.current = { bindings, actions, ptt, onHold };
+  const keys = useRef({ bindings, actions, ptt, onHold, browserMax }); keys.current = { bindings, actions, ptt, onHold, browserMax };
   useEffect(() => {
     // In the capture phase, before a focused button: holding Space for
     // push-to-talk would otherwise also press whatever button has focus.
@@ -251,6 +257,11 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       // A dialog, or the voice settings card closing on Escape, has the key.
       if (e.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
       if (e.code === "Escape" && document.querySelector(".voice-settings")) return;
+      // Escape gives a maximized browser its place back before it stops anything.
+      if (e.code === "Escape" && keys.current.browserMax && !editing(e.target)) {
+        e.preventDefault(); e.stopPropagation(); setBrowserMax(false);
+        return;
+      }
       const typing = editing(e.target);
       if (ptt && matches(bindings["voice.hold"], e) && !(typing && !e.ctrlKey && !e.altKey && !e.metaKey)) {
         e.preventDefault(); e.stopPropagation();
@@ -296,7 +307,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     return () => { cancelled = true; };
   }, [browserActivity, onCue]);
   const open = () => { setLoaded(true); setShown(true); onCue('focus'); };
-  const minimize = () => { setShown(false); end.current?.focus({ preventScroll: true }); };
+  const minimize = () => { setShown(false); setBrowserMax(false); end.current?.focus({ preventScroll: true }); };
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
   const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
@@ -308,13 +319,51 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   useEffect(() => {
     for (const el of [browser.current, terminal.current, filesWindow.current, picturesWindow.current, conversationWindow.current]) clearSize(el);
   }, [arrangement]);
+  // Once a window has been sized by hand, the orb goes where there is room
+  // for it: into a gap wide enough between the windows, as it stands with
+  // nothing open, or back into its dock when the windows close the gap. It
+  // follows as an edge is dragged. Set on the element rather than through
+  // state, so that a drag does not draw the whole stage again at every move.
+  useEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    let frame = 0;
+    const place = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const windows = [browser, terminal, filesWindow, picturesWindow, conversationWindow]
+          .map(r => r.current).filter((w): w is HTMLElement => !!w?.classList.contains("is-open"));
+        const canvas = el.closest(".session-workspace")?.querySelector<HTMLElement>(".session-canvases.is-open .canvas-panel");
+        if (canvas) windows.push(canvas);
+        const box = el.getBoundingClientRect();
+        const wide = matchMedia("(min-width: 601px)").matches;
+        const sized = wide && !browserMax && windows.some(w => w.dataset.sized);
+        const strip = sized ? freeStrip(box, windows.map(w => w.getBoundingClientRect())) : null;
+        setPresence(strip ? "free" : sized ? "dock" : null);
+        if (!strip) return;
+        el.style.setProperty("--free-x", `${Math.round(strip.center - box.left)}px`);
+        el.style.setProperty("--free-width", `${Math.round(strip.width)}px`);
+      });
+    };
+    place();
+    document.addEventListener("panel-resize", place);
+    el.addEventListener("transitionend", place);
+    const observer = new ResizeObserver(place);
+    observer.observe(el);
+    return () => { cancelAnimationFrame(frame); document.removeEventListener("panel-resize", place); el.removeEventListener("transitionend", place); observer.disconnect(); };
+  }, [arrangement, browserMax]);
   const drop = (e: DragEvent) => {
     if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
     // Portaled from inside Chat's form, it would bubble on to the form's own drop.
     e.preventDefault(); e.stopPropagation(); setDropping(false);
     add.current([...e.dataTransfer.files]);
   };
-  return <section className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen)} data-mode={mode}
+  const maximized = browserMax && shown;
+  const panels = Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen);
+  // One window has the orb beside it — unless it was made too wide for that,
+  // when the orb goes to the dock that two windows have it in.
+  const docked = maximized || (presence === "dock" && panels === 1);
+  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${docked ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={maximized ? "max" : docked ? "dock" : panels} data-presence={presence === "free" ? "free" : undefined} data-mode={mode}
     onDragOver={e => { if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); }}
     onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
     onDrop={drop}>
@@ -340,9 +389,11 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     </div>}
     {dropping && <div className="voice-drop-hint" aria-hidden="true"><LuImagePlus />Drop pictures to send them with what you say next</div>}
     <input ref={picker} type="file" accept={IMAGE_TYPES.join(",")} multiple hidden onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) onAddPictures(files); }} />
-    <section ref={browser} className={`voice-browser-window ${shown ? 'is-open' : ''}`} aria-label="Live browser" aria-hidden={!shown}>
+    <section ref={browser} className={`voice-browser-window ${shown ? 'is-open' : ''} ${maximized ? 'is-maximized' : ''}`} aria-label="Live browser" aria-hidden={!shown}>
       <header><span><i />Live browser</span><div>
-        <button type="button" aria-label="Fullscreen browser" title="Fullscreen" onClick={() => { void browser.current?.requestFullscreen?.().catch(() => setBrowserError('Fullscreen is unavailable.')); }}><LuMaximize2 /></button>
+        {maximized
+          ? <button type="button" aria-label="Restore browser size" title="Restore size (Esc)" onClick={() => setBrowserMax(false)}><LuMinimize2 /></button>
+          : <button type="button" aria-label="Maximize browser" title="Maximize" onClick={() => setBrowserMax(true)}><LuMaximize2 /></button>}
         <button type="button" aria-label="Minimize browser" title="Minimize browser" onClick={minimize}><LuMinus /></button>
       </div></header>
       {loaded && <iframe src="/browser-ui/" title="The agent's browser" allow="clipboard-read; clipboard-write; fullscreen" />}

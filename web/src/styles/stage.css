@@ -24,14 +24,13 @@
 .voice-end { color: #edaaaa; background: #ba4b4b12; border-color: #db787826; }
 .voice-live-transcript { max-width: 440px; max-height: 66px; margin: 18px 12px 0; color: rgb(var(--fg-muted)); font-size: 14px; line-height: 1.55; text-align: center; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .voice-stage-error { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: min(430px, 90%); color: rgb(var(--danger)); font-size: 12px; text-align: center; z-index: 6; }
-.voice-browser-window, .voice-terminal-window { position: absolute; z-index: 2; overflow: hidden; border: 1px solid rgb(var(--line)); border-radius: 18px; background: #0b0b0d; box-shadow: 0 30px 90px #0005, 0 2px 10px #0003; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transition: transform .7s cubic-bezier(.22,1,.36,1), left .7s cubic-bezier(.22,1,.36,1), top .7s cubic-bezier(.22,1,.36,1), width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1), opacity .4s, visibility .7s; }
+.voice-browser-window, .voice-terminal-window { position: absolute; z-index: 2; overflow: hidden; border: 1px solid rgb(var(--line)); border-radius: 18px; background: #0b0b0d; box-shadow: 0 26px 44px -22px #000c, 0 2px 8px #0003; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transition: transform .7s cubic-bezier(.22,1,.36,1), left .7s cubic-bezier(.22,1,.36,1), top .7s cubic-bezier(.22,1,.36,1), width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1), opacity .4s, visibility .7s; }
 .voice-browser-window { left: 50%; top: 47%; width: min(1000px, calc(100% - 64px)); height: calc(100% - 164px); transform: translate(-50%, -42%) scale(.92); }
 .voice-browser-window > header, .voice-terminal-window > header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 42px; padding: 0 10px 0 16px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); color: rgb(var(--fg-subtle)); font-size: 11px; }
 .voice-browser-window header > span, .voice-terminal-window header > span { display: flex; align-items: center; gap: 8px; }
 .voice-browser-window header > div, .voice-terminal-window header > div { display: flex; gap: 2px; }
 .voice-browser-window header i { width: 5px; height: 5px; border-radius: 50%; background: #3fe1c6; }
 .voice-browser-window iframe { width: 100%; flex: 1; min-height: 0; border: 0; background: #0b0b0d; }
-.voice-browser-window:fullscreen { width: 100vw; height: 100vh; inset: 0; transform: none; border-radius: 0; }
 .voice-browser-window.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
 .is-browsing .voice-presence { left: calc(100% - 156px); top: calc(100% - 48px); width: 268px; max-width: none; height: 68px; flex-direction: row; border-radius: 22px; background: rgb(var(--surface) / .8); border: 1px solid rgb(var(--line) / .55); backdrop-filter: blur(20px); padding: 0 12px 0 0; }
 .is-browsing .voice-avatar { width: 76px; flex-shrink: 0; }
@@ -89,7 +88,6 @@
   .voice-terminal-command i { animation: none; }
 }
 
-.voice-stage .voice-browser-window:fullscreen { width: 100vw; height: 100vh; left: 0; top: 0; right: auto; transform: none; border-radius: 0; }
 
 .voice-tool-activity { position: absolute; z-index: 5; top: 72px; left: 24px; width: min(310px, calc(100% - 48px)); display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
 .voice-tool-float { display: flex; align-items: flex-start; gap: 10px; padding: 12px 15px; border: 1px solid rgba(148,163,184,.18); border-radius: 16px; background: rgba(24,31,45,.78); color: #e2e8f0; box-shadow: 0 12px 30px rgba(0,0,0,.12); backdrop-filter: blur(18px); animation: voice-tool-drift 8s ease both; }
@@ -102,24 +100,24 @@
 
 /* Give the orb a clear silhouette, and center the compact voice dock. */
 .voice-orb { filter: saturate(1.2) contrast(1.08); }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-presence {
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-presence {
   left: 50%; top: calc(100% - 50px); width: 520px; max-width: calc(100% - 32px);
   height: 80px; flex-direction: row; border-radius: 26px; padding: 0 14px 0 0;
   background: rgba(23, 36, 56, .96); border: 1px solid rgba(153, 193, 244, .4);
   box-shadow: 0 8px 32px rgba(0,0,0,.3), 0 0 24px rgba(95,160,255,.12);
   backdrop-filter: blur(20px);
 }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-avatar { width: 100px; flex-shrink: 0; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-status { margin: 0; font-size: 11px; flex: 1; white-space: normal; line-height: 1.3; color: #edf5ff; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-status > span { display: none; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-stage-controls { margin: 0 0 0 10px; gap: 6px; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-stage-action { width: 32px; height: 32px; color: #edf5ff; background: rgba(255,255,255,.09); }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-stage-action svg { width: 16px; height: 16px; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-avatar { width: 100px; flex-shrink: 0; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-status { margin: 0; font-size: 11px; flex: 1; white-space: normal; line-height: 1.3; color: #edf5ff; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-status > span { display: none; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-stage-controls { margin: 0 0 0 10px; gap: 6px; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-stage-action { width: 32px; height: 32px; color: #edf5ff; background: rgba(255,255,255,.09); }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-stage-action svg { width: 16px; height: 16px; }
 @media (min-width: 601px) {
   .voice-stage.is-terminal:not(.is-browsing) .voice-terminal-window { top: 47%; height: calc(100% - 164px); }
 }
 @media (max-width: 600px) {
-  .voice-stage:is(.is-browsing, .is-terminal) .voice-tool-activity { bottom: 112px; }
+  .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-tool-activity { bottom: 112px; }
 }
 
 /* Readable voice chrome in both full and compact layouts. */
@@ -129,8 +127,8 @@
 .voice-stage-action { color: #f1f6ff; background: #263b56; border-color: #7793b5; box-shadow: 0 3px 12px #0003; }
 .voice-stage-action svg { stroke-width: 2; }
 .voice-stage-action:hover { background: #365477; }
-.voice-stage-action.is-muted, .voice-stage:is(.is-browsing, .is-terminal) .voice-stage-action.is-muted { color: #fff2d2; background: #614721; border-color: #d8ad62; }
-.voice-stage-action.voice-end, .voice-stage:is(.is-browsing, .is-terminal) .voice-stage-action.voice-end { color: #ffe5e5; background: #743d47; border-color: #c88490; }
+.voice-stage-action.is-muted, .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-stage-action.is-muted { color: #fff2d2; background: #614721; border-color: #d8ad62; }
+.voice-stage-action.voice-end, .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-stage-action.voice-end { color: #ffe5e5; background: #743d47; border-color: #c88490; }
 .voice-stage-action.voice-end:hover { background: #92505c; }
 .voice-utilities button, .voice-browser-window header button, .voice-terminal-window header button { color: rgb(var(--fg)); background: rgb(var(--fg) / .09); border: 1px solid rgb(var(--fg) / .3); }
 .voice-utilities button:hover, .voice-browser-window header button:hover, .voice-terminal-window header button:hover { background: rgb(var(--fg) / .18); }
@@ -142,35 +140,35 @@
 .voice-tool-float { background: #1d2c40; border-color: #647a98; }
 .voice-tool-float p { color: #ccd8e9; }
 .voice-stage-error { color: #ffe5e5; background: #743d47; border: 1px solid #c88490; border-radius: 12px; padding: 8px 12px; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-status { padding: 0; background: transparent; border: 0; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-stage-action { background: #324b69; border-color: #7793b5; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-status { padding: 0; background: transparent; border: 0; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-stage-action { background: #324b69; border-color: #7793b5; }
 
 /* Overscan the canvas so the halo fades out beyond the orb's layout box. */
 .voice-avatar { position: relative; aspect-ratio: 1; overflow: visible; }
 .voice-orb { position: absolute; left: -21.428571%; top: -21.428571%; width: 142.857143%; max-width: none; pointer-events: none; }
 .voice-dock-center { display: contents; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-dock-center { display: flex; flex: 1; min-width: 0; flex-direction: column; justify-content: center; gap: 4px; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-dock-center .voice-status { flex: none; justify-content: flex-start; font-size: 10px; color: #acc9ee; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-dock-center { display: flex; flex: 1; min-width: 0; flex-direction: column; justify-content: center; gap: 4px; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-dock-center .voice-status { flex: none; justify-content: flex-start; font-size: 10px; color: #acc9ee; }
 .voice-thought-stream { height: 34px; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; color: #edf5ff; font-size: 12px; line-height: 17px; mask-image: linear-gradient(to bottom, #0008, #000 7px); }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-stage-controls { flex-shrink: 0; }
-@media (max-width: 600px) { .voice-stage:is(.is-browsing, .is-terminal) .voice-avatar { width: 76px; } }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-stage-controls { flex-shrink: 0; }
+@media (max-width: 600px) { .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-avatar { width: 76px; } }
 
 /* Flights share the orb's origin, with alternating destinations kept in view. */
 .voice-stage { container-type: inline-size; }
 .voice-stage .voice-tool-activity { left: 50%; top: 49%; bottom: auto; width: 0; height: 0; --origin-x: 0px; --origin-y: -38px; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-tool-activity { left: 50%; top: calc(100% - 50px); bottom: auto; width: 0; --origin-x: calc(50px - min(260px, 50cqw - 16px)); --origin-y: 0px; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-tool-activity { left: 50%; top: calc(100% - 50px); bottom: auto; width: 0; --origin-x: calc(50px - min(260px, 50cqw - 16px)); --origin-y: 0px; }
 .voice-tool-float { position: absolute; left: 0; top: 0; width: min(220px, 42cqw); --flight-x: min(160px, 25cqw); --flight-y: -50px; animation: voice-tool-flight 8s cubic-bezier(.22,1,.36,1) both; }
 .voice-tool-float.flies-left { --flight-x: max(-160px, -25cqw); }
 .voice-tool-float.flight-lane-1 { --flight-y: -145px; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-tool-float { --flight-y: -110px; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-tool-float.flight-lane-1 { --flight-y: -205px; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-tool-float { --flight-y: -110px; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-tool-float.flight-lane-1 { --flight-y: -205px; }
 @keyframes voice-tool-flight {
   0% { opacity: 0; transform: translate(calc(-50% + var(--origin-x)), calc(-50% + var(--origin-y))) scale(.2); }
   12% { opacity: 1; transform: translate(calc(-50% + var(--flight-x)), var(--flight-y)) scale(1); animation-timing-function: linear; }
   65% { opacity: .8; transform: translate(calc(-50% + var(--flight-x)), calc(var(--flight-y) - 28px)) scale(1); animation-timing-function: linear; }
   100% { opacity: 0; transform: translate(calc(-50% + var(--flight-x)), calc(var(--flight-y) - 50px)) scale(.98); }
 }
-@media (max-width: 600px) { .voice-stage:is(.is-browsing, .is-terminal) .voice-tool-activity { --origin-x: calc(38px - min(260px, 50cqw - 16px)); } }
+@media (max-width: 600px) { .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-tool-activity { --origin-x: calc(38px - min(260px, 50cqw - 16px)); } }
 @media (prefers-reduced-motion: reduce) { .voice-tool-float { animation: none; transform: translate(calc(-50% + var(--flight-x)), var(--flight-y)); } }
 
 /* Session documents stay on the same stage in chat and voice mode. */
@@ -253,7 +251,7 @@
 }
 @media (max-width: 600px) {
   .voice-utilities { bottom: 8px; right: 8px; gap: 6px; }
-  .voice-stage:is(.is-browsing, .is-terminal) .voice-presence { top: calc(100% - 94px); }
+  .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-presence { top: calc(100% - 94px); }
 }
 
 
@@ -287,7 +285,7 @@
    takes the middle when the terminal is up and the browser is not, and the
    side otherwise; the stage's classes say where the presence goes. The
    window has the theme's own surface, since what is in it is text to read. */
-.voice-files-window { position: absolute; z-index: 2; overflow: hidden; border: 1px solid #62718a; border-radius: 18px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 30px 90px #0005, 0 2px 10px #0003; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transition: transform .7s cubic-bezier(.22,1,.36,1), left .7s cubic-bezier(.22,1,.36,1), top .7s cubic-bezier(.22,1,.36,1), width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1), opacity .4s, visibility .7s; }
+.voice-files-window { position: absolute; z-index: 2; overflow: hidden; border: 1px solid #62718a; border-radius: 18px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 26px 44px -22px #000c, 0 2px 8px #0003; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transition: transform .7s cubic-bezier(.22,1,.36,1), left .7s cubic-bezier(.22,1,.36,1), top .7s cubic-bezier(.22,1,.36,1), width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1), opacity .4s, visibility .7s; }
 .voice-files-window > header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 42px; padding: 0 10px 0 16px; border-bottom: 1px solid #62718a; background: rgb(var(--surface)); color: rgb(var(--fg)); font-size: 11px; font-weight: 500; }
 .voice-files-window header > span { display: flex; align-items: center; gap: 8px; }
 .voice-files-window header > div { display: flex; gap: 2px; }
@@ -335,10 +333,10 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
 /* Controls added beside the microphone: a picture, Repeat, Stop, and push-to-talk. */
 .voice-stage-action { position: relative; }
 .voice-stage-action.has-pictures i { position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #3fe1c6; color: #0b1a17; font: 600 10px/17px system-ui, sans-serif; font-style: normal; }
-.voice-stage-action.voice-stop, .voice-stage:is(.is-browsing, .is-terminal) .voice-stage-action.voice-stop { color: #fff2d2; background: #4f4430; border-color: #b69a60; }
+.voice-stage-action.voice-stop, .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-stage-action.voice-stop { color: #fff2d2; background: #4f4430; border-color: #b69a60; }
 .voice-stage-action.voice-stop svg { width: 14px; height: 14px; fill: currentColor; }
 .voice-stage-action.voice-hold { touch-action: none; user-select: none; -webkit-user-select: none; }
-.voice-stage-action.voice-hold.is-holding, .voice-stage:is(.is-browsing, .is-terminal) .voice-stage-action.voice-hold.is-holding { color: #0b1a17; background: #3fe1c6; border-color: #9ff3e4; box-shadow: 0 0 0 6px #3fe1c633; transform: scale(1.06); }
+.voice-stage-action.voice-hold.is-holding, .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-stage-action.voice-hold.is-holding { color: #0b1a17; background: #3fe1c6; border-color: #9ff3e4; box-shadow: 0 0 0 6px #3fe1c633; transform: scale(1.06); }
 
 /* Pictures waiting to go with what is said next. */
 .voice-attachments { position: absolute; z-index: 6; top: 46px; left: 26px; display: flex; flex-direction: column; gap: 6px; max-width: calc(100% - 52px); }
@@ -401,15 +399,15 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
 @media (max-width: 600px) { .voice-stage-controls { gap: 10px; } .voice-stage-action { width: 42px; height: 42px; } }
 
 /* With a window open the tray moves out of the windows' way, to the top right, and keeps only the pictures. */
-.voice-stage:is(.is-browsing, .is-terminal) .voice-attachments { top: 10px; left: auto; right: 16px; align-items: flex-end; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-attachments figure { width: 36px; height: 36px; border-radius: 9px; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-attachments button { top: 1px; right: 1px; width: 16px; height: 16px; }
-.voice-stage:is(.is-browsing, .is-terminal) .voice-attachments > span { display: none; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-attachments { top: 10px; left: auto; right: 16px; align-items: flex-end; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-attachments figure { width: 36px; height: 36px; border-radius: 9px; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-attachments button { top: 1px; right: 1px; width: 16px; height: 16px; }
+.voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-attachments > span { display: none; }
 /* On a phone the dock sits higher; the cards fly from where it is, so they stay clear of its buttons. */
 @media (max-width: 600px) {
-  .voice-stage:is(.is-browsing, .is-terminal) .voice-tool-activity { top: calc(100% - 94px); }
-  .voice-stage:is(.is-browsing, .is-terminal) .voice-tool-float { --flight-y: -140px; }
-  .voice-stage:is(.is-browsing, .is-terminal) .voice-tool-float.flight-lane-1 { --flight-y: -225px; }
+  .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-tool-activity { top: calc(100% - 94px); }
+  .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-tool-float { --flight-y: -140px; }
+  .voice-stage:is(.is-browsing, .is-terminal, .is-docked) .voice-tool-float.flight-lane-1 { --flight-y: -225px; }
 }
 .voice-terminal-empty { color: #8f9bb0; font-family: system-ui, sans-serif; }
 
@@ -429,3 +427,23 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
 body.is-resizing { user-select: none; -webkit-user-select: none; }
 body.is-resizing iframe { pointer-events: none; }
 @media (max-width: 600px) { .resize-handle { display: none; } }
+
+/* The browser made as large as the stage allows (not the page's fullscreen):
+   over the other windows, with the dock and the stage's buttons still in
+   reach under it. Above a size set by hand, which it gives back when restored. */
+.voice-stage .voice-browser-window.is-open.is-maximized { left: 12px !important; top: 12px !important; right: 12px !important; bottom: 104px !important; width: auto !important; height: auto !important; max-width: none !important; max-height: none !important; transform: none !important; z-index: 4; border-radius: 14px; }
+.voice-browser-window.is-maximized > .resize-handle { display: none; }
+
+/* A window sized by hand that leaves a gap wide enough: the orb stands in it
+   as it does with nothing open, rather than waiting in its dock. The gap's
+   middle and width are measured by the stage (see VoiceStage). */
+@media (min-width: 601px) {
+  .voice-stage.voice-stage[data-presence="free"] .voice-presence { left: var(--free-x); top: 48%; width: min(300px, calc(var(--free-width) - 40px)); max-width: none; height: auto; flex-direction: column; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
+  .voice-stage.voice-stage[data-presence="free"] .voice-avatar { width: 100%; }
+  .voice-stage.voice-stage[data-presence="free"] .voice-dock-center { display: contents; }
+  .voice-stage.voice-stage[data-presence="free"] .voice-thought-stream { display: none; }
+  .voice-stage.voice-stage[data-presence="free"] .voice-status { flex: none; justify-content: center; margin: -12px 0 0; padding: 7px 12px; font-size: 12px; color: #f1f6ff; border-radius: 20px; background: #192639; border: 1px solid #526b8c; }
+  .voice-stage.voice-stage[data-presence="free"] .voice-stage-controls { margin: 20px 0 0; gap: 12px; }
+  .voice-stage.voice-stage[data-presence="free"] .voice-stage-action { width: 42px; height: 42px; }
+  .voice-stage.voice-stage[data-presence="free"] .voice-tool-activity { left: var(--free-x); top: 48%; --origin-x: 0px; --origin-y: -30px; }
+}
