@@ -1,4 +1,5 @@
 import { LiveEvents } from "./live-events.js";
+import { ModelErrors } from "./model-errors.js";
 import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -112,6 +113,8 @@ class SessionManager extends EventEmitter {
   private live = new Map<string, LiveSession>();
   private stopping = new WeakSet<PiClient>();
   private stream = new LiveEvents(appendEvent);
+  /** Model failures pi has not recovered from: see model-errors.ts. */
+  private modelErrors = new ModelErrors();
 
   liveSnapshot(sessionId: string) { return this.stream.snapshot(sessionId); }
   /** In-flight ask() per session, so messages in one chat are answered in turn. */
@@ -327,8 +330,14 @@ class SessionManager extends EventEmitter {
         // simply stays as it was.
       });
 
+    // A new pi process knows nothing of what the last one was retrying.
+    this.modelErrors.forget(sessionId);
     client.on("event", (msg) => {
       rememberSessionFile();
+      // A model failure reaches no other place in the stream. Noted before the
+      // event that settles it, so an ask() finishing on agent_settled has it.
+      const failure = this.modelErrors.take(sessionId, msg);
+      if (failure) this.record(sessionId, "portal_notice", { text: failure, error: true });
       this.record(sessionId, msg.type, msg);
       // Status follows pi's own run state rather than being guessed at the
       // moments the portal happens to know about. agent_start covers a run
@@ -340,10 +349,6 @@ class SessionManager extends EventEmitter {
       // all of it still the model working. Settling on agent_end is what made
       // the Stop button disappear halfway through.
       if (msg.type === "agent_settled") this.mark(sessionId, "idle");
-
-      // A model failure reaches no other place in the stream, so it is noted
-      // here rather than left to silence.
-      this.noteModelErrors(sessionId, msg);
     });
 
     client.on("stderr", (chunk: string) => {
@@ -370,41 +375,6 @@ class SessionManager extends EventEmitter {
     this.live.set(sessionId, { client, executor });
 
     return client;
-  }
-
-  /**
-   * What a failed model call looks like in pi's event stream, turned into something
-   * the transcript can show.
-   *
-   * A failed call closes its turn as an assistant message with stopReason "error"
-   * and no text — pi emits nothing else for it, so without this the transcript
-   * would show a prompt answered by silence. Noted like every other portal
-   * notice: visible live and on replay.
-   */
-  noteModelErrors(sessionId: string, msg: any): void {
-    if (msg.type === "message_end") {
-      const message = msg.message;
-      if (message?.role === "assistant" && message.stopReason === "error") {
-        this.record(sessionId, "portal_notice", {
-          text: `Model error: ${message.errorMessage ?? "the model failed to answer."}`,
-          error: true,
-        });
-      }
-    }
-    // A retried turn that still ended in an error. The note above says what
-    // failed once; this one says the retries did not fix it. Aborted backoffs
-    // are cancellations, not failures.
-    if (
-      msg.type === "auto_retry_end" &&
-      msg.success === false &&
-      typeof msg.finalError === "string" &&
-      msg.finalError !== "Retry cancelled"
-    ) {
-      this.record(sessionId, "portal_notice", {
-        text: `Still failing after ${msg.attempt ?? "?"} ${msg.attempt === 1 ? "retry" : "retries"}: ${msg.finalError}`,
-        error: true,
-      });
-    }
   }
 
   /**
@@ -816,8 +786,9 @@ class SessionManager extends EventEmitter {
           relay(detail ? `⚙ ${name} · ${detail}` : `⚙ ${name}`);
           break;
         }
-        // Output from a builtin like /session or /compact. It is the answer as
-        // far as whoever asked is concerned, so it goes back like any other.
+        // Output from a builtin like /session or /compact, or a model failure
+        // pi gave up on. It is the answer as far as whoever asked is concerned,
+        // so it goes back like any other. One pi recovered from never gets here.
         case "portal_notice":
           flush();
           if (typeof payload.text === "string" && payload.text.trim()) {
