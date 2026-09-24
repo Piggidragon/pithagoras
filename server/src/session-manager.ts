@@ -3,23 +3,27 @@ import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { PiClient, PiTool } from "./pi/types.js";
+import type { PiClient, PiTool, PromptTaken } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
-import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
+import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/session-edit.js";
+import { AUDIO_MESSAGE_PREFIX } from "./pi/voice-first.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
 import {
   appendEvent,
   deleteEvent,
+  deleteEventsAfter,
   deleteEventsBetween,
   getSession,
   latestSeq,
   restoreEvents,
+  notePromptQueued,
   sentMessage,
   sentMessages,
+  unsettledMessages,
   getSettings,
   markOrphanedSessionsInterrupted,
   browserAllowed,
@@ -61,6 +65,8 @@ function summarizeToolInput(p: any): string | undefined {
 }
 
 const SESSION_ROOT = path.resolve(process.env.SESSION_DIR || "./data/sessions");
+/** Where a container's pi finds a session's folder: see ContainerExecutor. */
+const CONTAINER_SESSION_DIR = "/sessions/";
 /** What can go with a message besides its text. */
 export interface PromptOptions {
   voice?: boolean;
@@ -69,6 +75,41 @@ export interface PromptOptions {
   /** Mid-run, go into the run that is going instead of waiting for it to end. */
   steer?: boolean;
 }
+
+/** A message sent into a run, until pi takes it in: see SessionManager.waiting. */
+interface Waiting {
+  seq: number;
+  message: string;
+  /** How many pictures went with it, to tell apart messages with the same words. */
+  images: number;
+  /** Being handed to pi right now; settles once pi has queued it or refused it. */
+  handing?: Promise<void>;
+  /** In pi's queue, so pi's settling of the run means it was taken in. */
+  inPi?: boolean;
+  /**
+   * Where pi queued it and the words it queued, when the client can say: what
+   * the agent is handed, a template expanded and an input handler's rewrite
+   * applied. See takeIn.
+   */
+  queuedAs?: Queued;
+  /**
+   * What its portal_prompt said, carried by the event that places it: a page
+   * that loads only the end of a long chat may not have the prompt itself.
+   */
+  prompt: Record<string, unknown>;
+}
+
+/** A message in pi's queue: see PromptTaken. */
+type Queued = Omit<Extract<PromptTaken, { outcome: "queued" }>, "outcome">;
+
+/** pi's queue, lane by lane, as its last queue_update had it. */
+type PiQueue = Record<Queued["lane"], string[]>;
+
+/** Its words as pi has them, without the note a spoken turn carries. */
+const unspoken = (text: string) => (text.startsWith(AUDIO_MESSAGE_PREFIX) ? text.slice(AUDIO_MESSAGE_PREFIX.length) : text);
+
+/** What a page drops when a message is taken out: see deleteEventsBetween. */
+type Removed = { from: number; to: number | null; also?: number[]; kept?: number[] };
 
 /** Pictures sent with messages, a folder per chat: see prompt-images.ts. */
 const IMAGE_ROOT = path.resolve(process.env.DATA_DIR || "./data", "images");
@@ -125,13 +166,105 @@ class SessionManager extends EventEmitter {
    */
   private speaker = new Map<string, PersonRow>();
 
+  /**
+   * Touches nothing outside itself: anything that imports this module builds
+   * the manager, a test the agent runs from inside a chat among them, with the
+   * portal's DATA_DIR and SESSION_DIR in its environment. Each session's folder
+   * is made when its pi starts.
+   */
   constructor() {
     super();
     this.setMaxListeners(0);
-    mkdirSync(SESSION_ROOT, { recursive: true });
+  }
+
+  /**
+   * Chats left running by the previous server, marked interrupted.
+   *
+   * Called by the server on startup, before any pi is launched, rather than by
+   * the constructor. Done on construction, a test run from inside a chat marked
+   * the very chat running it as interrupted — which took away its Stop button
+   * while it was still waiting on the command. Only a run that died with the
+   * previous server is marked, so an interrupted chat has nothing running.
+   */
+  recoverOrphans(): void {
     const orphaned = markOrphanedSessionsInterrupted();
     if (orphaned > 0) {
       console.log(`[portal] marked ${orphaned} session(s) interrupted (server restarted mid-run)`);
+    }
+    this.settleOrphanedMessages();
+  }
+
+  /**
+   * Messages sent into a run the previous server did not live to see through.
+   *
+   * The list of what was waiting died with it, and left alone they sat at the
+   * foot of the chat under everything said since. pi's file says which of them
+   * it took in: one found there beyond the messages already accounted for was
+   * read, and the rest never reached it. Put where the run ended, which is as
+   * near as can be told to where the agent read them.
+   */
+  private settleOrphanedMessages(): void {
+    const bySession = new Map<string, ReturnType<typeof unsettledMessages>>();
+    for (const m of unsettledMessages()) bySession.set(m.sessionId, [...(bySession.get(m.sessionId) ?? []), m]);
+    for (const [sessionId, list] of bySession) {
+      const said = this.saidInFile(sessionId);
+      // pi's file could not be read, so which of them it took in cannot be
+      // told. Marked as that rather than as never sent: one it did read and
+      // answer, offered again as "not sent", would be sent twice.
+      if (!said) {
+        this.record(sessionId, "portal_unsent", {
+          seqs: list.map((m) => m.seq),
+          prompts: Object.fromEntries(list.map((m) => [m.seq, m.prompt])),
+          restarted: true,
+          unsure: true,
+        });
+        continue;
+      }
+      // Each by the words pi was given, where it said what it made of them: a
+      // template is in the file as what it expanded to.
+      const words = (m: { message: string; prompt?: Record<string, unknown>; payload?: Record<string, unknown> }) =>
+        unspoken(String((m.prompt ?? m.payload)?.queuedAs ?? m.message));
+      const left = new Map<string, number>();
+      for (const text of said) left.set(text, (left.get(text) ?? 0) + 1);
+      const orphans = new Set(list.map((m) => m.seq));
+      for (const m of sentMessages(sessionId)) {
+        if (!orphans.has(m.seq)) left.set(words(m), (left.get(words(m)) ?? 0) - 1);
+      }
+      const unsent: typeof list = [];
+      for (const m of list) {
+        if ((left.get(words(m)) ?? 0) > 0) {
+          left.set(words(m), left.get(words(m))! - 1);
+          this.record(sessionId, "portal_taken", { seq: m.seq, prompt: m.prompt });
+        } else unsent.push(m);
+      }
+      if (unsent.length) {
+        this.record(sessionId, "portal_unsent", {
+          seqs: unsent.map((m) => m.seq),
+          prompts: Object.fromEntries(unsent.map((m) => [m.seq, m.prompt])),
+          restarted: true,
+        });
+      }
+    }
+  }
+
+  /**
+   * What the person said, as pi's file for a session has it; undefined when
+   * that cannot be read. No file at all is nothing said: pi writes it with the
+   * first message it takes in. A container's pi names it by where the file is
+   * inside the container, which is the session's own folder here.
+   */
+  private saidInFile(sessionId: string): string[] | undefined {
+    const session = getSession(sessionId);
+    let file = session?.pi_session_file;
+    if (!file) return [];
+    if (session?.executor !== "host" && file.startsWith(CONTAINER_SESSION_DIR)) {
+      file = path.join(SESSION_ROOT, sessionId, file.slice(CONTAINER_SESSION_DIR.length));
+    }
+    try {
+      return userTexts(readFileSync(file, "utf8"));
+    } catch (e) {
+      console.error(`[portal] could not read the history of ${sessionId}: ${(e as Error).message}`);
+      return undefined;
     }
   }
 
@@ -140,7 +273,7 @@ class SessionManager extends EventEmitter {
   }
 
   /** Stream updates in memory; persist completed messages and lifecycle metadata. */
-  private record(sessionId: string, type: string, payload: unknown): void {
+  private record(sessionId: string, type: string, payload: unknown): EventRow | undefined {
     if (EPHEMERAL_EVENTS.has(type)) {
       // Still deliver it to anyone attached right now, with a negative seq so
       // it can never be confused with a stored event during replay.
@@ -150,10 +283,202 @@ class SessionManager extends EventEmitter {
         type,
         payload: JSON.stringify(payload),
       });
-      return;
+      return undefined;
     }
     const row = this.stream.record(sessionId, type, payload);
     this.emit(`session:${sessionId}`, row);
+    return row;
+  }
+
+  /**
+   * Messages sent mid-run that pi has not taken in yet, oldest first.
+   *
+   * Shown waiting at the foot of the conversation until pi takes one in —
+   * after the step it is on for a steer, at the end of the run for a
+   * follow-up — and then where that happened, which is where the agent read
+   * it. A Stop drops what is still waiting: pi would keep it queued and slip
+   * it into the next run, unasked.
+   */
+  private waiting = new Map<string, Waiting[]>();
+
+  /**
+   * The tail of the messages on their way to pi, per session: each resolves
+   * once pi has accepted it or refused it. See submit().
+   */
+  private sending = new Map<string, Promise<void>>();
+
+  /** A run's failure, reported ahead of its agent_settled: see the client's forward(). */
+  private failed = new Set<string>();
+
+  /**
+   * Messages handed to pi while it was idle, per session, whose own start has
+   * not come yet. Each starts the run it is handed to, so the first message
+   * from the person in that run is it — whatever pi made of its words — and
+   * not a waiting one that happens to say the same. One that was waiting its
+   * turn behind another is placed by it.
+   */
+  private fresh = new Map<string, { waiting?: Waiting }[]>();
+
+  /** What pi says is in its queue, per session, from its queue_update events. */
+  private piQueue = new Map<string, PiQueue>();
+
+  /**
+   * Slash commands pi queued into a run — a template, a skill — per session,
+   * with the words pi queued. Not chat messages, so nothing waits for them on
+   * the page; kept so a Stop that drops one can say so. See dropWaiting.
+   */
+  private queuedCommands = new Map<string, { command: string; queued: Queued }[]>();
+
+  /** Places a message sent into a run where pi took it in. */
+  private placeTaken(sessionId: string, message: Waiting): void {
+    if (this.unwait(sessionId, message)) this.record(sessionId, "portal_taken", { seq: message.seq, prompt: message.prompt });
+  }
+
+  /** pi started a message from the person: the waiting one it is, now in place. */
+  private takeIn(sessionId: string, content: unknown): void {
+    const starting = this.fresh.get(sessionId);
+    if (starting?.length) {
+      const [own] = starting.splice(0, 1);
+      if (!starting.length) this.fresh.delete(sessionId);
+      if (own.waiting) this.placeTaken(sessionId, own.waiting);
+      return;
+    }
+    const parts: any[] = typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : [];
+    const text = parts.map((c) => (c?.type === "text" && typeof c.text === "string" ? c.text : "")).join("");
+    const images = parts.filter((c) => c?.type === "image").length;
+    const list = this.waiting.get(sessionId) ?? [];
+    // As pi finds it in its own queue: the steers first, then the follow-ups,
+    // each by the words pi queued, oldest first — a typed steer overtakes a
+    // spoken follow-up sent before it. One whose client could not say what pi
+    // queued, by the words it was sent with: exactly, or with the note a
+    // spoken turn carries, and with as many pictures — a picture on its own
+    // has no words, and every message ends with none.
+    const inLane = (lane: Queued["lane"]) => list.find((m) => m.queuedAs?.lane === lane && m.queuedAs.text === text);
+    const taken =
+      inLane("steering") ??
+      inLane("followUp") ??
+      list.find((m) => !m.queuedAs && (text === m.message || text === AUDIO_MESSAGE_PREFIX + m.message) && images === m.images);
+    if (taken) {
+      this.placeTaken(sessionId, taken);
+      return;
+    }
+    const commands = this.queuedCommands.get(sessionId) ?? [];
+    const command = commands.findIndex((c) => c.queued.text === text);
+    if (command >= 0) commands.splice(command, 1);
+    if (!commands.length) this.queuedCommands.delete(sessionId);
+  }
+
+  /** Whether pi still holds a message, taking it off `queue` if so. */
+  private stillQueued(queue: PiQueue, message: { message: string; queuedAs?: Queued }): boolean {
+    for (const lane of message.queuedAs ? [message.queuedAs.lane] : (["steering", "followUp"] as const)) {
+      const at = queue[lane].findIndex((text) =>
+        message.queuedAs ? text === message.queuedAs.text : text === message.message || text === AUDIO_MESSAGE_PREFIX + message.message,
+      );
+      if (at < 0) continue;
+      queue[lane].splice(at, 1);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * The run is over. Anything that was in pi's queue, is not any more, and
+   * was not matched when pi started it was taken in all the same, and is put
+   * here. One pi still holds stays waiting: a Stop that could not take it out
+   * leaves it for the next run. One still on its way to pi is not placed
+   * either: it goes into the run it starts, and is placed when that run takes
+   * it in.
+   */
+  private settleWaiting(sessionId: string): void {
+    const now = this.piQueue.get(sessionId);
+    const queue: PiQueue = { steering: [...(now?.steering ?? [])], followUp: [...(now?.followUp ?? [])] };
+    const list = this.waiting.get(sessionId) ?? [];
+    const taken = list.filter((m) => m.inPi && !this.stillQueued(queue, m));
+    for (const m of taken) this.placeTaken(sessionId, m);
+    const commands = (this.queuedCommands.get(sessionId) ?? []).filter((c) =>
+      this.stillQueued(queue, { message: c.command, queuedAs: c.queued }),
+    );
+    if (commands.length) this.queuedCommands.set(sessionId, commands);
+    else this.queuedCommands.delete(sessionId);
+  }
+
+  /**
+   * Stopped before pi took them in: out of pi's queue, and marked as never
+   * sent. Without a client, pi is gone and its queue with it. One not handed
+   * to pi yet finds itself gone from the list and is never sent: see submit().
+   *
+   * A pi whose queue cannot be cleared — one in a container, which has no
+   * command for it — keeps what it holds, and goes on to read it. Those stay
+   * waiting, to be placed where it does, rather than shown as not sent.
+   *
+   * A slash command pi had queued goes with the rest; it has no line on the
+   * page to mark, so a notice says it never ran.
+   *
+   * `only`, when given, limits it to those: see abort().
+   */
+  private dropWaiting(sessionId: string, client?: PiClient, only?: Set<Waiting>): void {
+    const list = this.waiting.get(sessionId) ?? [];
+    const commands = this.queuedCommands.get(sessionId) ?? [];
+    if (!list.length && !commands.length) return;
+    let cleared = !client;
+    if (client?.clearQueue) {
+      try {
+        client.clearQueue();
+        cleared = true;
+      } catch (e) {
+        console.error(`[portal] could not clear the queue of ${sessionId}: ${(e as Error).message}`);
+      }
+    }
+    if (cleared) {
+      this.queuedCommands.delete(sessionId);
+      for (const c of commands) {
+        this.record(sessionId, "portal_notice", {
+          text: `${c.command.split("\n")[0]} was dropped before the agent read it, so it never ran.`,
+          error: true,
+        });
+      }
+    }
+    const dropped = list.filter((m) => (!only || only.has(m)) && (cleared || !m.inPi));
+    if (!dropped.length) return;
+    const rest = list.filter((m) => !dropped.includes(m));
+    if (rest.length) this.waiting.set(sessionId, rest);
+    else this.waiting.delete(sessionId);
+    this.record(sessionId, "portal_unsent", {
+      seqs: dropped.map((m) => m.seq),
+      prompts: Object.fromEntries(dropped.map((m) => [m.seq, m.prompt])),
+    });
+  }
+
+  /** Takes one message off the waiting list; false if it was no longer on it. */
+  private unwait(sessionId: string, message: Waiting): boolean {
+    const list = this.waiting.get(sessionId) ?? [];
+    if (!list.includes(message)) return false;
+    const rest = list.filter((m) => m !== message);
+    if (rest.length) this.waiting.set(sessionId, rest);
+    else this.waiting.delete(sessionId);
+    return true;
+  }
+
+  /**
+   * Until the messages being handed to pi right now are in its queue, where a
+   * Stop can take them out. pi's preflight is asynchronous — extension input
+   * handlers run first — and one that landed after the queue was cleared would
+   * be picked up by the run as it wound down, or start the next one. Bounded:
+   * a handler stuck on something is not a reason for Stop to hang.
+   */
+  private async whenHanded(sessionId: string, timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const handing = (this.waiting.get(sessionId) ?? []).flatMap((m) => (m.handing ? [m.handing] : []));
+      const left = deadline - Date.now();
+      if (!handing.length || left <= 0) return;
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        Promise.all(handing),
+        new Promise<void>((resolve) => (timer = setTimeout(resolve, left))),
+      ]);
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -328,18 +653,43 @@ class SessionManager extends EventEmitter {
       });
 
     client.on("event", (msg) => {
+      // A client stopped for an edit or a restart can still have a settle in
+      // hand; it speaks for a conversation that is no longer this one.
+      if (this.stopping.has(client)) return;
       rememberSessionFile();
+      // A run the portal started failed after pi had accepted it. Said here,
+      // before its agent_settled, so an ask() waiting on it fails instead of
+      // answering with what was said so far — and the session stays in error
+      // rather than going idle when the settle follows.
+      if (msg.type === "portal_failed") {
+        const failure = String(msg.error ?? "The run failed");
+        this.failed.add(sessionId);
+        updateSession(sessionId, { status: "error", last_error: failure });
+        this.record(sessionId, "portal_status", { status: "error", error: failure });
+        return;
+      }
+      if (msg.type === "agent_start") this.failed.delete(sessionId);
+      if (msg.type === "queue_update") {
+        const lane = (texts: unknown) => (Array.isArray(texts) ? texts.map(String) : []);
+        const queue = { steering: lane(msg.steering), followUp: lane(msg.followUp) };
+        if (queue.steering.length || queue.followUp.length) this.piQueue.set(sessionId, queue);
+        else this.piQueue.delete(sessionId);
+      }
       this.record(sessionId, msg.type, msg);
       // Status follows pi's own run state rather than being guessed at the
       // moments the portal happens to know about. agent_start covers a run
       // nobody here asked for — a queued follow-up picked up on its own, a
       // routine, a message that arrived through a channel.
       if (msg.type === "agent_start") this.mark(sessionId, "running");
+      if (msg.type === "message_start" && msg.message?.role === "user") this.takeIn(sessionId, msg.message.content);
       // agent_settled, not agent_end: agent_end fires once per agent run, and
       // a run is followed by retries, auto-compaction and any queued message,
       // all of it still the model working. Settling on agent_end is what made
       // the Stop button disappear halfway through.
-      if (msg.type === "agent_settled") this.mark(sessionId, "idle");
+      if (msg.type === "agent_settled") {
+        this.settleWaiting(sessionId);
+        if (!this.failed.delete(sessionId)) this.mark(sessionId, "idle");
+      }
     });
 
     client.on("stderr", (chunk: string) => {
@@ -352,6 +702,7 @@ class SessionManager extends EventEmitter {
       if (this.live.get(sessionId)?.client && this.live.get(sessionId)?.client !== client) return;
       this.live.delete(sessionId);
       this.stream.clear(sessionId);
+      this.forgetPi(sessionId);
       const current = getSession(sessionId);
       // A clean exit after a finished run is normal; anything else is a failure
       // worth surfacing in the UI rather than leaving as a silent stall.
@@ -401,6 +752,23 @@ class SessionManager extends EventEmitter {
     if (refused) throw new SessionEditError("unsupported", refused);
     // Behind an edit in progress, not through it: see withEdit.
     if (!insideEdit) await this.whenEditable(sessionId);
+    this.prompting.set(sessionId, (this.prompting.get(sessionId) ?? 0) + 1);
+    try {
+      await this.promptNow(sessionId, message, options, insideEdit);
+    } finally {
+      const left = (this.prompting.get(sessionId) ?? 1) - 1;
+      if (left) this.prompting.set(sessionId, left);
+      else this.prompting.delete(sessionId);
+    }
+  }
+
+  /**
+   * Prompts on their way in, per session, past the wait for an edit: an edit
+   * whose run failed does not go back over one. See settleEdit.
+   */
+  private prompting = new Map<string, number>();
+
+  private async promptNow(sessionId: string, message: string, options: PromptOptions | undefined, insideEdit: boolean): Promise<void> {
     this.mark(sessionId, "running");
     // Same reason as in abort(): a session mid-compaction is detached from
     // agent events, and a prompt started there is invisible.
@@ -409,13 +777,17 @@ class SessionManager extends EventEmitter {
     // already claimed the session. Without this the composer loses its Stop
     // and isBusy() reads false for however long pi takes to answer.
     this.mark(sessionId, "running");
-    const logged = { images: false };
+    const logged = { images: false, queued: false };
     try {
       await this.submit(sessionId, message, options, insideEdit, logged);
     } catch (e) {
-      const failure = (e as Error).message;
-      updateSession(sessionId, { status: "error", last_error: failure });
-      this.record(sessionId, "portal_status", { status: "error", error: failure });
+      // Refused on its way into a run that goes on: that run is not what
+      // failed, and will settle the session itself.
+      if (!(logged.queued && this.live.get(sessionId)?.client.isIdle?.() === false)) {
+        const failure = (e as Error).message;
+        updateSession(sessionId, { status: "error", last_error: failure });
+        this.record(sessionId, "portal_status", { status: "error", error: failure });
+      }
       throw e;
     } finally {
       // Pictures no event names are never shown again, so they are not kept:
@@ -430,7 +802,7 @@ class SessionManager extends EventEmitter {
     message: string,
     options?: PromptOptions,
     insideEdit = false,
-    logged = { images: false },
+    logged = { images: false, queued: false },
   ): Promise<void> {
     const client = await this.ensureClient(sessionId, insideEdit);
     const images = options?.images ?? [];
@@ -461,38 +833,138 @@ class SessionManager extends EventEmitter {
       return;
     }
 
-    if (!isCommand) {
-      this.record(sessionId, "portal_prompt", {
-        message,
-        ...(options?.voice ? { voice: true } : {}),
-        ...(images.length ? { images: forLog(images) } : {}),
-      });
+    // Into a run that is going, it waits for pi to take it in. So does one
+    // behind a message still on its way to pi: pi reads as idle through the
+    // whole of that one's preflight — extension handlers, a compaction check —
+    // and only then starts the run this one will be queued into.
+    const ahead = isCommand ? undefined : this.sending.get(sessionId);
+    const queued = !isCommand && (ahead !== undefined || (client.isIdle ? !client.isIdle() : false));
+    logged.queued = queued;
+    let waiting: Waiting | undefined;
+    const prompt = {
+      message,
+      ...(options?.voice ? { voice: true } : {}),
+      ...(images.length ? { images: forLog(images) } : {}),
+      ...(queued ? { queued: true } : {}),
+      // Taken in after the current step, rather than when the run ends.
+      ...(queued && options?.steer ? { steer: true } : {}),
+    };
+    const row = isCommand ? undefined : this.record(sessionId, "portal_prompt", prompt);
+    if (row) {
       logged.images = images.length > 0;
-    }
-    // pi sends a model that cannot see pictures a line saying one was left
-    // out, and nothing else. The person is told here, where they can pick
-    // another model — and before the answer, which is where it explains it.
-    if (images.length) {
-      const model = await client.getState().catch(() => undefined);
-      const input = model?.model.input;
-      if (input && !input.includes("image")) {
-        this.record(sessionId, "portal_notice", {
-          text: `${model!.model.name} cannot see pictures, so ${images.length === 1 ? "the picture was" : "the pictures were"} left out. Pick a model that takes images to send ${images.length === 1 ? "it" : "them"}.`,
-          error: true,
-        });
+      if (queued) {
+        waiting = { seq: row.seq, message, images: images.length, prompt };
+        this.waiting.set(sessionId, [...(this.waiting.get(sessionId) ?? []), waiting]);
       }
     }
-    await client.prompt(message, {
-      voice: options?.voice,
-      ...(images.length ? { images: forPi(images) } : {}),
-      ...(options?.steer ? { steer: true } : {}),
-    });
+    // Starts a run of its own, when it does: its start is not a waiting
+    // message's. See fresh.
+    let own: { waiting?: Waiting } | undefined;
+    const unfresh = () => {
+      const starting = this.fresh.get(sessionId);
+      if (!own || !starting?.includes(own)) return;
+      starting.splice(starting.indexOf(own), 1);
+      if (!starting.length) this.fresh.delete(sessionId);
+    };
+    // One at a time into pi, in the order they were sent, each once the one
+    // before has been accepted — by then its run has begun, and pi queues
+    // this one into it instead of starting a second run alongside. A command
+    // does not wait: it runs beside a run rather than in it.
+    let handed!: () => void;
+    const mine = new Promise<void>((resolve) => (handed = resolve));
+    const tail = ahead ? ahead.then(() => mine) : mine;
+    if (!isCommand) this.sending.set(sessionId, tail);
+    let taken: PromptTaken | void;
+    try {
+      // pi sends a model that cannot see pictures a line saying one was left
+      // out, and nothing else. The person is told here, where they can pick
+      // another model — and before the answer, which is where it explains it.
+      if (images.length) {
+        const model = await client.getState().catch(() => undefined);
+        const input = model?.model.input;
+        if (input && !input.includes("image")) {
+          this.record(sessionId, "portal_notice", {
+            text: `${model!.model.name} cannot see pictures, so ${images.length === 1 ? "the picture was" : "the pictures were"} left out. Pick a model that takes images to send ${images.length === 1 ? "it" : "them"}.`,
+            error: true,
+          });
+        }
+      }
+      if (ahead) await ahead;
+      // Stopped while it was on its way: already marked as not sent, and pi
+      // would otherwise start a run with it that nobody asked for.
+      if (waiting && !this.waiting.get(sessionId)?.includes(waiting)) return;
+      // Whether it starts a run is read now, with nothing awaited between here
+      // and the prompt: a run that began while this one waited its turn would
+      // queue it, and its start taken for this one's put a waiting message in
+      // the wrong place. Set before the prompt: pi can start the run, and the
+      // message, before the prompt comes back.
+      if (!isCommand && (client.isIdle ? client.isIdle() : !queued)) {
+        own = { waiting };
+        this.fresh.set(sessionId, [...(this.fresh.get(sessionId) ?? []), own]);
+      }
+      const sent = client.prompt(message, {
+        voice: options?.voice,
+        ...(images.length ? { images: forPi(images) } : {}),
+        ...(options?.steer ? { steer: true } : {}),
+      });
+      if (waiting) waiting.handing = sent.then(() => {}, () => {});
+      try {
+        taken = await sent;
+      } catch (e) {
+        unfresh();
+        // Refused, so never queued: nothing for pi to take in. Out of the
+        // transcript too — its words go back to the box they came from, and
+        // left there as well it would wait at the foot of the chat for good.
+        if (waiting && this.unwait(sessionId, waiting)) {
+          deleteEvent(waiting.seq);
+          this.record(sessionId, "portal_removed", { from: waiting.seq, to: waiting.seq + 1 });
+          logged.images = false;
+        }
+        throw e;
+      }
+      if (taken && taken.outcome !== "started") unfresh();
+      if (taken?.outcome === "queued") {
+        const queuedAs = { lane: taken.lane, text: taken.text };
+        if (isCommand) {
+          this.queuedCommands.set(sessionId, [...(this.queuedCommands.get(sessionId) ?? []), { command: message, queued: queuedAs }]);
+        } else if (!waiting && row) {
+          // A run began in the moment it was handed over, and pi queued it:
+          // it waits for that run to take it in after all, like any other,
+          // and is moved to where it does.
+          const late = { queued: true, ...(options?.steer ? { steer: true } : {}) };
+          waiting = { seq: row.seq, message, images: images.length, prompt: { ...prompt, ...late } };
+          this.waiting.set(sessionId, [...(this.waiting.get(sessionId) ?? []), waiting]);
+          notePromptQueued(row.seq, late);
+        }
+        if (waiting) {
+          waiting.queuedAs = queuedAs;
+          // Kept with the message where pi made something else of it, for a
+          // server that dies before pi reads it: see settleOrphanedMessages.
+          if (unspoken(taken.text) !== message) notePromptQueued(waiting.seq, { queuedAs: taken.text });
+        }
+      } else if (taken?.outcome === "handled" && waiting) {
+        // An extension took it and no run will: this is where it went in.
+        this.placeTaken(sessionId, waiting);
+      }
+      if (waiting) {
+        waiting.handing = undefined;
+        waiting.inPi = true;
+      }
+    } finally {
+      handed();
+      if (this.sending.get(sessionId) === tail) this.sending.delete(sessionId);
+    }
     // A slash command completes inside prompt() without ever starting an agent
     // turn, so no agent_settled arrives to clear the status. Settle it here
     // rather than leaving "working" on screen forever. Asking pi rather than
     // assuming: a message sent mid-run is queued and returns from prompt()
     // immediately, with the model still going.
-    if (client.isIdle?.()) this.mark(sessionId, "idle");
+    if (client.isIdle?.()) {
+      // Taken without a run — an extension handled it — so no start of its
+      // own is coming, and the next one must not be taken for it.
+      unfresh();
+      this.mark(sessionId, "idle");
+    }
   }
 
   /**
@@ -553,7 +1025,7 @@ class SessionManager extends EventEmitter {
     sessionId: string,
     seq: number,
     scope: Scope,
-  ): Promise<{ removed: { from: number; to: number | null }; undo: () => Promise<void> }> {
+  ): Promise<{ removed: Removed; undo: () => Promise<void> }> {
     const session = getSession(sessionId);
     if (!session) throw new SessionEditError("missing", "Unknown session");
     if (this.isBusy(sessionId) || this.compacting.has(sessionId)) {
@@ -583,7 +1055,8 @@ class SessionManager extends EventEmitter {
       write(
         dropMessage(
           original,
-          sent.slice(0, ordinal + 1).map((m) => m.message),
+          // In pi's file as pi queued it, where it made something else of it.
+          sent.slice(0, ordinal + 1).map((m) => String(m.payload.queuedAs ?? m.message)),
           ordinal,
           scope,
         ),
@@ -592,10 +1065,13 @@ class SessionManager extends EventEmitter {
       throw new SessionEditError("unsupported", "Messages cannot be edited in a container session.");
     }
 
-    const to = scope === "tail" ? null : (sent[ordinal + 1]?.seq ?? null);
-    let gone: EventRow[];
+    // Where the message sits, not the seq it was sent at: one sent into a run
+    // was read later, and what the agent did in between is still in its file.
+    const from = sent[ordinal].at;
+    const to = scope === "tail" ? null : (sent[ordinal + 1]?.at ?? null);
+    let gone: ReturnType<typeof deleteEventsBetween>;
     try {
-      gone = deleteEventsBetween(sessionId, seq, to);
+      gone = deleteEventsBetween(sessionId, from, to);
     } catch (e) {
       if (original !== undefined) write(original);
       throw e;
@@ -604,14 +1080,23 @@ class SessionManager extends EventEmitter {
       // A client started since would hold the edited conversation in memory.
       await this.stop(sessionId);
       if (original !== undefined) write(original);
-      restoreEvents(gone);
+      restoreEvents(gone.rows);
     };
-    return { removed: { from: seq, to }, undo };
+    return { removed: { from, to, also: gone.also, kept: gone.kept }, undo };
   }
 
-  /** Replace a message: everything from it onwards goes, and the new text is sent in its place. */
+  /**
+   * Replace a message: everything from it onwards goes, and the new text is
+   * sent in its place.
+   *
+   * Answered, and the conversation let go, once pi has the replacement — not
+   * once it has answered it: on a long chat the model can read for minutes
+   * before it says anything, and holding the edit that long held every steer,
+   * channel message and routine sent to the chat behind it. Until the answer
+   * comes the conversation it replaced can still come back: see settleEdit.
+   */
   async editMessage(sessionId: string, seq: number, message: string): Promise<void> {
-    await this.withEdit(sessionId, async () => {
+    const edit = await this.withEdit(sessionId, async () => {
       // Read before the cut takes the event away: a retried or rewritten
       // message goes with the pictures it was sent with.
       const images = loadImages(IMAGE_ROOT, sessionId, storedIn(sentMessage(sessionId, seq)?.payload));
@@ -621,25 +1106,116 @@ class SessionManager extends EventEmitter {
       if (refused) throw new SessionEditError("unsupported", refused);
       const { removed, undo } = await this.cut(sessionId, seq, "tail");
       const before = latestSeq();
+      const answered = this.firstAnswer(sessionId);
       try {
         await this.prompt(sessionId, message, images.length ? { images } : undefined, true);
       } catch (e) {
+        answered.cancel();
         // The replacement never got to the agent, so the conversation it was
         // meant to replace is still the conversation: nothing may be lost to a
         // model that was down or a client that would not start.
-        await undo();
-        // The transcript recorded the replacement before pi refused it.
-        for (const m of sentMessages(sessionId)) {
-          if (m.seq <= before) continue;
-          deleteEvent(m.seq);
-          this.record(sessionId, "portal_removed", { from: m.seq, to: m.seq + 1 });
-        }
+        await this.revertEdit(sessionId, undo, before);
         throw e;
       }
-      // Told only now, and only about what was removed: the replacement's own
-      // events are newer than everything that went, so a browser keeps them.
-      this.record(sessionId, "portal_removed", { from: removed.from, to: before + 1 });
+      // Nothing else could be sent while the edit held the chat: what comes
+      // after this is the chat going on from the replacement.
+      return { removed, undo, before, sent: latestSeq(), answered: answered.promise };
     });
+    void this.settleEdit(sessionId, edit);
+  }
+
+  /**
+   * An edit whose replacement pi has taken, once its run has answered or
+   * failed.
+   *
+   * Answered, it stands: the page is told what went, which it has kept on
+   * screen until now. Failed before a word of answer — the model down, the
+   * run refused — the conversation it replaced comes back, as it would have
+   * had the replacement been refused outright. Unless the chat has gone on
+   * from the replacement in the meantime — something else sent, or on its
+   * way — when going back would take that with it: the edit stands then, with
+   * the error that says what happened to its run.
+   */
+  private async settleEdit(
+    sessionId: string,
+    edit: { removed: Removed; undo: () => Promise<void>; before: number; sent: number; answered: Promise<void> },
+  ): Promise<void> {
+    const failure = await edit.answered.then(
+      () => undefined,
+      (e: Error) => e,
+    );
+    const stand = () => this.record(sessionId, "portal_removed", { ...edit.removed, to: edit.before + 1 });
+    if (!failure) return void stand();
+    try {
+      await this.withEdit(sessionId, async () => {
+        const since = sentMessages(sessionId).some((m) => m.seq > edit.sent);
+        if (since || this.prompting.get(sessionId) || this.sending.has(sessionId)) return void stand();
+        await this.revertEdit(sessionId, edit.undo, edit.before);
+        this.record(sessionId, "portal_notice", {
+          text: `The edited message got no answer (${failure.message}), so the conversation is back as it was.`,
+          error: true,
+        });
+      });
+    } catch (e) {
+      // Another edit got there first: it is working on the conversation as
+      // it now stands, replacement and all.
+      console.error(`[portal] could not settle the edit of ${sessionId}: ${(e as Error).message}`);
+      stand();
+    }
+  }
+
+  /** The conversation an edit replaced, back; what the replacement recorded, gone. */
+  private async revertEdit(sessionId: string, undo: () => Promise<void>, before: number): Promise<void> {
+    await undo();
+    // The transcript recorded the replacement, and whatever its run did
+    // before it failed. The error that says why stays.
+    const gone = deleteEventsAfter(sessionId, before);
+    if (gone.length) this.record(sessionId, "portal_removed", { from: 0, to: 0, also: gone });
+  }
+
+  /**
+   * Resolves once the run a prompt is starting has answered — a reply from
+   * the model that is not an error — or was stopped, or once pi has taken
+   * the prompt without a run at all. Rejects if the run fails first, or ends
+   * without an answer: a model that is down is retried, recorded as an error
+   * reply, and settled, without anything ever throwing. Attached before the
+   * prompt is sent, since all of it can happen before the prompt returns.
+   */
+  private firstAnswer(sessionId: string): { promise: Promise<void>; cancel: () => void } {
+    const key = `session:${sessionId}`;
+    let cancel!: () => void;
+    const promise = new Promise<void>((resolve, reject) => {
+      let started = false;
+      let error: string | undefined;
+      const done = (failure?: string) => {
+        cancel();
+        if (failure === undefined) resolve();
+        else reject(new Error(failure));
+      };
+      const onEvent = (row: { type: string; payload: string }) => {
+        let p: any = {};
+        try {
+          p = JSON.parse(row.payload);
+        } catch {
+          return;
+        }
+        if (row.type === "agent_start") started = true;
+        else if (row.type === "message_end" && p.message?.role === "assistant") {
+          if (p.message.stopReason !== "error") done();
+          else error = String(p.message.errorMessage ?? error ?? "The model answered with an error");
+        } else if (row.type === "portal_status" && p.status === "error") done(String(p.error ?? error ?? "The run failed"));
+        // Stopped by the person: the edit is what they stopped, not undid.
+        else if (row.type === "portal_status" && p.status === "idle" && p.aborted) done();
+        else if (row.type === "agent_settled") done(error ?? "The run ended without an answer");
+        // Idle with no run begun: an extension took it, and that is all.
+        else if (row.type === "portal_status" && p.status === "idle") done(started ? (error ?? "The run ended without an answer") : undefined);
+      };
+      cancel = () => this.off(key, onEvent);
+      this.on(key, onEvent);
+    });
+    // A prompt refused outright throws on its own; nothing waits on this then.
+    promise.catch(() => {});
+    return { promise, cancel };
   }
 
   /**
@@ -1059,16 +1635,36 @@ class SessionManager extends EventEmitter {
       await this.settleCompaction(sessionId);
       return;
     }
-    await live.client.abort().catch(() => {});
-    // Cancelling a compaction does not end it. pi detaches the session from
-    // agent events for the whole of compact() and reattaches in its own
-    // finally, so between abortCompaction() returning and that finally running
-    // the session is deaf. Publishing idle there lets the next prompt start
-    // against a detached session — it would run with nothing reaching the
-    // transcript, which is the failure this whole area keeps producing.
-    await this.settleCompaction(sessionId);
-    updateSession(sessionId, { status: "idle" });
-    this.record(sessionId, "portal_status", { status: "idle", aborted: true });
+    // What is sent from here on waits for the Stop to be over, and then starts
+    // a run of its own. Handed over now, pi would queue it into the run being
+    // stopped — the page still shows Stop while pi winds down, and the send
+    // goes out as a steer — and then go on with it after the abort.
+    let stopped!: () => void;
+    const gate = new Promise<void>((resolve) => (stopped = resolve));
+    const before = this.sending.get(sessionId);
+    const tail = before ? before.then(() => gate) : gate;
+    this.sending.set(sessionId, tail);
+    try {
+      const sentBefore = new Set(this.waiting.get(sessionId) ?? []);
+      // Before the abort, which waits for the run to settle and would find them
+      // still in pi's queue, ready for the next run. What is being handed to pi
+      // this moment is let into the queue first, to be cleared with the rest.
+      await this.whenHanded(sessionId);
+      this.dropWaiting(sessionId, live.client, sentBefore);
+      await live.client.abort().catch(() => {});
+      // Cancelling a compaction does not end it. pi detaches the session from
+      // agent events for the whole of compact() and reattaches in its own
+      // finally, so between abortCompaction() returning and that finally running
+      // the session is deaf. Publishing idle there lets the next prompt start
+      // against a detached session — it would run with nothing reaching the
+      // transcript, which is the failure this whole area keeps producing.
+      await this.settleCompaction(sessionId);
+      updateSession(sessionId, { status: "idle" });
+      this.record(sessionId, "portal_status", { status: "idle", aborted: true });
+    } finally {
+      stopped();
+      if (this.sending.get(sessionId) === tail) this.sending.delete(sessionId);
+    }
   }
 
   /**
@@ -1111,7 +1707,15 @@ class SessionManager extends EventEmitter {
     live.client.dispose();
     this.live.delete(sessionId);
     this.stream.clear(sessionId);
+    this.forgetPi(sessionId);
     await live.executor.cleanup?.(sessionId).catch(() => {});
+  }
+
+  /** pi is gone, and what it was holding with it. */
+  private forgetPi(sessionId: string): void {
+    this.fresh.delete(sessionId);
+    this.piQueue.delete(sessionId);
+    this.dropWaiting(sessionId);
   }
 
   /** Waits for a launch that is still in flight; it is not in `live` until it has finished. */

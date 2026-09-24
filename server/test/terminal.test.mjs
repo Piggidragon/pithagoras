@@ -62,5 +62,18 @@ test("a resize reaches the shell without being typed into it", async () => {
   // The old way left the command itself on the screen.
   assert.doesNotMatch(text, /stty rows/);
   await fetch(`${base}/terminal/${id}`, { method: "DELETE" });
+});
+
+test("closing a terminal ends what it started, even what ignores the hangup", async () => {
+  const { id } = await post("/terminal", {});
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await post(`/terminal/${id}/input`, { data: "nohup sleep 300 >/dev/null 2>&1 & echo job=$!\n" });
+  const pid = Number(/job=(\d+)/.exec(await read(id, /job=\d+/))?.[1]);
+  assert.ok(pid > 0, "the job started");
+  await fetch(`${base}/terminal/${id}`, { method: "DELETE" });
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const deadline = Date.now() + 5000;
+  while (alive() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.ok(!alive(), "the nohup job is gone");
   server.close();
 });
