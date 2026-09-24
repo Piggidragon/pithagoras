@@ -129,6 +129,18 @@ class SessionManager extends EventEmitter {
     super();
     this.setMaxListeners(0);
     mkdirSync(SESSION_ROOT, { recursive: true });
+  }
+
+  /**
+   * Chats left running by the previous server, marked interrupted.
+   *
+   * Called by the server on startup, not by the constructor: anything that
+   * imports this module builds the manager, and a test the agent runs from
+   * inside a chat inherits the portal's DATA_DIR. Done on construction, that
+   * test marked the very chat running it as interrupted — which took away its
+   * Stop button while it was still waiting on the command.
+   */
+  recoverOrphans(): void {
     const orphaned = markOrphanedSessionsInterrupted();
     if (orphaned > 0) {
       console.log(`[portal] marked ${orphaned} session(s) interrupted (server restarted mid-run)`);
@@ -335,6 +347,9 @@ class SessionManager extends EventEmitter {
       // nobody here asked for — a queued follow-up picked up on its own, a
       // routine, a message that arrived through a channel.
       if (msg.type === "agent_start") this.mark(sessionId, "running");
+      // Output from a chat marked interrupted means it is not: the run is
+      // still going here, and it needs its Stop button back.
+      else if (msg.type !== "agent_settled" && getSession(sessionId)?.status === "interrupted") this.mark(sessionId, "running");
       // agent_settled, not agent_end: agent_end fires once per agent run, and
       // a run is followed by retries, auto-compaction and any queued message,
       // all of it still the model working. Settling on agent_end is what made
@@ -1057,6 +1072,12 @@ class SessionManager extends EventEmitter {
       // had finished starting — the same bounded wait, so the answer arrives
       // when the thing it describes is actually over.
       await this.settleCompaction(sessionId);
+      // Interrupted by a restart: nothing is running, and Stop is how the
+      // chat is put back to rest without having to send it something.
+      if (getSession(sessionId)?.status === "interrupted") {
+        updateSession(sessionId, { status: "idle" });
+        this.record(sessionId, "portal_status", { status: "idle", aborted: true });
+      }
       return;
     }
     await live.client.abort().catch(() => {});

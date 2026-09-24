@@ -679,7 +679,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       this.wanted = new Set();
     }
     session.setActiveToolsByName = (names: string[]) => {
-      this.wanted = new Set(names);
+      // pi builds the next set from `getActiveToolNames()`, which the switches
+      // have already thinned. Taken as it came, every refresh — an extension
+      // registering a tool, an MCP server connecting — dropped whatever was
+      // switched off from what pi wants: gone from the chat's list, and with
+      // no way to switch it back on. What is missing only because it is off
+      // is still wanted.
+      const held = [...this.wanted].filter((name) => this.switchedOff.has(name) && !names.includes(name));
+      this.wanted = new Set([...names, ...held]);
       original(names.filter((name) => !this.switchedOff.has(name)));
     };
   }

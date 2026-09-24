@@ -170,10 +170,15 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
  * one and opens a new one after, so a single answer can be several bubbles —
  * one per paragraph around a tool. Offering Copy on all of them is a button
  * under every paragraph; only the last has the whole of what was said.
+ *
+ * And only when the answer ends there. A paragraph followed by a tool call is
+ * the agent saying what it is about to do, not an answer — a Copy under it
+ * sat between the words and the call like a stray gap.
  */
 export function lastReplyId(items: readonly Item[]): string | undefined {
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
+    if (it.kind === "tool") return undefined;
     if (it.kind === "assistant" && it.text) return it.done ? it.id : undefined;
   }
   return undefined;

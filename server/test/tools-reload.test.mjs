@@ -96,3 +96,17 @@ test("only what the model could be offered is listed", async () => {
   // is not in.
   for (const name of ["grep", "find", "ls"]) assert.ok(!names.includes(name), name);
 });
+
+test("a tool switched off stays listed, and can come back, after pi refreshes its tools", async () => {
+  const session = fakeSession();
+  const c = client(session);
+  await c.setToolsOff(["web_search"]);
+  // pi builds the next set from the active one, which no longer has it.
+  session.register("jira_search");
+  const listed = await c.getTools();
+  const web = listed.find((t) => t.name === "web_search");
+  assert.ok(web, "web_search is still offered");
+  assert.equal(web.enabled, false);
+  await c.setToolsOff([]);
+  assert.ok(session.active.includes("web_search"));
+});

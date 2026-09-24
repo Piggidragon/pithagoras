@@ -47,7 +47,15 @@ const terms = new Map<string, Term>();
 
 function end(term: Term): void {
   clearTimeout(term.reaper);
-  if (!term.exited) term.proc.kill("SIGHUP");
+  // SIGTERM, not SIGHUP: `script` from util-linux 2.39 (Debian, the LXC
+  // image) ignores a hangup, so every closed panel left its shell running —
+  // and the test that closes one waited on it forever.
+  if (!term.exited) {
+    term.proc.kill("SIGTERM");
+    setTimeout(() => {
+      if (!term.exited) term.proc.kill("SIGKILL");
+    }, 2000).unref();
+  }
   terms.delete(term.id);
 }
 

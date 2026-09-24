@@ -394,6 +394,10 @@ export function Chat({
     };
   }, [wantsMermaid, mermaid]);
   const running = session.status === "running";
+  // Interrupted is what a restart leaves, but a chat can be marked it while its
+  // run is still going here. Stop is offered either way: on a chat with nothing
+  // running it only puts it back to rest.
+  const stoppable = running || session.status === "interrupted";
 
   // What it is doing, and for how long. The clock ticks only while something is
   // running, so an idle session re-renders no more than it used to.
@@ -562,7 +566,16 @@ export function Chat({
       }
       setSending(true);
       try {
-        await onSend(msg, voiceMode || images.length ? { voice: voiceMode || undefined, images: images.length ? images : undefined } : undefined);
+        // Mid-run, typed words steer the run — taken in after the step it is on
+        // — rather than waiting for it to finish, which on a long run looked
+        // like the message had gone nowhere. Voice mode has its own switch.
+        const steer = running && !voiceMode;
+        await onSend(
+          msg,
+          voiceMode || images.length || steer
+            ? { voice: voiceMode || undefined, images: images.length ? images : undefined, steer: steer || undefined }
+            : undefined,
+        );
       } finally {
         setSending(false);
       }
@@ -961,7 +974,7 @@ export function Chat({
           }
           if (item.kind === "assistant") {
             return (
-              <div key={item.id} className="group max-w-[90%]">
+              <div key={item.id} className="group relative max-w-[90%]">
                 {item.thinking && (
                   <details className="mb-1 text-xs text-fg-subtle">
                     <summary className="cursor-pointer hover:text-fg-muted">thinking</summary>
@@ -989,9 +1002,10 @@ export function Chat({
                   </div>
                 )}
                 {/* Only the last bubble of the reply: one per tool call in
-                    between would be a Copy button after every paragraph. */}
+                    between would be a Copy button after every paragraph. Beside
+                    it rather than under it, so it adds no line of its own. */}
                 {item.id === lastReply && (
-                  <div className="mt-0.5 flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                  <div className="absolute -right-7 top-0 flex items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                     <CopyAction text={assistantText(item)} />
                   </div>
                 )}
@@ -1248,7 +1262,7 @@ export function Chat({
             if (
               stopsRun({
                 key: e.key,
-                running,
+                running: stoppable,
                 empty: !input.trim() && !attached.length,
                 composing: isComposing(e),
                 paletteOpen: matches.length > 0,
@@ -1268,7 +1282,7 @@ export function Chat({
             dictation.active
               ? "Speak — your words appear here…"
               : running
-                ? "pi is working — send to queue a follow-up…"
+                ? "pi is working — what you send goes into the run after its current step…"
                 : "Describe the task…"
           }
           aria-label="Message"
@@ -1295,9 +1309,9 @@ export function Chat({
               </button>
               <DictationButton dictation={dictation} />
               <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
-              {running && !input.trim() && !attached.length ? <button type="button" aria-label="Stop generation" title="Stop generation (Esc)" onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
+              {stoppable && !input.trim() && !attached.length ? <button type="button" aria-label="Stop generation" title="Stop generation (Esc)" onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
                 <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />
-              </button> : <button type="submit" aria-label="Send message" title={running ? 'Send follow-up' : 'Send message'} disabled={sending || adding > 0 || (!input.trim() && !attached.length)}
+              </button> : <button type="submit" aria-label="Send message" title={running ? 'Send into the running task' : 'Send message'} disabled={sending || adding > 0 || (!input.trim() && !attached.length)}
                 className="prompt-action prompt-send">
                 <LuArrowUp aria-hidden className="h-5 w-5" />
               </button>}

@@ -3,6 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+// sdk-client reaches the session manager, and so the database: never the one
+// of a portal this suite happens to be run from.
+process.env.DATA_DIR = mkdtempSync(path.join(tmpdir(), 'ctx-data-'));
+process.env.SESSION_DIR = path.join(process.env.DATA_DIR, 'sessions');
 const { extraContextFiles } = await import('../dist/pi/sdk-client.js');
 
 const names = (files) => files.map((f) => path.basename(f.path)).sort();

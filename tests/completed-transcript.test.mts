@@ -60,6 +60,14 @@ test('a reply still streaming after the last tool call is not offered yet', () =
   assert.equal(lastReplyId(buildTranscript(events)), undefined);
 });
 
+test('a paragraph followed by a tool call is not offered Copy', () => {
+  const events = [
+    { seq: 1, type: 'message_end', payload: { streamId: 'a', message: { role: 'assistant', content: [{ type: 'text', text: 'Running the tests now.' }] } } },
+    { seq: 2, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'bash' } },
+  ];
+  assert.equal(lastReplyId(buildTranscript(events)), undefined);
+});
+
 test('nothing to copy before anything has been said', () => {
   assert.equal(lastReplyId([]), undefined);
 });
