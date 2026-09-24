@@ -41,7 +41,8 @@ import { mcpRouter } from "./api/mcp.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { browserRouter } from "./api/browser.js";
-import { terminalRouter } from "./api/terminal.js";
+import { terminalRouter, terminalSessionIds } from "./api/terminal.js";
+import { MARKER, clearFinished, listJobs, readOutput, stopJob } from "./background.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
@@ -103,6 +104,13 @@ const PORT = Number(process.env.PORT || 4100);
 const REPLAY_EVENTS = 1_200;
 /** Persistent place for CLIs, kept on PATH so pi and its tools can reach them. */
 const BIN_DIR = path.resolve(process.env.BIN_DIR || "/data/bin");
+
+// Everything the portal starts carries this, and keeps it when it is detached:
+// it is how a background job is known to be the agent's. See background.ts.
+{
+  const [name, value] = MARKER.split("=");
+  process.env[name] = value;
+}
 
 const app = express();
 // A message can carry pictures, which do not fit in what every other request is
@@ -743,6 +751,62 @@ app.post("/api/sessions/:id/abort", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   await sessions.abort(session.id);
+  res.json({ ok: true });
+});
+
+// --- what runs beside the conversation: background jobs, extension status, subagents ---
+
+const BACKGROUND_SUPPORTED = (process.env.EXECUTOR || "host") !== "container" && process.platform === "linux";
+
+app.get("/api/sessions/:id/background", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const jobs = BACKGROUND_SUPPORTED ? await listJobs(session.workspace, terminalSessionIds()) : [];
+  res.json({ supported: BACKGROUND_SUPPORTED, jobs, ...sessions.extensionState(session.id) });
+});
+
+app.get("/api/sessions/:id/background/:key/output", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const from = req.query.from === undefined ? undefined : Number(req.query.from);
+  const out = await readOutput(session.workspace, req.params.key, Number.isFinite(from) ? from : undefined);
+  if (!out) return res.status(404).json({ error: "This job's output is not in a file the portal can follow" });
+  res.json(out);
+});
+
+app.post("/api/sessions/:id/background/:key/stop", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  if (!(await stopJob(session.workspace, req.params.key, terminalSessionIds()))) {
+    return res.status(409).json({ error: "That job is not running any more" });
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/sessions/:id/background/clear", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  clearFinished(session.workspace);
+  res.json({ ok: true });
+});
+
+app.post("/api/sessions/:id/subagents/:agent/input", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+  if (!text) return res.status(400).json({ error: "Nothing to send" });
+  if (!sessions.subagentInput(session.id, req.params.agent, text)) {
+    return res.status(409).json({ error: "The subagent cannot be reached — the chat is not running here" });
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/sessions/:id/subagents/:agent/stop", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  if (!sessions.subagentStop(session.id, req.params.agent)) {
+    return res.status(409).json({ error: "The subagent cannot be reached — the chat is not running here" });
+  }
   res.json({ ok: true });
 });
 

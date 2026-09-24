@@ -1,5 +1,5 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|compacting|tools|interrupted to see each state,
+// Open /tests/chat.html?phase=model|prefill|thinking|compacting|tools|agents|interrupted to see each state,
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -36,6 +36,31 @@ if (phase === 'thinking') events.push(ev('turn_start', {}, 8), ev('message_updat
 if (phase === 'compacting') events.push(ev('compaction_start', {}, 6));
 // The portal restarted mid-command: nothing says the call ended, only that the chat was interrupted.
 if (phase === 'interrupted') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run test:e2e', 'Running 42 tests using 4 workers\n  ✓ login (1.2s)\n', undefined, 12));
+if (phase === 'agents') {
+  events.push(
+    ev('tool_execution_start', { toolCallId: 'dr', toolName: 'deep_research', args: { query: 'Which vector DB fits a homelab?' } }, 50),
+    ev('tool_execution_update', { toolCallId: 'dr', partialResult: { content: [{ type: 'text', text: '## Findings so far\n- **pgvector** is enough below 10M vectors' }], details: { phase: 'researching (4 searches)', items: [{ type: 'toolCall', name: 'web_search', args: { query: 'pgvector vs qdrant 2026' } }, { type: 'text', text: 'Comparing memory use.' }, { type: 'toolCall', name: 'fetch', args: { url: 'https://qdrant.tech/benchmarks' } }] } } }, 5),
+    ev('tool_execution_start', { toolCallId: 'sa', toolName: 'subagent', args: { task: 'Audit the deploy script', label: 'Deploy audit' } }, 40),
+    ev('portal_subagent', { op: 'start', id: 'sub1', label: 'Deploy audit', toolCallId: 'sa', input: true, stop: true }, 40),
+    ev('portal_subagent', { op: 'event', id: 'sub1', event: { type: 'message_end', message: { role: 'user', content: 'Audit the deploy script for anything that could lose data.' } } }, 39),
+    ev('portal_subagent', { op: 'event', id: 'sub1', event: { type: 'tool_execution_start', toolCallId: 'x1', toolName: 'read', args: { path: 'deploy/setup.sh' } } }, 38),
+    ev('portal_subagent', { op: 'event', id: 'sub1', event: { type: 'tool_execution_end', toolCallId: 'x1', toolName: 'read', result: { content: [{ type: 'text', text: '#!/bin/sh…' }] } } }, 37),
+    ev('portal_subagent', { op: 'event', id: 'sub1', event: { type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'rm -rf on the old dir runs before the copy is verified.' }, { type: 'text', text: 'The script deletes `/opt/pithagoras.old` **before** checking that the new build started. I will look at the restart step next.' }] } } }, 20),
+    ev('portal_subagent_live', { op: 'event', id: 'sub1', event: { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'Now the systemd restart: does it wait for health?' } } }, 2),
+  );
+  const jobs = { supported: true, statuses: [{ key: 'background-tasks', text: 'bg 1 running' }], widgets: [], jobs: [
+    { key: 'j1', sid: 4242, pids: [4242, 4250], command: 'npm run dev -- --port 5173', startedAt: now - 754_000, state: 'running', hasOutput: true, attached: false },
+    { key: 'j2', sid: 4300, pids: [], command: 'python -m http.server 8000', startedAt: now - 3_600_000, exitedAt: now - 1_200_000, state: 'exited', hasOutput: true, attached: false },
+  ] };
+  const realFetch = window.fetch;
+  window.fetch = (async (url: any, init?: any) => {
+    const u = String(url);
+    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    if (u.endsWith('/background')) return reply(jobs);
+    if (u.includes('/background/') && u.includes('/output')) return reply({ text: u.includes('from=') ? '' : '> vite\n\n  VITE v5.4  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host to expose\n', from: 0, size: 120 });
+    return realFetch(url, init);
+  }) as typeof fetch;
+}
 
 const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
 const noop = async () => {};

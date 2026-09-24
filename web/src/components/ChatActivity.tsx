@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
+  LuBot,
   LuBrain,
   LuChevronRight,
   LuCircleSlash,
@@ -236,7 +237,16 @@ const INLINE_OUTPUT = 6000;
  * came back. A shell command shows whole, with its output, and a way into the
  * agent terminal for all of it.
  */
-export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTerminal?: (callId: string) => void }) {
+export function ToolCall({
+  item,
+  onOpenTerminal,
+  onOpenAgent,
+}: {
+  item: ToolItem;
+  onOpenTerminal?: (callId: string) => void;
+  /** The tool runs an agent of its own, which has a window: a way into it. */
+  onOpenAgent?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   // Whatever extension it came from: nothing below is keyed to one tool but
   // the shell, which is shown as a terminal would show it.
@@ -293,6 +303,11 @@ export function ToolCall({ item, onOpenTerminal }: { item: ToolItem; onOpenTermi
         )}
         <LuChevronRight className="chat-chevron" aria-hidden />
       </button>
+      {onOpenAgent && (
+        <button type="button" className="chat-tool-agent" onClick={onOpenAgent}>
+          <LuBot aria-hidden /> {running ? "Watch" : "Open"}
+        </button>
+      )}
       {recent.length > 0 && (
         // Keyed by place, not by text: a new line moves the others up
         // without anything being drawn afresh.

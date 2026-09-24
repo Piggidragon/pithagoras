@@ -15,6 +15,7 @@ import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
+import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP } from "../subagent-protocol.js";
 import { contextWindowFor } from "../db.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
@@ -206,6 +207,21 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
+  /** The extensions' event bus, when this client made one. */
+  bus?: { emit(channel: string, data: unknown): void };
+  unbridge?: () => void;
+
+  subagentInput(id: string, text: string): boolean {
+    if (!this.bus) return false;
+    this.bus.emit(SUBAGENT_INPUT, { id, text });
+    return true;
+  }
+
+  subagentStop(id: string): boolean {
+    if (!this.bus) return false;
+    this.bus.emit(SUBAGENT_STOP, { id });
+    return true;
+  }
   /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
   private appliedModel?: object;
   /** What each model's own definition says its window is, as last seen on a model that was pi's. */
@@ -257,6 +273,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const pi: any = await import("@earendil-works/pi-coding-agent");
 
     const modelRuntime = await pi.ModelRuntime.create();
+    // Shared with the extensions, so one that runs a subagent can tell the
+    // portal about it, and be told what the person wants of it.
+    const eventBus = typeof pi.createEventBus === "function" ? pi.createEventBus() : undefined;
 
     // Without an explicit loader the SDK starts with no extensions, skills or
     // prompt templates — so installed packages contribute no commands at all.
@@ -297,6 +316,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       }
       resourceLoader = new pi.DefaultResourceLoader({
         cwd: opts.cwd,
+        ...(eventBus ? { eventBus } : {}),
         agentDir: pi.getAgentDir(),
         // Available everywhere without being installed, and not editable in
         // place: they belong to the image, so an edit would be lost on the next
@@ -367,6 +387,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const client = new SdkPiClient(session, modelRuntime, () => {});
     client.portalSessionId = opts.sessionId;
     client.canvases = canvases;
+    if (eventBus && resourceLoader) {
+      client.bus = eventBus;
+      client.unbridge = bridgeSubagents(eventBus, (event) => client.emit("event", event));
+    }
     if (resourceLoader) {
       client.voiceFirst = voiceFirst;
     }
@@ -683,6 +707,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   dispose(): void {
+    this.unbridge?.();
     if (this.disposed) return;
     this.disposed = true;
     this.canvases?.interrupt();

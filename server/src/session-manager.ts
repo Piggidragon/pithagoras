@@ -132,6 +132,8 @@ const EPHEMERAL_EVENTS = new Set([
   "portal_prefill",
   // A model being loaded before the prompt can be read: news only while it lasts.
   "portal_model",
+  // A subagent's reply as it streams; its finished messages are stored.
+  "portal_subagent_live",
   // Tells a page which stretch of its transcript is gone. Stored, it would be
   // replayed to a reader who never saw what it refers to.
   "portal_removed",
@@ -564,6 +566,51 @@ class SessionManager extends EventEmitter {
     this.record(sessionId, "portal_prefill", prefill);
   }
 
+  /**
+   * What extensions currently show about themselves in a session: the status
+   * lines and text widgets pi's TUI would draw in its footer. Kept here, not
+   * only streamed, so a page opened later sees them too.
+   */
+  private extensionUi = new Map<string, { statuses: Map<string, string>; widgets: Map<string, string[]> }>();
+
+  private noteExtensionUi(sessionId: string, msg: any): void {
+    let ui = this.extensionUi.get(sessionId);
+    if (!ui) this.extensionUi.set(sessionId, (ui = { statuses: new Map(), widgets: new Map() }));
+    const plain = (t: unknown) => String(t ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim();
+    if (msg.method === "setStatus" && typeof msg.statusKey === "string") {
+      const text = plain(msg.statusText);
+      if (text) ui.statuses.set(msg.statusKey, text);
+      else ui.statuses.delete(msg.statusKey);
+    }
+    if (msg.method === "setWidget" && typeof msg.widgetKey === "string") {
+      const lines = Array.isArray(msg.widgetContent) ? msg.widgetContent.map(plain) : [];
+      if (lines.some(Boolean)) ui.widgets.set(msg.widgetKey, lines);
+      else ui.widgets.delete(msg.widgetKey);
+    }
+  }
+
+  /** Extension status lines and widgets for a session, as they are now. */
+  extensionState(sessionId: string): { statuses: { key: string; text: string }[]; widgets: { key: string; lines: string[] }[] } {
+    const ui = this.extensionUi.get(sessionId);
+    return {
+      statuses: ui ? [...ui.statuses].map(([key, text]) => ({ key, text })) : [],
+      widgets: ui ? [...ui.widgets].map(([key, lines]) => ({ key, lines })) : [],
+    };
+  }
+
+  /**
+   * A message for, or a stop to, a subagent an extension announced. False
+   * when the session is not running here or its executor cannot reach the
+   * extensions — the container one cannot.
+   */
+  subagentInput(sessionId: string, id: string, text: string): boolean {
+    return this.live.get(sessionId)?.client.subagentInput?.(id, text) ?? false;
+  }
+
+  subagentStop(sessionId: string, id: string): boolean {
+    return this.live.get(sessionId)?.client.subagentStop?.(id) ?? false;
+  }
+
   /** The session's model is being loaded, or has finished loading. */
   reportModelLoad(sessionId: string, load: unknown): void {
     this.record(sessionId, "portal_model", load);
@@ -691,6 +738,7 @@ class SessionManager extends EventEmitter {
       // event that settles it, so an ask() finishing on agent_settled has it.
       const modelFailure = this.modelErrors.take(sessionId, msg);
       if (modelFailure) this.record(sessionId, "portal_notice", { text: modelFailure, error: true });
+      if (msg.type === "extension_ui_request") this.noteExtensionUi(sessionId, msg);
       this.record(sessionId, msg.type, msg);
       // Status follows pi's own run state rather than being guessed at the
       // moments the portal happens to know about. agent_start covers a run
@@ -719,6 +767,8 @@ class SessionManager extends EventEmitter {
       this.live.delete(sessionId);
       this.stream.clear(sessionId);
       this.forgetPi(sessionId);
+      // What the extensions showed went with the process that ran them.
+      this.extensionUi.delete(sessionId);
       const current = getSession(sessionId);
       // A clean exit after a finished run is normal; anything else is a failure
       // worth surfacing in the UI rather than leaving as a silent stall.

@@ -99,6 +99,17 @@ function end(term: Term): void {
   terms.delete(term.id);
 }
 
+/** The Unix sessions of the shells open in terminal panels: the person's, not the agent's. */
+export function terminalSessionIds(): Set<number> {
+  const ids = new Set<number>();
+  for (const term of terms.values()) {
+    const shell = shellOf(term);
+    const sid = shell ? sessionOf(shell) : undefined;
+    if (sid) ids.add(sid);
+  }
+  return ids;
+}
+
 /** The shell `script` started: the child that leads the session on the pty. */
 function shellOf(term: Term): number | undefined {
   const pid = term.proc.pid;

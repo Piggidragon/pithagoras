@@ -190,3 +190,45 @@ The extension is still loaded, its commands still work, and other chats are
 unaffected. The tool is simply not offered to the model in this one.
 :::
 
+
+## Subagents and background jobs
+
+Whatever runs beside the conversation shows in a tray just above the message
+box: subagents, jobs the agent left running, and the status lines extensions
+set (the ones pi's terminal shows in its footer). Nothing there is specific to
+one extension.
+
+- **Subagents.** Any tool that keeps reporting while it runs — a research tool,
+  a delegate — gets a window (the robot button in the chat's header, or
+  *Watch* on its call) showing its output and the steps it reports. An
+  extension that speaks the *subagent protocol* below is shown like the main
+  conversation, and can be given instructions and stopped from there.
+- **Background jobs.** Processes the agent started in the chat's folder that
+  are still running — a dev server, a watcher, an extension's job — are listed
+  under *Background* in the terminal panel, with how long they have run. One
+  whose output goes to a file can be followed live there, and any can be
+  stopped. The portal finds them itself, so it works with whichever extension
+  started them. Needs `EXECUTOR=host` on Linux.
+
+### The subagent protocol
+
+An extension that runs an agent of its own tells the portal about it on pi's
+event bus (`pi.events`). No dependency on the portal: outside it, nobody is
+listening and nothing changes.
+
+| Channel | Direction | Payload |
+|---|---|---|
+| `subagent:v1:start` | extension → portal | `{ id, label, toolCallId?, input?: boolean, stop?: boolean, detail? }` |
+| `subagent:v1:event` | extension → portal | `{ id, event }` — one of the child's pi events, as `pi --mode json` or `--mode rpc` print them |
+| `subagent:v1:end` | extension → portal | `{ id, status: "done" \| "error" \| "stopped", error? }` |
+| `subagent:v1:input` | portal → extension | `{ id, text }` — only if `start` said `input: true` |
+| `subagent:v1:stop` | portal → extension | `{ id }` — only if `start` said `stop: true` |
+
+Passing the child's events on unchanged is the whole integration: the portal
+draws them the way it draws the main conversation. A child started with
+`pi --mode rpc` can take `input` as an RPC `steer` command.
+
+`extensions/subagent` in this repository is a complete example: a `subagent`
+tool that hands a task to a second pi and can be steered while it works.
+Install it like any local package (`pi install ./extensions/subagent`). Only
+the in-process executor (`EXECUTOR=host`) shares the event bus with the portal.
