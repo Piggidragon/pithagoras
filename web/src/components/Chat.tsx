@@ -1,6 +1,7 @@
 import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
+import { CommandLine } from "./CommandLine";
 import { mentionsCommand } from "../status-commands";
 import { SubagentPanel } from "./SubagentPanel";
 import { BackgroundJobs } from "./BackgroundJobs";
@@ -111,6 +112,9 @@ function ContextChip({ label, body }: { label: string; body: string }) {
     </>
   );
 }
+
+/** The requests to fill the chat box that have been, so each fills it once. */
+const filledFrom = new Set<number>();
 
 export function Chat({
   session,
@@ -482,7 +486,7 @@ export function Chat({
   // A notice is the portal speaking, not a message: only what a person or pi
   // said counts. Earlier pages that are not loaded yet count as said.
   const started = useMemo(
-    () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant"),
+    () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant" || item.kind === "command"),
     [items, hasEarlier],
   );
   const [now, setNow] = useState(() => Date.now());
@@ -743,6 +747,19 @@ export function Chat({
     drafts.set(session.id, next);
     setInput(next);
   };
+
+  // An extension that fills the chat box — pi's setEditorText, pasteToEditor —
+  // fills this one, for the person to send or change. Each once: these are
+  // live-only, and a chat opened again still holds the ones it was sent.
+  useEffect(() => {
+    for (const e of events) {
+      if (e.seq >= 0 || e.type !== "extension_ui_request" || e.payload?.method !== "setEditorText" || filledFrom.has(e.seq)) continue;
+      filledFrom.add(e.seq);
+      const text = String(e.payload.text ?? "");
+      changeInput(e.payload.paste ? draft.current + text : text);
+      requestAnimationFrame(() => box.current?.focus());
+    }
+  }, [events]);
 
   const clearBox = () => {
     caret.current = null;
@@ -1142,6 +1159,13 @@ export function Chat({
             return (
               <div key={item.id} className={`chat-row${enter}`}>
                 <CompactionMarker item={item} />
+              </div>
+            );
+          }
+          if (item.kind === "command") {
+            return (
+              <div key={item.id} className={`chat-row${enter}`}>
+                <CommandLine item={item} />
               </div>
             );
           }

@@ -55,6 +55,20 @@ const SHARED_FILES = ["SOUL.md", "TEAM.md"];
 
 const filesFor = (role?: string) => (!role || role === "primary" ? CONTEXT_FILES : SHARED_FILES);
 
+/**
+ * pi's own theme object, for extensions that style text with it even when
+ * nothing will draw it — as pi's no-UI context hands them. Loaded once.
+ */
+let piTheme: unknown;
+void (async () => {
+  try {
+    const entry = import.meta.resolve("@earendil-works/pi-coding-agent");
+    piTheme = (await import(new URL("modes/interactive/theme/theme.js", entry).href)).theme;
+  } catch {
+    // An extension reading it gets undefined, as it would have before.
+  }
+})();
+
 export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
   for (const name of filesFor(role)) {
@@ -548,6 +562,33 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       setWorkingVisible: () => {},
       setWorkingIndicator: () => {},
       setHiddenThinkingLabel: () => {},
+      // The rest of pi's UI, which extensions call whether or not there is a
+      // terminal. Missing, a call threw — "ctx.ui.custom is not a function" —
+      // and the command failed for no reason of its own. As pi's RPC mode
+      // does: what a browser can do is passed on, the rest does nothing.
+      setFooter: () => {},
+      setHeader: () => {},
+      setTitle: () => {},
+      // A view drawn for the terminal. Passed on so the chat can say it cannot be shown.
+      custom: async () => {
+        fireAndForget({ method: "custom" });
+        return undefined;
+      },
+      // Into the chat box, for the person to send or change.
+      setEditorText: (text: string) => fireAndForget({ method: "setEditorText", text: String(text ?? "") }),
+      pasteToEditor: (text: string) => fireAndForget({ method: "setEditorText", text: String(text ?? ""), paste: true }),
+      getEditorText: () => "",
+      addAutocompleteProvider: () => {},
+      setEditorComponent: () => {},
+      getEditorComponent: () => undefined,
+      get theme() {
+        return piTheme;
+      },
+      getAllThemes: () => [],
+      getTheme: () => undefined,
+      setTheme: () => ({ success: false, error: "The portal's theme is set in the browser." }),
+      getToolsExpanded: () => false,
+      setToolsExpanded: () => {},
     };
   }
 

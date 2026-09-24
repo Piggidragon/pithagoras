@@ -71,7 +71,15 @@ export type Item =
     }
   /** The conversation summarized to make room, while that runs and after. */
   | { kind: "compaction"; id: string; status: "running" | "done" | "failed"; tokensBefore?: number; summary?: string; since?: number; until?: number }
-  | { kind: "notice"; id: string; text: string; tone: "info" | "warn" | "error" };
+  | { kind: "notice"; id: string; text: string; tone: "info" | "warn" | "error" }
+  /**
+   * A slash command sent, and how it went: `done` when it showed something of
+   * its own, `quiet` when it ran and showed nothing, `started`/`queued` when it
+   * became a run, `failed` with why.
+   */
+  | { kind: "command"; id: string; seq: number; text: string; state: CommandState; error?: string };
+
+export type CommandState = "running" | "done" | "quiet" | "started" | "queued" | "failed";
 
 /** Enough of a tool's output to read in the transcript; the whole of it is in the agent terminal. */
 const TOOL_OUTPUT_MAX = 60_000;
@@ -153,6 +161,8 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         it.status = "error";
         it.interrupted = true;
       } else if (it.kind === "compaction" && it.status === "running") it.status = "failed";
+      // Its end was never written — the portal restarted. It ran, as far as anyone can say.
+      else if (it.kind === "command" && it.state === "running") it.state = "done";
     }
   };
 
@@ -228,6 +238,15 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           }
           current.thinking = thinking;
         }
+        // What an extension puts in the conversation for people to read —
+        // pi.sendMessage with display on. pi's TUI draws it; so does this.
+        if (ev.type === "message_end" && message?.role === "custom" && message.display !== false) {
+          const text = typeof message.content === "string"
+            ? message.content
+            : Array.isArray(message.content) ? message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("\n") : "";
+          if (text.trim()) items.push({ kind: "notice", id: `m${ev.seq}`, text: text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim(), tone: "info" });
+          break;
+        }
         if (ev.type === "message_end") closeCurrent();
         break;
       }
@@ -297,6 +316,22 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             break;
           }
         }
+        break;
+      }
+
+      // Not closing the answer being written: a command runs beside a run, and
+      // the answer goes on after it.
+      case "portal_command":
+        items.push({ kind: "command", id: `c${ev.seq}`, seq: ev.seq, text: String(p.text ?? ""), state: "running" });
+        break;
+
+      case "portal_command_end": {
+        const it = items.find((x): x is Extract<Item, { kind: "command" }> => x.kind === "command" && x.seq === p.of);
+        if (!it) break;
+        if (typeof p.error === "string") {
+          it.state = "failed";
+          it.error = p.error;
+        } else it.state = p.quiet ? "quiet" : p.outcome === "started" ? "started" : p.outcome === "queued" ? "queued" : "done";
         break;
       }
 

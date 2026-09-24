@@ -33,6 +33,17 @@ if (phase === 'tools') events.push(ev('turn_start', {}, 20), ...bash('b3', 'for 
 if (phase === 'model') events.push(ev('turn_start', {}, 8), ev('portal_model', { model: 'Qwen3.6-35B-A3B-UD-Q4_K_XL', state: 'loading' }, 7));
 if (phase === 'prefill') events.push(ev('turn_start', {}, 8), ev('message_start', { message: { role: 'assistant' } }, 7), ev('portal_prefill', { total: 48000, processed: 20160, cache: 12000 }, 1));
 if (phase === 'thinking') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'The test fails because the regex expects the status at the very end.\nI should check how pi appends it' } }, 5), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: ' — it adds two newlines before "Command exited".' } }, 1));
+// Slash commands and how each went: quiet, answered, a run, terminal-only, failed.
+if (phase === 'commands') {
+  const c = (text: string, end: any, ...between: PortalEvent[]) => { const start = ev('portal_command', { text }, 10); return [start, ...between, ev('portal_command_end', { of: start.seq, ...end }, 9)]; };
+  events.push(
+    ...c('/bg-clear', { outcome: 'handled', quiet: true }),
+    ...c('/bg-update', { outcome: 'handled' }, ev('portal_notice', { text: 'pi-background-tasks 2.6.2 is installed; 2.6.5 is the latest published version.\nUpdate from npm:\n  pi install npm:pi-background-tasks@latest', from: 'extension' }, 9)),
+    ...c('/bg-tasks', { outcome: 'handled' }, ev('portal_notice', { text: "/bg-tasks opens a view made for pi's terminal, which the browser cannot show.", warning: true, from: 'extension' }, 9)),
+    ...c('/broken', { error: 'boom: the thing it needed was not there' }),
+    ev('portal_command', { text: '/compact' }, 1),
+  );
+}
 if (phase === 'compacting') events.push(ev('compaction_start', {}, 6));
 // The portal restarted mid-command: nothing says the call ended, only that the chat was interrupted.
 if (phase === 'interrupted') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run test:e2e', 'Running 42 tests using 4 workers\n  ✓ login (1.2s)\n', undefined, 12));
