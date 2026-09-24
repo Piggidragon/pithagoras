@@ -12,7 +12,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { LuArrowDown, LuCheck, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
-import { MAX_IMAGES, pending, prepareImage, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
+import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Activity, type Item } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
@@ -175,6 +175,10 @@ export function Chat({
   }
   const currentSession = useRef(session.id);
   currentSession.current = session.id;
+  // Voice mode adds to and takes from the same pictures.
+  useEffect(() => pending.subscribe((id) => {
+    if (id === currentSession.current) setAttached(pending.get(id));
+  }), []);
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const [composerHeight, setComposerHeight] = useState(storedComposerHeight);
@@ -600,8 +604,6 @@ export function Chat({
     setAttached(next);
   };
 
-  /** Pictures on their way into the box, by chat, which count against its room already. */
-  const preparing = useRef(new Map<string, number>());
   /**
    * Pictures and files pasted, dropped or picked. Pictures wait in the box to
    * go with the message; anything else is put in the chat's folder at once and
@@ -614,21 +616,8 @@ export function Chat({
     setActionError(null);
     setAdding((n) => n + 1);
     const problems: string[] = [];
-    // Room is taken as it is counted: pictures still being made ready from an
-    // earlier paste are not in the box yet, but will be.
-    const room = Math.max(0, MAX_IMAGES - pending.get(id).length - (preparing.current.get(id) ?? 0));
-    const taking = Math.min(images.length, room);
-    preparing.current.set(id, (preparing.current.get(id) ?? 0) + taking);
     try {
-      if (images.length > room) problems.push(`At most ${MAX_IMAGES} pictures can go with one message.`);
-      const ready: Attachment[] = [];
-      for (const file of images.slice(0, taking)) {
-        try {
-          ready.push(await prepareImage(file, file.name || "Pasted picture"));
-        } catch (e) {
-          problems.push((e as Error).message);
-        }
-      }
+      problems.push(...(await pending.add(id, images)));
       const uploaded: string[] = [];
       for (const file of others) {
         try {
@@ -637,19 +626,12 @@ export function Chat({
           problems.push((e as Error).message);
         }
       }
-      // Into the chat they were added in, even if another has been opened since.
-      if (ready.length) {
-        const next = [...pending.get(id), ...ready];
-        if (currentSession.current === id) changeAttached(next);
-        else pending.set(id, next);
-      }
       const note = uploadedNote(uploaded);
       if (note) {
         if (currentSession.current === id) changeInput(draft.current.trim() ? `${draft.current.trimEnd()}\n${note}` : note);
         else drafts.set(id, drafts.get(id).trim() ? `${drafts.get(id).trimEnd()}\n${note}` : note);
       }
     } finally {
-      preparing.current.set(id, (preparing.current.get(id) ?? 0) - taking);
       setAdding((n) => n - 1);
       if (problems.length && currentSession.current === id) setActionError(problems.join(" "));
     }
@@ -722,7 +704,7 @@ export function Chat({
 
   return (
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
-      <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} open={canvasOpen} setOpen={setCanvasOpen}/>
+      <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} folder={session.workspace} open={canvasOpen} setOpen={setCanvasOpen}/>
       <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
       <header className={voiceMode ? "hidden" : "border-b border-line px-4 py-3"}>
         <div className="mx-auto flex w-full max-w-3xl items-center gap-3">
@@ -1024,16 +1006,31 @@ export function Chat({
                   ? "text-accent"
                   : "text-fg-faint";
             return (
-              <div
-                key={item.id}
-                className="flex items-center gap-2 py-0.5 font-mono text-[11px] text-fg-faint"
-              >
+              <Fragment key={item.id}>
+              <div className="flex items-center gap-2 py-0.5 font-mono text-[11px] text-fg-faint">
                 <span className={`shrink-0 ${tone}`}>
                   {item.status === "running" ? "◇" : item.status === "error" ? "✕" : "◆"}
                 </span>
                 <span className="shrink-0 text-fg-subtle">{item.name}</span>
                 {item.detail && <span className="truncate opacity-60">{item.detail}</span>}
               </div>
+              {item.picture && (
+                <a
+                  href={api.pictureUrl(session.id, item.picture.path, item.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mb-1 mt-0.5 block w-fit"
+                  title={item.picture.title ?? item.picture.path}
+                >
+                  <img
+                    src={api.pictureUrl(session.id, item.picture.path, item.id)}
+                    alt={item.picture.title ?? item.picture.path}
+                    loading="lazy"
+                    className="max-h-80 max-w-full rounded-lg border border-line object-contain"
+                  />
+                </a>
+              )}
+              </Fragment>
             );
           }
           return (
@@ -1063,7 +1060,9 @@ export function Chat({
           send();
         }}
         onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes("Files")) return;
+          // The voice stage is portaled from inside this form, and React
+          // bubbles its drags here too; whatever took them already handled it.
+          if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
           setDragging(true);
@@ -1075,7 +1074,7 @@ export function Chat({
           // Down whatever was dropped: a drag that looked like files can carry
           // none, and the overlay would stay up until the next one left.
           setDragging(false);
-          if (!e.dataTransfer.files.length) return;
+          if (e.defaultPrevented || !e.dataTransfer.files.length) return;
           e.preventDefault();
           void addFiles([...e.dataTransfer.files]);
         }}

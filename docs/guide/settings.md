@@ -76,6 +76,19 @@ which is a heuristic: a key built dynamically at runtime will not appear. Use
 Advanced to edit `settings.json` directly when that happens.
 :::
 
+## Shortcuts
+
+Every keyboard shortcut, in one list. The voice-mode ones can be changed: choose
+**Change** and press the new keys, with any modifiers. **Clear** leaves an action
+without one, **Reset** puts its default back, and **Reset all** puts back every
+default. A key that another action already has moves to the one being changed,
+and the list says which action lost it. Shortcuts are kept in this browser.
+
+A shortcut is the physical key, so it stays the same key whatever the keyboard
+layout, and it is shown with the label on this keyboard where the browser can
+tell (Chromium can). The chat's own keys — `/`, Enter, Shift+Enter and Escape
+in the message box — are listed there too, and are fixed.
+
 ## Advanced
 
 pi's raw `settings.json`, edited in place. It is validated as JSON before

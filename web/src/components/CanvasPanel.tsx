@@ -2,13 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { LuFileText, LuPlus, LuX, LuTrash2, LuCheck, LuPencil, LuEye, LuSave, LuDownload } from 'react-icons/lu';
 import { Streamdown } from 'streamdown';
 import { asksBeforeDeleting } from '../confirm-prefs';
+import { canvasPictures } from '../canvas-pictures';
+import { api } from '../api';
+import { ResizeHandles } from './ResizeHandles';
 
 type Canvas = { id:string; title:string; content:string; revision:number; status:string; active_call:string|null; updated_at:string; persisted:boolean };
 async function request(url:string,method:string,body?:unknown) {
   const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const data=await res.json();if(!res.ok)throw new Error(data.error||'Canvas request failed');return data;
 }
-export function CanvasPanel({sessionId,open,setOpen,showToggle=true}:{sessionId:string;open:boolean;setOpen:(open:boolean)=>void;showToggle?:boolean}) {
+export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{sessionId:string;folder:string;open:boolean;setOpen:(open:boolean)=>void;showToggle?:boolean}) {
   const [rows,setRows]=useState<Canvas[]>([]),[selected,setSelected]=useState('');
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(''),[title,setTitle]=useState(''),[base,setBase]=useState(0);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[connected,setConnected]=useState(false);
@@ -17,6 +20,7 @@ export function CanvasPanel({sessionId,open,setOpen,showToggle=true}:{sessionId:
   const lastActiveCall=useRef<string|null>(null);
   const updates=useRef(0);
   const viewport=useRef<HTMLDivElement>(null),follow=useRef(true);
+  const panel=useRef<HTMLElement>(null);
   const root=`/api/sessions/${encodeURIComponent(sessionId)}/canvases`;
   const canvas=rows.find(row=>row.id===selected);
   useEffect(()=>{
@@ -51,7 +55,7 @@ export function CanvasPanel({sessionId,open,setOpen,showToggle=true}:{sessionId:
   const download=()=>{if(!canvas)return;const url=URL.createObjectURL(new Blob([editing?draft:canvas.content],{type:'text/markdown;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=((editing?title:canvas.title).replace(/[\\/:*?"<>|]/g,'_')||'canvas')+'.md';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
   return <div className={`session-canvases ${open?'is-open':''}`}>
     {showToggle && <button className="canvas-toggle" onClick={()=>setOpen(!open)} aria-expanded={open} aria-label="Session canvases" title="Session canvases"><LuFileText/></button>}
-    {open&&<section className="canvas-panel" aria-label="Session canvas workspace">
+    {open&&<section ref={panel} className="canvas-panel" aria-label="Session canvas workspace">
       <header><div><LuFileText/><strong>Session canvases</strong></div><div className="canvas-frame-actions"><button aria-label={canvas?.persisted?"Canvas stored":"Store canvas"} title={canvas?.persisted?"Stored — edits auto-save":"Store canvas permanently"} disabled={!canvas||canvas.persisted||busy||editing} onClick={()=>void store()}>{canvas?.persisted?<LuCheck/>:<LuSave/>}</button><button aria-label="Download canvas" title="Download Markdown" disabled={!canvas} onClick={download}><LuDownload/></button><button aria-label="Close canvas" disabled={editing} onClick={()=>setOpen(false)}><LuX/></button></div></header>
       <div className="canvas-picker"><select aria-label="Select canvas" value={selected} disabled={editing} onChange={e=>{setSelected(e.target.value);setConfirmDelete(false);setError('');follow.current=true}}><option value="" disabled>Choose a document</option>{rows.map(row=><option key={row.id} value={row.id}>{row.title}{row.persisted?"":" (temporary)"}</option>)}</select><button disabled={editing||busy} aria-label="New canvas" onClick={()=>void create()}><LuPlus/></button></div>
       {!connected&&<p className="canvas-notice">Reconnecting to live canvas…</p>}
@@ -59,9 +63,9 @@ export function CanvasPanel({sessionId,open,setOpen,showToggle=true}:{sessionId:
       {canvas?<>
         <div className="canvas-document-heading">{editing?<input aria-label="Canvas title" maxLength={200} value={title} onChange={e=>setTitle(e.target.value)}/>:<h3>{canvas.title}</h3>}<span>{canvas.active_call?'Writing live':canvas.status==='edited'?'Edited by you':canvas.status==='interrupted'?'Partial draft retained':canvas.persisted?'Auto-saved':'Temporary'} · {canvas.persisted?"Stored":"Not stored — lost on server restart"} · r{canvas.revision}</span></div>
         {editing&&canvas.revision!==base&&<p className="canvas-error">This document changed. Your draft is preserved here; copy it before cancelling to read the latest version.</p>}
-        {editing?<textarea className="canvas-editor" aria-label="Edit canvas content" value={draft} onChange={e=>setDraft(e.target.value)} spellCheck/>:<div ref={viewport} className="canvas-document prose prose-sm max-w-none" onScroll={e=>{const el=e.currentTarget;follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<60}}>{canvas.content?<Streamdown>{canvas.content}</Streamdown>:<p className="canvas-empty">A blank page. Ask the agent to write here, or start editing.</p>}</div>}
+        {editing?<textarea className="canvas-editor" aria-label="Edit canvas content" value={draft} onChange={e=>setDraft(e.target.value)} spellCheck/>:<div ref={viewport} className="canvas-document prose prose-sm max-w-none" onScroll={e=>{const el=e.currentTarget;follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<60}}>{canvas.content?<Streamdown>{canvasPictures(canvas.content,folder,path=>api.pictureUrl(sessionId,path))}</Streamdown>:<p className="canvas-empty">A blank page. Ask the agent to write here, or start editing.</p>}</div>}
         <footer>{editing?<><button disabled={busy||!title.trim()||canvas.revision!==base||!!canvas.active_call} onClick={()=>void save()}><LuCheck/>{canvas.persisted?"Save changes":"Apply changes"}</button><button disabled={busy} onClick={()=>{setEditing(false);setError('')}}><LuEye/>Cancel edit</button></>:<><button disabled={!!canvas.active_call||busy} onClick={beginEdit}><LuPencil/>Edit inline</button><button disabled={!!canvas.active_call||busy} aria-label="Delete canvas" onClick={()=>asksBeforeDeleting()?setConfirmDelete(true):void remove()}><LuTrash2/></button></>}{confirmDelete&&!editing&&<span className="canvas-delete-confirm">Delete this document? <button disabled={busy} onClick={()=>void remove()}>Delete</button><button onClick={()=>setConfirmDelete(false)}>Keep</button></span>}</footer>
       </>:<div className="canvas-empty"><LuFileText/><h3>A place for your documents</h3><p>Ask the agent to create a canvas, or start a document here.</p><button disabled={busy} onClick={()=>void create()}>Create canvas</button></div>}
-    </section>}
+    <ResizeHandles target={panel} mode="anchored" edges={["w","s","sw"]}/></section>}
   </div>;
 }

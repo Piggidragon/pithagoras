@@ -24,6 +24,12 @@ export interface VoiceIO {
   transcribe: (samples: Float32Array, signal: AbortSignal) => Promise<string>;
   send: (text: string) => Promise<void>;
   abort: () => Promise<void>;
+  /** Handles what was said on the page instead of sending it, when it is for the page ("say that again"). */
+  command?: (text: string) => boolean;
+  /** Whether what has been heard so far could still turn out to be for the page. */
+  couldBeCommand?: (partial: string) => boolean;
+  /** True when speaking mid-run should add to the run rather than stop it. */
+  steering?: () => boolean;
   agentRunning: () => boolean;
   synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status') => Promise<PreparedSpeech>;
   trace?: (name:string)=>void;
@@ -38,6 +44,13 @@ export class HandsFreeVoice {
   private muted = false;
   private inputGeneration = 0;
   private acceptingReplies = true;
+  /**
+   * While what is being said is not yet known to be for the agent: the reply
+   * it cut off, and what the agent has written since. Spoken after all when
+   * it turns out to be a cough, a press taken back, or a page command; dropped
+   * only once it goes to the agent.
+   */
+  private held: string[] | null = null;
   private items: Item[] = [];
   private speech: StreamingSpeech;
   private recordings: Float32Array[] = [];
@@ -52,6 +65,8 @@ export class HandsFreeVoice {
   private transcription = new AbortController();
   private operations: Promise<void> = Promise.resolve();
   private sending = false;
+  /** The run going when this utterance began has already been told to stop. */
+  private stopped = false;
   private thinkingTimer?: ReturnType<typeof setTimeout>;
   private thinkingAnnounced = false;
   private lastThinkingAt = -Infinity;
@@ -105,7 +120,7 @@ export class HandsFreeVoice {
   observe(items: Item[]) {
     this.items = items;
     if (!this.alive) return;
-    if (!this.acceptingReplies) this.ignoreCurrent();
+    if (!this.acceptingReplies) { if (this.held) this.held.push(...this.speech.observe(items)); else this.ignoreCurrent(); }
     else if (!this.io.sequential || this.io.sentenceChunks || !this.io.agentRunning()) this.output.push(...this.speech.observe(items));
     this.state();
     void this.play();
@@ -124,16 +139,44 @@ export class HandsFreeVoice {
     this.clearThinkingTimer();
     this.hearing = true;
     this.acceptingReplies = false;
-    this.ignoreCurrent();
+    this.held = [...(this.held ?? []), ...this.pipeline.cancel(), ...this.output];
     this.output = [];
-    this.pipeline.cancel();
     this.thinkingPipeline.cancel();
-    // Serialize abort behind an in-flight send so it cannot miss that new run.
-    if (this.io.agentRunning() || this.sending) {
-      this.operations = this.operations.then(async () => { if (this.alive) await this.io.abort(); });
-      void this.operations.catch(error => this.report(error));
-    }
+    // The run is stopped only once what was said turns out to be for the agent:
+    // not a tap, not noise, not a command the page handles. See heard().
     this.state();
+  }
+  /**
+   * What has been made out so far of what is being said. Once it is plainly
+   * for the agent, a run it would stop is stopped now, not when the speaker is
+   * done: "stop, don't touch that file" must not wait for the end of the sentence.
+   */
+  heard(partial: string) {
+    if (!this.alive || this.muted || !this.hearing || this.stopped || this.compacting) return;
+    if (!partial.trim() || this.io.couldBeCommand?.(partial) || this.io.steering?.() || !(this.io.agentRunning() || this.sending)) return;
+    this.stopped = true;
+    const generation = this.inputGeneration;
+    // Serialized like the stop in process(), and a failed one is tried again there before anything is sent.
+    this.operations = this.operations.then(async () => { if (this.alive && this.inputGeneration === generation) await this.io.abort(); })
+      .catch(error => { this.stopped = false; this.report(error); });
+  }
+  /** Speech that began and is not going to be sent after all: a push-to-talk press too short to be words. */
+  speechCancel() {
+    if (!this.alive) return;
+    // A press during compaction is over; the next thing said is heard again.
+    this.compactionSpeech = false;
+    if (!this.hearing) return;
+    this.hearing = false;
+    this.stopped = false;
+    this.resumeReplies();
+    this.state();
+    void this.play();
+  }
+  /** What was said is not going to the agent: the reply it held back is spoken after all. */
+  private resumeReplies() {
+    if (this.held) this.output = [...this.held, ...this.output];
+    this.held = null;
+    this.acceptingReplies = true;
   }
   speechEnd(samples: Float32Array) {
     if (!this.alive || this.muted) return;
@@ -156,10 +199,35 @@ export class HandsFreeVoice {
       }
       // If speech resumes during transcription, retain the text and combine it
       // with the next segment instead of sending half a thought or losing it.
-      if (this.hearing || !this.text.length) return;
+      if (this.hearing) return;
+      if (!this.text.length) {
+        // Nothing in it but noise: the run was not stopped, so what it says next is spoken.
+        if (valid() && !this.recordings.length) { this.stopped = false; this.resumeReplies(); }
+        return;
+      }
       const text = this.text.join(" ");
+      if (this.io.command?.(text)) {
+        // For the page ("say that again") and handled there, not sent to the
+        // agent. The interruption cut its reply off, so what was left unsaid is
+        // spoken after all instead of dropped.
+        this.text = [];
+        this.stopped = false;
+        this.resumeReplies();
+        this.ignoreCurrent();
+        return;
+      }
+      // Serialize abort behind an in-flight send so it cannot miss that new run.
+      // When steering, the run goes on and what is said is added to it. When it
+      // was already stopped while this was being said, that is not done twice —
+      // but whether it was is only known once that stop has settled.
+      const busy = (this.io.agentRunning() || this.sending) && !this.io.steering?.();
       const send = this.operations.then(async () => {
         if (!valid() || this.hearing || this.recordings.length) return;
+        if (busy && !this.stopped) {
+          await this.io.abort();
+          if (!valid() || this.hearing || this.recordings.length) return;
+        }
+        this.held = null;
         this.ignoreCurrent();
         this.acceptingReplies = true;
         this.sending = true;
@@ -167,7 +235,7 @@ export class HandsFreeVoice {
         this.state();
         try {
           await this.io.send(text);
-          if (valid()) this.text = [];
+          if (valid()) { this.text = []; this.stopped = false; }
         } catch (error) {
           this.acceptingReplies = false;
           throw new Error(`Could not send “${text}”: ${error instanceof Error ? error.message : error}`);
@@ -201,9 +269,10 @@ export class HandsFreeVoice {
       this.hearing = false;
       this.recordings = [];
       this.text = [];
+      this.stopped = false;
       this.transcription.abort();
       this.transcription = new AbortController();
-      this.acceptingReplies = true;
+      this.resumeReplies();
     }
     this.state();
     void this.play();
@@ -215,6 +284,7 @@ export class HandsFreeVoice {
     this.thinkingPipeline.cancel();
     this.transcription.abort();
     this.output = [];
+    this.held = null;
     this.recordings = [];
     this.text = [];
   }

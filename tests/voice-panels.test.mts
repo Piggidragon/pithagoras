@@ -21,3 +21,17 @@ test('terminal follows cumulative streamed output and final tool errors by call 
   ];
   assert.deepEqual(terminalRuns(events), [{ id: 'a', command: 'npm test', output: 'Starting\nFailed', running: false, error: true }]);
 });
+
+test('files and pictures take the side first, and the middle when the side is taken', async () => {
+  const { placeWindows } = await import('../web/src/voice-windows.js');
+  const none = { browser: false, terminal: false, files: false, pictures: false };
+  assert.deepEqual(placeWindows({ ...none, pictures: true }), { main: undefined, side: 'pictures' });
+  assert.deepEqual(placeWindows({ ...none, files: true, terminal: true }), { main: 'files', side: 'terminal' });
+  assert.deepEqual(placeWindows({ ...none, pictures: true, browser: true }), { main: 'browser', side: 'pictures' });
+  assert.deepEqual(placeWindows({ ...none, pictures: true, files: true }), { main: 'pictures', side: 'files' });
+  assert.deepEqual(placeWindows({ ...none, browser: true, terminal: true }), { main: 'browser', side: 'terminal' });
+  // The conversation is a window like them, not something drawn over them.
+  assert.deepEqual(placeWindows({ ...none, conversation: true }), { main: undefined, side: 'conversation' });
+  assert.deepEqual(placeWindows({ ...none, conversation: true, terminal: true }), { main: 'conversation', side: 'terminal' });
+  assert.deepEqual(placeWindows({ ...none, conversation: true, pictures: true }), { main: 'pictures', side: 'conversation' });
+});

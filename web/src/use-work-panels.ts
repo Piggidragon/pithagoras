@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
-export type Panel = 'browser' | 'terminal' | 'canvas' | 'files';
+export type Panel = 'browser' | 'terminal' | 'canvas' | 'files' | 'pictures' | 'conversation';
 /** Two panels beside the conversation is what fits; a third would cover one of them. */
 const MAX_OPEN = 2;
 
@@ -21,11 +21,11 @@ export function settlePanels(order: Panel[], open: Panel[], keep: Panel[] = []):
 }
 
 /** Enforce before paint so a third panel never covers the current workspace. */
-export function useWorkPanels(open: Record<Panel, boolean>, hide: (panel: Panel) => void, keep: Panel[] = []) {
+export function useWorkPanels(open: Partial<Record<Panel, boolean>>, hide: (panel: Panel) => void, keep: Panel[] = []) {
   const order = useRef<Panel[]>([]), callback = useRef(hide); callback.current = hide;
   useLayoutEffect(() => {
     const settled = settlePanels(order.current, (Object.keys(open) as Panel[]).filter(p => open[p]), keep);
     order.current = settled.order;
     for (const panel of settled.close) callback.current(panel);
-  }, [open.browser, open.terminal, open.canvas, open.files, keep.join()]);
+  }, [open.browser, open.terminal, open.canvas, open.files, open.pictures, open.conversation, keep.join()]);
 }

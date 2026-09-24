@@ -50,6 +50,20 @@ const savedShowHidden = (): boolean => {
   }
 };
 
+/** By its name only: whether it is one is the server's to say, from its bytes, and a refusal falls back to the note. */
+const looksLikePicture = (p: string) => /\.(png|jpe?g|gif|webp)$/i.test(p);
+
+/** A picture, shown instead of the "not text" note; a file that turns out not to be one gets the note after all. */
+function FilePicture({ src, name }: { src: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <p className="p-6 text-center text-xs text-fg-subtle">Not a picture that can be shown here. Download it to open it.</p>;
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-[repeating-conic-gradient(rgb(var(--fg)/.05)_0%_25%,transparent_0%_50%)] bg-[length:16px_16px] p-3">
+      <img src={src} alt={name} onError={() => setFailed(true)} className="max-h-full max-w-full object-contain" />
+    </div>
+  );
+}
+
 const parentOf = (p: string) => p.split("/").slice(0, -1).join("/");
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
@@ -496,6 +510,8 @@ export function FilesPanel({
             </p>
           ) : file.loading ? (
             <p className="px-3 py-3 text-xs text-fg-subtle">Loading…</p>
+          ) : file.binary && looksLikePicture(file.path) ? (
+            <FilePicture key={`${file.path}@${file.mtime}`} src={api.pictureUrl(sessionId, file.path, file.mtime)} name={file.path} />
           ) : file.binary ? (
             <p className="p-6 text-center text-xs text-fg-subtle">Not text, or too large to show. Download it to open it.</p>
           ) : (

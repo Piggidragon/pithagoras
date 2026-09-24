@@ -20,6 +20,7 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
+import { pictureType } from "./prompt-images.js";
 
 /**
  * Looking at, changing and taking away the files in a chat's folder, from the browser.
@@ -254,6 +255,33 @@ export function openDownload(base: string, rel: unknown): { fd: number; size: nu
   const file = resolveInside(base, rel);
   const fd = openPlain(file, constants.O_RDONLY);
   return { fd, size: fstatSync(fd).size, name: path.basename(file) };
+}
+
+/** Larger than this, a picture is not shown: it is a download like any other file. */
+export const MAX_PICTURE_BYTES = 25 * 1024 * 1024;
+
+/**
+ * A picture in the folder, opened to be shown in the page, not saved.
+ *
+ * Its type comes from its first bytes, as a picture sent with a message does
+ * (see prompt-images.ts), not from its name: whatever is served back to be
+ * drawn inline must really be one of the four kinds a browser draws and
+ * nothing else, so that no page and no script is ever served under this
+ * portal's origin from a file the agent wrote.
+ */
+export function openPicture(base: string, rel: unknown): { fd: number; size: number; name: string; mimeType: string } {
+  const opened = openDownload(base, rel);
+  try {
+    if (opened.size > MAX_PICTURE_BYTES) throw new FileError("too_large", "The picture is over 25 MB; download it instead");
+    const head = Buffer.alloc(12);
+    readSync(opened.fd, head, 0, head.length, 0);
+    const mimeType = pictureType(head);
+    if (!mimeType) throw new FileError("invalid", "That is not a PNG, JPEG, GIF or WebP picture");
+    return { ...opened, mimeType };
+  } catch (e) {
+    closeSync(opened.fd);
+    throw e;
+  }
 }
 
 /**

@@ -1,4 +1,5 @@
 import { CanvasTools } from "./canvas-tools.js";
+import { showImageTool } from "./show-image-tool.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { VoiceFirstTurn, audioSystemRules, audioMessage } from "./voice-first.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
@@ -270,6 +271,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           ) },
       ];
       if (canvases) factories.push({ name: "canvases", factory: canvases.extension });
+      // Beside the canvases: both are how the agent puts something on the screen.
+      if (opts.sessionId) factories.push({ name: "pictures", factory: showImageTool(opts.cwd) });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       // Only where it means something: a conversation with the primary user has
@@ -519,7 +522,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return true;
   }
 
-  async prompt(message: string, options?: { voice?: boolean; images?: ImageContent[] }): Promise<void> {
+  async prompt(message: string, options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean }): Promise<void> {
     if (options?.voice) {
       this.voiceFirst?.arm(this.isIdle());
     } else {
@@ -527,7 +530,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
     const promptOptions = {
       expandPromptTemplates: true,
-      streamingBehavior: "followUp",
+      // Mid-run, a message waits for the run to end — unless it was said to
+      // steer it, when it is taken in after the tools that are running now.
+      streamingBehavior: options?.steer ? "steer" : "followUp",
       ...(options?.images?.length ? { images: options.images } : {}),
     };
     try {

@@ -219,8 +219,10 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
   await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
   await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-minimal.png' });
-  await page.getByRole('button', { name: 'Mute sound effects' }).click();
+  await page.getByRole('button', { name: 'Voice settings' }).click();
+  await page.getByRole('group', { name: 'Sound effects' }).getByRole('button', { name: 'Off' }).click();
   expect(await page.evaluate(() => localStorage.getItem('voiceSounds'))).toBe('off');
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Live browser', exact: true })).toBeVisible();
   await expect(page.locator('.voice-stage')).toHaveClass(/is-browsing/);

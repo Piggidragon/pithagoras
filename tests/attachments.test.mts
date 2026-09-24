@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createPending, fitWithin, isImage, needsShrinking, sortFiles, uploadedNote, MAX_EDGE, MAX_IMAGE_BYTES } from "../web/src/attachments.ts";
+import { createPending, fitWithin, isImage, needsShrinking, sortFiles, uploadedNote, MAX_EDGE, MAX_IMAGE_BYTES, MAX_IMAGES } from "../web/src/attachments.ts";
 import { buildTranscript } from "../web/src/transcript.ts";
 import type { PortalEvent } from "../web/src/api.ts";
 
@@ -47,6 +47,26 @@ test("pictures waiting in the box belong to their chat", () => {
   assert.deepEqual(pending.get("two"), []);
   pending.set("one", []);
   assert.deepEqual(pending.get("one"), []);
+});
+
+test("the box and voice mode hear of each other's pictures, and two quick adds share the room", async () => {
+  const pending = createPending();
+  const heard: string[] = [];
+  const stop = pending.subscribe((id) => heard.push(id));
+  let n = 0;
+  const prepare = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    return { id: `p${++n}`, name: "p.png", mimeType: "image/png", data: "data:image/png;base64,AA==" };
+  };
+  const files = (count: number) => Array.from({ length: count }, () => new File([], "p.png", { type: "image/png" }));
+  const [first, second] = await Promise.all([pending.add("one", files(5), prepare), pending.add("one", files(5), prepare)]);
+  assert.equal(pending.get("one").length, MAX_IMAGES);
+  assert.deepEqual(first, []);
+  assert.deepEqual(second, [`At most ${MAX_IMAGES} pictures can go with one message.`]);
+  assert.deepEqual(heard, ["one", "one"]);
+  stop();
+  pending.set("one", []);
+  assert.equal(heard.length, 2);
 });
 
 test("a sent message shows the pictures that went with it, even with no words", () => {

@@ -122,14 +122,57 @@ export async function refetchImage(url: string, name: string): Promise<Attachmen
  * Pictures waiting in each chat's box. Like the words, they belong to the chat
  * they were added in, and are there again on coming back. Only in memory: a
  * handful of pictures is more than session storage holds.
+ *
+ * The box and voice mode share them: a picture pasted in either goes with the
+ * next message, typed or said, and shows in both. `subscribe` is how each
+ * hears of the other's changes.
  */
 export function createPending() {
   const byChat = new Map<string, Attachment[]>();
+  // Pictures being made ready, by chat, which count against its room already.
+  const preparing = new Map<string, number>();
+  const listeners = new Set<(id: string) => void>();
+  const get = (id: string): Attachment[] => byChat.get(id) ?? [];
+  const set = (id: string, list: Attachment[]): void => {
+    if (list.length) byChat.set(id, list);
+    else byChat.delete(id);
+    for (const listener of listeners) listener(id);
+  };
   return {
-    get: (id: string): Attachment[] => byChat.get(id) ?? [],
-    set: (id: string, list: Attachment[]): void => {
-      if (list.length) byChat.set(id, list);
-      else byChat.delete(id);
+    get,
+    set,
+    subscribe(listener: (id: string) => void): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    /**
+     * Pictures made ready and put in chat `id`'s box, as many as there is room
+     * for. Room is taken as it is counted, so two quick pastes cannot both
+     * take the last places. What went wrong is returned, to be shown.
+     */
+    async add(id: string, files: File[], prepare: (file: File) => Promise<Attachment> = (file) => prepareImage(file, file.name || "Pasted picture")): Promise<string[]> {
+      const problems: string[] = [];
+      const room = Math.max(0, MAX_IMAGES - get(id).length - (preparing.get(id) ?? 0));
+      const taking = Math.min(files.length, room);
+      if (files.length > room) problems.push(`At most ${MAX_IMAGES} pictures can go with one message.`);
+      preparing.set(id, (preparing.get(id) ?? 0) + taking);
+      try {
+        const ready: Attachment[] = [];
+        for (const file of files.slice(0, taking)) {
+          try {
+            ready.push(await prepare(file));
+          } catch (e) {
+            problems.push((e as Error).message);
+          }
+        }
+        // Into the chat they were added in, even if another has been opened since.
+        if (ready.length) set(id, [...get(id), ...ready]);
+      } finally {
+        preparing.set(id, (preparing.get(id) ?? 0) - taking);
+      }
+      return problems;
     },
   };
 }
