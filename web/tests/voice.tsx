@@ -1,6 +1,7 @@
 // Development-only fixture using the actual chat and extension dialog.
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
 import { Chat } from '../src/components/Chat';
 import { ExtensionDialog } from '../src/components/ExtensionDialog';
 import { KeyboardShortcuts } from '../src/components/KeyboardShortcuts';
@@ -73,4 +74,5 @@ function Fixture() {
     </aside>
   </>;
 }
-createRoot(document.getElementById('root')!).render(<Fixture />);
+// Inside a router, as in the app: the chat's links go through it.
+createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /></BrowserRouter>);

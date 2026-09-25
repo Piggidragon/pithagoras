@@ -5,6 +5,7 @@ import path from "node:path";
 import { piSettingsPath } from "../pi-settings.js";
 import { extensionStash, setExtensionStash } from "../db.js";
 import express, { type Router } from "express";
+import { searchCatalog } from "../catalog.js";
 
 const run = promisify(execFile);
 
@@ -38,6 +39,17 @@ export function packagesRouter(): Router {
       res.json({ output: stdout.trim() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /** Packages published for pi, to pick from rather than spell out. */
+  router.get("/packages/catalog", async (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    const topic = req.query.topic === "provider" ? "provider" : undefined;
+    try {
+      res.json({ packages: await searchCatalog(q, topic) });
+    } catch (e) {
+      res.status(502).json({ error: (e as Error).message });
     }
   });
 

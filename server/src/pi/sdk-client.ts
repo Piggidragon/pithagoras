@@ -17,6 +17,8 @@ import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { contextWindowFor } from "../db.js";
+import { configStamp } from "../providers.js";
+import { rereadConfig } from "./model-runtime.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -853,8 +855,19 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       : ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
   }
 
+  /** When pi's model and key files were last read here. */
+  private configSeen = configStamp();
+
   /** Only models with working auth, unlike RPC which listed the whole catalogue. */
   async getModels(): Promise<PiState["model"][]> {
+    // pi reads models.json and auth.json once, when the conversation starts. A
+    // provider set up in Settings since then is read in now, when the model
+    // menu is opened, rather than only in the next conversation.
+    const stamp = configStamp();
+    if (stamp !== this.configSeen) {
+      this.configSeen = stamp;
+      await rereadConfig(this.modelRuntime).catch(() => {});
+    }
     const available = (await this.modelRuntime.getAvailable?.()) ?? [];
     return available.map((m: any) => ({
       id: m.id,

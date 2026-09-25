@@ -81,6 +81,20 @@ test('a call through the MCP adapter is named by the tool it asked for', async (
   assert.equal(toolName('web_search', { query: 'x' }), 'web_search');
 });
 
+test('an extension setting is named as a person would, and kept as the kind of value it was', async () => {
+  const { humanKey, typed } = await import('../web/src/setting-values.ts');
+  assert.equal(humanKey('llamaServerUrl'), 'Llama server URL');
+  assert.equal(humanKey('mcp_timeout_ms'), 'MCP timeout ms');
+  assert.equal(humanKey('HTTPProxy'), 'HTTP proxy');
+  assert.equal(typed(5, ' 12 '), 12);
+  assert.equal(typed(true, 'false'), false);
+  assert.deepEqual(typed({ a: 1 }, '{"a":2}'), { a: 2 });
+  assert.equal(typed('x', ''), '');
+  // A key never set is told by its text (see setting-values.test): a number, unless its name says it holds text.
+  assert.equal(typed(undefined, '42'), 42);
+  assert.equal(typed(undefined, '42', 'apiKey'), '42');
+});
+
 test('a tool its run left open does not run again with the next run', () => {
   // The portal restarted mid-call and recorded nothing; then a new message started a run.
   const items = buildTranscript([start(1, 't1'), ev(2, 'portal_prompt', { message: 'again' }), ev(3, 'agent_start'), start(4, 't2')] as any);
