@@ -273,8 +273,9 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           current.thinking = thinking;
         }
         // What an extension puts in the conversation for people to read —
-        // pi.sendMessage with display on. pi's TUI draws it; so does this.
-        if (ev.type === "message_end" && message?.role === "custom" && message.display !== false) {
+        // pi.sendMessage with display on. pi's TUI draws it; so does this. One
+        // that does not say so is for the model, as pi's TUI takes it.
+        if (ev.type === "message_end" && message?.role === "custom" && message.display) {
           const text = typeof message.content === "string"
             ? message.content
             : Array.isArray(message.content) ? message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("\n") : "";

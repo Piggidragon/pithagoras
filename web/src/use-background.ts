@@ -10,17 +10,20 @@ const EMPTY: BackgroundState = { supported: false, jobs: [], statuses: [], widge
  * status, or a job was stopped.
  */
 export function useBackground(sessionId: string, busy: boolean, nudge: unknown): [BackgroundState, () => void] {
-  const [state, setState] = useState<BackgroundState>(EMPTY);
+  // Kept with the chat it is of. Cleared in an effect, another chat's state
+  // lasted a render into the next, long enough for its status lines to make
+  // this one list its commands, which starts its pi.
+  const [held, setHeld] = useState<{ sessionId: string; state: BackgroundState }>({ sessionId, state: EMPTY });
+  const state = held.sessionId === sessionId ? held.state : EMPTY;
   const current = useRef(sessionId);
   current.current = sessionId;
   const [tick, setTick] = useState(0);
-  useEffect(() => setState(EMPTY), [sessionId]);
   useEffect(() => {
     let live = true;
     const load = () => {
       if (document.hidden) return;
       api.background(sessionId).then(
-        (s) => live && current.current === sessionId && setState(normalize(s)),
+        (s) => live && current.current === sessionId && setHeld({ sessionId, state: normalize(s) }),
         () => undefined,
       );
     };

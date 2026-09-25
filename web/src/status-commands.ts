@@ -7,10 +7,18 @@
 
 export type StatusPart = { text: string } | { command: string };
 
+/**
+ * A slash and a name, standing on its own: after a space, a bracket or a
+ * quote, and before one, or before punctuation. The name ends in a letter or
+ * digit, so "/bg-update:" and "/bg-update-" name /bg-update, while a path like
+ * a/b is never one.
+ */
+const COMMAND = /(^|[\s([{"'`])\/([\w:-]*\w)(?=$|[\s.,;:!?)\]}"'`-])/g;
+
 export function statusParts(text: string, known: ReadonlySet<string>): StatusPart[] {
   const parts: StatusPart[] = [];
   let last = 0;
-  for (const m of text.matchAll(/(^|\s)\/([\w:-]+)(?=\s|$|[.,;:!?)])/g)) {
+  for (const m of text.matchAll(COMMAND)) {
     if (!known.has(m[2])) continue;
     const start = m.index! + m[1].length;
     if (start > last) parts.push({ text: text.slice(last, start) });
@@ -22,4 +30,4 @@ export function statusParts(text: string, known: ReadonlySet<string>): StatusPar
 }
 
 /** Whether a status line names anything that looks like a command, worth asking the chat for its list. */
-export const mentionsCommand = (text: string) => /(^|\s)\/[\w:-]+/.test(text);
+export const mentionsCommand = (text: string) => new RegExp(COMMAND.source).test(text);

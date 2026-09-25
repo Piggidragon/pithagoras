@@ -74,13 +74,39 @@ if (phase === 'agents') {
   }) as typeof fetch;
 }
 
+// An extension fills the chat box twice in one millisecond, the way pi's RPC mode names it and then as a paste.
+if (phase === 'editor') {
+  const at = -now;
+  events.push(
+    { seq: at, type: 'extension_ui_request', at: now, payload: { method: 'set_editor_text', text: '/deploy ' } },
+    { seq: at, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: '--prod', paste: true } },
+  );
+}
+// Two chats: the first has a status that names a command, the second nothing. Which chats are asked for their commands is kept.
+if (phase === 'switch') {
+  const realFetch = window.fetch;
+  (window as any).commandsAsked = [];
+  window.fetch = (async (url: any, init?: any) => {
+    const u = String(url);
+    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    if (u.endsWith('/background')) return reply({ supported: true, jobs: [], widgets: [], statuses: u.includes('/sessions/first/') ? [{ key: 'bg', text: 'bg ⬆ v2.6.5 /bg-update' }] : [] });
+    if (u.endsWith('/commands')) {
+      (window as any).commandsAsked.push(u.split('/')[3]);
+      return reply({ commands: [{ name: 'bg-update', description: 'Update', source: 'extension' }] });
+    }
+    return realFetch(url, init);
+  }) as typeof fetch;
+}
+
 const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 function Fixture() {
   const [v, setV] = React.useState('b');
+  const [which, setWhich] = React.useState(phase === 'switch' ? 'first' : session.id);
+  const shown = which === session.id ? session : { ...session, id: which, title: which === 'first' ? 'First chat' : 'Second chat', status: 'idle' as const };
   return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-    <div style={{ padding: 8, display: 'flex', gap: 8 }}><Select aria-label="Preview select" size="sm" className="w-64" value={v} onChange={setV} options={[{ value: 'a', label: 'Project notes' }, { value: 'b', label: 'Release plan', hint: 'Temporary — not stored' }, { value: 'c', label: 'Meeting summary' }]} /><label className="flex items-center gap-2 text-xs"><input type="checkbox" defaultChecked />Checkbox</label><input type="range" defaultValue={40} /></div>
-    <div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={events} onSend={async (message) => { (window as any).sent = [...((window as any).sent ?? []), message]; }} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
+    <div style={{ padding: 8, display: 'flex', gap: 8 }}><Select aria-label="Preview select" size="sm" className="w-64" value={v} onChange={setV} options={[{ value: 'a', label: 'Project notes' }, { value: 'b', label: 'Release plan', hint: 'Temporary — not stored' }, { value: 'c', label: 'Meeting summary' }]} /><label className="flex items-center gap-2 text-xs"><input type="checkbox" defaultChecked />Checkbox</label><input type="range" defaultValue={40} />{phase === 'switch' && <button onClick={() => setWhich('second')}>Open the second chat</button>}</div>
+    <div style={{ flex: 1, minHeight: 0 }}><Chat session={shown} events={events} onSend={async (message) => { (window as any).sent = [...((window as any).sent ?? []), message]; }} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
   </div>;
 }
 createRoot(document.getElementById('root')!).render(<Fixture />);

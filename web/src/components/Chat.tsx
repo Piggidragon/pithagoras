@@ -113,8 +113,12 @@ function ContextChip({ label, body }: { label: string; body: string }) {
   );
 }
 
-/** The requests to fill the chat box that have been, so each fills it once. */
-const filledFrom = new Set<number>();
+/**
+ * The requests to fill the chat box that have been, so each fills it once. By
+ * the event itself: live events share a seq when they come in the same
+ * millisecond, and a paste right after a fill would be lost.
+ */
+const filledFrom = new WeakSet<object>();
 
 export function Chat({
   session,
@@ -750,15 +754,22 @@ export function Chat({
 
   // An extension that fills the chat box — pi's setEditorText, pasteToEditor —
   // fills this one, for the person to send or change. Each once: these are
-  // live-only, and a chat opened again still holds the ones it was sent.
+  // live-only, and a chat opened again still holds the ones it was sent. pi's
+  // RPC mode, which runs outside the host, names it set_editor_text.
   useEffect(() => {
+    // Built up across the ones that came together: the box's own text is not
+    // updated until they are all read, and a paste after a fill needs the fill.
+    let text: string | undefined;
     for (const e of events) {
-      if (e.seq >= 0 || e.type !== "extension_ui_request" || e.payload?.method !== "setEditorText" || filledFrom.has(e.seq)) continue;
-      filledFrom.add(e.seq);
-      const text = String(e.payload.text ?? "");
-      changeInput(e.payload.paste ? draft.current + text : text);
-      requestAnimationFrame(() => box.current?.focus());
+      const method = e.payload?.method;
+      if (e.seq >= 0 || e.type !== "extension_ui_request" || (method !== "setEditorText" && method !== "set_editor_text") || filledFrom.has(e)) continue;
+      filledFrom.add(e);
+      const given = String(e.payload.text ?? "");
+      text = e.payload.paste ? (text ?? draft.current) + given : given;
     }
+    if (text === undefined) return;
+    changeInput(text);
+    requestAnimationFrame(() => box.current?.focus());
   }, [events]);
 
   const clearBox = () => {

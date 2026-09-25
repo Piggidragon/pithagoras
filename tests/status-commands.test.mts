@@ -8,7 +8,13 @@ test("a command named in an extension's status can be run from it, and nothing e
   assert.deepEqual(statusParts("/reload, then /bg-update.", known), [{ command: "reload" }, { text: ", then " }, { command: "bg-update" }, { text: "." }]);
   assert.deepEqual(statusParts("logs in /tmp/x and /nope", known), [{ text: "logs in /tmp/x and /nope" }]);
   assert.deepEqual(statusParts("a/bg-update", known), [{ text: "a/bg-update" }], "only a word of its own");
+  // Named as people name commands: before a colon or a dash, in brackets or quotes.
+  assert.deepEqual(statusParts("run /bg-update: now", known), [{ text: "run " }, { command: "bg-update" }, { text: ": now" }]);
+  assert.deepEqual(statusParts("(/bg-update)", known), [{ text: "(" }, { command: "bg-update" }, { text: ")" }]);
+  assert.deepEqual(statusParts('try "/reload"', known), [{ text: 'try "' }, { command: "reload" }, { text: '"' }]);
+  assert.deepEqual(statusParts("try /bg-update-", known), [{ text: "try " }, { command: "bg-update" }, { text: "-" }]);
   assert.equal(mentionsCommand("bg ⬆ v2.6.5 /bg-update"), true);
+  assert.equal(mentionsCommand("(/bg-update)"), true);
   assert.equal(mentionsCommand("3 running"), false);
 });
 
@@ -29,6 +35,8 @@ test("each command sent is a line in the chat that says how it went", () => {
     ev("portal_command_end", { of: 8, error: "boom" }),
     ev("message_end", { message: { role: "custom", customType: "r", content: [{ type: "text", text: "All green" }], display: true } }),
     ev("message_end", { message: { role: "custom", customType: "hidden", content: "for the model", display: false } }),
+    // Not said to be for display: for the model, as pi's TUI takes it.
+    ev("message_end", { message: { role: "custom", customType: "ctx", content: "context for the model" } }),
     ev("portal_command", { text: "/lost" }),
     ev("portal_status", { status: "idle" }),
   ]);

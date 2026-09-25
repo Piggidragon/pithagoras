@@ -56,18 +56,23 @@ const SHARED_FILES = ["SOUL.md", "TEAM.md"];
 const filesFor = (role?: string) => (!role || role === "primary" ? CONTEXT_FILES : SHARED_FILES);
 
 /**
- * pi's own theme object, for extensions that style text with it even when
- * nothing will draw it — as pi's no-UI context hands them. Loaded once.
+ * pi's own theme, for extensions that style text with it even when nothing
+ * will draw it — as pi's no-UI context hands them. pi's CLI loads it on start;
+ * the SDK does not, and the theme object pi hands out throws on every read
+ * until it has. Loaded once, with the SDK, then read where pi keeps it.
  */
-let piTheme: unknown;
-void (async () => {
+const THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
+let themeLoaded = false;
+export function loadTheme(pi: { initTheme?: (name?: string, watch?: boolean) => void }) {
+  if (themeLoaded) return;
+  themeLoaded = true;
   try {
-    const entry = import.meta.resolve("@earendil-works/pi-coding-agent");
-    piTheme = (await import(new URL("modes/interactive/theme/theme.js", entry).href)).theme;
+    pi.initTheme?.(undefined, false);
   } catch {
-    // An extension reading it gets undefined, as it would have before.
+    // An extension reading it gets undefined, as it did before.
   }
-})();
+}
+const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
 
 export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
@@ -285,6 +290,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
     const pi: any = await import("@earendil-works/pi-coding-agent");
+    loadTheme(pi);
 
     const modelRuntime = await pi.ModelRuntime.create();
     // Shared with the extensions, so one that runs a subagent can tell the
@@ -582,7 +588,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       setEditorComponent: () => {},
       getEditorComponent: () => undefined,
       get theme() {
-        return piTheme;
+        return piTheme();
       },
       getAllThemes: () => [],
       getTheme: () => undefined,

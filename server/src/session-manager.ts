@@ -124,10 +124,28 @@ const EXECUTOR_KIND = (process.env.EXECUTOR || "host") as ExecutorKind;
 export function extensionFailure(where: unknown, error: unknown): string {
   const path = String(where ?? "");
   const command = /^command:(.+)$/.exec(path)?.[1];
-  const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path)?.[1] ?? (/([^/]+?)(?:\/(?:dist|src|extensions?))?\/[^/]+\.[cm]?[jt]s$/.exec(path)?.[1]);
-  const who = command ? `/${command}` : pkg ? pkg : "An extension";
+  const who = command ? `/${command}` : (/node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path)?.[1] ?? extensionName(path) ?? "An extension");
   return `${who} failed: ${String(error ?? "no reason given").trim()}`;
 }
+
+/**
+ * An extension outside a package, by its file: "my-ext" for extensions/my-ext.ts,
+ * and the folder's name for one whose file is only its entry point, such as
+ * extensions/my-ext/index.ts or my-ext/dist/index.js.
+ */
+function extensionName(path: string): string | undefined {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  if (!/\.[cm]?[jt]s$/.test(parts.at(-1) ?? "")) return undefined;
+  let name = parts.pop()!.replace(/\.[cm]?[jt]s$/, "");
+  while (/^(index|main|extension|dist|src|lib|build)$/.test(name) && parts.length) name = parts.pop()!;
+  return name || undefined;
+}
+
+/** A command sent to pi and not yet answered. */
+type InHand = { seq: number; name: string; said: number; error?: string };
+
+/** The extension UI requests a person sees in the chat: a line, a dialog, a view, the box filled. */
+const SHOWN = new Set(["notify", "select", "confirm", "input", "editor", "custom", "setEditorText"]);
 
 /**
  * Events that must not be persisted.
@@ -612,13 +630,23 @@ class SessionManager extends EventEmitter {
     }
   }
 
-  /** Commands sent and not yet answered, per session, with how much each has shown. */
-  private commandsInHand = new Map<string, { seq: number; name: string; said: number }[]>();
+  /**
+   * Commands sent and not yet answered, per session, with how much each has
+   * shown, and the error it threw: pi reports that apart from the answer,
+   * which counts a command that threw as handled.
+   */
+  private commandsInHand = new Map<string, InHand[]>();
 
-  private startCommand(sessionId: string, message: string) {
+  /**
+   * Sessions whose agent is in a run, from pi's agent_start to agent_settled.
+   * Not the session's status, which a command sent marks running as well.
+   */
+  private inRun = new Set<string>();
+
+  private startCommand(sessionId: string, message: string): InHand {
     const text = message.trim();
     const row = this.record(sessionId, "portal_command", { text });
-    const command = { seq: row?.seq ?? -1, name: /^\/([\w:-]+)/.exec(text)?.[1] ?? text, said: 0 };
+    const command: InHand = { seq: row?.seq ?? -1, name: /^\/([\w:-]+)/.exec(text)?.[1] ?? text, said: 0 };
     this.commandsInHand.set(sessionId, [...(this.commandsInHand.get(sessionId) ?? []), command]);
     return command;
   }
@@ -628,19 +656,30 @@ class SessionManager extends EventEmitter {
    * failed. `quiet` when it showed nothing at all — no line, no dialog, no
    * run — so the chat can say it ran and had nothing to say.
    */
-  private endCommand(
-    sessionId: string,
-    command: { seq: number; name: string; said: number },
-    end: { outcome?: string; said?: boolean; error?: string },
-  ) {
-    const list = (this.commandsInHand.get(sessionId) ?? []).filter((c) => c !== command);
+  private endCommand(sessionId: string, command: InHand, end: { outcome?: string; said?: boolean; error?: string }) {
+    const inHand = this.commandsInHand.get(sessionId) ?? [];
+    // Ended already, when pi went away before it answered.
+    if (!inHand.includes(command)) return;
+    const list = inHand.filter((c) => c !== command);
     if (list.length) this.commandsInHand.set(sessionId, list);
     else this.commandsInHand.delete(sessionId);
+    const error = end.error ?? command.error;
     this.record(sessionId, "portal_command_end", {
       of: command.seq,
-      ...(end.error ? { error: end.error } : { outcome: end.outcome ?? "handled" }),
-      ...(!end.error && !end.said && command.said === 0 && end.outcome === "handled" ? { quiet: true } : {}),
+      ...(error ? { error } : { outcome: end.outcome ?? "handled" }),
+      ...(!error && !end.said && command.said === 0 && end.outcome === "handled" ? { quiet: true } : {}),
     });
+  }
+
+  /**
+   * pi went before answering the commands it had: they end as failed, rather
+   * than running for good and lending their names to notices of later ones.
+   */
+  private dropCommands(sessionId: string) {
+    for (const command of this.commandsInHand.get(sessionId) ?? []) {
+      this.record(sessionId, "portal_command_end", { of: command.seq, error: "pi stopped before it answered" });
+    }
+    this.commandsInHand.delete(sessionId);
   }
 
   /** Extension status lines and widgets for a session, as they are now. */
@@ -802,14 +841,21 @@ class SessionManager extends EventEmitter {
       if (modelFailure) this.record(sessionId, "portal_notice", { text: modelFailure, error: true });
       if (msg.type === "extension_ui_request") this.noteExtensionUi(sessionId, msg);
       this.record(sessionId, msg.type, msg);
-      // Anything a command in hand shows for itself: see endCommand.
+      // Anything a command in hand shows for itself: see endCommand. Only what
+      // a person sees in the chat — a line, a dialog, a run, a message — and
+      // not a status or widget, which any extension updates on its own clock.
       if (
-        msg.type === "extension_ui_request" ||
-        msg.type === "extension_error" ||
+        (msg.type === "extension_ui_request" && SHOWN.has(msg.method)) ||
         msg.type === "agent_start" ||
-        (msg.type === "message_end" && msg.message?.role === "custom" && msg.message.display !== false)
+        (msg.type === "message_end" && msg.message?.role === "custom" && msg.message.display)
       ) {
         for (const c of this.commandsInHand.get(sessionId) ?? []) c.said++;
+      }
+      // A command that threw: pi answers it as handled and says so here.
+      if (msg.type === "extension_error") {
+        const threw = /^command:(.+)$/.exec(String(msg.extensionPath ?? ""))?.[1];
+        const command = threw ? this.commandsInHand.get(sessionId)?.find((c) => c.name === threw && !c.error) : undefined;
+        if (command) command.error = String(msg.error ?? "it threw");
       }
       // An extension that failed — its command, or a handler of its — says so
       // in the chat. pi's TUI prints it; here it went nowhere.
@@ -819,7 +865,10 @@ class SessionManager extends EventEmitter {
       // A view drawn for pi's terminal: nothing in a browser can draw it.
       // Said, rather than the command seeming to do nothing.
       if (msg.type === "extension_ui_request" && msg.method === "custom") {
-        const name = this.commandsInHand.get(sessionId)?.at(-1)?.name;
+        // Named only when it can only be the command's: during a run, a tool
+        // can open one too.
+        const inHand = this.commandsInHand.get(sessionId) ?? [];
+        const name = inHand.length === 1 && !this.inRun.has(sessionId) ? inHand[0].name : undefined;
         this.record(sessionId, "portal_notice", {
           text: `${name ? `/${name} opens` : "An extension opened"} a view made for pi's terminal, which the browser cannot show.`,
           warning: true,
@@ -847,6 +896,7 @@ class SessionManager extends EventEmitter {
       // routine, a message that arrived through a channel.
       if (msg.type === "agent_start") {
         this.runsStarted.set(sessionId, (this.runsStarted.get(sessionId) ?? 0) + 1);
+        this.inRun.add(sessionId);
         this.mark(sessionId, "running");
       }
       if (msg.type === "message_start" && msg.message?.role === "user") this.takeIn(sessionId, msg.message.content);
@@ -855,6 +905,7 @@ class SessionManager extends EventEmitter {
       // all of it still the model working. Settling on agent_end is what made
       // the Stop button disappear halfway through.
       if (msg.type === "agent_settled") {
+        this.inRun.delete(sessionId);
         this.settleWaiting(sessionId);
         if (!this.failed.delete(sessionId)) this.mark(sessionId, "idle");
       }
@@ -1907,6 +1958,8 @@ class SessionManager extends EventEmitter {
 
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
+    this.dropCommands(sessionId);
+    this.inRun.delete(sessionId);
     this.fresh.delete(sessionId);
     this.piQueue.delete(sessionId);
     this.dropWaiting(sessionId);
