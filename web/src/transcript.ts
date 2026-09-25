@@ -63,6 +63,10 @@ export type Item =
       output?: string;
       /** How many lines `output` had before it was cut to its end. */
       outputLines?: number;
+      /** What the tool reported about itself beside its text — an extension's progress, its subagent's steps. */
+      details?: unknown;
+      /** How many updates it streamed while it ran: a tool that reports as it goes is doing something worth watching. */
+      updates?: number;
       /** The run ended with this call still open: it never said how it came out. */
       interrupted?: boolean;
       since?: number;
@@ -280,8 +284,13 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
 
       case "tool_execution_update": {
         const tool = findRunningTool(items, p);
-        const text = toolOutputText(p.partialResult ?? p.result);
+        const partial = p.partialResult ?? p.result;
+        const text = toolOutputText(partial);
         if (tool && typeof text === "string") setToolOutput(tool, text);
+        if (tool) {
+          tool.updates = (tool.updates ?? 0) + 1;
+          if (partial?.details !== undefined) tool.details = partial.details;
+        }
         break;
       }
 
@@ -318,6 +327,9 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             if (ev.at !== undefined) it.until = ev.at;
             const text = toolOutputText(p.result);
             if (typeof text === "string" && text) setToolOutput(it, text);
+            if (p.result?.details !== undefined) it.details = p.result.details;
+            // Its updates were live only; how many there were is kept on its end.
+            if (typeof p.updates === "number") it.updates = Math.max(it.updates ?? 0, p.updates);
             const picture = shownPicture(p);
             if (picture) it.picture = picture;
             break;

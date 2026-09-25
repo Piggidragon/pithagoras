@@ -133,6 +133,8 @@ const EPHEMERAL_EVENTS = new Set([
   "portal_prefill",
   // A model being loaded before the prompt can be read: news only while it lasts.
   "portal_model",
+  // A subagent's reply as it streams; its finished messages are stored.
+  "portal_subagent_live",
   // Tells a page which stretch of its transcript is gone. Stored, it would be
   // replayed to a reader who never saw what it refers to.
   "portal_removed",
@@ -292,13 +294,14 @@ class SessionManager extends EventEmitter {
       // Still deliver it to anyone attached right now, with a negative seq so
       // it can never be confused with a stored event during replay.
       // Timed like a stored one, so a page can say how long it has lasted.
-      this.emit(`session:${sessionId}`, {
-        seq: -Date.now(),
-        session_id: sessionId,
-        type,
-        payload: JSON.stringify(payload),
-        created_at: new Date().toISOString(),
-      });
+      // Numbered by the live stream's own count: two in one millisecond had
+      // the same seq, and a page telling them apart by it took the second for
+      // the first. A subagent's stream is kept there too, for a page that
+      // opens mid-message.
+      this.emit(
+        `session:${sessionId}`,
+        type === "portal_subagent_live" ? this.stream.subagentLive(sessionId, payload) : this.stream.ephemeral(sessionId, type, payload),
+      );
       return undefined;
     }
     const row = this.stream.record(sessionId, type, payload);
@@ -575,6 +578,78 @@ class SessionManager extends EventEmitter {
     this.record(sessionId, "portal_prefill", prefill);
   }
 
+  /**
+   * What extensions currently show about themselves in a session: the status
+   * lines and text widgets pi's TUI would draw in its footer. Kept here, not
+   * only streamed, so a page opened later sees them too.
+   */
+  private extensionUi = new Map<string, { statuses: Map<string, string>; widgets: Map<string, string[]> }>();
+
+  private noteExtensionUi(sessionId: string, msg: any): void {
+    let ui = this.extensionUi.get(sessionId);
+    if (!ui) this.extensionUi.set(sessionId, (ui = { statuses: new Map(), widgets: new Map() }));
+    const plain = (t: unknown) => String(t ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim();
+    if (msg.method === "setStatus" && typeof msg.statusKey === "string") {
+      const text = plain(msg.statusText);
+      if (text) ui.statuses.set(msg.statusKey, text);
+      else ui.statuses.delete(msg.statusKey);
+    }
+    if (msg.method === "setWidget" && typeof msg.widgetKey === "string") {
+      const lines = Array.isArray(msg.widgetContent) ? msg.widgetContent.map(plain) : [];
+      if (lines.some(Boolean)) ui.widgets.set(msg.widgetKey, lines);
+      else ui.widgets.delete(msg.widgetKey);
+    }
+  }
+
+  /** Extension status lines and widgets for a session, as they are now. */
+  /**
+   * Tool calls running in each chat, its subagents' included, by call id. A
+   * process pi started for one and one an extension started look the same
+   * from outside; only while a call is running can a process be one.
+   */
+  private calls = new Map<string, Set<string>>();
+
+  private noteCall(sessionId: string, msg: any): void {
+    const sub = msg.type === "portal_subagent" && msg.op === "event" ? msg.event ?? {} : undefined;
+    const event = sub ?? msg;
+    const id = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
+    let calls = this.calls.get(sessionId);
+    if (event.type === "tool_execution_start") {
+      if (!calls) this.calls.set(sessionId, (calls = new Set()));
+      calls.add(id);
+    }
+    if (event.type === "tool_execution_end") calls?.delete(id);
+    // A subagent that ended took whatever it was running with it.
+    if (msg.type === "portal_subagent" && msg.op === "end") for (const c of [...(calls ?? [])]) if (c.startsWith(`${msg.id}:`)) calls!.delete(c);
+    if (calls && !calls.size) this.calls.delete(sessionId);
+  }
+
+  /** Whether a tool call is running in the chat: see calls. */
+  callsRunning(sessionId: string): boolean {
+    return this.calls.has(sessionId);
+  }
+
+  extensionState(sessionId: string): { statuses: { key: string; text: string }[]; widgets: { key: string; lines: string[] }[] } {
+    const ui = this.extensionUi.get(sessionId);
+    return {
+      statuses: ui ? [...ui.statuses].map(([key, text]) => ({ key, text })) : [],
+      widgets: ui ? [...ui.widgets].map(([key, lines]) => ({ key, lines })) : [],
+    };
+  }
+
+  /**
+   * A message for, or a stop to, a subagent an extension announced. False
+   * when the session is not running here or its executor cannot reach the
+   * extensions — the container one cannot.
+   */
+  subagentInput(sessionId: string, id: string, text: string): boolean {
+    return this.live.get(sessionId)?.client.subagentInput?.(id, text) ?? false;
+  }
+
+  subagentStop(sessionId: string, id: string): boolean {
+    return this.live.get(sessionId)?.client.subagentStop?.(id) ?? false;
+  }
+
   /** The session's model is being loaded, or has finished loading. */
   reportModelLoad(sessionId: string, load: unknown): void {
     this.record(sessionId, "portal_model", load);
@@ -700,6 +775,7 @@ class SessionManager extends EventEmitter {
         return;
       }
       if (msg.type === "agent_start") this.failed.delete(sessionId);
+      this.noteCall(sessionId, msg);
       if (msg.type === "queue_update") {
         const lane = (texts: unknown) => (Array.isArray(texts) ? texts.map(String) : []);
         const queue = { steering: lane(msg.steering), followUp: lane(msg.followUp) };
@@ -710,6 +786,7 @@ class SessionManager extends EventEmitter {
       // event that settles it, so an ask() finishing on agent_settled has it.
       const modelFailure = this.modelErrors.take(sessionId, msg);
       if (modelFailure) this.record(sessionId, "portal_notice", { text: modelFailure, error: true });
+      if (msg.type === "extension_ui_request") this.noteExtensionUi(sessionId, msg);
       this.record(sessionId, msg.type, msg);
       // Status follows pi's own run state rather than being guessed at the
       // moments the portal happens to know about. agent_start covers a run
@@ -1767,6 +1844,10 @@ class SessionManager extends EventEmitter {
 
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
+    // What the extensions showed went with the process that ran them: stopped
+    // for a restart or a delete as much as crashed.
+    this.extensionUi.delete(sessionId);
+    this.calls.delete(sessionId);
     this.fresh.delete(sessionId);
     this.piQueue.delete(sessionId);
     this.dropWaiting(sessionId);

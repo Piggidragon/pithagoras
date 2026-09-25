@@ -74,6 +74,13 @@ export interface PiCommand {
 export interface PiClient extends EventEmitter {
   readonly running: boolean;
   /**
+   * Speak to a subagent an extension announced over the subagent protocol
+   * (see subagent-protocol.ts). False when this executor cannot reach the
+   * extensions' event bus. Optional: only the in-process client can.
+   */
+  subagentInput?(id: string, text: string): boolean;
+  subagentStop?(id: string): boolean;
+  /**
    * pi's session file for this conversation, once it exists. Recorded by the
    * portal so the same conversation is reopened after a restart instead of a
    * new one being started. Undefined for executors that cannot report it.

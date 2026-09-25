@@ -185,6 +185,27 @@ export interface PromptOptions {
   steer?: boolean;
 }
 
+/** A job the agent left running — see server/src/background.ts. */
+export interface BackgroundJob {
+  key: string;
+  sid: number;
+  pids: number[];
+  command: string;
+  startedAt: number;
+  state: "running" | "stopped" | "exited";
+  exitedAt?: number;
+  hasOutput: boolean;
+  /** A tool call the chat is already showing. */
+  attached: boolean;
+}
+
+export interface BackgroundState {
+  supported: boolean;
+  jobs: BackgroundJob[];
+  statuses: { key: string; text: string }[];
+  widgets: { key: string; lines: string[] }[];
+}
+
 export interface PortalEvent {
   seq: number;
   type: string;
@@ -571,6 +592,25 @@ export const api = {
     }),
 
   abort: (id: string) => json<{ ok: true }>(`/api/sessions/${id}/abort`, { method: "POST" }),
+
+  /** Jobs the agent left running in the chat's folder, and what extensions show about themselves. */
+  background: (id: string) => json<BackgroundState>(`/api/sessions/${id}/background`),
+  backgroundOutput: (id: string, key: string, from?: number) =>
+    json<{ text: string; from: number; size: number }>(
+      `/api/sessions/${id}/background/${encodeURIComponent(key)}/output${from === undefined ? "" : `?from=${from}`}`,
+    ),
+  stopBackground: (id: string, key: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/background/${encodeURIComponent(key)}/stop`, { method: "POST" }),
+  clearBackground: (id: string) => json<{ ok: true }>(`/api/sessions/${id}/background/clear`, { method: "POST" }),
+  /** A message for a subagent that said it takes them (subagent protocol, input: true). */
+  subagentInput: (id: string, agent: string, text: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/subagents/${encodeURIComponent(agent)}/input`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
+  subagentStop: (id: string, agent: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/subagents/${encodeURIComponent(agent)}/stop`, { method: "POST" }),
 
   /** Cheap: never starts pi. Stats are null when the session is not live. */
   config: (id: string) => json<PiConfig>(`/api/sessions/${id}/config`),
