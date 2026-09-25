@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuCheck, LuDownload, LuExternalLink, LuPackage, LuRefreshCw, LuSearch, LuTrendingUp } from "react-icons/lu";
 import { api, type CatalogPackage } from "../api";
-import { ago, compactCount } from "../package-names";
+import { ago, compactCount, webLink } from "../package-names";
 import { confirmDialog } from "./ConfirmDialog";
 import { load, peek } from "../settings-cache";
 import { inputCls } from "./SettingsUi";
@@ -108,6 +108,7 @@ export function PackageCatalog({
         <ul key={asked} className="stagger-in mt-2 space-y-1.5">
           {shown.map((p) => {
             const has = installed.has(p.name) || done.has(p.name);
+            const link = webLink(p.homepage) ?? webLink(p.npm);
             return (
               <li key={p.name} className="rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:border-fg/15">
                 <div className="flex items-start gap-2.5">
@@ -126,8 +127,8 @@ export function PackageCatalog({
                       )}
                       {p.date && <span>updated {ago(p.date)}</span>}
                       {p.author && <span>by {p.author}</span>}
-                      {(p.homepage || p.npm) && (
-                        <a href={p.homepage || p.npm} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 hover:text-fg-muted">
+                      {link && (
+                        <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 hover:text-fg-muted">
                           more <LuExternalLink className="h-2.5 w-2.5" />
                         </a>
                       )}

@@ -14,6 +14,12 @@ import { piAgentDir } from "./pi-settings.js";
  */
 export const modelsJsonPath = () => path.join(piAgentDir(), "models.json");
 export const authJsonPath = () => path.join(piAgentDir(), "auth.json");
+/**
+ * What kind each server set up here is — llama-swap, Ollama — which pi has no
+ * field for. Beside pi's files rather than in models.json, which pi checks
+ * against its own schema; a server not in it is told by its name.
+ */
+export const kindsJsonPath = () => path.join(piAgentDir(), "portal-providers.json");
 
 /** What a provider is, as the page offers them — not a field pi knows about. */
 export type ProviderKind = "llama-cpp" | "llama-swap" | "ollama" | "openrouter" | "hosted" | "custom";
@@ -141,13 +147,24 @@ export function configStamp(): string {
 
 // --- reading ---
 
-/** What kind of server a models.json entry is, from its name and address. */
+/**
+ * What kind of server a models.json entry is, from its name and address —
+ * for one written by hand. Always a server: one named after a hosted service,
+ * such as "openrouter", is still reached by its address and its own models.
+ */
 export function inferKind(id: string, baseUrl?: string): ProviderKind {
   if (id === "llama.cpp" || id.startsWith("llama-server") || id.startsWith("llama-cpp")) return "llama-cpp";
   if (id.startsWith("llama-swap")) return "llama-swap";
   if (id.startsWith("ollama") || /:11434(\/|$)/.test(baseUrl ?? "")) return "ollama";
-  if (id === "openrouter") return "openrouter";
   return "custom";
+}
+
+const SERVER_KINDS = new Set<ProviderKind>(["llama-cpp", "llama-swap", "ollama", "custom"]);
+
+/** What kind a server is: as it was saved here, or else as its name says. */
+function kindOf(id: string, baseUrl: string | undefined, kinds: Json): ProviderKind {
+  const saved = kinds[id];
+  return SERVER_KINDS.has(saved) ? saved : inferKind(id, baseUrl);
 }
 
 export function keyHint(value: unknown): string | undefined {
@@ -172,13 +189,14 @@ const presetFor = (kind: ProviderKind) => PRESETS.find((p) => p.kind === kind)!;
 export function listProviders(names: Record<string, string> = {}, envKeyed: Record<string, string> = {}): ProviderInfo[] {
   const models = readModelsJson().providers ?? {};
   const auth = readAuthJson();
+  const kinds = readJson(kindsJsonPath());
   const out: ProviderInfo[] = [];
   for (const [id, raw] of Object.entries<Json>(models)) {
     if (!raw || typeof raw !== "object") continue;
     // Without a list of models it is an override of a built-in service — its
     // address, or a model's details — not a server of its own.
     if (!Array.isArray(raw.models)) continue;
-    const kind = inferKind(id, raw.baseUrl);
+    const kind = kindOf(id, raw.baseUrl, kinds);
     const stored = auth[id]?.type === "api_key" ? auth[id].key : undefined;
     const key = stored ?? raw.apiKey;
     out.push({
@@ -251,13 +269,28 @@ export function normalizeBaseUrl(raw: string, kind: ProviderKind): string {
   return url.replace(/\/models$/, "");
 }
 
-/** A key as pi would read it: an environment variable is looked up, a command is not run here. */
+const ENV_REF = /^\$\{?([A-Z_][A-Z0-9_]*)\}?$/i;
+
+/** A stored key as pi would read it: an environment variable is looked up, a command is not run here. */
 function resolveKey(key: string | undefined): string | undefined {
   if (!key || isPlaceholder(key)) return undefined;
-  const env = /^\$\{?([A-Z_][A-Z0-9_]*)\}?$/i.exec(key);
+  const env = ENV_REF.exec(key);
   if (env) return process.env[env[1]];
   return key.startsWith("!") ? undefined : key;
 }
+
+/**
+ * A key typed on the page, to send to the address typed beside it: only as
+ * it is. Naming a variable or a command is how pi is told where to find a key
+ * when it uses it — asked here, it would hand anything in the portal's
+ * environment to whatever address was given.
+ */
+function typedKey(key: string | undefined): string | undefined {
+  if (!key || isPlaceholder(key) || ENV_REF.test(key) || key.startsWith("!")) return undefined;
+  return key;
+}
+
+const sameBase = (a: string, b: string) => a.replace(/\/+$/, "").toLowerCase() === b.replace(/\/+$/, "").toLowerCase();
 
 async function getJson(url: string, key: string | undefined, ms = 6000, init: RequestInit = {}): Promise<unknown> {
   let res: Response;
@@ -272,7 +305,7 @@ async function getJson(url: string, key: string | undefined, ms = 6000, init: Re
     if ((e as Error).name === "TimeoutError") throw new ProbeError(`No answer from ${new URL(url).host} within ${ms / 1000} seconds.`);
     throw new ProbeError(cause === "ENOTFOUND" ? `There is no ${new URL(url).hostname} to reach.` : `Nothing answered at ${new URL(url).host} — is the server running, and reachable from here?`);
   }
-  if (res.status === 401 || res.status === 403) throw new ProbeError(key ? "The server turned the key down." : "The server wants an API key.");
+  if (res.status === 401 || res.status === 403) throw new ProbeError(key ? "The server turned the key down." : "The server wants an API key.", res.status);
   if (!res.ok) throw new ProbeError(`The server answered ${res.status} at ${new URL(url).pathname}.`);
   try {
     return await res.json();
@@ -281,7 +314,11 @@ async function getJson(url: string, key: string | undefined, ms = 6000, init: Re
   }
 }
 
-export class ProbeError extends Error {}
+export class ProbeError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+  }
+}
 
 /**
  * What llama-server itself says about the one model it has loaded: the window
@@ -320,31 +357,51 @@ async function ollamaShow(base: string, model: string): Promise<Partial<ModelEnt
   }
 }
 
+/** A saved server's address and its key, for asking it again. */
+export interface Saved {
+  baseUrl: string;
+  key?: string;
+}
+
 /**
- * Ask a server which models it has. `storedKey` is for a provider being
- * edited: the key never comes back to the page, so the page cannot send it.
+ * Ask a server which models it has. `saved` is for a provider being edited:
+ * its key never comes back to the page, so the page cannot send it — and it
+ * is sent only to the address it was saved with, never to one typed since.
  */
-export async function probeModels(kind: ProviderKind, baseUrl: string, key?: string, storedKey?: string): Promise<{ baseUrl: string; models: ModelEntry[] }> {
+export async function probeModels(kind: ProviderKind, baseUrl: string, key?: string, saved?: Saved): Promise<{ baseUrl: string; models: ModelEntry[] }> {
   const base = normalizeBaseUrl(baseUrl, kind);
-  const auth = resolveKey(key) ?? resolveKey(storedKey);
+  const keyFor = (at: string) => typedKey(key) ?? (saved && sameBase(at, saved.baseUrl) ? resolveKey(saved.key) : undefined);
+  const ask = async (at: string) => {
+    try {
+      return parseModels(await getJson(`${at}/models`, keyFor(at)));
+    } catch (e) {
+      // Its saved key would have been sent to its saved address, not this one.
+      if (e instanceof ProbeError && e.status && !keyFor(at) && resolveKey(saved?.key)) {
+        throw new ProbeError("The saved key is only sent to the address it was saved with. Type it again to use it here.", e.status);
+      }
+      throw e;
+    }
+  };
   let models: ModelEntry[];
   let at = base;
   try {
-    models = parseModels(await getJson(`${base}/models`, auth));
+    models = await ask(base);
   } catch (e) {
     // A custom address given without its /v1: try once with it before giving up.
     if (kind !== "custom" || /\/v\d+$/.test(base)) throw e;
     at = `${base}/v1`;
-    const retried = await getJson(`${at}/models`, auth).then(parseModels, () => []);
+    const retried = await ask(at).catch(() => []);
     if (!retried.length) throw e;
     models = retried;
   }
+  const auth = keyFor(at);
   if (kind === "llama-cpp") {
     const props = await llamaProps(at, auth);
     // One model per server: what it says of itself belongs to that one.
     if (models.length === 1) models = [{ ...models[0], ...props }];
   }
-  if (kind === "ollama") models = await Promise.all(models.slice(0, 40).map(async (m) => ({ ...m, ...(await ollamaShow(at, m.id)) })));
+  // Every model is listed; only the first 40 are looked up one by one.
+  if (kind === "ollama") models = await Promise.all(models.map(async (m, i) => (i < 40 ? { ...m, ...(await ollamaShow(at, m.id)) } : m)));
   return { baseUrl: at, models };
 }
 
@@ -376,7 +433,7 @@ async function swapRunning(base: string, key?: string): Promise<string[] | undef
   }
 }
 
-async function checkOne(id: string, raw: Json): Promise<ProviderStatus> {
+async function checkOne(id: string, raw: Json, kind: ProviderKind): Promise<ProviderStatus> {
   const base = String(raw.baseUrl).replace(/\/+$/, "");
   const key = resolveKey(storedKey(id));
   const started = performance.now();
@@ -387,7 +444,7 @@ async function checkOne(id: string, raw: Json): Promise<ProviderStatus> {
     const chosen: string[] = raw.models.map((m: Json) => m?.id).filter((m: unknown): m is string => typeof m === "string");
     // A server that lists nothing is not saying the chosen ones are gone.
     const status: ProviderStatus = { state: "up", ms, listed: listed.length, missing: listed.length ? chosen.filter((m) => !ids.has(m)) : [] };
-    if (inferKind(id, base) === "llama-swap") status.loaded = await swapRunning(base, key);
+    if (kind === "llama-swap") status.loaded = await swapRunning(base, key);
     return status;
   } catch (e) {
     return { state: "down", message: (e as Error).message };
@@ -401,11 +458,12 @@ async function checkOne(id: string, raw: Json): Promise<ProviderStatus> {
  */
 export async function checkProviders(): Promise<Record<string, ProviderStatus>> {
   const providers = readModelsJson().providers ?? {};
+  const kinds = readJson(kindsJsonPath());
   const out: Record<string, ProviderStatus> = {};
   await Promise.all(
     Object.entries<Json>(providers)
       .filter(([, raw]) => raw && Array.isArray(raw.models) && typeof raw.baseUrl === "string")
-      .map(async ([id, raw]) => { out[id] = await checkOne(id, raw); }),
+      .map(async ([id, raw]) => { out[id] = await checkOne(id, raw, kindOf(id, raw.baseUrl, kinds)); }),
   );
   return out;
 }
@@ -465,6 +523,8 @@ export function saveProvider(id: string, body: SaveProvider): Promise<void> {
     providers[id] = next;
     file.providers = providers;
     writeJson(modelsJsonPath(), file);
+    const kinds = readJson(kindsJsonPath());
+    if (kinds[id] !== body.kind) writeJson(kindsJsonPath(), { ...kinds, [id]: body.kind });
   });
 }
 
@@ -472,10 +532,18 @@ export function removeProvider(id: string): Promise<boolean> {
   return serial(() => {
     let found = false;
     const file = readModelsJson();
-    if (file.providers?.[id]) {
+    // Only a server of its own. An entry without models overrides a hosted
+    // service's address or details, written by hand: removing that service's
+    // key leaves it, as the page knows nothing of it.
+    if (Array.isArray(file.providers?.[id]?.models)) {
       delete file.providers[id];
       writeJson(modelsJsonPath(), file);
       found = true;
+    }
+    const kinds = readJson(kindsJsonPath());
+    if (id in kinds) {
+      delete kinds[id];
+      writeJson(kindsJsonPath(), kinds);
     }
     const auth = readAuthJson();
     if (auth[id]) {
@@ -493,4 +561,11 @@ export function storedKey(id: string): string | undefined {
   if (auth?.type === "api_key" && typeof auth.key === "string") return auth.key;
   const key = readModelsJson().providers?.[id]?.apiKey;
   return typeof key === "string" ? key : undefined;
+}
+
+/** A saved server's address and key, for asking it again from its editor. None for a hosted service, which has no address here. */
+export function savedServer(id: string): Saved | undefined {
+  const raw = readModelsJson().providers?.[id];
+  if (!raw || typeof raw.baseUrl !== "string") return undefined;
+  return { baseUrl: raw.baseUrl, key: storedKey(id) };
 }

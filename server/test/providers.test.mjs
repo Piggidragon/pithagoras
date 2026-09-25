@@ -128,3 +128,119 @@ test("each server is asked whether it answers, and which chosen models it no lon
     server.close();
   }
 });
+
+/** A server that lists `models`, and says which key each request brought. */
+async function listing(models, { needsKey = false } = {}) {
+  const keys = [];
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    keys.push(req.headers.authorization);
+    if (needsKey && !req.headers.authorization) { res.statusCode = 401; return res.end("{}"); }
+    if (req.url === "/v1/models") return res.end(JSON.stringify({ data: models.map((id) => ({ id })) }));
+    res.statusCode = 404; res.end("{}");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return { server, keys, base: `http://127.0.0.1:${server.address().port}/v1` };
+}
+
+test("a saved key is sent only to the address it was saved with, and a typed one is never looked up", async () => {
+  const theirs = await listing(["A"]);
+  const own = await listing(["B"], { needsKey: true });
+  try {
+    writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: {
+      gpu: { baseUrl: own.base, api: "openai-completions", apiKey: "sk-saved-0123456789", models: [{ id: "B" }] },
+    } }));
+    writeFileSync(path.join(dir, "auth.json"), JSON.stringify({ openrouter: { type: "api_key", key: "sk-or-v1-secret" } }));
+    process.env.PORTAL_TEST_SECRET = "hunter2";
+
+    // Its own address: the saved key goes with it.
+    assert.deepEqual((await p.probeModels("custom", own.base, undefined, p.savedServer("gpu"))).models, [{ id: "B" }]);
+    assert.equal(own.keys.at(-1), "Bearer sk-saved-0123456789");
+    // Another address: not the saved key, nor a hosted service's, nor the environment.
+    await p.probeModels("custom", theirs.base, undefined, p.savedServer("gpu"));
+    assert.equal(p.savedServer("openrouter"), undefined, "a hosted service has no address to be asked at");
+    await p.probeModels("custom", theirs.base, "$PORTAL_TEST_SECRET", p.savedServer("openrouter"));
+    await p.probeModels("custom", theirs.base, "!cat /etc/passwd");
+    assert.deepEqual(theirs.keys, [undefined, undefined, undefined]);
+    // Moved to an address that wants a key, it says why the saved one was not sent.
+    const moved = await listing(["B"], { needsKey: true });
+    try {
+      await assert.rejects(p.probeModels("custom", moved.base, undefined, p.savedServer("gpu")), /only sent to the address it was saved with/);
+    } finally {
+      moved.server.close();
+    }
+  } finally {
+    theirs.server.close();
+    own.server.close();
+    delete process.env.PORTAL_TEST_SECRET;
+  }
+});
+
+test("removing a hosted service leaves an override of it written by hand", async () => {
+  writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: { anthropic: { baseUrl: "https://proxy.example/v1" } } }));
+  writeFileSync(path.join(dir, "auth.json"), JSON.stringify({ anthropic: { type: "api_key", key: "sk-ant-0123456789" } }));
+  assert.equal(await p.removeProvider("anthropic"), true);
+  assert.equal(read("auth.json").anthropic, undefined);
+  assert.deepEqual(read("models.json").providers.anthropic, { baseUrl: "https://proxy.example/v1" });
+});
+
+test("a server is the kind it was saved as, whatever its name", async () => {
+  writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: {
+    openrouter: { baseUrl: "http://gw:4000/v1", apiKey: "none", models: [{ id: "x" }] },
+  } }));
+  writeFileSync(path.join(dir, "auth.json"), "{}");
+  await p.saveProvider("gpu", { kind: "llama-swap", baseUrl: "http://gpu:8080", models: [{ id: "A" }] });
+  await p.saveProvider("box", { kind: "llama-cpp", baseUrl: "http://box:8080", models: [{ id: "B" }] });
+  const kinds = Object.fromEntries(p.listProviders().map((x) => [x.id, [x.kind, x.endpoint]]));
+  assert.deepEqual(kinds, {
+    // Written by hand under a hosted service's name, it is still a server — edited with its address and models.
+    openrouter: ["custom", true],
+    gpu: ["llama-swap", true],
+    box: ["llama-cpp", true],
+  });
+  assert.equal(read("models.json").providers.gpu.kind, undefined, "pi's file holds only what pi knows");
+  await p.removeProvider("gpu");
+  assert.equal(read("portal-providers.json").gpu, undefined);
+});
+
+test("the llama-swap saved under another name is still asked what it has loaded", async () => {
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "A" }] }));
+    if (req.url === "/running") return res.end(JSON.stringify({ running: [{ model: "A", state: "ready" }] }));
+    res.statusCode = 404; res.end("{}");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  try {
+    writeFileSync(path.join(dir, "models.json"), "{}");
+    await p.saveProvider("gpu", { kind: "llama-swap", baseUrl: `http://127.0.0.1:${server.address().port}`, models: [{ id: "A" }] });
+    assert.deepEqual((await p.checkProviders()).gpu.loaded, ["A"]);
+  } finally {
+    server.close();
+  }
+});
+
+test("an Ollama server's every model is listed, past the ones looked up", async () => {
+  const names = Array.from({ length: 60 }, (_, i) => `m${i}`);
+  const shown = [];
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/v1/models") return res.end(JSON.stringify({ data: names.map((id) => ({ id })) }));
+    if (req.url === "/api/show") {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      return req.on("end", () => { shown.push(JSON.parse(body).model); res.end(JSON.stringify({ model_info: { "llama.context_length": 8192 } })); });
+    }
+    res.statusCode = 404; res.end("{}");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  try {
+    const found = await p.probeModels("ollama", `127.0.0.1:${server.address().port}`);
+    assert.equal(found.models.length, 60);
+    assert.deepEqual(found.models.at(-1), { id: "m59" });
+    assert.deepEqual(found.models[0], { id: "m0", contextWindow: 8192 });
+    assert.equal(shown.length, 40, "only so many are asked about one by one");
+  } finally {
+    server.close();
+  }
+});

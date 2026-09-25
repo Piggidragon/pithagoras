@@ -59,8 +59,11 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
   const ready = list.length > 0;
   const configured = providers.value?.providers ?? [];
 
-  const current = choice ?? (settings.value?.stored.model ? `${settings.value.stored.provider || settings.value.defaults.provider}\u0000${settings.value.stored.model}` : list[0] ? `${list[0].provider}\u0000${list[0].id}` : "");
-  const picked = list.find((m) => `${m.provider}\u0000${m.id}` === current);
+  const keyOf = (m: { provider: string; id: string }) => `${m.provider}\u0000${m.id}`;
+  const stored = settings.value?.stored.model ? `${settings.value.stored.provider || settings.value.defaults.provider}\u0000${settings.value.stored.model}` : "";
+  // A stored model that can no longer be used is no choice: the first that can is offered instead, and saved on Next.
+  const current = choice ?? (list.some((m) => keyOf(m) === stored) ? stored : list[0] ? keyOf(list[0]) : "");
+  const picked = list.find((m) => keyOf(m) === current);
   const level = effort ?? settings.value?.stored.thinkingLevel ?? "";
 
   const go = (to: number) => {
@@ -99,7 +102,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
   const modelOptions = useMemo(
     () =>
       list.map((m) => ({
-        value: `${m.provider}\u0000${m.id}`,
+        value: keyOf(m),
         label: m.name,
         text: `${m.name} ${m.id} ${m.provider}`,
         hint: describe(m, models.value?.providers[m.provider]),

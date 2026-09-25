@@ -53,3 +53,22 @@ test("what Settings keeps is fetched once for everyone asking, and again once fo
   await assert.rejects(load("k", async () => { throw new Error("down"); }), /down/);
   assert.equal(peek("k"), 2, "a failed fetch keeps the last value");
 });
+
+test("a fetch forgotten on its way does not land over one fetched since", async () => {
+  let release!: (v: string) => void;
+  const old = load("m", () => new Promise<string>((r) => (release = r)));
+  // A provider is saved: what was on its way is from before it.
+  forget("m");
+  assert.equal(await load("m", async () => "after the save"), "after the save");
+  release("before the save");
+  await old;
+  assert.equal(peek("m"), "after the save");
+
+  // Forgotten with nothing asked since, its answer is still not kept.
+  let again!: (v: string) => void;
+  const stale = load("m", () => new Promise<string>((r) => (again = r)), 0);
+  forget("m");
+  again("stale");
+  await stale;
+  assert.equal(peek("m"), "after the save");
+});

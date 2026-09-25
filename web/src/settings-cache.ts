@@ -31,9 +31,13 @@ export function load<T>(key: string, fetcher: () => Promise<T>, freshMs = 0): Pr
   const had = store.get(key);
   if (had?.pending) return had.pending as Promise<T>;
   if (had && "value" in had && had.value !== undefined && Date.now() - had.at < freshMs) return Promise.resolve(had.value as T);
-  const pending = fetcher().then(
+  const pending: Promise<T> = fetcher().then(
     (value) => {
-      publish(key, value);
+      // Forgotten while on its way: what it brings is from before the change
+      // that made it stale, and must not land over what was fetched since.
+      const now = store.get(key);
+      if (now?.pending === pending) publish(key, value);
+      else if (now?.pending) return now.pending as Promise<T>;
       return value;
     },
     (e) => {
@@ -46,7 +50,10 @@ export function load<T>(key: string, fetcher: () => Promise<T>, freshMs = 0): Pr
   return pending;
 }
 
-/** Drop a kept value, so the next look fetches it: after a change that makes it stale. */
+/**
+ * Drop a kept value, so the next look fetches it: after a change that makes
+ * it stale. A fetch still on its way is let go too — its answer is not kept.
+ */
 export function forget(key: string) {
   const had = store.get(key);
   if (had) store.set(key, { value: had.value, at: 0 });

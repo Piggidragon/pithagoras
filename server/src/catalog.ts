@@ -30,6 +30,9 @@ const cache = new Map<string, { at: number; value: Promise<CatalogPackage[]> }>(
 
 const PROVIDER_WORDS = new Set(["provider", "pi-provider", "llm-provider", "ai-provider", "model-provider"]);
 
+/** A link a package gives, when it is one to a web page: whatever it says goes into a link on the portal's page. */
+const webLink = (url: unknown) => (typeof url === "string" && /^https?:\/\//i.test(url.trim()) ? url.trim() : undefined);
+
 /** One search result, as the page wants it. */
 export function toPackage(o: Json): CatalogPackage | undefined {
   const p = o?.package;
@@ -44,8 +47,8 @@ export function toPackage(o: Json): CatalogPackage | undefined {
     weekly: typeof o.downloads?.weekly === "number" ? o.downloads.weekly : undefined,
     author: p.publisher?.username ?? p.author?.name,
     keywords,
-    npm: p.links?.npm,
-    homepage: p.links?.homepage ?? p.links?.repository,
+    npm: webLink(p.links?.npm),
+    homepage: webLink(p.links?.homepage) ?? webLink(p.links?.repository),
     provider: keywords.some((k) => PROVIDER_WORDS.has(k.toLowerCase())) || /\bprovider\b/i.test(description ?? ""),
   };
 }

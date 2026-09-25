@@ -18,6 +18,7 @@ import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { contextWindowFor } from "../db.js";
 import { configStamp } from "../providers.js";
+import { rereadConfig } from "./model-runtime.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -865,7 +866,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const stamp = configStamp();
     if (stamp !== this.configSeen) {
       this.configSeen = stamp;
-      await this.modelRuntime.refresh?.({ allowNetwork: false })?.catch?.(() => {});
+      await rereadConfig(this.modelRuntime).catch(() => {});
     }
     const available = (await this.modelRuntime.getAvailable?.()) ?? [];
     return available.map((m: any) => ({

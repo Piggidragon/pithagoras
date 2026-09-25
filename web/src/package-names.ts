@@ -34,3 +34,8 @@ export function ago(iso: string | undefined, now = Date.now()): string {
   }
   return "";
 }
+
+/** A package's link, when it goes to a web page — never one that runs script, which a published package could give. */
+export function webLink(url: string | undefined): string | undefined {
+  return url && /^https?:\/\//i.test(url.trim()) ? url.trim() : undefined;
+}

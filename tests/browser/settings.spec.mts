@@ -1,8 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /** The portal with no server: Settings, its search, and the setup assistant, over canned answers. */
-async function portal(page: Page, { models = true, slow = 0 } = {}) {
+async function portal(page: Page, { models = true, slow = 0, stored = {} as Record<string, string>, probe = undefined as undefined | ((baseUrl: string) => string[] | undefined), homepage = undefined as string | undefined } = {}) {
   const calls: string[] = [];
+  const providerSaves: unknown[] = [];
   const available = models ? [{ provider: 'llama-swap', id: 'Ornith', name: 'Ornith 1.5', contextWindow: 65536, reasoning: true }] : [];
   let saved: unknown = null;
   let installed: string[] = [];
@@ -20,7 +21,7 @@ async function portal(page: Page, { models = true, slow = 0 } = {}) {
     else if (p === '/api/settings') {
       await wait(slow);
       body = {
-        settings: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' }, stored: {}, defaults: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' },
+        settings: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' }, stored, defaults: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' },
         piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w',
       };
     } else if (p === '/api/models') { await wait(slow * 2); body = { models: available, providers: { 'llama-swap': 'llama-swap' } }; }
@@ -36,10 +37,16 @@ async function portal(page: Page, { models = true, slow = 0 } = {}) {
     else if (p === '/api/providers/status') body = { status: { 'llama-swap': { state: 'up', ms: 12, listed: 1, missing: ['Gone'], loaded: ['Ornith'] } } };
     else if (p === '/api/extensions') { await wait(slow * 3); body = { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:pi-web-access', name: 'pi-web-access', settings: [{ key: 'braveApiKey', value: '', configured: false }, { key: 'safeSearch', value: true, configured: true }] }] }; }
     else if (p === '/api/packages/catalog') body = { packages: [
-      { name: 'pi-web-access', version: '0.31.0', description: 'Web search for pi', weekly: 198311, keywords: ['pi-package'], provider: false },
+      { name: 'pi-web-access', version: '0.31.0', description: 'Web search for pi', weekly: 198311, keywords: ['pi-package'], provider: false, homepage },
       { name: 'pi-subagents', version: '0.71.0', description: 'Delegate to helpers', weekly: 100713, keywords: ['pi-package'], provider: false, date: new Date(Date.now() - 2 * 86400_000).toISOString() },
     ] };
     else if (p === '/api/packages' && method === 'POST') { installed.push(route.request().postDataJSON().spec); body = { ok: true, output: '' }; }
+    else if (p === '/api/providers/probe' && probe) {
+      const listed = probe(route.request().postDataJSON().baseUrl);
+      if (!listed) return route.fulfill({ status: 502, json: { error: 'Nothing answered there.' } });
+      body = { baseUrl: route.request().postDataJSON().baseUrl, models: listed.map((id) => ({ id })) };
+    }
+    else if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push(route.request().postDataJSON()); body = { ok: true }; }
     else if (p === '/api/providers/probe') return route.fulfill({ status: 502, json: { error: 'Nothing answered at 127.0.0.1:8080 — is the server running, and reachable from here?' } });
     else if (p === '/api/tool-names') body = { names: {} };
     else if (p === '/api/browser') body = { running: false, sessions: [], routines: [] };
@@ -50,7 +57,7 @@ async function portal(page: Page, { models = true, slow = 0 } = {}) {
   await page.addInitScript(() => {
     (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
   });
-  return { calls, saved: () => saved, installed: () => installed };
+  return { calls, saved: () => saved, installed: () => installed, providerSaves };
 }
 
 test('search finds a setting on another page and lights it up', async ({ page }) => {
@@ -155,4 +162,51 @@ test('with models, the assistant saves the model and effort, then offers package
   await expect.poll(() => api.installed()).toEqual(['npm:pi-subagents']);
   await setup.getByRole('button', { name: 'Done' }).click();
   await expect(setup).toBeHidden();
+});
+
+test('a stored model no one offers any more is not kept: the assistant offers one that is, and saves it', async ({ page }) => {
+  const api = await portal(page, { stored: { provider: 'gone', model: 'foo' } });
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Setup assistant' }).click();
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.getByLabel('Model for new chats')).toContainText('Ornith 1.5');
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect.poll(() => api.saved()).toMatchObject({ provider: 'llama-swap', model: 'Ornith' });
+});
+
+test('a new provider keeps only the models its current address lists', async ({ page }) => {
+  const api = await portal(page, { probe: (url) => (url.includes('9090') ? ['B'] : url.includes('8080') ? ['A'] : undefined) });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  // The preset's address is asked at once: something answers there.
+  await expect(dialog.getByLabel('Use A')).toBeChecked();
+  await dialog.getByLabel('Server address').fill('http://gpu:9090/v1');
+  await expect(dialog.getByLabel('Use B')).toBeChecked();
+  await expect(dialog.getByLabel('Use A')).toHaveCount(0);
+  // One named by hand stays, whatever the address.
+  await dialog.getByLabel('Model id to add').fill('Mine');
+  await dialog.getByLabel('Model id to add').press('Enter');
+  await dialog.getByLabel('Server address').fill('http://gpu:9090/v1/');
+  await expect(dialog.getByLabel('Use Mine')).toBeChecked();
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect.poll(() => api.providerSaves.length).toBe(1);
+  expect((api.providerSaves[0] as { models: { id: string }[] }).models.map((m) => m.id)).toEqual(['B', 'Mine']);
+});
+
+test("a package's link that is not a web page is not made a link", async ({ page }) => {
+  await portal(page, { homepage: 'javascript:alert(1)' });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  await dialog.getByLabel('Kind of provider').click();
+  await page.getByRole('option', { name: /From a package/ }).click();
+  // Drawn: its description is there, and so would its link be.
+  await expect(dialog.getByText('Web search for pi')).toBeVisible();
+  await expect(dialog.getByText('Delegate to helpers')).toBeVisible();
+  await expect(dialog.locator('a[href^="javascript:"]')).toHaveCount(0);
+  await expect(dialog.getByRole('link', { name: 'more' })).toHaveCount(0);
 });

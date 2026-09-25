@@ -272,10 +272,13 @@ function ModelChip({ model: m, loaded, missing }: { model: ProviderModel; loaded
   );
 }
 
-/** A model row in the editor: whether it is kept, and what is known about it. */
-type Row = ProviderModel & { keep: boolean; found: boolean; ctxText: string };
+/**
+ * A model row in the editor: whether it is kept, and what is known about it.
+ * `own` is one saved before or added by name — not only found at an address.
+ */
+type Row = ProviderModel & { keep: boolean; found: boolean; own: boolean; ctxText: string };
 
-const toRow = (m: ProviderModel, keep: boolean, found: boolean): Row => ({ ...m, keep, found, ctxText: m.contextWindow ? m.contextWindow.toLocaleString("en-US") : "" });
+const toRow = (m: ProviderModel, keep: boolean, found: boolean, own = false): Row => ({ ...m, keep, found, own, ctxText: m.contextWindow ? m.contextWindow.toLocaleString("en-US") : "" });
 
 function uniqueId(base: string, taken: Set<string>): string {
   if (!taken.has(base)) return base;
@@ -305,7 +308,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? preset.baseUrl ?? "");
   const [apiType, setApiType] = useState(provider?.api ?? "openai-completions");
   const [key, setKey] = useState("");
-  const [rows, setRows] = useState<Row[]>(() => (provider?.models ?? []).map((m) => toRow(m, true, false)));
+  const [rows, setRows] = useState<Row[]>(() => (provider?.models ?? []).map((m) => toRow(m, true, false, true)));
   const [probe, setProbe] = useState<{ state: "idle" | "asking" | "ok" | "failed"; message?: string }>({ state: "idle" });
   const [manual, setManual] = useState("");
   const [saving, setSaving] = useState(false);
@@ -341,7 +344,9 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
           // What is already chosen keeps what was set for it; a new server has everything ticked.
           return had ? { ...had, found: true } : toRow(m, !editing || before.length === 0, true);
         });
-        return [...merged, ...known.values()];
+        // What this server does not list: one saved or named stays, marked as
+        // not listed; one only found at an address asked before goes with it.
+        return [...merged, ...[...known.values()].filter((row) => row.own).map((row) => ({ ...row, found: false }))];
       });
       setProbe({ state: "ok", message: r.models.length ? `${r.models.length} model${r.models.length === 1 ? "" : "s"} found` : "It answered, but lists no models — add them by name below." });
       if (r.baseUrl !== url.trim()) setBaseUrl(r.baseUrl);
@@ -362,7 +367,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   const addManual = () => {
     const name = manual.trim();
     if (!name || rows.some((r) => r.id === name)) return;
-    setRows([...rows, toRow({ id: name }, true, false)]);
+    setRows([...rows, toRow({ id: name }, true, false, true)]);
     setManual("");
   };
 
