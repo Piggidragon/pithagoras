@@ -438,6 +438,11 @@ function migrate(d: Database.Database): void {
     `CREATE INDEX IF NOT EXISTS idx_events_settled ON events(session_id, seq)
        WHERE type IN ('portal_taken', 'portal_unsent')`,
   );
+  // Commands and their ends, looked for at startup: see unansweredCommands.
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_commands ON events(session_id, seq)
+       WHERE type IN ('portal_command', 'portal_command_end')`,
+  );
   const ruleCols = (d.prepare("PRAGMA table_info(tool_rules)").all() as { name: string }[]).map(
     (c) => c.name
   );
@@ -724,6 +729,35 @@ export function unsettledMessages(): {
     });
   }
   return out;
+}
+
+/**
+ * Commands a server that died left unanswered, with the error each threw
+ * before it did, where pi said so.
+ */
+export function unansweredCommands(): { sessionId: string; seq: number; error?: string }[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT session_id, seq, type, payload FROM events
+       WHERE type IN ('portal_command', 'portal_command_end')
+       ORDER BY session_id, seq`,
+    )
+    .all() as { session_id: string; seq: number; type: string; payload: string }[];
+  const open = new Map<number, { sessionId: string; text: string }>();
+  for (const r of rows) {
+    if (r.type === "portal_command") open.set(r.seq, { sessionId: r.session_id, text: String(JSON.parse(r.payload)?.text ?? "") });
+    else open.delete(Number(JSON.parse(r.payload)?.of));
+  }
+  const threw = getDb().prepare(
+    `SELECT json_extract(payload, '$.error') AS error FROM events
+     WHERE session_id = ? AND seq > ? AND type = 'extension_error' AND json_extract(payload, '$.extensionPath') = ?
+     ORDER BY seq LIMIT 1`,
+  );
+  return [...open].map(([seq, { sessionId, text }]) => {
+    const name = /^\/([\w:-]+)/.exec(text)?.[1];
+    const found = name ? (threw.get(sessionId, seq, `command:${name}`) as { error: unknown } | undefined) : undefined;
+    return { sessionId, seq, ...(found?.error != null ? { error: String(found.error) } : {}) };
+  });
 }
 
 /** One message the portal sent to the agent, by its seq, or undefined if that is not one. */

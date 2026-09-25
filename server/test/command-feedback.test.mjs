@@ -12,7 +12,7 @@ process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
 process.env.SESSION_DIR = path.join(home, "sessions");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 
-const { createSession, eventsSince } = await import("../dist/db.js");
+const { appendEvent, createSession, eventsSince, getSession } = await import("../dist/db.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { sessions, extensionFailure } = await import("../dist/session-manager.js");
 
@@ -32,15 +32,33 @@ const handlers = {
   // A view a tool opens during a run is not the command's to be named by.
   "/during-run": () => [{ type: "agent_start" }, ui("custom"), { type: "agent_settled" }],
   "/hang": () => [],
+  // Sets a status that names a command, as pi-background-tasks does.
+  "/bg-status": () => [ui("setStatus", { statusKey: "bg", statusText: "\x1b[?25l⬆ v2.6.5 /bg-update" })],
+  // A handler of an extension's that throws on every event of a run.
+  "/noisy": () => [0, 1, 2].map(() => ({ type: "extension_error", extensionPath: "/x/node_modules/pkg-noisy/index.js", error: "bad" })),
+  // Sent into a run: the run's queued follow-up starts while it is in hand.
+  "/bg-beside": () => [{ type: "agent_start" }],
+  // Two things to show in the same millisecond.
+  "/twice": () => [ui("notify", { message: "one" }), ui("notify", { message: "two" })],
+  // An extension's notice, in colour and with the cursor hidden.
+  "/coloured": () => [ui("notify", { message: "\x1b[?25l\x1b[32mgreen\x1b[0m" })],
 };
 
+let lastPi;
 class FakePi extends EventEmitter {
   running = true;
+  draft = "";
+  constructor() {
+    super();
+    lastPi = this;
+  }
+  setDraft(text) { this.draft = text; }
+  async reload() { throw new Error("the settings file is not valid JSON"); }
   async abort() {}
   dispose() {}
   isIdle() { return true; }
   async getCommands() {
-    return [...Object.keys(handlers), "/skill:x"].map((c) => ({ name: c.slice(1), source: "extension" }));
+    return [...Object.keys(handlers), "/skill:x", "/refused"].map((c) => ({ name: c.slice(1), source: "extension" }));
   }
   async prompt(text) {
     // pi goes away while the command waits, and never answers it.
@@ -48,6 +66,8 @@ class FakePi extends EventEmitter {
       setTimeout(() => this.emit("exit", { code: 1, signal: null }), 0);
       return new Promise(() => {});
     }
+    // pi refuses it outright.
+    if (text === "/refused") throw new Error("pi cannot take that now");
     for (const e of handlers[text]?.() ?? []) this.emit("event", e);
     return { outcome: text === "/skill:x" ? "started" : "handled" };
   }
@@ -126,4 +146,93 @@ test("a failure is named by its package, not its path", () => {
   assert.equal(extensionFailure("/proj/.pi/extensions/tidy/index.ts", "x"), "tidy failed: x");
   assert.equal(extensionFailure("/src/tidy/dist/index.js", "x"), "tidy failed: x");
   assert.equal(extensionFailure(undefined, undefined), "An extension failed: no reason given");
+});
+
+test("what extensions showed goes when pi is stopped, so a status cannot outlast it", async () => {
+  await send("stopped", "/bg-status");
+  assert.deepEqual(sessions.extensionState("stopped").statuses, [{ key: "bg", text: "⬆ v2.6.5 /bg-update" }], "without the terminal's codes");
+  // An edit or a delete stops pi; it does not exit on its own.
+  await sessions.stop("stopped");
+  assert.deepEqual(sessions.extensionState("stopped").statuses, []);
+  assert.equal(sessions.isLoaded("stopped"), false);
+});
+
+test("a builtin that fails says it once: on its line, its notice marked as its own", async () => {
+  createSession({ id: "reload", title: "reload", workspace: home, executor: "host" });
+  await sessions.prompt("reload", "/reload");
+  await new Promise((r) => setTimeout(r, 20));
+  const got = rows("reload");
+  const of = got.find((r) => r.type === "portal_command").payload;
+  const seq = eventsSince("reload").find((r) => r.type === "portal_command").seq;
+  assert.equal(of.text, "/reload");
+  assert.deepEqual(got.find((r) => r.type === "portal_notice").payload, { text: "the settings file is not valid JSON", error: true, of: seq });
+  assert.equal(got.find((r) => r.type === "portal_command_end").payload.error, "the settings file is not valid JSON");
+});
+
+test("a command pi refuses fails on its line, and the chat is not put in error", async () => {
+  createSession({ id: "refused", title: "refused", workspace: home, executor: "host" });
+  await assert.rejects(sessions.prompt("refused", "/refused"), /cannot take that now/);
+  const got = rows("refused");
+  assert.equal(got.find((r) => r.type === "portal_command_end").payload.error, "pi cannot take that now");
+  assert.equal(got.some((r) => r.type === "portal_status" && r.payload.status === "error"), false, "said once, on its line");
+  assert.equal(getSession("refused").status, "idle");
+});
+
+test("an extension failing on every event says so once a run", async () => {
+  const got = await send("noisy", "/noisy");
+  assert.equal(got.filter((r) => r.type === "portal_notice").length, 1);
+  // A new run: said again, once.
+  lastPi.emit("event", { type: "agent_start" });
+  for (let i = 0; i < 3; i++) lastPi.emit("event", { type: "extension_error", extensionPath: "/x/node_modules/pkg-noisy/index.js", error: "bad" });
+  assert.equal(rows("noisy").filter((r) => r.type === "portal_notice").length, 2);
+});
+
+test("a run that starts while a command sent into a run is in hand is not its answer", async () => {
+  createSession({ id: "beside", title: "beside", workspace: home, executor: "host" });
+  await sessions.prompt("beside", "/bg-clear");
+  lastPi.emit("event", { type: "agent_start" });
+  await sessions.prompt("beside", "/bg-beside");
+  const ends = rows("beside").filter((r) => r.type === "portal_command_end");
+  assert.equal(ends.at(-1).payload.quiet, true);
+});
+
+test("live events each have a seq of their own, even in the same millisecond", async () => {
+  createSession({ id: "twice", title: "twice", workspace: home, executor: "host" });
+  const seen = [];
+  const listen = (row) => row.seq < 0 && seen.push(row.seq);
+  sessions.on("session:twice", listen);
+  await sessions.prompt("twice", "/twice");
+  sessions.off("session:twice", listen);
+  assert.equal(seen.length, 2);
+  assert.notEqual(seen[0], seen[1]);
+});
+
+test("an extension's notice is shown without the codes a terminal would act on", async () => {
+  const got = await send("coloured", "/coloured");
+  assert.equal(got.find((r) => r.type === "portal_notice").payload.text, "green");
+});
+
+test("what is in the chat box is there for an extension to read, and not once it is sent", async () => {
+  createSession({ id: "draft", title: "draft", workspace: home, executor: "host" });
+  sessions.setDraft("draft", "fix the build");
+  await sessions.prompt("draft", "/bg-clear");
+  assert.equal(lastPi.draft, "fix the build", "a new pi is told what is in the box");
+  sessions.setDraft("draft", "/bg-clear");
+  await sessions.prompt("draft", "/bg-clear");
+  assert.equal(lastPi.draft, "", "sent from the box, which the page empties");
+});
+
+test("a command the last server never answered ends as failed, with what it threw", () => {
+  createSession({ id: "orphan", title: "orphan", workspace: home, executor: "host" });
+  const quiet = appendEvent("orphan", "portal_command", { text: "/deploy" });
+  const threw = appendEvent("orphan", "portal_command", { text: "/broken now" });
+  appendEvent("orphan", "extension_error", { type: "extension_error", extensionPath: "command:broken", error: "boom" });
+  const done = appendEvent("orphan", "portal_command", { text: "/bg-clear" });
+  appendEvent("orphan", "portal_command_end", { of: done.seq, outcome: "handled" });
+  sessions.recoverOrphans();
+  const ends = rows("orphan").filter((r) => r.type === "portal_command_end").map((r) => r.payload);
+  assert.deepEqual(ends.slice(1), [
+    { of: quiet.seq, error: "The portal restarted before it answered" },
+    { of: threw.seq, error: "boom" },
+  ]);
 });

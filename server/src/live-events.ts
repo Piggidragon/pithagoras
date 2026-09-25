@@ -14,6 +14,11 @@ export class LiveEvents {
     return { seq: --this.sequence, session_id: session, type, payload: JSON.stringify(payload), created_at: at };
   }
 
+  /** An event that is only ever live, never kept: numbered like the rest that are. */
+  ephemeral(session: string, type: string, payload: unknown): EventRow {
+    return this.live(session, type, payload);
+  }
+
   record(session: string, type: string, payload: any): EventRow {
     if (type === 'message_update') {
       let state = this.messages.get(session);

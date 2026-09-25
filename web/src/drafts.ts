@@ -1,3 +1,4 @@
+import { api } from "./api";
 import { session, type SafeStorage } from "./safe-storage";
 
 const PREFIX = "pithagoras.draft.";
@@ -10,8 +11,11 @@ const PREFIX = "pithagoras.draft.";
  * memory, and mirrored to session storage so that a reload does not lose it
  * either; a browser that will not store it still keeps drafts while the page
  * is open.
+ *
+ * `tell` hears each change, for the portal: an extension can ask what is in
+ * the box.
  */
-export function createDrafts(store: SafeStorage = session) {
+export function createDrafts(store: SafeStorage = session, tell?: (id: string, text: string) => void) {
   const memory = new Map<string, string>();
   return {
     get(id: string): string {
@@ -25,11 +29,28 @@ export function createDrafts(store: SafeStorage = session) {
         memory.delete(id);
         store.remove(PREFIX + id);
       }
+      tell?.(id, text);
     },
   };
 }
 
-export const drafts = createDrafts();
+/**
+ * The portal told what is in a chat's box once typing pauses. Emptied — sent,
+ * most often — at once, ahead of the message: a command that read the box
+ * would otherwise find itself in it.
+ */
+function tellPortal(): (id: string, text: string) => void {
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const send = (id: string, text: string) => void api.draft(id, text).catch(() => {});
+  return (id, text) => {
+    clearTimeout(timers.get(id));
+    timers.delete(id);
+    if (!text) send(id, text);
+    else timers.set(id, setTimeout(() => (timers.delete(id), send(id, text)), 300));
+  };
+}
+
+export const drafts = createDrafts(session, tellPortal());
 
 /**
  * A message that did not go, back in front of whatever has been typed since.

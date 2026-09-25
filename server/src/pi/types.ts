@@ -81,6 +81,11 @@ export interface PiClient extends EventEmitter {
   subagentInput?(id: string, text: string): boolean;
   subagentStop?(id: string): boolean;
   /**
+   * What is in the chat box, for an extension's getEditorText. Optional: pi's
+   * RPC mode answers that itself, with nothing, and cannot be told.
+   */
+  setDraft?(text: string): void;
+  /**
    * pi's session file for this conversation, once it exists. Recorded by the
    * portal so the same conversation is reopened after a restart instead of a
    * new one being started. Undefined for executors that cannot report it.

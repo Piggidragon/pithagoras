@@ -19,3 +19,14 @@ test("an extension can style text with ctx.ui.theme, as it can under pi's own CL
   assert.equal(typeof ui.theme.fg("dim", "quiet"), "string");
   assert.match(ui.theme.fg("dim", "quiet"), /quiet/);
 });
+
+test("an extension reads what is in the chat box, and what it put there", () => {
+  const client = { pendingUi: new Map(), emit() {}, draft: "" };
+  const ui = SdkPiClient.prototype.buildUiContext.call(client);
+  SdkPiClient.prototype.setDraft.call(client, "fix the build");
+  // Read, added to and written back, the draft is kept: it was replaced by the addition alone.
+  ui.setEditorText(ui.getEditorText() + " @file");
+  assert.equal(ui.getEditorText(), "fix the build @file");
+  ui.pasteToEditor("!");
+  assert.equal(ui.getEditorText(), "fix the build @file!");
+});

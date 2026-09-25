@@ -114,11 +114,12 @@ function ContextChip({ label, body }: { label: string; body: string }) {
 }
 
 /**
- * The requests to fill the chat box that have been, so each fills it once. By
- * the event itself: live events share a seq when they come in the same
- * millisecond, and a paste right after a fill would be lost.
+ * How far each chat's events have been read for requests to fill the box, so
+ * each fills it once: the lowest live seq and the highest stored one seen.
+ * Live events are numbered downwards, each its own. Kept outside the chat, which
+ * a chat opened again still holds the events of.
  */
-const filledFrom = new WeakSet<object>();
+const filledTo = new Map<string, { live: number; stored: number }>();
 
 export function Chat({
   session,
@@ -531,10 +532,29 @@ export function Chat({
   // What was listed for another chat is not offered here.
   useEffect(() => setCommands([]), [session.id]);
   // A status line that names a command can run it — once it is known to be
-  // one of this chat's. A status means pi is up, so asking starts nothing.
+  // one of this chat's. Asked only of a pi that is up: a status can outlast
+  // the pi that set it, and asking must not start another.
   const statusNamesCommand = background.statuses.some((s) => mentionsCommand(s.text));
   useEffect(() => {
-    if (statusNamesCommand) void loadCommands();
+    if (!statusNamesCommand) return;
+    const key = `${session.id}:${turns}`;
+    if (commandList.current?.key === key) {
+      void loadCommands();
+      return;
+    }
+    let live = true;
+    api.commands(session.id, { ifRunning: true }).then(
+      (r) => {
+        if (!live || r.notRunning) return;
+        // The same list a "/" would fetch, so kept as that.
+        if (commandList.current?.key !== key) commandList.current = { key, list: Promise.resolve(r.commands) };
+        setCommands(r.commands);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
   }, [statusNamesCommand, session.id, turns]);
   const commandNames = useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
 
@@ -757,17 +777,45 @@ export function Chat({
   // live-only, and a chat opened again still holds the ones it was sent. pi's
   // RPC mode, which runs outside the host, names it set_editor_text.
   useEffect(() => {
+    // Only what came since the last look, read back from the end — new events
+    // are appended — to the first one seen, not through the whole chat on
+    // every streamed word.
+    const seen = filledTo.get(session.id) ?? { live: 0, stored: 0 };
+    const fresh: PortalEvent[] = [];
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.seq < 0 ? e.seq >= seen.live : e.seq <= seen.stored) break;
+      fresh.unshift(e);
+    }
+    if (!fresh.length) return;
+    const now = { ...seen };
+    for (const e of fresh) {
+      if (e.seq < 0) now.live = Math.min(now.live, e.seq);
+      else now.stored = Math.max(now.stored, e.seq);
+    }
+    filledTo.set(session.id, now);
     // Built up across the ones that came together: the box's own text is not
     // updated until they are all read, and a paste after a fill needs the fill.
+    // A paste goes where the cursor is, as in pi's terminal.
     let text: string | undefined;
-    for (const e of events) {
+    let at: number | undefined;
+    for (const e of fresh) {
       const method = e.payload?.method;
-      if (e.seq >= 0 || e.type !== "extension_ui_request" || (method !== "setEditorText" && method !== "set_editor_text") || filledFrom.has(e)) continue;
-      filledFrom.add(e);
+      if (e.type !== "extension_ui_request" || (method !== "setEditorText" && method !== "set_editor_text")) continue;
       const given = String(e.payload.text ?? "");
-      text = e.payload.paste ? (text ?? draft.current) + given : given;
+      if (!e.payload.paste) {
+        text = given;
+        at = undefined;
+        continue;
+      }
+      const base = text ?? draft.current;
+      const where = at !== undefined ? { start: at, end: at } : text === undefined && caret.current ? caret.current : { start: base.length, end: base.length };
+      text = base.slice(0, where.start) + given + base.slice(where.end);
+      at = where.start + given.length;
     }
     if (text === undefined) return;
+    caret.current = at === undefined ? null : { start: at, end: at };
+    caretTo.current = at ?? text.length;
     changeInput(text);
     requestAnimationFrame(() => box.current?.focus());
   }, [events]);

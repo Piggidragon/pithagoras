@@ -26,3 +26,28 @@ test('opening another chat does not ask it for its commands because of the last 
   await page.waitForTimeout(800);
   expect(await page.evaluate(() => (window as any).commandsAsked)).not.toContain('second');
 });
+
+test('a status left by a pi that has gone stays text, and starts no pi to find out', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=gone');
+  const tray = page.getByLabel('Running beside the conversation');
+  await expect(tray.getByText('bg ⬆ v2.6.5 /bg-update')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).commandsAsked)).toEqual(['/commands?ifRunning=1']);
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => (window as any).commandsAsked)).toEqual(['/commands?ifRunning=1']);
+  await expect(tray.getByRole('button', { name: /bg-update/ })).toHaveCount(0);
+});
+
+test('an extension pastes where the cursor is, and reads what was typed', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=paste');
+  const box = page.getByRole('textbox').last();
+  await box.fill('fix build');
+  await expect.poll(() => page.evaluate(() => (window as any).drafts.at(-1))).toBe('fix build');
+  await box.press('Home');
+  for (let i = 0; i < 4; i++) await box.press('ArrowRight');
+  await page.getByRole('button', { name: 'Paste from the extension' }).click();
+  await expect(box).toHaveValue('fix the build');
+  // Once, however often the chat draws again.
+  await box.press('End');
+  await box.pressSequentially('!');
+  await expect(box).toHaveValue('fix the build!');
+});

@@ -68,19 +68,46 @@ if (phase === 'agents') {
     const u = String(url);
     const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
     if (u.endsWith('/background')) return reply(jobs);
-    if (u.endsWith('/commands')) return reply({ commands: [{ name: 'bg-update', description: 'Update pi-background', source: 'extension' }] });
+    if (u.includes('/commands')) return reply({ commands: [{ name: 'bg-update', description: 'Update pi-background', source: 'extension' }] });
     if (u.includes('/background/') && u.includes('/output')) return reply({ text: u.includes('from=') ? '' : '> vite\n\n  VITE v5.4  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host to expose\n', from: 0, size: 120 });
     return realFetch(url, init);
   }) as typeof fetch;
 }
 
-// An extension fills the chat box twice in one millisecond, the way pi's RPC mode names it and then as a paste.
+// An extension fills the chat box twice at once, the way pi's RPC mode names it and then as a paste.
 if (phase === 'editor') {
-  const at = -now;
+  const at = -now * 1000;
   events.push(
     { seq: at, type: 'extension_ui_request', at: now, payload: { method: 'set_editor_text', text: '/deploy ' } },
-    { seq: at, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: '--prod', paste: true } },
+    { seq: at - 1, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: '--prod', paste: true } },
   );
+}
+// What is typed is told to the portal, for an extension to read; an extension pastes into it later.
+if (phase === 'editor' || phase === 'paste') {
+  const realFetch = window.fetch;
+  (window as any).drafts = [];
+  window.fetch = (async (url: any, init?: any) => {
+    if (String(url).endsWith('/draft')) {
+      (window as any).drafts.push(JSON.parse(init.body).text);
+      return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    return realFetch(url, init);
+  }) as typeof fetch;
+}
+// A status left by a pi that has gone: the chat has none to ask, and none is started to answer.
+if (phase === 'gone') {
+  const realFetch = window.fetch;
+  (window as any).commandsAsked = [];
+  window.fetch = (async (url: any, init?: any) => {
+    const u = String(url);
+    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    if (u.endsWith('/background')) return reply({ supported: true, jobs: [], widgets: [], statuses: [{ key: 'bg', text: 'bg ⬆ v2.6.5 /bg-update' }] });
+    if (u.includes('/commands')) {
+      (window as any).commandsAsked.push(u.slice(u.indexOf('/commands')));
+      return reply(u.includes('ifRunning=1') ? { commands: [], notRunning: true } : { commands: [{ name: 'bg-update', description: 'Update', source: 'extension' }] });
+    }
+    return realFetch(url, init);
+  }) as typeof fetch;
 }
 // Two chats: the first has a status that names a command, the second nothing. Which chats are asked for their commands is kept.
 if (phase === 'switch') {
@@ -90,7 +117,7 @@ if (phase === 'switch') {
     const u = String(url);
     const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
     if (u.endsWith('/background')) return reply({ supported: true, jobs: [], widgets: [], statuses: u.includes('/sessions/first/') ? [{ key: 'bg', text: 'bg ⬆ v2.6.5 /bg-update' }] : [] });
-    if (u.endsWith('/commands')) {
+    if (u.includes('/commands')) {
       (window as any).commandsAsked.push(u.split('/')[3]);
       return reply({ commands: [{ name: 'bg-update', description: 'Update', source: 'extension' }] });
     }
@@ -103,10 +130,12 @@ const noop = async () => {};
 function Fixture() {
   const [v, setV] = React.useState('b');
   const [which, setWhich] = React.useState(phase === 'switch' ? 'first' : session.id);
+  const [shownEvents, setShownEvents] = React.useState(events);
+  const paste = () => setShownEvents((list) => [...list, { seq: -now * 1000 - list.length - 10, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: 'the ', paste: true } }]);
   const shown = which === session.id ? session : { ...session, id: which, title: which === 'first' ? 'First chat' : 'Second chat', status: 'idle' as const };
   return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-    <div style={{ padding: 8, display: 'flex', gap: 8 }}><Select aria-label="Preview select" size="sm" className="w-64" value={v} onChange={setV} options={[{ value: 'a', label: 'Project notes' }, { value: 'b', label: 'Release plan', hint: 'Temporary — not stored' }, { value: 'c', label: 'Meeting summary' }]} /><label className="flex items-center gap-2 text-xs"><input type="checkbox" defaultChecked />Checkbox</label><input type="range" defaultValue={40} />{phase === 'switch' && <button onClick={() => setWhich('second')}>Open the second chat</button>}</div>
-    <div style={{ flex: 1, minHeight: 0 }}><Chat session={shown} events={events} onSend={async (message) => { (window as any).sent = [...((window as any).sent ?? []), message]; }} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
+    <div style={{ padding: 8, display: 'flex', gap: 8 }}><Select aria-label="Preview select" size="sm" className="w-64" value={v} onChange={setV} options={[{ value: 'a', label: 'Project notes' }, { value: 'b', label: 'Release plan', hint: 'Temporary — not stored' }, { value: 'c', label: 'Meeting summary' }]} /><label className="flex items-center gap-2 text-xs"><input type="checkbox" defaultChecked />Checkbox</label><input type="range" defaultValue={40} />{phase === 'switch' && <button onClick={() => setWhich('second')}>Open the second chat</button>}{phase === 'paste' && <button onClick={paste}>Paste from the extension</button>}</div>
+    <div style={{ flex: 1, minHeight: 0 }}><Chat session={shown} events={shownEvents} onSend={async (message) => { (window as any).sent = [...((window as any).sent ?? []), message]; }} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
   </div>;
 }
 createRoot(document.getElementById('root')!).render(<Fixture />);

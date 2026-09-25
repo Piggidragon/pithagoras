@@ -691,6 +691,16 @@ app.post("/api/sessions/:id/ui-response", (req, res) => {
   res.json({ ok: delivered, note: delivered ? undefined : "Request already resolved or expired" });
 });
 
+/** What is in the chat box, which an extension can ask for. Kept by the portal; starts nothing. */
+app.put("/api/sessions/:id/draft", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const text = req.body?.text;
+  if (typeof text !== "string") return res.status(400).json({ error: "text required" });
+  sessions.setDraft(session.id, text);
+  res.json({ ok: true });
+});
+
 /**
  * The tools this conversation could use, and which of them are on.
  *
@@ -1066,6 +1076,9 @@ app.post("/api/sessions/:id/compact", async (req, res) => {
 app.get("/api/sessions/:id/commands", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
+  // Only if pi is up: a status line naming a command asks this way, and
+  // asking must not start pi for a chat that has none.
+  if (req.query.ifRunning && !sessions.isLoaded(session.id)) return res.json({ commands: [], notRunning: true });
   try {
     const client = await sessions.client(session.id);
     // Builtins first: they are the ones people reach for most.

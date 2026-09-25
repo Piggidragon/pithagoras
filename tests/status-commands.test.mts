@@ -38,11 +38,40 @@ test("each command sent is a line in the chat that says how it went", () => {
     ev("message_end", { message: { role: "custom", customType: "hidden", content: "for the model", display: false } }),
     // Not said to be for display: for the model, as pi's TUI takes it.
     ev("message_end", { message: { role: "custom", customType: "ctx", content: "context for the model" } }),
-    ev("portal_command", { text: "/lost" }),
-    ev("portal_status", { status: "idle" }),
   ]);
   assert.deepEqual(
     items.map((i) => (i.kind === "command" ? `${i.text}:${i.state}${i.error ? `:${i.error}` : ""}` : i.kind === "notice" ? `notice:${i.text}` : i.kind)),
-    ["/bg-clear:quiet", "/bg-update:done", "notice:2.6.5 is out", "/skill:x:started", "/broken:failed:boom", "notice:All green", "/lost:done"],
+    ["/bg-clear:quiet", "/bg-update:done", "notice:2.6.5 is out", "/skill:x:started", "/broken:failed:boom", "notice:All green"],
   );
+});
+
+const line = (i: any) => (i.kind === "command" ? `${i.text}:${i.state}${i.error ? `:${i.error}` : ""}` : i.kind === "notice" ? `notice:${i.text}` : i.kind);
+
+test("a command still going is not taken for done when the run beside it ends", () => {
+  let seq = 0;
+  const ev = (type: string, payload: any = {}) => ({ seq: ++seq, type, at: 0, payload });
+  const items = buildTranscript([
+    ev("agent_start"),
+    // Sent into the run, and waiting on a dialog when the run ends.
+    ev("portal_command", { text: "/deploy" }),
+    ev("agent_end"),
+    ev("portal_status", { status: "idle" }),
+  ]);
+  assert.deepEqual(items.filter((i) => i.kind === "command").map(line), ["/deploy:running"]);
+});
+
+test("a command's failure is said on its line once it ends, and by its notice until then", () => {
+  let seq = 0;
+  const ev = (type: string, payload: any = {}) => ({ seq: ++seq, type, at: 0, payload });
+  const thrown = [ev("portal_command", { text: "/broken" }), ev("portal_notice", { text: "/broken failed: boom", error: true, from: "extension", of: 1 })];
+  // Its end not yet written — or never, where the portal went first: the notice is all that says it.
+  assert.deepEqual(buildTranscript(thrown).map(line), ["/broken:running", "notice:/broken failed: boom"]);
+  assert.deepEqual(buildTranscript([...thrown, ev("portal_command_end", { of: 1, error: "boom" })]).map(line), ["/broken:failed:boom"]);
+});
+
+test("a message for people is shown without the codes a terminal would act on", () => {
+  const items = buildTranscript([
+    { seq: 1, type: "message_end", at: 0, payload: { message: { role: "custom", customType: "r", content: "\x1b[?25l\x1b[32mAll green\x1b[0m", display: true } } },
+  ]);
+  assert.deepEqual(items.map(line), ["notice:All green"]);
 });

@@ -148,6 +148,9 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
   // agent read it — rather than where it was sent, which is the middle of a
   // reply it had nothing to do with.
   const waiting = new Map<number, UserItem>();
+  // A command's failure said as a notice, by the command's seq: its line says
+  // it once the command ends, and the notice goes.
+  const failures = new Map<number, Item>();
   // Where a message sent into a run was placed. The prompt it was sent as can
   // be older than the events loaded — a long run, and a page that loads only
   // the end — so the placing event carries it too, and it stands in.
@@ -196,8 +199,9 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         it.status = "error";
         it.interrupted = true;
       } else if (it.kind === "compaction" && it.status === "running") it.status = "failed";
-      // Its end was never written — the portal restarted. It ran, as far as anyone can say.
-      else if (it.kind === "command" && it.state === "running") it.state = "done";
+      // Not a command: it runs beside a run, and can still be waiting on a
+      // dialog when the run ends. The portal writes its end, even for one a
+      // restart cut off.
     }
   };
 
@@ -279,7 +283,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           const text = typeof message.content === "string"
             ? message.content
             : Array.isArray(message.content) ? message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("\n") : "";
-          if (text.trim()) items.push({ kind: "notice", id: `m${ev.seq}`, text: text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim(), tone: "info" });
+          if (text.trim()) items.push({ kind: "notice", id: `m${ev.seq}`, text: stripAnsi(text).trim(), tone: "info" });
           break;
         }
         if (ev.type === "message_end") closeCurrent();
@@ -368,21 +372,30 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         if (typeof p.error === "string") {
           it.state = "failed";
           it.error = p.error;
+          // Its line says it now, so its own notice need not.
+          const notice = failures.get(it.seq);
+          if (notice) items.splice(items.indexOf(notice), 1);
         } else it.state = p.quiet ? "quiet" : p.outcome === "started" ? "started" : p.outcome === "queued" ? "queued" : "done";
         break;
       }
 
       // Output from a builtin like /session or /compact — pi never saw it.
       case "portal_notice":
-        // A command's own failure: its line says it, with the reason.
-        if (p.error && typeof p.of === "number" && items.some((x) => x.kind === "command" && x.seq === p.of)) break;
-        items.push({
+      {
+        // A command's own failure: its line says it, with the reason, once it
+        // ends. Shown until then: an end that never came must not hide it.
+        const own = p.error && typeof p.of === "number" ? items.find((x) => x.kind === "command" && x.seq === p.of) : undefined;
+        if (own?.kind === "command" && own.state === "failed") break;
+        const notice: Item = {
           kind: "notice",
           id: `n${ev.seq}`,
           text: String(p.text ?? ""),
           tone: p.error ? "error" : p.warning ? "warn" : "info",
-        });
+        };
+        items.push(notice);
+        if (own) failures.set(p.of, notice);
         break;
+      }
 
       case "portal_status":
         if (p.status === "error" && p.error) {

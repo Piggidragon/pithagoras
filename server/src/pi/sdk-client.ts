@@ -224,6 +224,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private voiceFirst?: VoiceFirstTurn;
   /** Dialogs an extension is waiting on, keyed by request id. */
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
+  /** The chat box's text, as the page last said it: see setDraft. */
+  private draft = "";
+
+  setDraft(text: string): void {
+    this.draft = text;
+  }
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
   /** The extensions' event bus, when this client made one. */
@@ -581,9 +587,17 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         return undefined;
       },
       // Into the chat box, for the person to send or change.
-      setEditorText: (text: string) => fireAndForget({ method: "setEditorText", text: String(text ?? "") }),
-      pasteToEditor: (text: string) => fireAndForget({ method: "setEditorText", text: String(text ?? ""), paste: true }),
-      getEditorText: () => "",
+      // What is in the box follows at once, for a getEditorText right after.
+      setEditorText: (text: string) => {
+        this.draft = String(text ?? "");
+        fireAndForget({ method: "setEditorText", text: String(text ?? "") });
+      },
+      pasteToEditor: (text: string) => {
+        this.draft += String(text ?? "");
+        fireAndForget({ method: "setEditorText", text: String(text ?? ""), paste: true });
+      },
+      // Answered with nothing, an extension that adds to the draft replaced it.
+      getEditorText: () => this.draft,
       addAutocompleteProvider: () => {},
       setEditorComponent: () => {},
       getEditorComponent: () => undefined,
