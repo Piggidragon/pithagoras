@@ -27,3 +27,39 @@ test('a detached job the agent left running is found, followed and stopped',{ski
   assert.equal(after?.state,'exited');
  }finally{try{process.kill(-child.pid!,'SIGKILL')}catch{} try{process.kill(-stranger.pid!,'SIGKILL')}catch{}}
 });
+const agentEnv=()=>{const [k,v]=MARKER.split('=');return {...process.env,[k]:v};};
+test('a workspace reached through a link still has its jobs found',{skip:process.platform!=='linux'},async()=>{
+ const ws=realpathSync(mkdtempSync(path.join(tmpdir(),'bg-')));
+ const link=path.join(realpathSync(tmpdir()),`bg-link-${process.pid}`);
+ (await import('node:fs')).symlinkSync(ws,link);
+ const child=spawn('sh',['-c','sleep 30'],{cwd:ws,detached:true,stdio:'ignore',env:agentEnv()});
+ child.unref();
+ try{
+  await wait(300);
+  assert.equal((await listJobs(link,new Set())).filter(j=>j.state==='running').length,1);
+ }finally{try{process.kill(-child.pid!,'SIGKILL')}catch{} (await import('node:fs')).unlinkSync(link);}
+});
+test('a job whose shell exits while what it started goes on stays one job',{skip:process.platform!=='linux'},async()=>{
+ const ws=realpathSync(mkdtempSync(path.join(tmpdir(),'bg-')));
+ const fs=await import('node:fs');
+ // `npm run dev > dev.log &` and then the shell ends: the server is the job now.
+ const child=spawn('sh',['-c','sleep 30 & sleep 0.4'],{cwd:ws,detached:true,stdio:['ignore',fs.openSync(path.join(ws,'dev.log'),'w'),'ignore'],env:agentEnv()});
+ child.unref();
+ try{
+  await wait(200);
+  const [first]=await listJobs(ws,new Set());
+  await wait(1300);
+  const after=await listJobs(ws,new Set());
+  assert.deepEqual(after.map(j=>[j.key,j.state,j.command]),[[first.key,'running','sleep 30 & sleep 0.4']]);
+ }finally{try{process.kill(-child.pid!,'SIGKILL')}catch{}}
+});
+test('what the portal runs in its own session is not a job of the agent\'s',{skip:process.platform!=='linux'},async()=>{
+ const ws=realpathSync(mkdtempSync(path.join(tmpdir(),'bg-')));
+ const fs=await import('node:fs');
+ // The terminal's wrapper, a subagent's pi: started by the portal, marked, and in its session.
+ const child=spawn('sh',['-c','sleep 30'],{cwd:ws,stdio:['ignore',fs.openSync(path.join(ws,'out.log'),'w'),'ignore'],env:agentEnv()});
+ try{
+  await wait(300);
+  assert.deepEqual(await listJobs(ws,new Set()),[]);
+ }finally{child.kill('SIGKILL');}
+});

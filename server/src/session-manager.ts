@@ -294,13 +294,14 @@ class SessionManager extends EventEmitter {
       // Still deliver it to anyone attached right now, with a negative seq so
       // it can never be confused with a stored event during replay.
       // Timed like a stored one, so a page can say how long it has lasted.
-      this.emit(`session:${sessionId}`, {
-        seq: -Date.now(),
-        session_id: sessionId,
-        type,
-        payload: JSON.stringify(payload),
-        created_at: new Date().toISOString(),
-      });
+      // Numbered by the live stream's own count: two in one millisecond had
+      // the same seq, and a page telling them apart by it took the second for
+      // the first. A subagent's stream is kept there too, for a page that
+      // opens mid-message.
+      this.emit(
+        `session:${sessionId}`,
+        type === "portal_subagent_live" ? this.stream.subagentLive(sessionId, payload) : this.stream.ephemeral(sessionId, type, payload),
+      );
       return undefined;
     }
     const row = this.stream.record(sessionId, type, payload);
@@ -789,8 +790,6 @@ class SessionManager extends EventEmitter {
       this.live.delete(sessionId);
       this.stream.clear(sessionId);
       this.forgetPi(sessionId);
-      // What the extensions showed went with the process that ran them.
-      this.extensionUi.delete(sessionId);
       const current = getSession(sessionId);
       // A clean exit after a finished run is normal; anything else is a failure
       // worth surfacing in the UI rather than leaving as a silent stall.
@@ -1817,6 +1816,9 @@ class SessionManager extends EventEmitter {
 
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
+    // What the extensions showed went with the process that ran them: stopped
+    // for a restart or a delete as much as crashed.
+    this.extensionUi.delete(sessionId);
     this.fresh.delete(sessionId);
     this.piQueue.delete(sessionId);
     this.dropWaiting(sessionId);

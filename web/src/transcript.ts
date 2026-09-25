@@ -328,6 +328,8 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             const text = toolOutputText(p.result);
             if (typeof text === "string" && text) setToolOutput(it, text);
             if (p.result?.details !== undefined) it.details = p.result.details;
+            // Its updates were live only; how many there were is kept on its end.
+            if (typeof p.updates === "number") it.updates = Math.max(it.updates ?? 0, p.updates);
             const picture = shownPicture(p);
             if (picture) it.picture = picture;
             break;
