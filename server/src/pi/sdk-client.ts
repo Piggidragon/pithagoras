@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
+import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
@@ -238,13 +238,11 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private voiceFirst?: VoiceFirstTurn;
   /** Dialogs an extension is waiting on, keyed by request id. */
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
-  /** The chat box's text, as the page last said it, and what is selected in it: see setDraft. */
-  private draft = "";
-  private caret: { start: number; end: number } | undefined;
+  /** The chat box's text, kept by the portal: see useDrafts. */
+  private drafts?: DraftStore;
 
-  setDraft(text: string, caret?: { start: number; end: number }): void {
-    this.draft = text;
-    this.caret = caret;
+  useDrafts(drafts: DraftStore): void {
+    this.drafts = drafts;
   }
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
@@ -607,19 +605,20 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // Into the chat box, for the person to send or change.
       // What is in the box follows at once, for a getEditorText right after.
       setEditorText: (text: string) => {
-        this.setDraft(String(text ?? ""));
+        this.drafts?.set(String(text ?? ""));
         fireAndForget({ method: "setEditorText", text: String(text ?? "") });
       },
       // Over what is selected, or at the end, as the page puts it.
       pasteToEditor: (text: string) => {
         const given = String(text ?? "");
-        const { start, end } = this.caret ?? { start: this.draft.length, end: this.draft.length };
+        const draft = this.drafts?.get()?.text ?? "";
+        const { start, end } = this.drafts?.get()?.caret ?? { start: draft.length, end: draft.length };
         const at = start + given.length;
-        this.setDraft(this.draft.slice(0, start) + given + this.draft.slice(end), { start: at, end: at });
+        this.drafts?.set(draft.slice(0, start) + given + draft.slice(end), { start: at, end: at });
         fireAndForget({ method: "setEditorText", text: given, paste: true });
       },
       // Answered with nothing, an extension that adds to the draft replaced it.
-      getEditorText: () => this.draft,
+      getEditorText: () => this.drafts?.get()?.text ?? "",
       addAutocompleteProvider: () => {},
       setEditorComponent: () => {},
       getEditorComponent: () => undefined,

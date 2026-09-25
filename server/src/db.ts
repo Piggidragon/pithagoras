@@ -738,23 +738,28 @@ export function unsettledMessages(): {
 }
 
 /**
+ * Commands no end was written for. "type IN (…)" is repeated from
+ * idx_events_commands, or SQLite does not see that the index covers the
+ * query, and reads the whole table twice; ordered as the index is, or it reads
+ * the table in seq order to spare itself a sort.
+ */
+export const UNANSWERED_COMMANDS = `SELECT session_id, seq FROM events
+       WHERE type IN ('portal_command', 'portal_command_end') AND type = 'portal_command'
+         AND seq NOT IN (
+           -- Not one NULL among them: NOT IN a list holding one matches nothing.
+           SELECT json_extract(payload, '$.of') FROM events
+           WHERE type IN ('portal_command', 'portal_command_end') AND type = 'portal_command_end'
+             AND json_extract(payload, '$.of') IS NOT NULL
+         )
+       ORDER BY session_id, seq`;
+
+/**
  * Commands a server that died left unanswered, with the reason each threw
  * before it did, where pi said so. Found by SQL, from the commands and their
  * ends alone: see idx_events_commands.
  */
 export function unansweredCommands(): { sessionId: string; seq: number; error?: string }[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT session_id, seq FROM events
-       WHERE type = 'portal_command'
-         AND seq NOT IN (
-           -- Not one NULL among them: NOT IN a list holding one matches nothing.
-           SELECT json_extract(payload, '$.of') FROM events
-           WHERE type = 'portal_command_end' AND json_extract(payload, '$.of') IS NOT NULL
-         )
-       ORDER BY seq`,
-    )
-    .all() as { session_id: string; seq: number }[];
+  const rows = getDb().prepare(UNANSWERED_COMMANDS).all() as { session_id: string; seq: number }[];
   // Its own failure, marked as its own: not the next one of the same name.
   const threw = getDb().prepare(
     `SELECT json_extract(payload, '$.reason') AS reason FROM events
@@ -803,10 +808,12 @@ export function deleteEventsBetween(
       .prepare(
         `SELECT * FROM events WHERE session_id = ?
            AND ((seq >= ? AND (? IS NULL OR seq < ?))
-                OR (type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1))
+                OR (type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1)
+                -- The ends of commands after the range, for any of its commands: see placeOf.
+                OR (type IN ('portal_command', 'portal_command_end') AND type = 'portal_command_end' AND ? IS NOT NULL AND seq >= ?))
          ORDER BY seq ASC`,
       )
-      .all(sessionId, from, to, to) as EventRow[];
+      .all(sessionId, from, to, to, to, to) as EventRow[];
     const gone = rows.filter((r) => inRange(placeOf(r, settled)));
     const going = new Set(gone);
     const also = gone.filter((r) => !inRange(r.seq)).map((r) => r.seq);

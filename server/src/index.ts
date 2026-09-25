@@ -816,7 +816,9 @@ app.get("/api/sessions/:id/background", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const jobs = BACKGROUND_SUPPORTED ? await listJobs(session.workspace, sessions.callsRunning(session.id)) : [];
-  res.json({ supported: BACKGROUND_SUPPORTED, jobs, ...sessions.extensionState(session.id) });
+  // piRunning: whether an extension could ask what is in the chat box — the page
+  // tells the portal only then.
+  res.json({ supported: BACKGROUND_SUPPORTED, jobs, ...sessions.extensionState(session.id), piRunning: sessions.isLoaded(session.id) });
 });
 
 app.get("/api/sessions/:id/background/:key/output", async (req, res) => {

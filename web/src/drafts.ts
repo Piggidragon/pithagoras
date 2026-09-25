@@ -50,18 +50,37 @@ export function caretFrom(read: typeof caretOf): void {
  * most often — at once, ahead of the message: a command that read the box
  * would otherwise find itself in it.
  */
+/**
+ * The chats whose pi is up, as their background list last said: only then can
+ * an extension ask what is in the box. Told of every pause and cursor move
+ * otherwise, the portal kept text nothing would read.
+ */
+const piUp = new Set<string>();
+
 function tellPortal(): (id: string, text: string) => void {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const send = (id: string, text: string) => void api.draft(id, text, text ? caretOf(id) : undefined).catch(() => {});
   return (id, text) => {
     clearTimeout(timers.get(id));
     timers.delete(id);
+    if (!piUp.has(id)) return;
     if (!text) send(id, text);
     else timers.set(id, setTimeout(() => (timers.delete(id), send(id, text)), 300));
   };
 }
 
 export const drafts = createDrafts(session, tellPortal());
+
+/** Whether a chat's pi is up. Once it is, what is in the box is told at once: it may have been typed before. */
+export function piRunning(id: string, up: boolean): void {
+  if (up === piUp.has(id)) return;
+  if (!up) {
+    piUp.delete(id);
+    return;
+  }
+  piUp.add(id);
+  drafts.moved(id);
+}
 
 /**
  * A message that did not go, back in front of whatever has been typed since.

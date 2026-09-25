@@ -32,6 +32,7 @@ import { FilesPanel } from "./FilesPanel";
 import { TitleInput } from "./TitleInput";
 import { latestFileActivity } from "../file-activity";
 import { caretFrom, drafts, withUnsent } from "../drafts";
+import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
@@ -112,14 +113,6 @@ function ContextChip({ label, body }: { label: string; body: string }) {
     </>
   );
 }
-
-/**
- * How far each chat's events have been read for requests to fill the box, so
- * each fills it once: the lowest live seq and the highest stored one seen.
- * Live events are numbered downwards, each its own. Kept outside the chat, which
- * a chat opened again still holds the events of.
- */
-const filledTo = new Map<string, { live: number; stored: number }>();
 
 export function Chat({
   session,
@@ -773,53 +766,27 @@ export function Chat({
   };
 
   // An extension that fills the chat box — pi's setEditorText, pasteToEditor —
-  // fills this one, for the person to send or change. Each once: these are
-  // live-only, and a chat opened again still holds the ones it was sent. pi's
-  // RPC mode, which runs outside the host, names it set_editor_text.
-  useEffect(() => {
-    // Only what came since the last look, read back from the end — new events
-    // are appended — to the first one seen, not through the whole chat on
-    // every streamed word.
-    const seen = filledTo.get(session.id) ?? { live: 0, stored: 0 };
-    let from = events.length;
-    while (from > 0) {
-      const e = events[from - 1];
-      if (e.seq < 0 ? e.seq >= seen.live : e.seq <= seen.stored) break;
-      from--;
-    }
-    const fresh = events.slice(from);
-    if (!fresh.length) return;
-    const now = { ...seen };
-    for (const e of fresh) {
-      if (e.seq < 0) now.live = Math.min(now.live, e.seq);
-      else now.stored = Math.max(now.stored, e.seq);
-    }
-    filledTo.set(session.id, now);
-    // Built up across the ones that came together: the box's own text is not
-    // updated until they are all read, and a paste after a fill needs the fill.
-    // A paste goes where the cursor is, as in pi's terminal.
-    let text: string | undefined;
-    let at: number | undefined;
-    for (const e of fresh) {
-      const method = e.payload?.method;
-      if (e.type !== "extension_ui_request" || (method !== "setEditorText" && method !== "set_editor_text")) continue;
-      const given = String(e.payload.text ?? "");
-      if (!e.payload.paste) {
-        text = given;
-        at = undefined;
-        continue;
-      }
-      const base = text ?? draft.current;
-      const where = at !== undefined ? { start: at, end: at } : text === undefined && caret.current ? caret.current : { start: base.length, end: base.length };
-      text = base.slice(0, where.start) + given + base.slice(where.end);
-      at = where.start + given.length;
-    }
-    if (text === undefined) return;
-    caret.current = at === undefined ? null : { start: at, end: at };
-    caretTo.current = at ?? text.length;
-    changeInput(text);
-    requestAnimationFrame(() => box.current?.focus());
-  }, [events]);
+  // fills this one, for the person to send or change: the whole of it, or a
+  // paste where the cursor is, as in pi's terminal. One right after another
+  // builds on it: the box's text is taken as it now is, not as last drawn.
+  useEffect(
+    () =>
+      onFill(session.id, ({ text: given, paste }) => {
+        const before = draft.current;
+        const where = caret.current ?? { start: before.length, end: before.length };
+        const next = paste ? before.slice(0, where.start) + given + before.slice(where.end) : given;
+        const at = paste ? where.start + given.length : next.length;
+        draft.current = next;
+        caret.current = paste ? { start: at, end: at } : null;
+        // The same text again draws nothing, and a cursor left to be placed
+        // then would move under the next key typed.
+        if (next === before) box.current?.setSelectionRange(at, at);
+        else caretTo.current = at;
+        changeInput(next);
+        requestAnimationFrame(() => box.current?.focus());
+      }),
+    [session.id],
+  );
 
   // Where a paste from an extension goes, for the portal to read the box as it will be.
   useEffect(() => caretFrom((id) => (id === currentSession.current ? caret.current ?? undefined : undefined)), []);

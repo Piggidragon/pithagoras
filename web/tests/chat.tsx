@@ -4,6 +4,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Chat } from '../src/components/Chat';
+import { fillFrom } from '../src/editor-fills';
 import { Select } from '../src/components/Select';
 import type { PortalEvent, Session } from '../src/api';
 import '../src/styles';
@@ -74,23 +75,24 @@ if (phase === 'agents') {
   }) as typeof fetch;
 }
 
-// An extension fills the chat box twice at once, the way pi's RPC mode names it and then as a paste.
-if (phase === 'editor') {
-  const at = -now * 1000;
-  events.push(
-    { seq: at, type: 'extension_ui_request', at: now, payload: { method: 'set_editor_text', text: '/deploy ' } },
-    { seq: at - 1, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: '--prod', paste: true } },
-  );
-}
+// An extension fills the chat box twice at once, the way pi's RPC mode names it and then as a paste: delivered as the page does, on arrival.
+const fills: PortalEvent[] = phase === 'editor' ? [
+  { seq: -now * 1000, type: 'extension_ui_request', at: now, payload: { method: 'set_editor_text', text: '/deploy ' } },
+  { seq: -now * 1000 - 1, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: '--prod', paste: true } },
+] : [];
 // What is typed is told to the portal, for an extension to read; an extension pastes into it later.
+// Whether the chat's pi is up is what the background list says: `?pi=off` until the test sets window.piUp.
 if (phase === 'editor' || phase === 'paste') {
   const realFetch = window.fetch;
   (window as any).drafts = [];
+  (window as any).piUp = new URLSearchParams(location.search).get('pi') !== 'off';
   window.fetch = (async (url: any, init?: any) => {
+    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
     if (String(url).endsWith('/draft')) {
       (window as any).drafts.push(JSON.parse(init.body));
-      return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+      return reply({ ok: true });
     }
+    if (String(url).endsWith('/background')) return reply({ supported: true, jobs: [], statuses: [], widgets: [], piRunning: (window as any).piUp });
     return realFetch(url, init);
   }) as typeof fetch;
 }
@@ -144,7 +146,9 @@ function Fixture() {
   const [v, setV] = React.useState('b');
   const [which, setWhich] = React.useState(phase === 'switch' ? 'first' : session.id);
   const [shownEvents, setShownEvents] = React.useState(events);
-  const paste = () => setShownEvents((list) => [...list, { seq: -now * 1000 - list.length - 10, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: 'the ', paste: true } }]);
+  const paste = () => fillFrom(session.id, { seq: -now * 1000 - 10, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: 'the ', paste: true } });
+  React.useEffect(() => { for (const ev of fills) fillFrom(session.id, ev); }, []);
+  (window as any).fillBox = (text: string) => fillFrom(session.id, { seq: -now * 1000 - 20, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text } });
   React.useEffect(() => {
     if (phase !== 'nudge') return;
     let n = 0;

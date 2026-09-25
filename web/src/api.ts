@@ -204,6 +204,8 @@ export interface BackgroundState {
   jobs: BackgroundJob[];
   statuses: { key: string; text: string }[];
   widgets: { key: string; lines: string[] }[];
+  /** Whether the chat's pi is up, for the chat box's text to be worth telling it. */
+  piRunning?: boolean;
 }
 
 export interface PortalEvent {

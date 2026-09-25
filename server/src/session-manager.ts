@@ -5,7 +5,7 @@ import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { agentHome, agentHomePath } from "./agent-home.js";
 import path from "node:path";
-import type { PiClient, PiTool, PromptTaken } from "./pi/types.js";
+import type { Draft, PiClient, PiTool, PromptTaken } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
@@ -171,7 +171,7 @@ function plain(text: unknown): string {
 type InHand = { seq: number; name: string; said: number; inRun: boolean; error?: string };
 
 /** The extension UI requests a person sees in the chat: a line, a dialog, a view, the box filled. */
-const SHOWN = new Set(["notify", "select", "confirm", "input", "editor", "custom", "setEditorText"]);
+const SHOWN = new Set(["notify", "select", "confirm", "input", "editor", "custom", "setEditorText", "set_editor_text"]);
 
 /**
  * Events that must not be persisted.
@@ -675,7 +675,7 @@ class SessionManager extends EventEmitter {
    */
   private inRun = new Set<string>();
 
-  /** Extension failures already said since the last run began, per session. */
+  /** The extensions whose failure has been said since the last run began, per session. */
   private failuresSaid = new Map<string, Set<string>>();
 
   private startCommand(sessionId: string, message: string): InHand {
@@ -928,11 +928,14 @@ class SessionManager extends EventEmitter {
         const command = threw ? this.commandsInHand.get(sessionId)?.find((c) => c.name === threw && !c.error) : undefined;
         if (command) command.error = String(msg.error ?? "it threw");
         // A handler that throws on every event says so once a run, not on
-        // every tool call. A command's own is always its own.
+        // every tool call: once per extension, whatever each error says — one
+        // that names an offset, or a count, differs every time. A command's
+        // own is always its own.
         const text = extensionFailure(msg.extensionPath, msg.error);
+        const who = String(msg.extensionPath ?? "");
         const said = this.failuresSaid.get(sessionId) ?? new Set<string>();
-        if (command || !said.has(text)) {
-          if (!command) this.failuresSaid.set(sessionId, said.add(text));
+        if (command || !said.has(who)) {
+          if (!command) this.failuresSaid.set(sessionId, said.add(who));
           this.record(sessionId, "portal_notice", {
             text,
             error: true,
@@ -1019,8 +1022,9 @@ class SessionManager extends EventEmitter {
       executor.cleanup?.(sessionId).catch(() => {});
     });
 
-    const draft = this.drafts.get(sessionId);
-    client.setDraft?.(draft?.text ?? "", draft?.caret);
+    // One copy, here: what an extension puts in the box outlives the pi that
+    // put it there, and a send from the box finds it.
+    client.useDrafts?.({ get: () => this.drafts.get(sessionId), set: (text, caret) => this.setDraft(sessionId, text, caret) });
     this.live.set(sessionId, { client, executor });
 
     return client;
@@ -1843,13 +1847,12 @@ class SessionManager extends EventEmitter {
   }
 
   /** What is in each chat's box, as its page last said: an extension can read it. */
-  private drafts = new Map<string, { text: string; caret?: { start: number; end: number } }>();
+  private drafts = new Map<string, Draft>();
 
   /** `caret`: what is selected in the box, where a paste goes; the end without one. */
   setDraft(sessionId: string, text: string, caret?: { start: number; end: number }): void {
     if (text) this.drafts.set(sessionId, { text, caret });
     else this.drafts.delete(sessionId);
-    this.live.get(sessionId)?.client.setDraft?.(text, caret);
   }
 
   /** Answer an extension dialog for a live session. */

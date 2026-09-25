@@ -12,7 +12,7 @@ process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
 process.env.SESSION_DIR = path.join(home, "sessions");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 
-const { appendEvent, createSession, deleteEventsAfter, deleteEventsBetween, eventsSince, getSession } = await import("../dist/db.js");
+const { appendEvent, createSession, deleteEventsAfter, deleteEventsBetween, eventsSince, getDb, getSession, UNANSWERED_COMMANDS } = await import("../dist/db.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { sessions, extensionFailure, commandName, CommandFailed } = await import("../dist/session-manager.js");
 
@@ -42,6 +42,10 @@ const handlers = {
   "/twice": () => [ui("notify", { message: "one" }), ui("notify", { message: "two" })],
   // An extension's notice, in colour and with the cursor hidden.
   "/coloured": () => [ui("notify", { message: "\x1b[?25l\x1b[32mgreen\x1b[0m" })],
+  // Fills the box, as pi's RPC mode names it outside the host.
+  "/fill-rpc": () => [ui("set_editor_text", { text: "/deploy --prod" })],
+  // A handler that fails on every event, with a different error each time.
+  "/counting": () => [1, 2, 3].map((n) => ({ type: "extension_error", extensionPath: "/x/node_modules/pkg-count/index.js", error: `bad chunk at offset ${n}` })),
   // A name with a dot: pi names it by everything up to the first space.
   "/deploy.prod": () => [{ type: "extension_error", extensionPath: "command:deploy.prod", error: "no target" }],
 };
@@ -49,12 +53,13 @@ const handlers = {
 let lastPi;
 class FakePi extends EventEmitter {
   running = true;
-  draft = "";
+  drafts;
   constructor() {
     super();
     lastPi = this;
   }
-  setDraft(text) { this.draft = text; }
+  useDrafts(drafts) { this.drafts = drafts; }
+  get draft() { return this.drafts?.get()?.text ?? ""; }
   async reload() { throw new Error("the settings file is not valid JSON"); }
   async abort() {}
   dispose() {}
@@ -225,7 +230,7 @@ test("what is in the chat box is there for an extension to read, and not once it
   createSession({ id: "draft", title: "draft", workspace: home, executor: "host" });
   sessions.setDraft("draft", "fix the build");
   await sessions.prompt("draft", "/bg-clear");
-  assert.equal(lastPi.draft, "fix the build", "a new pi is told what is in the box");
+  assert.equal(lastPi.draft, "fix the build", "a new pi reads what is in the box");
   sessions.setDraft("draft", "/bg-clear");
   await sessions.prompt("draft", "/bg-clear");
   assert.equal(lastPi.draft, "", "sent from the box, which the page empties");
@@ -282,4 +287,42 @@ test("taking out a message keeps the end of a command sent before it", () => {
   const own = appendEvent("cut", "portal_command_end", { of: second.seq, outcome: "handled" });
   const gone = deleteEventsAfter("cut", later.seq - 1);
   assert.deepEqual(gone, [later.seq, second.seq, own.seq]);
+});
+
+test("a box filled from pi's RPC mode is what the command showed", async () => {
+  const got = await send("fill-rpc", "/fill-rpc");
+  assert.equal(got.find((r) => r.type === "portal_command_end").payload.quiet, undefined);
+});
+
+test("an extension failing on every event says so once a run, whatever each error says", async () => {
+  const got = await send("counting", "/counting");
+  assert.deepEqual(got.filter((r) => r.type === "portal_notice").map((r) => r.payload.text), ["pkg-count failed: bad chunk at offset 1"]);
+});
+
+test("what an extension put in the box outlives the pi that put it there", async () => {
+  createSession({ id: "kept", title: "kept", workspace: home, executor: "host" });
+  await sessions.prompt("kept", "/bg-clear");
+  // An extension fills the box; pi is restarted before the page says anything.
+  lastPi.drafts.set("fix the build");
+  const first = lastPi;
+  await sessions.stop("kept");
+  await sessions.prompt("kept", "/bg-clear");
+  assert.notEqual(lastPi, first);
+  assert.equal(lastPi.draft, "fix the build");
+});
+
+test("taking out a command takes its end with it, wherever the end fell", () => {
+  createSession({ id: "cut2", title: "cut2", workspace: home, executor: "host" });
+  const command = appendEvent("cut2", "portal_command", { text: "/deploy" });
+  // The person sent a message while the command waited on a dialog; it answered after.
+  const message = appendEvent("cut2", "portal_prompt", { message: "meanwhile" });
+  const end = appendEvent("cut2", "portal_command_end", { of: command.seq, outcome: "handled" });
+  const { also } = deleteEventsBetween("cut2", command.seq, message.seq);
+  assert.deepEqual(also, [end.seq], "a page holding the events drops it too");
+  assert.deepEqual(rows("cut2").map((r) => r.type), ["portal_prompt"]);
+});
+
+test("the commands a crash left unanswered are found through their index, not by reading every event", () => {
+  const plan = getDb().prepare(`EXPLAIN QUERY PLAN ${UNANSWERED_COMMANDS}`).all().map((r) => r.detail);
+  assert.ok(plan.every((d) => !/^SCAN events$/.test(d)), plan.join("; "));
 });

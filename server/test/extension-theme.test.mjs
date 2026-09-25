@@ -21,16 +21,20 @@ test("an extension can style text with ctx.ui.theme, as it can under pi's own CL
 });
 
 test("an extension reads what is in the chat box, and what it put there", () => {
-  const client = { pendingUi: new Map(), emit() {}, draft: "", setDraft: SdkPiClient.prototype.setDraft };
+  // The portal's one copy of the box, as the session manager hands it over.
+  let kept;
+  const store = { get: () => kept, set: (text, caret) => (kept = text ? { text, caret } : undefined) };
+  const client = { pendingUi: new Map(), emit() {} };
+  SdkPiClient.prototype.useDrafts.call(client, store);
   const ui = SdkPiClient.prototype.buildUiContext.call(client);
-  SdkPiClient.prototype.setDraft.call(client, "fix the build");
+  store.set("fix the build");
   // Read, added to and written back, the draft is kept: it was replaced by the addition alone.
   ui.setEditorText(ui.getEditorText() + " @file");
   assert.equal(ui.getEditorText(), "fix the build @file");
   ui.pasteToEditor("!");
   assert.equal(ui.getEditorText(), "fix the build @file!");
   // Where the cursor is in the box, as the page pastes it.
-  SdkPiClient.prototype.setDraft.call(client, "fix build", { start: 4, end: 4 });
+  store.set("fix build", { start: 4, end: 4 });
   ui.pasteToEditor("the ");
   assert.equal(ui.getEditorText(), "fix the build");
   ui.pasteToEditor("whole ");
