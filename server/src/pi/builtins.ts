@@ -123,7 +123,9 @@ export async function runBuiltin(name: string, args: string, client: PiClient): 
       return [
         `Model: ${state.model.name}`,
         `Effort: ${state.thinkingLevel}`,
-        `Context: ${stats.contextUsage.tokens.toLocaleString()} / ${stats.contextUsage.contextWindow.toLocaleString()} (${stats.contextUsage.percent.toFixed(1)}%)`,
+        stats.contextUsage.tokens === null || stats.contextUsage.percent === null
+          ? `Context: unknown until the next reply / ${stats.contextUsage.contextWindow.toLocaleString()}`
+          : `Context: ${stats.contextUsage.tokens.toLocaleString()} / ${stats.contextUsage.contextWindow.toLocaleString()} (${stats.contextUsage.percent.toFixed(1)}%)`,
         `Tokens: ${stats.tokens.input.toLocaleString()} in, ${stats.tokens.output.toLocaleString()} out`,
         `Cost: $${stats.cost.toFixed(4)}`,
         `Tool calls: ${stats.toolCalls}`,

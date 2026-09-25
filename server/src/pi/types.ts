@@ -18,7 +18,11 @@ export interface PiState {
 export interface PiStats {
   tokens: { input: number; output: number; cacheRead?: number; cacheWrite?: number; total: number };
   cost: number;
-  contextUsage: { tokens: number; contextWindow: number; percent: number };
+  /**
+   * `tokens` and `percent` are null just after a compaction: the last count
+   * was taken before it, and pi will not guess until the next reply.
+   */
+  contextUsage: { tokens: number | null; contextWindow: number; percent: number | null };
   toolCalls: number;
   totalMessages: number;
 }

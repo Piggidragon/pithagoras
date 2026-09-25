@@ -93,49 +93,99 @@ function withProgress(body: Buffer): Buffer {
   }
 }
 
-async function probe(url: URL): Promise<any> {
+/** What `url` answers, or undefined; `denied` when it wanted a key it was not given. */
+async function probe(url: URL, auth: Record<string, string>): Promise<{ data?: any; denied?: boolean }> {
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    const response = await fetch(url, { headers: auth, signal: AbortSignal.timeout(2000) });
     if (!response.ok) {
       await response.body?.cancel();
-      return undefined;
+      return { denied: response.status === 401 || response.status === 403 };
     }
-    return await response.json();
+    return { data: await response.json() };
   } catch {
-    return undefined;
+    return {};
   }
+}
+
+/** The request's key, whichever way it was given, for asking the same server about it. */
+export function authHeaders(headers: http.IncomingHttpHeaders): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of ["authorization", "x-api-key"]) {
+    const value = headers[name];
+    if (typeof value === "string" && value) out[name] = value;
+  }
+  return out;
 }
 
 /**
  * Whether `model` is loaded on `upstream`: false when it is not, undefined when
  * the server does not say — a plain llama-server has one model, always loaded.
  */
-export async function modelLoaded(upstream: string, model: string): Promise<boolean | undefined> {
-  const quietUntil = silent.get(upstream);
-  if (quietUntil !== undefined && quietUntil > Date.now()) return undefined;
-  // llama-server's router: every preset, with its status.
-  const router = await probe(new URL("/models", upstream));
+export async function modelLoaded(upstream: string, model: string, auth: Record<string, string> = {}): Promise<boolean | undefined> {
+  const now = Date.now();
+  for (const key of [upstream, quietKey(upstream, model)]) {
+    const quietUntil = silent.get(key);
+    if (quietUntil !== undefined && quietUntil > now) return undefined;
+  }
+  // Loaded when last asked for, and asked for again soon enough that nothing
+  // has had the time to unload it: every step of an agent's run is a request,
+  // and asking the server each time would double them.
+  const hot = warm.get(upstream);
+  if (hot?.model === model && now - hot.at < WARM_MS) {
+    hot.at = now;
+    return true;
+  }
+  // llama-server's router: every preset, with its status. Asked with the
+  // request's own key — a router or llama-swap started with one refuses
+  // anything else.
+  const models = await probe(new URL("/models", upstream), auth);
+  const router = models.data;
   const entry = Array.isArray(router?.data) ? router.data.find((m: any) => m?.id === model) : undefined;
   const status = entry?.status?.value ?? entry?.status;
-  if (typeof status === "string") return status === "loaded";
+  if (typeof status === "string") return seen(upstream, model, status === "loaded");
   // llama-swap: the models that are up, and whether they are ready yet.
-  const swap = await probe(new URL("/running", upstream));
+  const running = await probe(new URL("/running", upstream), auth);
+  const swap = running.data;
   if (Array.isArray(swap?.running)) {
-    return swap.running.some((m: any) => m?.model === model && (m.state === undefined || m.state === "ready"));
+    const up = swap.running.find((m: any) => m?.model === model);
+    if (up) return seen(upstream, model, up.state === undefined || up.state === "ready");
+    // Not up under this name. Down, if it is one of llama-swap's models; an
+    // alias of one is not listed there, nor running under its own name, and
+    // what it stands for is not said: nothing is known of it.
+    const listed = await probe(new URL("/v1/models", upstream), auth);
+    if (Array.isArray(listed.data?.data) && listed.data.data.some((m: any) => m?.id === model)) return seen(upstream, model, false);
+    if (!listed.denied) silent.set(quietKey(upstream, model), Date.now() + SILENT_MS);
+    return undefined;
   }
   // Neither: a plain llama-server, which has its one model loaded and lists
   // it without a status. Asking it twice more on every request would learn
   // nothing new, so it is left alone for a while — a router put in front of
-  // it later is noticed after that. A router that simply does not know this
-  // model says so with statuses on the others, and is asked again.
+  // it later is noticed after that. A router that does not list this model —
+  // an alias, say — speaks about the others, and is left alone about this one.
+  // Refused for the key is not "says nothing": the next request may carry a good one.
   const routerSpeaks = Array.isArray(router?.data) && router.data.some((m: any) => m?.status !== undefined);
-  if (!routerSpeaks) silent.set(upstream, Date.now() + SILENT_MS);
+  if (!models.denied && !running.denied) silent.set(routerSpeaks ? quietKey(upstream, model) : upstream, Date.now() + SILENT_MS);
   return undefined;
 }
 
-/** Upstreams that say nothing about loading, and until when they are not asked. */
+/** Upstreams, or one model on one, that say nothing about loading, and until when they are not asked. */
 const silent = new Map<string, number>();
 const SILENT_MS = 10 * 60_000;
+const quietKey = (upstream: string, model: string) => `${upstream} ${model}`;
+
+/**
+ * The model each upstream last had loaded, and when it was last asked for.
+ * One per upstream: a request for another model may have swapped it out.
+ */
+const warm = new Map<string, { model: string; at: number }>();
+const WARM_MS = 60_000;
+
+/** Note what the server said, and pass it on. */
+function seen(upstream: string, model: string, loaded: boolean): boolean {
+  if (loaded) warm.set(upstream, { model, at: Date.now() });
+  else if (warm.get(upstream)?.model === model) warm.delete(upstream);
+  return loaded;
+}
 
 function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
   const url = req.url ?? "";
@@ -171,13 +221,16 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
     // not wait on the question, and the request is what starts the load.
     let answered = false;
     let loading = false;
-    const answering = () => {
+    // `came` when the model has answered, rather than the request having ended.
+    const answering = (came = false) => {
       if (answered) return;
       answered = true;
-      if (loading) notifyModel(sessionId, { model, state: "ready" });
+      if (!loading) return;
+      notifyModel(sessionId, { model, state: "ready" });
+      if (came) seen(upstream, model, true);
     };
     if (completion) {
-      void modelLoaded(upstream, model).then(loaded => {
+      void modelLoaded(upstream, model, authHeaders(req.headers)).then(loaded => {
         if (loaded !== false || answered || res.destroyed) return;
         loading = true;
         notifyModel(sessionId, { model, state: "loading" });
@@ -195,7 +248,7 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
           const streaming = (upstreamRes.headers["content-type"] ?? "").includes("event-stream");
           let progressBuffer = "";
           upstreamRes.on("data", (c: Buffer) => {
-            answering();
+            answering(upstreamRes.statusCode === 200);
             if (streaming) {
               progressBuffer += c.toString("utf8");
               const end = progressBuffer.lastIndexOf("\n");
@@ -212,7 +265,7 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse): void {
     });
     const enabled = (process.env.LLAMA_DISK_CACHE_MODELS ?? "").split(",").includes(model) && completion;
     void (enabled ? diskCache.run(upstream, model, sessionId, controller.signal, forward) : forward())
-      .finally(answering)
+      .finally(() => answering())
       .then(() => res.end())
       .catch(error => {
         if (res.destroyed) return;

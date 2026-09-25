@@ -1,3 +1,6 @@
+/** The width of the menus above the composer's toolbar: their w-72. */
+export const MENU_WIDTH = 288;
+
 /**
  * Where a menu above the composer's toolbar starts, so that it opens over the
  * button that opened it: at that button's left edge, pulled back only as far

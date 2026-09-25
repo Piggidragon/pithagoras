@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useState } from "react";
 import { Select } from "./Select";
 import {
   LuChevronLeft,
@@ -785,6 +785,18 @@ function Field({
   hint?: string;
   children: React.ReactNode;
 }) {
+  // A Select is a button: inside a label, a click anywhere on the label —
+  // the hint too — is passed on to it and opens the list, or shuts and opens
+  // it again. It is named by its own aria-label instead.
+  if (isValidElement<{ "aria-label"?: string }>(children) && children.type === Select) {
+    return (
+      <div className="block">
+        <span className="mb-1 block text-xs text-fg-subtle">{label}</span>
+        {cloneElement(children, { "aria-label": label })}
+        {hint && <span className="mt-1 block text-xs text-fg-faint">{hint}</span>}
+      </div>
+    );
+  }
   return (
     <label className="block">
       <span className="mb-1 block text-xs text-fg-subtle">{label}</span>
