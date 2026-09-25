@@ -5,7 +5,7 @@ import { readdir, readFile } from "node:fs/promises";
 import express, { type Router } from "express";
 import { getSession } from "../db.js";
 import { MARKER } from "../background.js";
-import { fieldsOf, statOf } from "../proc-stat.js";
+import { signalSession, statOf } from "../proc-stat.js";
 
 /**
  * A shell, in the portal.
@@ -101,17 +101,6 @@ function end(term: Term): void {
   terms.delete(term.id);
 }
 
-/** The Unix sessions of the shells open in terminal panels: the person's, not the agent's. */
-export function terminalSessionIds(): Set<number> {
-  const ids = new Set<number>();
-  for (const term of terms.values()) {
-    const shell = shellOf(term);
-    const sid = shell ? sessionOf(shell) : undefined;
-    if (sid) ids.add(sid);
-  }
-  return ids;
-}
-
 /** The shell `script` started: the child that leads the session on the pty. */
 function shellOf(term: Term): number | undefined {
   const pid = term.proc.pid;
@@ -133,43 +122,6 @@ function sessionOf(shell: number): number | undefined {
   const session = Number(statOf(shell)?.[3]);
   return session > 0 && session !== Number(statOf(process.pid)?.[3]) ? session : undefined;
 }
-
-/**
- * Signals every process in a session, and says which they were.
- *
- * A walk of /proc — every process on the host — so it is read without holding
- * up the event loop: a busy host has thousands, and a closing panel is no
- * reason for every open stream to stall. Read a batch at a time rather than
- * one after another, which on such a host kept the hangup waiting on
- * thousands of reads in turn.
- */
-async function signalSession(session: number, signal: NodeJS.Signals): Promise<number[]> {
-  let pids: string[];
-  try {
-    pids = (await readdir("/proc")).filter((name) => /^\d+$/.test(name));
-  } catch {
-    return [];
-  }
-  const members: number[] = [];
-  for (let i = 0; i < pids.length; i += STAT_BATCH) {
-    const stats = await Promise.all(
-      pids.slice(i, i + STAT_BATCH).map((pid) => readFile(`/proc/${pid}/stat`, "utf8").then((stat) => ({ pid, stat }), () => undefined)),
-    );
-    for (const found of stats) {
-      if (!found || Number(fieldsOf(found.stat)[3]) !== session) continue;
-      try {
-        process.kill(Number(found.pid), signal);
-        members.push(Number(found.pid));
-      } catch {
-        // Gone already, or not ours to signal.
-      }
-    }
-  }
-  return members;
-}
-
-/** How many /proc entries signalSession reads at once: well under any open-file limit. */
-const STAT_BATCH = 256;
 
 function watchUnattended(term: Term): void {
   clearTimeout(term.reaper);

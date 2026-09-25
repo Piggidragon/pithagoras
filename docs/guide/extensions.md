@@ -207,8 +207,13 @@ one extension.
   are still running — a dev server, a watcher, an extension's job — are listed
   under *Background* in the terminal panel, with how long they have run. One
   whose output goes to a file can be followed live there, and any can be
-  stopped. The portal finds them itself, so it works with whichever extension
-  started them. Needs `EXECUTOR=host` on Linux.
+  stopped; stopping one stops everything in its Unix session. The portal
+  finds them itself, so it works with whichever extension started them. A
+  tool call that is still running is not listed: the chat shows it. A
+  process an extension starts in a session of its own and reads through a
+  pipe looks like one, so while a tool call is running in the chat it is
+  not listed either. Your own terminal's processes are never listed. Needs
+  `EXECUTOR=host` on Linux.
 
 ### The subagent protocol
 

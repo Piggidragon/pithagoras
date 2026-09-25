@@ -3,7 +3,7 @@ import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
 import { SubagentPanel } from "./SubagentPanel";
 import { BackgroundJobs } from "./BackgroundJobs";
-import { subagents } from "../subagents";
+import { stableSubagents, subagents, type Subagent } from "../subagents";
 import { useBackground } from "../use-background";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
@@ -457,12 +457,12 @@ export function Chat({
   // running, so an idle session re-renders no more than it used to.
   const phase = useMemo(() => (running ? activity(events) : null), [running, events]);
   // Beside the conversation: subagents, jobs left running, extension statuses.
-  const agents = useMemo(() => subagents(events, items, ended), [events, items, ended]);
-  const extensionNudge = useMemo(
-    () => events.reduce((n, e) => n + (e.type === "extension_ui_request" && (e.payload?.method === "setStatus" || e.payload?.method === "setWidget") ? 1 : 0), 0),
-    [events],
-  );
-  const [background, refreshBackground] = useBackground(session.id, running, extensionNudge);
+  // The same entry for a subagent whose own events have not changed: an open
+  // panel draws its transcript again only when there is more of it, not on
+  // every word of the main chat.
+  const lastAgents = useRef<Subagent[]>([]);
+  const agents = useMemo(() => (lastAgents.current = stableSubagents(lastAgents.current, subagents(events, items, ended))), [events, items, ended]);
+  const [background, refreshBackground] = useBackground(session.id, running, events);
   const agentFor = (callId?: string) => (callId ? agents.find((a) => a.toolCallId === callId || a.id === `tool:${callId}`) : undefined);
   // The thinking block and the compaction marker already say so, animated,
   // where it is happening; the status pill would say it twice.

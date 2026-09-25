@@ -41,3 +41,19 @@ test("what extensions showed goes with a pi that is stopped, not only one that c
   await sessions.stop("restarted");
   assert.deepEqual(sessions.extensionState("restarted"), { statuses: [], widgets: [] });
 });
+
+test("a chat knows when a tool call is running in it, its subagents' included", async () => {
+  createSession({ id: "calls", title: "calls", workspace: home, executor: "host" });
+  await sessions.prompt("calls", "/bg");
+  const pi = sessions.live.get("calls").client;
+  assert.equal(sessions.callsRunning("calls"), false);
+  pi.emit("event", { type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "npm test" } });
+  assert.equal(sessions.callsRunning("calls"), true);
+  pi.emit("event", { type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: {} });
+  assert.equal(sessions.callsRunning("calls"), false);
+  // A subagent's call, and the subagent ending with it still open.
+  pi.emit("event", { type: "portal_subagent", op: "event", id: "s1", event: { type: "tool_execution_start", toolCallId: "t1", toolName: "bash" } });
+  assert.equal(sessions.callsRunning("calls"), true);
+  pi.emit("event", { type: "portal_subagent", op: "end", id: "s1", status: "stopped" });
+  assert.equal(sessions.callsRunning("calls"), false);
+});

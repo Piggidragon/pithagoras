@@ -43,7 +43,7 @@ import { mcpRouter } from "./api/mcp.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { browserRouter } from "./api/browser.js";
-import { terminalRouter, terminalSessionIds } from "./api/terminal.js";
+import { terminalRouter } from "./api/terminal.js";
 import { MARKER, clearFinished, listJobs, readOutput, stopJob } from "./background.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
@@ -798,7 +798,7 @@ const BACKGROUND_SUPPORTED = EXECUTOR_KIND !== "container" && process.platform =
 app.get("/api/sessions/:id/background", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  const jobs = BACKGROUND_SUPPORTED ? await listJobs(session.workspace, terminalSessionIds()) : [];
+  const jobs = BACKGROUND_SUPPORTED ? await listJobs(session.workspace, sessions.callsRunning(session.id)) : [];
   res.json({ supported: BACKGROUND_SUPPORTED, jobs, ...sessions.extensionState(session.id) });
 });
 
@@ -814,7 +814,7 @@ app.get("/api/sessions/:id/background/:key/output", async (req, res) => {
 app.post("/api/sessions/:id/background/:key/stop", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  if (!(await stopJob(session.workspace, req.params.key, terminalSessionIds()))) {
+  if (!(await stopJob(session.workspace, req.params.key))) {
     return res.status(409).json({ error: "That job is not running any more" });
   }
   res.json({ ok: true });
