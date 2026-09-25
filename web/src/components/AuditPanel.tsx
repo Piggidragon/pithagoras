@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { LuBan, LuCircleCheck, LuKeyRound, LuRefreshCw, LuShield, LuUserX } from "react-icons/lu";
+import { PageHeader, Stat } from "./PageHeader";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
 
@@ -26,15 +27,6 @@ const FILTERS = [
   { id: "allowed", label: "Allowed" },
   { id: "stranger", label: "Strangers" },
 ];
-
-function Stat({ value, label, tone }: { value: number; label: string; tone?: string }) {
-  return (
-    <span className="inline-flex items-baseline gap-1.5 rounded-lg bg-fg/5 px-2.5 py-1">
-      <span className={`text-sm font-medium ${tone ?? "text-fg"}`}>{value}</span>
-      <span className="text-[11px] text-fg-subtle">{label}</span>
-    </span>
-  );
-}
 
 const when = (iso: string) => {
   // Stored as UTC without a zone marker, which Date reads as local time.
@@ -111,25 +103,23 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
 
   return (
     <>
-      <header className="mb-5 rounded-2xl border border-line bg-gradient-to-br from-accent/10 via-transparent to-transparent px-5 py-5">
-        <div className="flex items-start gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/12 text-accent">
-            <LuShield className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold text-fg">Audit</h2>
-            <p className="mt-0.5 max-w-xl text-sm text-fg-muted">
-              What the agent was stopped from doing, what it was let through on, and who was
-              turned away. The last {entries.length} decisions.
-            </p>
-          </div>
-        </div>
+      <PageHeader
+        icon={<LuShield />}
+        title="Audit"
+        className="mb-5"
+        description={
+          <>
+            What the agent was stopped from doing, what it was let through on, and who was
+            turned away. The last {entries.length} decisions.
+          </>
+        }
+      >
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Stat value={counts.refused} label="refused" tone="text-danger" />
           <Stat value={counts.allowed} label="allowed" tone="text-ok" />
           <Stat value={counts.strangers} label="turned away" tone="text-warn" />
         </div>
-      </header>
+      </PageHeader>
 
       <div className="mb-3 flex flex-wrap items-center gap-1">
         {FILTERS.map((f) => (
@@ -154,7 +144,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
           through on a rule or an approval, or turns a stranger away.
         </p>
       ) : (
-        <ul className="space-y-1">
+        <ul className="stagger-in space-y-1">
           {shown.map((e) => {
             const k = KIND[e.kind] ?? {
               label: e.kind,

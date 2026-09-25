@@ -635,7 +635,7 @@ export function FilesPanel({
                     {entry.type === "file" && <span className="shrink-0 text-[10px] text-fg-faint">{sizeOf(entry.size)}</span>}
                   </button>
                   {/* Out of the way until the row is pointed at, but always there on a touch screen, which cannot point. */}
-                  <div className="flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
+                  <div className="files-row-actions flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
                     {entry.type !== "link" && (
                       <a
                         href={entry.type === "dir" ? api.archiveDownloadUrl(sessionId, join(dir, entry.name)) : api.fileDownloadUrl(sessionId, join(dir, entry.name))}

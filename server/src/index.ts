@@ -1183,7 +1183,10 @@ attachBrowserUpgrade(server);
 watchBrowserFrames();
 // Reports how far llama.cpp has got through a prompt, which is otherwise a
 // silent minute or two before the first token.
-startLlamaProxy((sessionId, prefill) => sessions.reportPrefill(sessionId, prefill));
+startLlamaProxy(
+  (sessionId, prefill) => sessions.reportPrefill(sessionId, prefill),
+  (sessionId, load) => sessions.reportModelLoad(sessionId, load),
+);
 sessions.recoverOrphans();
 getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
 pinConnection();

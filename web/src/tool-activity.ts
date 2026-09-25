@@ -40,18 +40,34 @@ const hostOf = (url: string) => {
   }
 };
 
-const nameOf = (p: any) => String(p?.toolName ?? p?.name ?? "tool");
-const inputOf = (p: any): Record<string, any> => {
-  const input = p?.input ?? p?.args ?? p?.parameters;
-  return input && typeof input === "object" ? input : {};
-};
+/**
+ * A tool that runs a shell command, whichever extension it comes from: these
+ * show their command and output as a terminal would.
+ */
+export const SHELL_TOOL = /^(bash|shell|terminal|exec_command)$/i;
 
-/** The call as the agent made it, unwrapped from the MCP adapter's single `mcp` tool when it came through that. */
-function unwrap(p: any): { name: string; input: Record<string, any> } {
-  const name = nameOf(p), input = inputOf(p);
-  if (name === "mcp" && typeof input.tool === "string") return { name: input.tool, input: input.args && typeof input.args === "object" ? input.args : {} };
+const nameOf = (p: any) => String(p?.toolName ?? p?.name ?? "tool");
+const argsOf = (p: any): unknown => p?.input ?? p?.args ?? p?.parameters;
+
+/**
+ * The call as the agent made it. The MCP adapter puts every server's tools
+ * behind one `mcp` tool, so a web search and a database query would both read
+ * "mcp": the tool it was asked to call, and what it was asked to call it with,
+ * are what say what happened.
+ */
+export function unwrapCall(name: string, args: unknown): { name: string; input: Record<string, any> } {
+  const input = args && typeof args === "object" ? (args as Record<string, any>) : {};
+  if (name === "mcp" && typeof input.tool === "string" && input.tool) {
+    return { name: input.tool, input: input.args && typeof input.args === "object" ? input.args : {} };
+  }
   return { name, input };
 }
+
+/** A payload's call, unwrapped: see unwrapCall. */
+export const unwrap = (p: any) => unwrapCall(nameOf(p), argsOf(p));
+
+/** The name to show for a call. */
+export const toolName = (name: string, args: unknown): string => unwrapCall(name, args).name;
 
 function browser(action: string, input: Record<string, any>): ToolCall {
   const url = text(input.url);
@@ -75,7 +91,7 @@ export function describeCall(payload: any, folder: string): ToolCall {
     ...(inside ? { target: "files" as const, path: inside } : {}),
   });
 
-  if (/^(bash|terminal|shell|exec_command)$/.test(name)) {
+  if (SHELL_TOOL.test(name)) {
     return { label: "Running a command", detail: flat(text(input.description) || text(input.command) || text(input.cmd)), target: "terminal" };
   }
   if (name === "read") {

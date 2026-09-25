@@ -1,4 +1,5 @@
 import type { PortalEvent } from "./api";
+import { unwrap } from "./tool-activity";
 
 /** A picture that went with a message, by the name the server keeps it under. */
 export interface SentImage {
@@ -44,9 +45,62 @@ export type Item =
       steer?: boolean;
       unsent?: "stopped" | "restarted" | "unsure";
     }
-  | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
-  | { kind: "tool"; id: string; name: string; callId?: string; status: "running" | "done" | "error"; detail?: string; picture?: ShownPicture }
+  /** `thinkingSince`/`thinkingUntil`: when the reasoning started and last grew, for "Thought for 12s". */
+  | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean; thinkingSince?: number; thinkingUntil?: number }
+  /**
+   * `args`: what the tool was called with, whole. `output`: the text it gave
+   * back — as it streams, then as it ended — kept to the last TOOL_OUTPUT_MAX.
+   */
+  | {
+      kind: "tool";
+      id: string;
+      name: string;
+      callId?: string;
+      status: "running" | "done" | "error";
+      detail?: string;
+      picture?: ShownPicture;
+      args?: unknown;
+      output?: string;
+      /** How many lines `output` had before it was cut to its end. */
+      outputLines?: number;
+      /** The run ended with this call still open: it never said how it came out. */
+      interrupted?: boolean;
+      since?: number;
+      until?: number;
+    }
+  /** The conversation summarized to make room, while that runs and after. */
+  | { kind: "compaction"; id: string; status: "running" | "done" | "failed"; tokensBefore?: number; summary?: string; since?: number; until?: number }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
+
+/** Enough of a tool's output to read in the transcript; the whole of it is in the agent terminal. */
+const TOOL_OUTPUT_MAX = 60_000;
+
+/** Lines in a text, not counting a newline at its very end. */
+export function lineCount(text: string): number {
+  if (!text) return 0;
+  let n = 1;
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) n++;
+  return text.endsWith("\n") ? n - 1 : n;
+}
+
+/** Keep the end of a tool's output on its item, and how long it was whole. */
+function setToolOutput(item: Extract<Item, { kind: "tool" }>, text: string) {
+  item.output = text.slice(-TOOL_OUTPUT_MAX);
+  if (text.length > TOOL_OUTPUT_MAX) item.outputLines = lineCount(text);
+  else delete item.outputLines;
+}
+
+/** Text without the colour and cursor codes a terminal would act on. */
+export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+
+/** The text of a tool result, however pi shaped it. */
+export function toolOutputText(result: any): string | undefined {
+  if (typeof result === "string") return result;
+  const content = result?.content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content.filter((c: any) => c?.type === "text" && typeof c.text === "string").map((c: any) => c.text).join("\n");
+  return text;
+}
 
 type UserItem = Extract<Item, { kind: "user" }>;
 
@@ -74,7 +128,7 @@ function userItem(seq: number, p: any): UserItem {
  * transcript — a task that ran fine shouldn't look broken because of one
  * unexpected field.
  */
-export function buildTranscript(events: PortalEvent[]): Item[] {
+export function buildTranscript(events: PortalEvent[], options: { ended?: boolean } = {}): Item[] {
   const items: Item[] = [];
   let audioReply = false;
   let current: Extract<Item, { kind: "assistant" }> | null = null;
@@ -99,10 +153,37 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
     return prompt && typeof prompt === "object" ? userItem(seq, prompt) : undefined;
   };
 
+  // A reply to write into. The one with this id when it is the last thing
+  // shown: it was closed early — a status that said the run was over while it
+  // was not — and a second item with its id would split it in two.
+  const openReply = (id: string): Extract<Item, { kind: "assistant" }> => {
+    const last = items.at(-1);
+    if (last?.kind === "assistant" && last.id === id) {
+      last.done = false;
+      return last;
+    }
+    const reply = { kind: "assistant" as const, id, text: "", thinking: "", done: false, audio: audioReply };
+    items.push(reply);
+    return reply;
+  };
+
   const closeCurrent = () => {
     if (current) {
       current.done = true;
       current = null;
+    }
+  };
+
+  // The run is over, so nothing in it is still going. A call whose end never
+  // came — the process died, the portal restarted, a stop cut it short — would
+  // otherwise spin for good; it says it was cut off instead.
+  const settle = () => {
+    closeCurrent();
+    for (const it of items) {
+      if (it.kind === "tool" && it.status === "running") {
+        it.status = "error";
+        it.interrupted = true;
+      } else if (it.kind === "compaction" && it.status === "running") it.status = "failed";
     }
   };
 
@@ -146,11 +227,14 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         const inner = p.assistantMessageEvent ?? {};
         const delta = typeof inner.delta === "string" ? inner.delta : "";
         if (!delta) break;
-        if (!current) {
-          current = { kind: "assistant", id: `a${p.streamId ?? ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
-          items.push(current);
+        if (!current) current = openReply(`a${p.streamId ?? ev.seq}`);
+        if (inner.type === "thinking_delta") {
+          current.thinking += delta;
+          if (ev.at !== undefined) {
+            current.thinkingSince ??= ev.at;
+            current.thinkingUntil = ev.at;
+          }
         }
-        if (inner.type === "thinking_delta") current.thinking += delta;
         else if (inner.type === "text_delta") current.text += delta;
         break;
       }
@@ -161,19 +245,26 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         if (message?.role === "assistant" && Array.isArray(message.content)) {
           const text = message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("");
           const thinking = message.content.filter((c: any) => c?.type === "thinking").map((c: any) => c.thinking ?? "").join("");
-          if (!current) {
-            current = { kind: "assistant", id: `a${p.streamId ?? ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
-            items.push(current);
-          }
+          if (!current) current = openReply(`a${p.streamId ?? ev.seq}`);
           current.text = text;
+          // The server keeps when the reasoning ran: the deltas that timed it
+          // are gone once the message ends, and after a reload.
+          if (typeof p.thinkingSince === "number" && typeof p.thinkingUntil === "number") {
+            current.thinkingSince = Math.min(current.thinkingSince ?? p.thinkingSince, p.thinkingSince);
+            current.thinkingUntil = Math.max(current.thinkingUntil ?? p.thinkingUntil, p.thinkingUntil);
+          } else if (ev.at !== undefined && thinking !== current.thinking) {
+            current.thinkingSince ??= ev.at;
+            current.thinkingUntil = ev.at;
+          }
           current.thinking = thinking;
         }
         if (ev.type === "message_end") closeCurrent();
         break;
       }
 
-      case "tool_execution_start":
+      case "tool_execution_start": {
         closeCurrent();
+        const args = p.input ?? p.args ?? p.parameters;
         items.push({
           kind: "tool",
           id: `t${ev.seq}`,
@@ -181,17 +272,52 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
           name: String(p.toolName ?? p.name ?? "tool"),
           status: "running",
           detail: summarizeToolInput(p),
+          ...(args !== undefined ? { args } : {}),
+          ...(ev.at !== undefined ? { since: ev.at } : {}),
         });
         break;
+      }
+
+      case "tool_execution_update": {
+        const tool = findRunningTool(items, p);
+        const text = toolOutputText(p.partialResult ?? p.result);
+        if (tool && typeof text === "string") setToolOutput(tool, text);
+        break;
+      }
+
+      case "compaction_start":
+        items.push({ kind: "compaction", id: `c${ev.seq}`, status: "running", ...(ev.at !== undefined ? { since: ev.at } : {}) });
+        break;
+
+      case "compaction_end": {
+        let open: Extract<Item, { kind: "compaction" }> | undefined;
+        for (let i = items.length - 1; i >= 0 && !open; i--) {
+          const it = items[i];
+          if (it.kind === "compaction" && it.status === "running") open = it;
+        }
+        // The start can be on a page not loaded yet.
+        if (!open) items.push((open = { kind: "compaction", id: `c${ev.seq}`, status: "running" }));
+        const result = p.result ?? {};
+        open.status = p.aborted || p.errorMessage ? "failed" : "done";
+        if (ev.at !== undefined) open.until = ev.at;
+        if (typeof result.tokensBefore === "number") open.tokensBefore = result.tokensBefore;
+        if (typeof result.summary === "string" && result.summary) open.summary = result.summary;
+        break;
+      }
 
       case "tool_execution_end": {
-        // Close the most recent still-running tool of the same name.
+        // Close the most recent still-running tool of the same name. By its id,
+        // one taken for cut off too: its end is what really happened.
         const name = String(p.toolName ?? p.name ?? "tool");
         for (let i = items.length - 1; i >= 0; i--) {
           const it = items[i];
-          if (it.kind === "tool" && it.status === "running" &&
-              (p.toolCallId ? it.callId === p.toolCallId : it.name === name)) {
+          if (it.kind === "tool" &&
+              (p.toolCallId ? it.callId === p.toolCallId && (it.status === "running" || it.interrupted) : it.status === "running" && it.name === name)) {
             it.status = p.isError || p.error ? "error" : "done";
+            delete it.interrupted;
+            if (ev.at !== undefined) it.until = ev.at;
+            const text = toolOutputText(p.result);
+            if (typeof text === "string" && text) setToolOutput(it, text);
             const picture = shownPicture(p);
             if (picture) it.picture = picture;
             break;
@@ -217,16 +343,32 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         if (p.status === "idle" && p.aborted) {
           items.push({ kind: "notice", id: `n${ev.seq}`, text: "Aborted", tone: "info" });
         }
+        if (typeof p.status === "string" && p.status !== "running") settle();
         break;
 
       case "agent_end":
-        closeCurrent();
+        settle();
+        break;
+
+      // A new run: a tool still open from before it can only be one whose run
+      // died without saying so (a portal restart that recorded nothing).
+      case "agent_start":
+        for (const it of items) {
+          if (it.kind === "tool" && it.status === "running") {
+            it.status = "error";
+            it.interrupted = true;
+          }
+        }
         break;
 
       default:
         break;
     }
   }
+
+  // The caller knows the run is over even where no event says so: a portal
+  // restarted mid-run records nothing.
+  if (options.ended) settle();
 
   // Anything still open belongs to a run in flight, and what is waiting to go
   // into it comes after.
@@ -256,8 +398,21 @@ export function lastReplyId(items: readonly Item[]): string | undefined {
   return undefined;
 }
 
+/** The call an update belongs to: by its id, or else the newest one of that name still running. */
+function findRunningTool(items: Item[], p: any): Extract<Item, { kind: "tool" }> | undefined {
+  const name = String(p.toolName ?? p.name ?? "");
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind !== "tool") continue;
+    if (p.toolCallId ? it.callId === p.toolCallId : it.status === "running" && (!name || it.name === name)) return it;
+  }
+  return undefined;
+}
+
 function summarizeToolInput(p: any): string | undefined {
-  const input = p.input ?? p.args ?? p.parameters;
+  const raw = p.input ?? p.args ?? p.parameters;
+  // Through the MCP adapter, what the tool inside was given.
+  const input = String(p.toolName ?? p.name ?? "") === "mcp" && raw && typeof raw === "object" && typeof raw.tool === "string" ? unwrap(p).input : raw;
   if (!input) return undefined;
   if (typeof input === "string") return truncate(input);
   if (typeof input === "object") {
@@ -286,6 +441,28 @@ export interface Activity {
   since?: number;
   /** Prefill, when llama.cpp is reporting it. */
   prefill?: { total: number; cache: number; processed: number };
+  /** The model being loaded, while `label` is "loading the model". */
+  model?: string;
+}
+
+/** "800", "6k", "20.5k": a count of tokens. */
+export const formatTokens = (n: number) =>
+  n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k` : String(n);
+
+/** "12s", "2m 05s": how long a phase has been going. */
+export const formatElapsed = (s: number) =>
+  s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+
+const PROMPT_LABELS = ["Reading the conversation", "Reviewing the context", "Preparing to respond"];
+
+/** What reading the prompt is called `seconds` in: it moves on every few seconds, so a long one is seen to be going. */
+export const promptLabel = (seconds: number) => PROMPT_LABELS[Math.floor(seconds / 4) % PROMPT_LABELS.length];
+
+/** How far prefill has got: tokens read, counting the cached prefix, and that as a percentage when there is a total. */
+export function prefillShare(prefill: Activity["prefill"]): { done: number; percent?: number } {
+  const total = prefill?.total ?? 0;
+  const done = Math.max(0, Math.min(total, prefill?.processed ?? 0));
+  return { done, ...(total > 0 ? { percent: Math.round((done / total) * 100) } : {}) };
 }
 
 /**
@@ -299,6 +476,8 @@ export interface Activity {
  */
 export function activity(events: PortalEvent[]): Activity {
   let prefill: Activity["prefill"];
+  // Walking backwards, a `ready` is met before the `loading` it ends.
+  let loaded = false;
   // Compaction can emit its own model events; retain its identity until it ends.
   const compact = [...events].reverse().find(ev => ['compaction_start', 'compaction_end', 'agent_end', 'portal_prompt'].includes(ev.type));
   if (compact?.type === 'compaction_start') {
@@ -315,6 +494,14 @@ export function activity(events: PortalEvent[]): Activity {
         if (!prefill) {
           prefill = { total: p.total ?? 0, cache: p.cache ?? 0, processed: p.processed ?? 0 };
 
+        }
+        break;
+
+      // Before any prefill: once the prompt is being read, the model is up.
+      case "portal_model":
+        if (p.state === "ready") loaded = true;
+        else if (p.state === "loading" && !loaded && !prefill) {
+          return { label: "loading the model", since: ev.at, ...(typeof p.model === "string" && p.model ? { model: p.model } : {}) };
         }
         break;
 

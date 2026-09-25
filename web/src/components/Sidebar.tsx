@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { StatusDot } from "./StatusDot";
 import {
   LuBot,
   LuPanelLeftClose,
@@ -19,24 +20,10 @@ import {
   LuShield,
   LuTrash2,
 } from "react-icons/lu";
-import type { Session, SessionStatus } from "../api";
+import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
-
-const STATUS_STYLE: Record<SessionStatus, string> = {
-  running: "bg-accent animate-pulse",
-  idle: "bg-fg-faint",
-  error: "bg-danger",
-  interrupted: "bg-warn",
-};
-
-const STATUS_LABEL: Record<SessionStatus, string> = {
-  running: "running",
-  idle: "idle",
-  error: "error",
-  interrupted: "interrupted — server restarted mid-run",
-};
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
 const RECENTS_LIMIT = 12;
@@ -71,7 +58,7 @@ export function Sidebar({
   onRename: (id: string, title: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
   onOpenSettings: () => void;
-  onNavigate: (to: "sessions" | "projects" | "agent" | "routines" | "browser" | "audit") => void;
+  onNavigate: (to: Destination) => void;
 }) {
   const [storedCollapsed, setCollapsed] = useState(() => local.get("sidebarCollapsed") === "true");
   const collapsed = forceExpanded ? false : storedCollapsed;
@@ -121,6 +108,18 @@ export function Sidebar({
     />
   );
 
+  const destinations: { to: Destination; icon: ReactNode; label: string }[] = [
+    { to: "sessions", icon: <LuMessagesSquare />, label: "Sessions" },
+    { to: "projects", icon: <LuFolderKanban />, label: "Projects" },
+    { to: "agent", icon: <LuBot />, label: "Agent" },
+    { to: "routines", icon: <LuClock />, label: "Routines" },
+    // Hidden unless there is one. The browser is an optional service, and
+    // a dead link to a feature you did not install is just clutter.
+    ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: "Browser" }] : []),
+    { to: "audit", icon: <LuShield />, label: "Audit" },
+  ];
+  const anyRunning = sessions.some((s) => s.status === "running");
+
   return (
     <aside aria-label="Sidebar" className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-64"}`}>
       <button type="button" onClick={toggleSidebar} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -128,7 +127,21 @@ export function Sidebar({
         className="hidden md:grid absolute right-2 top-3 z-10 grid h-8 w-8 place-items-center rounded-lg text-fg-subtle transition-colors hover:bg-canvas hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
         {collapsed ? <LuPanelLeftOpen size={18} /> : <LuPanelLeftClose size={18} />}
       </button>
-      <div id="sidebar-content" className={`min-h-0 w-64 flex-1 flex-col ${collapsed ? "hidden" : "flex"}`}>
+      {/* Folded, the places are still one click away: a rail of their icons. */}
+      {collapsed && (
+        <nav className="sidebar-rail max-md:hidden" aria-label="Destinations">
+          <RailButton icon={<LuPlus />} label="New chat" onClick={newChat} />
+          <hr />
+          {destinations.map((d) => (
+            <RailButton key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} current={view === d.to}>
+              {d.to === "sessions" && anyRunning && <StatusDot status="running" />}
+            </RailButton>
+          ))}
+          <div className="mt-auto" />
+          <RailButton icon={<LuSettings />} label="Settings" onClick={onOpenSettings} />
+        </nav>
+      )}
+      <div id="sidebar-content" className={`sidebar-content min-h-0 w-64 flex-1 flex-col ${collapsed ? "hidden" : "flex"}`}>
 
       <div className="flex items-center gap-2 pl-3 pr-12 pb-3 pt-4">
         <img
@@ -149,46 +162,9 @@ export function Sidebar({
       {/* Destinations, above the session lists. */}
       <nav className="px-2 pb-2">
         <NavItem icon={<LuPlus />} label="New" onClick={newChat} active={starting} />
-        <NavItem
-          icon={<LuMessagesSquare />}
-          label="Sessions"
-          onClick={() => onNavigate("sessions")}
-          active={view === "sessions"}
-        />
-        <NavItem
-          icon={<LuFolderKanban />}
-          label="Projects"
-          onClick={() => onNavigate("projects")}
-          active={view === "projects"}
-        />
-        <NavItem
-          icon={<LuBot />}
-          label="Agent"
-          onClick={() => onNavigate("agent")}
-          active={view === "agent"}
-        />
-        <NavItem
-          icon={<LuClock />}
-          label="Routines"
-          onClick={() => onNavigate("routines")}
-          active={view === "routines"}
-        />
-        {/* Hidden unless there is one. The browser is an optional service, and
-            a dead link to a feature you did not install is just clutter. */}
-        {hasBrowser && (
-          <NavItem
-            icon={<LuGlobe />}
-            label="Browser"
-            onClick={() => onNavigate("browser")}
-            active={view === "browser"}
-          />
-        )}
-        <NavItem
-          icon={<LuShield />}
-          label="Audit"
-          onClick={() => onNavigate("audit")}
-          active={view === "audit"}
-        />
+        {destinations.map((d) => (
+          <NavItem key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} active={view === d.to} />
+        ))}
 
         {startError && <p className="px-2.5 pt-1 text-xs text-danger">{startError}</p>}
       </nav>
@@ -267,6 +243,29 @@ const GroupLabel = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
+type Destination = "sessions" | "projects" | "agent" | "routines" | "browser" | "audit";
+
+function RailButton({
+  icon,
+  label,
+  onClick,
+  current,
+  children,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  current?: boolean;
+  children?: ReactNode;
+}) {
+  return (
+    <button type="button" onClick={onClick} title={label} aria-label={label} aria-current={current ? "page" : undefined} className="sidebar-rail-button">
+      {icon}
+      {children}
+    </button>
+  );
+}
+
 function NavItem({
   icon,
   label,
@@ -315,17 +314,25 @@ function SessionItem({
 }) {
   const [renaming, setRenaming] = useState(false);
   return (
+    // A row with buttons in it, so not a button itself: reachable with Tab and
+    // opened with Enter all the same, which a bare div with a click was not.
     <div
       onClick={onSelect}
-      className={`group mb-0.5 cursor-pointer rounded-lg px-2.5 py-1.5 transition ${
+      tabIndex={0}
+      aria-current={active ? "page" : undefined}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget || renaming) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`group mb-0.5 cursor-pointer rounded-lg px-2.5 py-1.5 transition focus-visible:outline-offset-0 ${
         active ? "bg-fg/[0.07]" : "hover:bg-fg/5"
       }`}
     >
       <div className="flex items-center gap-2">
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[s.status]}`}
-          title={STATUS_LABEL[s.status]}
-        />
+        <StatusDot status={s.status} />
         {renaming ? (
           <TitleInput
             value={s.title}
@@ -349,7 +356,8 @@ function SessionItem({
           </span>
         )}
 
-        <div className="ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex">
+        {/* Without a mouse there is no hover: the open chat's row keeps them. */}
+        <div className={`ml-auto hidden shrink-0 items-center gap-0.5 group-focus-within:flex group-hover:flex ${active ? "[@media(hover:none)]:flex" : ""}`}>
           <button
             onClick={(e) => {
               e.stopPropagation();

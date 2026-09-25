@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Select } from "./Select";
 import {
   LuCheck,
   LuChevronLeft,
@@ -10,6 +11,8 @@ import {
   LuRefreshCw,
   LuTrash2,
 } from "react-icons/lu";
+import { PageHeader, Stat } from "./PageHeader";
+import { RowsSkeleton } from "./Skeleton";
 import { api, type ReportTarget, type ReportTo, type Routine } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
@@ -194,20 +197,16 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
   return (
     <div className="h-full overflow-y-auto px-4 py-6">
       <div className="mx-auto w-full max-w-3xl">
-        <header className="rounded-2xl border border-line bg-gradient-to-br from-accent/10 via-transparent to-transparent px-5 py-5">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/12 text-accent">
-              <LuClock className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-base font-semibold text-fg">Routines</h2>
-              <p className="mt-0.5 max-w-xl text-sm text-fg-muted">
-                Work the agent does on a schedule instead of because you asked. It wakes up, follows
-                its instructions, and goes quiet again.
-              </p>
-            </div>
-          </div>
-
+        <PageHeader
+          icon={<LuClock />}
+          title="Routines"
+          description={
+            <>
+              Work the agent does on a schedule instead of because you asked. It wakes up, follows
+              its instructions, and goes quiet again.
+            </>
+          }
+        >
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Stat value={routines.length} label="routines" />
             <Stat value={routines.filter((r) => r.enabled).length} label="enabled" tone="text-accent" />
@@ -217,7 +216,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
               tone="text-danger"
             />
           </div>
-        </header>
+        </PageHeader>
 
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -249,7 +248,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
         )}
 
         {loading ? (
-          <p className="py-10 text-center text-sm text-fg-subtle">Loading…</p>
+          <RowsSkeleton />
         ) : routines.length === 0 ? (
           <div className="mt-3 rounded-xl border border-dashed border-line px-4 py-10 text-center">
             <p className="text-sm text-fg-muted">No routines yet.</p>
@@ -259,7 +258,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
             </p>
           </div>
         ) : (
-          <ul className="mt-3 space-y-1.5">
+          <ul className="stagger-in mt-3 space-y-1.5">
             {routines.map((r) => (
               <li key={r.id}>
                 <button
@@ -301,15 +300,6 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
           still running when its next slot comes round is skipped rather than stacked.
         </p>
       </div>
-    </div>
-  );
-}
-
-function Stat({ value, label, tone }: { value: number; label: string; tone?: string }) {
-  return (
-    <div className="flex items-baseline gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
-      <span className={`text-sm tabular-nums ${tone ?? "text-fg"}`}>{value}</span>
-      <span className="text-[11px] text-fg-subtle">{label}</span>
     </div>
   );
 }
@@ -674,32 +664,30 @@ function RoutineDetail({
           </span>
         </button>
 
-        <label className="block pt-1">
+        {/* Not a label: it would pass a click on the hint to the Select's button. */}
+        <div className="block pt-1">
           <span className="mb-1 block text-xs text-fg-subtle">Report to</span>
-          <select
+          <Select
+            aria-label="Report to"
+            className="w-full"
             value={report}
-            onChange={(e) => setReport(e.target.value)}
-            className="w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition focus:border-accent/60"
-          >
-            <option value="">
-              {fallback
-                ? `Default — ${labelFor(targets, fallback) ?? fallback.channel}`
-                : "Default — none set"}
-            </option>
-            <option value="off">Never report</option>
-            {targets.map((t) => (
-              <option key={`${t.channel}\u0000${t.target}`} value={`${t.channel}\u0000${t.target}`}>
-                {t.channel} — {t.label}
-              </option>
-            ))}
-          </select>
+            onChange={setReport}
+            options={[
+              {
+                value: "",
+                label: fallback ? `Default — ${labelFor(targets, fallback) ?? fallback.channel}` : "Default — none set",
+              },
+              { value: "off", label: "Never report" },
+              ...targets.map((t) => ({ value: `${t.channel}\u0000${t.target}`, label: `${t.channel} — ${t.label}` })),
+            ]}
+          />
           <p className="mt-1 text-[11px] text-fg-faint">
             The agent decides whether a run is worth reporting and writes the message itself. It
             only has somewhere to send it if this points at a conversation.
             {targets.length === 0 &&
               " Nothing to pick yet — message a channel that can start a conversation, and it appears here."}
           </p>
-        </label>
+        </div>
       </section>
 
       {r.lastStatus && (

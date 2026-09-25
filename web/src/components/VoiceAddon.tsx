@@ -1,4 +1,5 @@
 import { VoiceLibrary } from './VoiceLibrary';
+import { Select } from "./Select";
 import { useEffect, useState } from "react";
 import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
@@ -35,11 +36,11 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     </section>
     <section className="rounded-xl border border-line bg-surface/50 p-4 space-y-4">
       <h3 className="text-sm font-medium">Conversation</h3>
-    <label className="block text-xs text-fg-muted">Input language<select className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config.language || "auto"} onChange={e => update({ language: e.target.value })}>{languages.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    <div className="block text-xs text-fg-muted">Input language<Select aria-label="Input language" size="sm" className="mt-1.5 w-full" value={config.language || "auto"} onChange={language => update({ language })} options={languages.map(([value, label]) => ({ value, label }))} /></div>
     <p className="text-xs text-fg-faint">Choosing your language improves recognition on short turns.</p>
     {chatterbox
-      ? <label className="block text-xs text-fg-muted">Speech delivery<select className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config.exaggeration ?? 0.5} onChange={e => update({ exaggeration: Number(e.target.value) })}><option value={0.3}>Calm · flatter delivery</option><option value={0.5}>Natural · as recorded</option><option value={0.8}>Expressive · stronger emotion</option></select></label>
-      : <label className="block text-xs text-fg-muted">Speech generation<select className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config.cfgScale ?? 4} onChange={e => update({ cfgScale: Number(e.target.value) })}><option value={1}>Fast · lighter voice guidance</option><option value={4}>Expressive · stronger voice guidance</option></select></label>}
+      ? <div className="block text-xs text-fg-muted">Speech delivery<Select<number> aria-label="Speech delivery" size="sm" className="mt-1.5 w-full" value={config.exaggeration ?? 0.5} onChange={exaggeration => update({ exaggeration })} options={[{ value: 0.3, label: "Calm", hint: "Flatter delivery" }, { value: 0.5, label: "Natural", hint: "As recorded" }, { value: 0.8, label: "Expressive", hint: "Stronger emotion" }]} /></div>
+      : <div className="block text-xs text-fg-muted">Speech generation<Select<number> aria-label="Speech generation" size="sm" className="mt-1.5 w-full" value={config.cfgScale ?? 4} onChange={cfgScale => update({ cfgScale })} options={[{ value: 1, label: "Fast", hint: "Lighter voice guidance" }, { value: 4, label: "Expressive", hint: "Stronger voice guidance" }]} /></div>}
     {chatterbox && <p className="text-xs text-fg-faint">Chatterbox speaks your input language and clones the selected reference voice; it has no designed voice.{NUMBER_PACK_LANGUAGES.includes(config.language ?? "") ? " Numbers are written out before synthesis so they are spoken correctly." : " Numbers stay as digits in this language, which Chatterbox reads unreliably."}</p>}
     {chatterbox && (config.voice || "design") === "design" && <p role="alert" className="text-xs text-red-400">Choose Aria or a voice with a recording above: Chatterbox cannot speak with a designed voice.</p>}
     </section>
@@ -82,7 +83,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     <details className="rounded-xl border border-line p-4">
       <summary className="cursor-pointer text-sm font-medium">Advanced connection<span className="mt-1 block text-xs font-normal text-fg-muted">Custom runtime and service addresses</span></summary>
       <div className="mt-4 space-y-4">
-    <label className="block text-xs text-fg-muted">Speech runtime<select className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config.runtime ?? "breeze"} onChange={e => setRuntime(e.target.value as VoiceConfig["runtime"])}><option value="breeze">Breeze Python</option><option value="audio-cpp">Breeze audio.cpp · streaming</option><option value="chatterbox">Chatterbox audio.cpp · multilingual</option></select></label>
+    <div className="block text-xs text-fg-muted">Speech runtime<Select aria-label="Speech runtime" size="sm" className="mt-1.5 w-full" value={config.runtime ?? "breeze"} onChange={v => setRuntime(v as VoiceConfig["runtime"])} options={[{ value: "breeze", label: "Breeze Python" }, { value: "audio-cpp", label: "Breeze audio.cpp", hint: "Streaming" }, { value: "chatterbox", label: "Chatterbox audio.cpp", hint: "Multilingual" }]} /></div>
     {([['whisperUrl', 'Speech recognition URL'], ['breezeUrl', 'Speech synthesis URL']] as const).map(([key, label]) => <label key={key} className="block text-xs text-fg-muted">{label}<input className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config[key]} onChange={e => update({ [key]: e.target.value })} /></label>)}
     <label className="block text-xs text-fg-muted">Speech recognition model<input className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" placeholder="Whisper.cpp needs none; audio.cpp names its model, e.g. qwen3-asr" value={config.sttModel ?? ""} onChange={e => update({ sttModel: e.target.value })} /></label>
       </div>

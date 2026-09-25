@@ -1,0 +1,39 @@
+/* Controls the portal draws itself instead of the browser: the dropdown and tooltips. Tokens and base rules are in index.css. */
+
+/* ── Select: a dropdown drawn by the portal ── */
+.ui-select { display: inline-flex; align-items: center; gap: 8px; min-width: 0; text-align: left; border: 1px solid rgb(var(--line)); background: rgb(var(--raised) / .6); color: rgb(var(--fg)); border-radius: 10px; transition: border-color .18s, background .18s, box-shadow .18s; }
+.ui-select-md { padding: 7px 10px 7px 12px; font-size: 13px; }
+.ui-select-sm { padding: 5px 8px 5px 10px; font-size: 12px; border-radius: 8px; }
+.ui-select:hover:not(:disabled) { border-color: rgb(var(--fg-faint)); background: rgb(var(--raised)); }
+.ui-select.is-open, .ui-select:focus-visible { outline: none; border-color: rgb(var(--accent) / .6); box-shadow: 0 0 0 3px rgb(var(--accent) / .15); }
+.ui-select:disabled { opacity: .5; cursor: not-allowed; }
+.ui-select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-select-value.is-placeholder { color: rgb(var(--fg-subtle)); }
+.ui-select-chevron { width: 14px; height: 14px; flex-shrink: 0; color: rgb(var(--fg-subtle)); transition: transform .25s var(--ease-out); }
+.ui-select.is-open .ui-select-chevron { transform: rotate(180deg); }
+.ui-select-list { position: fixed; z-index: 200; overflow-y: auto; overscroll-behavior: contain; padding: 4px; border-radius: 12px; border: 1px solid rgb(var(--line)); background: rgb(var(--surface) / .96); backdrop-filter: blur(16px); box-shadow: 0 16px 40px -12px #0007, 0 4px 12px -4px #0004; transform-origin: top center; animation: ui-pop .2s var(--ease-out) both; }
+.ui-select-list.is-above { transform-origin: bottom center; }
+@keyframes ui-pop { from { opacity: 0; transform: translateY(-4px) scale(.97); } to { opacity: 1; transform: none; } }
+.ui-select-list.is-above { animation-name: ui-pop-up; }
+@keyframes ui-pop-up { from { opacity: 0; transform: translateY(4px) scale(.97); } to { opacity: 1; transform: none; } }
+.ui-select-option { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; font-size: 13px; color: rgb(var(--fg-muted)); cursor: pointer; transition: background .12s, color .12s; }
+.ui-select-option.is-active { background: rgb(var(--fg) / .07); color: rgb(var(--fg)); }
+.ui-select-option[aria-selected="true"] { color: rgb(var(--fg)); }
+.ui-select-option.is-disabled { opacity: .4; cursor: not-allowed; }
+.ui-select-hint { display: block; margin-top: 1px; font-size: 11px; color: rgb(var(--fg-faint)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ui-select-check { width: 14px; height: 14px; flex-shrink: 0; color: rgb(var(--accent)); animation: chat-pop .3s var(--ease-spring) both; }
+@media (prefers-reduced-motion: reduce) { .ui-select-list, .ui-select-check { animation: none; } .ui-select-chevron { transition: none; } }
+
+/* ── Tooltips (see tooltips.ts) ── */
+.ui-tooltip { position: fixed; z-index: 300; max-width: min(320px, calc(100vw - 16px)); padding: 5px 9px; border-radius: 8px; background: rgb(var(--fg)); color: rgb(var(--canvas)); font-size: 11.5px; line-height: 1.45; font-weight: 500; box-shadow: 0 6px 20px -6px #0006; pointer-events: none; opacity: 0; transform: translateY(3px) scale(.97); transition: opacity .14s ease, transform .18s var(--ease-out); white-space: normal; overflow-wrap: anywhere; }
+.ui-tooltip[data-side="below"] { transform: translateY(-3px) scale(.97); }
+.ui-tooltip.is-shown { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .ui-tooltip { transition: opacity .1s; transform: none; } }
+
+/* ── Status dots (see StatusDot.tsx) ── */
+.status-dot { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: rgb(var(--fg-faint)); transition: background .3s; }
+.status-dot.is-running { background: rgb(var(--accent)); animation: status-ping 1.8s var(--ease-out) infinite; }
+.status-dot.is-error { background: rgb(var(--danger)); }
+.status-dot.is-interrupted { background: rgb(var(--warn)); }
+@keyframes status-ping { 0% { box-shadow: 0 0 0 0 rgb(var(--accent) / .55); } 70%, 100% { box-shadow: 0 0 0 5px rgb(var(--accent) / 0); } }
+@media (prefers-reduced-motion: reduce) { .status-dot.is-running { animation: none; } }

@@ -3,6 +3,7 @@ import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { api, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
@@ -346,8 +347,8 @@ function Shell({
 
   return (
     <div className="flex h-[100dvh] min-h-0 overflow-hidden bg-canvas">
-      {mobileNav && <button aria-label="Dismiss navigation" onClick={() => setMobileNav(false)} className="fixed inset-0 z-40 bg-black/50 md:hidden" />}
-      <div id="mobile-navigation" className={`${mobileNav ? "fixed inset-y-0 left-0 z-50 flex" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
+      {mobileNav && <button aria-label="Dismiss navigation" onClick={() => setMobileNav(false)} className="ui-backdrop fixed inset-0 z-40 bg-black/50 md:hidden" />}
+      <div id="mobile-navigation" className={`${mobileNav ? "mobile-drawer fixed inset-y-0 left-0 z-50 flex" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
       {mobileNav && <button type="button" aria-label="Close navigation" onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-20 rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
       <Sidebar
         forceExpanded={mobileNav}
@@ -383,8 +384,10 @@ function Shell({
       />
 
       </div>
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
+      <main className="app-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {/* In a chat the chat's own header has the menu button, and this bar
+            would only repeat its title; in voice mode that header is gone. */}
+        <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
           <button type="button" aria-label="Open navigation" aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
           <span className="truncate text-sm text-fg">{active?.title || "Pithagoras"}</span>
         </header>
@@ -396,6 +399,8 @@ function Shell({
             Lost the connection to the portal — trying again. What is shown may be out of date.
           </div>
         )}
+        {/* One page failing to draw takes down that page, not the portal. */}
+        <ErrorBoundary resetKey={`${view}:${sessionId ?? ""}`}>
         {view === "sessions" ? (
           <SessionsPage
             sessions={sessions}
@@ -468,6 +473,7 @@ function Shell({
               await api.renameSession(active.id, title);
               await refreshSessions();
             }}
+            onOpenNavigation={() => setMobileNav(true)}
             onClientCommand={async (name, args) => {
               if (name === "settings") {
                 navigate(`/s/${active.id}/settings/general`);
@@ -486,6 +492,7 @@ function Shell({
         ) : (
           <EmptyState hasSessions={sessions.length > 0} />
         )}
+        </ErrorBoundary>
       </main>
 
       {active && uiQueue[0] && (
@@ -508,12 +515,11 @@ function Shell({
 
 function EmptyState({ hasSessions }: { hasSessions: boolean }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-      <div className="grid h-12 w-12 place-items-center rounded-2xl bg-surface text-xl text-fg-faint">
-        π
-      </div>
+    <div className="chat-empty flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+      <img src="/icon-192.png" alt="" draggable={false} className="chat-empty-mark mb-2 h-12 w-12 object-contain" />
       <p className="text-sm text-fg-muted">
-        {hasSessions ? "Pick a session on the left." : "Start a session to get going."}
+        {/* On a phone the list is behind the menu, not on the left. */}
+        {hasSessions ? "Pick a session from the list." : "Start a session to get going."}
       </p>
       <p className="max-w-xs text-xs text-fg-faint">
         Give it a task and close the tab — it keeps working, and picks up where it left off when you

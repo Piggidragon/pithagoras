@@ -4,6 +4,8 @@ import { api, type PiConfig } from "../api";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { isEnter } from "../shortcuts";
+import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
+import { useDismiss } from "../use-dismiss";
 
 /**
  * Context fill is the number that decides whether a long session keeps working,
@@ -188,6 +190,7 @@ export function ContextPill({
   /** pi refuses to compact a short session, so its reason has to be visible. */
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const pill = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open || keepRecent !== null) return;
@@ -197,16 +200,12 @@ export function ContextPill({
       .catch(() => {});
   }, [open, keepRecent]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  useDismiss(open, [ref], () => setOpen(false), pill);
 
   const usage = cfg.stats.contextUsage;
+  // Unknown just after a compaction, until the next reply is counted. An empty
+  // ring and a dash say so; 0% claimed the summary and the recent turns weighed nothing.
+  const known = usage.percent !== null && usage.tokens !== null;
   const pct = usage.percent ?? 0;
   const t = tone(pct);
   const auto = cfg.state.autoCompactionEnabled !== false;
@@ -256,24 +255,27 @@ export function ContextPill({
   ];
 
   return (
-    <div ref={ref} className="relative">
+    // Not positioned itself: the card is placed in the toolbar, over this pill
+    // (see menu-anchor.ts), rather than hanging leftwards off its right edge.
+    <div ref={ref}>
       <button
+        ref={pill}
         type="button"
         onClick={() => setOpen(!open)}
-        title={`Context ${pct.toFixed(1)}% full`}
+        title={known ? `Context ${pct.toFixed(1)}% full` : "Context: counted again at the next reply"}
         className={`flex items-center gap-1.5 rounded px-2 py-1 ${
           open ? "bg-raised" : "hover:bg-raised"
         }`}
       >
         <Donut pct={pct} color={t.stroke} />
-        <span className={`tabular-nums ${t.text}`}>{pct.toFixed(0)}%</span>
+        <span className={`tabular-nums ${known ? t.text : "text-fg-subtle"}`}>{known ? `${pct.toFixed(0)}%` : "–"}</span>
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           <div className="flex items-baseline justify-between">
             <p className="text-sm text-fg-muted">Context</p>
-            <p className={`text-sm tabular-nums ${t.text}`}>{pct.toFixed(1)}% full</p>
+            <p className={`text-sm tabular-nums ${known ? t.text : "text-fg-subtle"}`}>{known ? `${pct.toFixed(1)}% full` : "just compacted"}</p>
           </div>
 
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
@@ -283,8 +285,14 @@ export function ContextPill({
             />
           </div>
           <p className="mt-1.5 text-[11px] tabular-nums text-fg-subtle">
-            {usage.tokens.toLocaleString()} of {usage.contextWindow.toLocaleString()} tokens ·{" "}
-            {Math.max(0, usage.contextWindow - usage.tokens).toLocaleString()} left
+            {usage.tokens !== null ? (
+              <>
+                {usage.tokens.toLocaleString()} of {usage.contextWindow.toLocaleString()} tokens ·{" "}
+                {Math.max(0, usage.contextWindow - usage.tokens).toLocaleString()} left
+              </>
+            ) : (
+              <>Counted again with the next reply · {usage.contextWindow.toLocaleString()} tokens in all</>
+            )}
           </p>
 
           <div className="my-3 border-t border-line" />
