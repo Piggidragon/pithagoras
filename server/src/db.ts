@@ -586,15 +586,19 @@ export function eventTime(createdAt: string | undefined): number | undefined {
 
 export function appendEvent(sessionId: string, type: string, payload: unknown): EventRow {
   const encodedPayload = JSON.stringify(payload);
+  // To the millisecond, and the same time live and after a reload: SQLite's
+  // own default keeps whole seconds, and a call timed from it took 0.1s or
+  // 1.0s depending on where the seconds fell.
+  const createdAt = new Date().toISOString();
   const info = getDb()
-    .prepare("INSERT INTO events (session_id, type, payload) VALUES (?, ?, ?)")
-    .run(sessionId, type, encodedPayload);
+    .prepare("INSERT INTO events (session_id, type, payload, created_at) VALUES (?, ?, ?, ?)")
+    .run(sessionId, type, encodedPayload, createdAt);
   return {
     seq: Number(info.lastInsertRowid),
     session_id: sessionId,
     type,
     payload: encodedPayload,
-    created_at: new Date().toISOString(),
+    created_at: createdAt,
   };
 }
 
@@ -849,13 +853,14 @@ export function eventsSince(sessionId: string, since = 0, limit = 5000): EventRo
  * that owned it died with the previous server. Mark them interrupted so the UI
  * can offer a resume instead of showing a spinner forever.
  */
-export function markOrphanedSessionsInterrupted(): number {
-  const info = getDb()
+/** The ids of the sessions it marked. */
+export function markOrphanedSessionsInterrupted(): string[] {
+  const rows = getDb()
     .prepare(
-      "UPDATE sessions SET status = 'interrupted', updated_at = datetime('now') WHERE status = 'running'"
+      "UPDATE sessions SET status = 'interrupted', updated_at = datetime('now') WHERE status = 'running' RETURNING id"
     )
-    .run();
-  return info.changes;
+    .all() as { id: string }[];
+  return rows.map((r) => r.id);
 }
 
 // --- global settings ---

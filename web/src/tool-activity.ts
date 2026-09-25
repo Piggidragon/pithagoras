@@ -47,27 +47,27 @@ const hostOf = (url: string) => {
 export const SHELL_TOOL = /^(bash|shell|terminal|exec_command)$/i;
 
 const nameOf = (p: any) => String(p?.toolName ?? p?.name ?? "tool");
-const inputOf = (p: any): Record<string, any> => {
-  const input = p?.input ?? p?.args ?? p?.parameters;
-  return input && typeof input === "object" ? input : {};
-};
+const argsOf = (p: any): unknown => p?.input ?? p?.args ?? p?.parameters;
 
-/** The call as the agent made it, unwrapped from the MCP adapter's single `mcp` tool when it came through that. */
-function unwrap(p: any): { name: string; input: Record<string, any> } {
-  const name = nameOf(p), input = inputOf(p);
-  if (name === "mcp" && typeof input.tool === "string") return { name: input.tool, input: input.args && typeof input.args === "object" ? input.args : {} };
+/**
+ * The call as the agent made it. The MCP adapter puts every server's tools
+ * behind one `mcp` tool, so a web search and a database query would both read
+ * "mcp": the tool it was asked to call, and what it was asked to call it with,
+ * are what say what happened.
+ */
+export function unwrapCall(name: string, args: unknown): { name: string; input: Record<string, any> } {
+  const input = args && typeof args === "object" ? (args as Record<string, any>) : {};
+  if (name === "mcp" && typeof input.tool === "string" && input.tool) {
+    return { name: input.tool, input: input.args && typeof input.args === "object" ? input.args : {} };
+  }
   return { name, input };
 }
 
-/**
- * The name to show for a call. The MCP adapter puts every server's tools
- * behind one `mcp` tool, so a web search and a database query would both read
- * "mcp": the tool it was asked to call is the one that says what happened.
- */
-export function toolName(name: string, args: unknown): string {
-  const input = args && typeof args === "object" ? (args as Record<string, any>) : {};
-  return name === "mcp" && typeof input.tool === "string" && input.tool ? input.tool : name;
-}
+/** A payload's call, unwrapped: see unwrapCall. */
+export const unwrap = (p: any) => unwrapCall(nameOf(p), argsOf(p));
+
+/** The name to show for a call. */
+export const toolName = (name: string, args: unknown): string => unwrapCall(name, args).name;
 
 function browser(action: string, input: Record<string, any>): ToolCall {
   const url = text(input.url);

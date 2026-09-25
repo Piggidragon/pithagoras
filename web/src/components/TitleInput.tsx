@@ -25,18 +25,22 @@ export function TitleInput({
   // Enter commits and then the field unmounts, and unmounting a focused input
   // fires blur — which would commit a second time. Whichever comes first wins.
   const finished = useRef(false);
+  // A title made from the first message ends in "…" where it was cut. That is
+  // not part of the name: the field starts without it, and handing it back
+  // untouched still counts as no change.
+  const start = value.replace(/\s*…$/, "");
   const finish = (next: string | null) => {
     if (finished.current) return;
     finished.current = true;
     const trimmed = next?.trim();
-    if (trimmed && trimmed !== value) onCommit(trimmed);
+    if (trimmed && trimmed !== value && trimmed !== start) onCommit(trimmed);
     else onCancel();
   };
 
   return (
     <input
       autoFocus
-      defaultValue={value}
+      defaultValue={start}
       aria-label={label}
       maxLength={120}
       onFocus={(e) => e.currentTarget.select()}
