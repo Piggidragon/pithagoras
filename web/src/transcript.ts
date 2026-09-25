@@ -374,6 +374,8 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
 
       // Output from a builtin like /session or /compact — pi never saw it.
       case "portal_notice":
+        // A command's own failure: its line says it, with the reason.
+        if (p.error && typeof p.of === "number" && items.some((x) => x.kind === "command" && x.seq === p.of)) break;
         items.push({
           kind: "notice",
           id: `n${ev.seq}`,

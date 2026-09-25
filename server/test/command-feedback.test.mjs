@@ -81,7 +81,8 @@ test("a terminal-only view, a failure and a message for people are each said", a
     text: "/bg-tasks opens a view made for pi's terminal, which the browser cannot show.", warning: true, from: "extension",
   });
   const broken = await send("broken", "/broken");
-  assert.deepEqual(broken.find((r) => r.type === "portal_notice").payload, { text: "/broken failed: boom", error: true, from: "extension" });
+  const of = eventsSince("broken").find((r) => r.type === "portal_command").seq;
+  assert.deepEqual(broken.find((r) => r.type === "portal_notice").payload, { text: "/broken failed: boom", error: true, from: "extension", of }, "kept for a channel, marked as the command's");
   // pi answers a command that threw as handled; its line says it failed all the same.
   assert.equal(broken.find((r) => r.type === "portal_command_end").payload.error, "boom");
   const report = await send("report", "/report");

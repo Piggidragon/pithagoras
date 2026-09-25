@@ -32,6 +32,7 @@ test("each command sent is a line in the chat that says how it went", () => {
     ev("portal_command", { text: "/skill:x" }),
     ev("portal_command_end", { of: 6, outcome: "started" }),
     ev("portal_command", { text: "/broken" }),
+    ev("portal_notice", { text: "/broken failed: boom", error: true, from: "extension", of: 8 }),
     ev("portal_command_end", { of: 8, error: "boom" }),
     ev("message_end", { message: { role: "custom", customType: "r", content: [{ type: "text", text: "All green" }], display: true } }),
     ev("message_end", { message: { role: "custom", customType: "hidden", content: "for the model", display: false } }),

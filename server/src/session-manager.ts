@@ -851,16 +851,21 @@ class SessionManager extends EventEmitter {
       ) {
         for (const c of this.commandsInHand.get(sessionId) ?? []) c.said++;
       }
-      // A command that threw: pi answers it as handled and says so here.
+      // An extension that failed — its command, or a handler of its — says so
+      // in the chat. pi's TUI prints it; here it went nowhere. A command that
+      // threw is answered as handled, and this is where it says otherwise: the
+      // error goes on its line. The notice is kept, marked as that command's,
+      // for whoever asked through a channel, whose answer it is.
       if (msg.type === "extension_error") {
         const threw = /^command:(.+)$/.exec(String(msg.extensionPath ?? ""))?.[1];
         const command = threw ? this.commandsInHand.get(sessionId)?.find((c) => c.name === threw && !c.error) : undefined;
         if (command) command.error = String(msg.error ?? "it threw");
-      }
-      // An extension that failed — its command, or a handler of its — says so
-      // in the chat. pi's TUI prints it; here it went nowhere.
-      if (msg.type === "extension_error") {
-        this.record(sessionId, "portal_notice", { text: extensionFailure(msg.extensionPath, msg.error), error: true, from: "extension" });
+        this.record(sessionId, "portal_notice", {
+          text: extensionFailure(msg.extensionPath, msg.error),
+          error: true,
+          from: "extension",
+          ...(command ? { of: command.seq } : {}),
+        });
       }
       // A view drawn for pi's terminal: nothing in a browser can draw it.
       // Said, rather than the command seeming to do nothing.
