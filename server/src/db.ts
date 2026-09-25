@@ -4,6 +4,7 @@ import { browserTool, toolEnabled } from "./tool-policy.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { agentHome } from "./agent-home.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -408,6 +409,16 @@ function migrate(d: Database.Database): void {
   if (routineCols.length && !routineCols.includes("guard")) {
     d.exec("ALTER TABLE routines ADD COLUMN guard INTEGER NOT NULL DEFAULT 1");
   }
+  // Where a routine's runs happen: NULL for Home, else a project's directory.
+  if (routineCols.length && !routineCols.includes("workspace")) {
+    d.exec("ALTER TABLE routines ADD COLUMN workspace TEXT");
+    // Until now every run was in Home, so every routine session is a Home one.
+    // A routine finds its session by place from here on, so one made under an
+    // earlier AGENT_HOME is moved to where Home is now rather than lost.
+    // Home is asked for only when there is one to move: a new database has none.
+    const runs = d.prepare("SELECT count(*) AS n FROM sessions WHERE kind = 'routine'").get() as { n: number };
+    if (runs.n) d.prepare("UPDATE sessions SET workspace = ? WHERE kind = 'routine'").run(agentHome());
+  }
   if (routineCols.length && !routineCols.includes("browser")) {
     d.exec("ALTER TABLE routines ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
   }
@@ -498,11 +509,14 @@ export function findChannelSession(key: string): SessionRow | undefined {
     | undefined;
 }
 
-/** The session a routine owns, if it has run before. */
-export function findRoutineSession(slug: string): SessionRow | undefined {
+/**
+ * The session a routine owns in `workspace`, if it has run there before. One
+ * per place: moved to a project and back, it picks up its Home history again.
+ */
+export function findRoutineSession(slug: string, workspace: string): SessionRow | undefined {
   return getDb()
-    .prepare("SELECT * FROM sessions WHERE routine_slug = ? AND kind = 'routine' ORDER BY created_at ASC")
-    .get(slug) as SessionRow | undefined;
+    .prepare("SELECT * FROM sessions WHERE routine_slug = ? AND kind = 'routine' AND workspace = ? ORDER BY created_at ASC")
+    .get(slug, workspace) as SessionRow | undefined;
 }
 
 export function listRoutineSessions(slug?: string): SessionRow[] {

@@ -1,6 +1,6 @@
 import { bindHost, loginThrottle, portalSecurityHeaders } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import path from "node:path";
@@ -16,9 +16,11 @@ import {
   replayStart,
   getSession,
   listAgentSessions,
+  listRoutineSessions,
   listSessions,
   updateSession,
 } from "./db.js";
+import { checkWorkspace, isWithin, workspaceRoot } from "./workspaces.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import {
   agentFileStatus,
@@ -34,7 +36,7 @@ import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth, signOut
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
-import { routinesRouter } from "./api/routines.js";
+import { routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
@@ -88,10 +90,7 @@ import {
   setSettings,
 } from "./db.js";
 
-// WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys.
-const WORKSPACE_ROOT = path.resolve(
-  process.env.WORKSPACE_ROOT || process.env.WORKSPACES_DIR || "/workspaces"
-);
+const WORKSPACE_ROOT = workspaceRoot();
 const PORT = Number(process.env.PORT || 4100);
 /**
  * How much of a long conversation a fresh page load replays.
@@ -291,6 +290,20 @@ const projectFailure = (res: express.Response, e: unknown) => {
 const chatsIn = (dir: string, all = listSessions()) =>
   all.filter((s) => s.workspace === dir || s.workspace.startsWith(dir + path.sep));
 
+/**
+ * The same, and those that reach the folder through a link too: what deleting
+ * it would take from under them. Each place is looked at once, since many
+ * chats share one, and only this one project's are followed.
+ */
+function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[] {
+  const seen = new Map<string, boolean>();
+  return rows.filter((row) => {
+    let inside = seen.get(row.workspace);
+    if (inside === undefined) seen.set(row.workspace, (inside = isWithin(dir, row.workspace)));
+    return inside;
+  });
+}
+
 /** The projects, each with how many chats it has and when one last moved. */
 app.get("/api/projects", (_req, res) => {
   try {
@@ -328,7 +341,13 @@ app.post("/api/projects", (req, res) => {
 app.get("/api/projects/:name", (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
-    res.json({ ...project, sessions: chatsIn(project.path).length, ...describeProject(WORKSPACE_ROOT, project.name) });
+    res.json({
+      ...project,
+      sessions: workingIn(project.path, listSessions()).length,
+      // The ones a delete would switch off: one already off is not changed by it.
+      routines: routinesIn(project.path).filter((r) => r.enabled).map((r) => r.name),
+      ...describeProject(WORKSPACE_ROOT, project.name),
+    });
   } catch (e) {
     projectFailure(res, e);
   }
@@ -353,26 +372,57 @@ app.put("/api/projects/:name/instructions", (req, res) => {
   }
 });
 
-/** The project, its chats and its folder. Refused while any chat in it is running. */
+/**
+ * The project, its chats and its folder. Refused while any chat or routine run
+ * in it is working.
+ *
+ * A routine that runs here keeps its sessions, the record of what it did, as
+ * deleting the routine itself does. It is switched off once the folder is gone:
+ * every run would fail there, until it is given another place.
+ */
 app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
-    const chats = chatsIn(project.path);
+    const chats = workingIn(project.path, listSessions());
     if (chats.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
-    // In an order in which a failure leaves nothing half done. Stopping is first
-    // and destroys nothing. The folder is next, the part most likely to fail (a
-    // busy mount, a file that is not ours), and before anything that cannot come
-    // back — the chats' transcripts. Their rows go last, together, so that
-    // either all are removed or none.
-    for (const chat of chats) await sessions.discard(chat.id);
-    deleteProjectFolder(WORKSPACE_ROOT, project.name);
-    getDb().transaction(() => {
-      for (const chat of chats) deleteSession(chat.id);
-    })();
-    for (const chat of chats) sessions.removeFiles(chat.id);
-    res.json({ ok: true, sessionsDeleted: chats.length });
+    const routines = routinesIn(project.path);
+    // Only the ones with a process to stop, looked for among those first: a
+    // routine that ran here every hour has a session for each run.
+    const runs = workingIn(project.path, listRoutineSessions().filter((s) => sessions.isLoaded(s.id)));
+    if (routines.some((r) => routineSupervisor.isRunning(r.slug)) || runs.some((s) => sessions.isBusy(s.id))) {
+      return res.status(409).json({ error: "A routine is running in this project. Wait for it to finish, or stop it." });
+    }
+    // Held with nothing awaited since the check: from here no run of theirs can
+    // start, by schedule or by hand, and have the folder removed from under it.
+    const release = routineSupervisor.hold(routines.map((r) => r.slug));
+    try {
+      // In an order in which a failure leaves nothing half done. Stopping is
+      // first and destroys nothing. The folder is next, the part most likely to
+      // fail (a busy mount, a file that is not ours), and before anything that
+      // cannot come back — the chats' transcripts — and before the routines are
+      // switched off, which a project that stays would not want. The chats' rows
+      // go last, together, so that either all are removed or none.
+      for (const run of runs) await sessions.discard(run.id);
+      for (const chat of chats) await sessions.discard(chat.id);
+      // A routine can have been given this place while those were stopped. It
+      // was not held, so it is looked for again, with nothing awaited from here
+      // until the folder is gone.
+      const late = routinesIn(project.path).filter((r) => !routines.some((known) => known.id === r.id));
+      if (late.some((r) => routineSupervisor.isRunning(r.slug))) {
+        return res.status(409).json({ error: "A routine started running in this project meanwhile. Wait for it to finish, or stop it." });
+      }
+      deleteProjectFolder(WORKSPACE_ROOT, project.name);
+      const switchedOff = switchOffRoutines([...routines, ...late]);
+      getDb().transaction(() => {
+        for (const chat of chats) deleteSession(chat.id);
+      })();
+      for (const chat of chats) sessions.removeFiles(chat.id);
+      res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff });
+    } finally {
+      release();
+    }
   } catch (e) {
     projectFailure(res, e);
   }
@@ -498,24 +548,11 @@ app.post("/api/sessions", (req, res) => {
     return res.status(400).json({ error: "workspace must be a path" });
   }
   // Without one, a chat starts in Home: the agent's own directory, where its
-  // SOUL.md, PrimaryUser.md and MEMORY.md are.
-  const home = agentHome();
-  const resolved = workspace === undefined ? home : path.resolve(workspace);
-  // Keep pi inside the mounted workspace area — no escaping to the rest of the
-  // FS. Home is the one place outside it a chat may start.
-  if (resolved !== home && resolved !== WORKSPACE_ROOT && !resolved.startsWith(WORKSPACE_ROOT + path.sep)) {
-    return res.status(400).json({ error: "workspace must be inside the workspace root" });
-  }
-  if (!existsSync(resolved)) return res.status(400).json({ error: "workspace does not exist" });
-  // The check above is on the text of the path, and a link inside the root
-  // passes it while leading anywhere. Where it really points must be inside too.
-  if (resolved !== home) {
-    const real = realpathSync(resolved);
-    const realRoot = realpathSync(WORKSPACE_ROOT);
-    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
-      return res.status(400).json({ error: "workspace must be inside the workspace root" });
-    }
-  }
+  // SOUL.md, PrimaryUser.md and MEMORY.md are. Home is the one place outside
+  // the workspace root a chat may start.
+  const where = workspace === undefined ? { path: agentHome() } : checkWorkspace(workspace);
+  if ("error" in where) return res.status(400).json({ error: where.error });
+  const resolved = where.path;
 
   const id = nanoid(12);
   createSession({
