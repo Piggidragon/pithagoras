@@ -1,5 +1,6 @@
 import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
+import { fillFrom } from "./editor-fills";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { api, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
@@ -242,6 +243,7 @@ function Shell({
         const last = [...batch].reverse().find((e) => e.type === "portal_status");
         if (last) applyStatus(last);
         batch.forEach(applyDialog);
+        for (const ev of batch) fillFrom(sessionId, ev);
       };
       es.onmessage = (m) => {
         const ev: PortalEvent = JSON.parse(m.data);
@@ -269,6 +271,7 @@ function Shell({
         setEvents((prev) => appendLiveEvent(prev, ev));
         applyStatus(ev);
         applyDialog(ev);
+        fillFrom(sessionId, ev);
       };
       es.addEventListener("caught-up", () => {
         flush();

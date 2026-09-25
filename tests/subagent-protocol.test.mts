@@ -1,0 +1,51 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {bridgeSubagents} from '../server/src/subagent-protocol.ts';
+const bus=()=>{const h=new Map<string,((d:unknown)=>void)[]>();return{emit:(c:string,d:unknown)=>h.get(c)?.forEach(f=>f(d)),on:(c:string,f:(d:unknown)=>void)=>{h.set(c,[...(h.get(c)??[]),f]);return()=>h.set(c,(h.get(c)??[]).filter(x=>x!==f));}};};
+test('a subagent an extension announces reaches the portal as session events',()=>{
+ const b=bus();const out:any[]=[];const off=bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:event',{id:'x',event:{type:'agent_start'}});
+ assert.equal(out.length,0,'nothing about a subagent that was never started');
+ b.emit('subagent:v1:start',{id:'r1',label:'Research',input:true});
+ b.emit('subagent:v1:event',{id:'r1',event:{type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'Hi',partial:{huge:true}}}});
+ b.emit('subagent:v1:event',{id:'r1',event:{type:'tool_execution_end',toolCallId:'t',toolName:'web_search',result:{content:[{type:'text',text:'found'},{type:'image',data:'…'}]}}});
+ b.emit('subagent:v1:event',{id:'r1',event:{type:'something_else'}});
+ b.emit('subagent:v1:end',{id:'r1',status:'bogus'});
+ assert.deepEqual(out.map(e=>[e.type,e.op]),[['portal_subagent','start'],['portal_subagent_live','event'],['portal_subagent','event'],['portal_subagent','end']]);
+ assert.deepEqual(out[0],{type:'portal_subagent',op:'start',id:'r1',label:'Research',input:true,stop:false});
+ assert.deepEqual(out[1].event,{type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'Hi'}});
+ assert.deepEqual(out[2].event.result,{content:[{type:'text',text:'found'}]});
+ assert.equal(out[3].status,'done');
+ off();b.emit('subagent:v1:start',{id:'r2'});assert.equal(out.length,4);
+});
+test('a subagent\'s finished message says how long it thought',()=>{
+ const b=bus();const out:any[]=[];bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'r',label:'R'});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_update',assistantMessageEvent:{type:'thinking_delta',delta:'Hm'}}});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_end',message:{role:'assistant',content:[{type:'thinking',thinking:'Hm'}]}}});
+ const end=out.find(e=>e.event?.type==='message_end').event;
+ assert.equal(typeof end.thinkingSince,'number');
+ assert.ok(end.thinkingUntil>=end.thinkingSince);
+});
+test('only what is drawn is stored: a tool result again as a message is left out, what says what the child is doing now is live',()=>{
+ const b=bus();const out:any[]=[];const bridge=bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'r',label:'R',input:true});
+ for(const type of ['turn_start','message_start','turn_end'])b.emit('subagent:v1:event',{id:'r',event:{type,message:{role:'assistant',content:[]}}});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_end',message:{role:'toolResult',toolCallId:'t',content:[{type:'text',text:'x'.repeat(60_000)},{type:'image',data:'A'}]}}});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'tool_execution_end',toolCallId:'t',toolName:'read',result:{content:[{type:'text',text:'x'.repeat(60_000)}]}}});
+ assert.deepEqual(out.slice(1).map(e=>[e.type,e.event.type]),[['portal_subagent_live','turn_start'],['portal_subagent_live','message_start'],['portal_subagent_live','turn_end'],['portal_subagent','tool_execution_end']]);
+ // Messages and stops go only to one running here that takes them.
+ assert.equal(bridge.takes('r','input'),true);
+ assert.equal(bridge.takes('r','stop'),false,'it did not say it could be stopped');
+ assert.equal(bridge.takes('gone','input'),false);
+ b.emit('subagent:v1:end',{id:'r',status:'done'});
+ assert.equal(bridge.takes('r','input'),false,'not once it has ended');
+});
+test('every event of a subagent says which tool call runs it',()=>{
+ const b=bus();const out:any[]=[];bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'r',label:'R',toolCallId:'call-7'});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_end',message:{role:'assistant',content:[]}}});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'x'}}});
+ b.emit('subagent:v1:end',{id:'r',status:'done'});
+ assert.deepEqual(out.map(e=>e.toolCallId),['call-7','call-7','call-7','call-7']);
+});

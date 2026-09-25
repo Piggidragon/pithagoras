@@ -4,6 +4,8 @@ import { readFileSync, readlinkSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import express, { type Router } from "express";
 import { getSession } from "../db.js";
+import { MARKER } from "../background.js";
+import { signalSession, statOf } from "../proc-stat.js";
 
 /**
  * A shell, in the portal.
@@ -111,16 +113,6 @@ function shellOf(term: Term): number | undefined {
   }
 }
 
-/** Fields of /proc/<pid>/stat after the command name, which may hold spaces. */
-const fieldsOf = (stat: string): string[] => stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-
-function statOf(pid: string | number): string[] | undefined {
-  try {
-    return fieldsOf(readFileSync(`/proc/${pid}/stat`, "utf8"));
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * The session the shell leads — the id stays after the shell itself is gone.
@@ -130,43 +122,6 @@ function sessionOf(shell: number): number | undefined {
   const session = Number(statOf(shell)?.[3]);
   return session > 0 && session !== Number(statOf(process.pid)?.[3]) ? session : undefined;
 }
-
-/**
- * Signals every process in a session, and says which they were.
- *
- * A walk of /proc — every process on the host — so it is read without holding
- * up the event loop: a busy host has thousands, and a closing panel is no
- * reason for every open stream to stall. Read a batch at a time rather than
- * one after another, which on such a host kept the hangup waiting on
- * thousands of reads in turn.
- */
-async function signalSession(session: number, signal: NodeJS.Signals): Promise<number[]> {
-  let pids: string[];
-  try {
-    pids = (await readdir("/proc")).filter((name) => /^\d+$/.test(name));
-  } catch {
-    return [];
-  }
-  const members: number[] = [];
-  for (let i = 0; i < pids.length; i += STAT_BATCH) {
-    const stats = await Promise.all(
-      pids.slice(i, i + STAT_BATCH).map((pid) => readFile(`/proc/${pid}/stat`, "utf8").then((stat) => ({ pid, stat }), () => undefined)),
-    );
-    for (const found of stats) {
-      if (!found || Number(fieldsOf(found.stat)[3]) !== session) continue;
-      try {
-        process.kill(Number(found.pid), signal);
-        members.push(Number(found.pid));
-      } catch {
-        // Gone already, or not ours to signal.
-      }
-    }
-  }
-  return members;
-}
-
-/** How many /proc entries signalSession reads at once: well under any open-file limit. */
-const STAT_BATCH = 256;
 
 function watchUnattended(term: Term): void {
   clearTimeout(term.reaper);
@@ -191,13 +146,21 @@ function ptyOf(term: Term): string | undefined {
   }
 }
 
+/** The portal's environment less MARKER, which everything else it starts carries. */
+export function personsEnv(): NodeJS.ProcessEnv {
+  const { [MARKER.split("=")[0]]: _mark, ...env } = process.env;
+  return env;
+}
+
 function create(cwd: string): Term {
   const id = randomUUID().slice(0, 8);
   // -q quiet, -f flush on every write so output is not held back, -e return the
   // command's exit status, and /dev/null because we want the pty, not a log.
   const proc = spawn("script", ["-qfec", process.env.SHELL || "bash -il", "/dev/null"], {
     cwd,
-    env: { ...process.env, TERM: "xterm-256color" },
+    // Without the agent's mark: what the person starts here — tmux, a server
+    // under setsid — is theirs, and not a job for the chat to list and stop.
+    env: { ...personsEnv(), TERM: "xterm-256color" },
     stdio: ["pipe", "pipe", "pipe"],
   });
 

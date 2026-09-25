@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTranscript } from '../web/src/transcript.ts';
+import { subagents } from '../web/src/subagents.ts';
 import { shellOutcome } from '../web/src/components/ChatActivity.tsx';
 
 const ev = (seq: number, type: string, payload: any = {}) => ({ seq, at: seq * 1000, type, payload });
@@ -42,6 +43,26 @@ test('a restart records nothing, so the caller says the run is over', () => {
 test('an interrupted shell command says so rather than "failed"', () => {
   assert.deepEqual(shellOutcome('error', '', true), { label: 'interrupted', tone: 'warn' });
   assert.deepEqual(shellOutcome('error', ''), { label: 'failed', tone: 'error' });
+});
+
+test('a protocol subagent whose end never came stops with its tool call, or with its process', () => {
+  const events = [
+    start(1, 'call', 'delegate'),
+    ev(2, 'portal_subagent', { op: 'start', id: 'a', label: 'Helper', toolCallId: 'call', input: true, stop: true }),
+    ev(3, 'portal_subagent', { op: 'start', id: 'b', label: 'Loose', input: true }),
+  ] as any;
+  const running = subagents(events, buildTranscript(events));
+  assert.deepEqual(running.filter((s) => s.kind === 'protocol').map((s) => s.status), ['running', 'running']);
+
+  const ended = [...events, ev(4, 'tool_execution_end', { toolCallId: 'call', toolName: 'delegate', result: { content: [] } })];
+  const afterTool = subagents(ended, buildTranscript(ended));
+  const a = afterTool.find((s) => s.id === 'a')!;
+  assert.equal(a.status, 'stopped');
+  assert.equal(a.input, false);
+  assert.equal(afterTool.find((s) => s.id === 'b')!.status, 'running', 'not tied to a tool: it may outlive the call');
+
+  const gone = subagents(events, buildTranscript(events, { ended: true }), true);
+  assert.deepEqual(gone.filter((s) => s.kind === 'protocol').map((s) => s.status), ['stopped', 'stopped']);
 });
 
 test('a tool is pictured from the words in its name, whichever extension it comes from', async () => {

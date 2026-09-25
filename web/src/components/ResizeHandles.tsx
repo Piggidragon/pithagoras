@@ -1,9 +1,7 @@
 import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
+import { GAP, MIN, dockBox, dockSize, type Box } from "../voice-windows";
 
 export type Edge = "e" | "w" | "s" | "se" | "sw";
-
-/** Smaller than this a window is no use: a header and a few lines. */
-const MIN = { width: 280, height: 180 };
 
 /**
  * Where a window sits is decided by the voice stage's layout — centred, at
@@ -18,6 +16,10 @@ const MIN = { width: 280, height: 180 };
  */
 export type ResizeMode = "pin" | "anchored";
 
+/**
+ * Sized by hand, and how: `data-sized` holds the ResizeMode — whether the
+ * window was pinned where it is or only given a size.
+ */
 export function clearSize(el: HTMLElement | null) {
   if (!el?.dataset.sized) return;
   for (const p of ["left", "top", "right", "bottom", "width", "height", "transform", "maxWidth", "maxHeight"] as const) el.style[p] = "";
@@ -26,32 +28,137 @@ export function clearSize(el: HTMLElement | null) {
 
 const ENDS = ["pointerup", "pointercancel", "lostpointercapture"] as const;
 
+/** Every window a voice stage or a chat can have open, the canvas included. */
+export const WINDOWS = ".voice-browser-window.is-open, .voice-terminal-window.is-open, .voice-files-window.is-open, .session-canvases.is-open .canvas-panel";
+/** Kept clear at the edges of the area a window lives in. */
+const EDGE = 8;
+
+/**
+ * The windows open around `root` — a chat's workspace, which holds the voice
+ * stage's windows and the canvas — that are there to be seen: not one hidden
+ * under a maximized browser. What the orb makes room for and what a window
+ * being resized stops at are the same windows.
+ */
+export function openWindows(root: ParentNode): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(WINDOWS)].filter(w => {
+    const o = w.getBoundingClientRect();
+    return o.width > 0 && o.height > 0 && getComputedStyle(w).visibility !== "hidden";
+  });
+}
+
+/** The chat's workspace: the voice stage's windows and the canvas are all in it. */
+export const workspaceOf = (el: Element) => el.closest<HTMLElement>(".session-workspace");
+/** The chat's voice stage, for a window in it or for the canvas, which hangs beside it. */
+export const stageOf = (el: Element) => el.closest<HTMLElement>(".voice-stage") ?? workspaceOf(el)?.querySelector<HTMLElement>(".voice-stage") ?? null;
+
+/**
+ * How far a window's edges may go, in the page's coordinates: inside the area
+ * it belongs to — the voice stage, or the chat's workspace for the canvas,
+ * which hangs over it and would otherwise reach under the sidebar.
+ */
+export function areaFor(el: HTMLElement): Box {
+  const area = (el.closest(".voice-stage") ?? workspaceOf(el))?.getBoundingClientRect() ?? { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+  return { left: area.left + EDGE, top: area.top, right: area.right - EDGE, bottom: area.bottom - EDGE };
+}
+
+/**
+ * What a window being resized must stay clear of (see `clear`): the other
+ * windows, the stage's buttons, and the voice dock while the orb is in it.
+ * The orb standing free is not one: it moves aside for a window rather than
+ * holding one back (see the effect in VoiceStage that places it).
+ *
+ * Measured once, as the drag begins — nothing else moves while it goes on —
+ * but for the dock: the orb can go back to it during the drag, so whether it
+ * is there is asked at every move, of the stage's `data-orb`, which needs no
+ * layout. Where it is is where the stage's styles put it, not where the orb
+ * is on its way there.
+ */
+function obstaclesFor(el: HTMLElement): () => Box[] {
+  const fixed: Box[] = openWindows(workspaceOf(el) ?? document).filter(other => other !== el && !other.contains(el) && !el.contains(other)).map(o => o.getBoundingClientRect());
+  const stage = stageOf(el);
+  const buttons = stage?.querySelector<HTMLElement>(".voice-utilities")?.getBoundingClientRect();
+  if (buttons?.width) fixed.push(buttons);
+  const dock = stage && dockBox(stage.getBoundingClientRect(), dockSize(stage));
+  return () => (dock && stage.dataset.orb === "dock" ? [...fixed, dock] : fixed);
+}
+
+/**
+ * The window a drag would make, kept clear of every obstacle.
+ *
+ * Only the edges being dragged give way, and only toward an obstacle they
+ * were clear of when the drag began: one to the right stops the right edge,
+ * one to the left the left edge, one below the bottom. One off at a corner
+ * could stop either: the one that has to give up less does, so the window
+ * slides along the other's edge instead of catching on its corner. No edge is
+ * pushed back past where it started.
+ *
+ * GAP is kept on each side — except where the window already stood closer
+ * when the drag began, which is as close as it is kept: a window that ends
+ * a few pixels above the dock can still be widened alongside it, over free
+ * space, where it would never meet it.
+ */
+export function clear(from: Box, want: Box, edge: Edge, others: Box[]): Box {
+  const out = { ...want };
+  // What was kept between the two on one axis: GAP, or less if it stood closer; GAP where they overlap on it.
+  const kept = (gap: number) => (gap < 0 ? GAP : Math.min(GAP, gap));
+  for (const o of others) {
+    const x = kept(Math.max(o.left - from.right, from.left - o.right)), y = kept(Math.max(o.top - from.bottom, from.top - o.bottom));
+    if (!(out.left < o.right + x && out.right > o.left - x && out.top < o.bottom + y && out.bottom > o.top - y)) continue;
+    const ways: { side: "right" | "left" | "bottom"; to: number; cost: number }[] = [];
+    if (edge.includes("e") && o.left >= from.right - 1) ways.push({ side: "right", to: Math.min(out.right, Math.max(from.right, o.left - GAP)), cost: out.right - (o.left - GAP) });
+    if (edge.includes("w") && o.right <= from.left + 1) ways.push({ side: "left", to: Math.max(out.left, Math.min(from.left, o.right + GAP)), cost: o.right + GAP - out.left });
+    if (edge.includes("s") && o.top >= from.bottom - 1) ways.push({ side: "bottom", to: Math.min(out.bottom, Math.max(from.bottom, o.top - GAP)), cost: out.bottom - (o.top - GAP) });
+    const way = ways.sort((a, b) => a.cost - b.cost)[0];
+    if (way) out[way.side] = way.to;
+  }
+  return out;
+}
+
+/** Between the smallest a window may be and what there is room for — never more than the room. */
+const fit = (want: number, least: number, room: number) => Math.min(room, Math.max(Math.min(least, room), want));
+
 function begin(e: ReactPointerEvent, el: HTMLElement, edge: Edge, mode: ResizeMode) {
   if (e.button !== 0) return;
   e.preventDefault(); e.stopPropagation();
   const handle = e.currentTarget as HTMLElement;
   handle.setPointerCapture(e.pointerId);
   const box = el.getBoundingClientRect();
+  const area = areaFor(el), obstacles = obstaclesFor(el);
   const parent = (el.offsetParent as HTMLElement | null)?.getBoundingClientRect() ?? { left: 0, top: 0, width: innerWidth, height: innerHeight, right: innerWidth, bottom: innerHeight };
   const start = { x: e.clientX, y: e.clientY, left: box.left - parent.left, top: box.top - parent.top, width: box.width, height: box.height };
-  if (mode === "pin") {
-    Object.assign(el.style, { left: `${start.left}px`, top: `${start.top}px`, width: `${start.width}px`, height: `${start.height}px`, right: "auto", bottom: "auto", transform: "none" });
-  }
-  el.style.maxWidth = "none"; el.style.maxHeight = "none";
-  el.dataset.sized = "1";
-  // No sliding into place while dragging, and no frame under the pointer taking the moves.
-  el.style.transition = "none";
-  document.body.classList.add("is-resizing");
+  // Heard by whatever arranges itself around the windows — the voice orb.
+  const moved = () => el.dispatchEvent(new Event("panel-resize", { bubbles: true }));
+  // Taken out of the layout only once the pointer moves: a press on an edge
+  // that goes nowhere leaves the window, and the orb, as they were.
+  let dragging = false;
+  const take = () => {
+    dragging = true;
+    if (mode === "pin") {
+      Object.assign(el.style, { left: `${start.left}px`, top: `${start.top}px`, width: `${start.width}px`, height: `${start.height}px`, right: "auto", bottom: "auto", transform: "none" });
+    }
+    el.style.maxWidth = "none"; el.style.maxHeight = "none";
+    el.dataset.sized = mode;
+    // No sliding into place while dragging, and no frame under the pointer taking the moves.
+    el.style.transition = "none";
+    document.body.classList.add("is-resizing");
+  };
   const move = (ev: PointerEvent) => {
     const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
-    if (edge.includes("e")) el.style.width = `${Math.max(MIN.width, Math.min(start.width + dx, parent.width - start.left))}px`;
-    if (edge.includes("w")) {
-      // Growing leftwards: the right edge stays where it was.
-      const width = Math.max(MIN.width, Math.min(start.width - dx, mode === "pin" ? start.left + start.width : box.right - 8));
-      el.style.width = `${width}px`;
-      if (mode === "pin") el.style.left = `${start.left + start.width - width}px`;
-    }
-    if (edge.includes("s")) el.style.height = `${Math.max(MIN.height, Math.min(start.height + dy, (mode === "pin" ? parent.height - start.top : innerHeight - box.top) - 8))}px`;
+    if (!dragging && !dx && !dy) return;
+    if (!dragging) take();
+    // Where the pointer takes each edge, within the area — never pulled in
+    // from where it already is — and then clear of what is around it.
+    const want = { ...box.toJSON() as Box };
+    if (edge.includes("e")) want.right = box.left + fit(start.width + dx, MIN.width, Math.max(area.right, box.right) - box.left);
+    if (edge.includes("w")) want.left = box.right - fit(start.width - dx, MIN.width, box.right - Math.min(area.left, box.left));
+    if (edge.includes("s")) want.bottom = box.top + fit(start.height + dy, MIN.height, Math.max(area.bottom, box.bottom) - box.top);
+    const got = clear(box, want, edge, obstacles());
+    const width = Math.max(0, got.right - got.left), height = Math.max(0, got.bottom - got.top);
+    if (edge.includes("e") || edge.includes("w")) el.style.width = `${width}px`;
+    // Growing leftwards: the right edge stays where it was.
+    if (edge.includes("w") && mode === "pin") el.style.left = `${start.left + start.width - width}px`;
+    if (edge.includes("s")) el.style.height = `${height}px`;
+    moved();
   };
   // Over when the pointer is let go — or when the window closes mid-drag and
   // takes the handle with it: then the capture is lost at the document, and
@@ -61,8 +168,10 @@ function begin(e: ReactPointerEvent, el: HTMLElement, edge: Edge, mode: ResizeMo
     if (ev.pointerId !== e.pointerId) return;
     handle.removeEventListener("pointermove", move);
     for (const name of ENDS) window.removeEventListener(name, end, true);
+    if (!dragging) return;
     el.style.transition = "";
     document.body.classList.remove("is-resizing");
+    moved();
   };
   handle.addEventListener("pointermove", move);
   for (const name of ENDS) window.addEventListener(name, end, true);
