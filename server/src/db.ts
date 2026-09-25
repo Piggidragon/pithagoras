@@ -4,6 +4,7 @@ import { browserTool, toolEnabled } from "./tool-policy.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { agentHome } from "./agent-home.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -411,6 +412,12 @@ function migrate(d: Database.Database): void {
   // Where a routine's runs happen: NULL for Home, else a project's directory.
   if (routineCols.length && !routineCols.includes("workspace")) {
     d.exec("ALTER TABLE routines ADD COLUMN workspace TEXT");
+    // Until now every run was in Home, so every routine session is a Home one.
+    // A routine finds its session by place from here on, so one made under an
+    // earlier AGENT_HOME is moved to where Home is now rather than lost.
+    // Home is asked for only when there is one to move: a new database has none.
+    const runs = d.prepare("SELECT count(*) AS n FROM sessions WHERE kind = 'routine'").get() as { n: number };
+    if (runs.n) d.prepare("UPDATE sessions SET workspace = ? WHERE kind = 'routine'").run(agentHome());
   }
   if (routineCols.length && !routineCols.includes("browser")) {
     d.exec("ALTER TABLE routines ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
@@ -505,22 +512,11 @@ export function findChannelSession(key: string): SessionRow | undefined {
 /**
  * The session a routine owns in `workspace`, if it has run there before. One
  * per place: moved to a project and back, it picks up its Home history again.
- *
- * The workspace `root` is given when it looks in Home, the one place outside
- * the root. A session the routine made outside it under an earlier AGENT_HOME
- * is its Home session all the same. It is moved to where Home is now, rather
- * than left behind while the routine starts over.
  */
-export function findRoutineSession(slug: string, workspace: string, root?: string): SessionRow | undefined {
-  const own = getDb()
-    .prepare("SELECT * FROM sessions WHERE routine_slug = ? AND kind = 'routine' ORDER BY created_at ASC")
-    .all(slug) as SessionRow[];
-  const here = own.find((s) => s.workspace === workspace);
-  if (here || root === undefined) return here;
-  const moved = own.find((s) => s.workspace !== root && !s.workspace.startsWith(root + path.sep));
-  if (!moved) return undefined;
-  getDb().prepare("UPDATE sessions SET workspace = ? WHERE id = ?").run(workspace, moved.id);
-  return { ...moved, workspace };
+export function findRoutineSession(slug: string, workspace: string): SessionRow | undefined {
+  return getDb()
+    .prepare("SELECT * FROM sessions WHERE routine_slug = ? AND kind = 'routine' AND workspace = ? ORDER BY created_at ASC")
+    .get(slug, workspace) as SessionRow | undefined;
 }
 
 export function listRoutineSessions(slug?: string): SessionRow[] {

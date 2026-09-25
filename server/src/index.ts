@@ -20,7 +20,7 @@ import {
   listSessions,
   updateSession,
 } from "./db.js";
-import { checkWorkspace, workspaceRoot } from "./workspaces.js";
+import { checkWorkspace, isWithin, workspaceRoot } from "./workspaces.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import {
   agentFileStatus,
@@ -36,7 +36,7 @@ import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth, signOut
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
-import { routinesIn, routinesRouter, switchOffRoutinesIn } from "./api/routines.js";
+import { routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
@@ -361,34 +361,45 @@ app.put("/api/projects/:name/instructions", (req, res) => {
  * in it is working.
  *
  * A routine that runs here keeps its sessions, the record of what it did, as
- * deleting the routine itself does. It is switched off: every run would fail
- * with its folder gone, until it is given another place.
+ * deleting the routine itself does. It is switched off once the folder is gone:
+ * every run would fail there, until it is given another place.
  */
 app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     const chats = chatsIn(project.path);
-    const runs = chatsIn(project.path, listRoutineSessions());
     if (chats.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
-    if (runs.some((s) => sessions.isBusy(s.id))) {
+    const routines = routinesIn(project.path);
+    // Only the ones with a process to stop: a routine that ran here every hour
+    // has a session for each run.
+    const runs = listRoutineSessions().filter((s) => isWithin(project.path, s.workspace) && sessions.isLoaded(s.id));
+    if (routines.some((r) => routineSupervisor.isRunning(r.slug)) || runs.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A routine is running in this project. Wait for it to finish, or stop it." });
     }
-    const routines = switchOffRoutinesIn(project.path);
-    for (const run of runs) await sessions.discard(run.id);
-    // In an order in which a failure leaves nothing half done. Stopping is first
-    // and destroys nothing. The folder is next, the part most likely to fail (a
-    // busy mount, a file that is not ours), and before anything that cannot come
-    // back — the chats' transcripts. Their rows go last, together, so that
-    // either all are removed or none.
-    for (const chat of chats) await sessions.discard(chat.id);
-    deleteProjectFolder(WORKSPACE_ROOT, project.name);
-    getDb().transaction(() => {
-      for (const chat of chats) deleteSession(chat.id);
-    })();
-    for (const chat of chats) sessions.removeFiles(chat.id);
-    res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: routines });
+    // Held with nothing awaited since the check: from here no run of theirs can
+    // start, by schedule or by hand, and have the folder removed from under it.
+    const release = routineSupervisor.hold(routines.map((r) => r.slug));
+    try {
+      // In an order in which a failure leaves nothing half done. Stopping is
+      // first and destroys nothing. The folder is next, the part most likely to
+      // fail (a busy mount, a file that is not ours), and before anything that
+      // cannot come back — the chats' transcripts — and before the routines are
+      // switched off, which a project that stays would not want. The chats' rows
+      // go last, together, so that either all are removed or none.
+      for (const run of runs) await sessions.discard(run.id);
+      for (const chat of chats) await sessions.discard(chat.id);
+      deleteProjectFolder(WORKSPACE_ROOT, project.name);
+      const switchedOff = switchOffRoutines(routines);
+      getDb().transaction(() => {
+        for (const chat of chats) deleteSession(chat.id);
+      })();
+      for (const chat of chats) sessions.removeFiles(chat.id);
+      res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff });
+    } finally {
+      release();
+    }
   } catch (e) {
     projectFailure(res, e);
   }

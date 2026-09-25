@@ -280,6 +280,11 @@ class SessionManager extends EventEmitter {
     return this.live.get(sessionId)?.client.running ?? false;
   }
 
+  /** A pi process is up or starting for it: only then is there anything for discard() to stop. */
+  isLoaded(sessionId: string): boolean {
+    return this.live.has(sessionId) || this.starting.has(sessionId);
+  }
+
   /** Stream updates in memory; persist completed messages and lifecycle metadata. */
   private record(sessionId: string, type: string, payload: unknown): EventRow | undefined {
     if (EPHEMERAL_EVENTS.has(type)) {

@@ -3,6 +3,7 @@ import { test, expect, type Page } from '@playwright/test';
 async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
+  const other = { ...session, id: 's2', title: 'Other chat', workspace: '/w/notes' };
   const routine = {
     id: 'r1', slug: 'build', name: 'Nightly build', enabled: true, schedule: '0 2 * * *', runAt: null, mode: 'repeats', done: false,
     instructions: 'Build it', freshSession: false, guard: true, browser: false, workspace: null, reportChannel: null, reportTarget: null,
@@ -17,7 +18,7 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     if (method !== 'GET') sent.push({ method, path: p, body });
     let reply: unknown = {};
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions: [session], executor: 'host' };
+    else if (p === '/api/sessions') reply = { sessions: [session, other], executor: 'host' };
     else if (p === '/api/sessions/s1' && method === 'PATCH' && opts.renameFails) return route.fulfill({ status: 500, json: { error: 'disk full' } });
     else if (p === '/api/sessions/s1' && method === 'PATCH') { session.title = body.title; reply = session; }
     else if (p === '/api/routines' && method === 'GET') reply = { routines: [routine] };
@@ -116,4 +117,25 @@ test('a folder in a project is shown as a place, not as gone, and the hint does 
   const option = page.getByRole('option', { name: /site\/docs/ });
   await expect(option).toContainText('/w/site/docs');
   await expect(option).not.toContainText('Not there any more');
+});
+
+test('a click on another row overtakes a click on a name that was waiting for a second one', async ({ page }) => {
+  await portal(page);
+  await page.goto('/sessions');
+  await page.getByRole('main').getByText('Old name', { exact: true }).click();
+  await page.getByRole('main').getByText('/w/notes', { exact: true }).click();
+  await expect(page).toHaveURL(/\/s\/s2$/);
+  await page.waitForTimeout(500);
+  await expect(page).toHaveURL(/\/s\/s2$/);
+});
+
+test('ending a rename with a click elsewhere in its row does not open the chat', async ({ page }) => {
+  const sent = await portal(page);
+  await page.goto('/sessions');
+  await page.getByRole('button', { name: 'Rename Old name' }).click();
+  await page.getByLabel('Session name').fill('Kept here');
+  await page.getByRole('main').getByText('/w/site', { exact: true }).click();
+  await expect.poll(() => sent.find((s) => s.method === 'PATCH')?.body).toEqual({ title: 'Kept here' });
+  await page.waitForTimeout(500);
+  expect(page.url()).toMatch(/\/sessions$/);
 });

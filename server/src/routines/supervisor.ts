@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { createSession, findRoutineSession, getDb, type SessionRow } from "../db.js";
 import { agentHome } from "../agent.js";
-import { checkWorkspace, workspaceRoot } from "../workspaces.js";
+import { checkWorkspace } from "../workspaces.js";
 import { sessions, EXECUTOR_KIND } from "../session-manager.js";
 import { isDue, nextRun, parseCron } from "./cron.js";
 import { reportFraming, reportToFor } from "../pi/report-tool.js";
@@ -58,6 +58,8 @@ const TICK_MS = 20_000;
 class RoutineSupervisor {
   /** Routines with a run in flight — a slow one must not stack on itself. */
   private running = new Set<string>();
+  /** Routines that may not start a run: the folder they run in is being deleted. */
+  private held = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
 
   private rows(): RoutineRow[] {
@@ -83,6 +85,18 @@ class RoutineSupervisor {
     }
   }
 
+  /**
+   * Keeps these routines from starting a run, by schedule or by hand, until the
+   * returned release is called: their folder is being deleted, and a run begun
+   * meanwhile would have it removed from under it.
+   */
+  hold(slugs: string[]): () => void {
+    for (const slug of slugs) this.held.add(slug);
+    return () => {
+      for (const slug of slugs) this.held.delete(slug);
+    };
+  }
+
   isRunning(slug: string): boolean {
     return this.running.has(slug);
   }
@@ -90,7 +104,7 @@ class RoutineSupervisor {
   private async tick(): Promise<void> {
     const now = new Date();
     for (const row of this.rows()) {
-      if (!row.enabled || this.running.has(row.slug)) continue;
+      if (!row.enabled || this.running.has(row.slug) || this.held.has(row.slug)) continue;
 
       if (isOneOff(row)) {
         // Deliberately catches up: a one-off whose moment passed while the
@@ -123,6 +137,7 @@ class RoutineSupervisor {
    */
   async run(row: RoutineRow, trigger: "schedule" | "manual"): Promise<RoutineRow> {
     if (this.running.has(row.slug)) throw new Error(`"${row.name}" is already running`);
+    if (this.held.has(row.slug)) throw new Error(`"${row.name}" cannot run while the folder it runs in is being deleted`);
     this.running.add(row.slug);
 
     const started = Date.now();
@@ -177,7 +192,7 @@ class RoutineSupervisor {
       throw new Error(`Its project ${row.workspace} cannot be used (${where.error}). Choose where it runs in the routine.`);
     }
     if (!row.fresh_session) {
-      const existing = findRoutineSession(row.slug, where.path, row.workspace ? undefined : workspaceRoot());
+      const existing = findRoutineSession(row.slug, where.path);
       if (existing) return existing;
     }
 

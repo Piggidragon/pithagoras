@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -14,8 +14,8 @@ mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 const { default: express } = await import("express");
 const { parseCron, nextRun } = await import("../dist/routines/cron.js");
 const { oneOffDone, routineSupervisor } = await import("../dist/routines/supervisor.js");
-const { routinesRouter, switchOffRoutinesIn } = await import("../dist/api/routines.js");
-const { createSession, getDb } = await import("../dist/db.js");
+const { routinesIn, routinesRouter, switchOffRoutines } = await import("../dist/api/routines.js");
+const { getDb } = await import("../dist/db.js");
 const { sessions } = await import("../dist/session-manager.js");
 
 test("cron takes 7 for Sunday, and day and month names", () => {
@@ -144,37 +144,35 @@ test("a routine whose project has gone still saves its other changes, and says t
   });
 });
 
-test("a routine's Home session from an earlier AGENT_HOME is picked up, not started over", async () => {
-  const asked = [];
-  sessions.ask = async (id) => {
-    asked.push(id);
-    return "ok";
-  };
-  await withApi(async (call) => {
-    const made = await call("POST", "/routines", { name: "Moved home", schedule: "@daily", instructions: "x" });
-    createSession({ id: "old-home-run", title: "Moved home", workspace: path.join(home, "old-agent-home"), executor: "host", kind: "routine", routine_slug: made.slug });
-    await call("POST", `/routines/${made.id}/run`);
-    assert.deepEqual(asked, ["old-home-run"]);
-    assert.equal(getDb().prepare("SELECT workspace FROM sessions WHERE id = ?").get("old-home-run").workspace, process.env.AGENT_HOME);
-  });
-});
-
 test("deleting a project switches off the routines that run in it, and leaves their sessions", async () => {
   const project = path.join(process.env.WORKSPACE_ROOT, "doomed");
   mkdirSync(path.join(project, "sub"), { recursive: true });
   mkdirSync(path.join(process.env.WORKSPACE_ROOT, "doomed-too"), { recursive: true });
+  symlinkSync(project, path.join(process.env.WORKSPACE_ROOT, "alias"));
   sessions.ask = async () => "ok";
   await withApi(async (call) => {
     const top = await call("POST", "/routines", { name: "Top", schedule: "@daily", instructions: "x", workspace: "doomed" });
     const below = await call("POST", "/routines", { name: "Below", schedule: "@daily", instructions: "x", workspace: "doomed/sub" });
+    const linked = await call("POST", "/routines", { name: "Linked", schedule: "@daily", instructions: "x", workspace: "alias" });
     const beside = await call("POST", "/routines", { name: "Beside", schedule: "@daily", instructions: "x", workspace: "doomed-too" });
     await call("POST", `/routines/${top.id}/run`);
 
-    assert.deepEqual(switchOffRoutinesIn(project), ["Below", "Top"]);
+    // Found while the folder is there, since a link into it cannot be followed after.
+    const found = routinesIn(project);
+    assert.deepEqual(found.map((r) => r.name), ["Below", "Linked", "Top"], "a link to the project is in it too");
+
+    // While the folder goes, none of them may start a run, even by hand.
+    const release = routineSupervisor.hold(found.map((r) => r.slug));
+    assert.match((await call("POST", `/routines/${top.id}/run`)).error, /being deleted/);
+    release();
+
+    rmSync(project, { recursive: true });
+    assert.deepEqual(switchOffRoutines(found), ["Below", "Linked", "Top"]);
     const all = (await call("GET", "/routines")).routines;
     const on = (id) => all.find((r) => r.id === id).enabled;
     assert.equal(on(top.id), false);
     assert.equal(on(below.id), false);
+    assert.equal(on(linked.id), false);
     assert.equal(on(beside.id), true, "a folder that only starts with the same name is another project");
     assert.equal((await call("GET", `/routines/${top.id}/sessions`)).sessions.length, 1);
   });

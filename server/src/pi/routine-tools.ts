@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import { nanoid } from "nanoid";
 import { getDb, type SessionRow } from "../db.js";
 import { unscopeKey } from "../agent.js";
-import { checkWorkspace, routinePlace } from "../workspaces.js";
+import { placeProblem, routinePlace } from "../workspaces.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
@@ -62,10 +62,14 @@ const describe = (r: RoutineRow) => ({
   lastStatus: r.last_status,
   instructions: r.instructions,
   runsIn: r.workspace ?? "Home",
-  ...(r.workspace && "error" in checkWorkspace(r.workspace)
-    ? { problem: `${r.workspace} cannot be used, so its runs fail until it is given another place` }
-    : {}),
+  ...problem(r.workspace),
 });
+
+/** Said only when there is something wrong with where it runs, as the Routines page says it. */
+function problem(workspace: string | null): { problem?: string } {
+  const why = placeProblem(workspace);
+  return why ? { problem: `${workspace}: ${why}. Its runs fail until it is given another place.` } : {};
+}
 
 /** A project to run in, by name or path, or Home when there is none: read as the HTTP API reads it. */
 function place(raw: unknown): { workspace: string | null } | { error: string } {

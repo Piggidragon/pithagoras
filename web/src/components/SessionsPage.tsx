@@ -41,6 +41,12 @@ export function SessionsPage({
   /** The chat a click on its name opens, unless a second click makes it a rename. */
   const opening = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(opening.current), []);
+  /**
+   * The press that ends a rename, by leaving the field for the rest of its row.
+   * The field closes on the press, before the click, so by the click the row
+   * no longer looks as if it were being renamed; it is told here instead.
+   */
+  const endingRename = useRef(false);
 
   const rename = (s: Session, title: string) => {
     setRenaming(null);
@@ -108,7 +114,18 @@ export function SessionsPage({
               {matches.map((s) => (
                 <li
                   key={s.id}
-                  onClick={() => renaming !== s.id && onSelect(s.id)}
+                  onMouseDown={() => {
+                    endingRename.current = renaming === s.id;
+                  }}
+                  onClick={() => {
+                    // A click on a name that is waiting for a second one is overtaken by this one.
+                    window.clearTimeout(opening.current);
+                    if (endingRename.current || renaming === s.id) {
+                      endingRename.current = false;
+                      return;
+                    }
+                    onSelect(s.id);
+                  }}
                   className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:bg-fg/5"
                 >
                   <StatusDot status={s.status} />

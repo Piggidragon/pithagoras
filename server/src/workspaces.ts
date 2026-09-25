@@ -1,6 +1,6 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
-import { agentHome } from "./agent.js";
+import { agentHome } from "./agent-home.js";
 
 /** Where projects live. WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys. */
 export function workspaceRoot(): string {
@@ -22,16 +22,45 @@ export function checkWorkspace(raw: string): { path: string } | { error: string 
     return { error: "workspace must be inside the workspace root" };
   }
   if (!existsSync(resolved)) return { error: "workspace does not exist" };
-  // The check above is on the text of the path, and a link inside the root
-  // passes it while leading anywhere. Where it really points must be inside too.
-  const real = realpathSync(resolved);
-  const realRoot = realpathSync(root);
-  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
-    return { error: "workspace must be inside the workspace root" };
+  // The folder can go between one look and the next, or not be ours to read.
+  // Either is an answer about this place, never a failure of the caller.
+  try {
+    // The check above is on the text of the path, and a link inside the root
+    // passes it while leading anywhere. Where it really points must be inside too.
+    const real = realpathSync(resolved);
+    const realRoot = realpathSync(root);
+    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+      return { error: "workspace must be inside the workspace root" };
+    }
+    // A file would be taken as far as the launch, and every run would fail there.
+    if (!statSync(real).isDirectory()) return { error: "workspace is not a directory" };
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return { error: code === "ENOENT" ? "workspace does not exist" : `workspace cannot be read (${code ?? (e as Error).message})` };
   }
-  // A file would be taken as far as the launch, and every run would fail there.
-  if (!statSync(real).isDirectory()) return { error: "workspace is not a directory" };
   return { path: resolved };
+}
+
+/** Why a routine's place cannot be used now, such as a project that was deleted; null when it can. Home always can. */
+export function placeProblem(workspace: string | null): string | null {
+  if (!workspace) return null;
+  const where = checkWorkspace(workspace);
+  return "error" in where ? where.error : null;
+}
+
+/**
+ * `where` is the folder `dir` or inside it: by the text of the path, or by
+ * where it really leads, so that a link to a project counts as in the project.
+ */
+export function isWithin(dir: string, where: string | null): boolean {
+  if (!where) return false;
+  const inside = (d: string, w: string) => w === d || w.startsWith(d + path.sep);
+  if (inside(dir, where)) return true;
+  try {
+    return inside(realpathSync(dir), realpathSync(where));
+  } catch {
+    return false;
+  }
 }
 
 /**
