@@ -4,15 +4,15 @@ import { useWorkPanels } from "../use-work-panels";
 import { FilesPanel } from "./FilesPanel";
 import { latestFileActivity, type FileActivity } from "../file-activity";
 import { VoiceToolActivity } from "./VoiceToolActivity";
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MutableRefObject } from "react";
 import { buildTranscript, type Item } from "../transcript";
 import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuTerminal, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
 import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
 import { ACTIONS, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
-import { clearOfDock, dockBox, dockSize, freeStrip, placeWindows } from "../voice-windows";
-import { ResizeHandles, WINDOWS, clearSize, openWindows } from "./ResizeHandles";
+import { MIN, clearOfDock, dockBox, dockSize, freeStrip, placeWindows, type Orb } from "../voice-windows";
+import { ResizeHandles, WINDOWS, areaFor, clearSize, openWindows, workspaceOf } from "./ResizeHandles";
 import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
 import type { ToolCall } from "../tool-activity";
 import { VoiceTerminal } from "./VoiceTerminal";
@@ -107,6 +107,14 @@ const GEOMETRY = new Set(["left", "top", "right", "width", "height", "transform"
  */
 const VIEWER_KEYS = "#overlayInput, #keyboard-input-assist";
 
+/** Wide enough for the orb to stand beside a window, or in a gap between them. */
+const WIDE = "(min-width: 601px)";
+const watchWide = (changed: () => void) => {
+  const query = matchMedia(WIDE);
+  query.addEventListener("change", changed);
+  return () => query.removeEventListener("change", changed);
+};
+
 /** Where focus is typing, so Space and a paste belong to that and not to voice mode. */
 const editing = (target: EventTarget | null) => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
 
@@ -133,8 +141,11 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // fullscreen: that took the whole of the person's browser with it, and
   // closing the window here did not give it back.
   const [browserMax, setBrowserMax] = useState(false);
-  // Where the orb stands once a window has been sized by hand: in a gap, or in its dock.
-  const [presence, setPresence] = useState<"free" | "dock" | null>(null);
+  // Where the orb stands once a window has been sized by hand: in a gap, or
+  // in its dock. Measured after the windows have moved, for the arrangement
+  // they were in then — and for no other: see `presence` below.
+  const [placed, setPlaced] = useState<{ for: string; at: "free" | "dock" | null }>({ for: "", at: null });
+  const wide = useSyncExternalStore(watchWide, () => matchMedia(WIDE).matches);
   const activity = useRef(browserActivity), terminalSeen = useRef(terminalActivity);
   const terminal = useRef<HTMLElement>(null);
   const [shown, setShown] = useState(false), [terminalShown, setTerminalShown] = useState(false);
@@ -354,11 +365,23 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const anyPanel = shown || terminalShown || filesShown || picturesShown || conversation;
   // A window sized by hand keeps its size until the windows are arranged
   // differently — one opens or closes — and then the layout places it again.
+  // Before it is drawn, so that no frame shows the new arrangement with the
+  // old sizes. Not as voice mode opens: the canvas may have been sized in the
+  // chat before, and keeps that until the windows change around it here.
   const arrangement = `${place.main}|${place.side}|${canvasOpen}`;
-  useEffect(() => {
-    const canvas = stage.current?.closest(".session-workspace")?.querySelector<HTMLElement>(".canvas-panel") ?? null;
-    for (const el of [browser.current, terminal.current, filesWindow.current, picturesWindow.current, conversationWindow.current, canvas]) clearSize(el);
+  const arranged = useRef(arrangement);
+  useLayoutEffect(() => {
+    if (arranged.current === arrangement) return;
+    arranged.current = arrangement;
+    const canvas = stage.current && workspaceOf(stage.current)?.querySelector<HTMLElement>(".canvas-panel");
+    for (const el of [browser.current, terminal.current, filesWindow.current, picturesWindow.current, conversationWindow.current, canvas ?? null]) clearSize(el);
   }, [arrangement]);
+  // What the orb's place was measured for. Anything else — a window opened or
+  // closed, the browser maximized — has no sizes set by hand yet, so the orb
+  // is where the layout puts it from the first frame, not where it stood in
+  // the arrangement before until it is measured again.
+  const placing = `${arrangement}|${maximized}`;
+  const presence = placed.for === placing ? placed.at : null;
   // Once a window has been sized by hand, the orb goes where there is room
   // for it: into a gap wide enough between the windows, as it stands with
   // nothing open, or back into its dock when the windows close the gap — and
@@ -368,25 +391,30 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   useEffect(() => {
     const el = stage.current;
     if (!el) return;
-    const root = el.closest<HTMLElement>(".session-workspace") ?? el;
+    const root = workspaceOf(el) ?? el;
     let frame = 0;
     const place = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const windows = openWindows(root);
         const box = el.getBoundingClientRect();
-        const wide = matchMedia("(min-width: 601px)").matches;
-        const sized = wide && !maximized && windows.some(w => w.dataset.sized);
+        const sized = matchMedia(WIDE).matches && !maximized && windows.some(w => w.dataset.sized);
         const strip = sized ? freeStrip(box, windows.map(w => w.getBoundingClientRect())) : null;
-        setPresence(strip ? "free" : sized ? "dock" : null);
+        setPlaced({ for: placing, at: strip ? "free" : sized ? "dock" : null });
         // Not the one being dragged: the drag keeps it clear of the dock
         // itself, and lifting it here as well would fight the pointer. Done
         // when it is let go.
         if (sized && !strip && !document.body.classList.contains("is-resizing")) {
           const dock = dockBox(box, dockSize(el));
           for (const w of windows) {
-            const height = w.dataset.sized ? clearOfDock(dock, w.getBoundingClientRect()) : null;
-            if (height !== null) w.style.height = `${height}px`;
+            if (!w.dataset.sized) continue;
+            const at = w.getBoundingClientRect();
+            // No shorter than it may be — nor than its own styles let it be.
+            const least = Math.max(MIN.height, parseFloat(getComputedStyle(w).minHeight) || 0);
+            const to = clearOfDock(dock, at, least, w.dataset.sized === "pin", areaFor(w).top);
+            if (!to) continue;
+            if (to.top !== at.top) w.style.top = `${to.top - ((w.offsetParent as HTMLElement | null)?.getBoundingClientRect().top ?? 0)}px`;
+            w.style.height = `${to.height}px`;
           }
         }
         if (!strip) return;
@@ -404,7 +432,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     const observer = new ResizeObserver(place);
     observer.observe(el);
     return () => { cancelAnimationFrame(frame); document.removeEventListener("panel-resize", place); root.removeEventListener("transitionend", settled); observer.disconnect(); };
-  }, [arrangement, maximized]);
+  }, [placing]);
   const drop = (e: DragEvent) => {
     if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
     // Portaled from inside Chat's form, it would bubble on to the form's own drop.
@@ -412,14 +440,18 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     add.current([...e.dataTransfer.files]);
   };
   const panels = Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen);
-  // One window has the orb beside it — unless it was made too wide for that,
-  // or is the browser maximized, when the orb goes to the dock that two
-  // windows have it in. With more open, what is under a maximized browser
-  // keeps its place, so nothing moves about under it or back after.
-  const docked = maximized || (presence === "dock" && panels === 1);
-  // is-docked: the dock's styles — which a single window's orb beside it, or
-  // one standing free, take the place of on a wide screen.
-  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${browsing || sideWindow || docked ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={docked && panels === 1 ? "dock" : panels} data-presence={presence === "free" ? "free" : undefined} data-mode={mode}
+  // Where the orb is, said once for the stage's styles and for the windows
+  // being resized (see Orb). In its dock under a maximized browser, or when
+  // the windows sized by hand leave no gap wide enough; in the gap when they
+  // do. Otherwise, on a wide screen, beside a single window — the canvas too
+  // — and in its dock under two; on a phone, in its dock under any window of
+  // the stage's own. With nothing open it stands in the middle.
+  const stageWindows = browsing || sideWindow;
+  const orb: Orb | undefined = maximized || presence === "dock" ? "dock" : presence === "free" ? "free" : panels === 1 && wide ? "beside" : stageWindows ? "dock" : undefined;
+  // is-docked: the compact chrome that goes with a window open — the dock's
+  // styles, and the pictures and cards out of the windows' way — over which
+  // the orb standing on its own has its own.
+  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${stageWindows || orb === "dock" ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={panels} data-orb={orb} data-mode={mode}
     onDragOver={e => { if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); }}
     onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
     onDrop={drop}>

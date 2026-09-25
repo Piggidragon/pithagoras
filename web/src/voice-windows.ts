@@ -47,7 +47,20 @@ export function freeStrip(stage: { left: number; right: number }, windows: { lef
   return best;
 }
 
-type Box = { left: number; top: number; right: number; bottom: number };
+/** A window, or what it keeps clear of, in the page's coordinates. */
+export type Box = { left: number; top: number; right: number; bottom: number };
+
+/** Kept clear between two windows, so that neither's edge or shadow is taken for the other's — and between a window and the dock. */
+export const GAP = 16;
+/** Smaller than this a window is no use: a header and a few lines. */
+export const MIN = { width: 280, height: 180 };
+
+/**
+ * Where the orb is, as the voice stage says on its `data-orb` and its styles
+ * and the windows follow: in its dock; standing free in a gap the windows
+ * leave; beside a single window; or, with nothing open, not said.
+ */
+export type Orb = "dock" | "free" | "beside";
 
 /**
  * The voice dock's measures, as the stage's styles set them (see `--dock-*`
@@ -71,22 +84,19 @@ export function dockBox(stage: Box, size: DockSize): Box {
 }
 
 /**
- * The dock, where the orb is in it — as the stage's styles place it, not
- * where the orb is on its way there. Null when the orb stands on its own:
- * beside a single window, in a gap between two, or with nothing open.
+ * Where a window goes with the orb back in its dock, where it reaches under
+ * the dock: ending GAP above it. Null when it does not reach under it. A
+ * window can reach down there while the orb stands elsewhere, and the dock
+ * coming back would be drawn over it.
+ *
+ * Shorter, down to `least` — the smallest the window may be. One that would
+ * have to be smaller moves up instead, when it `moves` (not the canvas, which
+ * hangs from its corner), as far as `ceiling`, the top of its area.
  */
-export function dockOf(stage: HTMLElement): Box | null {
-  const docked = stage.classList.contains("is-docked") && stage.dataset.panels !== "1" && stage.dataset.presence !== "free";
-  return docked ? dockBox(stage.getBoundingClientRect(), dockSize(stage)) : null;
-}
-
-/**
- * How tall a window may be with the orb back in its dock, where it reaches
- * under the dock: the height that ends `gap` above it. Null when it does
- * not. A window can reach down there while the orb stands elsewhere, and the
- * dock coming back would be drawn over it.
- */
-export function clearOfDock(dock: Box, window: Box, gap = 16, least = 180): number | null {
+export function clearOfDock(dock: Box, window: Box, least: number, moves: boolean, ceiling: number): { top: number; height: number } | null {
   if (window.right <= dock.left || window.left >= dock.right || window.bottom <= dock.top) return null;
-  return Math.max(least, dock.top - gap - window.top);
+  const bottom = dock.top - GAP;
+  if (bottom - window.top >= least || !moves) return { top: window.top, height: Math.max(least, bottom - window.top) };
+  const top = Math.max(ceiling, bottom - least);
+  return { top, height: Math.max(least, bottom - top) };
 }

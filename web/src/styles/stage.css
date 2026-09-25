@@ -221,22 +221,23 @@
 @media (min-width: 601px) {
   .session-workspace:has(.voice-stage) .session-canvases { top: 52px; }
   .session-workspace:has(.voice-stage) .canvas-panel { width: 57cqw; height: calc(100dvh - 250px); }
-  /* The orb standing on its own, as it does with nothing open: beside a
-     single window, or in a gap between windows sized by hand, where the
-     stage says (--free-x and --free-width, see VoiceStage). Over the dock's
-     styles, which the stage's classes may also ask for. Five controls in its
+  /* The orb standing on its own, as it does with nothing open, where the
+     stage's data-orb says: beside a single window, or free in a gap between
+     windows sized by hand, whose middle and width the stage measures
+     (--free-x and --free-width, see VoiceStage). Over the dock's styles,
+     which is-docked asks for with any window open. Five controls in its
      column: smaller, so the row stays within it. */
   .voice-stage { --stand-x: 20%; --stand-width: min(300px, 34%); }
-  .voice-stage[data-presence="free"] { --stand-x: var(--free-x); --stand-width: min(300px, calc(var(--free-width) - 40px)); }
-  .voice-stage.voice-stage:is([data-panels="1"], [data-presence="free"]) .voice-presence { left: var(--stand-x); top: 48%; width: var(--stand-width); max-width: none; height: auto; flex-direction: column; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
-  .voice-stage.voice-stage:is([data-panels="1"], [data-presence="free"]) .voice-avatar { width: 100%; }
-  .voice-stage.voice-stage:is([data-panels="1"], [data-presence="free"]) .voice-dock-center { display: contents; }
-  .voice-stage.voice-stage:is([data-panels="1"], [data-presence="free"]) .voice-thought-stream { display: none; }
-  .voice-stage.voice-stage:is([data-panels="1"], [data-presence="free"]) .voice-status { flex: none; justify-content: center; margin: -12px 0 0; padding: 7px 12px; font-size: 12px; color: #f1f6ff; border-radius: 20px; background: #192639; border: 1px solid #526b8c; }
-  .voice-stage.voice-stage:is([data-panels="1"], [data-presence="free"]) .voice-stage-controls { margin: 20px 0 0; gap: 8px; }
-  .voice-stage.voice-stage:is([data-panels="1"], [data-presence="free"]) .voice-stage-action { width: 38px; height: 38px; }
-  .voice-stage.voice-stage:is([data-panels="1"], [data-presence="free"]) .voice-stage-action svg { width: 17px; height: 17px; }
-  .voice-stage.voice-stage:is([data-panels="1"], [data-presence="free"]) .voice-tool-activity { left: var(--stand-x); top: 48%; --origin-x: 0px; --origin-y: -30px; }
+  .voice-stage[data-orb="free"] { --stand-x: var(--free-x); --stand-width: min(300px, calc(var(--free-width) - 40px)); }
+  .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-presence { left: var(--stand-x); top: 48%; width: var(--stand-width); max-width: none; height: auto; flex-direction: column; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
+  .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-avatar { width: 100%; }
+  .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-dock-center { display: contents; }
+  .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-thought-stream { display: none; }
+  .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-status { flex: none; justify-content: center; margin: -12px 0 0; padding: 7px 12px; font-size: 12px; color: #f1f6ff; border-radius: 20px; background: #192639; border: 1px solid #526b8c; }
+  .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-stage-controls { margin: 20px 0 0; gap: 8px; }
+  .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-stage-action { width: 38px; height: 38px; }
+  .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-stage-action svg { width: 17px; height: 17px; }
+  .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-tool-activity { left: var(--stand-x); top: 48%; --origin-x: 0px; --origin-y: -30px; }
   .voice-stage[data-panels="1"] .voice-terminal-window,
   .voice-stage[data-panels="1"] .voice-files-window,
   .voice-stage[data-panels="1"] .voice-browser-window { left: auto; right: 18px; top: 47%; transform: translateY(-50%); width: 57%; height: calc(100% - 130px); }
@@ -247,7 +248,7 @@
 }
 @media (prefers-reduced-motion: reduce) { .canvas-panel,.session-canvases { transition: none; animation: none !important; } }
 .canvas-panel { max-width: calc(100vw - 72px); }
-@media (min-width: 601px) { .voice-stage[data-panels="1"] .voice-tool-float.flies-left { --flight-x: max(-60px, -6cqw); } }
+@media (min-width: 601px) { .voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-tool-float.flies-left { --flight-x: max(-60px, -6cqw); } }
 
 /* A single bottom-right control row; pane coordinates use their left edge. */
 .canvas-toggle { width: 36px; height: 36px; padding: 0; justify-content: center; }

@@ -44,10 +44,10 @@ test('two windows cannot be dragged over each other, and a gap between them brin
 
   // Docked while the windows leave no room; standing in the gap once there is.
   const presence = page.locator('.voice-presence');
-  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-presence', 'free');
+  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-orb', 'free');
   await drag(page, browser.locator('.resize-e'), -700);
   await drag(page, terminal.locator('.resize-w'), 300);
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-presence', 'free');
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'free');
   await page.waitForTimeout(900);
   const orb = await box(presence), left = await box(browser), right = await box(terminal);
   expect(orb.x).toBeGreaterThanOrEqual(left.x + left.width);
@@ -57,7 +57,7 @@ test('two windows cannot be dragged over each other, and a gap between them brin
 
   // Closing the gap again sends it back to its dock.
   await drag(page, browser.locator('.resize-e'), 700);
-  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-presence', 'free');
+  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-orb', 'free');
 });
 
 test('the browser maximizes within the stage, not the page, and gives its place back', async ({ page }) => {
@@ -98,12 +98,12 @@ test('a single window stays inside its workspace and the orb moves aside for it'
   await drag(page, panel.locator('.resize-w'), -1200);
   const workspace = await box(page.getByTestId('workspace'));
   expect((await box(panel)).x).toBeGreaterThanOrEqual(workspace.x);
-  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-presence', 'free');
+  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-orb', 'free');
   const orb = await box(page.locator('.voice-presence'));
   expect(orb.height).toBeLessThan(100);
 
   await drag(page, panel.locator('.resize-w'), 500);
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-presence', 'free');
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'free');
   await page.waitForTimeout(900);
   const standing = await box(page.locator('.voice-presence'));
   expect(standing.x + standing.width).toBeLessThanOrEqual((await box(panel)).x);
@@ -216,7 +216,7 @@ test('a window that reached down beside the orb is lifted clear of the dock when
   await page.waitForTimeout(900);
   await drag2(page, terminal.locator('.resize-s'), 0, 300);
   await drag(page, terminal.locator('.resize-w'), -330);
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels', 'dock');
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
   await page.waitForTimeout(1000);
   const t = await box(terminal), dock = await box(page.locator('.voice-presence'));
   expect(t.y + t.height).toBeLessThanOrEqual(dock.y - 15);
@@ -230,7 +230,7 @@ test('a canvas sized by hand takes its place again when another window opens', a
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await page.waitForTimeout(1000);
   expect(overlap(await box(panel), await box(page.locator('.voice-browser-window')))).toBe(false);
-  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-presence', 'free');
+  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-orb', 'free');
 });
 
 test('the orb is placed again when a window slides, not at every hover or fade on the stage', async ({ page }) => {
@@ -260,7 +260,7 @@ test('a window dragged while the orb goes back to its dock is not fought over, a
   await page.waitForTimeout(900);
   // Down beside the orb, which stands on its own: nothing holds it there.
   await drag2(page, terminal.locator('.resize-s'), 0, 300);
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-presence', 'free');
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'free');
   // Every height the window is given while its corner is dragged over the gap, so the orb goes to its dock mid-drag.
   await terminal.evaluate(el => {
     const heights: string[] = ((window as any).heights = []);
@@ -270,7 +270,7 @@ test('a window dragged while the orb goes back to its dock is not fought over, a
   const x = grip.x + 8, y = grip.y + 8;
   await page.mouse.move(x, y); await page.mouse.down();
   for (let i = 1; i <= 30; i++) { await page.mouse.move(x - i * 11, y + i * 2); await page.waitForTimeout(20); }
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels', 'dock');
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
   const during = await page.evaluate(() => (window as any).heights.map(parseFloat) as number[]);
   await page.mouse.up();
   // Growing all the way, never pulled back up and pushed down again in turn.
@@ -332,7 +332,7 @@ test('a press on an edge that goes nowhere changes nothing', async ({ page }) =>
   await terminal.locator('.resize-e').click();
   await page.waitForTimeout(900);
   expect(await terminal.evaluate(el => el.dataset.sized)).toBeUndefined();
-  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-presence', 'free');
+  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-orb', 'free');
   expect(await box(terminal)).toEqual(before);
 });
 
@@ -352,4 +352,61 @@ test('a window that stands closer to the dock than the gap does not jump when it
   await page.mouse.move(grip.x + 20, grip.y + 5);
   expect((await box(browser)).height).toBeGreaterThanOrEqual(before.height - 0.5);
   await page.mouse.up();
+});
+
+test('closing one of two windows stands the orb beside the other from the first frame', async ({ page }) => {
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  const browser = page.locator('.voice-browser-window');
+  await page.waitForTimeout(1000);
+  // Sized by hand so there is no gap: the orb is in its dock.
+  await drag(page, browser.locator('.resize-e'), 400);
+  await expect.poll(() => page.locator('.voice-presence').evaluate(p => getComputedStyle(p).flexDirection)).toBe('row');
+  // Every frame after the terminal closes: how the orb is laid out.
+  const frames = await page.evaluate(async () => {
+    const presence = document.querySelector('.voice-presence')!;
+    const seen: string[] = [];
+    (document.querySelector('[aria-label="Minimize terminal"]') as HTMLElement).click();
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => requestAnimationFrame(r));
+      seen.push(getComputedStyle(presence).flexDirection);
+    }
+    return seen;
+  });
+  expect(frames.every(f => f === 'column')).toBe(true);
+});
+
+test('the canvas keeps the size it was given before voice mode', async ({ page }) => {
+  await openCanvas(page);
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  await expect(page.locator('.voice-stage')).toHaveCount(0);
+  const panel = page.locator('.canvas-panel');
+  await page.waitForTimeout(900);
+  await drag(page, panel.locator('.resize-w'), -120);
+  const sized = await box(panel);
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.locator('.voice-stage')).toHaveCount(1);
+  await page.waitForTimeout(900);
+  expect((await box(panel)).width).toBeCloseTo(sized.width, 0);
+});
+
+test('a drag measures the other windows once, not at every move of the pointer', async ({ page }) => {
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  const browser = page.locator('.voice-browser-window');
+  await page.waitForTimeout(1000);
+  const grip = await box(browser.locator('.resize-e'));
+  await page.mouse.move(grip.x + 4, grip.y + 40); await page.mouse.down();
+  // Twenty moves in one frame, as a fast mouse sends them: how often the terminal beside it is measured.
+  const reads = await page.evaluate(({ x, y }) => {
+    const handle = document.querySelector('.voice-browser-window .resize-e')!, other = document.querySelector('.voice-terminal-window')!;
+    let reads = 0;
+    const read = other.getBoundingClientRect;
+    other.getBoundingClientRect = function () { reads++; return read.call(this); };
+    for (let i = 1; i <= 20; i++) handle.dispatchEvent(new PointerEvent('pointermove', { clientX: x - i, clientY: y, bubbles: true }));
+    other.getBoundingClientRect = read;
+    return reads;
+  }, { x: grip.x + 4, y: grip.y + 40 });
+  await page.mouse.up();
+  expect(reads).toBe(0);
 });

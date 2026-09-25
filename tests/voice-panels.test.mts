@@ -69,9 +69,14 @@ test('a window the orb comes back to its dock under is made to end above the doc
   const dock = dockBox({ left: 0, top: 0, right: 1000, bottom: 800 }, size);
   // 520px wide in the middle, its top 90px above the stage's bottom.
   assert.deepEqual(dock, { left: 240, right: 760, top: 710, bottom: 790 });
-  assert.equal(clearOfDock(dock, { left: 400, right: 980, top: 50, bottom: 790 }), 710 - 16 - 50);
-  assert.equal(clearOfDock(dock, { left: 400, right: 980, top: 50, bottom: 700 }), null, 'ends above it already, if closer than the gap');
-  assert.equal(clearOfDock(dock, { left: 780, right: 980, top: 50, bottom: 790 }), null, 'beside the dock, not over it');
+  assert.deepEqual(clearOfDock(dock, { left: 400, right: 980, top: 50, bottom: 790 }, 180, true, 0), { top: 50, height: 710 - 16 - 50 });
+  assert.equal(clearOfDock(dock, { left: 400, right: 980, top: 50, bottom: 700 }, 180, true, 0), null, 'ends above it already, if closer than the gap');
+  assert.equal(clearOfDock(dock, { left: 780, right: 980, top: 50, bottom: 790 }, 180, true, 0), null, 'beside the dock, not over it');
+  // Too near the dock to be shortened enough: it moves up, as far as its area lets it.
+  assert.deepEqual(clearOfDock(dock, { left: 400, right: 980, top: 610, bottom: 790 }, 180, true, 0), { top: 514, height: 180 });
+  assert.deepEqual(clearOfDock(dock, { left: 400, right: 980, top: 610, bottom: 790 }, 180, true, 560), { top: 560, height: 180 });
+  // One that cannot move — the canvas, hanging from its corner — is only made as short as it may be.
+  assert.deepEqual(clearOfDock(dock, { left: 400, right: 980, top: 610, bottom: 790 }, 260, false, 0), { top: 610, height: 260 });
   // On a narrow stage the dock is the stage less its inset either side; on a phone it sits higher.
   assert.deepEqual(dockBox({ left: 0, top: 0, right: 400, bottom: 800 }, { ...size, middle: 94 }), { left: 16, right: 384, top: 666, bottom: 746 });
 });
@@ -95,4 +100,9 @@ test('a window dragged by a corner stops at a window off that corner, by the edg
   const near = { left: 310, top: 0, right: 500, bottom: 300 };
   assert.equal(clear(a, { ...a }, 'e', [near]).right, 300);
   assert.equal(clear(a, { ...a, right: 280 }, 'e', [near]).right, 280);
+  // Ending 10px above the dock, to the dock's left: widened alongside it, over free space, it is not stopped.
+  const dock = { left: 500, top: 310, right: 900, bottom: 390 };
+  assert.equal(clear(a, { ...a, right: 700 }, 'e', [dock]).right, 700);
+  // But grown down toward it, the bottom still stops GAP above it.
+  assert.equal(clear(a, { ...a, right: 700, bottom: 380 }, 'se', [dock]).bottom, 300);
 });
