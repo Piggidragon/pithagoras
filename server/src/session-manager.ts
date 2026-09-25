@@ -3,6 +3,7 @@ import { ModelErrors } from "./model-errors.js";
 import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { agentHome, agentHomePath } from "./agent-home.js";
 import path from "node:path";
 import type { PiClient, PiTool, PromptTaken } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
@@ -278,6 +279,11 @@ class SessionManager extends EventEmitter {
 
   isRunning(sessionId: string): boolean {
     return this.live.get(sessionId)?.client.running ?? false;
+  }
+
+  /** A pi process is up or starting for it: only then is there anything for discard() to stop. */
+  isLoaded(sessionId: string): boolean {
+    return this.live.has(sessionId) || this.starting.has(sessionId);
   }
 
   /** Stream updates in memory; persist completed messages and lifecycle metadata. */
@@ -608,6 +614,14 @@ class SessionManager extends EventEmitter {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Unknown session ${sessionId}`);
 
+    // A session can outlive its folder: a routine's past runs stay, the record
+    // of what it did, when the project they ran in is deleted. Said plainly,
+    // rather than as whatever starting pi in no directory comes to.
+    // Home is made again if need be; a project is not.
+    if (session.workspace === agentHomePath()) agentHome();
+    if (!existsSync(session.workspace)) {
+      throw new Error(`The folder this chat worked in, ${session.workspace}, is gone. Its history can still be read, but it cannot go on.`);
+    }
     const executor = buildExecutor(EXECUTOR_KIND, SESSION_ROOT);
     mkdirSync(path.join(SESSION_ROOT, sessionId), { recursive: true });
 
