@@ -46,3 +46,25 @@ export function freeStrip(stage: { left: number; right: number }, windows: { lef
   }
   return best;
 }
+
+/**
+ * The voice dock, as stage.css draws it on a wide screen: centred, up to
+ * 520px wide and 16px short of the stage at either side, its top edge 90px
+ * above the stage's bottom (`top: calc(100% - 50px)`, 80px tall, centred on
+ * that).
+ */
+export const DOCK = { width: 520, top: 90, inset: 16 };
+
+/**
+ * How tall a window may be with the orb back in its dock: the height that
+ * ends `gap` above the dock, where the window reaches over it. Null when it
+ * does not. A window can reach down there while the orb stands elsewhere,
+ * and the dock coming back would be drawn over it.
+ */
+export function clearOfDock(stage: { left: number; right: number; bottom: number }, window: { left: number; right: number; top: number; bottom: number }, gap = 16, least = 180): number | null {
+  const width = Math.min(DOCK.width, stage.right - stage.left - 2 * DOCK.inset);
+  const middle = (stage.left + stage.right) / 2;
+  const dock = { left: middle - width / 2, right: middle + width / 2, top: stage.bottom - DOCK.top };
+  if (window.right <= dock.left || window.left >= dock.right || window.bottom <= dock.top - gap) return null;
+  return Math.max(least, dock.top - gap - window.top);
+}

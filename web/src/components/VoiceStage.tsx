@@ -11,8 +11,8 @@ import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
 import { ACTIONS, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
-import { freeStrip, placeWindows } from "../voice-windows";
-import { ResizeHandles, clearSize } from "./ResizeHandles";
+import { clearOfDock, freeStrip, placeWindows } from "../voice-windows";
+import { ResizeHandles, WINDOWS, clearSize, openWindows } from "./ResizeHandles";
 import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
 import type { ToolCall } from "../tool-activity";
 import { VoiceTerminal } from "./VoiceTerminal";
@@ -95,6 +95,9 @@ function VoiceOrb({ mode, levels }: { mode: OrbMode; levels: MutableRefObject<Vo
   }, [levels]);
   return <canvas ref={canvas} aria-hidden="true" className="voice-orb" data-mode={mode} />;
 }
+
+/** What a window's place and size slide by (see stage.css). */
+const GEOMETRY = new Set(["left", "top", "right", "width", "height", "transform"]);
 
 /** Where focus is typing, so Space and a paste belong to that and not to voice mode. */
 const editing = (target: EventTarget | null) => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
@@ -248,7 +251,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     "voice.ptt": () => { onPtt(!ptt); },
     "voice.sounds": () => { onSounds(); },
   };
-  const keys = useRef({ bindings, actions, ptt, onHold, browserMax }); keys.current = { bindings, actions, ptt, onHold, browserMax };
+  const maximized = browserMax && shown;
+  const keys = useRef({ bindings, actions, ptt, onHold, maximized }); keys.current = { bindings, actions, ptt, onHold, maximized };
   useEffect(() => {
     // In the capture phase, before a focused button: holding Space for
     // push-to-talk would otherwise also press whatever button has focus.
@@ -258,7 +262,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       if (e.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
       if (e.code === "Escape" && document.querySelector(".voice-settings")) return;
       // Escape gives a maximized browser its place back before it stops anything.
-      if (e.code === "Escape" && keys.current.browserMax && !editing(e.target)) {
+      if (e.code === "Escape" && keys.current.maximized && !editing(e.target)) {
         e.preventDefault(); e.stopPropagation(); setBrowserMax(false);
         return;
       }
@@ -307,7 +311,21 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     return () => { cancelled = true; };
   }, [browserActivity, onCue]);
   const open = () => { setLoaded(true); setShown(true); onCue('focus'); };
-  const minimize = () => { setShown(false); setBrowserMax(false); end.current?.focus({ preventScroll: true }); };
+  const minimize = () => { setShown(false); end.current?.focus({ preventScroll: true }); };
+  // However the browser was put away — minimized, or closed for a third
+  // window — it comes back at its usual size, and Escape is Stop's again.
+  useEffect(() => { if (!shown) setBrowserMax(false); }, [shown]);
+  // Escape restores the browser from inside it too, as it left fullscreen:
+  // once the page in it has focus, the key is that page's and never reaches
+  // the stage. Heard before the viewer, which would pass it on to the page.
+  const frameKeys = (frame: HTMLIFrameElement) => {
+    try {
+      frame.contentWindow?.addEventListener("keydown", e => {
+        if (e.code !== "Escape" || !keys.current.maximized) return;
+        e.preventDefault(); e.stopPropagation(); setBrowserMax(false);
+      }, true);
+    } catch { /* not the portal's page: its keys stay its own */ }
+  };
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
   const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
@@ -317,53 +335,64 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // differently — one opens or closes — and then the layout places it again.
   const arrangement = `${place.main}|${place.side}|${canvasOpen}`;
   useEffect(() => {
-    for (const el of [browser.current, terminal.current, filesWindow.current, picturesWindow.current, conversationWindow.current]) clearSize(el);
+    const canvas = stage.current?.closest(".session-workspace")?.querySelector<HTMLElement>(".canvas-panel") ?? null;
+    for (const el of [browser.current, terminal.current, filesWindow.current, picturesWindow.current, conversationWindow.current, canvas]) clearSize(el);
   }, [arrangement]);
   // Once a window has been sized by hand, the orb goes where there is room
   // for it: into a gap wide enough between the windows, as it stands with
-  // nothing open, or back into its dock when the windows close the gap. It
-  // follows as an edge is dragged. Set on the element rather than through
+  // nothing open, or back into its dock when the windows close the gap — and
+  // a window that reached down where the dock goes is made to end above it.
+  // It follows as an edge is dragged. Set on the element rather than through
   // state, so that a drag does not draw the whole stage again at every move.
   useEffect(() => {
     const el = stage.current;
     if (!el) return;
+    const root = el.closest<HTMLElement>(".session-workspace") ?? el;
     let frame = 0;
     const place = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const windows = [browser, terminal, filesWindow, picturesWindow, conversationWindow]
-          .map(r => r.current).filter((w): w is HTMLElement => !!w?.classList.contains("is-open"));
-        const canvas = el.closest(".session-workspace")?.querySelector<HTMLElement>(".session-canvases.is-open .canvas-panel");
-        if (canvas) windows.push(canvas);
+        const windows = openWindows(root);
         const box = el.getBoundingClientRect();
         const wide = matchMedia("(min-width: 601px)").matches;
-        const sized = wide && !browserMax && windows.some(w => w.dataset.sized);
+        const sized = wide && !maximized && windows.some(w => w.dataset.sized);
         const strip = sized ? freeStrip(box, windows.map(w => w.getBoundingClientRect())) : null;
         setPresence(strip ? "free" : sized ? "dock" : null);
+        if (sized && !strip) {
+          for (const w of windows) {
+            const height = w.dataset.sized ? clearOfDock(box, w.getBoundingClientRect()) : null;
+            if (height !== null) w.style.height = `${height}px`;
+          }
+        }
         if (!strip) return;
         el.style.setProperty("--free-x", `${Math.round(strip.center - box.left)}px`);
         el.style.setProperty("--free-width", `${Math.round(strip.width)}px`);
       });
     };
+    // A window done sliding into place — not every hover and fade on the stage.
+    const settled = (e: TransitionEvent) => {
+      if (GEOMETRY.has(e.propertyName) && (e.target as Element).matches?.(`${WINDOWS}, .session-canvases.is-open`)) place();
+    };
     place();
     document.addEventListener("panel-resize", place);
-    el.addEventListener("transitionend", place);
+    root.addEventListener("transitionend", settled);
     const observer = new ResizeObserver(place);
     observer.observe(el);
-    return () => { cancelAnimationFrame(frame); document.removeEventListener("panel-resize", place); el.removeEventListener("transitionend", place); observer.disconnect(); };
-  }, [arrangement, browserMax]);
+    return () => { cancelAnimationFrame(frame); document.removeEventListener("panel-resize", place); root.removeEventListener("transitionend", settled); observer.disconnect(); };
+  }, [arrangement, maximized]);
   const drop = (e: DragEvent) => {
     if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return;
     // Portaled from inside Chat's form, it would bubble on to the form's own drop.
     e.preventDefault(); e.stopPropagation(); setDropping(false);
     add.current([...e.dataTransfer.files]);
   };
-  const maximized = browserMax && shown;
   const panels = Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen);
   // One window has the orb beside it — unless it was made too wide for that,
-  // when the orb goes to the dock that two windows have it in.
+  // or is the browser maximized, when the orb goes to the dock that two
+  // windows have it in. With more open, what is under a maximized browser
+  // keeps its place, so nothing moves about under it or back after.
   const docked = maximized || (presence === "dock" && panels === 1);
-  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${docked ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={maximized ? "max" : docked ? "dock" : panels} data-presence={presence === "free" ? "free" : undefined} data-mode={mode}
+  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${docked ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={docked && panels === 1 ? "dock" : panels} data-presence={presence === "free" ? "free" : undefined} data-mode={mode}
     onDragOver={e => { if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); }}
     onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
     onDrop={drop}>
@@ -396,7 +425,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
           : <button type="button" aria-label="Maximize browser" title="Maximize" onClick={() => setBrowserMax(true)}><LuMaximize2 /></button>}
         <button type="button" aria-label="Minimize browser" title="Minimize browser" onClick={minimize}><LuMinus /></button>
       </div></header>
-      {loaded && <iframe src="/browser-ui/" title="The agent's browser" allow="clipboard-read; clipboard-write; fullscreen" />}
+      {loaded && <iframe onLoad={e => frameKeys(e.currentTarget)} src="/browser-ui/" title="The agent's browser" allow="clipboard-read; clipboard-write; fullscreen" />}
       <ResizeHandles target={browser} />
     </section>
     <section ref={terminal} className={`voice-terminal-window ${terminalShown ? 'is-open' : ''}`} aria-label="Live terminal" aria-hidden={!terminalShown}>

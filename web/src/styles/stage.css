@@ -434,6 +434,11 @@ body.is-resizing iframe { pointer-events: none; }
    reach under it. Above a size set by hand, which it gives back when restored. */
 .voice-stage .voice-browser-window.is-open.is-maximized { left: 12px !important; top: 12px !important; right: 12px !important; bottom: 104px !important; width: auto !important; height: auto !important; max-width: none !important; max-height: none !important; transform: none !important; z-index: 4; border-radius: 14px; }
 .voice-browser-window.is-maximized > .resize-handle { display: none; }
+/* On a phone the dock sits higher (see above): the browser ends above it there. */
+@media (max-width: 600px) { .voice-stage .voice-browser-window.is-open.is-maximized { bottom: 148px !important; } }
+/* The canvas hangs over the stage rather than in it, and would stay on top of
+   the browser: it waits, in its place, until the browser is restored. */
+.session-workspace:has(.voice-browser-window.is-open.is-maximized) .session-canvases { visibility: hidden; }
 
 /* A window sized by hand that leaves a gap wide enough: the orb stands in it
    as it does with nothing open, rather than waiting in its dock. The gap's
