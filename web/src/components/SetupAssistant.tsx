@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { LuArrowLeft, LuArrowRight, LuCheck, LuPlus, LuRefreshCw, LuRocket } from "react-icons/lu";
 import { api, type AvailableModel } from "../api";
 import { forget, useCached } from "../settings-cache";
-import { formatTokens } from "./KeepRecent";
+import { formatTokens } from "../transcript";
 import { Modal } from "./Modal";
 import { PackageCatalog } from "./PackageCatalog";
 import { KindIcon, ProviderEditor, StatusBadge, useInstalledPackages, useProviderStatus } from "./ProvidersPanel";

@@ -10,7 +10,7 @@ import { packageName } from "../package-names";
 import { PackageCatalog } from "./PackageCatalog";
 import { parseWindow } from "../context-window";
 import { confirmDialog } from "./ConfirmDialog";
-import { formatTokens } from "./KeepRecent";
+import { formatTokens } from "../transcript";
 import { Select } from "./Select";
 import { Empty, Field, Section, btnCls, ghostCls, inputCls, primaryCls } from "./SettingsUi";
 
