@@ -84,8 +84,10 @@ export function installTooltips(): void {
       release();
       if (!el) return;
       const t = el.getAttribute("title")?.trim();
-      // Inside an iframe or the terminal the page is not ours to decorate.
-      if (!t || el.closest(".xterm")) return;
+      // An iframe or the terminal is not ours to decorate. The iframe also
+      // keeps every pointer and key event inside it, so nothing would take the
+      // tip away again until the pointer left it.
+      if (!t || el instanceof HTMLIFrameElement || el.closest(".xterm")) return;
       owner = el;
       text = t;
       el.setAttribute("title", "");

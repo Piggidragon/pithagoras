@@ -1,7 +1,7 @@
 import { LuBlocks } from "react-icons/lu";
 import { ToolSwitches } from "./ToolSwitches";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { anchorLeft } from "../menu-anchor";
+import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
 import { ContextPill } from "./ContextPill";
@@ -13,9 +13,6 @@ import { ContextPill } from "./ContextPill";
  * having levels, and waiting for the catalogue meant the popover opened empty.
  * Replaced by whatever pi actually reports once that arrives.
  */
-/** The menus above the toolbar: w-72. */
-const MENU_WIDTH = 288;
-
 const DEFAULT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**

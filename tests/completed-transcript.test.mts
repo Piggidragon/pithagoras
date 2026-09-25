@@ -97,3 +97,14 @@ test('a finished reply keeps how long it thought, though the deltas that timed i
  assert.equal(item.thinkingSince, 1_000);
  assert.equal(item.thinkingUntil, 13_000);
 });
+
+test('a long tool output keeps its end and counts the lines of all of it', () => {
+ const text=Array.from({length:50_000},(_,i)=>`line ${i}`).join('\n')+'\n';
+ const items=buildTranscript([
+  {seq:1,type:'tool_execution_start',payload:{toolCallId:'t',toolName:'bash',args:{command:'yes'}}},
+  {seq:2,type:'tool_execution_end',payload:{toolCallId:'t',toolName:'bash',result:{content:[{type:'text',text}]}}},
+ ] as any);
+ const tool=items.find((i:any)=>i.kind==='tool') as any;
+ assert.ok(tool.output.length<text.length);
+ assert.equal(tool.outputLines,50_000);
+});

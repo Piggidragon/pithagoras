@@ -147,7 +147,15 @@ export async function modelLoaded(upstream: string, model: string, auth: Record<
   const running = await probe(new URL("/running", upstream), auth);
   const swap = running.data;
   if (Array.isArray(swap?.running)) {
-    return seen(upstream, model, swap.running.some((m: any) => m?.model === model && (m.state === undefined || m.state === "ready")));
+    const up = swap.running.find((m: any) => m?.model === model);
+    if (up) return seen(upstream, model, up.state === undefined || up.state === "ready");
+    // Not up under this name. Down, if it is one of llama-swap's models; an
+    // alias of one is not listed there, nor running under its own name, and
+    // what it stands for is not said: nothing is known of it.
+    const listed = await probe(new URL("/v1/models", upstream), auth);
+    if (Array.isArray(listed.data?.data) && listed.data.data.some((m: any) => m?.id === model)) return seen(upstream, model, false);
+    if (!listed.denied) silent.set(quietKey(upstream, model), Date.now() + SILENT_MS);
+    return undefined;
   }
   // Neither: a plain llama-server, which has its one model loaded and lists
   // it without a status. Asking it twice more on every request would learn

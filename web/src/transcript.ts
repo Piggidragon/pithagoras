@@ -61,6 +61,8 @@ export type Item =
       picture?: ShownPicture;
       args?: unknown;
       output?: string;
+      /** How many lines `output` had before it was cut to its end. */
+      outputLines?: number;
       /** The run ended with this call still open: it never said how it came out. */
       interrupted?: boolean;
       since?: number;
@@ -72,6 +74,21 @@ export type Item =
 
 /** Enough of a tool's output to read in the transcript; the whole of it is in the agent terminal. */
 const TOOL_OUTPUT_MAX = 60_000;
+
+/** Lines in a text, not counting a newline at its very end. */
+export function lineCount(text: string): number {
+  if (!text) return 0;
+  let n = 1;
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) n++;
+  return text.endsWith("\n") ? n - 1 : n;
+}
+
+/** Keep the end of a tool's output on its item, and how long it was whole. */
+function setToolOutput(item: Extract<Item, { kind: "tool" }>, text: string) {
+  item.output = text.slice(-TOOL_OUTPUT_MAX);
+  if (text.length > TOOL_OUTPUT_MAX) item.outputLines = lineCount(text);
+  else delete item.outputLines;
+}
 
 /** Text without the colour and cursor codes a terminal would act on. */
 export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
@@ -264,7 +281,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
       case "tool_execution_update": {
         const tool = findRunningTool(items, p);
         const text = toolOutputText(p.partialResult ?? p.result);
-        if (tool && typeof text === "string") tool.output = text.slice(-TOOL_OUTPUT_MAX);
+        if (tool && typeof text === "string") setToolOutput(tool, text);
         break;
       }
 
@@ -300,7 +317,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             delete it.interrupted;
             if (ev.at !== undefined) it.until = ev.at;
             const text = toolOutputText(p.result);
-            if (typeof text === "string" && text) it.output = text.slice(-TOOL_OUTPUT_MAX);
+            if (typeof text === "string" && text) setToolOutput(it, text);
             const picture = shownPicture(p);
             if (picture) it.picture = picture;
             break;
@@ -427,6 +444,10 @@ export interface Activity {
   /** The model being loaded, while `label` is "loading the model". */
   model?: string;
 }
+
+/** "800", "6k", "20.5k": a count of tokens. */
+export const formatTokens = (n: number) =>
+  n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k` : String(n);
 
 /** "12s", "2m 05s": how long a phase has been going. */
 export const formatElapsed = (s: number) =>

@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import { api, type CompactionSettings } from "../api";
+import { formatTokens } from "../transcript";
 
 /**
  * How much of a conversation compaction leaves alone.
@@ -26,9 +27,6 @@ const STEP = 1_000;
  * by a control that merely cannot draw it.
  */
 const FALLBACK_MAX = 48_000;
-
-export const formatTokens = (n: number) =>
-  n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k` : String(n);
 
 export function KeepRecent({
   value,

@@ -4,7 +4,7 @@ import { api, type PiConfig } from "../api";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { isEnter } from "../shortcuts";
-import { anchorLeft } from "../menu-anchor";
+import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 
 /**
  * Context fill is the number that decides whether a long session keeps working,
@@ -275,7 +275,7 @@ export function ContextPill({
       </button>
 
       {open && (
-        <div style={{ left: anchorLeft(pill.current, 288) }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           <div className="flex items-baseline justify-between">
             <p className="text-sm text-fg-muted">Context</p>
             <p className={`text-sm tabular-nums ${t.text}`}>{pct.toFixed(1)}% full</p>

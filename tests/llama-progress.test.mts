@@ -101,3 +101,18 @@ test('a model found loaded is not asked about again on every step of a run, and 
   assert.equal(asked,after,'a model the router does not list is left alone for a while');
  }finally{upstream.closeAllConnections();upstream.close();}
 });
+test('llama-swap: a model up is loaded, one down is not, and an alias is not taken for down',async()=>{
+ const upstream=http.createServer((req,res)=>{
+  const json=(body:unknown)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
+  if(req.url==='/running')return json({running:[{model:'qwen',state:'ready'}]});
+  if(req.url==='/v1/models')return json({object:'list',data:[{id:'qwen'},{id:'llama'}]});
+  res.writeHead(404).end();
+ });
+ upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const origin=`http://127.0.0.1:${(upstream.address() as any).port}`;
+ try{
+  assert.equal(await modelLoaded(origin,'llama'),false);
+  assert.equal(await modelLoaded(origin,'qwen'),true);
+  assert.equal(await modelLoaded(origin,'fast'),undefined,'an alias: what it stands for is not said');
+ }finally{upstream.closeAllConnections();upstream.close();}
+});
