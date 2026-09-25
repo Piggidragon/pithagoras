@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LuSquare, LuTrash2 } from "react-icons/lu";
 import { api, type BackgroundState } from "../api";
 import { useFollowBottom } from "../use-follow-bottom";
-import { formatElapsed } from "./ChatActivity";
+import { formatElapsed, stripAnsi } from "../transcript";
 
 /** Output kept on screen for one job; the file has the rest. */
 const KEEP = 400_000;
@@ -145,7 +145,7 @@ function JobOutput({ sessionId, jobKey, live }: { sessionId: string; jobKey: str
   if (gone) return <p className="bg-jobs-empty">{gone}</p>;
   return (
     <pre ref={ref} onScroll={onScroll} className="bg-job-output">
-      {text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "") || (live ? "Waiting for output…" : "(no output)")}
+      {stripAnsi(text) || (live ? "Waiting for output…" : "(no output)")}
     </pre>
   );
 }

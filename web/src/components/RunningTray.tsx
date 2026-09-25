@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { LuBot, LuSquareTerminal } from "react-icons/lu";
 import type { BackgroundJob } from "../api";
 import type { Subagent } from "../subagents";
-import { Ring, formatElapsed } from "./ChatActivity";
+import { formatElapsed } from "../transcript";
+import { Ring } from "./ChatActivity";
 
 /**
  * What is running beside the conversation, just above the box: subagents,
