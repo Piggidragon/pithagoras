@@ -81,6 +81,12 @@ export interface PiClient extends EventEmitter {
   subagentInput?(id: string, text: string): boolean;
   subagentStop?(id: string): boolean;
   /**
+   * Where the chat box's text is kept — by the portal, one copy for the page
+   * and pi alike — for an extension's getEditorText, and for what it puts in
+   * the box. Optional: pi's RPC mode answers that itself, with nothing.
+   */
+  useDrafts?(drafts: DraftStore): void;
+  /**
    * pi's session file for this conversation, once it exists. Recorded by the
    * portal so the same conversation is reopened after a restart instead of a
    * new one being started. Undefined for executors that cannot report it.
@@ -140,4 +146,11 @@ export interface PiClient extends EventEmitter {
 
   /** Answer an extension dialog. Returns false if the request is unknown/expired. */
   respondUi(id: string, response: { cancelled?: boolean; value?: unknown }): boolean;
+}
+
+/** What is in a chat's box, and what is selected in it: where a paste goes. */
+export type Draft = { text: string; caret?: { start: number; end: number } };
+export interface DraftStore {
+  get(): Draft | undefined;
+  set(text: string, caret?: { start: number; end: number }): void;
 }

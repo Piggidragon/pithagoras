@@ -438,6 +438,11 @@ function migrate(d: Database.Database): void {
     `CREATE INDEX IF NOT EXISTS idx_events_settled ON events(session_id, seq)
        WHERE type IN ('portal_taken', 'portal_unsent')`,
   );
+  // Commands and their ends, looked for at startup: see unansweredCommands.
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_commands ON events(session_id, seq)
+       WHERE type IN ('portal_command', 'portal_command_end')`,
+  );
   const ruleCols = (d.prepare("PRAGMA table_info(tool_rules)").all() as { name: string }[]).map(
     (c) => c.name
   );
@@ -658,6 +663,12 @@ function placeOf(
   row: { seq: number; type: string; payload: string },
   settled: ReturnType<typeof settledAt>,
 ): number {
+  // A command's end is where its command is: taken out with it, and kept
+  // with one that stays, when the end fell among what is taken out.
+  if (row.type === "portal_command_end") {
+    const of = (JSON.parse(row.payload) ?? {}).of;
+    return typeof of === "number" ? of : row.seq;
+  }
   if (row.type !== "portal_prompt" || !(JSON.parse(row.payload) ?? {}).queued) return row.seq;
   return settled.taken.get(row.seq) ?? settled.unsent.get(row.seq) ?? Number.POSITIVE_INFINITY;
 }
@@ -726,6 +737,41 @@ export function unsettledMessages(): {
   return out;
 }
 
+/**
+ * Commands no end was written for. "type IN (…)" is repeated from
+ * idx_events_commands, or SQLite does not see that the index covers the
+ * query, and reads the whole table twice; ordered as the index is, or it reads
+ * the table in seq order to spare itself a sort.
+ */
+export const UNANSWERED_COMMANDS = `SELECT session_id, seq FROM events
+       WHERE type IN ('portal_command', 'portal_command_end') AND type = 'portal_command'
+         AND seq NOT IN (
+           -- Not one NULL among them: NOT IN a list holding one matches nothing.
+           SELECT json_extract(payload, '$.of') FROM events
+           WHERE type IN ('portal_command', 'portal_command_end') AND type = 'portal_command_end'
+             AND json_extract(payload, '$.of') IS NOT NULL
+         )
+       ORDER BY session_id, seq`;
+
+/**
+ * Commands a server that died left unanswered, with the reason each threw
+ * before it did, where pi said so. Found by SQL, from the commands and their
+ * ends alone: see idx_events_commands.
+ */
+export function unansweredCommands(): { sessionId: string; seq: number; error?: string }[] {
+  const rows = getDb().prepare(UNANSWERED_COMMANDS).all() as { session_id: string; seq: number }[];
+  // Its own failure, marked as its own: not the next one of the same name.
+  const threw = getDb().prepare(
+    `SELECT json_extract(payload, '$.reason') AS reason FROM events
+     WHERE session_id = ? AND seq > ? AND type = 'portal_notice' AND json_extract(payload, '$.of') = ?
+     LIMIT 1`,
+  );
+  return rows.map((r) => {
+    const found = threw.get(r.session_id, r.seq, r.seq) as { reason: unknown } | undefined;
+    return { sessionId: r.session_id, seq: r.seq, ...(found?.reason != null ? { error: String(found.reason) } : {}) };
+  });
+}
+
 /** One message the portal sent to the agent, by its seq, or undefined if that is not one. */
 export function sentMessage(
   sessionId: string,
@@ -762,10 +808,12 @@ export function deleteEventsBetween(
       .prepare(
         `SELECT * FROM events WHERE session_id = ?
            AND ((seq >= ? AND (? IS NULL OR seq < ?))
-                OR (type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1))
+                OR (type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1)
+                -- The ends of commands after the range, for any of its commands: see placeOf.
+                OR (type IN ('portal_command', 'portal_command_end') AND type = 'portal_command_end' AND ? IS NOT NULL AND seq >= ?))
          ORDER BY seq ASC`,
       )
-      .all(sessionId, from, to, to) as EventRow[];
+      .all(sessionId, from, to, to, to, to) as EventRow[];
     const gone = rows.filter((r) => inRange(placeOf(r, settled)));
     const going = new Set(gone);
     const also = gone.filter((r) => !inRange(r.seq)).map((r) => r.seq);
@@ -823,15 +871,16 @@ export function deleteEvent(seq: number): void {
 
 /**
  * Drops what a session recorded after `seq`, but for its status changes — an
- * error among them is what says why the rest is gone. Returns the seqs dropped.
+ * error among them is what says why the rest is gone — and the ends of
+ * commands sent before it, which stay. Returns the seqs dropped.
  */
 export function deleteEventsAfter(sessionId: string, seq: number): number[] {
   const db = getDb();
+  const which = `session_id = ? AND seq > ? AND type != 'portal_status'
+    AND NOT (type = 'portal_command_end' AND json_extract(payload, '$.of') <= ?)`;
   return db.transaction(() => {
-    const gone = db
-      .prepare("SELECT seq FROM events WHERE session_id = ? AND seq > ? AND type != 'portal_status' ORDER BY seq")
-      .all(sessionId, seq) as { seq: number }[];
-    db.prepare("DELETE FROM events WHERE session_id = ? AND seq > ? AND type != 'portal_status'").run(sessionId, seq);
+    const gone = db.prepare(`SELECT seq FROM events WHERE ${which} ORDER BY seq`).all(sessionId, seq, seq) as { seq: number }[];
+    db.prepare(`DELETE FROM events WHERE ${which}`).run(sessionId, seq, seq);
     return gone.map((r) => r.seq);
   })();
 }

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type BackgroundState, type PortalEvent } from "./api";
 import { stripAnsi } from "./transcript";
+import { piRunning } from "./drafts";
 
 const EMPTY: BackgroundState = { supported: false, jobs: [], statuses: [], widgets: [] };
 
 /** Where a page was in its events when it asked: the newest live and stored seqs it held. */
 export type Mark = { live: number; stored: number };
+/** Before any event: every one is after it. */
+const NOWHERE: Mark = { live: 0, stored: 0 };
 
 export function markOf(events: PortalEvent[]): Mark {
   const mark = { live: 0, stored: 0 };
@@ -61,14 +64,16 @@ export function withLiveUi(state: BackgroundState, events: PortalEvent[], since:
  * extensions say after that comes with the events.
  */
 export function useBackground(sessionId: string, busy: boolean, events: PortalEvent[]): [BackgroundState, () => void] {
-  const [held, setHeld] = useState<{ state: BackgroundState; since: Mark }>({ state: EMPTY, since: { live: 0, stored: 0 } });
-  const state = held.state;
+  // Kept with the chat it is of. Cleared in an effect, another chat's state
+  // lasted a render into the next, long enough for its status lines to make
+  // this one list its commands, which starts its pi.
+  const [held, setHeld] = useState<{ sessionId: string; state: BackgroundState; since: Mark }>({ sessionId, state: EMPTY, since: { live: 0, stored: 0 } });
+  const state = held.sessionId === sessionId ? held.state : EMPTY;
   const current = useRef(sessionId);
   current.current = sessionId;
   const latest = useRef(events);
   latest.current = events;
   const [tick, setTick] = useState(0);
-  useEffect(() => setHeld({ state: EMPTY, since: { live: 0, stored: 0 } }), [sessionId]);
   useEffect(() => {
     let live = true;
     const load = () => {
@@ -76,7 +81,12 @@ export function useBackground(sessionId: string, busy: boolean, events: PortalEv
       // Where the events were as it asked: anything after may not be in the answer.
       const since = markOf(latest.current);
       api.background(sessionId).then(
-        (s) => live && current.current === sessionId && setHeld({ state: normalize(s), since }),
+        (s) => {
+          if (!live || current.current !== sessionId) return;
+          const state = normalize(s);
+          piRunning(sessionId, state.piRunning === true);
+          setHeld({ sessionId, state, since });
+        },
         () => undefined,
       );
     };
@@ -91,7 +101,10 @@ export function useBackground(sessionId: string, busy: boolean, events: PortalEv
       document.removeEventListener("visibilitychange", visible);
     };
   }, [sessionId, busy, tick, state.jobs.some((j) => j.state === "running")]);
-  const shown = useMemo(() => withLiveUi(held.state, events, held.since), [held, events]);
+  // Where this chat's events were when its answer was asked for. Another
+  // chat's would take this one's statuses for ones its answer already had.
+  const since = held.sessionId === sessionId ? held.since : NOWHERE;
+  const shown = useMemo(() => withLiveUi(state, events, since), [state, since, events]);
   return [shown, () => setTick((n) => n + 1)];
 }
 
@@ -102,5 +115,5 @@ export function useBackground(sessionId: string, busy: boolean, events: PortalEv
  */
 function normalize(s: Partial<BackgroundState> | null | undefined): BackgroundState {
   const list = <T,>(v: T[] | undefined): T[] => (Array.isArray(v) ? v : []);
-  return { supported: s?.supported === true, jobs: list(s?.jobs), statuses: list(s?.statuses), widgets: list(s?.widgets) };
+  return { supported: s?.supported === true, jobs: list(s?.jobs), statuses: list(s?.statuses), widgets: list(s?.widgets), piRunning: s?.piRunning === true };
 }

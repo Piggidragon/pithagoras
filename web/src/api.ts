@@ -204,6 +204,8 @@ export interface BackgroundState {
   jobs: BackgroundJob[];
   statuses: { key: string; text: string }[];
   widgets: { key: string; lines: string[] }[];
+  /** Whether the chat's pi is up, for the chat box's text to be worth telling it. */
+  piRunning?: boolean;
 }
 
 export interface PortalEvent {
@@ -638,7 +640,12 @@ export const api = {
   compact: (id: string) =>
     json<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),
 
-  commands: (id: string) => json<{ commands: PiCommand[] }>(`/api/sessions/${id}/commands`),
+  /** `ifRunning`: only from a pi that is up, rather than starting one; `notRunning` when none was. */
+  commands: (id: string, opts?: { ifRunning?: boolean }) =>
+    json<{ commands: PiCommand[]; notRunning?: boolean }>(`/api/sessions/${id}/commands${opts?.ifRunning ? "?ifRunning=1" : ""}`),
+  /** What is in the chat box, for an extension that asks. */
+  draft: (id: string, text: string, caret?: { start: number; end: number }) =>
+    json<{ ok: true }>(`/api/sessions/${id}/draft`, { method: "PUT", body: JSON.stringify({ text, caret }) }),
   piSettings: () => json<{ path: string; content: string }>("/api/pi-settings"),
   savePiSettings: (content: string) =>
     json<{ ok: true; path: string; note: string }>("/api/pi-settings", {

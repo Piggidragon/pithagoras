@@ -184,6 +184,12 @@ button.chat-compaction-pill:disabled { cursor: default; }
 .running-chip { display: inline-flex; align-items: center; gap: 6px; max-width: min(100%, 22rem); padding: 3px 10px 3px 6px; border-radius: 999px; border: 1px solid rgb(var(--line)); background: rgb(var(--raised) / .55); font-size: 11.5px; color: rgb(var(--fg-muted)); animation: chat-pill-in .4s var(--ease-out) both; transition: background .18s, border-color .18s, color .18s; }
 button.running-chip:hover { background: rgb(var(--raised)); border-color: rgb(var(--fg-faint)); color: rgb(var(--fg)); }
 .running-chip.is-status { padding-left: 10px; color: rgb(var(--fg-subtle)); border-style: dashed; }
+/* A status that names a command runs it: solid, and the command in the accent. */
+.running-chip.is-status.is-action { border-style: solid; border-color: rgb(var(--accent) / .3); color: rgb(var(--fg-muted)); cursor: pointer; }
+button.running-chip.is-action:hover { border-color: rgb(var(--accent) / .6); background: rgb(var(--accent) / .08); }
+.running-chip.is-action:disabled { opacity: .7; cursor: default; }
+.running-chip-command { color: rgb(var(--accent)); font: 500 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+button.running-chip-command:hover { text-decoration: underline; }
 .running-chip-icon { display: grid; place-items: center; width: 14px; height: 14px; flex-shrink: 0; }
 .running-chip-icon .chat-ring { width: 12px; height: 12px; }
 .running-chip-kind { width: 12px; height: 12px; flex-shrink: 0; opacity: .7; }
@@ -299,3 +305,18 @@ button.running-chip:hover { background: rgb(var(--raised)); border-color: rgb(va
   .files-row-actions > a,
   .files-row-actions > button { padding: 7px; }
 }
+
+/* A slash command that was sent: on the side of what you send, small, with how it went. */
+.command-line { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.command-line-pill { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 4px 10px 4px 9px; border-radius: 999px; border: 1px solid rgb(var(--line)); background: rgb(var(--raised) / .6); color: rgb(var(--fg-muted)); animation: chat-pill-in .35s var(--ease-out) both; transition: border-color .3s, background .3s; }
+.command-line-pill code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: rgb(var(--fg)); }
+.command-line-kind { width: 13px; height: 13px; flex-shrink: 0; opacity: .6; }
+.command-line-state { width: 13px; height: 13px; flex-shrink: 0; }
+.command-line.is-running .command-line-state { color: rgb(var(--fg-faint)); }
+.command-line.is-done .command-line-state, .command-line.is-quiet .command-line-state { color: rgb(var(--ok)); animation: pop-in .3s var(--ease-spring) both; }
+.command-line.is-started .command-line-state, .command-line.is-queued .command-line-state { color: rgb(var(--accent)); }
+.command-line.is-failed .command-line-pill { border-color: rgb(var(--danger) / .4); background: rgb(var(--danger) / .06); }
+.command-line.is-failed .command-line-state { color: rgb(var(--danger)); }
+.command-line-said { font-size: 11px; color: rgb(var(--fg-faint)); padding-right: 10px; animation: view-in .3s var(--ease-out) both; }
+.command-line-said.is-error { color: rgb(var(--danger)); white-space: pre-wrap; text-align: right; max-width: 36rem; }
+@media (prefers-reduced-motion: reduce) { .command-line-pill, .command-line-state, .command-line-said { animation: none !important; } }

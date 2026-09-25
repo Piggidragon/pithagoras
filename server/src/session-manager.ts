@@ -5,7 +5,7 @@ import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { agentHome, agentHomePath } from "./agent-home.js";
 import path from "node:path";
-import type { PiClient, PiTool, PromptTaken } from "./pi/types.js";
+import type { Draft, PiClient, PiTool, PromptTaken } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
@@ -26,6 +26,7 @@ import {
   sentMessage,
   sentMessages,
   unsettledMessages,
+  unansweredCommands,
   getSettings,
   markOrphanedSessionsInterrupted,
   browserAllowed,
@@ -118,6 +119,61 @@ const IMAGE_ROOT = path.resolve(process.env.DATA_DIR || "./data", "images");
 const EXECUTOR_KIND = (process.env.EXECUTOR || "host") as ExecutorKind;
 
 /**
+ * An extension's failure, said with its package's name rather than a path:
+ * pi names the file, or "command:<name>" for a command that threw.
+ */
+export function extensionFailure(where: unknown, error: unknown): string {
+  const path = String(where ?? "");
+  const command = /^command:(.+)$/.exec(path)?.[1];
+  const who = command ? `/${command}` : (/node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path)?.[1] ?? extensionName(path) ?? "An extension");
+  return `${who} failed: ${String(error ?? "no reason given").trim()}`;
+}
+
+/**
+ * An extension outside a package, by its file: "my-ext" for extensions/my-ext.ts,
+ * and the folder's name for one whose file is only its entry point, such as
+ * extensions/my-ext/index.ts or my-ext/dist/index.js.
+ */
+function extensionName(path: string): string | undefined {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  if (!/\.[cm]?[jt]s$/.test(parts.at(-1) ?? "")) return undefined;
+  let name = parts.pop()!.replace(/\.[cm]?[jt]s$/, "");
+  while (/^(index|main|extension|dist|src|lib|build)$/.test(name) && parts.length) name = parts.pop()!;
+  return name || undefined;
+}
+
+/**
+ * The name a slash command is run by, as pi reads it: everything after the
+ * slash up to the first space. "deploy.prod" for "/deploy.prod --now".
+ */
+export function commandName(text: string): string | undefined {
+  const t = text.trim();
+  if (!t.startsWith("/")) return undefined;
+  const space = t.indexOf(" ");
+  return (space === -1 ? t.slice(1) : t.slice(1, space)) || undefined;
+}
+
+/**
+ * A command's failure, said as it ends, so that a channel that sent it hears
+ * it once, and not as well as the page's own report of the send failing.
+ */
+export class CommandFailed extends Error {}
+
+/** Text without the colour and cursor codes a terminal would act on, as the chat's stripAnsi. */
+function plain(text: unknown): string {
+  return String(text ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").trim();
+}
+
+/**
+ * A command sent to pi and not yet answered. `inRun`: sent into a run, whose
+ * next start is not the command's doing.
+ */
+type InHand = { seq: number; name: string; said: number; inRun: boolean; error?: string };
+
+/** The extension UI requests a person sees in the chat: a line, a dialog, a view, the box filled. */
+const SHOWN = new Set(["notify", "select", "confirm", "input", "editor", "custom", "setEditorText", "set_editor_text"]);
+
+/**
  * Events that must not be persisted.
  *
  * Beyond noise, extension dialogs are strictly live: a stored
@@ -203,6 +259,12 @@ class SessionManager extends EventEmitter {
     // there for good, and not taken up again as running by the next run.
     for (const id of orphaned) this.record(id, "portal_status", { status: "interrupted", restarted: true });
     this.settleOrphanedMessages();
+    // A command's end is written when pi answers it. One the last server was
+    // holding never will be: it failed, with what it threw if it did. The page
+    // cannot tell one still waiting on a dialog from one that never will.
+    for (const c of unansweredCommands()) {
+      this.record(c.sessionId, "portal_command_end", { of: c.seq, error: c.error ?? "The portal restarted before it answered" });
+    }
   }
 
   /**
@@ -588,7 +650,6 @@ class SessionManager extends EventEmitter {
   private noteExtensionUi(sessionId: string, msg: any): void {
     let ui = this.extensionUi.get(sessionId);
     if (!ui) this.extensionUi.set(sessionId, (ui = { statuses: new Map(), widgets: new Map() }));
-    const plain = (t: unknown) => String(t ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim();
     if (msg.method === "setStatus" && typeof msg.statusKey === "string") {
       const text = plain(msg.statusText);
       if (text) ui.statuses.set(msg.statusKey, text);
@@ -599,6 +660,61 @@ class SessionManager extends EventEmitter {
       if (lines.some(Boolean)) ui.widgets.set(msg.widgetKey, lines);
       else ui.widgets.delete(msg.widgetKey);
     }
+  }
+
+  /**
+   * Commands sent and not yet answered, per session, with how much each has
+   * shown, and the error it threw: pi reports that apart from the answer,
+   * which counts a command that threw as handled.
+   */
+  private commandsInHand = new Map<string, InHand[]>();
+
+  /**
+   * Sessions whose agent is in a run, from pi's agent_start to agent_settled.
+   * Not the session's status, which a command sent marks running as well.
+   */
+  private inRun = new Set<string>();
+
+  /** The extensions whose failure has been said since the last run began, per session. */
+  private failuresSaid = new Map<string, Set<string>>();
+
+  private startCommand(sessionId: string, message: string): InHand {
+    const text = message.trim();
+    const row = this.record(sessionId, "portal_command", { text });
+    const command: InHand = { seq: row?.seq ?? -1, name: commandName(text) ?? text, said: 0, inRun: this.inRun.has(sessionId) };
+    this.commandsInHand.set(sessionId, [...(this.commandsInHand.get(sessionId) ?? []), command]);
+    return command;
+  }
+
+  /**
+   * How a command ended: run by an extension, a run started or queued, or
+   * failed. `quiet` when it showed nothing at all — no line, no dialog, no
+   * run — so the chat can say it ran and had nothing to say.
+   */
+  private endCommand(sessionId: string, command: InHand, end: { outcome?: string; said?: boolean; error?: string }) {
+    const inHand = this.commandsInHand.get(sessionId) ?? [];
+    // Ended already, when pi went away before it answered.
+    if (!inHand.includes(command)) return;
+    const list = inHand.filter((c) => c !== command);
+    if (list.length) this.commandsInHand.set(sessionId, list);
+    else this.commandsInHand.delete(sessionId);
+    const error = end.error ?? command.error;
+    this.record(sessionId, "portal_command_end", {
+      of: command.seq,
+      ...(error ? { error } : { outcome: end.outcome ?? "handled" }),
+      ...(!error && !end.said && command.said === 0 && end.outcome === "handled" ? { quiet: true } : {}),
+    });
+  }
+
+  /**
+   * pi went before answering the commands it had: they end as failed, rather
+   * than running for good and lending their names to notices of later ones.
+   */
+  private dropCommands(sessionId: string) {
+    for (const command of this.commandsInHand.get(sessionId) ?? []) {
+      this.record(sessionId, "portal_command_end", { of: command.seq, error: "pi stopped before it answered" });
+    }
+    this.commandsInHand.delete(sessionId);
   }
 
   /** Extension status lines and widgets for a session, as they are now. */
@@ -788,12 +904,88 @@ class SessionManager extends EventEmitter {
       if (modelFailure) this.record(sessionId, "portal_notice", { text: modelFailure, error: true });
       if (msg.type === "extension_ui_request") this.noteExtensionUi(sessionId, msg);
       this.record(sessionId, msg.type, msg);
+      // Anything a command in hand shows for itself: see endCommand. Only what
+      // a person sees in the chat — a line, a dialog, a run, a message — and
+      // not a status or widget, which any extension updates on its own clock.
+      // A run is one only for a command sent while none was going: into one,
+      // the next start is its queued follow-up's.
+      if (
+        (msg.type === "extension_ui_request" && SHOWN.has(msg.method)) ||
+        (msg.type === "message_end" && msg.message?.role === "custom" && msg.message.display)
+      ) {
+        for (const c of this.commandsInHand.get(sessionId) ?? []) c.said++;
+      }
+      if (msg.type === "agent_start") {
+        for (const c of this.commandsInHand.get(sessionId) ?? []) if (!c.inRun) c.said++;
+      }
+      // An extension that failed — its command, or a handler of its — says so
+      // in the chat. pi's TUI prints it; here it went nowhere. A command that
+      // threw is answered as handled, and this is where it says otherwise: the
+      // error goes on its line. The notice is kept, marked as that command's,
+      // for whoever asked through a channel, whose answer it is.
+      if (msg.type === "extension_error") {
+        const threw = /^command:(.+)$/.exec(String(msg.extensionPath ?? ""))?.[1];
+        const command = threw ? this.commandsInHand.get(sessionId)?.find((c) => c.name === threw && !c.error) : undefined;
+        if (command) command.error = String(msg.error ?? "it threw");
+        // A handler that throws on every event says so once a run, not on
+        // every tool call: once per extension, whatever each error says — one
+        // that names an offset, or a count, differs every time. A command's
+        // own is always its own.
+        const text = extensionFailure(msg.extensionPath, msg.error);
+        const who = String(msg.extensionPath ?? "");
+        const said = this.failuresSaid.get(sessionId) ?? new Set<string>();
+        if (command || !said.has(who)) {
+          if (!command) this.failuresSaid.set(sessionId, said.add(who));
+          this.record(sessionId, "portal_notice", {
+            text,
+            error: true,
+            from: "extension",
+            // The reason, for a server that dies before the command's end is written.
+            ...(command ? { of: command.seq, reason: command.error } : {}),
+          });
+        }
+      }
+      // A view drawn for pi's terminal: nothing in a browser can draw it.
+      // Said, rather than the command seeming to do nothing.
+      if (msg.type === "extension_ui_request" && msg.method === "custom") {
+        // Named only when it can only be the command's: during a run, a tool
+        // can open one too.
+        const inHand = this.commandsInHand.get(sessionId) ?? [];
+        const owner = inHand.length === 1 && !this.inRun.has(sessionId) ? inHand[0] : undefined;
+        this.record(sessionId, "portal_notice", {
+          text: `${owner ? `/${owner.name} opens` : "An extension opened"} a view made for pi's terminal, which the browser cannot show.`,
+          warning: true,
+          from: "extension",
+          ...(owner ? { command: owner.seq } : {}),
+        });
+      }
+      // What an extension says with notify — the answer to a command like
+      // /bg-update, or news from a job — is a line pi's TUI prints and then
+      // forgets. Here the request is live-only, so without this nothing showed
+      // and the command seemed to do nothing. Kept in the chat like the
+      // output of a builtin.
+      if (msg.type === "extension_ui_request" && msg.method === "notify") {
+        const text = plain(msg.message);
+        // The answer of the one command in hand, as far as can be told: pi
+        // does not say which extension spoke. A channel hears only its own.
+        const inHand = this.commandsInHand.get(sessionId) ?? [];
+        if (text) {
+          this.record(sessionId, "portal_notice", {
+            text,
+            ...(msg.notifyType === "error" ? { error: true } : msg.notifyType === "warning" ? { warning: true } : {}),
+            from: "extension",
+            ...(inHand.length === 1 ? { command: inHand[0].seq } : {}),
+          });
+        }
+      }
       // Status follows pi's own run state rather than being guessed at the
       // moments the portal happens to know about. agent_start covers a run
       // nobody here asked for — a queued follow-up picked up on its own, a
       // routine, a message that arrived through a channel.
       if (msg.type === "agent_start") {
         this.runsStarted.set(sessionId, (this.runsStarted.get(sessionId) ?? 0) + 1);
+        this.inRun.add(sessionId);
+        this.failuresSaid.delete(sessionId);
         this.mark(sessionId, "running");
       }
       if (msg.type === "message_start" && msg.message?.role === "user") this.takeIn(sessionId, msg.message.content);
@@ -802,6 +994,7 @@ class SessionManager extends EventEmitter {
       // all of it still the model working. Settling on agent_end is what made
       // the Stop button disappear halfway through.
       if (msg.type === "agent_settled") {
+        this.inRun.delete(sessionId);
         this.settleWaiting(sessionId);
         if (!this.failed.delete(sessionId)) this.mark(sessionId, "idle");
       }
@@ -829,6 +1022,9 @@ class SessionManager extends EventEmitter {
       executor.cleanup?.(sessionId).catch(() => {});
     });
 
+    // One copy, here: what an extension puts in the box outlives the pi that
+    // put it there, and a send from the box finds it.
+    client.useDrafts?.({ get: () => this.drafts.get(sessionId), set: (text, caret) => this.setDraft(sessionId, text, caret) });
     this.live.set(sessionId, { client, executor });
 
     return client;
@@ -895,15 +1091,24 @@ class SessionManager extends EventEmitter {
     // already claimed the session. Without this the composer loses its Stop
     // and isBusy() reads false for however long pi takes to answer.
     this.mark(sessionId, "running");
-    const logged = { images: false, queued: false, command: false };
+    const logged = { images: false, queued: false, command: false, failedOnLine: false };
     try {
       await this.submit(sessionId, message, options, insideEdit, logged);
     } catch (e) {
+      const busy = this.live.get(sessionId)?.client.isIdle?.() === false;
+      // A command refused: its line in the chat says so, and why. The chat
+      // itself did not fail, and saying it did put the same error there twice.
+      // Only while pi is still up: one that died has said so, and set the
+      // chat in error, before the refusal got here.
+      if (logged.failedOnLine) {
+        if (!busy && this.live.has(sessionId)) this.mark(sessionId, "idle");
+        throw new CommandFailed((e as Error).message);
+      }
       // Refused on its way into a run that goes on — a message queued into
       // it, or a command sent beside it: that run is not what failed, and
       // will settle the session itself. Marked failed, the page would take
       // every call still open in it for one that was cut off.
-      if (!((logged.queued || logged.command) && this.live.get(sessionId)?.client.isIdle?.() === false)) {
+      if (!((logged.queued || logged.command) && busy)) {
         const failure = (e as Error).message;
         updateSession(sessionId, { status: "error", last_error: failure });
         this.record(sessionId, "portal_status", { status: "error", error: failure });
@@ -922,10 +1127,13 @@ class SessionManager extends EventEmitter {
     message: string,
     options?: PromptOptions,
     insideEdit = false,
-    logged = { images: false, queued: false, command: false },
+    logged = { images: false, queued: false, command: false, failedOnLine: false },
   ): Promise<void> {
     const client = await this.ensureClient(sessionId, insideEdit);
     const images = options?.images ?? [];
+    // Sent from the box, which the page empties as it sends: said here too,
+    // or a command reading the box would find itself there.
+    if (this.drafts.get(sessionId)?.text.trim() === message.trim()) this.setDraft(sessionId, "");
 
     // A slash command is an instruction to the agent, not something said in the
     // conversation, so it should not appear as a chat message — its dialog or
@@ -938,6 +1146,10 @@ class SessionManager extends EventEmitter {
     // Portal builtins never reach the model — they act on the session itself.
     const builtin = /^\/([\w-]+)\s*(.*)$/.exec(message.trim());
     const serverBuiltin = builtin ? await findServerBuiltin(builtin[1]) : undefined;
+    // A command is not a chat message, but it is in the chat: a line that
+    // says it was sent, and then whether it is running, done, started a run,
+    // or failed. Without one a command that answers nothing looked unsent.
+    const command = isCommand || serverBuiltin ? this.startCommand(sessionId, message) : undefined;
     if (serverBuiltin) {
       // Not awaited: /compact is a model call and would hold the request open.
       // Same contract as a prompt — accept it, report through the event stream.
@@ -949,8 +1161,11 @@ class SessionManager extends EventEmitter {
         try {
           const text = await runBuiltin(serverBuiltin.name, builtin![2], client);
           this.record(sessionId, "portal_notice", { text });
+          if (command) this.endCommand(sessionId, command, { outcome: "handled", said: true });
         } catch (e) {
-          this.record(sessionId, "portal_notice", { text: (e as Error).message, error: true });
+          // Marked as the command's, as an extension's failure is: its line says it.
+          this.record(sessionId, "portal_notice", { text: (e as Error).message, error: true, ...(command ? { of: command.seq } : {}) });
+          if (command) this.endCommand(sessionId, command, { error: (e as Error).message });
         } finally {
           // Sent into a run, or overtaken by one — started, or on its way to
           // pi — it must not end it: the run settles the session itself, and
@@ -1041,6 +1256,10 @@ class SessionManager extends EventEmitter {
       try {
         taken = await sent;
       } catch (e) {
+        if (command) {
+          this.endCommand(sessionId, command, { error: (e as Error).message });
+          logged.failedOnLine = true;
+        }
         unfresh();
         // Refused, so never queued: nothing for pi to take in. Out of the
         // transcript too — its words go back to the box they came from, and
@@ -1076,6 +1295,7 @@ class SessionManager extends EventEmitter {
         // An extension took it and no run will: this is where it went in.
         this.placeTaken(sessionId, waiting);
       }
+      if (command) this.endCommand(sessionId, command, { outcome: taken ? taken.outcome : "handled" });
       if (waiting) {
         waiting.handing = undefined;
         waiting.inPi = true;
@@ -1454,7 +1674,10 @@ class SessionManager extends EventEmitter {
       if (streamText) relay(done);
     };
 
-    const onEvent = (row: { type: string; payload: string }) => {
+    // The command this ask sent, once its line is written: what an extension
+    // says for it is the answer. What one says for anything else is not.
+    let mine: number | undefined;
+    const onEvent = (row: { seq?: number; type: string; payload: string }) => {
       let payload: any = {};
       try {
         payload = JSON.parse(row.payload);
@@ -1483,10 +1706,16 @@ class SessionManager extends EventEmitter {
           relay(detail ? `⚙ ${name} · ${detail}` : `⚙ ${name}`);
           break;
         }
+        case "portal_command":
+          if (mine === undefined && payload.text === prepared.message.trim()) mine = row.seq;
+          break;
         // Output from a builtin like /session or /compact, or a model failure
         // pi gave up on. It is the answer as far as whoever asked is concerned,
         // so it goes back like any other. One pi recovered from never gets here.
         case "portal_notice":
+          // An extension's news, or its failure, belongs to a channel only if it
+          // was for the command that channel sent.
+          if (payload.from === "extension" && (mine === undefined || (payload.of !== mine && payload.command !== mine))) break;
           flush();
           if (typeof payload.text === "string" && payload.text.trim()) {
             all.push(payload.text.trim());
@@ -1607,14 +1836,23 @@ class SessionManager extends EventEmitter {
 
   /** True when the message invokes a command pi actually knows about. */
   private async looksLikeCommand(client: PiClient, message: string): Promise<boolean> {
-    const match = /^\/([\w:-]+)/.exec(message.trim());
-    if (!match) return false;
+    const name = commandName(message);
+    if (!name) return false;
     try {
       const commands = await client.getCommands();
-      return commands.some((c) => c.name === match[1]);
+      return commands.some((c) => c.name === name);
     } catch {
       return false;
     }
+  }
+
+  /** What is in each chat's box, as its page last said: an extension can read it. */
+  private drafts = new Map<string, Draft>();
+
+  /** `caret`: what is selected in the box, where a paste goes; the end without one. */
+  setDraft(sessionId: string, text: string, caret?: { start: number; end: number }): void {
+    if (text) this.drafts.set(sessionId, { text, caret });
+    else this.drafts.delete(sessionId);
   }
 
   /** Answer an extension dialog for a live session. */
@@ -1844,9 +2082,13 @@ class SessionManager extends EventEmitter {
 
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
+    this.dropCommands(sessionId);
     // What the extensions showed went with the process that ran them: stopped
-    // for a restart or a delete as much as crashed.
+    // for a restart or a delete as much as crashed. Left, a status naming a
+    // command had the page list the commands, starting pi.
     this.extensionUi.delete(sessionId);
+    this.failuresSaid.delete(sessionId);
+    this.inRun.delete(sessionId);
     this.calls.delete(sessionId);
     this.fresh.delete(sessionId);
     this.piQueue.delete(sessionId);
@@ -1882,6 +2124,7 @@ class SessionManager extends EventEmitter {
    * one a container wrote as another user — is a leftover, not an error.
    */
   removeFiles(sessionId: string): void {
+    this.drafts.delete(sessionId);
     try {
       removeSessionFiles(SESSION_ROOT, sessionId);
       removeImages(IMAGE_ROOT, sessionId);

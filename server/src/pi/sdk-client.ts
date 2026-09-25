@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
+import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
@@ -54,6 +54,39 @@ const CONTEXT_FILES = ["SOUL.md", "PrimaryUser.md", "MEMORY.md"];
 const SHARED_FILES = ["SOUL.md", "TEAM.md"];
 
 const filesFor = (role?: string) => (!role || role === "primary" ? CONTEXT_FILES : SHARED_FILES);
+
+/**
+ * pi's own theme, for extensions that style text with it even when nothing
+ * will draw it — as pi's no-UI context hands them. pi's CLI loads it on start;
+ * the SDK does not, and the theme object pi hands out throws on every read
+ * until it has. Loaded once, with the SDK, then read where pi keeps it.
+ */
+const THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
+let themeLoaded: string | null = null;
+export function loadTheme(
+  pi: { initTheme?: (name?: string, watch?: boolean) => void; SettingsManager?: { create(cwd: string): { getTheme(): string | undefined } } },
+  cwd = process.cwd(),
+) {
+  // The one set in pi's settings, as pi's CLI loads it; its default without one.
+  let name: string | undefined;
+  try {
+    name = pi.SettingsManager?.create(cwd).getTheme();
+  } catch {
+    // Settings that cannot be read leave the default.
+  }
+  if (themeLoaded === (name ?? "")) return;
+  themeLoaded = name ?? "";
+  try {
+    pi.initTheme?.(name, false);
+  } catch {
+    try {
+      pi.initTheme?.(undefined, false);
+    } catch {
+      // An extension reading it gets undefined, as it did before.
+    }
+  }
+}
+const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
 
 export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
@@ -205,6 +238,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private voiceFirst?: VoiceFirstTurn;
   /** Dialogs an extension is waiting on, keyed by request id. */
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
+  /** The chat box's text, kept by the portal: see useDrafts. */
+  private drafts?: DraftStore;
+
+  useDrafts(drafts: DraftStore): void {
+    this.drafts = drafts;
+  }
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
   /** The extensions' event bus, when this client made one. */
@@ -273,6 +312,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
     const pi: any = await import("@earendil-works/pi-coding-agent");
+    loadTheme(pi, opts.cwd);
 
     const modelRuntime = await pi.ModelRuntime.create();
     // Shared with the extensions, so one that runs a subagent can tell the
@@ -550,6 +590,46 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       setWorkingVisible: () => {},
       setWorkingIndicator: () => {},
       setHiddenThinkingLabel: () => {},
+      // The rest of pi's UI, which extensions call whether or not there is a
+      // terminal. Missing, a call threw — "ctx.ui.custom is not a function" —
+      // and the command failed for no reason of its own. As pi's RPC mode
+      // does: what a browser can do is passed on, the rest does nothing.
+      setFooter: () => {},
+      setHeader: () => {},
+      setTitle: () => {},
+      // A view drawn for the terminal. Passed on so the chat can say it cannot be shown.
+      custom: async () => {
+        fireAndForget({ method: "custom" });
+        return undefined;
+      },
+      // Into the chat box, for the person to send or change.
+      // What is in the box follows at once, for a getEditorText right after.
+      setEditorText: (text: string) => {
+        this.drafts?.set(String(text ?? ""));
+        fireAndForget({ method: "setEditorText", text: String(text ?? "") });
+      },
+      // Over what is selected, or at the end, as the page puts it.
+      pasteToEditor: (text: string) => {
+        const given = String(text ?? "");
+        const draft = this.drafts?.get()?.text ?? "";
+        const { start, end } = this.drafts?.get()?.caret ?? { start: draft.length, end: draft.length };
+        const at = start + given.length;
+        this.drafts?.set(draft.slice(0, start) + given + draft.slice(end), { start: at, end: at });
+        fireAndForget({ method: "setEditorText", text: given, paste: true });
+      },
+      // Answered with nothing, an extension that adds to the draft replaced it.
+      getEditorText: () => this.drafts?.get()?.text ?? "",
+      addAutocompleteProvider: () => {},
+      setEditorComponent: () => {},
+      getEditorComponent: () => undefined,
+      get theme() {
+        return piTheme();
+      },
+      getAllThemes: () => [],
+      getTheme: () => undefined,
+      setTheme: () => ({ success: false, error: "The portal's theme is set in the browser." }),
+      getToolsExpanded: () => false,
+      setToolsExpanded: () => {},
     };
   }
 

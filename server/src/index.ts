@@ -28,7 +28,7 @@ import {
   writeAgentFile,
   type WizardInput,
 } from "./agent-setup.js";
-import { sessions, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
+import { sessions, CommandFailed, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
@@ -633,6 +633,10 @@ app.post("/api/sessions/:id/prompt", promptJson, async (req, res) => {
     if (title && getSession(session.id)?.auto_title) updateSession(session.id, { title, auto_title: 0 });
     res.json({ ok: true, status: "running" });
   } catch (e) {
+    // Sent, and failed where it is shown: on the command's line in the chat.
+    // An error here as well was the same words in a banner, and the command
+    // put back in the box.
+    if (e instanceof CommandFailed) return res.json({ ok: true, failed: e.message });
     res.status(500).json({ error: (e as Error).message });
   }
 });
@@ -689,6 +693,19 @@ app.post("/api/sessions/:id/ui-response", (req, res) => {
   if (typeof id !== "string") return res.status(400).json({ error: "id required" });
   const delivered = sessions.respondUi(session.id, id, { value, cancelled: Boolean(cancelled) });
   res.json({ ok: delivered, note: delivered ? undefined : "Request already resolved or expired" });
+});
+
+/** What is in the chat box, which an extension can ask for. Kept by the portal; starts nothing. */
+app.put("/api/sessions/:id/draft", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const { text, caret } = req.body ?? {};
+  if (typeof text !== "string") return res.status(400).json({ error: "text required" });
+  const at = (n: unknown) => (Number.isInteger(n) && (n as number) >= 0 && (n as number) <= text.length ? (n as number) : undefined);
+  const start = at(caret?.start);
+  const end = at(caret?.end);
+  sessions.setDraft(session.id, text, start !== undefined && end !== undefined && start <= end ? { start, end } : undefined);
+  res.json({ ok: true });
 });
 
 /**
@@ -799,7 +816,9 @@ app.get("/api/sessions/:id/background", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   const jobs = BACKGROUND_SUPPORTED ? await listJobs(session.workspace, sessions.callsRunning(session.id)) : [];
-  res.json({ supported: BACKGROUND_SUPPORTED, jobs, ...sessions.extensionState(session.id) });
+  // piRunning: whether an extension could ask what is in the chat box — the page
+  // tells the portal only then.
+  res.json({ supported: BACKGROUND_SUPPORTED, jobs, ...sessions.extensionState(session.id), piRunning: sessions.isLoaded(session.id) });
 });
 
 app.get("/api/sessions/:id/background/:key/output", async (req, res) => {
@@ -1066,6 +1085,9 @@ app.post("/api/sessions/:id/compact", async (req, res) => {
 app.get("/api/sessions/:id/commands", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
+  // Only if pi is up: a status line naming a command asks this way, and
+  // asking must not start pi for a chat that has none.
+  if (req.query.ifRunning && !sessions.isLoaded(session.id)) return res.json({ commands: [], notRunning: true });
   try {
     const client = await sessions.client(session.id);
     // Builtins first: they are the ones people reach for most.

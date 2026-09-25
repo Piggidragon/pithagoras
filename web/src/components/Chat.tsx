@@ -1,6 +1,8 @@
 import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
+import { CommandLine } from "./CommandLine";
+import { mentionsCommand } from "../status-commands";
 import { SubagentPanel } from "./SubagentPanel";
 import { BackgroundJobs } from "./BackgroundJobs";
 import { stableSubagents, subagents, type Subagent } from "../subagents";
@@ -29,7 +31,8 @@ import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
 import { TitleInput } from "./TitleInput";
 import { latestFileActivity } from "../file-activity";
-import { drafts, withUnsent } from "../drafts";
+import { caretFrom, drafts, withUnsent } from "../drafts";
+import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
@@ -481,7 +484,7 @@ export function Chat({
   // A notice is the portal speaking, not a message: only what a person or pi
   // said counts. Earlier pages that are not loaded yet count as said.
   const started = useMemo(
-    () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant"),
+    () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant" || item.kind === "command"),
     [items, hasEarlier],
   );
   const [now, setNow] = useState(() => Date.now());
@@ -521,6 +524,32 @@ export function Chat({
   };
   // What was listed for another chat is not offered here.
   useEffect(() => setCommands([]), [session.id]);
+  // A status line that names a command can run it — once it is known to be
+  // one of this chat's. Asked only of a pi that is up: a status can outlast
+  // the pi that set it, and asking must not start another.
+  const statusNamesCommand = background.statuses.some((s) => mentionsCommand(s.text));
+  useEffect(() => {
+    if (!statusNamesCommand) return;
+    const key = `${session.id}:${turns}`;
+    if (commandList.current?.key === key) {
+      void loadCommands();
+      return;
+    }
+    let live = true;
+    api.commands(session.id, { ifRunning: true }).then(
+      (r) => {
+        if (!live || r.notRunning) return;
+        // The same list a "/" would fetch, so kept as that.
+        if (commandList.current?.key !== key) commandList.current = { key, list: Promise.resolve(r.commands) };
+        setCommands(r.commands);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [statusNamesCommand, session.id, turns]);
+  const commandNames = useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
 
   // Show the palette while the composer holds a bare "/name" prefix.
   const slashText = slashToken(input);
@@ -735,6 +764,32 @@ export function Chat({
     drafts.set(session.id, next);
     setInput(next);
   };
+
+  // An extension that fills the chat box — pi's setEditorText, pasteToEditor —
+  // fills this one, for the person to send or change: the whole of it, or a
+  // paste where the cursor is, as in pi's terminal. One right after another
+  // builds on it: the box's text is taken as it now is, not as last drawn.
+  useEffect(
+    () =>
+      onFill(session.id, ({ text: given, paste }) => {
+        const before = draft.current;
+        const where = caret.current ?? { start: before.length, end: before.length };
+        const next = paste ? before.slice(0, where.start) + given + before.slice(where.end) : given;
+        const at = paste ? where.start + given.length : next.length;
+        draft.current = next;
+        caret.current = paste ? { start: at, end: at } : null;
+        // The same text again draws nothing, and a cursor left to be placed
+        // then would move under the next key typed.
+        if (next === before) box.current?.setSelectionRange(at, at);
+        else caretTo.current = at;
+        changeInput(next);
+        requestAnimationFrame(() => box.current?.focus());
+      }),
+    [session.id],
+  );
+
+  // Where a paste from an extension goes, for the portal to read the box as it will be.
+  useEffect(() => caretFrom((id) => (id === currentSession.current ? caret.current ?? undefined : undefined)), []);
 
   const clearBox = () => {
     caret.current = null;
@@ -1139,6 +1194,13 @@ export function Chat({
               </div>
             );
           }
+          if (item.kind === "command") {
+            return (
+              <div key={item.id} className={`chat-row${enter}`}>
+                <CommandLine item={item} />
+              </div>
+            );
+          }
           if (item.kind === "tool") {
             return (
               <div key={item.id} className={`tool-row${enter}`}>
@@ -1168,7 +1230,9 @@ export function Chat({
               className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs${enter} ${
                 item.tone === "error"
                   ? "bg-danger/10 text-danger"
-                  : "bg-raised/60 text-fg-muted"
+                  : item.tone === "warn"
+                    ? "bg-warn/10 text-warn"
+                    : "bg-raised/60 text-fg-muted"
               }`}
             >
               {item.text}
@@ -1275,7 +1339,15 @@ export function Chat({
         >
           <span className="h-1 w-12 rounded-full bg-fg/15 transition group-hover:bg-accent/60" />
         </button>
-        <RunningTray agents={agents} jobs={background.jobs} statuses={background.statuses} onAgent={openAgent} onJob={openJob} />
+        <RunningTray
+          agents={agents}
+          jobs={background.jobs}
+          statuses={background.statuses}
+          commands={commandNames}
+          onAgent={openAgent}
+          onJob={openJob}
+          onCommand={(command) => attempt(() => submit(command, false))}
+        />
         <DictationStrip dictation={dictation} />
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 text-xs text-accent">
@@ -1321,6 +1393,7 @@ export function Chat({
           }}
           onSelect={(e) => {
             caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
+            drafts.moved(session.id);
           }}
           onPaste={(e) => {
             // A screenshot, or "Copy image" in a browser. Where there is text as
