@@ -41,3 +41,11 @@ test('only what is drawn is stored: a tool result again as a message is left out
  b.emit('subagent:v1:end',{id:'r',status:'done'});
  assert.equal(bridge.takes('r','input'),false,'not once it has ended');
 });
+test('every event of a subagent says which tool call runs it',()=>{
+ const b=bus();const out:any[]=[];bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'r',label:'R',toolCallId:'call-7'});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_end',message:{role:'assistant',content:[]}}});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'x'}}});
+ b.emit('subagent:v1:end',{id:'r',status:'done'});
+ assert.deepEqual(out.map(e=>e.toolCallId),['call-7','call-7','call-7','call-7']);
+});

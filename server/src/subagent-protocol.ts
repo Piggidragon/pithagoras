@@ -112,7 +112,9 @@ export function slimEvent(event: any): Record<string, unknown> | undefined {
  * `portal_subagent_live` (streamed, not stored). Returns the unsubscribe.
  */
 export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
-  const known = new Map<string, { input: boolean; stop: boolean }>();
+  // With the tool call that runs each: carried on all its events, so a page
+  // that has not loaded the start still knows whose they are.
+  const known = new Map<string, { input: boolean; stop: boolean; toolCallId?: string }>();
   // When each child's current message began and stopped thinking, epoch ms:
   // its tokens are never stored, so the times ride on its message_end.
   const thinking = new Map<string, { thinkingSince: number; thinkingUntil: number }>();
@@ -120,7 +122,7 @@ export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
     bus.on(SUBAGENT_START, (data: any) => {
       const id = str(data?.id, 120);
       if (!id) return;
-      known.set(id, { input: data.input === true, stop: data.stop === true });
+      known.set(id, { input: data.input === true, stop: data.stop === true, toolCallId: str(data.toolCallId, 200) });
       emit({
         type: "portal_subagent",
         op: "start",
@@ -146,15 +148,17 @@ export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
         Object.assign(event, thinking.get(id));
         thinking.delete(id);
       }
-      emit({ type: LIVE.has(String(event.type)) ? "portal_subagent_live" : "portal_subagent", op: "event", id, event });
+      const toolCallId = known.get(id)?.toolCallId;
+      emit({ type: LIVE.has(String(event.type)) ? "portal_subagent_live" : "portal_subagent", op: "event", id, ...(toolCallId ? { toolCallId } : {}), event });
     }),
     bus.on(SUBAGENT_END, (data: any) => {
       const id = str(data?.id, 120);
       if (!id || !known.has(id)) return;
+      const toolCallId = known.get(id)?.toolCallId;
       known.delete(id);
       thinking.delete(id);
       const status = ["done", "error", "stopped"].includes(data.status) ? data.status : "done";
-      emit({ type: "portal_subagent", op: "end", id, status, ...(str(data.error, 2000) ? { error: str(data.error, 2000) } : {}) });
+      emit({ type: "portal_subagent", op: "end", id, ...(toolCallId ? { toolCallId } : {}), status, ...(str(data.error, 2000) ? { error: str(data.error, 2000) } : {}) });
     }),
   ];
   return Object.assign(() => off.forEach((f) => f()), {

@@ -718,6 +718,33 @@ class SessionManager extends EventEmitter {
   }
 
   /** Extension status lines and widgets for a session, as they are now. */
+  /**
+   * Tool calls running in each chat, its subagents' included, by call id. A
+   * process pi started for one and one an extension started look the same
+   * from outside; only while a call is running can a process be one.
+   */
+  private calls = new Map<string, Set<string>>();
+
+  private noteCall(sessionId: string, msg: any): void {
+    const sub = msg.type === "portal_subagent" && msg.op === "event" ? msg.event ?? {} : undefined;
+    const event = sub ?? msg;
+    const id = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
+    let calls = this.calls.get(sessionId);
+    if (event.type === "tool_execution_start") {
+      if (!calls) this.calls.set(sessionId, (calls = new Set()));
+      calls.add(id);
+    }
+    if (event.type === "tool_execution_end") calls?.delete(id);
+    // A subagent that ended took whatever it was running with it.
+    if (msg.type === "portal_subagent" && msg.op === "end") for (const c of [...(calls ?? [])]) if (c.startsWith(`${msg.id}:`)) calls!.delete(c);
+    if (calls && !calls.size) this.calls.delete(sessionId);
+  }
+
+  /** Whether a tool call is running in the chat: see calls. */
+  callsRunning(sessionId: string): boolean {
+    return this.calls.has(sessionId);
+  }
+
   extensionState(sessionId: string): { statuses: { key: string; text: string }[]; widgets: { key: string; lines: string[] }[] } {
     const ui = this.extensionUi.get(sessionId);
     return {
@@ -864,6 +891,7 @@ class SessionManager extends EventEmitter {
         return;
       }
       if (msg.type === "agent_start") this.failed.delete(sessionId);
+      this.noteCall(sessionId, msg);
       if (msg.type === "queue_update") {
         const lane = (texts: unknown) => (Array.isArray(texts) ? texts.map(String) : []);
         const queue = { steering: lane(msg.steering), followUp: lane(msg.followUp) };
@@ -2058,6 +2086,7 @@ class SessionManager extends EventEmitter {
     this.extensionUi.delete(sessionId);
     this.failuresSaid.delete(sessionId);
     this.inRun.delete(sessionId);
+    this.calls.delete(sessionId);
     this.fresh.delete(sessionId);
     this.piQueue.delete(sessionId);
     this.dropWaiting(sessionId);

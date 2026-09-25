@@ -96,7 +96,17 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
     // Its start is further up than the page has loaded — a long subagent's
     // steps fill what a reload reads. Still shown, from what came after.
     if (!sub) {
-      sub = { id, kind: "protocol", label: "Subagent", status: "running", input: false, stop: false, events: [] };
+      sub = {
+        id,
+        kind: "protocol",
+        label: "Subagent",
+        status: "running",
+        input: false,
+        stop: false,
+        // Tied to its tool call all the same: listed once, and over when it is.
+        ...(typeof p.toolCallId === "string" ? { toolCallId: p.toolCallId } : {}),
+        events: [],
+      };
       byId.set(id, sub);
       order.push(sub);
     }
@@ -154,4 +164,23 @@ export function reportedSteps(details: unknown): { type: "text" | "toolCall"; te
   return list
     .filter((s: any) => (s?.type === "text" && typeof s.text === "string") || (s?.type === "toolCall" && typeof s.name === "string"))
     .map((s: any) => (s.type === "text" ? { type: "text", text: s.text } : { type: "toolCall", name: s.name, args: s.args }));
+}
+
+/**
+ * `next`, with each subagent that has not changed since `prev` kept as the
+ * object it was: nothing about it differs, nor how many events it has, nor
+ * the last of them.
+ */
+export function stableSubagents(prev: Subagent[], next: Subagent[]): Subagent[] {
+  const before = new Map(prev.map((s) => [s.id, s]));
+  const same = (a: Subagent, b: Subagent) => {
+    if (a.events.length !== b.events.length || a.events.at(-1)?.seq !== b.events.at(-1)?.seq) return false;
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) if (k !== "events" && (a as any)[k] !== (b as any)[k]) return false;
+    return true;
+  };
+  return next.map((s) => {
+    const was = before.get(s.id);
+    return was && same(was, s) ? was : s;
+  });
 }

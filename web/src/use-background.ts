@@ -1,32 +1,84 @@
-import { useEffect, useRef, useState } from "react";
-import { api, type BackgroundState } from "./api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, type BackgroundState, type PortalEvent } from "./api";
+import { stripAnsi } from "./transcript";
 
 const EMPTY: BackgroundState = { supported: false, jobs: [], statuses: [], widgets: [] };
+
+/** Where a page was in its events when it asked: the newest live and stored seqs it held. */
+export type Mark = { live: number; stored: number };
+
+export function markOf(events: PortalEvent[]): Mark {
+  const mark = { live: 0, stored: 0 };
+  for (const e of events) {
+    if (e.seq < 0) mark.live = Math.min(mark.live, e.seq);
+    else mark.stored = Math.max(mark.stored, e.seq);
+  }
+  return mark;
+}
+
+/**
+ * What extensions say about themselves, as the portal last answered and then
+ * as their events have said since: a status arrives as an event, and asking
+ * the portal again for each — with a walk of /proc for the jobs — was a
+ * request a moment, for text the page already had. Read back from the end of
+ * the events to where the page was when it asked: new ones are appended.
+ */
+export function withLiveUi(state: BackgroundState, events: PortalEvent[], since: Mark): BackgroundState {
+  let from = events.length;
+  while (from > 0) {
+    const e = events[from - 1];
+    if (e.seq < 0 ? e.seq >= since.live : e.seq <= since.stored) break;
+    from--;
+  }
+  const said = events.slice(from).filter((e) => e.type === "extension_ui_request" && (e.payload?.method === "setStatus" || e.payload?.method === "setWidget"));
+  if (!said.length) return state;
+  const statuses = new Map(state.statuses.map((s) => [s.key, s.text]));
+  const widgets = new Map(state.widgets.map((w) => [w.key, w.lines]));
+  const plain = (t: unknown) => stripAnsi(String(t ?? "")).trim();
+  for (const { payload: p } of said) {
+    if (p.method === "setStatus" && typeof p.statusKey === "string") {
+      const text = plain(p.statusText);
+      if (text) statuses.set(p.statusKey, text);
+      else statuses.delete(p.statusKey);
+    }
+    if (p.method === "setWidget" && typeof p.widgetKey === "string") {
+      const lines = Array.isArray(p.widgetContent) ? p.widgetContent.map(plain) : [];
+      if (lines.some(Boolean)) widgets.set(p.widgetKey, lines);
+      else widgets.delete(p.widgetKey);
+    }
+  }
+  return {
+    ...state,
+    statuses: [...statuses].map(([key, text]) => ({ key, text })),
+    widgets: [...widgets].map(([key, lines]) => ({ key, lines })),
+  };
+}
 
 /**
  * Jobs the agent left running, and what extensions say about themselves,
  * asked for every few seconds while the page is looked at — more often while
- * something is running. `nudge` asks at once: an extension just changed its
- * status, or a job was stopped.
+ * something is running — and once at once when a job was stopped. What
+ * extensions say after that comes with the events.
  */
-export function useBackground(sessionId: string, busy: boolean, nudged: unknown): [BackgroundState, () => void] {
-  // An extension can move its status several times a second — a spinner, a
-  // count — and each asked again at once, a /proc walk every time.
-  const nudge = useThrottled(nudged, NUDGE_MS);
+export function useBackground(sessionId: string, busy: boolean, events: PortalEvent[]): [BackgroundState, () => void] {
   // Kept with the chat it is of. Cleared in an effect, another chat's state
   // lasted a render into the next, long enough for its status lines to make
   // this one list its commands, which starts its pi.
-  const [held, setHeld] = useState<{ sessionId: string; state: BackgroundState }>({ sessionId, state: EMPTY });
+  const [held, setHeld] = useState<{ sessionId: string; state: BackgroundState; since: Mark }>({ sessionId, state: EMPTY, since: { live: 0, stored: 0 } });
   const state = held.sessionId === sessionId ? held.state : EMPTY;
   const current = useRef(sessionId);
   current.current = sessionId;
+  const latest = useRef(events);
+  latest.current = events;
   const [tick, setTick] = useState(0);
   useEffect(() => {
     let live = true;
     const load = () => {
       if (document.hidden) return;
+      // Where the events were as it asked: anything after may not be in the answer.
+      const since = markOf(latest.current);
       api.background(sessionId).then(
-        (s) => live && current.current === sessionId && setHeld({ sessionId, state: normalize(s) }),
+        (s) => live && current.current === sessionId && setHeld({ sessionId, state: normalize(s), since }),
         () => undefined,
       );
     };
@@ -40,26 +92,9 @@ export function useBackground(sessionId: string, busy: boolean, nudged: unknown)
       window.clearInterval(t);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [sessionId, busy, nudge, tick, state.jobs.some((j) => j.state === "running")]);
-  return [state, () => setTick((n) => n + 1)];
-}
-
-/** How often a moving status asks again, at most. */
-const NUDGE_MS = 1500;
-
-/** `value`, changing at most once per `ms`; the last of a burst still comes through. */
-function useThrottled<T>(value: T, ms: number): T {
-  const [shown, setShown] = useState(value);
-  const last = useRef(0);
-  useEffect(() => {
-    if (Object.is(value, shown)) return;
-    const t = window.setTimeout(() => {
-      last.current = Date.now();
-      setShown(value);
-    }, Math.max(0, last.current + ms - Date.now()));
-    return () => window.clearTimeout(t);
-  }, [value, shown, ms]);
-  return shown;
+  }, [sessionId, busy, tick, state.jobs.some((j) => j.state === "running")]);
+  const shown = useMemo(() => withLiveUi(state, events, held.since), [state, held.since, events]);
+  return [shown, () => setTick((n) => n + 1)];
 }
 
 /**
