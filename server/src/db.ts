@@ -663,6 +663,12 @@ function placeOf(
   row: { seq: number; type: string; payload: string },
   settled: ReturnType<typeof settledAt>,
 ): number {
+  // A command's end is where its command is: taken out with it, and kept
+  // with one that stays, when the end fell among what is taken out.
+  if (row.type === "portal_command_end") {
+    const of = (JSON.parse(row.payload) ?? {}).of;
+    return typeof of === "number" ? of : row.seq;
+  }
   if (row.type !== "portal_prompt" || !(JSON.parse(row.payload) ?? {}).queued) return row.seq;
   return settled.taken.get(row.seq) ?? settled.unsent.get(row.seq) ?? Number.POSITIVE_INFINITY;
 }
@@ -732,31 +738,32 @@ export function unsettledMessages(): {
 }
 
 /**
- * Commands a server that died left unanswered, with the error each threw
- * before it did, where pi said so.
+ * Commands a server that died left unanswered, with the reason each threw
+ * before it did, where pi said so. Found by SQL, from the commands and their
+ * ends alone: see idx_events_commands.
  */
 export function unansweredCommands(): { sessionId: string; seq: number; error?: string }[] {
   const rows = getDb()
     .prepare(
-      `SELECT session_id, seq, type, payload FROM events
-       WHERE type IN ('portal_command', 'portal_command_end')
-       ORDER BY session_id, seq`,
+      `SELECT session_id, seq FROM events
+       WHERE type = 'portal_command'
+         AND seq NOT IN (
+           -- Not one NULL among them: NOT IN a list holding one matches nothing.
+           SELECT json_extract(payload, '$.of') FROM events
+           WHERE type = 'portal_command_end' AND json_extract(payload, '$.of') IS NOT NULL
+         )
+       ORDER BY seq`,
     )
-    .all() as { session_id: string; seq: number; type: string; payload: string }[];
-  const open = new Map<number, { sessionId: string; text: string }>();
-  for (const r of rows) {
-    if (r.type === "portal_command") open.set(r.seq, { sessionId: r.session_id, text: String(JSON.parse(r.payload)?.text ?? "") });
-    else open.delete(Number(JSON.parse(r.payload)?.of));
-  }
+    .all() as { session_id: string; seq: number }[];
+  // Its own failure, marked as its own: not the next one of the same name.
   const threw = getDb().prepare(
-    `SELECT json_extract(payload, '$.error') AS error FROM events
-     WHERE session_id = ? AND seq > ? AND type = 'extension_error' AND json_extract(payload, '$.extensionPath') = ?
-     ORDER BY seq LIMIT 1`,
+    `SELECT json_extract(payload, '$.reason') AS reason FROM events
+     WHERE session_id = ? AND seq > ? AND type = 'portal_notice' AND json_extract(payload, '$.of') = ?
+     LIMIT 1`,
   );
-  return [...open].map(([seq, { sessionId, text }]) => {
-    const name = /^\/([\w:-]+)/.exec(text)?.[1];
-    const found = name ? (threw.get(sessionId, seq, `command:${name}`) as { error: unknown } | undefined) : undefined;
-    return { sessionId, seq, ...(found?.error != null ? { error: String(found.error) } : {}) };
+  return rows.map((r) => {
+    const found = threw.get(r.session_id, r.seq, r.seq) as { reason: unknown } | undefined;
+    return { sessionId: r.session_id, seq: r.seq, ...(found?.reason != null ? { error: String(found.reason) } : {}) };
   });
 }
 
@@ -857,15 +864,16 @@ export function deleteEvent(seq: number): void {
 
 /**
  * Drops what a session recorded after `seq`, but for its status changes — an
- * error among them is what says why the rest is gone. Returns the seqs dropped.
+ * error among them is what says why the rest is gone — and the ends of
+ * commands sent before it, which stay. Returns the seqs dropped.
  */
 export function deleteEventsAfter(sessionId: string, seq: number): number[] {
   const db = getDb();
+  const which = `session_id = ? AND seq > ? AND type != 'portal_status'
+    AND NOT (type = 'portal_command_end' AND json_extract(payload, '$.of') <= ?)`;
   return db.transaction(() => {
-    const gone = db
-      .prepare("SELECT seq FROM events WHERE session_id = ? AND seq > ? AND type != 'portal_status' ORDER BY seq")
-      .all(sessionId, seq) as { seq: number }[];
-    db.prepare("DELETE FROM events WHERE session_id = ? AND seq > ? AND type != 'portal_status'").run(sessionId, seq);
+    const gone = db.prepare(`SELECT seq FROM events WHERE ${which} ORDER BY seq`).all(sessionId, seq, seq) as { seq: number }[];
+    db.prepare(`DELETE FROM events WHERE ${which}`).run(sessionId, seq, seq);
     return gone.map((r) => r.seq);
   })();
 }

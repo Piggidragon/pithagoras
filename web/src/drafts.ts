@@ -31,7 +31,18 @@ export function createDrafts(store: SafeStorage = session, tell?: (id: string, t
       }
       tell?.(id, text);
     },
+    /** The cursor moved in a chat's box: told again, with where it is now. */
+    moved(id: string): void {
+      const text = this.get(id);
+      if (text) tell?.(id, text);
+    },
   };
+}
+
+/** Where a chat's cursor is, told with its text: the chat box says, for the chat it shows. */
+let caretOf: (id: string) => { start: number; end: number } | undefined = () => undefined;
+export function caretFrom(read: typeof caretOf): void {
+  caretOf = read;
 }
 
 /**
@@ -41,7 +52,7 @@ export function createDrafts(store: SafeStorage = session, tell?: (id: string, t
  */
 function tellPortal(): (id: string, text: string) => void {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  const send = (id: string, text: string) => void api.draft(id, text).catch(() => {});
+  const send = (id: string, text: string) => void api.draft(id, text, text ? caretOf(id) : undefined).catch(() => {});
   return (id, text) => {
     clearTimeout(timers.get(id));
     timers.delete(id);

@@ -88,7 +88,7 @@ if (phase === 'editor' || phase === 'paste') {
   (window as any).drafts = [];
   window.fetch = (async (url: any, init?: any) => {
     if (String(url).endsWith('/draft')) {
-      (window as any).drafts.push(JSON.parse(init.body).text);
+      (window as any).drafts.push(JSON.parse(init.body));
       return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
     }
     return realFetch(url, init);

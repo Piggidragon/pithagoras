@@ -62,14 +62,28 @@ const filesFor = (role?: string) => (!role || role === "primary" ? CONTEXT_FILES
  * until it has. Loaded once, with the SDK, then read where pi keeps it.
  */
 const THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
-let themeLoaded = false;
-export function loadTheme(pi: { initTheme?: (name?: string, watch?: boolean) => void }) {
-  if (themeLoaded) return;
-  themeLoaded = true;
+let themeLoaded: string | null = null;
+export function loadTheme(
+  pi: { initTheme?: (name?: string, watch?: boolean) => void; SettingsManager?: { create(cwd: string): { getTheme(): string | undefined } } },
+  cwd = process.cwd(),
+) {
+  // The one set in pi's settings, as pi's CLI loads it; its default without one.
+  let name: string | undefined;
   try {
-    pi.initTheme?.(undefined, false);
+    name = pi.SettingsManager?.create(cwd).getTheme();
   } catch {
-    // An extension reading it gets undefined, as it did before.
+    // Settings that cannot be read leave the default.
+  }
+  if (themeLoaded === (name ?? "")) return;
+  themeLoaded = name ?? "";
+  try {
+    pi.initTheme?.(name, false);
+  } catch {
+    try {
+      pi.initTheme?.(undefined, false);
+    } catch {
+      // An extension reading it gets undefined, as it did before.
+    }
   }
 }
 const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
@@ -224,11 +238,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private voiceFirst?: VoiceFirstTurn;
   /** Dialogs an extension is waiting on, keyed by request id. */
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
-  /** The chat box's text, as the page last said it: see setDraft. */
+  /** The chat box's text, as the page last said it, and what is selected in it: see setDraft. */
   private draft = "";
+  private caret: { start: number; end: number } | undefined;
 
-  setDraft(text: string): void {
+  setDraft(text: string, caret?: { start: number; end: number }): void {
     this.draft = text;
+    this.caret = caret;
   }
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
@@ -296,7 +312,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
     const pi: any = await import("@earendil-works/pi-coding-agent");
-    loadTheme(pi);
+    loadTheme(pi, opts.cwd);
 
     const modelRuntime = await pi.ModelRuntime.create();
     // Shared with the extensions, so one that runs a subagent can tell the
@@ -589,12 +605,16 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // Into the chat box, for the person to send or change.
       // What is in the box follows at once, for a getEditorText right after.
       setEditorText: (text: string) => {
-        this.draft = String(text ?? "");
+        this.setDraft(String(text ?? ""));
         fireAndForget({ method: "setEditorText", text: String(text ?? "") });
       },
+      // Over what is selected, or at the end, as the page puts it.
       pasteToEditor: (text: string) => {
-        this.draft += String(text ?? "");
-        fireAndForget({ method: "setEditorText", text: String(text ?? ""), paste: true });
+        const given = String(text ?? "");
+        const { start, end } = this.caret ?? { start: this.draft.length, end: this.draft.length };
+        const at = start + given.length;
+        this.setDraft(this.draft.slice(0, start) + given + this.draft.slice(end), { start: at, end: at });
+        fireAndForget({ method: "setEditorText", text: given, paste: true });
       },
       // Answered with nothing, an extension that adds to the draft replaced it.
       getEditorText: () => this.draft,

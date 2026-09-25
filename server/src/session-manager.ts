@@ -142,6 +142,23 @@ function extensionName(path: string): string | undefined {
   return name || undefined;
 }
 
+/**
+ * The name a slash command is run by, as pi reads it: everything after the
+ * slash up to the first space. "deploy.prod" for "/deploy.prod --now".
+ */
+export function commandName(text: string): string | undefined {
+  const t = text.trim();
+  if (!t.startsWith("/")) return undefined;
+  const space = t.indexOf(" ");
+  return (space === -1 ? t.slice(1) : t.slice(1, space)) || undefined;
+}
+
+/**
+ * A command's failure, said as it ends, so that a channel that sent it hears
+ * it once, and not as well as the page's own report of the send failing.
+ */
+export class CommandFailed extends Error {}
+
 /** Text without the colour and cursor codes a terminal would act on, as the chat's stripAnsi. */
 function plain(text: unknown): string {
   return String(text ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").trim();
@@ -660,7 +677,7 @@ class SessionManager extends EventEmitter {
   private startCommand(sessionId: string, message: string): InHand {
     const text = message.trim();
     const row = this.record(sessionId, "portal_command", { text });
-    const command: InHand = { seq: row?.seq ?? -1, name: /^\/([\w:-]+)/.exec(text)?.[1] ?? text, said: 0, inRun: this.inRun.has(sessionId) };
+    const command: InHand = { seq: row?.seq ?? -1, name: commandName(text) ?? text, said: 0, inRun: this.inRun.has(sessionId) };
     this.commandsInHand.set(sessionId, [...(this.commandsInHand.get(sessionId) ?? []), command]);
     return command;
   }
@@ -888,7 +905,8 @@ class SessionManager extends EventEmitter {
             text,
             error: true,
             from: "extension",
-            ...(command ? { of: command.seq } : {}),
+            // The reason, for a server that dies before the command's end is written.
+            ...(command ? { of: command.seq, reason: command.error } : {}),
           });
         }
       }
@@ -898,11 +916,12 @@ class SessionManager extends EventEmitter {
         // Named only when it can only be the command's: during a run, a tool
         // can open one too.
         const inHand = this.commandsInHand.get(sessionId) ?? [];
-        const name = inHand.length === 1 && !this.inRun.has(sessionId) ? inHand[0].name : undefined;
+        const owner = inHand.length === 1 && !this.inRun.has(sessionId) ? inHand[0] : undefined;
         this.record(sessionId, "portal_notice", {
-          text: `${name ? `/${name} opens` : "An extension opened"} a view made for pi's terminal, which the browser cannot show.`,
+          text: `${owner ? `/${owner.name} opens` : "An extension opened"} a view made for pi's terminal, which the browser cannot show.`,
           warning: true,
           from: "extension",
+          ...(owner ? { command: owner.seq } : {}),
         });
       }
       // What an extension says with notify — the answer to a command like
@@ -912,11 +931,15 @@ class SessionManager extends EventEmitter {
       // output of a builtin.
       if (msg.type === "extension_ui_request" && msg.method === "notify") {
         const text = plain(msg.message);
+        // The answer of the one command in hand, as far as can be told: pi
+        // does not say which extension spoke. A channel hears only its own.
+        const inHand = this.commandsInHand.get(sessionId) ?? [];
         if (text) {
           this.record(sessionId, "portal_notice", {
             text,
             ...(msg.notifyType === "error" ? { error: true } : msg.notifyType === "warning" ? { warning: true } : {}),
             from: "extension",
+            ...(inHand.length === 1 ? { command: inHand[0].seq } : {}),
           });
         }
       }
@@ -964,7 +987,8 @@ class SessionManager extends EventEmitter {
       executor.cleanup?.(sessionId).catch(() => {});
     });
 
-    client.setDraft?.(this.drafts.get(sessionId) ?? "");
+    const draft = this.drafts.get(sessionId);
+    client.setDraft?.(draft?.text ?? "", draft?.caret);
     this.live.set(sessionId, { client, executor });
 
     return client;
@@ -1038,14 +1062,17 @@ class SessionManager extends EventEmitter {
       const busy = this.live.get(sessionId)?.client.isIdle?.() === false;
       // A command refused: its line in the chat says so, and why. The chat
       // itself did not fail, and saying it did put the same error there twice.
+      // Only while pi is still up: one that died has said so, and set the
+      // chat in error, before the refusal got here.
       if (logged.failedOnLine) {
-        if (!busy) this.mark(sessionId, "idle");
+        if (!busy && this.live.has(sessionId)) this.mark(sessionId, "idle");
+        throw new CommandFailed((e as Error).message);
       }
       // Refused on its way into a run that goes on — a message queued into
       // it, or a command sent beside it: that run is not what failed, and
       // will settle the session itself. Marked failed, the page would take
       // every call still open in it for one that was cut off.
-      else if (!((logged.queued || logged.command) && busy)) {
+      if (!((logged.queued || logged.command) && busy)) {
         const failure = (e as Error).message;
         updateSession(sessionId, { status: "error", last_error: failure });
         this.record(sessionId, "portal_status", { status: "error", error: failure });
@@ -1070,7 +1097,7 @@ class SessionManager extends EventEmitter {
     const images = options?.images ?? [];
     // Sent from the box, which the page empties as it sends: said here too,
     // or a command reading the box would find itself there.
-    if (this.drafts.get(sessionId)?.trim() === message.trim()) this.setDraft(sessionId, "");
+    if (this.drafts.get(sessionId)?.text.trim() === message.trim()) this.setDraft(sessionId, "");
 
     // A slash command is an instruction to the agent, not something said in the
     // conversation, so it should not appear as a chat message — its dialog or
@@ -1611,7 +1638,10 @@ class SessionManager extends EventEmitter {
       if (streamText) relay(done);
     };
 
-    const onEvent = (row: { type: string; payload: string }) => {
+    // The command this ask sent, once its line is written: what an extension
+    // says for it is the answer. What one says for anything else is not.
+    let mine: number | undefined;
+    const onEvent = (row: { seq?: number; type: string; payload: string }) => {
       let payload: any = {};
       try {
         payload = JSON.parse(row.payload);
@@ -1640,10 +1670,16 @@ class SessionManager extends EventEmitter {
           relay(detail ? `⚙ ${name} · ${detail}` : `⚙ ${name}`);
           break;
         }
+        case "portal_command":
+          if (mine === undefined && payload.text === prepared.message.trim()) mine = row.seq;
+          break;
         // Output from a builtin like /session or /compact, or a model failure
         // pi gave up on. It is the answer as far as whoever asked is concerned,
         // so it goes back like any other. One pi recovered from never gets here.
         case "portal_notice":
+          // An extension's news, or its failure, belongs to a channel only if it
+          // was for the command that channel sent.
+          if (payload.from === "extension" && (mine === undefined || (payload.of !== mine && payload.command !== mine))) break;
           flush();
           if (typeof payload.text === "string" && payload.text.trim()) {
             all.push(payload.text.trim());
@@ -1764,23 +1800,24 @@ class SessionManager extends EventEmitter {
 
   /** True when the message invokes a command pi actually knows about. */
   private async looksLikeCommand(client: PiClient, message: string): Promise<boolean> {
-    const match = /^\/([\w:-]+)/.exec(message.trim());
-    if (!match) return false;
+    const name = commandName(message);
+    if (!name) return false;
     try {
       const commands = await client.getCommands();
-      return commands.some((c) => c.name === match[1]);
+      return commands.some((c) => c.name === name);
     } catch {
       return false;
     }
   }
 
   /** What is in each chat's box, as its page last said: an extension can read it. */
-  private drafts = new Map<string, string>();
+  private drafts = new Map<string, { text: string; caret?: { start: number; end: number } }>();
 
-  setDraft(sessionId: string, text: string): void {
-    if (text) this.drafts.set(sessionId, text);
+  /** `caret`: what is selected in the box, where a paste goes; the end without one. */
+  setDraft(sessionId: string, text: string, caret?: { start: number; end: number }): void {
+    if (text) this.drafts.set(sessionId, { text, caret });
     else this.drafts.delete(sessionId);
-    this.live.get(sessionId)?.client.setDraft?.(text);
+    this.live.get(sessionId)?.client.setDraft?.(text, caret);
   }
 
   /** Answer an extension dialog for a live session. */

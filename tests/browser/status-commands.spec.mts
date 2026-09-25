@@ -41,9 +41,11 @@ test('an extension pastes where the cursor is, and reads what was typed', async 
   await page.goto('/tests/chat.html?phase=paste');
   const box = page.getByRole('textbox').last();
   await box.fill('fix build');
-  await expect.poll(() => page.evaluate(() => (window as any).drafts.at(-1))).toBe('fix build');
+  await expect.poll(() => page.evaluate(() => (window as any).drafts.at(-1)?.text)).toBe('fix build');
   await box.press('Home');
   for (let i = 0; i < 4; i++) await box.press('ArrowRight');
+  // Where the cursor went is told too, for a paste the portal makes in its copy of the box.
+  await expect.poll(() => page.evaluate(() => (window as any).drafts.at(-1))).toEqual({ text: 'fix build', caret: { start: 4, end: 4 } });
   await page.getByRole('button', { name: 'Paste from the extension' }).click();
   await expect(box).toHaveValue('fix the build');
   // Once, however often the chat draws again.

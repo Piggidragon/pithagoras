@@ -31,7 +31,7 @@ import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
 import { TitleInput } from "./TitleInput";
 import { latestFileActivity } from "../file-activity";
-import { drafts, withUnsent } from "../drafts";
+import { caretFrom, drafts, withUnsent } from "../drafts";
 import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
@@ -781,12 +781,13 @@ export function Chat({
     // are appended — to the first one seen, not through the whole chat on
     // every streamed word.
     const seen = filledTo.get(session.id) ?? { live: 0, stored: 0 };
-    const fresh: PortalEvent[] = [];
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
+    let from = events.length;
+    while (from > 0) {
+      const e = events[from - 1];
       if (e.seq < 0 ? e.seq >= seen.live : e.seq <= seen.stored) break;
-      fresh.unshift(e);
+      from--;
     }
+    const fresh = events.slice(from);
     if (!fresh.length) return;
     const now = { ...seen };
     for (const e of fresh) {
@@ -819,6 +820,9 @@ export function Chat({
     changeInput(text);
     requestAnimationFrame(() => box.current?.focus());
   }, [events]);
+
+  // Where a paste from an extension goes, for the portal to read the box as it will be.
+  useEffect(() => caretFrom((id) => (id === currentSession.current ? caret.current ?? undefined : undefined)), []);
 
   const clearBox = () => {
     caret.current = null;
@@ -1422,6 +1426,7 @@ export function Chat({
           }}
           onSelect={(e) => {
             caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
+            drafts.moved(session.id);
           }}
           onPaste={(e) => {
             // A screenshot, or "Copy image" in a browser. Where there is text as

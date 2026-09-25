@@ -12,9 +12,9 @@ process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
 process.env.SESSION_DIR = path.join(home, "sessions");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 
-const { appendEvent, createSession, eventsSince, getSession } = await import("../dist/db.js");
+const { appendEvent, createSession, deleteEventsAfter, deleteEventsBetween, eventsSince, getSession } = await import("../dist/db.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
-const { sessions, extensionFailure } = await import("../dist/session-manager.js");
+const { sessions, extensionFailure, commandName, CommandFailed } = await import("../dist/session-manager.js");
 
 const ui = (method, extra = {}) => ({ type: "extension_ui_request", id: `u-${Math.random()}`, method, ...extra });
 
@@ -42,6 +42,8 @@ const handlers = {
   "/twice": () => [ui("notify", { message: "one" }), ui("notify", { message: "two" })],
   // An extension's notice, in colour and with the cursor hidden.
   "/coloured": () => [ui("notify", { message: "\x1b[?25l\x1b[32mgreen\x1b[0m" })],
+  // A name with a dot: pi names it by everything up to the first space.
+  "/deploy.prod": () => [{ type: "extension_error", extensionPath: "command:deploy.prod", error: "no target" }],
 };
 
 let lastPi;
@@ -58,7 +60,7 @@ class FakePi extends EventEmitter {
   dispose() {}
   isIdle() { return true; }
   async getCommands() {
-    return [...Object.keys(handlers), "/skill:x", "/refused"].map((c) => ({ name: c.slice(1), source: "extension" }));
+    return [...Object.keys(handlers), "/skill:x", "/refused", "/crash"].map((c) => ({ name: c.slice(1), source: "extension" }));
   }
   async prompt(text) {
     // pi goes away while the command waits, and never answers it.
@@ -68,6 +70,11 @@ class FakePi extends EventEmitter {
     }
     // pi refuses it outright.
     if (text === "/refused") throw new Error("pi cannot take that now");
+    // pi dies with it in hand: the exit is heard before the refusal.
+    if (text === "/crash") {
+      this.emit("exit", { code: 1, signal: null });
+      throw new Error("pi exited (code=1 signal=null) before replying");
+    }
     for (const e of handlers[text]?.() ?? []) this.emit("event", e);
     return { outcome: text === "/skill:x" ? "started" : "handled" };
   }
@@ -99,10 +106,11 @@ test("a terminal-only view, a failure and a message for people are each said", a
   const tasks = await send("tasks", "/bg-tasks");
   assert.deepEqual(tasks.find((r) => r.type === "portal_notice").payload, {
     text: "/bg-tasks opens a view made for pi's terminal, which the browser cannot show.", warning: true, from: "extension",
+    command: eventsSince("tasks").find((r) => r.type === "portal_command").seq,
   });
   const broken = await send("broken", "/broken");
   const of = eventsSince("broken").find((r) => r.type === "portal_command").seq;
-  assert.deepEqual(broken.find((r) => r.type === "portal_notice").payload, { text: "/broken failed: boom", error: true, from: "extension", of }, "kept for a channel, marked as the command's");
+  assert.deepEqual(broken.find((r) => r.type === "portal_notice").payload, { text: "/broken failed: boom", error: true, from: "extension", of, reason: "boom" }, "kept for a channel, marked as the command's");
   // pi answers a command that threw as handled; its line says it failed all the same.
   assert.equal(broken.find((r) => r.type === "portal_command_end").payload.error, "boom");
   const report = await send("report", "/report");
@@ -171,7 +179,8 @@ test("a builtin that fails says it once: on its line, its notice marked as its o
 
 test("a command pi refuses fails on its line, and the chat is not put in error", async () => {
   createSession({ id: "refused", title: "refused", workspace: home, executor: "host" });
-  await assert.rejects(sessions.prompt("refused", "/refused"), /cannot take that now/);
+  // Failed where it is shown: the send itself is not reported as failing as well.
+  await assert.rejects(sessions.prompt("refused", "/refused"), (e) => e instanceof CommandFailed && /cannot take that now/.test(e.message));
   const got = rows("refused");
   assert.equal(got.find((r) => r.type === "portal_command_end").payload.error, "pi cannot take that now");
   assert.equal(got.some((r) => r.type === "portal_status" && r.payload.status === "error"), false, "said once, on its line");
@@ -226,13 +235,51 @@ test("a command the last server never answered ends as failed, with what it thre
   createSession({ id: "orphan", title: "orphan", workspace: home, executor: "host" });
   const quiet = appendEvent("orphan", "portal_command", { text: "/deploy" });
   const threw = appendEvent("orphan", "portal_command", { text: "/broken now" });
-  appendEvent("orphan", "extension_error", { type: "extension_error", extensionPath: "command:broken", error: "boom" });
+  appendEvent("orphan", "portal_notice", { text: "/broken failed: boom", error: true, from: "extension", of: threw.seq, reason: "boom" });
   const done = appendEvent("orphan", "portal_command", { text: "/bg-clear" });
   appendEvent("orphan", "portal_command_end", { of: done.seq, outcome: "handled" });
+  // The same command again, later, answered: its failure is its own, not the one before's.
+  const again = appendEvent("orphan", "portal_command", { text: "/deploy" });
+  appendEvent("orphan", "portal_notice", { text: "/deploy failed: bad arg", error: true, from: "extension", of: again.seq, reason: "bad arg" });
+  appendEvent("orphan", "portal_command_end", { of: again.seq, error: "bad arg" });
   sessions.recoverOrphans();
   const ends = rows("orphan").filter((r) => r.type === "portal_command_end").map((r) => r.payload);
-  assert.deepEqual(ends.slice(1), [
+  assert.deepEqual(ends.slice(2), [
     { of: quiet.seq, error: "The portal restarted before it answered" },
     { of: threw.seq, error: "boom" },
   ]);
+});
+
+test("a command pi dies with leaves the chat in error, not idle", async () => {
+  createSession({ id: "crash", title: "crash", workspace: home, executor: "host" });
+  await assert.rejects(sessions.prompt("crash", "/crash"));
+  assert.equal(getSession("crash").status, "error");
+  assert.match(getSession("crash").last_error, /pi exited unexpectedly/);
+});
+
+test("a command is named as pi names it, so its failure is put on its line", async () => {
+  assert.equal(commandName("/deploy.prod --now"), "deploy.prod");
+  assert.equal(commandName("/skill:x"), "skill:x");
+  assert.equal(commandName("not one"), undefined);
+  const got = await send("dotted", "/deploy.prod");
+  assert.equal(got.find((r) => r.type === "portal_command_end").payload.error, "no target");
+});
+
+test("taking out a message keeps the end of a command sent before it", () => {
+  createSession({ id: "cut", title: "cut", workspace: home, executor: "host" });
+  const command = appendEvent("cut", "portal_command", { text: "/deploy" });
+  const message = appendEvent("cut", "portal_prompt", { message: "and then?" });
+  // The command answered after the message was sent: its end is among what goes.
+  const end = appendEvent("cut", "portal_command_end", { of: command.seq, outcome: "handled" });
+  appendEvent("cut", "message_end", { message: { role: "assistant", content: "ok" } });
+  const { kept } = deleteEventsBetween("cut", message.seq, null);
+  assert.deepEqual(kept, [end.seq], "a page holding the events keeps it too");
+  assert.deepEqual(rows("cut").map((r) => r.type), ["portal_command", "portal_command_end"]);
+  // An edit that failed goes back over everything after it, but for the same.
+  const later = appendEvent("cut", "portal_prompt", { message: "edited" });
+  const second = appendEvent("cut", "portal_command", { text: "/deploy" });
+  appendEvent("cut", "portal_command_end", { of: command.seq, outcome: "handled" });
+  const own = appendEvent("cut", "portal_command_end", { of: second.seq, outcome: "handled" });
+  const gone = deleteEventsAfter("cut", later.seq - 1);
+  assert.deepEqual(gone, [later.seq, second.seq, own.seq]);
 });

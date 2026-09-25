@@ -642,8 +642,8 @@ export const api = {
   commands: (id: string, opts?: { ifRunning?: boolean }) =>
     json<{ commands: PiCommand[]; notRunning?: boolean }>(`/api/sessions/${id}/commands${opts?.ifRunning ? "?ifRunning=1" : ""}`),
   /** What is in the chat box, for an extension that asks. */
-  draft: (id: string, text: string) =>
-    json<{ ok: true }>(`/api/sessions/${id}/draft`, { method: "PUT", body: JSON.stringify({ text }) }),
+  draft: (id: string, text: string, caret?: { start: number; end: number }) =>
+    json<{ ok: true }>(`/api/sessions/${id}/draft`, { method: "PUT", body: JSON.stringify({ text, caret }) }),
   piSettings: () => json<{ path: string; content: string }>("/api/pi-settings"),
   savePiSettings: (content: string) =>
     json<{ ok: true; path: string; note: string }>("/api/pi-settings", {

@@ -28,7 +28,7 @@ import {
   writeAgentFile,
   type WizardInput,
 } from "./agent-setup.js";
-import { sessions, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
+import { sessions, CommandFailed, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
@@ -633,6 +633,10 @@ app.post("/api/sessions/:id/prompt", promptJson, async (req, res) => {
     if (title && getSession(session.id)?.auto_title) updateSession(session.id, { title, auto_title: 0 });
     res.json({ ok: true, status: "running" });
   } catch (e) {
+    // Sent, and failed where it is shown: on the command's line in the chat.
+    // An error here as well was the same words in a banner, and the command
+    // put back in the box.
+    if (e instanceof CommandFailed) return res.json({ ok: true, failed: e.message });
     res.status(500).json({ error: (e as Error).message });
   }
 });
@@ -695,9 +699,12 @@ app.post("/api/sessions/:id/ui-response", (req, res) => {
 app.put("/api/sessions/:id/draft", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  const text = req.body?.text;
+  const { text, caret } = req.body ?? {};
   if (typeof text !== "string") return res.status(400).json({ error: "text required" });
-  sessions.setDraft(session.id, text);
+  const at = (n: unknown) => (Number.isInteger(n) && (n as number) >= 0 && (n as number) <= text.length ? (n as number) : undefined);
+  const start = at(caret?.start);
+  const end = at(caret?.end);
+  sessions.setDraft(session.id, text, start !== undefined && end !== undefined && start <= end ? { start, end } : undefined);
   res.json({ ok: true });
 });
 
