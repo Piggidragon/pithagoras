@@ -253,3 +253,103 @@ test('the orb is placed again when a window slides, not at every hover or fade o
   expect(await placings('.voice-presence', 'padding-left')).toBe(0);
   expect(await placings('.voice-terminal-window', 'width')).toBeGreaterThan(0);
 });
+
+test('a window dragged while the orb goes back to its dock is not fought over, and ends clear of the dock', async ({ page }) => {
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  const terminal = page.locator('.voice-terminal-window');
+  await page.waitForTimeout(900);
+  // Down beside the orb, which stands on its own: nothing holds it there.
+  await drag2(page, terminal.locator('.resize-s'), 0, 300);
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-presence', 'free');
+  // Every height the window is given while its corner is dragged over the gap, so the orb goes to its dock mid-drag.
+  await terminal.evaluate(el => {
+    const heights: string[] = ((window as any).heights = []);
+    new MutationObserver(() => { if (heights.at(-1) !== el.style.height) heights.push(el.style.height); }).observe(el, { attributes: true, attributeFilter: ['style'] });
+  });
+  const grip = (await box(terminal.locator('.resize-sw')))!;
+  const x = grip.x + 8, y = grip.y + 8;
+  await page.mouse.move(x, y); await page.mouse.down();
+  for (let i = 1; i <= 30; i++) { await page.mouse.move(x - i * 11, y + i * 2); await page.waitForTimeout(20); }
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels', 'dock');
+  const during = await page.evaluate(() => (window as any).heights.map(parseFloat) as number[]);
+  await page.mouse.up();
+  // Growing all the way, never pulled back up and pushed down again in turn.
+  const turns = during.slice(2).filter((h, i) => Math.sign(h - during[i + 1]) !== Math.sign(during[i + 1] - during[i])).length;
+  expect(turns).toBe(0);
+  await page.waitForTimeout(1000);
+  const t = await box(terminal), dock = await box(page.locator('.voice-presence'));
+  expect(t.y + t.height).toBeLessThanOrEqual(dock.y - 15);
+});
+
+test('a window opening while the browser is maximized gives it its place back', async ({ page }) => {
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  const browser = page.locator('.voice-browser-window');
+  await page.getByRole('button', { name: 'Maximize browser' }).click();
+  // The agent runs a command: the terminal opens for it.
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  await expect(browser).not.toHaveClass(/is-maximized/);
+  await expect(page.locator('.voice-terminal-window')).toHaveClass(/is-open/);
+  await page.getByRole('button', { name: 'Maximize browser' }).click();
+  await page.getByRole('button', { name: 'Session canvases' }).click();
+  await expect(browser).not.toHaveClass(/is-maximized/);
+  await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
+});
+
+test('pictures waiting to be sent do not cover the maximized browser\'s buttons', async ({ page }) => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
+  await page.locator('.voice-stage input[type=file]').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: png });
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await page.getByRole('button', { name: 'Maximize browser' }).click();
+  await page.waitForTimeout(900);
+  for (const name of ['Restore browser size', 'Minimize browser']) {
+    const b = await box(page.getByRole('button', { name }));
+    const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label'), { x: b.x + b.width / 2, y: b.y + b.height / 2 });
+    expect(hit).toBe(name);
+  }
+  await page.getByRole('button', { name: 'Minimize browser' }).click();
+  await expect(page.getByLabel('Pictures for your next message').getByRole('img', { name: 'photo.png' })).toHaveCount(1);
+});
+
+test('Escape in a field of the browser viewer\'s own is that field\'s; in the one it passes keys on through, it restores', async ({ page }) => {
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  const browser = page.locator('.voice-browser-window');
+  await page.getByRole('button', { name: 'Maximize browser' }).click();
+  const frame = page.frameLocator('.voice-browser-window iframe');
+  await frame.locator('body').evaluate(b => { b.insertAdjacentHTML('beforeend', '<input aria-label="Search settings"><input id="overlayInput" type="search" aria-label="Keys">'); });
+  await frame.getByLabel('Search settings').click();
+  await page.keyboard.press('Escape');
+  await expect(browser).toHaveClass(/is-maximized/);
+  await frame.getByLabel('Keys').click();
+  await page.keyboard.press('Escape');
+  await expect(browser).not.toHaveClass(/is-maximized/);
+});
+
+test('a press on an edge that goes nowhere changes nothing', async ({ page }) => {
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  const terminal = page.locator('.voice-terminal-window');
+  await page.waitForTimeout(900);
+  const before = await box(terminal);
+  await terminal.locator('.resize-e').click();
+  await page.waitForTimeout(900);
+  expect(await terminal.evaluate(el => el.dataset.sized)).toBeUndefined();
+  await expect(page.locator('.voice-stage')).not.toHaveAttribute('data-presence', 'free');
+  expect(await box(terminal)).toEqual(before);
+});
+
+test('a window that stands closer to the dock than the gap does not jump when its edge is taken', async ({ page }) => {
+  // Short enough that the browser's own place ends a few pixels short of the dock's margin.
+  await page.setViewportSize({ width: 1400, height: 700 });
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  const browser = page.locator('.voice-browser-window');
+  await page.waitForTimeout(1000);
+  const before = await box(browser), dock = await box(page.locator('.voice-presence'));
+  expect(dock.y - (before.y + before.height)).toBeLessThan(16);
+  // At its left end, clear of the tool cards that float up from the dock.
+  const grip = await box(browser.locator('.resize-s'));
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.className, { x: grip.x + 20, y: grip.y + 4 })).toContain('resize-s');
+  await page.mouse.move(grip.x + 20, grip.y + 4); await page.mouse.down();
+  await page.mouse.move(grip.x + 20, grip.y + 5);
+  expect((await box(browser)).height).toBeGreaterThanOrEqual(before.height - 0.5);
+  await page.mouse.up();
+});

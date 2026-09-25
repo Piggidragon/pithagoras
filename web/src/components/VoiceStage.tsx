@@ -11,7 +11,7 @@ import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
 import { ACTIONS, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
-import { clearOfDock, freeStrip, placeWindows } from "../voice-windows";
+import { clearOfDock, dockBox, dockSize, freeStrip, placeWindows } from "../voice-windows";
 import { ResizeHandles, WINDOWS, clearSize, openWindows } from "./ResizeHandles";
 import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
 import type { ToolCall } from "../tool-activity";
@@ -98,6 +98,14 @@ function VoiceOrb({ mode, levels }: { mode: OrbMode; levels: MutableRefObject<Vo
 
 /** What a window's place and size slide by (see stage.css). */
 const GEOMETRY = new Set(["left", "top", "right", "width", "height", "transform"]);
+
+/**
+ * The fields the browser viewer takes keys through for the remote page —
+ * everything typed there, into the page or its address bar, goes by one of
+ * these, not to a field of the viewer's own. On a desktop and with the
+ * on-screen keyboard.
+ */
+const VIEWER_KEYS = "#overlayInput, #keyboard-input-assist";
 
 /** Where focus is typing, so Space and a paste belong to that and not to voice mode. */
 const editing = (target: EventTarget | null) => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
@@ -315,13 +323,26 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // However the browser was put away — minimized, or closed for a third
   // window — it comes back at its usual size, and Escape is Stop's again.
   useEffect(() => { if (!shown) setBrowserMax(false); }, [shown]);
+  // A window opening — by the person or for what the agent does — is there
+  // to be seen, and would open under the browser: it gives its place back.
+  // Each window by itself: one opening can close another for room.
+  const others = [terminalShown, filesShown, picturesShown, conversation, canvasOpen];
+  const othersBefore = useRef(others);
+  useEffect(() => {
+    if (others.some((open, i) => open && !othersBefore.current[i])) setBrowserMax(false);
+    othersBefore.current = others;
+  }, others);
   // Escape restores the browser from inside it too, as it left fullscreen:
   // once the page in it has focus, the key is that page's and never reaches
   // the stage. Heard before the viewer, which would pass it on to the page.
+  // A field of the viewer's own keeps its Escape, as one on the stage does —
+  // but not the field the viewer takes the remote page's keys through, which
+  // has focus whenever the page does.
   const frameKeys = (frame: HTMLIFrameElement) => {
     try {
       frame.contentWindow?.addEventListener("keydown", e => {
         if (e.code !== "Escape" || !keys.current.maximized) return;
+        if (editing(e.target) && !(e.target as Element).matches(VIEWER_KEYS)) return;
         e.preventDefault(); e.stopPropagation(); setBrowserMax(false);
       }, true);
     } catch { /* not the portal's page: its keys stay its own */ }
@@ -358,9 +379,13 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         const sized = wide && !maximized && windows.some(w => w.dataset.sized);
         const strip = sized ? freeStrip(box, windows.map(w => w.getBoundingClientRect())) : null;
         setPresence(strip ? "free" : sized ? "dock" : null);
-        if (sized && !strip) {
+        // Not the one being dragged: the drag keeps it clear of the dock
+        // itself, and lifting it here as well would fight the pointer. Done
+        // when it is let go.
+        if (sized && !strip && !document.body.classList.contains("is-resizing")) {
+          const dock = dockBox(box, dockSize(el));
           for (const w of windows) {
-            const height = w.dataset.sized ? clearOfDock(box, w.getBoundingClientRect()) : null;
+            const height = w.dataset.sized ? clearOfDock(dock, w.getBoundingClientRect()) : null;
             if (height !== null) w.style.height = `${height}px`;
           }
         }
@@ -392,7 +417,9 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // windows have it in. With more open, what is under a maximized browser
   // keeps its place, so nothing moves about under it or back after.
   const docked = maximized || (presence === "dock" && panels === 1);
-  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${docked ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={docked && panels === 1 ? "dock" : panels} data-presence={presence === "free" ? "free" : undefined} data-mode={mode}
+  // is-docked: the dock's styles — which a single window's orb beside it, or
+  // one standing free, take the place of on a wide screen.
+  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${browsing || sideWindow || docked ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={docked && panels === 1 ? "dock" : panels} data-presence={presence === "free" ? "free" : undefined} data-mode={mode}
     onDragOver={e => { if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); }}
     onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
     onDrop={drop}>

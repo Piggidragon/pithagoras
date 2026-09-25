@@ -64,14 +64,16 @@ test('the orb stands in the widest gap the windows leave, when it fits', async (
 });
 
 test('a window the orb comes back to its dock under is made to end above the dock', async () => {
-  const { clearOfDock } = await import('../web/src/voice-windows.ts');
-  const stage = { left: 0, right: 1000, bottom: 800 };
-  // The dock: 520px wide in the middle, its top 90px above the stage's bottom.
-  assert.equal(clearOfDock(stage, { left: 400, right: 980, top: 50, bottom: 790 }), 800 - 90 - 16 - 50);
-  assert.equal(clearOfDock(stage, { left: 400, right: 980, top: 50, bottom: 690 }), null, 'ends above it already');
-  assert.equal(clearOfDock(stage, { left: 780, right: 980, top: 50, bottom: 790 }), null, 'beside the dock, not over it');
-  // On a narrow stage the dock is the stage less 16px either side.
-  assert.equal(clearOfDock({ left: 0, right: 400, bottom: 800 }, { left: 10, right: 30, top: 50, bottom: 790 }), 644);
+  const { clearOfDock, dockBox } = await import('../web/src/voice-windows.ts');
+  const size = { width: 520, height: 80, middle: 50, inset: 16 };
+  const dock = dockBox({ left: 0, top: 0, right: 1000, bottom: 800 }, size);
+  // 520px wide in the middle, its top 90px above the stage's bottom.
+  assert.deepEqual(dock, { left: 240, right: 760, top: 710, bottom: 790 });
+  assert.equal(clearOfDock(dock, { left: 400, right: 980, top: 50, bottom: 790 }), 710 - 16 - 50);
+  assert.equal(clearOfDock(dock, { left: 400, right: 980, top: 50, bottom: 700 }), null, 'ends above it already, if closer than the gap');
+  assert.equal(clearOfDock(dock, { left: 780, right: 980, top: 50, bottom: 790 }), null, 'beside the dock, not over it');
+  // On a narrow stage the dock is the stage less its inset either side; on a phone it sits higher.
+  assert.deepEqual(dockBox({ left: 0, top: 0, right: 400, bottom: 800 }, { ...size, middle: 94 }), { left: 16, right: 384, top: 666, bottom: 746 });
 });
 
 test('a window dragged by a corner stops at a window off that corner, by the edge that gives up less', async () => {
@@ -89,4 +91,8 @@ test('a window dragged by a corner stops at a window off that corner, by the edg
   assert.equal(clear(a, { ...a, right: 900 }, 'e', [{ left: 500, top: 100, right: 700, bottom: 200 }]).right, 484);
   assert.equal(clear(a, { ...a, bottom: 900 }, 's', [{ left: 100, top: 500, right: 200, bottom: 600 }]).bottom, 484);
   assert.deepEqual(clear(a, { ...a, right: 350 }, 'se', [b]), { ...a, right: 350 });
+  // Closer than the gap already: pressing the edge does not throw it back, and it can still be pulled in.
+  const near = { left: 310, top: 0, right: 500, bottom: 300 };
+  assert.equal(clear(a, { ...a }, 'e', [near]).right, 300);
+  assert.equal(clear(a, { ...a, right: 280 }, 'e', [near]).right, 280);
 });

@@ -47,24 +47,46 @@ export function freeStrip(stage: { left: number; right: number }, windows: { lef
   return best;
 }
 
-/**
- * The voice dock, as stage.css draws it on a wide screen: centred, up to
- * 520px wide and 16px short of the stage at either side, its top edge 90px
- * above the stage's bottom (`top: calc(100% - 50px)`, 80px tall, centred on
- * that).
- */
-export const DOCK = { width: 520, top: 90, inset: 16 };
+type Box = { left: number; top: number; right: number; bottom: number };
 
 /**
- * How tall a window may be with the orb back in its dock: the height that
- * ends `gap` above the dock, where the window reaches over it. Null when it
- * does not. A window can reach down there while the orb stands elsewhere,
- * and the dock coming back would be drawn over it.
+ * The voice dock's measures, as the stage's styles set them (see `--dock-*`
+ * on .voice-stage in stage.css): its width, at most, and its height; how far
+ * above the stage's bottom its middle is; and what it keeps clear at the
+ * stage's sides.
  */
-export function clearOfDock(stage: { left: number; right: number; bottom: number }, window: { left: number; right: number; top: number; bottom: number }, gap = 16, least = 180): number | null {
-  const width = Math.min(DOCK.width, stage.right - stage.left - 2 * DOCK.inset);
-  const middle = (stage.left + stage.right) / 2;
-  const dock = { left: middle - width / 2, right: middle + width / 2, top: stage.bottom - DOCK.top };
-  if (window.right <= dock.left || window.left >= dock.right || window.bottom <= dock.top - gap) return null;
+export type DockSize = { width: number; height: number; middle: number; inset: number };
+
+export function dockSize(stage: Element): DockSize {
+  const style = getComputedStyle(stage);
+  const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0;
+  return { width: px("--dock-width"), height: px("--dock-height"), middle: px("--dock-middle"), inset: px("--dock-inset") };
+}
+
+/** Where the dock is on a stage: centred at its foot. */
+export function dockBox(stage: Box, size: DockSize): Box {
+  const width = Math.min(size.width, stage.right - stage.left - 2 * size.inset);
+  const middle = (stage.left + stage.right) / 2, y = stage.bottom - size.middle;
+  return { left: middle - width / 2, right: middle + width / 2, top: y - size.height / 2, bottom: y + size.height / 2 };
+}
+
+/**
+ * The dock, where the orb is in it — as the stage's styles place it, not
+ * where the orb is on its way there. Null when the orb stands on its own:
+ * beside a single window, in a gap between two, or with nothing open.
+ */
+export function dockOf(stage: HTMLElement): Box | null {
+  const docked = stage.classList.contains("is-docked") && stage.dataset.panels !== "1" && stage.dataset.presence !== "free";
+  return docked ? dockBox(stage.getBoundingClientRect(), dockSize(stage)) : null;
+}
+
+/**
+ * How tall a window may be with the orb back in its dock, where it reaches
+ * under the dock: the height that ends `gap` above it. Null when it does
+ * not. A window can reach down there while the orb stands elsewhere, and the
+ * dock coming back would be drawn over it.
+ */
+export function clearOfDock(dock: Box, window: Box, gap = 16, least = 180): number | null {
+  if (window.right <= dock.left || window.left >= dock.right || window.bottom <= dock.top) return null;
   return Math.max(least, dock.top - gap - window.top);
 }
