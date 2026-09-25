@@ -165,6 +165,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const places = usePlaces();
 
   const load = () =>
     api
@@ -190,6 +191,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
             onChanged={load}
             onError={setError}
             onOpenSession={onOpenSession}
+            places={places}
           />
         </div>
       </div>
@@ -239,6 +241,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
 
         {adding && (
           <NewRoutine
+            places={places}
             onCancel={() => setAdding(false)}
             onError={setError}
             onCreated={async (created) => {
@@ -279,7 +282,13 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
                           : r.schedule}
                       </span>
                       {" · "}
-                      <span title={r.workspace ?? "Home — the agent's own directory"}>{placeName(r.workspace)}</span>
+                      <span
+                        className={r.workspaceProblem ? "text-danger" : ""}
+                        title={r.workspaceProblem ? `${r.workspace}: ${r.workspaceProblem}` : (r.workspace ?? "Home — the agent's own directory")}
+                      >
+                        {placeName(r.workspace, places.root)}
+                        {r.workspaceProblem ? " (gone)" : ""}
+                      </span>
                       {r.done ? " · done" : r.enabled ? ` · ${until(r.nextRun)}` : " · disabled"}
                       {r.lastStatus && (
                         <>
@@ -308,21 +317,56 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
   );
 }
 
-/** Home, or the project's folder name. */
-const placeName = (workspace: string | null) => (workspace ? workspace.split("/").filter(Boolean).pop() ?? workspace : "Home");
+/** The projects a routine can run in, and the root they are under. `list` is null until they are read. */
+interface Places {
+  root: string | null;
+  list: Workspace[] | null;
+  error: string | null;
+}
+
+/** Read once for the page, not again for each routine opened. */
+function usePlaces(): Places {
+  const [places, setPlaces] = useState<Places>({ root: null, list: null, error: null });
+  useEffect(() => {
+    api
+      .workspaces()
+      .then((r) => setPlaces({ root: r.root, list: r.workspaces, error: null }))
+      .catch((e) => setPlaces({ root: null, list: [], error: (e as Error).message }));
+  }, []);
+  return places;
+}
+
+/** Home, or where under the projects' root it runs: "site", or "site/docs" for a folder in one. */
+const placeName = (workspace: string | null, root: string | null) => {
+  if (!workspace) return "Home";
+  if (root && workspace.startsWith(root + "/")) return workspace.slice(root.length + 1);
+  return workspace.split("/").filter(Boolean).pop() ?? workspace;
+};
 
 /**
  * Where a routine's runs happen: Home — the agent's own directory, with its
  * notes and memory — or one of the projects. "" is Home.
+ *
+ * A place that is not a project in the list, such as a folder in one that the
+ * agent chose, is still shown. It is called gone only when the server says it
+ * cannot be used (`problem`), not merely because the list lacks it.
  */
-function WorkspacePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [list, setList] = useState<Workspace[] | null>(null);
-  useEffect(() => {
-    api.workspaces().then((r) => setList(r.workspaces)).catch(() => setList([]));
-  }, []);
+function WorkspacePicker({
+  value,
+  onChange,
+  places,
+  problem,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  places: Places;
+  problem?: string | null;
+}) {
+  const { list, root, error } = places;
   const known = list?.some((w) => w.path === value);
   return (
-    <label className="block">
+    // Not a label: it would pass a click on the hint to the Select's button.
+    <div className="block">
       <span className="text-xs text-fg-muted">Runs in</span>
       <Select
         className="mt-1 w-full"
@@ -343,14 +387,17 @@ function WorkspacePicker({ value, onChange }: { value: string; onChange: (v: str
             text: w.name,
             hint: `${w.path}${w.isGit ? " · git" : ""}`,
           })),
-          // A project that is gone is still shown for what it is, rather than as nothing.
-          ...(value && list && !known ? [{ value, label: placeName(value), hint: "Not there any more — runs fail until another is chosen" }] : []),
+          // Shown for what it is, rather than as nothing.
+          ...(value && list && !known
+            ? [{ value, label: placeName(value, root), text: placeName(value, root), hint: problem ? "Not there any more — runs fail until another is chosen" : value }]
+            : []),
         ]}
       />
       <p className="mt-1 text-[11px] text-fg-faint">
         Its runs work in this directory. Each place keeps its own session, so moving it back picks up where it left off.
+        {error && ` The projects could not be listed (${error}), so only Home is offered.`}
       </p>
-    </label>
+    </div>
   );
 }
 
@@ -410,10 +457,12 @@ function SchedulePicker({
 }
 
 function NewRoutine({
+  places,
   onCancel,
   onCreated,
   onError,
 }: {
+  places: Places;
   onCancel: () => void;
   onCreated: (r: Routine) => Promise<void>;
   onError: (e: string) => void;
@@ -476,7 +525,7 @@ function NewRoutine({
         />
       </label>
 
-      <WorkspacePicker value={workspace} onChange={setWorkspace} />
+      <WorkspacePicker value={workspace} onChange={setWorkspace} places={places} />
 
       <div className="flex items-center gap-2">
         <button disabled={!name.trim() || busy} onClick={create} className={primaryCls}>
@@ -497,12 +546,14 @@ function RoutineDetail({
   onChanged,
   onError,
   onOpenSession,
+  places,
 }: {
   routine: Routine;
   onBack: () => void;
   onChanged: () => Promise<void>;
   onError: (e: string) => void;
   onOpenSession: (id: string) => void;
+  places: Places;
 }) {
   const [name, setName] = useState(r.name);
   const [mode, setMode] = useState<"repeats" | "once">(r.mode);
@@ -642,7 +693,12 @@ function RoutineDetail({
           </p>
         </label>
 
-        <WorkspacePicker value={workspace} onChange={setWorkspace} />
+        <WorkspacePicker
+          value={workspace}
+          onChange={setWorkspace}
+          places={places}
+          problem={workspace === (r.workspace ?? "") ? r.workspaceProblem : null}
+        />
 
         <button
           type="button"
@@ -810,7 +866,8 @@ function RoutineDetail({
                 freshSession: fresh,
                 guard,
                 browser,
-                workspace: workspace || null,
+                // Only when it changed: a place that has gone would refuse the save.
+                ...(workspace !== (r.workspace ?? "") ? { workspace: workspace || null } : {}),
                 ...reportPatch(report),
               });
               setSaved(true);

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { LuMessagesSquare, LuPencil, LuPin, LuPinOff, LuSearch, LuTrash2 } from "react-icons/lu";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { LuCircleAlert, LuMessagesSquare, LuPencil, LuPin, LuPinOff, LuSearch, LuTrash2 } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
 import type { Session } from "../api";
 import { when } from "../time";
@@ -7,6 +7,12 @@ import { filterSessions } from "../session-filter";
 import { confirmDialog } from "./ConfirmDialog";
 import { StatusDot } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
+
+/**
+ * How long a click on a name waits for a second one. The chat opens on a click
+ * and this page goes with it, so a double-click to rename would never arrive.
+ */
+const DOUBLE_CLICK_MS = 300;
 
 /**
  * Every session, not just the dozen the sidebar has room for — with search,
@@ -29,6 +35,20 @@ export function SessionsPage({
   const [query, setQuery] = useState("");
   /** The session whose name is being edited in place. */
   const [renaming, setRenaming] = useState<string | null>(null);
+  /** A new name on its way to the server, shown until the list has it. */
+  const [pending, setPending] = useState<{ id: string; title: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  /** The chat a click on its name opens, unless a second click makes it a rename. */
+  const opening = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(opening.current), []);
+
+  const rename = (s: Session, title: string) => {
+    setRenaming(null);
+    setPending({ id: s.id, title });
+    onRename(s.id, title)
+      .catch((e) => setError(`Could not rename "${s.title}": ${(e as Error).message}`))
+      .finally(() => setPending((p) => (p?.id === s.id ? null : p)));
+  };
 
   const running = sessions.filter((s) => s.status === "running").length;
   const pinnedCount = sessions.filter((s) => s.pinned).length;
@@ -71,6 +91,14 @@ export function SessionsPage({
             )}
           </div>
 
+          {error && (
+            <div role="alert" className="mt-3 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+              <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="min-w-0 flex-1">{error}</span>
+              <button onClick={() => setError(null)} aria-label="Dismiss">✕</button>
+            </div>
+          )}
+
           {matches.length === 0 ? (
             <p className="py-12 text-center text-sm text-fg-subtle">
               {sessions.length === 0 ? "No sessions yet." : "Nothing matches that."}
@@ -91,21 +119,25 @@ export function SessionsPage({
                           value={s.title}
                           label="Session name"
                           className="flex-1 text-sm"
-                          onCommit={(next) => {
-                            setRenaming(null);
-                            void onRename(s.id, next);
-                          }}
+                          onCommit={(next) => rename(s, next)}
                           onCancel={() => setRenaming(null)}
                         />
                       ) : (
                         <p
                           className="truncate text-sm text-fg"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.clearTimeout(opening.current);
+                            if (e.detail > 1) return;
+                            opening.current = window.setTimeout(() => onSelect(s.id), DOUBLE_CLICK_MS);
+                          }}
                           onDoubleClick={(e) => {
                             e.stopPropagation();
+                            window.clearTimeout(opening.current);
                             setRenaming(s.id);
                           }}
                         >
-                          {s.title}
+                          {pending?.id === s.id ? pending.title : s.title}
                         </p>
                       )}
                       {s.pinned && (

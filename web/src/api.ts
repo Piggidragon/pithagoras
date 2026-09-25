@@ -82,6 +82,8 @@ export interface Routine {
   browser: boolean;
   /** Where its runs happen: null for Home, else a project's directory. */
   workspace: string | null;
+  /** Why that place cannot be used now, such as a project that was deleted; null when it can. */
+  workspaceProblem?: string | null;
   /** null inherits the portal default; "" means this one never reports. */
   reportChannel: string | null;
   reportTarget: string | null;
@@ -134,6 +136,8 @@ export interface ProjectContents extends Project {
   bytes: number;
   /** False when the count stopped early on a very large folder. */
   complete: boolean;
+  /** The routines that run here, by name. Deleting the project switches them off. */
+  routines?: string[];
 }
 
 export interface CompactionSettings {

@@ -1,12 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
 
-async function portal(page: Page) {
+async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   const routine = {
     id: 'r1', slug: 'build', name: 'Nightly build', enabled: true, schedule: '0 2 * * *', runAt: null, mode: 'repeats', done: false,
     instructions: 'Build it', freshSession: false, guard: true, browser: false, workspace: null, reportChannel: null, reportTarget: null,
     lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '', updatedAt: '1',
+    workspaceProblem: null, ...opts.routine,
   };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
@@ -17,6 +18,7 @@ async function portal(page: Page) {
     let reply: unknown = {};
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
     else if (p === '/api/sessions') reply = { sessions: [session], executor: 'host' };
+    else if (p === '/api/sessions/s1' && method === 'PATCH' && opts.renameFails) return route.fulfill({ status: 500, json: { error: 'disk full' } });
     else if (p === '/api/sessions/s1' && method === 'PATCH') { session.title = body.title; reply = session; }
     else if (p === '/api/routines' && method === 'GET') reply = { routines: [routine] };
     else if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: String(Date.now()) }); reply = routine; }
@@ -56,4 +58,61 @@ test('a routine is moved from Home into a project', async ({ page }) => {
   await page.getByRole('option', { name: /site/ }).click();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => sent.find((s) => s.method === 'PATCH')?.body?.workspace).toBe('/w/site');
+});
+
+test('double-clicking a name on the sessions page renames it, and a single click opens the chat', async ({ page }) => {
+  const sent = await portal(page);
+  await page.goto('/sessions');
+  const name = page.getByRole('main').getByText('Old name', { exact: true });
+  await name.dblclick();
+  const field = page.getByLabel('Session name');
+  await expect(field).toBeVisible();
+  expect(page.url()).toContain('/sessions');
+  await field.fill('Twice');
+  await field.press('Enter');
+  await expect.poll(() => sent.find((s) => s.method === 'PATCH')?.body).toEqual({ title: 'Twice' });
+
+  await page.getByRole('main').getByText('Twice', { exact: true }).click();
+  await expect(page).toHaveURL(/\/s\/s1$/);
+});
+
+test('a rename that fails says so, and the old name comes back', async ({ page }) => {
+  await portal(page, { renameFails: true });
+  await page.goto('/sessions');
+  await page.getByRole('button', { name: 'Rename Old name' }).click();
+  const field = page.getByLabel('Session name');
+  await field.fill('Never');
+  await field.press('Enter');
+  await expect(page.getByRole('alert')).toContainText('disk full');
+  await expect(page.getByRole('main').getByText('Old name', { exact: true })).toBeVisible();
+});
+
+test('a routine whose project has gone says so, and saves another change without a new place', async ({ page }) => {
+  const sent = await portal(page, { routine: { workspace: '/w/gone', workspaceProblem: 'workspace does not exist' } });
+  await page.goto('/routines');
+  await expect(page.getByText('gone (gone)')).toBeVisible();
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  const where = page.getByLabel('Where it runs');
+  await expect(where).toContainText('gone');
+  await where.click();
+  await expect(page.getByRole('option', { name: /gone/ })).toContainText('Not there any more');
+  await page.keyboard.press('Escape');
+
+  await page.getByText('Build it').fill('Build it again');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.poll(() => sent.find((s) => s.method === 'PATCH')?.body?.instructions).toBe('Build it again');
+  expect('workspace' in sent.find((s) => s.method === 'PATCH')!.body).toBe(false);
+});
+
+test('a folder in a project is shown as a place, not as gone, and the hint does not open the menu', async ({ page }) => {
+  await portal(page, { routine: { workspace: '/w/site/docs' } });
+  await page.goto('/routines');
+  await expect(page.getByText('site/docs', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  await page.getByText('Its runs work in this directory.').click();
+  await expect(page.getByRole('listbox')).toHaveCount(0);
+  await page.getByLabel('Where it runs').click();
+  const option = page.getByRole('option', { name: /site\/docs/ });
+  await expect(option).toContainText('/w/site/docs');
+  await expect(option).not.toContainText('Not there any more');
 });

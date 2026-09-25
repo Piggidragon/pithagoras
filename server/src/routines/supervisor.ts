@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { createSession, findRoutineSession, getDb, type SessionRow } from "../db.js";
 import { agentHome } from "../agent.js";
-import { checkWorkspace } from "../workspaces.js";
+import { checkWorkspace, workspaceRoot } from "../workspaces.js";
 import { sessions, EXECUTOR_KIND } from "../session-manager.js";
 import { isDue, nextRun, parseCron } from "./cron.js";
 import { reportFraming, reportToFor } from "../pi/report-tool.js";
@@ -177,7 +177,7 @@ class RoutineSupervisor {
       throw new Error(`Its project ${row.workspace} cannot be used (${where.error}). Choose where it runs in the routine.`);
     }
     if (!row.fresh_session) {
-      const existing = findRoutineSession(row.slug, where.path);
+      const existing = findRoutineSession(row.slug, where.path, row.workspace ? undefined : workspaceRoot());
       if (existing) return existing;
     }
 

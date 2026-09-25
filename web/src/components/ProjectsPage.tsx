@@ -85,9 +85,18 @@ export function ProjectsPage({
           ? `${contents.complete ? "" : "over "}${contents.files.toLocaleString()} file${contents.files === 1 ? "" : "s"} (${bytesLabel(contents.bytes)}) in its folder`
           : "",
       ].filter(Boolean);
+      const routines = contents.routines ?? [];
+      // They stay, with their history, but have nowhere left to run.
+      const names = routines.map((r) => `"${r}"`).join(", ");
+      const stranded =
+        routines.length === 0
+          ? ""
+          : routines.length === 1
+            ? ` The routine ${names} runs here: it is switched off until it is given another place, and keeps its history.`
+            : ` The routines ${names} run here: they are switched off until they are given another place, and keep their history.`;
       const ok = await confirmDialog({
         title: `Delete the project "${p.name}"?`,
-        message: `${parts.length ? parts.join(" and ") + " go with it. " : "It is empty. "}This cannot be undone.`,
+        message: `${parts.length ? parts.join(" and ") + " go with it. " : "It is empty. "}This cannot be undone.${stranded}`,
         confirmLabel: "Delete project",
         danger: true,
         deletes: true,

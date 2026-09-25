@@ -1,8 +1,8 @@
 import { Type } from "typebox";
 import { nanoid } from "nanoid";
 import { getDb, type SessionRow } from "../db.js";
-import { agentHome, unscopeKey } from "../agent.js";
-import { checkWorkspace } from "../workspaces.js";
+import { unscopeKey } from "../agent.js";
+import { checkWorkspace, routinePlace } from "../workspaces.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
@@ -62,15 +62,15 @@ const describe = (r: RoutineRow) => ({
   lastStatus: r.last_status,
   instructions: r.instructions,
   runsIn: r.workspace ?? "Home",
+  ...(r.workspace && "error" in checkWorkspace(r.workspace)
+    ? { problem: `${r.workspace} cannot be used, so its runs fail until it is given another place` }
+    : {}),
 });
 
-/** A project to run in, by name or path, or Home when there is none. */
+/** A project to run in, by name or path, or Home when there is none: read as the HTTP API reads it. */
 function place(raw: unknown): { workspace: string | null } | { error: string } {
-  if (raw === undefined || raw === null || raw === "" || (typeof raw === "string" && /^home$/i.test(raw.trim()))) return { workspace: null };
-  if (typeof raw !== "string") return { error: "workspace must be a project's name or path" };
-  const where = checkWorkspace(raw.trim());
-  if ("error" in where) return { error: `Cannot run in "${raw}": ${where.error}` };
-  return { workspace: where.path === agentHome() ? null : where.path };
+  const where = routinePlace(raw);
+  return "error" in where ? { error: `Cannot run in "${raw}": ${where.error}` } : where;
 }
 
 const WORKSPACE_PARAM = Type.Optional(

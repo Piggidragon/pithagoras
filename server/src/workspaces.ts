@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { agentHome } from "./agent.js";
 
@@ -29,5 +29,23 @@ export function checkWorkspace(raw: string): { path: string } | { error: string 
   if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
     return { error: "workspace must be inside the workspace root" };
   }
+  // A file would be taken as far as the launch, and every run would fail there.
+  if (!statSync(real).isDirectory()) return { error: "workspace is not a directory" };
   return { path: resolved };
+}
+
+/**
+ * Where a routine runs, as the page or the agent asked for it. Nothing, "" or
+ * "home" is Home (a project called "home" is still reached by its path).
+ * Anything else must be a place a chat could run. Home is kept as null, so
+ * that a routine follows it if AGENT_HOME moves.
+ */
+export function routinePlace(raw: unknown): { workspace: string | null } | { error: string } {
+  if (raw === undefined || raw === null) return { workspace: null };
+  if (typeof raw !== "string") return { error: "workspace must be a project's name or path, or null for Home" };
+  const text = raw.trim();
+  if (!text || /^home$/i.test(text)) return { workspace: null };
+  const where = checkWorkspace(text);
+  if ("error" in where) return where;
+  return { workspace: where.path === agentHome() ? null : where.path };
 }

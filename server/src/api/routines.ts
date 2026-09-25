@@ -1,12 +1,12 @@
 import express, { type Router } from "express";
+import path from "node:path";
 import { nanoid } from "nanoid";
 import { getDb, getDefaultReportTo, listRoutineSessions, setDefaultReportTo } from "../db.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
 import { isOneOff, oneOffDone, routineSupervisor, whenNext, type RoutineRow } from "../routines/supervisor.js";
-import { agentHome } from "../agent.js";
-import { checkWorkspace } from "../workspaces.js";
+import { checkWorkspace, routinePlace } from "../workspaces.js";
 
 /**
  * Scheduled work: a standing instruction, a cron expression, and a record of
@@ -30,6 +30,8 @@ const toApi = (row: RoutineRow) => ({
   browser: row.browser === 1,
   /** Where its runs happen: null for Home, else a project's directory. */
   workspace: row.workspace ?? null,
+  /** Why that place cannot be used now, such as a project that was deleted; null when it can. */
+  workspaceProblem: placeProblem(row.workspace),
   /** null inherits the portal default; "" is an explicit "never report". */
   reportChannel: row.report_channel,
   reportTarget: row.report_target,
@@ -81,18 +83,46 @@ function readReport(body: any): { channel: string | null; target: string | null 
   return { channel: null, target: null };
 }
 
+/** Home is always there; a project can be deleted from under a routine. */
+function placeProblem(workspace: string | null): string | null {
+  if (!workspace) return null;
+  const where = checkWorkspace(workspace);
+  return "error" in where ? where.error : null;
+}
+
 /**
- * Where a routine runs, as sent: absent leaves it as it is, null or "" is
- * Home, and anything else must be a place a chat could run.
+ * Where a routine runs, as sent: absent leaves it as it is, and anything else
+ * is read as the agent's tool reads it. The place it already has is taken as
+ * it is, even one that has gone: saving another change must not need a new
+ * place first.
  */
-export function readWorkspace(body: any): { workspace: string | null } | { error: string } | undefined {
+export function readWorkspace(body: any, current?: string | null): { workspace: string | null } | { error: string } | undefined {
   if (!body || !("workspace" in body)) return undefined;
-  const raw = body.workspace;
-  if (raw === null || raw === "") return { workspace: null };
-  if (typeof raw !== "string") return { error: "workspace must be a path, or null for Home" };
-  const where = checkWorkspace(raw);
-  if ("error" in where) return where;
-  return { workspace: where.path === agentHome() ? null : where.path };
+  if (current && body.workspace === current) return { workspace: current };
+  return routinePlace(body.workspace);
+}
+
+/** The routines that run in this folder, or in one below it. */
+export function routinesIn(dir: string): { id: string; name: string }[] {
+  return (getDb().prepare("SELECT id, name, workspace FROM routines ORDER BY name").all() as Pick<RoutineRow, "id" | "name" | "workspace">[])
+    .filter((r) => !!r.workspace && (r.workspace === dir || r.workspace.startsWith(dir + path.sep)))
+    .map((r) => ({ id: r.id, name: r.name }));
+}
+
+/**
+ * Switches off the routines that run in a folder about to be deleted, by name:
+ * each run would fail there. Their sessions are left alone, the record of what
+ * they did, and they run again once given another place and switched on.
+ */
+export function switchOffRoutinesIn(dir: string): string[] {
+  const routines = routinesIn(dir);
+  if (!routines.length) return [];
+  const off = getDb().prepare("UPDATE routines SET enabled = 0, updated_at = datetime('now') WHERE id = ?");
+  getDb().transaction(() => {
+    for (const r of routines) off.run(r.id);
+  })();
+  routineSupervisor.refreshSchedules();
+  return routines.map((r) => r.name);
 }
 
 /** Slugs own the sessions, so two routines must never share one. */
@@ -270,7 +300,7 @@ export function routinesRouter(): Router {
       sets.push("fresh_session = ?");
       values.push(freshSession ? 1 : 0);
     }
-    const place = readWorkspace(req.body);
+    const place = readWorkspace(req.body, row.workspace);
     if (place && "error" in place) return res.status(400).json({ error: place.error });
     if (place) {
       sets.push("workspace = ?");

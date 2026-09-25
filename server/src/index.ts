@@ -16,6 +16,7 @@ import {
   replayStart,
   getSession,
   listAgentSessions,
+  listRoutineSessions,
   listSessions,
   updateSession,
 } from "./db.js";
@@ -35,7 +36,7 @@ import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth, signOut
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
-import { routinesRouter } from "./api/routines.js";
+import { routinesIn, routinesRouter, switchOffRoutinesIn } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
@@ -325,7 +326,12 @@ app.post("/api/projects", (req, res) => {
 app.get("/api/projects/:name", (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
-    res.json({ ...project, sessions: chatsIn(project.path).length, ...describeProject(WORKSPACE_ROOT, project.name) });
+    res.json({
+      ...project,
+      sessions: chatsIn(project.path).length,
+      routines: routinesIn(project.path).map((r) => r.name),
+      ...describeProject(WORKSPACE_ROOT, project.name),
+    });
   } catch (e) {
     projectFailure(res, e);
   }
@@ -350,14 +356,27 @@ app.put("/api/projects/:name/instructions", (req, res) => {
   }
 });
 
-/** The project, its chats and its folder. Refused while any chat in it is running. */
+/**
+ * The project, its chats and its folder. Refused while any chat or routine run
+ * in it is working.
+ *
+ * A routine that runs here keeps its sessions, the record of what it did, as
+ * deleting the routine itself does. It is switched off: every run would fail
+ * with its folder gone, until it is given another place.
+ */
 app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     const chats = chatsIn(project.path);
+    const runs = chatsIn(project.path, listRoutineSessions());
     if (chats.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
+    if (runs.some((s) => sessions.isBusy(s.id))) {
+      return res.status(409).json({ error: "A routine is running in this project. Wait for it to finish, or stop it." });
+    }
+    const routines = switchOffRoutinesIn(project.path);
+    for (const run of runs) await sessions.discard(run.id);
     // In an order in which a failure leaves nothing half done. Stopping is first
     // and destroys nothing. The folder is next, the part most likely to fail (a
     // busy mount, a file that is not ours), and before anything that cannot come
@@ -369,7 +388,7 @@ app.delete("/api/projects/:name", async (req, res) => {
       for (const chat of chats) deleteSession(chat.id);
     })();
     for (const chat of chats) sessions.removeFiles(chat.id);
-    res.json({ ok: true, sessionsDeleted: chats.length });
+    res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: routines });
   } catch (e) {
     projectFailure(res, e);
   }

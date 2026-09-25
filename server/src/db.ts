@@ -505,11 +505,22 @@ export function findChannelSession(key: string): SessionRow | undefined {
 /**
  * The session a routine owns in `workspace`, if it has run there before. One
  * per place: moved to a project and back, it picks up its Home history again.
+ *
+ * The workspace `root` is given when it looks in Home, the one place outside
+ * the root. A session the routine made outside it under an earlier AGENT_HOME
+ * is its Home session all the same. It is moved to where Home is now, rather
+ * than left behind while the routine starts over.
  */
-export function findRoutineSession(slug: string, workspace: string): SessionRow | undefined {
-  return getDb()
-    .prepare("SELECT * FROM sessions WHERE routine_slug = ? AND kind = 'routine' AND workspace = ? ORDER BY created_at ASC")
-    .get(slug, workspace) as SessionRow | undefined;
+export function findRoutineSession(slug: string, workspace: string, root?: string): SessionRow | undefined {
+  const own = getDb()
+    .prepare("SELECT * FROM sessions WHERE routine_slug = ? AND kind = 'routine' ORDER BY created_at ASC")
+    .all(slug) as SessionRow[];
+  const here = own.find((s) => s.workspace === workspace);
+  if (here || root === undefined) return here;
+  const moved = own.find((s) => s.workspace !== root && !s.workspace.startsWith(root + path.sep));
+  if (!moved) return undefined;
+  getDb().prepare("UPDATE sessions SET workspace = ? WHERE id = ?").run(workspace, moved.id);
+  return { ...moved, workspace };
 }
 
 export function listRoutineSessions(slug?: string): SessionRow[] {
