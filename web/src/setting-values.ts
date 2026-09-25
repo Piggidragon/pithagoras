@@ -17,10 +17,24 @@ export function humanKey(key: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** What was typed, as the kind of value that was there before it: a number stays a number. */
-export function typed(before: unknown, text: string): unknown {
+/** Names whose values are text however they look: "0123" in a PIN, or "8080" in a key, is not a number. */
+const TEXT_NAMES = /(key|token|secret|password|passwd|pin|id|name|url|uri|path|dir|host|model|user|email|version)$/i;
+
+/**
+ * What was typed, as the kind of value that was there before it: a number
+ * stays a number. With nothing there before, what the text is says it:
+ * "true" and "false" are a switch — as text, "false" is on to an extension
+ * that reads `if (settings.x)` — and a plain number is a number, unless the
+ * key's name says it holds text.
+ */
+export function typed(before: unknown, text: string, key = ""): unknown {
   const t = text.trim();
   if (t === "") return "";
+  if (before === undefined || before === null) {
+    if (/^(true|false)$/i.test(t)) return t.toLowerCase() === "true";
+    if (!TEXT_NAMES.test(key) && /^-?(0|[1-9]\d*)(\.\d+)?$/.test(t)) return Number(t);
+    return t;
+  }
   if (typeof before === "number" && Number.isFinite(Number(t))) return Number(t);
   if (typeof before === "boolean" && /^(true|false)$/i.test(t)) return t.toLowerCase() === "true";
   if (before !== null && typeof before === "object") {

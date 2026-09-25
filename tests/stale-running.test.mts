@@ -90,7 +90,9 @@ test('an extension setting is named as a person would, and kept as the kind of v
   assert.equal(typed(true, 'false'), false);
   assert.deepEqual(typed({ a: 1 }, '{"a":2}'), { a: 2 });
   assert.equal(typed('x', ''), '');
-  assert.equal(typed(undefined, '42'), '42', 'a key never set stays text: nothing says it is a number');
+  // A key never set is told by its text (see setting-values.test): a number, unless its name says it holds text.
+  assert.equal(typed(undefined, '42'), 42);
+  assert.equal(typed(undefined, '42', 'apiKey'), '42');
 });
 
 test('a tool its run left open does not run again with the next run', () => {

@@ -149,11 +149,44 @@ function installedPackages(settings: Record<string, unknown>) {
   return listed.value;
 }
 
-/** The keys a package reads, found once per version of it rather than on every look. */
-const keysFound = new Map<string, { stamp: number; keys: string[] }>();
-function settingKeysOf(dir: string): string[] {
-  let stamp = 0;
-  try { stamp = statSync(path.join(dir, "package.json")).mtimeMs; } catch { /* scanned anyway */ }
+/**
+ * When the files a scan reads last changed, and how many there are — the
+ * same files detectSettingKeys reads, only looked at, not read.
+ */
+function sourceStamp(dir: string, depth = 0): string {
+  if (depth > 4) return "";
+  let newest = 0, count = 0;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return "";
+  }
+  const deeper: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) deeper.push(sourceStamp(full, depth + 1));
+    else if (/\.(ts|js|mjs|cjs)$/.test(entry.name)) {
+      try { newest = Math.max(newest, statSync(full).mtimeMs); count++; } catch { /* gone meanwhile */ }
+    }
+  }
+  return [`${newest}:${count}`, ...deeper].join(",");
+}
+
+/**
+ * The keys a package reads, found once per version of it rather than on
+ * every look. One from npm or git changes only by being installed again,
+ * which rewrites its package.json. One from a folder of its own is being
+ * worked on: an edit to its code is seen at the next look.
+ */
+const keysFound = new Map<string, { stamp: string; keys: string[] }>();
+export function settingKeysOf(dir: string, installed: boolean): string[] {
+  let stamp: string | undefined;
+  if (installed) {
+    try { stamp = String(statSync(path.join(dir, "package.json")).mtimeMs); } catch { /* looked at as a folder */ }
+  }
+  stamp ??= sourceStamp(dir);
   const had = keysFound.get(dir);
   if (had && had.stamp === stamp) return had.keys;
   const keys = detectSettingKeys(dir);
@@ -201,7 +234,7 @@ export function extensionsRouter(): Router {
           // settings.json. The key scanner finds them all the same, and a form
           // built from them would write keys the adapter never reads — so it
           // gets no config page here. Settings → MCP edits the real file.
-          const keys = info.name === "pi-mcp-adapter" ? [] : settingKeysOf(pkg.path);
+          const keys = info.name === "pi-mcp-adapter" ? [] : settingKeysOf(pkg.path, /^(npm|git):/.test(pkg.spec));
           for (const key of keys) {
             info.settings.push({
               key,

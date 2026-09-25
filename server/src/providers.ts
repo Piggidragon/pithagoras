@@ -159,6 +159,33 @@ function writeJson(file: string, data: Json) {
   renameSync(temp, file);
 }
 
+/**
+ * Write models.json, keeping a copy first when it has comments: pi allows
+ * them, but what is written is plain JSON, so a save would drop them. The
+ * copy is named for when it was made, beside it — never over an older one.
+ * Its name, when one was made.
+ */
+function writeModelsJson(data: Json): string | undefined {
+  const file = modelsJsonPath();
+  let backup: string | undefined;
+  try {
+    const text = readFileSync(file, "utf8");
+    if (stripJsonComments(text) !== text) {
+      backup = `${path.basename(file)}.before-${new Date().toISOString().replace(/[:.]/g, "-")}.bak`;
+      writeFileSync(path.join(path.dirname(file), backup), text, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+  writeJson(file, data);
+  return backup;
+}
+
+/** What a change did besides: the copy kept of a models.json whose comments it dropped. */
+export interface Changed {
+  backup?: string;
+}
+
 let chain: Promise<unknown> = Promise.resolve();
 /** One change at a time, so two saves cannot each drop the other's. */
 function serial<T>(fn: () => T | Promise<T>): Promise<T> {
@@ -566,7 +593,7 @@ export function mergeModels(existing: ModelEntry[], wanted: ModelEntry[]): Model
 /** Something is set up under that name already. */
 export class TakenError extends Error {}
 
-export function saveProvider(id: string, body: SaveProvider): Promise<void> {
+export function saveProvider(id: string, body: SaveProvider): Promise<Changed> {
   if (!ID_RE.test(id)) return Promise.reject(new Error("A provider's name is letters, digits and - _ . : = — and starts with a letter or digit."));
   const preset = PRESETS.find((p) => p.kind === body.kind);
   if (!preset) return Promise.reject(new Error(`Unknown kind of provider: ${body.kind}`));
@@ -576,7 +603,7 @@ export function saveProvider(id: string, body: SaveProvider): Promise<void> {
       const key = body.apiKey;
       if (key === undefined) {
         if (body.adding && readAuthJson()[id]) throw taken();
-        return;
+        return {};
       }
       await changeAuth((auth) => {
         if (body.adding && auth[id]) throw taken();
@@ -584,7 +611,7 @@ export function saveProvider(id: string, body: SaveProvider): Promise<void> {
         else if (auth[id]) delete auth[id];
         else return false;
       });
-      return;
+      return {};
     }
     if (!body.baseUrl?.trim()) throw new Error("An address is needed, such as http://127.0.0.1:8080/v1.");
     const file = readForChange(modelsJsonPath());
@@ -610,22 +637,32 @@ export function saveProvider(id: string, body: SaveProvider): Promise<void> {
     next.models = mergeModels(Array.isArray(current.models) ? current.models : [], body.models ?? []);
     providers[id] = next;
     file.providers = providers;
-    writeJson(modelsJsonPath(), file);
+    const backup = writeModelsJson(file);
     const kinds = readJson(kindsJsonPath());
     if (kinds[id] !== body.kind) writeJson(kindsJsonPath(), { ...kinds, [id]: body.kind });
+    return { backup };
   });
 }
 
-export function removeProvider(id: string): Promise<boolean> {
+export function removeProvider(id: string): Promise<Changed & { found: boolean }> {
   return serial(async () => {
     let found = false;
-    const file = readForChange(modelsJsonPath());
+    let backup: string | undefined;
+    // A models.json that cannot be read stops the removal — unless the name
+    // is a key in auth.json, which is all the page could have shown for it:
+    // it lists no server from a file it cannot read.
+    let file: Json | undefined;
+    try {
+      file = readForChange(modelsJsonPath());
+    } catch (e) {
+      if (!readAuthJson()[id]) throw e;
+    }
     // Only a server of its own. An entry without models overrides a hosted
     // service's address or details, written by hand: removing that service's
     // key leaves it, as the page knows nothing of it.
-    if (Array.isArray(file.providers?.[id]?.models)) {
+    if (file && Array.isArray(file.providers?.[id]?.models)) {
       delete file.providers[id];
-      writeJson(modelsJsonPath(), file);
+      backup = writeModelsJson(file);
       found = true;
     }
     const kinds = readJson(kindsJsonPath());
@@ -641,7 +678,7 @@ export function removeProvider(id: string): Promise<boolean> {
       });
       found ||= removed === true;
     }
-    return found;
+    return { found, backup };
   });
 }
 

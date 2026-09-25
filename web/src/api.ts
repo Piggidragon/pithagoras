@@ -399,8 +399,9 @@ export const api = {
   probeProvider: (body: { kind: ProviderKind; baseUrl: string; apiKey?: string; id?: string }) =>
     json<{ baseUrl: string; models: ProviderModel[] }>("/api/providers/probe", { method: "POST", body: JSON.stringify(body) }),
   saveProvider: (id: string, body: { kind: ProviderKind; adding?: boolean; baseUrl?: string; api?: string; apiKey?: string; models?: ProviderModel[] }) =>
-    json<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
-  removeProvider: (id: string) => json<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    json<{ ok: true; note?: string }>(`/api/providers/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
+  /** `note` says what else came of it: a copy kept of a models.json whose comments were dropped. */
+  removeProvider: (id: string) => json<{ ok: true; note?: string }>(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
   /** Whether each server answers now. */
   providerStatus: () => json<{ status: Record<string, ProviderStatus> }>("/api/providers/status"),
   /** Every model pi can use now, outside any chat — for the defaults. */

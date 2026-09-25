@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { agentHome } from "../agent-home.js";
-import { addExtensionProviders } from "../pi/model-runtime.js";
+import { addExtensionProviders, rereadConfig } from "../pi/model-runtime.js";
 import { readPiSettings } from "../pi-settings.js";
 import {
   APIS, PRESETS, ProbeError, TakenError, checkProviders, configStamp, listProviders, probeModels, removeProvider, saveProvider, savedServer,
@@ -24,20 +24,31 @@ function installedStamp(): string {
  * packages bring, as a session has them. Built once and kept until the files
  * it was built from change: creating it reads pi's whole catalogue.
  */
-let runtime: { stamp: string; value: Promise<any> } | undefined;
+let runtime: { installed: string; config: string; value: Promise<any> } | undefined;
 export function modelRuntime(cwd = agentHome()): Promise<any> {
-  const stamp = `${configStamp()}|${installedStamp()}`;
-  if (runtime?.stamp !== stamp) {
+  const installed = installedStamp();
+  const config = configStamp();
+  if (runtime?.installed !== installed) {
+    // Made anew only when what is installed changes: that loads every
+    // extension's code, which is not something to do on every saved key.
     const value = import("@earendil-works/pi-coding-agent").then(async (pi: any) => {
       const rt = await pi.ModelRuntime.create();
       // Without them the models pi offers would be only its own and models.json's.
       await addExtensionProviders(pi, rt, cwd).catch((e) => console.error(`[portal] package providers not loaded: ${(e as Error).message}`));
       return rt;
     });
-    runtime = { stamp, value };
-    value.catch(() => { if (runtime?.value === value) runtime = undefined; });
+    runtime = { installed, config, value };
+  } else if (runtime.config !== config) {
+    // A provider or a key changed: the same runtime reads pi's two files again, as an open chat's does.
+    runtime.config = config;
+    runtime.value = runtime.value.then(async (rt) => {
+      await rereadConfig(rt);
+      return rt;
+    });
   }
-  return runtime.value;
+  const { value } = runtime;
+  value.catch(() => { if (runtime?.value === value) runtime = undefined; });
+  return value;
 }
 
 /** pi's names for its hosted services, and which of them it finds a key for outside its files. */
@@ -61,6 +72,9 @@ async function services(): Promise<{ names: Record<string, string>; envKeyed: Re
 }
 
 const KINDS = new Set(PRESETS.map((p) => p.kind));
+
+const droppedComments = (backup: string) =>
+  `models.json had comments, which saving here does not keep. It is kept as it was in ${backup}, beside it.`;
 
 export function providersRouter(): Router {
   const router = express.Router();
@@ -91,7 +105,7 @@ export function providersRouter(): Router {
     const body = req.body ?? {};
     if (!KINDS.has(body.kind)) return res.status(400).json({ error: "Which kind of provider this is was not said." });
     try {
-      await saveProvider(req.params.id, {
+      const { backup } = await saveProvider(req.params.id, {
         kind: body.kind,
         adding: body.adding === true,
         baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
@@ -99,15 +113,21 @@ export function providersRouter(): Router {
         apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
         models: Array.isArray(body.models) ? body.models.filter((m: any) => m && typeof m.id === "string") : undefined,
       });
-      res.json({ ok: true });
+      res.json({ ok: true, ...(backup ? { note: droppedComments(backup) } : {}) });
     } catch (e) {
       res.status(e instanceof TakenError ? 409 : 400).json({ error: (e as Error).message });
     }
   });
 
   router.delete("/providers/:id", async (req, res) => {
-    const found = await removeProvider(req.params.id);
-    res.status(found ? 200 : 404).json(found ? { ok: true } : { error: "Nothing is set up under that name." });
+    try {
+      const { found, backup } = await removeProvider(req.params.id);
+      if (!found) return res.status(404).json({ error: "Nothing is set up under that name." });
+      res.json({ ok: true, ...(backup ? { note: droppedComments(backup) } : {}) });
+    } catch (e) {
+      // Said to the page as the rest are, not as Express's own page.
+      res.status(500).json({ error: (e as Error).message });
+    }
   });
 
   /** Every model pi can use now — the ones with a key — for the defaults. */

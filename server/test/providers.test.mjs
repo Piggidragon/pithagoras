@@ -70,9 +70,9 @@ test("a hosted service's key goes to auth.json, and removing it takes it out", a
   ]);
   await p.saveProvider("openrouter", { kind: "openrouter" });
   assert.equal(read("auth.json").openrouter.key, "sk-or-v1-0123456789", "no key sent keeps the one stored");
-  assert.equal(await p.removeProvider("openrouter"), true);
+  assert.equal((await p.removeProvider("openrouter")).found, true);
   assert.equal(read("auth.json").openrouter, undefined);
-  assert.equal(await p.removeProvider("openrouter"), false);
+  assert.equal((await p.removeProvider("openrouter")).found, false);
 });
 
 test("a bad name is refused before anything is written", async () => {
@@ -179,7 +179,7 @@ test("a saved key is sent only to the address it was saved with, and a typed one
 test("removing a hosted service leaves an override of it written by hand", async () => {
   writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: { anthropic: { baseUrl: "https://proxy.example/v1" } } }));
   writeFileSync(path.join(dir, "auth.json"), JSON.stringify({ anthropic: { type: "api_key", key: "sk-ant-0123456789" } }));
-  assert.equal(await p.removeProvider("anthropic"), true);
+  assert.equal((await p.removeProvider("anthropic")).found, true);
   assert.equal(read("auth.json").anthropic, undefined);
   assert.deepEqual(read("models.json").providers.anthropic, { baseUrl: "https://proxy.example/v1" });
 });
@@ -312,4 +312,47 @@ test("a server's key goes where pi reads it first: auth.json, when one is kept t
   await p.saveProvider("box", { kind: "llama-cpp", baseUrl: "http://box:8080", apiKey: "", models: [{ id: "A" }] });
   assert.equal(read("auth.json").box, undefined);
   assert.equal(p.listProviders().find((x) => x.id === "box").key.set, false);
+});
+
+test("a models.json with comments is kept as it was before a save drops them", async () => {
+  const { readdirSync } = await import("node:fs");
+  const commented = '{\n  // by hand\n  "providers": { "box": { "baseUrl": "http://box:8080/v1", "apiKey": "none", "models": [{ "id": "A" }] } }\n}';
+  writeFileSync(path.join(dir, "models.json"), commented);
+  writeFileSync(path.join(dir, "models.json.bak"), "someone's own copy");
+  const copies = () => readdirSync(dir).filter((f) => f.startsWith("models.json.before-")).length;
+  const had = copies();
+  const { backup } = await p.saveProvider("gpu", { kind: "llama-swap", baseUrl: "http://gpu:8080", models: [{ id: "B" }] });
+  assert.match(backup, /^models\.json\.before-.+\.bak$/);
+  assert.equal(readFileSync(path.join(dir, backup), "utf8"), commented);
+  assert.equal(readFileSync(path.join(dir, "models.json.bak"), "utf8"), "someone's own copy", "a copy already there is not written over");
+  // Without comments now: no more copies.
+  assert.equal((await p.saveProvider("gpu", { kind: "llama-swap", baseUrl: "http://gpu:8080", models: [{ id: "B" }] })).backup, undefined);
+  assert.equal((await p.removeProvider("gpu")).backup, undefined);
+  assert.equal(copies(), had + 1);
+  writeFileSync(path.join(dir, "models.json"), "{}");
+});
+
+test("a hosted key is removed even while models.json cannot be read, and the page is told why when not", async () => {
+  const express = (await import("express")).default;
+  const { providersRouter } = await import("../dist/api/providers.js");
+  const app = express();
+  app.use(express.json());
+  app.use("/api", providersRouter());
+  const server = await new Promise((r) => { const s = app.listen(0, "127.0.0.1", () => r(s)); });
+  const url = `http://127.0.0.1:${server.address().port}/api/providers`;
+  try {
+    writeFileSync(path.join(dir, "models.json"), '{ "providers": { "box": ');
+    writeFileSync(path.join(dir, "auth.json"), JSON.stringify({ openrouter: { type: "api_key", key: "sk-or-v1-0123456789" } }));
+    const removed = await fetch(`${url}/openrouter`, { method: "DELETE" });
+    assert.equal(removed.status, 200);
+    assert.equal(read("auth.json").openrouter, undefined);
+    // A server in the file that cannot be read: a message the page can show, not an HTML page.
+    const refused = await fetch(`${url}/box`, { method: "DELETE" });
+    assert.equal(refused.status, 500);
+    assert.match((await refused.json()).error, /models\.json could not be read/);
+  } finally {
+    server.close();
+    writeFileSync(path.join(dir, "models.json"), "{}");
+    writeFileSync(path.join(dir, "auth.json"), "{}");
+  }
 });

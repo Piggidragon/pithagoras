@@ -43,3 +43,15 @@ test("the models Settings offers include those an installed package brings", asy
   writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ extensions: [path.join(dir, "ext", "gateway.js")], defaultModel: "m1" }));
   assert.equal(modelRuntime(home), built);
 });
+
+test("a key saved is read into the runtime Settings keeps, without making it again", async () => {
+  const home = mkdtempSync(path.join(tmpdir(), "agent-home-"));
+  writeFileSync(path.join(dir, "auth.json"), "{}");
+  const before = await modelRuntime(home);
+  assert.equal((await providersOf(before)).has("openrouter"), false);
+  await new Promise((r) => setTimeout(r, 20));
+  writeFileSync(path.join(dir, "auth.json"), JSON.stringify({ openrouter: { type: "api_key", key: "sk-or-v1-test" } }));
+  const after = await modelRuntime(home);
+  assert.equal(after, before, "the same runtime: no extension ran again");
+  assert.equal((await providersOf(after)).has("openrouter"), true);
+});

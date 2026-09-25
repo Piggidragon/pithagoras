@@ -62,7 +62,8 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
   const keyOf = (m: { provider: string; id: string }) => `${m.provider}\u0000${m.id}`;
   const stored = settings.value?.stored.model ? `${settings.value.stored.provider || settings.value.defaults.provider}\u0000${settings.value.stored.model}` : "";
   // A stored model that can no longer be used is no choice: the first that can is offered instead, and saved on Next.
-  const current = choice ?? (list.some((m) => keyOf(m) === stored) ? stored : list[0] ? keyOf(list[0]) : "");
+  // Nothing until what is stored is known, or the first would be offered over a stored one that is fine.
+  const current = choice ?? (!settings.value ? "" : list.some((m) => keyOf(m) === stored) ? stored : list[0] ? keyOf(list[0]) : "");
   const picked = list.find((m) => keyOf(m) === current);
   const level = effort ?? settings.value?.stored.thinkingLevel ?? "";
 
@@ -80,10 +81,12 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
   };
 
   const saveModel = async () => {
+    if (!settings.value) return;
     if (!picked) return go(2);
     setSaving(true);
     try {
-      await api.saveSettings({ provider: picked.provider, model: picked.id, thinkingLevel: picked.reasoning ? level : "" });
+      // A model that does not think leaves the effort stored as it is, for the ones that do.
+      await api.saveSettings({ provider: picked.provider, model: picked.id, thinkingLevel: picked.reasoning ? level : settings.value.stored.thinkingLevel ?? "" });
       forget("settings");
       go(2);
     } catch (e) {
@@ -129,7 +132,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
             </button>
           )}
           {step === 1 && (
-            <button type="button" disabled={saving} onClick={() => void saveModel()} className={primaryCls}>
+            <button type="button" disabled={saving || !settings.value} onClick={() => void saveModel()} className={primaryCls}>
               {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : null} Next <LuArrowRight className="h-4 w-4" />
             </button>
           )}

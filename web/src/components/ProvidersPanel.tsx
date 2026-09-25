@@ -9,6 +9,7 @@ import { forget, useCached } from "../settings-cache";
 import { packageName } from "../package-names";
 import { PackageCatalog } from "./PackageCatalog";
 import { parseWindow } from "../context-window";
+import { looksComplete } from "../provider-address";
 import { confirmDialog } from "./ConfirmDialog";
 import { formatTokens } from "../transcript";
 import { Select } from "./Select";
@@ -41,6 +42,8 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
   const [busy, setBusy] = useState<string | null>(null);
   const [browsing, setBrowsing] = useState(false);
   const installed = useInstalledPackages();
+  /** What a change did besides, to be told: a copy kept of a file it rewrote. */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = async () => {
     // What the defaults offer changes with the providers.
@@ -62,7 +65,8 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
     if (!ok) return;
     setBusy(p.id);
     try {
-      await api.removeProvider(p.id);
+      const r = await api.removeProvider(p.id);
+      setNotice(r.note ?? null);
       await load();
     } catch (e) {
       onError((e as Error).message);
@@ -73,7 +77,7 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
 
   if (!view) return <ProvidersSkeleton />;
 
-  const saved = async () => { setEditing(null); await load(); };
+  const saved = async (note?: string) => { setEditing(null); setNotice(note ?? null); await load(); };
   // Names in use in pi's files. One keyed only from the environment is not:
   // a key can still be stored for it, under the name pi knows it by.
   const ids = new Set(view.providers.filter((p) => p.key.source !== "environment").map((p) => p.id));
@@ -96,6 +100,7 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
           </div>
         )}
       >
+        {notice && <p role="status" className="float-in mb-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">{notice}</p>}
         {editing === "new" && (
           <ProviderEditor view={view} taken={ids} onCancel={() => setEditing(null)} onSaved={saved} onError={onError} onInstalled={() => void load()} />
         )}
@@ -296,7 +301,8 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   /** Names already set up: a new provider cannot take one. */
   taken: Set<string>;
   onCancel: () => void;
-  onSaved: () => void;
+  /** Saved; `note` says what else came of it. */
+  onSaved: (note?: string) => void;
   onError: (e: string) => void;
   /** A package was installed: the models it brings are there to be fetched. */
   onInstalled?: () => void;
@@ -318,10 +324,13 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   const [manual, setManual] = useState("");
   const [saving, setSaving] = useState(false);
   const probeSeq = useRef(0);
+  /** The address the server last answered at, as it said it: put in the field, it is not asked again. */
+  const answered = useRef<string | null>(null);
 
   // A new provider's name and address follow the kind picked, until they are typed in.
   const pickKind = (picked: EditorKind) => {
     setChoice(picked);
+    answered.current = null;
     if (picked === "package") return;
     const next = picked;
     const p = view.presets.find((x) => x.kind === next)!;
@@ -342,6 +351,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
     try {
       const r = await api.probeProvider({ kind, baseUrl: url, apiKey: key || undefined, id: editing ? provider!.id : undefined });
       if (seq !== probeSeq.current) return;
+      answered.current = r.baseUrl;
       setRows((before) => {
         const known = new Map(before.map((row) => [row.id, row]));
         const merged: Row[] = r.models.map((m) => {
@@ -364,7 +374,10 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
 
   // Asked as soon as there is an address: while typing, a moment after the last key.
   useEffect(() => {
-    if (choice === "package" || !preset.endpoint || !/^(https?:\/\/)?[\w.-]+(:\d+)?/.test(baseUrl.trim())) return;
+    // What was asked before this change is about another address now: its answer is not taken.
+    probeSeq.current++;
+    setProbe((p) => (p.state === "asking" ? { state: "idle" } : p));
+    if (choice === "package" || !preset.endpoint || !looksComplete(baseUrl) || baseUrl.trim() === answered.current) return;
     const t = setTimeout(() => void ask(), editing && probe.state === "idle" ? 0 : 700);
     return () => clearTimeout(t);
   }, [baseUrl, kind]);
@@ -386,7 +399,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   const save = async () => {
     setSaving(true);
     try {
-      await api.saveProvider(id.trim(), {
+      const r = await api.saveProvider(id.trim(), {
         kind,
         adding: !editing,
         ...(preset.endpoint ? {
@@ -398,7 +411,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         } : {}),
         ...(key.trim() ? { apiKey: key.trim() } : {}),
       });
-      onSaved();
+      onSaved(r.note);
     } catch (e) {
       onError((e as Error).message);
     } finally {

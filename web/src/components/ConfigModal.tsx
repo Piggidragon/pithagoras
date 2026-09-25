@@ -49,6 +49,7 @@ import { EffortPicker, Empty, Section, Switch, SwitchRow, btnCls, inputCls, prim
 import { PackageCatalog } from "./PackageCatalog";
 import { packageName } from "../package-names";
 import { load, useCached } from "../settings-cache";
+import { serialSaver } from "../serial-saver";
 import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
 import { useTheme, type Theme } from "../theme";
 import { humanKey, typed } from "../setting-values";
@@ -611,13 +612,8 @@ function BrowserPanel({ onError }: { onError: (e: string) => void }) {
 
 /** Where this portal keeps what it keeps, set when it was deployed. */
 function AboutPanel({ onError }: { onError: (e: string) => void }) {
-  const [meta, setMeta] = useState<{ executor: string; workspaceRoot: string; piSettingsPath: string } | null>(null);
-  useEffect(() => {
-    api
-      .settings()
-      .then((r) => setMeta({ executor: r.executor, workspaceRoot: r.workspaceRoot, piSettingsPath: r.piSettingsPath }))
-      .catch((e) => onError((e as Error).message));
-  }, []);
+  // What Defaults reads too, fetched ahead: drawn at once from what is kept.
+  const meta = useCached("settings", api.settings, { onError: (e) => onError(e.message) }).value;
   if (!meta) return <div className="skeleton-group space-y-2"><div className="skeleton h-4 w-32" /><div className="skeleton h-28 w-full" /></div>;
   const agentDir = meta.piSettingsPath.replace(/\/settings\.json$/, "");
   const rows: { icon: ReactNode; label: string; value: string; detail: string }[] = [
@@ -682,10 +678,35 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
   const [ctxSaved, setCtxSaved] = useState<number | null>(r?.contextDefault ?? null);
   const [ctxNote, setCtxNote] = useState<string | null>(null);
 
-  // What was kept is brought up to date when the page opens, or after a save.
+  /**
+   * Each change is saved as it is made: there is no form to forget to submit.
+   * One save at a time, ending on the last change asked for: two clicks in a
+   * row sent side by side could land in either order. Read again once the
+   * last one is in.
+   */
+  const saver = useMemo(
+    () =>
+      serialSaver<Partial<GlobalSettings>>(
+        async (next) => {
+          // Sent even when blank: an empty value clears the override server-side.
+          await api.saveSettings({ provider: next.provider ?? "", model: next.model ?? "", thinkingLevel: next.thinkingLevel ?? "" });
+        },
+        async () => {
+          setSaved("Saved");
+          setTimeout(() => setSaved(null), 2000);
+          await settings.reload();
+        },
+      ),
+    // One saver for the page's life; what it calls stays the same.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  // What was kept is brought up to date when the page opens, or after a save —
+  // not while one is out, when what was read may be from before it.
   useEffect(() => {
     if (!r) return;
-    setStored(r.stored);
+    if (!saver.busy) setStored(r.stored);
     setKeepRecent(r.compaction.keepRecentTokens);
     setCtxSaved(r.contextDefault);
     if (document.activeElement?.getAttribute("aria-label") !== "Default context window in tokens") {
@@ -761,19 +782,10 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
     );
   }
 
-  /** Each change is saved as it is made: there is no form to forget to submit. */
   const save = async (next: Partial<GlobalSettings>) => {
     setStored(next);
     try {
-      // Sent even when blank: an empty value clears the override server-side.
-      await api.saveSettings({
-        provider: next.provider ?? "",
-        model: next.model ?? "",
-        thinkingLevel: next.thinkingLevel ?? "",
-      });
-      setSaved("Saved");
-      setTimeout(() => setSaved(null), 2000);
-      void load();
+      await saver.request(next);
     } catch (e) {
       onError((e as Error).message);
       void load();
@@ -1193,12 +1205,18 @@ function ExtensionPanel({
     );
   }, [ext.spec]);
 
+  /** What was typed for a key, as the kind of value it is — told from the text when nothing is set yet. */
+  const typedFor = (key: string) => {
+    const setting = ext.settings.find((s) => s.key === key);
+    return typed(setting?.configured ? setting.value : undefined, values[key], key);
+  };
+
   /**
    * Stored as what it is: a number as a number, and a switch as true or false.
    * Written as text, "false" was a string — which an extension reading
    * `if (settings.x)` takes as on.
    */
-  const save = async (key: string, value: unknown = typed(ext.settings.find((s) => s.key === key)?.value, values[key])) => {
+  const save = async (key: string, value: unknown = typedFor(key)) => {
     setBusy(key);
     try {
       await api.setExtensionSetting(key, value);

@@ -1,11 +1,38 @@
 import { test, expect, type Page } from '@playwright/test';
 
+interface Portal {
+  models?: boolean;
+  slow?: number;
+  /** Only /api/settings is slow. */
+  slowSettings?: number;
+  stored?: Record<string, string>;
+  /** What a server at an address lists, or undefined when nothing answers there. */
+  probe?: (baseUrl: string) => string[] | undefined;
+  /** How long a server at an address takes to answer. */
+  probeDelay?: (baseUrl: string) => number;
+  homepage?: string;
+  openRouterFromEnv?: boolean;
+  installBringsModels?: boolean;
+  /** A model that does not think, beside Ornith. */
+  plainModel?: boolean;
+  /** How long the nth save of the defaults takes, from 0. */
+  settingsSaveDelay?: (n: number) => number;
+  /** What the server says came of saving a provider, besides. */
+  providerNote?: string;
+}
+
 /** The portal with no server: Settings, its search, and the setup assistant, over canned answers. */
-async function portal(page: Page, { models = true, slow = 0, stored = {} as Record<string, string>, probe = undefined as undefined | ((baseUrl: string) => string[] | undefined), homepage = undefined as string | undefined, openRouterFromEnv = false, installBringsModels = false } = {}) {
+async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, stored = {}, probe, probeDelay, homepage, openRouterFromEnv = false, installBringsModels = false, plainModel = false, settingsSaveDelay, providerNote }: Portal = {}) {
   const calls: string[] = [];
   const providerSaves: { id: string; body: any }[] = [];
+  const settingsSaves: unknown[] = [];
+  const extensionSaves: unknown[] = [];
+  let savingNow = 0, savingMost = 0;
   // A provider package, once installed, brings its models.
-  const available = () => (models || (installBringsModels && installed.length) ? [{ provider: 'llama-swap', id: 'Ornith', name: 'Ornith 1.5', contextWindow: 65536, reasoning: true }] : []);
+  const available = () => (models || (installBringsModels && installed.length) ? [
+    { provider: 'llama-swap', id: 'Ornith', name: 'Ornith 1.5', contextWindow: 65536, reasoning: true },
+    ...(plainModel ? [{ provider: 'llama-swap', id: 'Plain', name: 'Plain 1', contextWindow: 32768, reasoning: false }] : []),
+  ] : []);
   let saved: unknown = null;
   let installed: string[] = [];
   await page.route('**/api/**', async (route) => {
@@ -18,9 +45,18 @@ async function portal(page: Page, { models = true, slow = 0, stored = {} as Reco
     if (p === '/api/auth/status') body = { authed: true, authRequired: false };
     else if (p === '/api/sessions' && method === 'GET') body = { sessions: [], executor: 'host' };
     else if (p === '/api/sessions') body = { id: 'new', title: 'New', workspace: '/w', status: 'idle', kind: 'task', pinned: false };
-    else if (p === '/api/settings' && method === 'PUT') { saved = route.request().postDataJSON(); body = { settings: {}, compaction: { keepRecentTokens: 20000 }, refreshed: 0, note: '' }; }
+    else if (p === '/api/settings' && method === 'PUT') {
+      const sent = route.request().postDataJSON();
+      savingMost = Math.max(savingMost, ++savingNow);
+      await wait(settingsSaveDelay?.(settingsSaves.length) ?? 0);
+      savingNow--;
+      // What the server ends on: the save that landed last.
+      settingsSaves.push(sent);
+      saved = sent;
+      body = { settings: {}, compaction: { keepRecentTokens: 20000 }, refreshed: 0, note: '' };
+    }
     else if (p === '/api/settings') {
-      await wait(slow);
+      await wait(slow + slowSettings);
       body = {
         settings: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' }, stored, defaults: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' },
         piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w',
@@ -40,18 +76,23 @@ async function portal(page: Page, { models = true, slow = 0, stored = {} as Reco
       ],
     };
     else if (p === '/api/providers/status') body = { status: { 'llama-swap': { state: 'up', ms: 12, listed: 1, missing: ['Gone'], loaded: ['Ornith'] } } };
-    else if (p === '/api/extensions') { await wait(slow * 3); body = { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:pi-web-access', name: 'pi-web-access', settings: [{ key: 'braveApiKey', value: '', configured: false }, { key: 'safeSearch', value: true, configured: true }] }] }; }
+    else if (p === '/api/extensions') { await wait(slow * 3); body = { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:pi-web-access', name: 'pi-web-access', settings: [{ key: 'braveApiKey', value: '', configured: false }, { key: 'safeSearch', value: true, configured: true }, { key: 'enableCache', value: '', configured: false }] }] }; }
+    else if (p === '/api/extensions/settings' && method === 'PUT') { extensionSaves.push(route.request().postDataJSON()); body = { ok: true }; }
     else if (p === '/api/packages/catalog') body = { packages: [
       { name: 'pi-web-access', version: '0.31.0', description: 'Web search for pi', weekly: 198311, keywords: ['pi-package'], provider: false, homepage },
       { name: 'pi-subagents', version: '0.71.0', description: 'Delegate to helpers', weekly: 100713, keywords: ['pi-package'], provider: false, date: new Date(Date.now() - 2 * 86400_000).toISOString() },
     ] };
     else if (p === '/api/packages' && method === 'POST') { installed.push(route.request().postDataJSON().spec); body = { ok: true, output: '' }; }
     else if (p === '/api/providers/probe' && probe) {
-      const listed = probe(route.request().postDataJSON().baseUrl);
+      const asked: string = route.request().postDataJSON().baseUrl;
+      await wait(probeDelay?.(asked) ?? 0);
+      const listed = probe(asked);
       if (!listed) return route.fulfill({ status: 502, json: { error: 'Nothing answered there.' } });
-      body = { baseUrl: route.request().postDataJSON().baseUrl, models: listed.map((id) => ({ id })) };
+      // As the server says it: with its scheme and its /v1.
+      const at = /\/v\d/.test(asked) ? asked : `${/^https?:/.test(asked) ? '' : 'http://'}${asked.replace(/\/+$/, '')}/v1`;
+      body = { baseUrl: at, models: listed.map((id) => ({ id })) };
     }
-    else if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push({ id: decodeURIComponent(p.split('/').pop()!), body: route.request().postDataJSON() }); body = { ok: true }; }
+    else if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push({ id: decodeURIComponent(p.split('/').pop()!), body: route.request().postDataJSON() }); body = { ok: true, ...(providerNote ? { note: providerNote } : {}) }; }
     else if (p === '/api/providers/probe') return route.fulfill({ status: 502, json: { error: 'Nothing answered at 127.0.0.1:8080 — is the server running, and reachable from here?' } });
     else if (p === '/api/tool-names') body = { names: {} };
     else if (p === '/api/browser') body = { running: false, sessions: [], routines: [] };
@@ -62,7 +103,7 @@ async function portal(page: Page, { models = true, slow = 0, stored = {} as Reco
   await page.addInitScript(() => {
     (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
   });
-  return { calls, saved: () => saved, installed: () => installed, providerSaves };
+  return { calls, saved: () => saved, installed: () => installed, providerSaves, settingsSaves, extensionSaves, savingMost: () => savingMost };
 }
 
 test('search finds a setting on another page and lights it up', async ({ page }) => {
@@ -254,4 +295,113 @@ test('a provider package installed in the assistant brings its models, and Next 
   await setup.getByRole('button', { name: 'Install pi-subagents' }).click();
   await page.getByRole('button', { name: 'Install', exact: true }).click();
   await expect(setup.getByRole('button', { name: 'Next' })).toBeEnabled();
+});
+
+test('quick changes to the defaults are saved one at a time, ending on the last', async ({ page }) => {
+  // The first save is slow: sent side by side, the second would land first and the first win.
+  const api = await portal(page, { stored: { provider: 'llama-swap', model: 'Ornith' }, settingsSaveDelay: (n) => (n === 0 ? 600 : 20) });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/general');
+  const effort = page.getByRole('radiogroup', { name: 'Default effort' });
+  await effort.getByRole('radio', { name: 'high', exact: true }).click();
+  await effort.getByRole('radio', { name: 'low', exact: true }).click();
+  await expect.poll(() => api.settingsSaves.length).toBe(2);
+  expect(api.savingMost()).toBe(1);
+  expect(api.saved()).toMatchObject({ thinkingLevel: 'low' });
+});
+
+test('the assistant keeps the effort stored for thinking models when the model picked does not think', async ({ page }) => {
+  const api = await portal(page, { plainModel: true, stored: { provider: 'llama-swap', model: 'Plain', thinkingLevel: 'high' } });
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Setup assistant' }).click();
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.getByLabel('Model for new chats')).toContainText('Plain 1');
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect.poll(() => api.saved()).toEqual({ provider: 'llama-swap', model: 'Plain', thinkingLevel: 'high' });
+});
+
+test('the assistant waits for what is stored before it saves a model', async ({ page }) => {
+  const api = await portal(page, { plainModel: true, slowSettings: 2500, stored: { provider: 'llama-swap', model: 'Plain', thinkingLevel: 'high' } });
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Setup assistant' }).click();
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  await setup.getByRole('button', { name: 'Next' }).click();
+  // Clicked before the stored model is known: nothing is saved over it.
+  await setup.getByRole('button', { name: 'Next' }).click({ force: true });
+  await expect(setup.getByLabel('Model for new chats')).toContainText('Plain 1');
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect.poll(() => api.saved()).toEqual({ provider: 'llama-swap', model: 'Plain', thinkingLevel: 'high' });
+  expect(api.settingsSaves).toHaveLength(1);
+});
+
+test('About draws from what Settings already has', async ({ page }) => {
+  const api = await portal(page);
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/general');
+  await expect(page.getByLabel('Default model')).toBeVisible();
+  const asked = api.calls.filter((c) => c === 'GET /api/settings').length;
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'About', exact: true }).click();
+  await expect(page.getByText('/w', { exact: true })).toBeVisible({ timeout: 150 });
+  expect(api.calls.filter((c) => c === 'GET /api/settings').length).toBe(asked);
+});
+
+test("an extension's setting not set before is stored as a switch or a number when it is one", async ({ page }) => {
+  const api = await portal(page);
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'pi-web-access' }).click();
+  await dialog.getByLabel('Enable cache').fill('false');
+  await dialog.getByLabel('Enable cache').press('Enter');
+  await expect.poll(() => api.extensionSaves).toEqual([{ key: 'enableCache', value: false }]);
+});
+
+test('an answer from an address typed over is not taken', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await portal(page, { probe: (url) => (url.includes('host-a') ? ['FromA'] : url.includes('host-b') ? ['FromB'] : undefined), probeDelay: (url) => (url.includes('host-a') ? 400 : 0) });
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  const address = dialog.getByLabel('Server address');
+  // Typed bare: the server's answer says it whole, which is put in the field.
+  await address.fill('host-a:8080');
+  // Asked a moment after the last key; typed over while it is on its way.
+  await page.waitForTimeout(800);
+  await address.fill('host-b:8080');
+  await expect(dialog.getByLabel('Use FromB')).toBeChecked();
+  await expect(address).toHaveValue('http://host-b:8080/v1');
+  await expect(dialog.getByLabel('Use FromA')).toHaveCount(0);
+});
+
+test('an address is asked once it is whole, and not again when the server tidies it', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  const api = await portal(page, { probe: (url) => (url.includes('11434') ? ['llama3'] : undefined) });
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  const address = dialog.getByLabel('Server address');
+  await expect(address).toHaveValue('http://127.0.0.1:8080/v1');
+  await page.waitForTimeout(1000);
+  const probes = () => api.calls.filter((c) => c === 'POST /api/providers/probe').length;
+  const before = probes();
+  await address.fill('192.168.');
+  await page.waitForTimeout(1200);
+  expect(probes(), 'half an address is not asked').toBe(before);
+  await address.fill('gpu:11434');
+  await expect(address).toHaveValue('http://gpu:11434/v1');
+  await expect(dialog.getByLabel('Use llama3')).toBeChecked();
+  await page.waitForTimeout(1200);
+  expect(probes(), 'asked once').toBe(before + 1);
+});
+
+test('what a save did besides is said: a copy kept of a models.json whose comments it dropped', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await portal(page, { probe: () => ['A'], providerNote: 'models.json had comments, which saving here does not keep. It is kept as it was in models.json.before-x.bak, beside it.' });
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  await expect(dialog.getByLabel('Use A')).toBeChecked();
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(dialog.getByRole('status')).toContainText('models.json.before-x.bak');
 });
