@@ -95,10 +95,10 @@ export function readWorkspace(body: any, current?: string | null): { workspace: 
 }
 
 /** The routines that run in this folder, or in one below it, or through a link to either. */
-export function routinesIn(dir: string): { id: string; slug: string; name: string }[] {
-  return (getDb().prepare("SELECT id, slug, name, workspace FROM routines ORDER BY name").all() as Pick<RoutineRow, "id" | "slug" | "name" | "workspace">[])
+export function routinesIn(dir: string): { id: string; slug: string; name: string; enabled: boolean }[] {
+  return (getDb().prepare("SELECT id, slug, name, enabled, workspace FROM routines ORDER BY name").all() as Pick<RoutineRow, "id" | "slug" | "name" | "enabled" | "workspace">[])
     .filter((r) => isWithin(dir, r.workspace))
-    .map((r) => ({ id: r.id, slug: r.slug, name: r.name }));
+    .map((r) => ({ id: r.id, slug: r.slug, name: r.name, enabled: r.enabled === 1 }));
 }
 
 /**
@@ -106,8 +106,10 @@ export function routinesIn(dir: string): { id: string; slug: string; name: strin
  * there. Their sessions are left alone, the record of what they did, and they
  * run again once given another place and switched on. Taken from routinesIn
  * before the folder went, since a link into it cannot be followed after.
+ * Returns the names of those that were on.
  */
-export function switchOffRoutines(routines: { id: string; name: string }[]): string[] {
+export function switchOffRoutines(all: { id: string; name: string; enabled: boolean }[]): string[] {
+  const routines = all.filter((r) => r.enabled);
   if (!routines.length) return [];
   const off = getDb().prepare("UPDATE routines SET enabled = 0, updated_at = datetime('now') WHERE id = ?");
   getDb().transaction(() => {

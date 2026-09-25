@@ -136,7 +136,7 @@ export interface ProjectContents extends Project {
   bytes: number;
   /** False when the count stopped early on a very large folder. */
   complete: boolean;
-  /** The routines that run here, by name. Deleting the project switches them off. */
+  /** The routines that run here and are on, by name. Deleting the project switches them off. */
   routines?: string[];
 }
 

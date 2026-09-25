@@ -11,7 +11,12 @@ import path from "node:path";
  * agent.ts, which imports the database.
  */
 export function agentHome(): string {
-  const dir = path.resolve(process.env.AGENT_HOME || "/data/agent-home");
+  const dir = agentHomePath();
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/** Where Home is, without making sure it is there: for comparing a path with it. */
+export function agentHomePath(): string {
+  return path.resolve(process.env.AGENT_HOME || "/data/agent-home");
 }

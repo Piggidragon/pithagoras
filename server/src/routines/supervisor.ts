@@ -58,8 +58,12 @@ const TICK_MS = 20_000;
 class RoutineSupervisor {
   /** Routines with a run in flight — a slow one must not stack on itself. */
   private running = new Set<string>();
-  /** Routines that may not start a run: the folder they run in is being deleted. */
-  private held = new Set<string>();
+  /**
+   * Routines that may not start a run, and by how many holds: the folder they
+   * run in is being deleted. Counted, so that one delete finishing does not
+   * lift the hold of another still under way.
+   */
+  private held = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
 
   private rows(): RoutineRow[] {
@@ -91,9 +95,16 @@ class RoutineSupervisor {
    * meanwhile would have it removed from under it.
    */
   hold(slugs: string[]): () => void {
-    for (const slug of slugs) this.held.add(slug);
+    for (const slug of slugs) this.held.set(slug, (this.held.get(slug) ?? 0) + 1);
+    let released = false;
     return () => {
-      for (const slug of slugs) this.held.delete(slug);
+      if (released) return;
+      released = true;
+      for (const slug of slugs) {
+        const left = (this.held.get(slug) ?? 1) - 1;
+        if (left > 0) this.held.set(slug, left);
+        else this.held.delete(slug);
+      }
     };
   }
 

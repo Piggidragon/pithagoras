@@ -289,6 +289,20 @@ const projectFailure = (res: express.Response, e: unknown) => {
 const chatsIn = (dir: string, all = listSessions()) =>
   all.filter((s) => s.workspace === dir || s.workspace.startsWith(dir + path.sep));
 
+/**
+ * The same, and those that reach the folder through a link too: what deleting
+ * it would take from under them. Each place is looked at once, since many
+ * chats share one, and only this one project's are followed.
+ */
+function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[] {
+  const seen = new Map<string, boolean>();
+  return rows.filter((row) => {
+    let inside = seen.get(row.workspace);
+    if (inside === undefined) seen.set(row.workspace, (inside = isWithin(dir, row.workspace)));
+    return inside;
+  });
+}
+
 /** The projects, each with how many chats it has and when one last moved. */
 app.get("/api/projects", (_req, res) => {
   try {
@@ -328,8 +342,9 @@ app.get("/api/projects/:name", (req, res) => {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     res.json({
       ...project,
-      sessions: chatsIn(project.path).length,
-      routines: routinesIn(project.path).map((r) => r.name),
+      sessions: workingIn(project.path, listSessions()).length,
+      // The ones a delete would switch off: one already off is not changed by it.
+      routines: routinesIn(project.path).filter((r) => r.enabled).map((r) => r.name),
       ...describeProject(WORKSPACE_ROOT, project.name),
     });
   } catch (e) {
@@ -367,14 +382,14 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
-    const chats = chatsIn(project.path);
+    const chats = workingIn(project.path, listSessions());
     if (chats.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
     const routines = routinesIn(project.path);
-    // Only the ones with a process to stop: a routine that ran here every hour
-    // has a session for each run.
-    const runs = listRoutineSessions().filter((s) => isWithin(project.path, s.workspace) && sessions.isLoaded(s.id));
+    // Only the ones with a process to stop, looked for among those first: a
+    // routine that ran here every hour has a session for each run.
+    const runs = workingIn(project.path, listRoutineSessions().filter((s) => sessions.isLoaded(s.id)));
     if (routines.some((r) => routineSupervisor.isRunning(r.slug)) || runs.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A routine is running in this project. Wait for it to finish, or stop it." });
     }
@@ -390,8 +405,15 @@ app.delete("/api/projects/:name", async (req, res) => {
       // go last, together, so that either all are removed or none.
       for (const run of runs) await sessions.discard(run.id);
       for (const chat of chats) await sessions.discard(chat.id);
+      // A routine can have been given this place while those were stopped. It
+      // was not held, so it is looked for again, with nothing awaited from here
+      // until the folder is gone.
+      const late = routinesIn(project.path).filter((r) => !routines.some((known) => known.id === r.id));
+      if (late.some((r) => routineSupervisor.isRunning(r.slug))) {
+        return res.status(409).json({ error: "A routine started running in this project meanwhile. Wait for it to finish, or stop it." });
+      }
       deleteProjectFolder(WORKSPACE_ROOT, project.name);
-      const switchedOff = switchOffRoutines(routines);
+      const switchedOff = switchOffRoutines([...routines, ...late]);
       getDb().transaction(() => {
         for (const chat of chats) deleteSession(chat.id);
       })();

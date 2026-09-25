@@ -35,8 +35,9 @@ export function SessionsPage({
   const [query, setQuery] = useState("");
   /** The session whose name is being edited in place. */
   const [renaming, setRenaming] = useState<string | null>(null);
-  /** A new name on its way to the server, shown until the list has it. */
-  const [pending, setPending] = useState<{ id: string; title: string } | null>(null);
+  /** A new name on its way to the server, shown until the list has it. `n` tells one rename from the next. */
+  const [pending, setPending] = useState<{ id: string; title: string; n: number } | null>(null);
+  const renames = useRef(0);
   const [error, setError] = useState<string | null>(null);
   /** The chat a click on its name opens, unless a second click makes it a rename. */
   const opening = useRef<number | undefined>(undefined);
@@ -50,10 +51,12 @@ export function SessionsPage({
 
   const rename = (s: Session, title: string) => {
     setRenaming(null);
-    setPending({ id: s.id, title });
+    const n = ++renames.current;
+    setPending({ id: s.id, title, n });
     onRename(s.id, title)
       .catch((e) => setError(`Could not rename "${s.title}": ${(e as Error).message}`))
-      .finally(() => setPending((p) => (p?.id === s.id ? null : p)));
+      // Only its own: a later rename's name stays until that one is done.
+      .finally(() => setPending((p) => (p?.n === n ? null : p)));
   };
 
   const running = sessions.filter((s) => s.status === "running").length;

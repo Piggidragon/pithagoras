@@ -1,6 +1,6 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
-import { agentHome } from "./agent-home.js";
+import { agentHomePath } from "./agent-home.js";
 
 /** Where projects live. WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys. */
 export function workspaceRoot(): string {
@@ -13,7 +13,7 @@ export function workspaceRoot(): string {
  * A bare name is a project under the root.
  */
 export function checkWorkspace(raw: string): { path: string } | { error: string } {
-  const home = agentHome();
+  const home = agentHomePath();
   const root = workspaceRoot();
   const resolved = path.isAbsolute(raw) ? path.resolve(raw) : path.join(root, raw);
   if (resolved === home) return { path: home };
@@ -76,5 +76,5 @@ export function routinePlace(raw: unknown): { workspace: string | null } | { err
   if (!text || /^home$/i.test(text)) return { workspace: null };
   const where = checkWorkspace(text);
   if ("error" in where) return where;
-  return { workspace: where.path === agentHome() ? null : where.path };
+  return { workspace: where.path === agentHomePath() ? null : where.path };
 }

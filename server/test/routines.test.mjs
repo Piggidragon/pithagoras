@@ -155,26 +155,33 @@ test("deleting a project switches off the routines that run in it, and leaves th
     const below = await call("POST", "/routines", { name: "Below", schedule: "@daily", instructions: "x", workspace: "doomed/sub" });
     const linked = await call("POST", "/routines", { name: "Linked", schedule: "@daily", instructions: "x", workspace: "alias" });
     const beside = await call("POST", "/routines", { name: "Beside", schedule: "@daily", instructions: "x", workspace: "doomed-too" });
+    const off = await call("POST", "/routines", { name: "Off", schedule: "@daily", instructions: "x", workspace: "doomed" });
+    await call("PATCH", `/routines/${off.id}`, { enabled: false });
     await call("POST", `/routines/${top.id}/run`);
 
     // Found while the folder is there, since a link into it cannot be followed after.
     const found = routinesIn(project);
-    assert.deepEqual(found.map((r) => r.name), ["Below", "Linked", "Top"], "a link to the project is in it too");
+    assert.deepEqual(found.map((r) => r.name), ["Below", "Linked", "Off", "Top"], "a link to the project is in it too");
 
-    // While the folder goes, none of them may start a run, even by hand.
-    const release = routineSupervisor.hold(found.map((r) => r.slug));
+    // While the folder goes, none of them may start a run, even by hand. Two
+    // deletes at once each hold them: the first to finish leaves the other's.
+    const first = routineSupervisor.hold(found.map((r) => r.slug));
+    const second = routineSupervisor.hold(found.map((r) => r.slug));
     assert.match((await call("POST", `/routines/${top.id}/run`)).error, /being deleted/);
-    release();
+    first();
+    first();
+    assert.match((await call("POST", `/routines/${top.id}/run`)).error, /being deleted/, "released once, however often called");
+    second();
 
     rmSync(project, { recursive: true });
-    assert.deepEqual(switchOffRoutines(found), ["Below", "Linked", "Top"]);
+    assert.deepEqual(switchOffRoutines(found), ["Below", "Linked", "Top"], "one already off is not named");
     const all = (await call("GET", "/routines")).routines;
     const on = (id) => all.find((r) => r.id === id).enabled;
     assert.equal(on(top.id), false);
     assert.equal(on(below.id), false);
     assert.equal(on(linked.id), false);
     assert.equal(on(beside.id), true, "a folder that only starts with the same name is another project");
-    assert.equal((await call("GET", `/routines/${top.id}/sessions`)).sessions.length, 1);
+    assert.equal((await call("GET", `/routines/${top.id}/sessions`)).sessions.length, 1, "a run held back makes no session, and the one before keeps its record");
   });
 });
 

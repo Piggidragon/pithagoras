@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean } = {}) {
+async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   const other = { ...session, id: 's2', title: 'Other chat', workspace: '/w/notes' };
@@ -18,6 +18,7 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     if (method !== 'GET') sent.push({ method, path: p, body });
     let reply: unknown = {};
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
+    else if (p === '/api/sessions' && opts.listFailsAfterRename && sent.some((s) => s.method === 'PATCH')) return route.fulfill({ status: 502, json: { error: 'bad gateway' } });
     else if (p === '/api/sessions') reply = { sessions: [session, other], executor: 'host' };
     else if (p === '/api/sessions/s1' && method === 'PATCH' && opts.renameFails) return route.fulfill({ status: 500, json: { error: 'disk full' } });
     else if (p === '/api/sessions/s1' && method === 'PATCH') { session.title = body.title; reply = session; }
@@ -138,4 +139,17 @@ test('ending a rename with a click elsewhere in its row does not open the chat',
   await expect.poll(() => sent.find((s) => s.method === 'PATCH')?.body).toEqual({ title: 'Kept here' });
   await page.waitForTimeout(500);
   expect(page.url()).toMatch(/\/sessions$/);
+});
+
+test('a rename that was saved is shown as saved, even when the list then fails to load', async ({ page }) => {
+  await portal(page, { listFailsAfterRename: true });
+  await page.goto('/sessions');
+  await page.getByRole('button', { name: 'Rename Old name' }).click();
+  const field = page.getByLabel('Session name');
+  await field.fill('Saved anyway');
+  await field.press('Enter');
+  await expect(page.getByRole('main').getByText('Saved anyway', { exact: true })).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page.getByRole('main').getByText('Saved anyway', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
