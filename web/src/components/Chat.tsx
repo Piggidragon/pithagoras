@@ -1524,11 +1524,10 @@ export function Chat({
             className="w-1 shrink-0 cursor-col-resize bg-line transition hover:bg-accent/40 max-md:hidden"
           />
           <aside
-            ref={browserPane}
             style={{ width: asideWidth }}
             // On a phone there is no room beside the conversation: the panels
             // cover it, under the header that opened them, until closed.
-            className="chat-aside flex shrink-0 flex-col overflow-hidden border-l border-line [&:fullscreen]:w-screen max-md:absolute max-md:inset-0 max-md:z-20 max-md:!w-full max-md:border-l-0 max-md:bg-surface"
+            className="chat-aside flex shrink-0 flex-col overflow-hidden border-l border-line max-md:absolute max-md:inset-0 max-md:z-20 max-md:!w-full max-md:border-l-0 max-md:bg-surface"
           >
             {asidePanels.map((kind, i) => (
               <Fragment key={kind}>
@@ -1540,6 +1539,12 @@ export function Chat({
                   />
                 )}
                 <div
+                  // The browser's own panel is what goes fullscreen, not the
+                  // side panel it shares: the terminal or Files beside it stays
+                  // where it is, and however the browser is closed — ✕, or a
+                  // third panel taking its place — taking it away ends
+                  // fullscreen with it.
+                  ref={kind === "browser" ? browserPane : undefined}
                   className={`chat-aside-panel flex min-h-0 flex-col ${kind === "browser" ? "bg-black" : ""}`}
                   style={{ flex: asidePanels.length === 1 ? "1 1 0%" : `${i === 0 ? split : 1 - split} 1 0%` }}
                 >
