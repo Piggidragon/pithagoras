@@ -2,10 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
 import { LuArrowUp, LuBot, LuSquare } from "react-icons/lu";
 import { api } from "../api";
-import { buildTranscript, type Item } from "../transcript";
+import { buildTranscript, formatElapsed, type Item } from "../transcript";
 import { reportedSteps, type Subagent } from "../subagents";
 import { useFollowBottom } from "../use-follow-bottom";
-import { CompactionMarker, Ring, Shimmer, ThinkingBlock, ToolCall, formatElapsed } from "./ChatActivity";
+import { CompactionMarker, Ring, Shimmer, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { isEnter } from "../shortcuts";
 
 /**

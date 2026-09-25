@@ -18,3 +18,12 @@ test('a subagent an extension announces reaches the portal as session events',()
  assert.equal(out[3].status,'done');
  off();b.emit('subagent:v1:start',{id:'r2'});assert.equal(out.length,4);
 });
+test('a subagent\'s finished message says how long it thought',()=>{
+ const b=bus();const out:any[]=[];bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'r',label:'R'});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_update',assistantMessageEvent:{type:'thinking_delta',delta:'Hm'}}});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_end',message:{role:'assistant',content:[{type:'thinking',thinking:'Hm'}]}}});
+ const end=out.find(e=>e.event?.type==='message_end').event;
+ assert.equal(typeof end.thinkingSince,'number');
+ assert.ok(end.thinkingUntil>=end.thinkingSince);
+});

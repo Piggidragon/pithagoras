@@ -788,14 +788,17 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const stats = (await this.session.getSessionStats?.()) ?? {};
     const usage = (await this.session.getContextUsage?.()) ?? {};
     const contextWindow = usage.contextWindow ?? this.session.model?.contextWindow ?? 0;
+    // pi says null, not 0, just after a compaction: the count it had was taken
+    // before it. Passed on as it is, or the pill claims an empty context.
+    const unknown = usage.tokens === null;
     const used = usage.tokens ?? 0;
     return {
       tokens: stats.tokens ?? { input: 0, output: 0, total: 0 },
       cost: stats.cost ?? 0,
       contextUsage: {
-        tokens: used,
+        tokens: unknown ? null : used,
         contextWindow,
-        percent: usage.percent ?? (contextWindow ? (used / contextWindow) * 100 : 0),
+        percent: unknown ? null : (usage.percent ?? (contextWindow ? (used / contextWindow) * 100 : 0)),
       },
       toolCalls: stats.toolCalls ?? 0,
       totalMessages: stats.totalMessages ?? 0,

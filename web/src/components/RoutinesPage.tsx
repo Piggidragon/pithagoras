@@ -664,9 +664,11 @@ function RoutineDetail({
           </span>
         </button>
 
-        <label className="block pt-1">
+        {/* Not a label: it would pass a click on the hint to the Select's button. */}
+        <div className="block pt-1">
           <span className="mb-1 block text-xs text-fg-subtle">Report to</span>
           <Select
+            aria-label="Report to"
             className="w-full"
             value={report}
             onChange={setReport}
@@ -685,7 +687,7 @@ function RoutineDetail({
             {targets.length === 0 &&
               " Nothing to pick yet — message a channel that can start a conversation, and it appears here."}
           </p>
-        </label>
+        </div>
       </section>
 
       {r.lastStatus && (

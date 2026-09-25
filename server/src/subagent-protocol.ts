@@ -99,6 +99,9 @@ export function slimEvent(event: any): Record<string, unknown> | undefined {
  */
 export function bridgeSubagents(bus: Bus, emit: Emit): () => void {
   const known = new Set<string>();
+  // When each child's current message began and stopped thinking, epoch ms:
+  // its tokens are never stored, so the times ride on its message_end.
+  const thinking = new Map<string, { thinkingSince: number; thinkingUntil: number }>();
   const off = [
     bus.on(SUBAGENT_START, (data: any) => {
       const id = str(data?.id, 120);
@@ -120,12 +123,22 @@ export function bridgeSubagents(bus: Bus, emit: Emit): () => void {
       if (!id || !known.has(id)) return;
       const event = slimEvent(data.event);
       if (!event) return;
+      const inner = (event.assistantMessageEvent ?? {}) as { type?: unknown };
+      if (event.type === "message_update" && inner.type === "thinking_delta") {
+        const now = Date.now();
+        thinking.set(id, { thinkingSince: thinking.get(id)?.thinkingSince ?? now, thinkingUntil: now });
+      }
+      if (event.type === "message_end") {
+        Object.assign(event, thinking.get(id));
+        thinking.delete(id);
+      }
       emit({ type: LIVE.has(String(event.type)) ? "portal_subagent_live" : "portal_subagent", op: "event", id, event });
     }),
     bus.on(SUBAGENT_END, (data: any) => {
       const id = str(data?.id, 120);
       if (!id || !known.has(id)) return;
       known.delete(id);
+      thinking.delete(id);
       const status = ["done", "error", "stopped"].includes(data.status) ? data.status : "done";
       emit({ type: "portal_subagent", op: "end", id, status, ...(str(data.error, 2000) ? { error: str(data.error, 2000) } : {}) });
     }),

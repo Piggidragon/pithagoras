@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { LuBot, LuPlay, LuRefreshCw, LuSquareTerminal } from "react-icons/lu";
 import type { BackgroundJob } from "../api";
 import type { Subagent } from "../subagents";
-import { Ring, formatElapsed } from "./ChatActivity";
+import { formatElapsed } from "../transcript";
+import { Ring } from "./ChatActivity";
 import { statusParts } from "../status-commands";
 
 /**

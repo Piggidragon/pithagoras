@@ -768,7 +768,8 @@ export interface PiConfig {
   stats: null | {
     tokens: { input: number; output: number; total: number };
     cost: number;
-    contextUsage: { tokens: number; contextWindow: number; percent: number };
+    /** `tokens` and `percent` are null just after a compaction, until the next reply. */
+    contextUsage: { tokens: number | null; contextWindow: number; percent: number | null };
     toolCalls: number;
     totalMessages: number;
   };
