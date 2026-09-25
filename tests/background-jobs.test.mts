@@ -63,3 +63,34 @@ test('what the portal runs in its own session is not a job of the agent\'s',{ski
   assert.deepEqual(await listJobs(ws,new Set()),[]);
  }finally{child.kill('SIGKILL');}
 });
+test('a job whose processes all change between two looks is still the one job',{skip:process.platform!=='linux'},async()=>{
+ const ws=realpathSync(mkdtempSync(path.join(tmpdir(),'bg-')));
+ const fs=await import('node:fs');
+ // `npm install && nohup npm start &`: the install ends, the shell forks the server and ends.
+ const child=spawn('sh',['-c','sleep 0.6; sleep 30 & sleep 0.2'],{cwd:ws,detached:true,stdio:['ignore',fs.openSync(path.join(ws,'app.log'),'w'),'ignore'],env:agentEnv()});
+ child.unref();
+ try{
+  await wait(200);
+  const [first]=await listJobs(ws,new Set());
+  await wait(1500);
+  const after=await listJobs(ws,new Set());
+  assert.deepEqual(after.map(j=>[j.key,j.state]),[[first.key,'running']]);
+ }finally{try{process.kill(-child.pid!,'SIGKILL')}catch{}}
+});
+test('a job in a workspace inside another is the job of both, for each to follow and stop',{skip:process.platform!=='linux'},async()=>{
+ const outer=realpathSync(mkdtempSync(path.join(tmpdir(),'bg-')));
+ const inner=path.join(outer,'proj');
+ const fs=await import('node:fs');
+ fs.mkdirSync(inner);
+ const child=spawn('sh',['-c','echo hi; sleep 30'],{cwd:inner,detached:true,stdio:['ignore',fs.openSync(path.join(inner,'out.log'),'w'),'ignore'],env:agentEnv()});
+ child.unref();
+ try{
+  await wait(300);
+  const [a]=await listJobs(outer,new Set());
+  const [b]=await listJobs(inner,new Set());
+  assert.equal(a.key,b.key);
+  // The inner chat looked last: the outer one can still read and stop it.
+  assert.equal((await readOutput(outer,a.key))?.text,'hi\n');
+  assert.equal(await stopJob(outer,a.key,new Set()),true);
+ }finally{try{process.kill(-child.pid!,'SIGKILL')}catch{}}
+});

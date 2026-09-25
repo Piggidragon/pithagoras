@@ -93,7 +93,13 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
       order.push(sub);
       continue;
     }
-    if (!sub) continue;
+    // Its start is further up than the page has loaded — a long subagent's
+    // steps fill what a reload reads. Still shown, from what came after.
+    if (!sub) {
+      sub = { id, kind: "protocol", label: "Subagent", status: "running", input: false, stop: false, events: [] };
+      byId.set(id, sub);
+      order.push(sub);
+    }
     if (p.op === "event") {
       const mapped = asPortalEvent(ev.seq, ev.at, p.event);
       if (mapped) sub.events.push(mapped);

@@ -9,7 +9,10 @@ const EMPTY: BackgroundState = { supported: false, jobs: [], statuses: [], widge
  * something is running. `nudge` asks at once: an extension just changed its
  * status, or a job was stopped.
  */
-export function useBackground(sessionId: string, busy: boolean, nudge: unknown): [BackgroundState, () => void] {
+export function useBackground(sessionId: string, busy: boolean, nudged: unknown): [BackgroundState, () => void] {
+  // An extension can move its status several times a second — a spinner, a
+  // count — and each asked again at once, a /proc walk every time.
+  const nudge = useThrottled(nudged, NUDGE_MS);
   // Kept with the chat it is of. Cleared in an effect, another chat's state
   // lasted a render into the next, long enough for its status lines to make
   // this one list its commands, which starts its pi.
@@ -39,6 +42,24 @@ export function useBackground(sessionId: string, busy: boolean, nudge: unknown):
     };
   }, [sessionId, busy, nudge, tick, state.jobs.some((j) => j.state === "running")]);
   return [state, () => setTick((n) => n + 1)];
+}
+
+/** How often a moving status asks again, at most. */
+const NUDGE_MS = 1500;
+
+/** `value`, changing at most once per `ms`; the last of a burst still comes through. */
+function useThrottled<T>(value: T, ms: number): T {
+  const [shown, setShown] = useState(value);
+  const last = useRef(0);
+  useEffect(() => {
+    if (Object.is(value, shown)) return;
+    const t = window.setTimeout(() => {
+      last.current = Date.now();
+      setShown(value);
+    }, Math.max(0, last.current + ms - Date.now()));
+    return () => window.clearTimeout(t);
+  }, [value, shown, ms]);
+  return shown;
 }
 
 /**

@@ -27,13 +27,17 @@ test('a subagent\'s finished message says how long it thought',()=>{
  assert.equal(typeof end.thinkingSince,'number');
  assert.ok(end.thinkingUntil>=end.thinkingSince);
 });
-test('a tool result the child hands on as a message is trimmed like the tool\'s end, pictures left out',()=>{
- const b=bus();const out:any[]=[];bridgeSubagents(b,e=>out.push(e));
- b.emit('subagent:v1:start',{id:'r',label:'R'});
- const log='x'.repeat(60_000)+'the end';
- b.emit('subagent:v1:event',{id:'r',event:{type:'message_end',message:{role:'toolResult',toolCallId:'t',content:[{type:'text',text:log},{type:'image',data:'A'.repeat(1000),mimeType:'image/png'}]}}});
- const content=out.at(-1).event.message.content;
- assert.equal(content.length,1);
- assert.equal(content[0].text.length,50_000);
- assert.ok(content[0].text.endsWith('the end'));
+test('only what is drawn is stored: a tool result again as a message is left out, what says what the child is doing now is live',()=>{
+ const b=bus();const out:any[]=[];const bridge=bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'r',label:'R',input:true});
+ for(const type of ['turn_start','message_start','turn_end'])b.emit('subagent:v1:event',{id:'r',event:{type,message:{role:'assistant',content:[]}}});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_end',message:{role:'toolResult',toolCallId:'t',content:[{type:'text',text:'x'.repeat(60_000)},{type:'image',data:'A'}]}}});
+ b.emit('subagent:v1:event',{id:'r',event:{type:'tool_execution_end',toolCallId:'t',toolName:'read',result:{content:[{type:'text',text:'x'.repeat(60_000)}]}}});
+ assert.deepEqual(out.slice(1).map(e=>[e.type,e.event.type]),[['portal_subagent_live','turn_start'],['portal_subagent_live','message_start'],['portal_subagent_live','turn_end'],['portal_subagent','tool_execution_end']]);
+ // Messages and stops go only to one running here that takes them.
+ assert.equal(bridge.takes('r','input'),true);
+ assert.equal(bridge.takes('r','stop'),false,'it did not say it could be stopped');
+ assert.equal(bridge.takes('gone','input'),false);
+ b.emit('subagent:v1:end',{id:'r',status:'done'});
+ assert.equal(bridge.takes('r','input'),false,'not once it has ended');
 });

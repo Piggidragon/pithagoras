@@ -31,3 +31,11 @@ test('a tool that reported as it ran is still one worth watching once the page i
  const items=buildTranscript(events);
  assert.deepEqual(subagents(events,items).map(s=>[s.kind,s.label,s.status]),[['tool','deep_research','done']]);
 });
+test('a subagent whose start is further up than the page has loaded is still shown',()=>{
+ const events:any[]=[
+  {seq:900,type:'portal_subagent',at:0,payload:{op:'event',id:'long',event:{type:'message_end',message:{role:'assistant',content:[{type:'text',text:'Step 150 done'}]}}}},
+  {seq:901,type:'portal_subagent',at:0,payload:{op:'end',id:'long',status:'done'}},
+ ];
+ const [sub]=subagents(events,buildTranscript(events));
+ assert.deepEqual([sub?.id,sub?.status,sub?.events.length],['long','done',1]);
+});

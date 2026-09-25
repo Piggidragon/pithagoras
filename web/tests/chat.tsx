@@ -127,11 +127,34 @@ if (phase === 'switch') {
 
 const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
 const noop = async () => {};
+// An extension moves its status twenty times a second: how often the chat asks for /background is counted.
+if (phase === 'nudge') {
+  const realFetch = window.fetch;
+  (window as any).backgroundAsked = 0;
+  window.fetch = (async (url: any, init?: any) => {
+    if (String(url).endsWith('/background')) {
+      (window as any).backgroundAsked++;
+      return new Response(JSON.stringify({ supported: true, jobs: [], widgets: [], statuses: [] }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    return realFetch(url, init);
+  }) as typeof fetch;
+}
+
 function Fixture() {
   const [v, setV] = React.useState('b');
   const [which, setWhich] = React.useState(phase === 'switch' ? 'first' : session.id);
   const [shownEvents, setShownEvents] = React.useState(events);
   const paste = () => setShownEvents((list) => [...list, { seq: -now * 1000 - list.length - 10, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: 'the ', paste: true } }]);
+  React.useEffect(() => {
+    if (phase !== 'nudge') return;
+    let n = 0;
+    const t = setInterval(() => {
+      n++;
+      setShownEvents((list) => [...list, { seq: -now * 1000 - n, type: 'extension_ui_request', at: Date.now(), payload: { method: 'setStatus', statusKey: 'spin', statusText: `working ${n}` } }]);
+      if (n >= 40) clearInterval(t);
+    }, 50);
+    return () => clearInterval(t);
+  }, []);
   const shown = which === session.id ? session : { ...session, id: which, title: which === 'first' ? 'First chat' : 'Second chat', status: 'idle' as const };
   return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
     <div style={{ padding: 8, display: 'flex', gap: 8 }}><Select aria-label="Preview select" size="sm" className="w-64" value={v} onChange={setV} options={[{ value: 'a', label: 'Project notes' }, { value: 'b', label: 'Release plan', hint: 'Temporary — not stored' }, { value: 'c', label: 'Meeting summary' }]} /><label className="flex items-center gap-2 text-xs"><input type="checkbox" defaultChecked />Checkbox</label><input type="range" defaultValue={40} />{phase === 'switch' && <button onClick={() => setWhich('second')}>Open the second chat</button>}{phase === 'paste' && <button onClick={paste}>Paste from the extension</button>}</div>

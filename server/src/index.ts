@@ -810,7 +810,7 @@ app.post("/api/sessions/:id/abort", async (req, res) => {
 
 // --- what runs beside the conversation: background jobs, extension status, subagents ---
 
-const BACKGROUND_SUPPORTED = (process.env.EXECUTOR || "host") !== "container" && process.platform === "linux";
+const BACKGROUND_SUPPORTED = EXECUTOR_KIND !== "container" && process.platform === "linux";
 
 app.get("/api/sessions/:id/background", async (req, res) => {
   const session = getSession(req.params.id);
@@ -850,7 +850,7 @@ app.post("/api/sessions/:id/subagents/:agent/input", (req, res) => {
   const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
   if (!text) return res.status(400).json({ error: "Nothing to send" });
   if (!sessions.subagentInput(session.id, req.params.agent, text)) {
-    return res.status(409).json({ error: "The subagent cannot be reached — the chat is not running here" });
+    return res.status(409).json({ error: "The subagent cannot be reached: it is not running any more, or the chat is not running here" });
   }
   res.json({ ok: true });
 });
@@ -859,7 +859,7 @@ app.post("/api/sessions/:id/subagents/:agent/stop", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   if (!sessions.subagentStop(session.id, req.params.agent)) {
-    return res.status(409).json({ error: "The subagent cannot be reached — the chat is not running here" });
+    return res.status(409).json({ error: "The subagent cannot be reached: it is not running any more, or the chat is not running here" });
   }
   res.json({ ok: true });
 });

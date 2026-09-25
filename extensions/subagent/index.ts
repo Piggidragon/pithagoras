@@ -36,11 +36,21 @@ export default function (pi: any) {
     async execute(toolCallId: string, params: { task: string; label?: string }, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {
       const id = randomUUID();
       const label = params.label?.trim() || "Subagent";
+      // Its stderr goes nowhere: a pipe nobody reads fills, and the child
+      // blocks on its next warning for good.
       const child = spawn(process.env.PI_SUBAGENT_BIN || "pi", ["--mode", "rpc", "--no-session"], {
         cwd: ctx.cwd,
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "ignore"],
       });
-      const send = (command: Record<string, unknown>) => child.stdin.write(JSON.stringify(command) + "\n");
+      // A child that died, or never started, closes the pipe under the next
+      // write. Unheard, that error takes down whatever runs this extension —
+      // the portal, for everyone. As pi's own bash tool does: heard, and let go.
+      child.stdin.on("error", () => {});
+      const send = (command: Record<string, unknown>) => {
+        if (child.stdin.writable) child.stdin.write(JSON.stringify(command) + "\n");
+      };
+      // Why it failed, when the child said.
+      let failure: string | undefined;
 
       let answer = "";
       let steps = 0;
@@ -70,7 +80,15 @@ export default function (pi: any) {
           } catch {
             return;
           }
-          if (event.type === "response") return;
+          // The task refused — no model, no key: no run follows, so nothing
+          // would ever settle it, and the child would wait on its input for good.
+          if (event.type === "response") {
+            if (event.command === "prompt" && event.success === false) {
+              failure = String(event.error ?? "The subagent refused the task");
+              resolve("error");
+            }
+            return;
+          }
           pi.events.emit(EVENT, { id, event });
           if (event.type === "tool_execution_start") {
             steps++;
@@ -93,7 +111,8 @@ export default function (pi: any) {
       child.kill();
       signal?.removeEventListener("abort", stopped);
       off.forEach((f: () => void) => f());
-      pi.events.emit(END, { id, status });
+      pi.events.emit(END, { id, status, ...(failure ? { error: failure } : {}) });
+      if (failure) throw new Error(`The subagent could not start: ${failure}`);
       if (status === "error" && !answer) throw new Error("The subagent could not run — is `pi` on PATH? (PI_SUBAGENT_BIN)");
       return { content: [{ type: "text", text: answer || "(the subagent gave no answer)" }], details: { phase: status } };
     },
