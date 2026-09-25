@@ -44,9 +44,17 @@ export default function (pi: any) {
 
       let answer = "";
       let steps = 0;
+      // Stopped by the person in the portal, or by the parent's own stop: either
+      // way what it has is not its whole answer.
+      let stoppedHere = false;
+      const wasStopped = () => stoppedHere || signal?.aborted === true;
       const off = [
         pi.events.on(INPUT, (d: any) => d?.id === id && typeof d.text === "string" && send({ type: "steer", message: d.text })),
-        pi.events.on(STOP, (d: any) => d?.id === id && send({ type: "abort" })),
+        pi.events.on(STOP, (d: any) => {
+          if (d?.id !== id) return;
+          stoppedHere = true;
+          send({ type: "abort" });
+        }),
       ];
       pi.events.emit(START, { id, label, toolCallId, input: true, stop: true, detail: "Starting" });
 
@@ -73,9 +81,11 @@ export default function (pi: any) {
             if (text) answer = text;
             onUpdate?.({ content: [{ type: "text", text: answer }], details: { phase: "thinking" } });
           }
-          if (event.type === "agent_end") resolve(signal?.aborted ? "stopped" : "done");
+          // Settled, not ended: pi ends a run and then retries it, or compacts
+          // and goes on, and only settles once it has nothing left to do.
+          if (event.type === "agent_settled") resolve(wasStopped() ? "stopped" : "done");
         });
-        child.on("exit", (code) => resolve(signal?.aborted ? "stopped" : code === 0 ? "done" : "error"));
+        child.on("exit", (code) => resolve(wasStopped() ? "stopped" : code === 0 ? "done" : "error"));
         child.on("error", () => resolve("error"));
         send({ type: "prompt", message: params.task });
       });

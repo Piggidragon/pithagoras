@@ -358,8 +358,12 @@ class SessionManager extends EventEmitter {
       // Timed like a stored one, so a page can say how long it has lasted.
       // Numbered by the live stream's own count: two in one millisecond had
       // the same seq, and a page telling them apart by it took the second for
-      // the first.
-      this.emit(`session:${sessionId}`, this.stream.ephemeral(sessionId, type, payload));
+      // the first. A subagent's stream is kept there too, for a page that
+      // opens mid-message.
+      this.emit(
+        `session:${sessionId}`,
+        type === "portal_subagent_live" ? this.stream.subagentLive(sessionId, payload) : this.stream.ephemeral(sessionId, type, payload),
+      );
       return undefined;
     }
     const row = this.stream.record(sessionId, type, payload);
@@ -2048,8 +2052,9 @@ class SessionManager extends EventEmitter {
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
     this.dropCommands(sessionId);
-    // What the extensions showed went with the process that ran them. Left,
-    // a status naming a command had the page list the commands, starting pi.
+    // What the extensions showed went with the process that ran them: stopped
+    // for a restart or a delete as much as crashed. Left, a status naming a
+    // command had the page list the commands, starting pi.
     this.extensionUi.delete(sessionId);
     this.failuresSaid.delete(sessionId);
     this.inRun.delete(sessionId);

@@ -1,5 +1,5 @@
 import { readFile, readdir, readlink, open } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -19,7 +19,10 @@ import path from "node:path";
 export const MARKER = "PITHAGORAS_AGENT=1";
 
 export interface BackgroundJob {
-  /** Stable for the life of the job: the session id and when its leader started. */
+  /**
+   * Stable for the life of the job: the session id and when its first leader
+   * started, kept when that leader exits and the rest of the job goes on.
+   */
   key: string;
   sid: number;
   pids: number[];
@@ -59,6 +62,38 @@ const HZ = 100;
 
 const inside = (dir: string, root: string) => dir === root || dir.startsWith(root.endsWith("/") ? root : root + "/");
 
+/**
+ * A workspace as /proc names a process's folder: its real path. As written, a
+ * workspace reached through a link never matched, and nothing ever ran there.
+ */
+function rootOf(workspace: string): string {
+  const resolved = path.resolve(workspace);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+/**
+ * The portal's own Unix session. Everything it starts carries MARKER, its
+ * terminal wrapper and an extension's subagents too; left in, they were one
+ * job, and stopping it signalled them all. The agent's commands run in
+ * sessions of their own.
+ */
+let ownSid: number | undefined;
+function portalSession(): number {
+  if (ownSid === undefined) {
+    try {
+      const stat = readFileSync("/proc/self/stat", "utf8");
+      ownSid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[3]);
+    } catch {
+      ownSid = -1;
+    }
+  }
+  return ownSid;
+}
+
 async function fileTarget(pid: number, fd: number): Promise<string | undefined> {
   try {
     const target = await readlink(`/proc/${pid}/fd/${fd}`);
@@ -77,35 +112,55 @@ interface Proc {
   argv: string[];
 }
 
-async function scan(workspace: string, excludeSids: Set<number>): Promise<Proc[]> {
+/** How many processes are read at once: all of them at once filled the pool every file read waits on. */
+const BATCH = 64;
+
+async function walk(workspace: string): Promise<Proc[]> {
   let names: string[];
   try {
     names = (await readdir("/proc")).filter((n) => /^\d+$/.test(n));
   } catch {
     return [];
   }
+  const own = portalSession();
   const found: Proc[] = [];
-  await Promise.all(
-    names.map(async (name) => {
-      const pid = Number(name);
-      if (pid === process.pid) return;
-      try {
-        const cwd = await readlink(`/proc/${pid}/cwd`);
-        if (!inside(cwd, workspace)) return;
-        const env = await readFile(`/proc/${pid}/environ`, "latin1");
-        if (!env.split("\0").includes(MARKER)) return;
-        const stat = await readFile(`/proc/${pid}/stat`, "utf8");
-        const f = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-        const sid = Number(f[3]);
-        if (excludeSids.has(sid)) return;
-        const argv = (await readFile(`/proc/${pid}/cmdline`, "utf8")).split("\0").filter(Boolean);
-        found.push({ pid, ppid: Number(f[1]), sid, state: f[0], start: Number(f[19]), argv });
-      } catch {
-        // Gone meanwhile, or not ours to read.
-      }
-    }),
-  );
+  const read = async (name: string) => {
+    const pid = Number(name);
+    if (pid === process.pid) return;
+    try {
+      const cwd = await readlink(`/proc/${pid}/cwd`);
+      if (!inside(cwd, workspace)) return;
+      const env = await readFile(`/proc/${pid}/environ`, "latin1");
+      if (!env.split("\0").includes(MARKER)) return;
+      const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+      const f = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      const sid = Number(f[3]);
+      if (sid === own) return;
+      const argv = (await readFile(`/proc/${pid}/cmdline`, "utf8")).split("\0").filter(Boolean);
+      found.push({ pid, ppid: Number(f[1]), sid, state: f[0], start: Number(f[19]), argv });
+    } catch {
+      // Gone meanwhile, or not ours to read.
+    }
+  };
+  for (let i = 0; i < names.length; i += BATCH) await Promise.all(names.slice(i, i + BATCH).map(read));
   return found;
+}
+
+/**
+ * One walk of /proc per workspace a second, however many pages ask: each open
+ * chat asks every few seconds, and again whenever an extension's status moves.
+ */
+const SCAN_TTL_MS = 1000;
+const scans = new Map<string, { at: number; procs: Promise<Proc[]> }>();
+
+async function scan(workspace: string, excludeSids: Set<number>, fresh = false): Promise<Proc[]> {
+  let cached = scans.get(workspace);
+  if (fresh || !cached || Date.now() - cached.at > SCAN_TTL_MS) {
+    cached = { at: Date.now(), procs: walk(workspace) };
+    scans.set(workspace, cached);
+    for (const [key, old] of scans) if (Date.now() - old.at > SCAN_TTL_MS * 10) scans.delete(key);
+  }
+  return (await cached.procs).filter((p) => !excludeSids.has(p.sid));
 }
 
 /** A shell's `-c` script rather than "bash -c …", which says nothing. */
@@ -120,7 +175,7 @@ function describe(argv: string[]): string {
  * `excludeSids`: sessions that are the person's own shells.
  */
 export async function listJobs(workspace: string, excludeSids: Set<number>): Promise<BackgroundJob[]> {
-  const root = path.resolve(workspace);
+  const root = rootOf(workspace);
   const procs = await scan(root, excludeSids);
   const groups = new Map<number, Proc[]>();
   for (const p of procs) {
@@ -132,7 +187,12 @@ export async function listJobs(workspace: string, excludeSids: Set<number>): Pro
   const seen = new Set<string>();
   for (const [sid, members] of groups) {
     const leader = members.find((m) => m.pid === sid) ?? [...members].sort((a, b) => a.start - b.start)[0];
-    const key = `${sid}-${leader.start}`;
+    // The same job when its leader has exited — the shell that started `npm
+    // run dev &` — and the rest goes on: the one seen before with any of these
+    // processes in it. By the leader alone, it came back as a second job.
+    const pids = new Set(members.map((m) => m.pid));
+    const before = [...tracked.values()].find((j) => j.workspace === root && j.sid === sid && j.state !== "exited" && j.pids.some((p) => pids.has(p)));
+    const key = before?.key ?? `${sid}-${leader.start}`;
     seen.add(key);
     const live = members.filter((m) => m.state !== "Z");
     const prior = tracked.get(key);
@@ -149,8 +209,8 @@ export async function listJobs(workspace: string, excludeSids: Set<number>): Pro
       sid,
       workspace: root,
       pids: live.map((m) => m.pid),
-      command: describe(leader.argv),
-      startedAt: bootTime() + (leader.start / HZ) * 1000,
+      command: prior?.command ?? describe(leader.argv),
+      startedAt: prior?.startedAt ?? bootTime() + (leader.start / HZ) * 1000,
       state: !live.length ? "exited" : live.every((m) => m.state === "T") ? "stopped" : "running",
       hasOutput: !!output,
       output,
@@ -176,7 +236,7 @@ export async function listJobs(workspace: string, excludeSids: Set<number>): Pro
 
 /** The finished jobs are forgotten; the running ones stay. */
 export function clearFinished(workspace: string): void {
-  const root = path.resolve(workspace);
+  const root = rootOf(workspace);
   for (const [key, job] of tracked) if (job.workspace === root && job.state === "exited") tracked.delete(key);
 }
 
@@ -188,7 +248,7 @@ export async function readOutput(
   tail = 200_000,
 ): Promise<{ text: string; from: number; size: number } | undefined> {
   const job = tracked.get(key);
-  if (!job?.output || job.workspace !== path.resolve(workspace)) return undefined;
+  if (!job?.output || job.workspace !== rootOf(workspace)) return undefined;
   const handle = await open(job.output, "r").catch(() => undefined);
   if (!handle) return { text: "", from: 0, size: 0 };
   try {
@@ -211,9 +271,12 @@ export async function readOutput(
  */
 export async function stopJob(workspace: string, key: string, excludeSids: Set<number>): Promise<boolean> {
   const job = tracked.get(key);
-  if (!job || job.workspace !== path.resolve(workspace) || job.state === "exited") return false;
-  const current = (await scan(job.workspace, excludeSids)).filter((p) => p.sid === job.sid);
+  if (!job || job.workspace !== rootOf(workspace) || job.state === "exited") return false;
+  // Read now, not from the last second's: a pid may have been given to something else.
+  const current = (await scan(job.workspace, excludeSids, true)).filter((p) => p.sid === job.sid);
   if (!current.length) return false;
+  // What the list says next is after the stop, not the scan from before it.
+  scans.delete(job.workspace);
   for (const p of current) {
     try {
       process.kill(p.pid, "SIGTERM");

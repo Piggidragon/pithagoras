@@ -27,3 +27,13 @@ test('a subagent\'s finished message says how long it thought',()=>{
  assert.equal(typeof end.thinkingSince,'number');
  assert.ok(end.thinkingUntil>=end.thinkingSince);
 });
+test('a tool result the child hands on as a message is trimmed like the tool\'s end, pictures left out',()=>{
+ const b=bus();const out:any[]=[];bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'r',label:'R'});
+ const log='x'.repeat(60_000)+'the end';
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_end',message:{role:'toolResult',toolCallId:'t',content:[{type:'text',text:log},{type:'image',data:'A'.repeat(1000),mimeType:'image/png'}]}}});
+ const content=out.at(-1).event.message.content;
+ assert.equal(content.length,1);
+ assert.equal(content[0].text.length,50_000);
+ assert.ok(content[0].text.endsWith('the end'));
+});

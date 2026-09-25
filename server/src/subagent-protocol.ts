@@ -77,6 +77,9 @@ export function slimEvent(event: any): Record<string, unknown> | undefined {
     case "message_start":
     case "message_end": {
       const m = event.message ?? {};
+      // A tool's result comes again as a message: trimmed as its end is, or a
+      // log it read, or a screenshot, is stored and sent whole.
+      if (m.role === "toolResult") return { type: event.type, message: { role: m.role, content: (trimResult(m) as { content: unknown[] }).content } };
       return { type: event.type, message: { role: m.role, content: Array.isArray(m.content) ? m.content : m.content ?? "" } };
     }
     case "tool_execution_start":
