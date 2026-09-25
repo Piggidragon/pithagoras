@@ -80,6 +80,10 @@ export interface Routine {
   guard: boolean;
   /** True lets this routine's runs drive the agent's browser. */
   browser: boolean;
+  /** Where its runs happen: null for Home, else a project's directory. */
+  workspace: string | null;
+  /** Why that place cannot be used now, such as a project that was deleted; null when it can. */
+  workspaceProblem?: string | null;
   /** null inherits the portal default; "" means this one never reports. */
   reportChannel: string | null;
   reportTarget: string | null;
@@ -132,6 +136,8 @@ export interface ProjectContents extends Project {
   bytes: number;
   /** False when the count stopped early on a very large folder. */
   complete: boolean;
+  /** The routines that run here and are on, by name. Deleting the project switches them off. */
+  routines?: string[];
 }
 
 export interface CompactionSettings {
@@ -523,6 +529,7 @@ export const api = {
     instructions?: string;
     reportChannel?: string | null;
     reportTarget?: string | null;
+    workspace?: string | null;
   }) =>
     json<Routine>("/api/routines", { method: "POST", body: JSON.stringify(input) }),
   updateRoutine: (
@@ -539,6 +546,7 @@ export const api = {
       browser?: boolean;
       reportChannel?: string | null;
       reportTarget?: string | null;
+      workspace?: string | null;
     }
   ) => json<Routine>(`/api/routines/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteRoutine: (id: string) => json<{ ok: true }>(`/api/routines/${id}`, { method: "DELETE" }),

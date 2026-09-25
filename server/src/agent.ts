@@ -1,19 +1,8 @@
-import { mkdirSync } from "node:fs";
-import path from "node:path";
 import { nanoid } from "nanoid";
 import { createSession, findChannelSession, type SessionRow } from "./db.js";
+import { agentHome } from "./agent-home.js";
 
-/**
- * The agent's fixed working directory, separate from the per-task workspaces.
- *
- * Kept out of the workspace root deliberately: it is not a project you would
- * start a session against, and listing it as one would be misleading.
- */
-export function agentHome(): string {
-  const dir = path.resolve(process.env.AGENT_HOME || "/data/agent-home");
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
+export { agentHome };
 
 /** Keys come from outside, so they are bounded before touching the database. */
 const MAX_KEY = 200;
