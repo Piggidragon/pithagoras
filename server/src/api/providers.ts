@@ -1,16 +1,21 @@
 import express, { type Router } from "express";
-import { statSync } from "node:fs";
 import { agentHome } from "../agent-home.js";
 import { addExtensionProviders } from "../pi/model-runtime.js";
-import { piSettingsPath } from "../pi-settings.js";
+import { readPiSettings } from "../pi-settings.js";
 import {
-  APIS, PRESETS, ProbeError, checkProviders, configStamp, listProviders, probeModels, removeProvider, saveProvider, savedServer,
+  APIS, PRESETS, ProbeError, TakenError, checkProviders, configStamp, listProviders, probeModels, removeProvider, saveProvider, savedServer,
   type ProviderKind,
 } from "../providers.js";
 
-/** When pi's settings last changed: installing a package, which may bring a provider, writes them. */
-function settingsStamp(): string {
-  try { return String(statSync(piSettingsPath()).mtimeMs); } catch { return "-"; }
+/**
+ * What is installed, as pi's settings list it: a package, or an extension by
+ * its path, may bring a provider. Not when the file last changed — every
+ * default and extension setting saved rewrites it, and each rebuild runs
+ * every extension's code again.
+ */
+function installedStamp(): string {
+  const settings = readPiSettings();
+  return JSON.stringify([settings.packages ?? null, settings.extensions ?? null]);
 }
 
 /**
@@ -21,7 +26,7 @@ function settingsStamp(): string {
  */
 let runtime: { stamp: string; value: Promise<any> } | undefined;
 export function modelRuntime(cwd = agentHome()): Promise<any> {
-  const stamp = `${configStamp()}|${settingsStamp()}`;
+  const stamp = `${configStamp()}|${installedStamp()}`;
   if (runtime?.stamp !== stamp) {
     const value = import("@earendil-works/pi-coding-agent").then(async (pi: any) => {
       const rt = await pi.ModelRuntime.create();
@@ -88,6 +93,7 @@ export function providersRouter(): Router {
     try {
       await saveProvider(req.params.id, {
         kind: body.kind,
+        adding: body.adding === true,
         baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
         api: typeof body.api === "string" ? body.api : undefined,
         apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
@@ -95,7 +101,7 @@ export function providersRouter(): Router {
       });
       res.json({ ok: true });
     } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
+      res.status(e instanceof TakenError ? 409 : 400).json({ error: (e as Error).message });
     }
   });
 

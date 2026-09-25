@@ -3,6 +3,7 @@
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
 import { Chat } from '../src/components/Chat';
 import { fillFrom } from '../src/editor-fills';
 import { Select } from '../src/components/Select';
@@ -165,4 +166,5 @@ function Fixture() {
     <div style={{ flex: 1, minHeight: 0 }}><Chat session={shown} events={shownEvents} onSend={async (message) => { (window as any).sent = [...((window as any).sent ?? []), message]; }} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
   </div>;
 }
-createRoot(document.getElementById('root')!).render(<Fixture />);
+// Inside a router, as in the app: the chat's links go through it.
+createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /></BrowserRouter>);

@@ -398,7 +398,7 @@ export const api = {
   providers: () => json<ProvidersView>("/api/providers"),
   probeProvider: (body: { kind: ProviderKind; baseUrl: string; apiKey?: string; id?: string }) =>
     json<{ baseUrl: string; models: ProviderModel[] }>("/api/providers/probe", { method: "POST", body: JSON.stringify(body) }),
-  saveProvider: (id: string, body: { kind: ProviderKind; baseUrl?: string; api?: string; apiKey?: string; models?: ProviderModel[] }) =>
+  saveProvider: (id: string, body: { kind: ProviderKind; adding?: boolean; baseUrl?: string; api?: string; apiKey?: string; models?: ProviderModel[] }) =>
     json<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
   removeProvider: (id: string) => json<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
   /** Whether each server answers now. */

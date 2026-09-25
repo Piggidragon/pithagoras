@@ -72,3 +72,14 @@ test("a fetch forgotten on its way does not land over one fetched since", async 
   await stale;
   assert.equal(peek("m"), "after the save");
 });
+
+test("fetched again after a change, a fetch that started before it does not answer", async () => {
+  let release!: (v: string) => void;
+  const before = load("d", () => new Promise<string>((r) => (release = r)));
+  // Saved, then fetched again: the one on its way asked the server before the save.
+  const after = load("d", async () => "after the save", 0, true);
+  release("before the save");
+  assert.equal(await after, "after the save");
+  await before;
+  assert.equal(peek("d"), "after the save");
+});

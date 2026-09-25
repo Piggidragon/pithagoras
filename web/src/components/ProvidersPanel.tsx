@@ -74,7 +74,9 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
   if (!view) return <ProvidersSkeleton />;
 
   const saved = async () => { setEditing(null); await load(); };
-  const ids = new Set(view.providers.map((p) => p.id));
+  // Names in use in pi's files. One keyed only from the environment is not:
+  // a key can still be stored for it, under the name pi knows it by.
+  const ids = new Set(view.providers.filter((p) => p.key.source !== "environment").map((p) => p.id));
 
   return (
     <>
@@ -95,7 +97,7 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
         )}
       >
         {editing === "new" && (
-          <ProviderEditor view={view} taken={ids} onCancel={() => setEditing(null)} onSaved={saved} onError={onError} />
+          <ProviderEditor view={view} taken={ids} onCancel={() => setEditing(null)} onSaved={saved} onError={onError} onInstalled={() => void load()} />
         )}
         {view.providers.length === 0 && editing !== "new" ? (
           <Empty>
@@ -134,7 +136,7 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
       >
         {browsing ? (
           <div className="float-in">
-            <PackageCatalog topic="provider" installed={installed.names} onInstalled={() => void installed.reload()} onError={onError} limit={6} />
+            <PackageCatalog topic="provider" installed={installed.names} onInstalled={() => { void installed.reload(); void load(); }} onError={onError} limit={6} />
           </div>
         ) : null}
       </Section>
@@ -288,13 +290,16 @@ function uniqueId(base: string, taken: Set<string>): string {
 /** Not a kind of server: a package that brings its own. */
 type EditorKind = ProviderKind | "package";
 
-export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onError, embedded }: {
+export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onError, onInstalled, embedded }: {
   view: ProvidersView;
   provider?: ProviderInfo;
+  /** Names already set up: a new provider cannot take one. */
   taken: Set<string>;
   onCancel: () => void;
   onSaved: () => void;
   onError: (e: string) => void;
+  /** A package was installed: the models it brings are there to be fetched. */
+  onInstalled?: () => void;
   /** Part of another page — the setup assistant — rather than a card in the list. */
   embedded?: boolean;
 }) {
@@ -321,7 +326,8 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
     const next = picked;
     const p = view.presets.find((x) => x.kind === next)!;
     if (!editing) {
-      setId(next === "hosted" ? "" : uniqueId(p.id, taken));
+      // A hosted service is filed under the name pi knows it by — "openrouter-2" would be no service at all.
+      setId(next === "hosted" ? "" : p.endpoint ? uniqueId(p.id, taken) : p.id);
       setBaseUrl(p.baseUrl ?? "");
       setRows([]);
       setProbe({ state: "idle" });
@@ -374,13 +380,15 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   const kept = rows.filter((r) => r.keep);
   const badCtx = kept.find((r) => parseWindow(r.ctxText).kind === "bad");
   const needsKey = preset.key === "required" && !key.trim() && !provider?.key.set;
-  const canSave = !!id.trim() && !saving && !badCtx && !needsKey && (!preset.endpoint || (!!baseUrl.trim() && kept.length > 0));
+  const clash = !editing && taken.has(id.trim());
+  const canSave = !!id.trim() && !clash && !saving && !badCtx && !needsKey && (!preset.endpoint || (!!baseUrl.trim() && kept.length > 0));
 
   const save = async () => {
     setSaving(true);
     try {
       await api.saveProvider(id.trim(), {
         kind,
+        adding: !editing,
         ...(preset.endpoint ? {
           baseUrl, api: kind === "custom" ? apiType : undefined,
           models: kept.map((r) => {
@@ -433,7 +441,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
 
       {choice === "package" ? (
         <div key="package" className="float-in mt-3">
-          <PackageCatalog topic="provider" installed={installed.names} onInstalled={() => void installed.reload()} onError={onError} limit={5} />
+          <PackageCatalog topic="provider" installed={installed.names} onInstalled={() => { void installed.reload(); forget("models"); onInstalled?.(); }} onError={onError} limit={5} />
           <p className="mt-2 text-[11px] text-fg-faint">
             A package's models show in the model menu of chats started after it is installed. Most want a key or an
             address of their own: they appear under Extension settings when it can be set there.
@@ -533,7 +541,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         )}
         {!embedded && <button type="button" onClick={onCancel} className={ghostCls}>{choice === "package" ? "Done" : "Cancel"}</button>}
         <span className="ml-auto text-[11px] text-fg-faint">
-          {badCtx ? `${badCtx.id}: the window is a whole number of tokens.` : needsKey ? "It needs a key." : preset.endpoint && kept.length === 0 && rows.length > 0 ? "Tick at least one model." : ""}
+          {clash ? `${kind === "openrouter" ? "OpenRouter" : `“${id.trim()}”`} is set up already — edit it in the list${kind === "openrouter" || kind === "hosted" ? "" : ", or pick another name"}.` : badCtx ? `${badCtx.id}: the window is a whole number of tokens.` : needsKey ? "It needs a key." : preset.endpoint && kept.length === 0 && rows.length > 0 ? "Tick at least one model." : ""}
         </span>
       </div>
     </div>

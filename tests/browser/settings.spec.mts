@@ -1,10 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /** The portal with no server: Settings, its search, and the setup assistant, over canned answers. */
-async function portal(page: Page, { models = true, slow = 0, stored = {} as Record<string, string>, probe = undefined as undefined | ((baseUrl: string) => string[] | undefined), homepage = undefined as string | undefined } = {}) {
+async function portal(page: Page, { models = true, slow = 0, stored = {} as Record<string, string>, probe = undefined as undefined | ((baseUrl: string) => string[] | undefined), homepage = undefined as string | undefined, openRouterFromEnv = false, installBringsModels = false } = {}) {
   const calls: string[] = [];
-  const providerSaves: unknown[] = [];
-  const available = models ? [{ provider: 'llama-swap', id: 'Ornith', name: 'Ornith 1.5', contextWindow: 65536, reasoning: true }] : [];
+  const providerSaves: { id: string; body: any }[] = [];
+  // A provider package, once installed, brings its models.
+  const available = () => (models || (installBringsModels && installed.length) ? [{ provider: 'llama-swap', id: 'Ornith', name: 'Ornith 1.5', contextWindow: 65536, reasoning: true }] : []);
   let saved: unknown = null;
   let installed: string[] = [];
   await page.route('**/api/**', async (route) => {
@@ -24,15 +25,19 @@ async function portal(page: Page, { models = true, slow = 0, stored = {} as Reco
         settings: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' }, stored, defaults: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' },
         piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w',
       };
-    } else if (p === '/api/models') { await wait(slow * 2); body = { models: available, providers: { 'llama-swap': 'llama-swap' } }; }
+    } else if (p === '/api/models') { await wait(slow * 2); body = { models: available(), providers: { 'llama-swap': 'llama-swap' } }; }
     else if (p === '/api/routines/report-targets') { await wait(slow); body = { targets: [], default: null }; }
     else if (p === '/api/providers') body = {
       presets: [
         { kind: 'llama-cpp', label: 'llama.cpp', description: 'One llama-server', id: 'llama-server', endpoint: true, baseUrl: 'http://127.0.0.1:8080/v1', key: 'optional' },
         { kind: 'custom', label: 'Custom', description: 'Any OpenAI-compatible server', id: 'custom', endpoint: true, key: 'optional' },
+        { kind: 'openrouter', label: 'OpenRouter', description: 'Hundreds of hosted models', id: 'openrouter', endpoint: false, key: 'required' },
       ],
       apis: ['openai-completions'], hosted: [],
-      providers: models ? [{ id: 'llama-swap', kind: 'llama-swap', label: 'llama-swap', baseUrl: 'http://gpu:8080/v1', key: { set: false }, models: [{ id: 'Ornith', name: 'Ornith 1.5' }, { id: 'Gone' }], endpoint: true }] : [],
+      providers: [
+        ...(models ? [{ id: 'llama-swap', kind: 'llama-swap', label: 'llama-swap', baseUrl: 'http://gpu:8080/v1', key: { set: false }, models: [{ id: 'Ornith', name: 'Ornith 1.5' }, { id: 'Gone' }], endpoint: true }] : []),
+        ...(openRouterFromEnv ? [{ id: 'openrouter', kind: 'openrouter', label: 'OpenRouter', key: { set: true, source: 'environment' }, models: [], endpoint: false }] : []),
+      ],
     };
     else if (p === '/api/providers/status') body = { status: { 'llama-swap': { state: 'up', ms: 12, listed: 1, missing: ['Gone'], loaded: ['Ornith'] } } };
     else if (p === '/api/extensions') { await wait(slow * 3); body = { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:pi-web-access', name: 'pi-web-access', settings: [{ key: 'braveApiKey', value: '', configured: false }, { key: 'safeSearch', value: true, configured: true }] }] }; }
@@ -46,7 +51,7 @@ async function portal(page: Page, { models = true, slow = 0, stored = {} as Reco
       if (!listed) return route.fulfill({ status: 502, json: { error: 'Nothing answered there.' } });
       body = { baseUrl: route.request().postDataJSON().baseUrl, models: listed.map((id) => ({ id })) };
     }
-    else if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push(route.request().postDataJSON()); body = { ok: true }; }
+    else if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push({ id: decodeURIComponent(p.split('/').pop()!), body: route.request().postDataJSON() }); body = { ok: true }; }
     else if (p === '/api/providers/probe') return route.fulfill({ status: 502, json: { error: 'Nothing answered at 127.0.0.1:8080 — is the server running, and reachable from here?' } });
     else if (p === '/api/tool-names') body = { names: {} };
     else if (p === '/api/browser') body = { running: false, sessions: [], routines: [] };
@@ -193,7 +198,7 @@ test('a new provider keeps only the models its current address lists', async ({ 
   await expect(dialog.getByLabel('Use Mine')).toBeChecked();
   await dialog.getByRole('button', { name: 'Add', exact: true }).click();
   await expect.poll(() => api.providerSaves.length).toBe(1);
-  expect((api.providerSaves[0] as { models: { id: string }[] }).models.map((m) => m.id)).toEqual(['B', 'Mine']);
+  expect((api.providerSaves[0].body as { models: { id: string }[] }).models.map((m) => m.id)).toEqual(['B', 'Mine']);
 });
 
 test("a package's link that is not a web page is not made a link", async ({ page }) => {
@@ -209,4 +214,44 @@ test("a package's link that is not a web page is not made a link", async ({ page
   await expect(dialog.getByText('Delegate to helpers')).toBeVisible();
   await expect(dialog.locator('a[href^="javascript:"]')).toHaveCount(0);
   await expect(dialog.getByRole('link', { name: 'more' })).toHaveCount(0);
+});
+
+test('a new provider cannot take a name already set up', async ({ page }) => {
+  await portal(page, { probe: () => ['A'] });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  await expect(dialog.getByLabel('Use A')).toBeChecked();
+  const add = dialog.getByRole('button', { name: 'Add', exact: true });
+  await expect(add).toBeEnabled();
+  await dialog.getByLabel('Provider name').fill('llama-swap');
+  await expect(add).toBeDisabled();
+  await expect(dialog.getByText('“llama-swap” is set up already — edit it in the list, or pick another name.')).toBeVisible();
+});
+
+test('OpenRouter keyed from the environment is given a stored key under its own name', async ({ page }) => {
+  const api = await portal(page, { openRouterFromEnv: true });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  await dialog.getByLabel('Kind of provider').click();
+  await page.getByRole('option', { name: /OpenRouter/ }).click();
+  await dialog.getByLabel('API key').fill('sk-or-v1-0123456789');
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect.poll(() => api.providerSaves.map((s) => s.id)).toEqual(['openrouter']);
+  expect(api.providerSaves[0].body).toMatchObject({ kind: 'openrouter', adding: true, apiKey: 'sk-or-v1-0123456789' });
+});
+
+test('a provider package installed in the assistant brings its models, and Next with them', async ({ page }) => {
+  await portal(page, { models: false, installBringsModels: true });
+  await page.goto('/');
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  await expect(setup.getByRole('button', { name: 'Next' })).toBeDisabled();
+  await setup.getByLabel('Kind of provider').click();
+  await page.getByRole('option', { name: /From a package/ }).click();
+  await setup.getByRole('button', { name: 'Install pi-subagents' }).click();
+  await page.getByRole('button', { name: 'Install', exact: true }).click();
+  await expect(setup.getByRole('button', { name: 'Next' })).toBeEnabled();
 });

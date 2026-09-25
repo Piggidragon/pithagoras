@@ -2,6 +2,7 @@ import { LuBlocks } from "react-icons/lu";
 import { ToolSwitches } from "./ToolSwitches";
 import { useDismiss } from "../use-dismiss";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
@@ -185,6 +186,7 @@ export function ComposerBar({
   /** True while a catalogue fetch is in flight — not "has one ever run". */
   const [loadingCatalogue, setLoadingCatalogue] = useState(false);
   const [open, setOpen] = useState<null | "model" | "effort" | "tools">(null);
+  const navigate = useNavigate();
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState("");
   const [recents, setRecents] = useState<string[]>(readRecents);
@@ -549,7 +551,7 @@ export function ComposerBar({
           <div className="my-1 border-t border-line" />
           <button
             type="button"
-            onClick={() => { setOpen(null); openProviders(sessionId); }}
+            onClick={() => { setOpen(null); navigate(`/s/${sessionId}/settings/models`); }}
             className="flex w-full items-center px-3 py-1.5 text-left text-xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
           >
             Add or change providers…
@@ -619,11 +621,3 @@ export function ComposerBar({
   );
 }
 
-/**
- * Settings → Providers, over this chat. Through the router's own history, so
- * the page is not loaded again: it listens for popstate.
- */
-function openProviders(sessionId: string) {
-  window.history.pushState(null, "", `/s/${sessionId}/settings/models`);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}

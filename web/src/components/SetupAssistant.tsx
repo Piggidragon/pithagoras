@@ -192,9 +192,10 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
                 <ProviderEditor
                   embedded
                   view={providers.value}
-                  taken={new Set(configured.map((p) => p.id))}
+                  taken={new Set(configured.filter((p) => p.key.source !== "environment").map((p) => p.id))}
                   onCancel={() => setAdding(false)}
                   onSaved={() => void providerSaved()}
+                  onInstalled={() => void Promise.all([providers.reload(), models.reload()])}
                   onError={setError}
                 />
                 {configured.length > 0 && (

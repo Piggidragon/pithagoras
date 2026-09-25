@@ -34,6 +34,12 @@ test("the models Settings offers include those an installed package brings", asy
   // A moment on, so the settings file is seen to have changed.
   await new Promise((r) => setTimeout(r, 20));
   writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ extensions: [path.join(dir, "ext", "gateway.js")] }));
-  const models = await (await modelRuntime(home)).getAvailable();
+  const built = modelRuntime(home);
+  const models = await (await built).getAvailable();
   assert.deepEqual(models.filter((m) => m.provider === "fake-gateway").map((m) => m.id), ["m1"]);
+
+  // A default saved rewrites the file, but installs nothing: what was built is kept, and no extension runs again.
+  await new Promise((r) => setTimeout(r, 20));
+  writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ extensions: [path.join(dir, "ext", "gateway.js")], defaultModel: "m1" }));
+  assert.equal(modelRuntime(home), built);
 });

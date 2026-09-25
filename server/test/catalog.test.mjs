@@ -55,3 +55,9 @@ test("a package's link is kept only when it goes to a web page", () => {
   assert.equal(one({ npm: "data:text/html,<script>1</script>" }).npm, undefined);
   assert.equal(one({ homepage: "https://pi.dev/x" }).homepage, "https://pi.dev/x");
 });
+
+test("searches kept are only so many: each word typed is one", async () => {
+  const { KEEP_MAX, keptSearches } = await import("../dist/catalog.js");
+  for (let i = 0; i < KEEP_MAX + 30; i++) await searchCatalog(`word ${i}`);
+  assert.ok(keptSearches() <= KEEP_MAX, `${keptSearches()} kept`);
+});

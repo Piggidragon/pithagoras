@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { piAgentDir } from "./pi-settings.js";
 
@@ -110,10 +111,41 @@ export interface ProviderInfo {
 
 type Json = Record<string, any>;
 
+/** As pi reads its files: `//` comments and trailing commas allowed, strings left alone (pi's utils/json.js). */
+export function stripJsonComments(input: string): string {
+  return input
+    .replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*/g, (m) => (m[0] === '"' ? m : ""))
+    .replace(/"(?:\\.|[^"\\])*"|,(\s*[}\]])/g, (m, tail) => tail ?? (m[0] === '"' ? m : ""));
+}
+
+/**
+ * A file to change: none yet is empty, but one that is there and cannot be
+ * read stops the change. Taken as empty, the next save would write back only
+ * what it adds, and every provider or key in the file would be gone.
+ */
+function readForChange(file: string): Json {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw e;
+  }
+  if (!text.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripJsonComments(text));
+  } catch (e) {
+    throw new Error(`${path.basename(file)} could not be read (${(e as Error).message}), so nothing was changed. Put it right by hand, then save again.`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${path.basename(file)} does not hold what pi expects, so nothing was changed.`);
+  return parsed as Json;
+}
+
+/** A file to show: what cannot be read shows as nothing. */
 function readJson(file: string): Json {
   try {
-    const parsed = JSON.parse(readFileSync(file, "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    return readForChange(file);
   } catch {
     return {};
   }
@@ -129,7 +161,7 @@ function writeJson(file: string, data: Json) {
 
 let chain: Promise<unknown> = Promise.resolve();
 /** One change at a time, so two saves cannot each drop the other's. */
-function serial<T>(fn: () => T): Promise<T> {
+function serial<T>(fn: () => T | Promise<T>): Promise<T> {
   const next = chain.then(fn);
   chain = next.catch(() => {});
   return next;
@@ -137,6 +169,38 @@ function serial<T>(fn: () => T): Promise<T> {
 
 export const readModelsJson = () => readJson(modelsJsonPath());
 export const readAuthJson = () => readJson(authJsonPath());
+
+interface Lockfile {
+  lock(file: string, options: Json): Promise<() => Promise<void>>;
+}
+let lockfile: Lockfile | undefined;
+
+/**
+ * Change auth.json under pi's own lock. pi changes it under that lock too —
+ * a chat refreshing a login, pi on the command line — and a change made
+ * beside it would land over the refreshed token and sign the account out.
+ * The lock is pi's copy of proper-lockfile, so it is always the one pi takes.
+ * `change` says whether it changed anything.
+ */
+async function changeAuth<T>(change: (auth: Json) => T | false): Promise<T | false> {
+  lockfile ??= createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"))("proper-lockfile") as Lockfile;
+  const file = authJsonPath();
+  mkdirSync(path.dirname(file), { recursive: true });
+  // As pi takes it when it waits: a few tries, backing off, and a lock left by a process that died is taken over.
+  const release = await lockfile.lock(file, {
+    realpath: false,
+    stale: 30_000,
+    retries: { retries: 10, factor: 2, minTimeout: 100, maxTimeout: 10_000, randomize: true },
+  });
+  try {
+    const auth = readForChange(file);
+    const result = change(auth);
+    if (result !== false) writeJson(file, auth);
+    return result;
+  } finally {
+    await release().catch(() => {});
+  }
+}
 
 /** When either file last changed, for whoever keeps something built from them. */
 export function configStamp(): string {
@@ -474,6 +538,8 @@ const ID_RE = /^[A-Za-z0-9][\w.:=-]{0,63}$/;
 
 export interface SaveProvider {
   kind: ProviderKind;
+  /** Added, not edited: refused when something is set up under that name already. */
+  adding?: boolean;
   baseUrl?: string;
   api?: string;
   /** Undefined keeps the stored key, "" removes it. */
@@ -497,26 +563,48 @@ export function mergeModels(existing: ModelEntry[], wanted: ModelEntry[]): Model
   });
 }
 
+/** Something is set up under that name already. */
+export class TakenError extends Error {}
+
 export function saveProvider(id: string, body: SaveProvider): Promise<void> {
   if (!ID_RE.test(id)) return Promise.reject(new Error("A provider's name is letters, digits and - _ . : = — and starts with a letter or digit."));
   const preset = PRESETS.find((p) => p.kind === body.kind);
   if (!preset) return Promise.reject(new Error(`Unknown kind of provider: ${body.kind}`));
-  return serial(() => {
+  const taken = () => new TakenError(`Something is set up as “${id}” already. Edit it, or pick another name.`);
+  return serial(async () => {
     if (!preset.endpoint) {
-      if (body.apiKey === undefined) return;
-      const auth = readAuthJson();
-      if (body.apiKey.trim()) auth[id] = { ...(auth[id]?.type === "api_key" ? auth[id] : {}), type: "api_key", key: body.apiKey.trim() };
-      else delete auth[id];
-      writeJson(authJsonPath(), auth);
+      const key = body.apiKey;
+      if (key === undefined) {
+        if (body.adding && readAuthJson()[id]) throw taken();
+        return;
+      }
+      await changeAuth((auth) => {
+        if (body.adding && auth[id]) throw taken();
+        if (key.trim()) auth[id] = { ...(auth[id]?.type === "api_key" ? auth[id] : {}), type: "api_key", key: key.trim() };
+        else if (auth[id]) delete auth[id];
+        else return false;
+      });
       return;
     }
     if (!body.baseUrl?.trim()) throw new Error("An address is needed, such as http://127.0.0.1:8080/v1.");
-    const file = readModelsJson();
+    const file = readForChange(modelsJsonPath());
     const providers: Json = file.providers && typeof file.providers === "object" ? file.providers : {};
+    // Added under a name already in use, it would be merged into what is there.
+    if (body.adding && (providers[id] || readAuthJson()[id])) throw taken();
     const current: Json = providers[id] ?? {};
     const next: Json = { ...current, baseUrl: normalizeBaseUrl(body.baseUrl, body.kind) };
     next.api = body.api && (APIS as readonly string[]).includes(body.api) ? body.api : current.api ?? "openai-completions";
-    if (body.apiKey !== undefined) next.apiKey = body.apiKey.trim() || preset.placeholderKey || "none";
+    // pi takes a key in auth.json over the one here: one kept there is changed there, or the new one would never be used.
+    const keptInAuth = body.apiKey !== undefined && readAuthJson()[id]?.type === "api_key";
+    if (keptInAuth) {
+      const key = body.apiKey!.trim();
+      await changeAuth((auth) => {
+        if (auth[id]?.type !== "api_key") return false;
+        if (key) auth[id] = { ...auth[id], key };
+        else delete auth[id];
+      });
+      next.apiKey ??= preset.placeholderKey ?? "none";
+    } else if (body.apiKey !== undefined) next.apiKey = body.apiKey.trim() || preset.placeholderKey || "none";
     else next.apiKey ??= preset.placeholderKey ?? "none";
     if (preset.compat && !current.compat) next.compat = preset.compat;
     next.models = mergeModels(Array.isArray(current.models) ? current.models : [], body.models ?? []);
@@ -529,9 +617,9 @@ export function saveProvider(id: string, body: SaveProvider): Promise<void> {
 }
 
 export function removeProvider(id: string): Promise<boolean> {
-  return serial(() => {
+  return serial(async () => {
     let found = false;
-    const file = readModelsJson();
+    const file = readForChange(modelsJsonPath());
     // Only a server of its own. An entry without models overrides a hosted
     // service's address or details, written by hand: removing that service's
     // key leaves it, as the page knows nothing of it.
@@ -545,11 +633,13 @@ export function removeProvider(id: string): Promise<boolean> {
       delete kinds[id];
       writeJson(kindsJsonPath(), kinds);
     }
-    const auth = readAuthJson();
-    if (auth[id]) {
-      delete auth[id];
-      writeJson(authJsonPath(), auth);
-      found = true;
+    if (readAuthJson()[id]) {
+      const removed = await changeAuth((auth) => {
+        if (!auth[id]) return false;
+        delete auth[id];
+        return true;
+      });
+      found ||= removed === true;
     }
     return found;
   });

@@ -26,7 +26,22 @@ type Json = Record<string, any>;
 
 const REGISTRY = () => (process.env.NPM_REGISTRY_URL || "https://registry.npmjs.org").replace(/\/+$/, "");
 const KEEP_MS = 10 * 60_000;
+/** Searches kept at most: each word typed in the search is one. */
+export const KEEP_MAX = 100;
 const cache = new Map<string, { at: number; value: Promise<CatalogPackage[]> }>();
+
+/** Room for one more: what is out of date goes, then the oldest past the limit. */
+function makeRoom(now: number) {
+  for (const [key, entry] of cache) if (now - entry.at >= KEEP_MS) cache.delete(key);
+  // A Map keeps the order things were put in: the first is the oldest.
+  for (const key of cache.keys()) {
+    if (cache.size < KEEP_MAX) break;
+    cache.delete(key);
+  }
+}
+
+/** How many searches are kept, for the tests. */
+export const keptSearches = () => cache.size;
 
 const PROVIDER_WORDS = new Set(["provider", "pi-provider", "llm-provider", "ai-provider", "model-provider"]);
 
@@ -80,6 +95,8 @@ export function searchCatalog(text: string, topic?: "provider"): Promise<Catalog
       const reason = e.name === "TimeoutError" ? "npm did not answer in time" : e.message;
       throw new Error(`Could not reach the package list (${reason}). Is the portal online?`);
     });
+  cache.delete(key);
+  makeRoom(Date.now());
   cache.set(key, { at: Date.now(), value });
   return value;
 }

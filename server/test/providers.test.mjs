@@ -244,3 +244,72 @@ test("an Ollama server's every model is listed, past the ones looked up", async 
     server.close();
   }
 });
+
+test("a models.json with comments is read as pi reads it, and a save keeps what is in it", async () => {
+  writeFileSync(path.join(dir, "models.json"), `{
+  // The GPU box, by hand.
+  "providers": {
+    "box": { "baseUrl": "http://box:8080/v1", "apiKey": "none", "models": [{ "id": "A" }], },
+  },
+}`);
+  assert.deepEqual(p.listProviders().map((x) => x.id), ["box"]);
+  await p.saveProvider("gpu", { kind: "llama-swap", adding: true, baseUrl: "http://gpu:8080", models: [{ id: "B" }] });
+  assert.deepEqual(Object.keys(read("models.json").providers), ["box", "gpu"]);
+});
+
+test("a file that cannot be read is not saved over", async () => {
+  const broken = '{ "providers": { "box": { "baseUrl": "http://box:8080/v1", "models": [ }';
+  writeFileSync(path.join(dir, "models.json"), broken);
+  await assert.rejects(p.saveProvider("gpu", { kind: "llama-swap", baseUrl: "http://gpu:8080", models: [{ id: "B" }] }), /models\.json could not be read/);
+  await assert.rejects(p.removeProvider("box"), /could not be read/);
+  assert.equal(readFileSync(path.join(dir, "models.json"), "utf8"), broken);
+
+  writeFileSync(path.join(dir, "auth.json"), '{ "anthropic": { "type": "oauth", "refresh": "r1"');
+  await assert.rejects(p.saveProvider("openrouter", { kind: "openrouter", apiKey: "sk-or-v1-0123456789" }), /auth\.json could not be read/);
+  assert.equal(readFileSync(path.join(dir, "auth.json"), "utf8"), '{ "anthropic": { "type": "oauth", "refresh": "r1"');
+  writeFileSync(path.join(dir, "models.json"), "{}");
+  writeFileSync(path.join(dir, "auth.json"), "{}");
+});
+
+test("auth.json is changed under pi's lock, so a login pi refreshes meanwhile is kept", async () => {
+  const { createRequire } = await import("node:module");
+  const lockfile = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"))("proper-lockfile");
+  const file = path.join(dir, "auth.json");
+  writeFileSync(file, JSON.stringify({ anthropic: { type: "oauth", refresh: "old" } }));
+  // pi, refreshing the login: it holds the lock while it reads, asks, and writes.
+  const release = await lockfile.lock(file, { realpath: false });
+  const before = JSON.parse(readFileSync(file, "utf8"));
+  const saving = p.saveProvider("openrouter", { kind: "openrouter", apiKey: "sk-or-v1-0123456789" });
+  await new Promise((r) => setTimeout(r, 300));
+  writeFileSync(file, JSON.stringify({ ...before, anthropic: { type: "oauth", refresh: "new" } }));
+  await release();
+  await saving;
+  const auth = read("auth.json");
+  assert.equal(auth.anthropic.refresh, "new", "the refreshed login is not written over");
+  assert.equal(auth.openrouter.key, "sk-or-v1-0123456789");
+  writeFileSync(file, "{}");
+});
+
+test("a provider is not added under a name that is taken", async () => {
+  writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: { "llama-swap": { baseUrl: "http://gpu:8080/v1", apiKey: "none", models: [{ id: "A" }, { id: "B" }] } } }));
+  writeFileSync(path.join(dir, "auth.json"), JSON.stringify({ openrouter: { type: "api_key", key: "sk-or-v1-first" } }));
+  await assert.rejects(p.saveProvider("llama-swap", { kind: "llama-swap", adding: true, baseUrl: "http://other:8080", models: [{ id: "C" }] }), p.TakenError);
+  await assert.rejects(p.saveProvider("openrouter", { kind: "openrouter", adding: true, apiKey: "sk-or-v1-second" }), p.TakenError);
+  assert.deepEqual(read("models.json").providers["llama-swap"].models.map((m) => m.id), ["A", "B"]);
+  assert.equal(read("auth.json").openrouter.key, "sk-or-v1-first");
+  // Edited, it is changed.
+  await p.saveProvider("llama-swap", { kind: "llama-swap", baseUrl: "http://gpu:8080", models: [{ id: "A" }] });
+  assert.deepEqual(read("models.json").providers["llama-swap"].models.map((m) => m.id), ["A"]);
+});
+
+test("a server's key goes where pi reads it first: auth.json, when one is kept there", async () => {
+  writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: { box: { baseUrl: "http://box:8080/v1", apiKey: "none", models: [{ id: "A" }] } } }));
+  writeFileSync(path.join(dir, "auth.json"), JSON.stringify({ box: { type: "api_key", key: "sk-old-0123456789" } }));
+  await p.saveProvider("box", { kind: "llama-cpp", baseUrl: "http://box:8080", apiKey: "sk-new-0123456789", models: [{ id: "A" }] });
+  assert.equal(p.storedKey("box"), "sk-new-0123456789");
+  assert.equal(p.listProviders().find((x) => x.id === "box").key.hint, "sk-n…6789");
+  // Cleared, it is gone from both.
+  await p.saveProvider("box", { kind: "llama-cpp", baseUrl: "http://box:8080", apiKey: "", models: [{ id: "A" }] });
+  assert.equal(read("auth.json").box, undefined);
+  assert.equal(p.listProviders().find((x) => x.id === "box").key.set, false);
+});

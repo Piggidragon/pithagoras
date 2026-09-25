@@ -25,11 +25,13 @@ function publish(key: string, value: unknown) {
 
 /**
  * The value, fetched unless one younger than `freshMs` is kept. Asking again
- * while a fetch is on its way waits for that one rather than starting another.
+ * while a fetch is on its way waits for that one rather than starting another
+ * — unless `anew`: after a change, one on its way may have asked the server
+ * before it, so a new one is started, and the other's answer is not kept.
  */
-export function load<T>(key: string, fetcher: () => Promise<T>, freshMs = 0): Promise<T> {
+export function load<T>(key: string, fetcher: () => Promise<T>, freshMs = 0, anew = false): Promise<T> {
   const had = store.get(key);
-  if (had?.pending) return had.pending as Promise<T>;
+  if (had?.pending && !anew) return had.pending as Promise<T>;
   if (had && "value" in had && had.value !== undefined && Date.now() - had.at < freshMs) return Promise.resolve(had.value as T);
   const pending: Promise<T> = fetcher().then(
     (value) => {
@@ -77,8 +79,8 @@ export function useCached<T>(key: string, fetcher: () => Promise<T>, { freshMs =
   }, [key]);
 
   const fetch = useCallback(
-    (fresh: number) =>
-      load(key, fetcher, fresh).then(
+    (fresh: number, anew = false) =>
+      load(key, fetcher, fresh, anew).then(
         (v) => {
           setFailed(null);
           return v;
@@ -98,6 +100,7 @@ export function useCached<T>(key: string, fetcher: () => Promise<T>, { freshMs =
     void fetch(freshMs);
   }, [fetch]);
 
-  const reload = useCallback(() => fetch(0), [fetch]);
+  /** Fetched again, after a change: never answered by a fetch that started before it. */
+  const reload = useCallback(() => fetch(0, true), [fetch]);
   return { value, failed, reload };
 }
