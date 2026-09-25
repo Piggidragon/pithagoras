@@ -413,6 +413,13 @@ function Shell({
               await api.pinSession(id, pinned);
               refreshSessions();
             }}
+            onRename={async (id, title) => {
+              await api.renameSession(id, title);
+              // Saved by now, and shown so, whether or not the list then loads:
+              // a list that fails to load is not a rename that failed.
+              setSessions((all) => all.map((s) => (s.id === id ? { ...s, title } : s)));
+              await refreshSessions().catch(() => {});
+            }}
           />
         ) : view === "projects" ? (
           <ProjectsPage
