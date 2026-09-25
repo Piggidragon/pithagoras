@@ -15,7 +15,7 @@ import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
-import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP } from "../subagent-protocol.js";
+import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { contextWindowFor } from "../db.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
@@ -209,16 +209,18 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   portalSessionId?: string;
   /** The extensions' event bus, when this client made one. */
   bus?: { emit(channel: string, data: unknown): void };
-  unbridge?: () => void;
+  unbridge?: Bridge;
 
+  // Only to one running here that takes it: after a restart, the bus is new
+  // and nobody on it, and "sent" would be a message that went nowhere.
   subagentInput(id: string, text: string): boolean {
-    if (!this.bus) return false;
+    if (!this.bus || !this.unbridge?.takes(id, "input")) return false;
     this.bus.emit(SUBAGENT_INPUT, { id, text });
     return true;
   }
 
   subagentStop(id: string): boolean {
-    if (!this.bus) return false;
+    if (!this.bus || !this.unbridge?.takes(id, "stop")) return false;
     this.bus.emit(SUBAGENT_STOP, { id });
     return true;
   }

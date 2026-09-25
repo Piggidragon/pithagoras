@@ -43,12 +43,23 @@ const KNOWN = new Set([
   "compaction_end",
 ]);
 
-/** Streamed a token at a time: delivered to whoever watches, never stored. */
-const LIVE = new Set(["message_update", "tool_execution_update"]);
+/**
+ * Delivered to whoever watches, never stored: streamed a token at a time, or
+ * only saying what the child is doing now. Stored, a long subagent's steps
+ * came to eight rows each, and a reload, which reads the last rows of a chat,
+ * found little else.
+ */
+const LIVE = new Set(["message_update", "tool_execution_update", "turn_start", "turn_end", "message_start"]);
 
 const OUTPUT_MAX = 50_000;
 
 type Bus = { on(channel: string, handler: (data: unknown) => void): () => void };
+
+/**
+ * Unsubscribes when called. `takes`: whether a subagent is running here that
+ * said it takes messages, or a stop — anything else would go to nobody.
+ */
+export type Bridge = (() => void) & { takes(id: string, what: "input" | "stop"): boolean };
 type Emit = (event: Record<string, unknown>) => void;
 
 const str = (v: unknown, max: number): string | undefined =>
@@ -77,9 +88,9 @@ export function slimEvent(event: any): Record<string, unknown> | undefined {
     case "message_start":
     case "message_end": {
       const m = event.message ?? {};
-      // A tool's result comes again as a message: trimmed as its end is, or a
-      // log it read, or a screenshot, is stored and sent whole.
-      if (m.role === "toolResult") return { type: event.type, message: { role: m.role, content: (trimResult(m) as { content: unknown[] }).content } };
+      // A tool's result, again as a message: its tool's end already carries
+      // it, trimmed, and nothing draws this.
+      if (m.role === "toolResult") return undefined;
       return { type: event.type, message: { role: m.role, content: Array.isArray(m.content) ? m.content : m.content ?? "" } };
     }
     case "tool_execution_start":
@@ -100,8 +111,8 @@ export function slimEvent(event: any): Record<string, unknown> | undefined {
  * subagents, as session events: `portal_subagent` (stored) and
  * `portal_subagent_live` (streamed, not stored). Returns the unsubscribe.
  */
-export function bridgeSubagents(bus: Bus, emit: Emit): () => void {
-  const known = new Set<string>();
+export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
+  const known = new Map<string, { input: boolean; stop: boolean }>();
   // When each child's current message began and stopped thinking, epoch ms:
   // its tokens are never stored, so the times ride on its message_end.
   const thinking = new Map<string, { thinkingSince: number; thinkingUntil: number }>();
@@ -109,7 +120,7 @@ export function bridgeSubagents(bus: Bus, emit: Emit): () => void {
     bus.on(SUBAGENT_START, (data: any) => {
       const id = str(data?.id, 120);
       if (!id) return;
-      known.add(id);
+      known.set(id, { input: data.input === true, stop: data.stop === true });
       emit({
         type: "portal_subagent",
         op: "start",
@@ -146,5 +157,7 @@ export function bridgeSubagents(bus: Bus, emit: Emit): () => void {
       emit({ type: "portal_subagent", op: "end", id, status, ...(str(data.error, 2000) ? { error: str(data.error, 2000) } : {}) });
     }),
   ];
-  return () => off.forEach((f) => f());
+  return Object.assign(() => off.forEach((f) => f()), {
+    takes: (id: string, what: "input" | "stop") => known.get(id)?.[what] === true,
+  });
 }

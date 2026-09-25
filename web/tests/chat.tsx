@@ -64,11 +64,35 @@ if (phase === 'agents') {
 
 const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
 const noop = async () => {};
+// An extension moves its status twenty times a second: how often the chat asks for /background is counted.
+if (phase === 'nudge') {
+  const realFetch = window.fetch;
+  (window as any).backgroundAsked = 0;
+  window.fetch = (async (url: any, init?: any) => {
+    if (String(url).endsWith('/background')) {
+      (window as any).backgroundAsked++;
+      return new Response(JSON.stringify({ supported: true, jobs: [], widgets: [], statuses: [] }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    return realFetch(url, init);
+  }) as typeof fetch;
+}
+
 function Fixture() {
   const [v, setV] = React.useState('b');
+  const [shownEvents, setShownEvents] = React.useState(events);
+  React.useEffect(() => {
+    if (phase !== 'nudge') return;
+    let n = 0;
+    const t = setInterval(() => {
+      n++;
+      setShownEvents((list) => [...list, { seq: -now * 1000 - n, type: 'extension_ui_request', at: Date.now(), payload: { method: 'setStatus', statusKey: 'spin', statusText: `working ${n}` } }]);
+      if (n >= 40) clearInterval(t);
+    }, 50);
+    return () => clearInterval(t);
+  }, []);
   return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
     <div style={{ padding: 8, display: 'flex', gap: 8 }}><Select aria-label="Preview select" size="sm" className="w-64" value={v} onChange={setV} options={[{ value: 'a', label: 'Project notes' }, { value: 'b', label: 'Release plan', hint: 'Temporary — not stored' }, { value: 'c', label: 'Meeting summary' }]} /><label className="flex items-center gap-2 text-xs"><input type="checkbox" defaultChecked />Checkbox</label><input type="range" defaultValue={40} /></div>
-    <div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={events} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
+    <div style={{ flex: 1, minHeight: 0 }}><Chat session={session} events={shownEvents} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
   </div>;
 }
 createRoot(document.getElementById('root')!).render(<Fixture />);

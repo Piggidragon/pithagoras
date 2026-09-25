@@ -64,6 +64,17 @@ test("a resize reaches the shell without being typed into it", async () => {
   await fetch(`${base}/terminal/${id}`, { method: "DELETE" });
 });
 
+test("what the person starts in their terminal is not marked as the agent's", async () => {
+  // The portal marks everything it starts, for the background list to find.
+  process.env.PITHAGORAS_AGENT = "1";
+  const { id } = await post("/terminal", {});
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await post(`/terminal/${id}/input`, { data: 'echo "mark:[${PITHAGORAS_AGENT:-none}]"\n' });
+  const text = await read(id, /mark:\[(none|1)\]/);
+  assert.match(text, /mark:\[none\]/);
+  await fetch(`${base}/terminal/${id}`, { method: "DELETE" });
+});
+
 test("closing a terminal ends what it started, even what ignores the hangup", async () => {
   const { id } = await post("/terminal", {});
   await new Promise((resolve) => setTimeout(resolve, 300));
