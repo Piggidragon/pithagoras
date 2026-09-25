@@ -94,6 +94,7 @@ test('a routine whose project has gone says so, and saves another change without
   await page.getByRole('button', { name: /Nightly build/ }).click();
   const where = page.getByLabel('Where it runs');
   await expect(where).toContainText('gone');
+  await expect(page.getByText('/w/gone is not there any more')).toBeVisible();
   await where.click();
   await expect(page.getByRole('option', { name: /gone/ })).toContainText('Not there any more');
   await page.keyboard.press('Escape');

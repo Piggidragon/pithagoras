@@ -397,6 +397,11 @@ function WorkspacePicker({
         Its runs work in this directory. Each place keeps its own session, so moving it back picks up where it left off.
         {error && ` The projects could not be listed (${error}), so only Home is offered.`}
       </p>
+      {problem && value && (
+        <p className="mt-1 text-[11px] text-danger">
+          {value} is not there any more ({problem}). Its runs fail until another place is chosen.
+        </p>
+      )}
     </div>
   );
 }
