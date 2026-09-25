@@ -1,7 +1,8 @@
 import { LuBlocks } from "react-icons/lu";
 import { ToolSwitches } from "./ToolSwitches";
+import { useDismiss } from "../use-dismiss";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { anchorLeft } from "../menu-anchor";
+import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
 import { ContextPill } from "./ContextPill";
@@ -13,9 +14,6 @@ import { ContextPill } from "./ContextPill";
  * having levels, and waiting for the catalogue meant the popover opened empty.
  * Replaced by whatever pi actually reports once that arrives.
  */
-/** The menus above the toolbar: w-72. */
-const MENU_WIDTH = 288;
-
 const DEFAULT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
@@ -193,7 +191,6 @@ export function ComposerBar({
   const [busy, setBusy] = useState(false);
   /** Where the handle sits mid-drag, before the change is sent. */
   const [dragEffort, setDragEffort] = useState<number | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
   // Each menu opens over its own button; see menu-anchor.ts.
   const pills = { model: useRef<HTMLButtonElement>(null), effort: useRef<HTMLButtonElement>(null), tools: useRef<HTMLButtonElement>(null) };
   const [menuLeft, setMenuLeft] = useState<number | undefined>();
@@ -299,18 +296,18 @@ export function ComposerBar({
     onPanelConsumed?.();
   }, [panelRequest]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) {
-        setOpen(null);
-        setShowAll(false);
-        setFilter("");
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  const menu = useRef<HTMLDivElement>(null);
+  const trigger = open ? pills[open] : undefined;
+  useDismiss(
+    !!open,
+    trigger ? [menu, trigger] : [menu],
+    () => {
+      setOpen(null);
+      setShowAll(false);
+      setFilter("");
+    },
+    trigger,
+  );
 
   const models = cfg.models.models ?? [];
   const byId = useMemo(() => new Map(models.map((m) => [m.id, m])), [models]);
@@ -400,7 +397,7 @@ export function ComposerBar({
   const flipThinking = () => applyLevel(thinkingOn ? "off" : onLevel);
 
   return (
-    <div ref={ref} className="composer-toolbar relative text-xs">
+    <div className="composer-toolbar relative text-xs">
       <div className="composer-settings">
         <button
           ref={pills.model}
@@ -473,7 +470,7 @@ export function ComposerBar({
 
       {/* Tools */}
       {open === "tools" && (
-        <div style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menu} style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <p className="px-3 py-1 text-[11px] text-fg-subtle">Tools in this chat</p>
           <ToolSwitches sessionId={sessionId} />
         </div>
@@ -481,7 +478,7 @@ export function ComposerBar({
 
       {/* Models */}
       {open === "model" && (
-        <div style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menu} style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <div className="flex items-center gap-2 px-3 py-1">
             <p className="text-[11px] text-fg-subtle">Models</p>
             <button
@@ -562,7 +559,7 @@ export function ComposerBar({
 
       {/* Effort */}
       {open === "effort" && levels.length > 1 && (
-        <div style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div ref={menu} style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           {onOff ? (
             // Reached through /effort; the pill flips the same switch directly.
             <button

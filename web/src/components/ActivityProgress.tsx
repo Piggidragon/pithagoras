@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Activity } from '../transcript';
-
-const promptLabels = ['Reading the conversation…', 'Reviewing the context…', 'Preparing to respond…'];
+import { formatElapsed, prefillShare, promptLabel, type Activity } from '../transcript';
 
 export function ActivityProgress({ phase, compact = false }: { phase: Activity; compact?: boolean }) {
   const [now, setNow] = useState(Date.now);
@@ -9,13 +7,12 @@ export function ActivityProgress({ phase, compact = false }: { phase: Activity; 
   const seconds = Math.max(0, Math.floor((now - (phase.since ?? now)) / 1000));
   const p = phase.prefill;
   const total = p?.total ?? 0;
-  const done = Math.max(0, Math.min(total, p?.processed ?? 0));
-  const percent = total > 0 ? Math.round(done / total * 100) : undefined;
+  const { done, percent } = prefillShare(p);
   const compacting = phase.label === 'compacting the conversation';
-  const elapsed = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+  const elapsed = formatElapsed(seconds);
   if (!compacting && seconds < 2) return null;
   return <div className={`activity-progress ${compact ? 'activity-progress-compact' : ''}`}>
-    <div className="activity-progress-heading"><span role="status">{compacting ? 'Compacting conversation' : promptLabels[Math.floor(Math.max(0, seconds - 2) / 3) % promptLabels.length]}</span><span>{percent !== undefined ? `${percent}% · ` : ''}{elapsed}</span></div>
+    <div className="activity-progress-heading"><span role="status">{compacting ? 'Compacting conversation' : `${promptLabel(seconds)}…`}</span><span>{percent !== undefined ? `${percent}% · ` : ''}{elapsed}</span></div>
     <div className="activity-progress-track" role="progressbar" aria-label={compacting ? 'Conversation compaction' : 'Prompt processing'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
       <div className={percent === undefined ? 'activity-progress-indeterminate' : ''} style={percent === undefined ? undefined : {width: `${percent}%`}} />
     </div>

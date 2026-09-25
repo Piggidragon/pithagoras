@@ -71,3 +71,34 @@ test('an extension setting is named as a person would, and kept as the kind of v
   assert.equal(typed('x', ''), '');
   assert.equal(typed(undefined, '42'), '42', 'a key never set stays text: nothing says it is a number');
 });
+
+test('a tool its run left open does not run again with the next run', () => {
+  // The portal restarted mid-call and recorded nothing; then a new message started a run.
+  const items = buildTranscript([start(1, 't1'), ev(2, 'portal_prompt', { message: 'again' }), ev(3, 'agent_start'), start(4, 't2')] as any);
+  const tools = items.filter((i: any) => i.kind === 'tool') as any[];
+  assert.equal(tools[0].interrupted, true);
+  assert.equal(tools[1].status, 'running');
+});
+
+test('the interrupted status recorded after a restart settles what the run left open', () => {
+  const items = buildTranscript([start(1, 't1'), ev(2, 'portal_status', { status: 'interrupted', restarted: true })] as any);
+  assert.equal((items[0] as any).interrupted, true);
+});
+
+test('a call taken for cut off by an early idle takes its real end, and the reply stays one', () => {
+  const delta = (seq: number, text: string) => ev(seq, 'message_update', { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta: text } });
+  const items = buildTranscript([
+    start(1, 't1'),
+    ev(2, 'portal_status', { status: 'idle' }),
+    ev(3, 'tool_execution_end', { toolCallId: 't1', toolName: 'bash', result: { content: [{ type: 'text', text: 'ok' }] } }),
+    delta(4, 'Hel'),
+    ev(5, 'portal_status', { status: 'idle' }),
+    delta(6, 'lo'),
+  ] as any);
+  const tool = items[0] as any;
+  assert.equal(tool.status, 'done');
+  assert.equal(tool.interrupted, undefined);
+  const replies = items.filter((i: any) => i.kind === 'assistant') as any[];
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].text, 'Hello');
+});

@@ -49,7 +49,10 @@ export function Modal({
     >
       {/* The rail layout gets a floor as well as a ceiling: its panels fetch
           before they render anything, so without one the dialog opened as a
-          bare title bar and snapped to full height a moment later. */}
+          bare title bar and snapped to full height a moment later. Wider than
+          a phone its height is fixed: sized to each section, it grew and shrank
+          and re-centred from one to the next, and the rail moved under the
+          pointer that had just picked from it. */}
       <div
         role="dialog"
         aria-modal="true"
@@ -59,7 +62,7 @@ export function Modal({
           // form has a comfortable width, and a 34-inch screen should not
           // stretch a two-column form across all of it.
           wide ? "max-w-3xl xl:max-w-5xl" : "max-w-2xl"
-        } ${rail ? "min-h-[min(34rem,94dvh)] sm:min-h-[min(34rem,88vh)]" : ""}`}
+        } ${rail ? "min-h-[min(34rem,94dvh)] sm:h-[min(44rem,88vh)]" : ""}`}
       >
         <header className="flex items-center gap-3 border-b border-line px-5 py-3.5">
           {rail && !inRail && (
