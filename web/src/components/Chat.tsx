@@ -1,5 +1,12 @@
 import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { VoiceTerminal } from "./VoiceTerminal";
+import { RunningTray } from "./RunningTray";
+import { CommandLine } from "./CommandLine";
+import { mentionsCommand } from "../status-commands";
+import { SubagentPanel } from "./SubagentPanel";
+import { BackgroundJobs } from "./BackgroundJobs";
+import { stableSubagents, subagents, type Subagent } from "../subagents";
+import { useBackground } from "../use-background";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
@@ -11,7 +18,7 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuMenu, LuArrowDown, LuCheck, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuMenu, LuBot, LuArrowDown, LuCheck, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
@@ -24,7 +31,8 @@ import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
 import { TitleInput } from "./TitleInput";
 import { latestFileActivity } from "../file-activity";
-import { drafts, withUnsent } from "../drafts";
+import { caretFrom, drafts, withUnsent } from "../drafts";
+import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
@@ -193,7 +201,10 @@ export function Chat({
   const [terminal, setTerminal] = useState(false);
   // The terminal panel holds two: what the agent ran, and a shell of your own.
   // The shell is only started once asked for, and kept while the panel is open.
-  const [terminalTab, setTerminalTab] = useState<"agent" | "shell">("agent");
+  const [terminalTab, setTerminalTab] = useState<"agent" | "jobs" | "shell">("agent");
+  const [selectedJob, setSelectedJob] = useState<string | null>(null);
+  const [agentsOpen, setAgentsOpen] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [shellStarted, setShellStarted] = useState(false);
   const [terminalFocus, setTerminalFocus] = useState<{ id: string; at: number } | null>(null);
   useEffect(() => {
@@ -202,6 +213,15 @@ export function Chat({
   useEffect(() => {
     if (terminalTab === "shell" && terminal) setShellStarted(true);
   }, [terminalTab, terminal]);
+  const openAgent = (id: string) => {
+    setSelectedAgent(id);
+    setAgentsOpen(true);
+  };
+  const openJob = (key: string) => {
+    setSelectedJob(key);
+    setTerminalTab("jobs");
+    setTerminal(true);
+  };
   /** A command from the chat, found in the agent terminal. */
   const showInTerminal = (callId: string) => {
     setTerminalTab("agent");
@@ -213,8 +233,8 @@ export function Chat({
   const [filesDirty, setFilesDirty] = useState(false);
   const fileActivity = useMemo(() => latestFileActivity(events, session.workspace), [events, session.workspace]);
   useWorkPanels(
-    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else setCanvasOpen(false); },
+    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, agents: !voiceMode && agentsOpen },
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "agents") setAgentsOpen(false); else setCanvasOpen(false); },
     // A third panel closes another one instead, while Files has an edit in it.
     filesDirty ? ["files"] : [],
   );
@@ -228,7 +248,7 @@ export function Chat({
     setFiles(false);
   };
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", files && "files", terminal && "terminal"].filter(Boolean) as ("browser" | "files" | "terminal")[];
+  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", terminal && "terminal"].filter(Boolean) as ("browser" | "agents" | "files" | "terminal")[];
   const browserPane = useRef<HTMLDivElement>(null);
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
@@ -439,6 +459,14 @@ export function Chat({
   // What it is doing, and for how long. The clock ticks only while something is
   // running, so an idle session re-renders no more than it used to.
   const phase = useMemo(() => (running ? activity(events) : null), [running, events]);
+  // Beside the conversation: subagents, jobs left running, extension statuses.
+  // The same entry for a subagent whose own events have not changed: an open
+  // panel draws its transcript again only when there is more of it, not on
+  // every word of the main chat.
+  const lastAgents = useRef<Subagent[]>([]);
+  const agents = useMemo(() => (lastAgents.current = stableSubagents(lastAgents.current, subagents(events, items, ended))), [events, items, ended]);
+  const [background, refreshBackground] = useBackground(session.id, running, events);
+  const agentFor = (callId?: string) => (callId ? agents.find((a) => a.toolCallId === callId || a.id === `tool:${callId}`) : undefined);
   // The thinking block and the compaction marker already say so, animated,
   // where it is happening; the status pill would say it twice.
   const statusShownElsewhere = useMemo(() => {
@@ -456,7 +484,7 @@ export function Chat({
   // A notice is the portal speaking, not a message: only what a person or pi
   // said counts. Earlier pages that are not loaded yet count as said.
   const started = useMemo(
-    () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant"),
+    () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant" || item.kind === "command"),
     [items, hasEarlier],
   );
   const [now, setNow] = useState(() => Date.now());
@@ -496,6 +524,32 @@ export function Chat({
   };
   // What was listed for another chat is not offered here.
   useEffect(() => setCommands([]), [session.id]);
+  // A status line that names a command can run it — once it is known to be
+  // one of this chat's. Asked only of a pi that is up: a status can outlast
+  // the pi that set it, and asking must not start another.
+  const statusNamesCommand = background.statuses.some((s) => mentionsCommand(s.text));
+  useEffect(() => {
+    if (!statusNamesCommand) return;
+    const key = `${session.id}:${turns}`;
+    if (commandList.current?.key === key) {
+      void loadCommands();
+      return;
+    }
+    let live = true;
+    api.commands(session.id, { ifRunning: true }).then(
+      (r) => {
+        if (!live || r.notRunning) return;
+        // The same list a "/" would fetch, so kept as that.
+        if (commandList.current?.key !== key) commandList.current = { key, list: Promise.resolve(r.commands) };
+        setCommands(r.commands);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [statusNamesCommand, session.id, turns]);
+  const commandNames = useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
 
   // Show the palette while the composer holds a bare "/name" prefix.
   const slashText = slashToken(input);
@@ -711,6 +765,32 @@ export function Chat({
     setInput(next);
   };
 
+  // An extension that fills the chat box — pi's setEditorText, pasteToEditor —
+  // fills this one, for the person to send or change: the whole of it, or a
+  // paste where the cursor is, as in pi's terminal. One right after another
+  // builds on it: the box's text is taken as it now is, not as last drawn.
+  useEffect(
+    () =>
+      onFill(session.id, ({ text: given, paste }) => {
+        const before = draft.current;
+        const where = caret.current ?? { start: before.length, end: before.length };
+        const next = paste ? before.slice(0, where.start) + given + before.slice(where.end) : given;
+        const at = paste ? where.start + given.length : next.length;
+        draft.current = next;
+        caret.current = paste ? { start: at, end: at } : null;
+        // The same text again draws nothing, and a cursor left to be placed
+        // then would move under the next key typed.
+        if (next === before) box.current?.setSelectionRange(at, at);
+        else caretTo.current = at;
+        changeInput(next);
+        requestAnimationFrame(() => box.current?.focus());
+      }),
+    [session.id],
+  );
+
+  // Where a paste from an extension goes, for the portal to read the box as it will be.
+  useEffect(() => caretFrom((id) => (id === currentSession.current ? caret.current ?? undefined : undefined)), []);
+
   const clearBox = () => {
     caret.current = null;
     changeInput("");
@@ -814,6 +894,17 @@ export function Chat({
             <span className="rounded-md bg-warn/10 px-2 py-0.5 text-[11px] text-warn">
               interrupted — send a message to resume
             </span>
+          )}
+          {agents.length > 0 && (
+            <PanelToggle
+              open={agentsOpen}
+              onClick={() => setAgentsOpen((v) => !v)}
+              label="Subagents"
+              title={agentsOpen ? "Hide the subagents" : "The agents working beside this one"}
+              live={agents.some((a) => a.status === "running")}
+            >
+              <LuBot />
+            </PanelToggle>
           )}
           {browserUp && (
             <PanelToggle
@@ -1103,10 +1194,17 @@ export function Chat({
               </div>
             );
           }
+          if (item.kind === "command") {
+            return (
+              <div key={item.id} className={`chat-row${enter}`}>
+                <CommandLine item={item} />
+              </div>
+            );
+          }
           if (item.kind === "tool") {
             return (
               <div key={item.id} className={`tool-row${enter}`}>
-              <ToolCall item={item} onOpenTerminal={showInTerminal} />
+              <ToolCall item={item} onOpenTerminal={showInTerminal} onOpenAgent={agentFor(item.callId) ? () => openAgent(agentFor(item.callId)!.id) : undefined} />
               {item.picture && (
                 <a
                   href={api.pictureUrl(session.id, item.picture.path, item.id)}
@@ -1132,7 +1230,9 @@ export function Chat({
               className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs${enter} ${
                 item.tone === "error"
                   ? "bg-danger/10 text-danger"
-                  : "bg-raised/60 text-fg-muted"
+                  : item.tone === "warn"
+                    ? "bg-warn/10 text-warn"
+                    : "bg-raised/60 text-fg-muted"
               }`}
             >
               {item.text}
@@ -1239,6 +1339,15 @@ export function Chat({
         >
           <span className="h-1 w-12 rounded-full bg-fg/15 transition group-hover:bg-accent/60" />
         </button>
+        <RunningTray
+          agents={agents}
+          jobs={background.jobs}
+          statuses={background.statuses}
+          commands={commandNames}
+          onAgent={openAgent}
+          onJob={openJob}
+          onCommand={(command) => attempt(() => submit(command, false))}
+        />
         <DictationStrip dictation={dictation} />
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 text-xs text-accent">
@@ -1284,6 +1393,7 @@ export function Chat({
           }}
           onSelect={(e) => {
             caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
+            drafts.moved(session.id);
           }}
           onPaste={(e) => {
             // A screenshot, or "Copy image" in a browser. Where there is text as
@@ -1440,12 +1550,16 @@ export function Chat({
                           Agent
                           {running && <i className="chat-tab-live" aria-label="Running" />}
                         </button>
+                        <button type="button" role="tab" aria-selected={terminalTab === "jobs"} onClick={() => setTerminalTab("jobs")}>
+                          Background
+                          {background.jobs.some((j) => j.state === "running" && !j.attached) && <i className="chat-tab-live" aria-label="Running" />}
+                        </button>
                         <button type="button" role="tab" aria-selected={terminalTab === "shell"} onClick={() => setTerminalTab("shell")}>
                           Your shell
                         </button>
                       </div>
                     ) : (
-                      <span className="text-[11px] text-fg-subtle">{kind === "browser" ? "Browser" : "Files"}</span>
+                      <span className="text-[11px] text-fg-subtle">{kind === "browser" ? "Browser" : kind === "agents" ? "Subagents" : "Files"}</span>
                     )}
                     {kind === "terminal" && terminalTab === "shell" && <span className="max-md:hidden truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
                     {kind === "browser" && (
@@ -1457,9 +1571,9 @@ export function Chat({
                       </button>
                     )}
                     <button
-                      onClick={() => (kind === "browser" ? (exitFullscreen(browserPane.current), setWatching(false)) : kind === "files" ? void closeFiles() : setTerminal(false))}
+                      onClick={() => (kind === "browser" ? (exitFullscreen(browserPane.current), setWatching(false)) : kind === "files" ? void closeFiles() : kind === "agents" ? setAgentsOpen(false) : setTerminal(false))}
                       title="Collapse"
-                      aria-label={`Close the ${kind === "browser" ? "browser" : kind === "files" ? "files" : "terminal"}`}
+                      aria-label={`Close the ${kind === "browser" ? "browser" : kind === "files" ? "files" : kind === "agents" ? "subagents" : "terminal"}`}
                       className={`${kind === "browser" ? "" : "ml-auto "}rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg`}
                     >
                       ✕
@@ -1473,6 +1587,11 @@ export function Chat({
                       allow="clipboard-read; clipboard-write; fullscreen"
                     />
                   )}
+                  {kind === "agents" && (
+                    <div className="min-h-0 flex-1 bg-surface">
+                      <SubagentPanel sessionId={session.id} agents={agents} items={items} selected={selectedAgent} onSelect={setSelectedAgent} />
+                    </div>
+                  )}
                   {kind === "files" && (
                     <div className="min-h-0 flex-1 bg-surface">
                       {/* Not before the chat's events are here: what it did earlier is not news. */}
@@ -1483,6 +1602,11 @@ export function Chat({
                     <div className="relative min-h-0 flex-1 bg-[#0b0b0d]">
                       <div className={terminalTab === "agent" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
                         <VoiceTerminal events={events} limit={500} maxOutput={200_000} ended={ended} hidden={terminalTab !== "agent"} focus={terminalFocus} onFocused={() => setTerminalFocus(null)} />
+                      </div>
+                      <div className={terminalTab === "jobs" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
+                        {terminalTab === "jobs" && (
+                          <BackgroundJobs sessionId={session.id} state={background} selected={selectedJob} onSelect={setSelectedJob} onChanged={refreshBackground} />
+                        )}
                       </div>
                       {shellStarted && (
                         <div className={terminalTab === "shell" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
@@ -1541,12 +1665,15 @@ function PanelToggle({
   onClick,
   label,
   title,
+  live,
   children,
 }: {
   open: boolean;
   onClick: () => void;
   label: string;
   title: string;
+  /** Something in the panel is running: a dot says so while it is shut. */
+  live?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -1561,6 +1688,7 @@ function PanelToggle({
       }`}
     >
       {children}
+      {live && <i className="header-live-dot" aria-hidden />}
     </button>
   );
 }

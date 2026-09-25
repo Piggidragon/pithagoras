@@ -8,13 +8,14 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
+import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
+import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { contextWindowFor } from "../db.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
@@ -53,6 +54,39 @@ const CONTEXT_FILES = ["SOUL.md", "PrimaryUser.md", "MEMORY.md"];
 const SHARED_FILES = ["SOUL.md", "TEAM.md"];
 
 const filesFor = (role?: string) => (!role || role === "primary" ? CONTEXT_FILES : SHARED_FILES);
+
+/**
+ * pi's own theme, for extensions that style text with it even when nothing
+ * will draw it — as pi's no-UI context hands them. pi's CLI loads it on start;
+ * the SDK does not, and the theme object pi hands out throws on every read
+ * until it has. Loaded once, with the SDK, then read where pi keeps it.
+ */
+const THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
+let themeLoaded: string | null = null;
+export function loadTheme(
+  pi: { initTheme?: (name?: string, watch?: boolean) => void; SettingsManager?: { create(cwd: string): { getTheme(): string | undefined } } },
+  cwd = process.cwd(),
+) {
+  // The one set in pi's settings, as pi's CLI loads it; its default without one.
+  let name: string | undefined;
+  try {
+    name = pi.SettingsManager?.create(cwd).getTheme();
+  } catch {
+    // Settings that cannot be read leave the default.
+  }
+  if (themeLoaded === (name ?? "")) return;
+  themeLoaded = name ?? "";
+  try {
+    pi.initTheme?.(name, false);
+  } catch {
+    try {
+      pi.initTheme?.(undefined, false);
+    } catch {
+      // An extension reading it gets undefined, as it did before.
+    }
+  }
+}
+const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
 
 export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
@@ -204,8 +238,31 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private voiceFirst?: VoiceFirstTurn;
   /** Dialogs an extension is waiting on, keyed by request id. */
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
+  /** The chat box's text, kept by the portal: see useDrafts. */
+  private drafts?: DraftStore;
+
+  useDrafts(drafts: DraftStore): void {
+    this.drafts = drafts;
+  }
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
+  /** The extensions' event bus, when this client made one. */
+  bus?: { emit(channel: string, data: unknown): void };
+  unbridge?: Bridge;
+
+  // Only to one running here that takes it: after a restart, the bus is new
+  // and nobody on it, and "sent" would be a message that went nowhere.
+  subagentInput(id: string, text: string): boolean {
+    if (!this.bus || !this.unbridge?.takes(id, "input")) return false;
+    this.bus.emit(SUBAGENT_INPUT, { id, text });
+    return true;
+  }
+
+  subagentStop(id: string): boolean {
+    if (!this.bus || !this.unbridge?.takes(id, "stop")) return false;
+    this.bus.emit(SUBAGENT_STOP, { id });
+    return true;
+  }
   /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
   private appliedModel?: object;
   /** What each model's own definition says its window is, as last seen on a model that was pi's. */
@@ -255,8 +312,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
     const pi: any = await import("@earendil-works/pi-coding-agent");
+    loadTheme(pi, opts.cwd);
 
     const modelRuntime = await pi.ModelRuntime.create();
+    // Shared with the extensions, so one that runs a subagent can tell the
+    // portal about it, and be told what the person wants of it.
+    const eventBus = typeof pi.createEventBus === "function" ? pi.createEventBus() : undefined;
 
     // Without an explicit loader the SDK starts with no extensions, skills or
     // prompt templates — so installed packages contribute no commands at all.
@@ -297,6 +358,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       }
       resourceLoader = new pi.DefaultResourceLoader({
         cwd: opts.cwd,
+        ...(eventBus ? { eventBus } : {}),
         agentDir: pi.getAgentDir(),
         // Available everywhere without being installed, and not editable in
         // place: they belong to the image, so an edit would be lost on the next
@@ -367,6 +429,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const client = new SdkPiClient(session, modelRuntime, () => {});
     client.portalSessionId = opts.sessionId;
     client.canvases = canvases;
+    if (eventBus && resourceLoader) {
+      client.bus = eventBus;
+      client.unbridge = bridgeSubagents(eventBus, (event) => client.emit("event", event));
+    }
     if (resourceLoader) {
       client.voiceFirst = voiceFirst;
     }
@@ -524,6 +590,46 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       setWorkingVisible: () => {},
       setWorkingIndicator: () => {},
       setHiddenThinkingLabel: () => {},
+      // The rest of pi's UI, which extensions call whether or not there is a
+      // terminal. Missing, a call threw — "ctx.ui.custom is not a function" —
+      // and the command failed for no reason of its own. As pi's RPC mode
+      // does: what a browser can do is passed on, the rest does nothing.
+      setFooter: () => {},
+      setHeader: () => {},
+      setTitle: () => {},
+      // A view drawn for the terminal. Passed on so the chat can say it cannot be shown.
+      custom: async () => {
+        fireAndForget({ method: "custom" });
+        return undefined;
+      },
+      // Into the chat box, for the person to send or change.
+      // What is in the box follows at once, for a getEditorText right after.
+      setEditorText: (text: string) => {
+        this.drafts?.set(String(text ?? ""));
+        fireAndForget({ method: "setEditorText", text: String(text ?? "") });
+      },
+      // Over what is selected, or at the end, as the page puts it.
+      pasteToEditor: (text: string) => {
+        const given = String(text ?? "");
+        const draft = this.drafts?.get()?.text ?? "";
+        const { start, end } = this.drafts?.get()?.caret ?? { start: draft.length, end: draft.length };
+        const at = start + given.length;
+        this.drafts?.set(draft.slice(0, start) + given + draft.slice(end), { start: at, end: at });
+        fireAndForget({ method: "setEditorText", text: given, paste: true });
+      },
+      // Answered with nothing, an extension that adds to the draft replaced it.
+      getEditorText: () => this.drafts?.get()?.text ?? "",
+      addAutocompleteProvider: () => {},
+      setEditorComponent: () => {},
+      getEditorComponent: () => undefined,
+      get theme() {
+        return piTheme();
+      },
+      getAllThemes: () => [],
+      getTheme: () => undefined,
+      setTheme: () => ({ success: false, error: "The portal's theme is set in the browser." }),
+      getToolsExpanded: () => false,
+      setToolsExpanded: () => {},
     };
   }
 
@@ -683,6 +789,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   dispose(): void {
+    this.unbridge?.();
     if (this.disposed) return;
     this.disposed = true;
     this.canvases?.interrupt();

@@ -28,7 +28,7 @@ import {
   writeAgentFile,
   type WizardInput,
 } from "./agent-setup.js";
-import { sessions, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
+import { sessions, CommandFailed, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
@@ -44,6 +44,7 @@ import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { browserRouter } from "./api/browser.js";
 import { terminalRouter } from "./api/terminal.js";
+import { MARKER, clearFinished, listJobs, readOutput, stopJob } from "./background.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
@@ -102,6 +103,13 @@ const PORT = Number(process.env.PORT || 4100);
 const REPLAY_EVENTS = 1_200;
 /** Persistent place for CLIs, kept on PATH so pi and its tools can reach them. */
 const BIN_DIR = path.resolve(process.env.BIN_DIR || "/data/bin");
+
+// Everything the portal starts carries this, and keeps it when it is detached:
+// it is how a background job is known to be the agent's. See background.ts.
+{
+  const [name, value] = MARKER.split("=");
+  process.env[name] = value;
+}
 
 const app = express();
 // A message can carry pictures, which do not fit in what every other request is
@@ -625,6 +633,10 @@ app.post("/api/sessions/:id/prompt", promptJson, async (req, res) => {
     if (title && getSession(session.id)?.auto_title) updateSession(session.id, { title, auto_title: 0 });
     res.json({ ok: true, status: "running" });
   } catch (e) {
+    // Sent, and failed where it is shown: on the command's line in the chat.
+    // An error here as well was the same words in a banner, and the command
+    // put back in the box.
+    if (e instanceof CommandFailed) return res.json({ ok: true, failed: e.message });
     res.status(500).json({ error: (e as Error).message });
   }
 });
@@ -681,6 +693,19 @@ app.post("/api/sessions/:id/ui-response", (req, res) => {
   if (typeof id !== "string") return res.status(400).json({ error: "id required" });
   const delivered = sessions.respondUi(session.id, id, { value, cancelled: Boolean(cancelled) });
   res.json({ ok: delivered, note: delivered ? undefined : "Request already resolved or expired" });
+});
+
+/** What is in the chat box, which an extension can ask for. Kept by the portal; starts nothing. */
+app.put("/api/sessions/:id/draft", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const { text, caret } = req.body ?? {};
+  if (typeof text !== "string") return res.status(400).json({ error: "text required" });
+  const at = (n: unknown) => (Number.isInteger(n) && (n as number) >= 0 && (n as number) <= text.length ? (n as number) : undefined);
+  const start = at(caret?.start);
+  const end = at(caret?.end);
+  sessions.setDraft(session.id, text, start !== undefined && end !== undefined && start <= end ? { start, end } : undefined);
+  res.json({ ok: true });
 });
 
 /**
@@ -780,6 +805,64 @@ app.post("/api/sessions/:id/abort", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   await sessions.abort(session.id);
+  res.json({ ok: true });
+});
+
+// --- what runs beside the conversation: background jobs, extension status, subagents ---
+
+const BACKGROUND_SUPPORTED = EXECUTOR_KIND !== "container" && process.platform === "linux";
+
+app.get("/api/sessions/:id/background", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const jobs = BACKGROUND_SUPPORTED ? await listJobs(session.workspace, sessions.callsRunning(session.id)) : [];
+  // piRunning: whether an extension could ask what is in the chat box — the page
+  // tells the portal only then.
+  res.json({ supported: BACKGROUND_SUPPORTED, jobs, ...sessions.extensionState(session.id), piRunning: sessions.isLoaded(session.id) });
+});
+
+app.get("/api/sessions/:id/background/:key/output", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const from = req.query.from === undefined ? undefined : Number(req.query.from);
+  const out = await readOutput(session.workspace, req.params.key, Number.isFinite(from) ? from : undefined);
+  if (!out) return res.status(404).json({ error: "This job's output is not in a file the portal can follow" });
+  res.json(out);
+});
+
+app.post("/api/sessions/:id/background/:key/stop", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  if (!(await stopJob(session.workspace, req.params.key))) {
+    return res.status(409).json({ error: "That job is not running any more" });
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/sessions/:id/background/clear", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  clearFinished(session.workspace);
+  res.json({ ok: true });
+});
+
+app.post("/api/sessions/:id/subagents/:agent/input", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+  if (!text) return res.status(400).json({ error: "Nothing to send" });
+  if (!sessions.subagentInput(session.id, req.params.agent, text)) {
+    return res.status(409).json({ error: "The subagent cannot be reached: it is not running any more, or the chat is not running here" });
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/sessions/:id/subagents/:agent/stop", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  if (!sessions.subagentStop(session.id, req.params.agent)) {
+    return res.status(409).json({ error: "The subagent cannot be reached: it is not running any more, or the chat is not running here" });
+  }
   res.json({ ok: true });
 });
 
@@ -1002,6 +1085,9 @@ app.post("/api/sessions/:id/compact", async (req, res) => {
 app.get("/api/sessions/:id/commands", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
+  // Only if pi is up: a status line naming a command asks this way, and
+  // asking must not start pi for a chat that has none.
+  if (req.query.ifRunning && !sessions.isLoaded(session.id)) return res.json({ commands: [], notRunning: true });
   try {
     const client = await sessions.client(session.id);
     // Builtins first: they are the ones people reach for most.
