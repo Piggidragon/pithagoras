@@ -18,6 +18,7 @@ import {
   LuX,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
+import { Streamdown } from "streamdown";
 import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, stripAnsi, type Activity, type Item } from "../transcript";
 import { SHELL_TOOL, unwrapCall } from "../tool-activity";
 
@@ -424,7 +425,10 @@ export function CompactionMarker({ item }: { item: CompactionItem }) {
       </div>
       {item.summary && (
         <Collapse open={open}>
-          <div className="chat-compaction-summary">{item.summary}</div>
+          {/* pi writes the summary in markdown: headings, checklists, file lists. */}
+          <div className="chat-compaction-summary md">
+            <Streamdown shikiTheme={["github-light", "github-dark"]}>{item.summary}</Streamdown>
+          </div>
         </Collapse>
       )}
     </div>

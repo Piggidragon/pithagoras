@@ -786,7 +786,9 @@ export function Chat({
             <TitleInput
               value={session.title}
               label="Chat name"
-              className="w-full text-sm font-medium"
+              // The field's padding hangs outside the line, so the header
+              // keeps its height and the text stays where the title was.
+              className="-my-0.5 -ml-1.5 block w-full text-sm font-medium leading-5"
               onCommit={(next) => {
                 setRenaming(false);
                 void attempt(() => onRename(next));
