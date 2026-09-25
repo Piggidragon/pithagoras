@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   LuBot,
   LuBrain,
@@ -19,19 +19,15 @@ import {
   LuX,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
-import type { Activity, Item } from "../transcript";
-import { SHELL_TOOL, toolName } from "../tool-activity";
+import { Streamdown } from "streamdown";
+import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, stripAnsi, type Activity, type Item } from "../transcript";
+import { SHELL_TOOL, unwrapCall } from "../tool-activity";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
 
-export const formatElapsed = (s: number) =>
-  s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
-
 const formatDuration = (ms: number) =>
-  ms < 1000 ? `${Math.max(0.1, ms / 1000).toFixed(1)}s` : ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : formatElapsed(Math.round(ms / 1000));
-
-export const tokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  ms < 10_000 ? `${Math.max(0.1, ms / 1000).toFixed(1)}s` : formatElapsed(Math.round(ms / 1000));
 
 /**
  * Opens and closes by animating its height to what the content needs — the
@@ -96,12 +92,7 @@ export function ThinkingBlock({
 }) {
   const [open, setOpen] = useState(false);
   const body = useRef<HTMLDivElement>(null);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!streaming) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [streaming]);
+  const now = useNow(streaming);
   useLayoutEffect(() => {
     const el = body.current;
     if (el && streaming && open) el.scrollTop = el.scrollHeight;
@@ -212,22 +203,42 @@ function useNow(on: boolean) {
 }
 
 /**
- * How a shell command ended, read from what pi's bash tool appends to its
- * output: an exit code, a timeout, or a stop.
+ * The exit code a shell tool gave in its own words, on one of the first or
+ * last lines of its output: pi's "Command exited with code 2", another
+ * extension's "Process exited with code 2" or "exit code: 2". Only there, so a
+ * log that mentions an exit code on the way is not taken for the command's.
  */
-export function shellOutcome(status: ToolItem["status"], output: string, interrupted?: boolean): { label: string; tone: "ok" | "error" | "warn" } | undefined {
+function reportedExit(output: string): number | undefined {
+  const lines = output.trim().split("\n");
+  for (const line of [...lines.slice(0, 6), ...lines.slice(-4)]) {
+    const m = /^[[(]?\s*(?:(?:command|process) exited with code|exit(?:[ _]code|[ _]status)?\s*[:=])\s*(-?\d+)\s*[\])]?$/i.exec(line.trim());
+    if (m) return Number(m[1]);
+  }
+  return undefined;
+}
+
+/**
+ * How a shell command ended: an exit code, a timeout, or a stop. pi's bash
+ * tool calls a non-zero exit an error, so a `done` from it is exit 0; a shell
+ * tool from another extension may end "done" with a failure it only states in
+ * its output, and says nothing of a success it does not state.
+ */
+export function shellOutcome(status: ToolItem["status"], output: string, interrupted?: boolean, tool = "bash"): { label: string; tone: "ok" | "error" | "warn" } | undefined {
   if (status === "running") return undefined;
   if (interrupted) return { label: "interrupted", tone: "warn" };
-  if (status === "done") return { label: "exit 0", tone: "ok" };
+  if (status === "done") {
+    const code = reportedExit(output) ?? (tool.toLowerCase() === "bash" ? 0 : undefined);
+    return code === undefined ? undefined : { label: `exit ${code}`, tone: code === 0 ? "ok" : "error" };
+  }
   const code = /Command exited with code (-?\d+)\s*$/.exec(output);
   if (code) return { label: `exit ${code[1]}`, tone: "error" };
   const timeout = /Command timed out after (\d+) seconds\s*$/.exec(output);
   if (timeout) return { label: `timed out · ${timeout[1]}s`, tone: "warn" };
   if (/Command aborted\s*$/.test(output)) return { label: "stopped", tone: "warn" };
+  const other = reportedExit(output);
+  if (other !== undefined) return { label: `exit ${other}`, tone: "error" };
   return { label: "failed", tone: "error" };
 }
-
-const lineCount = (text: string) => (text ? text.replace(/\n$/, "").split("\n").length : 0);
 
 /** Past this, the output shown in the chat is the end of it; the terminal has the rest. */
 const INLINE_OUTPUT = 6000;
@@ -249,13 +260,19 @@ export function ToolCall({
 }) {
   const [open, setOpen] = useState(false);
   // Whatever extension it came from: nothing below is keyed to one tool but
-  // the shell, which is shown as a terminal would show it.
-  const name = toolName(item.name, item.args);
+  // the shell, which is shown as a terminal would show it. Called through the
+  // MCP adapter, it is the tool inside, with what that was given.
+  const call = unwrapCall(item.name, item.args);
+  const name = call.name;
+  const wrapped = name !== item.name;
   const shell = SHELL_TOOL.test(name);
-  const args = item.args && typeof item.args === "object" ? (item.args as Record<string, unknown>) : undefined;
+  const args = wrapped ? call.input : item.args && typeof item.args === "object" ? (item.args as Record<string, unknown>) : undefined;
   const command = shell ? String(args?.command ?? args?.cmd ?? (typeof item.args === "string" ? item.args : "")) : "";
   const took = item.since && item.until ? item.until - item.since : undefined;
-  const output = item.output?.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "") ?? "";
+  // Stored before times were kept to the millisecond: both on a whole second,
+  // so only whole seconds can be said of it.
+  const coarse = took !== undefined && item.since! % 1000 === 0 && item.until! % 1000 === 0;
+  const output = useMemo(() => stripAnsi(item.output ?? ""), [item.output]);
   const clipped = output.length > INLINE_OUTPUT;
   const running = item.status === "running";
   const now = useNow(running);
@@ -265,11 +282,12 @@ export function ToolCall({
   // A command given a timeout has an end to measure against; the ring fills towards it.
   const timeout = typeof args?.timeout === "number" && args.timeout > 0 ? args.timeout : undefined;
   const outcome = shell
-    ? shellOutcome(item.status, output, item.interrupted)
+    ? shellOutcome(item.status, output, item.interrupted, name)
     : item.interrupted
       ? ({ label: "interrupted", tone: "warn" } as const)
       : undefined;
-  const lines = shell ? lineCount(output) : 0;
+  // Counted on the whole output: what is kept of it is only the end.
+  const lines = shell ? (item.outputLines ?? lineCount(output)) : 0;
   // Any tool that streams what it is doing shows its newest lines while it runs.
   const recent = running && !open ? lastLines(output) : [];
 
@@ -288,6 +306,8 @@ export function ToolCall({
           )}
         </span>
         <span className="chat-tool-name" title={name !== item.name ? `${item.name} → ${name}` : undefined}>{running ? <Shimmer>{name}</Shimmer> : name}</span>
+        {/* What it acted on — the command, the file — readable without opening each call. */}
+        {item.detail && <span className="chat-tool-detail" title={item.detail}>{item.detail}</span>}
         {outcome && <span className={`chat-tool-badge is-${outcome.tone}`}>{outcome.label}</span>}
         {timed && (
           <span className="chat-faint tabular-nums">
@@ -295,7 +315,7 @@ export function ToolCall({
             {timeout ? ` / ${formatElapsed(timeout)}` : ""}
           </span>
         )}
-        {took !== undefined && <span className="chat-faint tabular-nums">{formatDuration(took)}</span>}
+        {took !== undefined && <span className="chat-faint tabular-nums">{coarse ? (took < 1000 ? "<1s" : formatElapsed(Math.round(took / 1000))) : formatDuration(took)}</span>}
         {shell && lines > 0 && (
           <span className="chat-faint tabular-nums">
             {lines.toLocaleString()} {lines === 1 ? "line" : "lines"}
@@ -325,13 +345,13 @@ export function ToolCall({
               {command || "(no command)"}
             </pre>
           ) : (
-            <ToolArgs args={item.args} />
+            <ToolArgs args={wrapped ? call.input : item.args} />
           )}
           {output ? (
             <div className="chat-tool-output-wrap">
               <div className="chat-tool-label">
                 {item.status === "error" && !item.interrupted ? "Error" : "Output"}
-                {clipped && <span className="chat-faint"> · last {tokens(INLINE_OUTPUT)} characters</span>}
+                {clipped && <span className="chat-faint"> · last {INLINE_OUTPUT.toLocaleString()} characters</span>}
               </div>
               <pre className={`chat-tool-output ${item.status === "error" && !item.interrupted ? "is-error" : ""}`}>{clipped ? output.slice(-INLINE_OUTPUT) : output}</pre>
             </div>
@@ -375,13 +395,8 @@ function ToolArgs({ args }: { args: unknown }) {
  */
 export function CompactionMarker({ item }: { item: CompactionItem }) {
   const [open, setOpen] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
   const running = item.status === "running";
-  useEffect(() => {
-    if (!running) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [running]);
+  const now = useNow(running);
   const seconds = item.since ? Math.max(0, Math.floor((now - item.since) / 1000)) : 0;
 
   if (running) {
@@ -417,7 +432,7 @@ export function CompactionMarker({ item }: { item: CompactionItem }) {
           {failed ? <LuTriangleAlert aria-hidden /> : <LuFoldVertical aria-hidden />}
           <span>
             {failed ? "Compaction did not finish" : "Conversation compacted"}
-            {!failed && item.tokensBefore ? ` · ${tokens(item.tokensBefore)} tokens summarized` : ""}
+            {!failed && item.tokensBefore ? ` · ${formatTokens(item.tokensBefore)} tokens summarized` : ""}
           </span>
           {item.summary && <LuChevronRight className="chat-chevron" aria-hidden />}
         </button>
@@ -425,14 +440,15 @@ export function CompactionMarker({ item }: { item: CompactionItem }) {
       </div>
       {item.summary && (
         <Collapse open={open}>
-          <div className="chat-compaction-summary">{item.summary}</div>
+          {/* pi writes the summary in markdown: headings, checklists, file lists. */}
+          <div className="chat-compaction-summary md">
+            <Streamdown shikiTheme={["github-light", "github-dark"]}>{item.summary}</Streamdown>
+          </div>
         </Collapse>
       )}
     </div>
   );
 }
-
-const promptLabels = ["Reading the conversation", "Reviewing the context", "Preparing to respond"];
 
 /**
  * What the agent is doing between the things that show for themselves.
@@ -447,9 +463,8 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
   const elapsed = seconds >= 2 ? formatElapsed(seconds) : null;
   const p = phase.prefill;
   // `processed` already counts the cached prefix.
-  const percent = p && p.total > 0 ? Math.round((Math.min(p.total, p.processed) / p.total) * 100) : undefined;
-
-  const detail = p ? `${p.processed.toLocaleString()} / ${p.total.toLocaleString()} tokens${p.cache ? ` · ${p.cache.toLocaleString()} from cache` : ""}` : undefined;
+  const { done, percent } = prefillShare(p);
+  const detail = p ? `${done.toLocaleString()} / ${p.total.toLocaleString()} tokens${p.cache ? ` · ${p.cache.toLocaleString()} from cache` : ""}` : undefined;
   let kind: string;
   let icon: ReactNode;
   let text: ReactNode;
@@ -470,7 +485,7 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
     case "processing the prompt": {
       kind = "prefill";
       icon = <Ring value={percent !== undefined ? percent / 100 : undefined} />;
-      const label = promptLabels[Math.floor(seconds / 4) % promptLabels.length];
+      const label = promptLabel(seconds);
       text = (
         <span key={label} className="chat-status-swap">
           <Shimmer>{label}</Shimmer>

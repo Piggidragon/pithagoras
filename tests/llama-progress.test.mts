@@ -63,3 +63,56 @@ test('a load that fails before a byte comes back still ends, so the chat does no
   assert.deepEqual(models.filter(m=>m.id==='test-fail').map(m=>m.state),['loading','ready']);
  }finally{forgetSession('test-fail');upstream.closeAllConnections();upstream.close();}
 });
+test('a server that wants a key is asked with the request\'s key, and a refusal is not taken for silence',async()=>{
+ const seen:(string|undefined)[]=[];
+ const upstream=http.createServer((req,res)=>{
+  seen.push(req.headers.authorization);
+  if(req.headers.authorization!=='Bearer k'){res.writeHead(401).end();return;}
+  if(req.url==='/models'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[{id:'m',status:{value:'unloaded'}}]}));return;}
+  res.writeHead(404).end();
+ });
+ upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const origin=`http://127.0.0.1:${(upstream.address() as any).port}`;
+ try{
+  assert.equal(await modelLoaded(origin,'m'),undefined,'no key: refused');
+  assert.equal(await modelLoaded(origin,'m',{authorization:'Bearer k'}),false,'asked again, with the key');
+  assert.equal(seen.at(-1),'Bearer k');
+ }finally{upstream.closeAllConnections();upstream.close();}
+});
+test('a model found loaded is not asked about again on every step of a run, and a swap asks again',async()=>{
+ let asked=0;
+ const upstream=http.createServer((req,res)=>{
+  asked++;
+  if(req.url==='/models'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[{id:'a',status:{value:'loaded'}},{id:'b',status:{value:'loaded'}}]}));return;}
+  res.writeHead(404).end();
+ });
+ upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const origin=`http://127.0.0.1:${(upstream.address() as any).port}`;
+ try{
+  assert.equal(await modelLoaded(origin,'a'),true);
+  assert.equal(await modelLoaded(origin,'a'),true);
+  assert.equal(asked,1);
+  assert.equal(await modelLoaded(origin,'b'),true);
+  assert.equal(await modelLoaded(origin,'a'),true);
+  assert.equal(asked,3,'another model in between may have swapped it out');
+  assert.equal(await modelLoaded(origin,'alias'),undefined);
+  const after=asked;
+  assert.equal(await modelLoaded(origin,'alias'),undefined);
+  assert.equal(asked,after,'a model the router does not list is left alone for a while');
+ }finally{upstream.closeAllConnections();upstream.close();}
+});
+test('llama-swap: a model up is loaded, one down is not, and an alias is not taken for down',async()=>{
+ const upstream=http.createServer((req,res)=>{
+  const json=(body:unknown)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
+  if(req.url==='/running')return json({running:[{model:'qwen',state:'ready'}]});
+  if(req.url==='/v1/models')return json({object:'list',data:[{id:'qwen'},{id:'llama'}]});
+  res.writeHead(404).end();
+ });
+ upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const origin=`http://127.0.0.1:${(upstream.address() as any).port}`;
+ try{
+  assert.equal(await modelLoaded(origin,'llama'),false);
+  assert.equal(await modelLoaded(origin,'qwen'),true);
+  assert.equal(await modelLoaded(origin,'fast'),undefined,'an alias: what it stands for is not said');
+ }finally{upstream.closeAllConnections();upstream.close();}
+});

@@ -1,25 +1,68 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { PortalEvent } from '../api';
 import { useFollowBottom } from '../use-follow-bottom';
-import { SHELL_TOOL } from '../tool-activity';
+import { SHELL_TOOL, unwrap } from '../tool-activity';
+import { stripAnsi, toolOutputText } from '../transcript';
 
-export function terminalRuns(events: PortalEvent[], limit = 6, maxOutput = 20000) {
-  const runs: { id: string; command: string; output: string; running: boolean; error: boolean }[] = [];
+type Run = { id: string; command: string; output: string; running: boolean; error: boolean; interrupted?: boolean };
+
+/**
+ * The commands in `events`, oldest first, the last `limit` of them. `ended`:
+ * the run is over though no event says so — see buildTranscript.
+ *
+ * One pass, whatever the length: this runs again with every token streamed.
+ */
+export function terminalRuns(events: PortalEvent[], limit = 6, maxOutput = 20000, ended = false) {
+  const runs: (Run & { result?: unknown })[] = [];
+  const byId = new Map<string, Run & { result?: unknown }>();
+  const open = new Set<Run>();
+  // What the chat does with a call whose end never came: it was cut off.
+  const settle = () => {
+    for (const run of open) { run.running = false; run.interrupted = true; }
+    open.clear();
+  };
   for (const event of events) {
     const p = event.payload ?? {};
-    if (event.type === 'tool_execution_start' && SHELL_TOOL.test(p.toolName ?? p.name ?? '')) {
-      const input = p.input ?? p.args ?? p.parameters ?? {};
-      runs.push({ id: p.toolCallId ?? String(event.seq), command: input.command ?? input.cmd ?? p.toolName, output: '', running: true, error: false });
-    } else if (event.type === 'tool_execution_update' || event.type === 'tool_execution_end') {
-      const run = p.toolCallId ? runs.find(r => r.id === p.toolCallId) : [...runs].reverse().find(r => r.running && SHELL_TOOL.test(p.toolName ?? p.name ?? ''));
-      if (!run) continue;
-      const result = p.partialResult ?? p.result;
-      const text = result?.content?.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
-      if (typeof text === 'string') run.output = text.slice(-maxOutput);
-      if (event.type === 'tool_execution_end') { run.running = false; run.error = !!p.isError; }
+    switch (event.type) {
+      case 'tool_execution_start': {
+        const { name, input } = unwrap(p);
+        if (!SHELL_TOOL.test(name)) break;
+        const run = { id: p.toolCallId ?? String(event.seq), command: input.command ?? input.cmd ?? name, output: '', running: true, error: false };
+        runs.push(run);
+        byId.set(run.id, run);
+        open.add(run);
+        break;
+      }
+      case 'tool_execution_update':
+      case 'tool_execution_end': {
+        let run = p.toolCallId ? byId.get(p.toolCallId) : undefined;
+        if (!p.toolCallId && SHELL_TOOL.test(unwrap(p).name)) run = [...open].at(-1);
+        if (!run) break;
+        // Only the newest output is shown: read once, at the end.
+        const result = p.partialResult ?? p.result;
+        if (result !== undefined) run.result = result;
+        if (event.type === 'tool_execution_end') {
+          run.running = false;
+          run.error = !!p.isError;
+          delete run.interrupted;
+          open.delete(run);
+        }
+        break;
+      }
+      case 'portal_status':
+        if (typeof p.status === 'string' && p.status !== 'running') settle();
+        break;
+      case 'agent_end':
+      case 'agent_start':
+        settle();
+        break;
     }
   }
-  return runs.slice(-limit);
+  if (ended) settle();
+  return runs.slice(-limit).map(({ result, ...run }) => {
+    const text = result === undefined ? undefined : toolOutputText(result);
+    return typeof text === 'string' ? { ...run, output: text.slice(-maxOutput) } : run;
+  });
 }
 
 /**
@@ -27,31 +70,56 @@ export function terminalRuns(events: PortalEvent[], limit = 6, maxOutput = 20000
  *
  * `focus` is a tool call to bring into view — "Show the whole output" on a call
  * in the chat — marked for a moment so the eye finds it among the others.
+ * `onFocused` hands it back once it has been shown, so opening the terminal
+ * again later does not scroll back to it.
  */
-export function VoiceTerminal({ events, limit, maxOutput, focus }: { events: PortalEvent[]; limit?: number; maxOutput?: number; focus?: { id: string; at: number } | null }) {
+export function VoiceTerminal({ events, limit, maxOutput, ended, focus, onFocused, hidden = false }: {
+  events: PortalEvent[];
+  limit?: number;
+  maxOutput?: number;
+  ended?: boolean;
+  focus?: { id: string; at: number } | null;
+  onFocused?: () => void;
+  /** Behind another tab: kept as it was, rather than worked out anew with every token. */
+  hidden?: boolean;
+}) {
   const { ref, onScroll, follow } = useFollowBottom<HTMLDivElement>();
-  const runs = terminalRuns(events, limit, maxOutput);
+  const seen = useRef(events);
+  if (!hidden) seen.current = events;
+  const shownEvents = seen.current;
+  const runs = useMemo(() => terminalRuns(shownEvents, limit, maxOutput, ended), [shownEvents, limit, maxOutput, ended]);
+  // The command being shown, while it is: new output does not scroll away from it.
   const focused = useRef<string | null>(null);
+  const release = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(release.current), []);
   // Follows new output, but leaves you where you scrolled to read earlier lines.
   // Before paint, so new lines are never shown at the old scroll position.
-  useLayoutEffect(() => { if (!focused.current) follow(); }, [events]);
+  useLayoutEffect(() => { if (!focused.current) follow(); }, [shownEvents]);
   useEffect(() => {
     if (!focus || !ref.current) return;
+    onFocused?.();
     const el = ref.current.querySelector<HTMLElement>(`[data-run="${CSS.escape(focus.id)}"]`);
+    // Not among those drawn: whatever was being shown before keeps its own release.
     if (!el) return;
+    window.clearTimeout(release.current);
     focused.current = focus.id;
     el.scrollIntoView({ block: 'start', behavior: 'smooth' });
     el.classList.remove('is-focused');
     void el.offsetWidth;
     el.classList.add('is-focused');
-    const t = window.setTimeout(() => { focused.current = null; }, 1200);
-    return () => window.clearTimeout(t);
+    release.current = window.setTimeout(() => { focused.current = null; }, 1200);
   }, [focus?.id, focus?.at]);
   return <div ref={ref} onScroll={onScroll} className="voice-terminal-output" aria-label="Agent terminal output">
     {!runs.length && <p className="voice-terminal-empty">No commands yet. What the agent runs shows up here as it runs.</p>}
-    {runs.map(run => <div key={run.id} data-run={run.id} className="voice-terminal-run">
-      <div className="voice-terminal-command"><span aria-hidden>$</span><code>{run.command}</code>{run.running && <i aria-label="Command running" />}</div>
-      {run.output && <pre className={run.error ? 'is-error' : ''}>{run.output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')}</pre>}
-    </div>)}
+    {runs.map(run => <TerminalRun key={run.id} {...run} />)}
   </div>;
 }
+
+/** One command. Kept apart so a run whose output has not changed is not cleaned of its codes again. */
+const TerminalRun = memo(function TerminalRun({ id, command, output, running, error, interrupted }: Run) {
+  const shown = useMemo(() => stripAnsi(output), [output]);
+  return <div data-run={id} className="voice-terminal-run">
+    <div className="voice-terminal-command"><span aria-hidden>$</span><code>{command}</code>{running && <i aria-label="Command running" />}{interrupted && <small>interrupted</small>}</div>
+    {shown && <pre className={error ? 'is-error' : ''}>{shown}</pre>}
+  </div>;
+});

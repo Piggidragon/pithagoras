@@ -1,4 +1,5 @@
 import type { PortalEvent } from "./api";
+import { unwrap } from "./tool-activity";
 
 /** A picture that went with a message, by the name the server keeps it under. */
 export interface SentImage {
@@ -60,6 +61,8 @@ export type Item =
       picture?: ShownPicture;
       args?: unknown;
       output?: string;
+      /** How many lines `output` had before it was cut to its end. */
+      outputLines?: number;
       /** What the tool reported about itself beside its text — an extension's progress, its subagent's steps. */
       details?: unknown;
       /** How many updates it streamed while it ran: a tool that reports as it goes is doing something worth watching. */
@@ -75,6 +78,24 @@ export type Item =
 
 /** Enough of a tool's output to read in the transcript; the whole of it is in the agent terminal. */
 const TOOL_OUTPUT_MAX = 60_000;
+
+/** Lines in a text, not counting a newline at its very end. */
+export function lineCount(text: string): number {
+  if (!text) return 0;
+  let n = 1;
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) n++;
+  return text.endsWith("\n") ? n - 1 : n;
+}
+
+/** Keep the end of a tool's output on its item, and how long it was whole. */
+function setToolOutput(item: Extract<Item, { kind: "tool" }>, text: string) {
+  item.output = text.slice(-TOOL_OUTPUT_MAX);
+  if (text.length > TOOL_OUTPUT_MAX) item.outputLines = lineCount(text);
+  else delete item.outputLines;
+}
+
+/** Text without the colour and cursor codes a terminal would act on. */
+export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
 
 /** The text of a tool result, however pi shaped it. */
 export function toolOutputText(result: any): string | undefined {
@@ -134,6 +155,20 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
     const shown = items.findIndex((it) => it.kind === "user" && it.seq === seq);
     if (shown >= 0) return items.splice(shown, 1)[0] as UserItem;
     return prompt && typeof prompt === "object" ? userItem(seq, prompt) : undefined;
+  };
+
+  // A reply to write into. The one with this id when it is the last thing
+  // shown: it was closed early — a status that said the run was over while it
+  // was not — and a second item with its id would split it in two.
+  const openReply = (id: string): Extract<Item, { kind: "assistant" }> => {
+    const last = items.at(-1);
+    if (last?.kind === "assistant" && last.id === id) {
+      last.done = false;
+      return last;
+    }
+    const reply = { kind: "assistant" as const, id, text: "", thinking: "", done: false, audio: audioReply };
+    items.push(reply);
+    return reply;
   };
 
   const closeCurrent = () => {
@@ -196,10 +231,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         const inner = p.assistantMessageEvent ?? {};
         const delta = typeof inner.delta === "string" ? inner.delta : "";
         if (!delta) break;
-        if (!current) {
-          current = { kind: "assistant", id: `a${p.streamId ?? ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
-          items.push(current);
-        }
+        if (!current) current = openReply(`a${p.streamId ?? ev.seq}`);
         if (inner.type === "thinking_delta") {
           current.thinking += delta;
           if (ev.at !== undefined) {
@@ -217,12 +249,14 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         if (message?.role === "assistant" && Array.isArray(message.content)) {
           const text = message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("");
           const thinking = message.content.filter((c: any) => c?.type === "thinking").map((c: any) => c.thinking ?? "").join("");
-          if (!current) {
-            current = { kind: "assistant", id: `a${p.streamId ?? ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
-            items.push(current);
-          }
+          if (!current) current = openReply(`a${p.streamId ?? ev.seq}`);
           current.text = text;
-          if (ev.at !== undefined && thinking !== current.thinking) {
+          // The server keeps when the reasoning ran: the deltas that timed it
+          // are gone once the message ends, and after a reload.
+          if (typeof p.thinkingSince === "number" && typeof p.thinkingUntil === "number") {
+            current.thinkingSince = Math.min(current.thinkingSince ?? p.thinkingSince, p.thinkingSince);
+            current.thinkingUntil = Math.max(current.thinkingUntil ?? p.thinkingUntil, p.thinkingUntil);
+          } else if (ev.at !== undefined && thinking !== current.thinking) {
             current.thinkingSince ??= ev.at;
             current.thinkingUntil = ev.at;
           }
@@ -252,7 +286,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         const tool = findRunningTool(items, p);
         const partial = p.partialResult ?? p.result;
         const text = toolOutputText(partial);
-        if (tool && typeof text === "string") tool.output = text.slice(-TOOL_OUTPUT_MAX);
+        if (tool && typeof text === "string") setToolOutput(tool, text);
         if (tool) {
           tool.updates = (tool.updates ?? 0) + 1;
           if (partial?.details !== undefined) tool.details = partial.details;
@@ -281,16 +315,18 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
       }
 
       case "tool_execution_end": {
-        // Close the most recent still-running tool of the same name.
+        // Close the most recent still-running tool of the same name. By its id,
+        // one taken for cut off too: its end is what really happened.
         const name = String(p.toolName ?? p.name ?? "tool");
         for (let i = items.length - 1; i >= 0; i--) {
           const it = items[i];
-          if (it.kind === "tool" && it.status === "running" &&
-              (p.toolCallId ? it.callId === p.toolCallId : it.name === name)) {
+          if (it.kind === "tool" &&
+              (p.toolCallId ? it.callId === p.toolCallId && (it.status === "running" || it.interrupted) : it.status === "running" && it.name === name)) {
             it.status = p.isError || p.error ? "error" : "done";
+            delete it.interrupted;
             if (ev.at !== undefined) it.until = ev.at;
             const text = toolOutputText(p.result);
-            if (typeof text === "string" && text) it.output = text.slice(-TOOL_OUTPUT_MAX);
+            if (typeof text === "string" && text) setToolOutput(it, text);
             if (p.result?.details !== undefined) it.details = p.result.details;
             const picture = shownPicture(p);
             if (picture) it.picture = picture;
@@ -322,6 +358,17 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
 
       case "agent_end":
         settle();
+        break;
+
+      // A new run: a tool still open from before it can only be one whose run
+      // died without saying so (a portal restart that recorded nothing).
+      case "agent_start":
+        for (const it of items) {
+          if (it.kind === "tool" && it.status === "running") {
+            it.status = "error";
+            it.interrupted = true;
+          }
+        }
         break;
 
       default:
@@ -373,7 +420,9 @@ function findRunningTool(items: Item[], p: any): Extract<Item, { kind: "tool" }>
 }
 
 function summarizeToolInput(p: any): string | undefined {
-  const input = p.input ?? p.args ?? p.parameters;
+  const raw = p.input ?? p.args ?? p.parameters;
+  // Through the MCP adapter, what the tool inside was given.
+  const input = String(p.toolName ?? p.name ?? "") === "mcp" && raw && typeof raw === "object" && typeof raw.tool === "string" ? unwrap(p).input : raw;
   if (!input) return undefined;
   if (typeof input === "string") return truncate(input);
   if (typeof input === "object") {
@@ -404,6 +453,26 @@ export interface Activity {
   prefill?: { total: number; cache: number; processed: number };
   /** The model being loaded, while `label` is "loading the model". */
   model?: string;
+}
+
+/** "800", "6k", "20.5k": a count of tokens. */
+export const formatTokens = (n: number) =>
+  n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k` : String(n);
+
+/** "12s", "2m 05s": how long a phase has been going. */
+export const formatElapsed = (s: number) =>
+  s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+
+const PROMPT_LABELS = ["Reading the conversation", "Reviewing the context", "Preparing to respond"];
+
+/** What reading the prompt is called `seconds` in: it moves on every few seconds, so a long one is seen to be going. */
+export const promptLabel = (seconds: number) => PROMPT_LABELS[Math.floor(seconds / 4) % PROMPT_LABELS.length];
+
+/** How far prefill has got: tokens read, counting the cached prefix, and that as a percentage when there is a total. */
+export function prefillShare(prefill: Activity["prefill"]): { done: number; percent?: number } {
+  const total = prefill?.total ?? 0;
+  const done = Math.max(0, Math.min(total, prefill?.processed ?? 0));
+  return { done, ...(total > 0 ? { percent: Math.round((done / total) * 100) } : {}) };
 }
 
 /**

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { orderedInput } from "../ordered-input";
 import { api } from "../api";
 
 /**
@@ -54,12 +55,15 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
         // restarted — used to vanish, and the panel looked merely unresponsive.
         // Said once, not on every key.
         let told = false;
-        term.onData((data) =>
-          api.terminalInput(termId, data).catch(() => {
-            if (told || closed) return;
-            told = true;
-            term.write("\r\n[Connection to the shell lost — close this panel and open it again]\r\n");
-          }),
+        term.onData(
+          orderedInput(
+            (data) => api.terminalInput(termId, data),
+            () => {
+              if (told || closed) return;
+              told = true;
+              term.write("\r\n[Connection to the shell lost — close this panel and open it again]\r\n");
+            },
+          ),
         );
         resize();
       })

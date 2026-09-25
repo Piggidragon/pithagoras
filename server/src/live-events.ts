@@ -4,7 +4,8 @@ import type { EventRow } from './db.js';
 type Store = (session: string, type: string, payload: unknown) => EventRow;
 /** One current snapshot per message/tool, never a growing list of token events. */
 export class LiveEvents {
-  private messages = new Map<string, { streamId: string; message: any; at: string }>();
+  /** `thinkingSince`/`thinkingUntil`: epoch ms of the reasoning's first and last token, kept on message_end for "Thought for 12s". */
+  private messages = new Map<string, { streamId: string; message: any; at: string; thinkingSince?: number; thinkingUntil?: number }>();
   private tools = new Map<string, Map<string, EventRow>>();
   private sequence = -Date.now() * 1000;
   constructor(private store: Store) {}
@@ -21,6 +22,11 @@ export class LiveEvents {
         this.messages.set(session, state);
       }
       const inner = payload?.assistantMessageEvent;
+      if (typeof inner?.type === 'string' && inner.type.startsWith('thinking_')) {
+        const now = Date.now();
+        state.thinkingSince ??= now;
+        state.thinkingUntil = now;
+      }
       const message = inner?.partial ?? payload?.message;
       if (message) state.message = message;
       else if (typeof inner?.delta === 'string' && ['text_delta', 'thinking_delta'].includes(inner.type)) {
@@ -42,7 +48,7 @@ export class LiveEvents {
     }
     if (type === 'message_end' && payload?.message?.role === 'assistant') {
       const state = this.messages.get(session);
-      const row = this.store(session, type, { ...payload, ...(state && { streamId: state.streamId }) });
+      const row = this.store(session, type, { ...payload, ...(state && { streamId: state.streamId, ...thinkingTimes(state) }) });
       this.messages.delete(session);
       return row;
     }
@@ -59,7 +65,7 @@ export class LiveEvents {
   snapshot(session: string): EventRow[] {
     const state = this.messages.get(session);
     const rows = state ? [this.live(session, 'message_snapshot', {
-      streamId: state.streamId, message: state.message,
+      streamId: state.streamId, message: state.message, ...thinkingTimes(state),
     }, state.at)] : [];
     return [...rows, ...(this.tools.get(session)?.values() ?? [])];
   }
@@ -68,4 +74,8 @@ export class LiveEvents {
     this.messages.delete(session);
     this.tools.delete(session);
   }
+}
+
+function thinkingTimes(state: { thinkingSince?: number; thinkingUntil?: number }) {
+  return state.thinkingSince === undefined ? {} : { thinkingSince: state.thinkingSince, thinkingUntil: state.thinkingUntil };
 }

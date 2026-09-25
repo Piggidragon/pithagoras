@@ -195,9 +195,12 @@ class SessionManager extends EventEmitter {
    */
   recoverOrphans(): void {
     const orphaned = markOrphanedSessionsInterrupted();
-    if (orphaned > 0) {
-      console.log(`[portal] marked ${orphaned} session(s) interrupted (server restarted mid-run)`);
+    if (orphaned.length > 0) {
+      console.log(`[portal] marked ${orphaned.length} session(s) interrupted (server restarted mid-run)`);
     }
+    // Said in the conversation too, so what the run left open is settled
+    // there for good, and not taken up again as running by the next run.
+    for (const id of orphaned) this.record(id, "portal_status", { status: "interrupted", restarted: true });
     this.settleOrphanedMessages();
   }
 
@@ -284,11 +287,13 @@ class SessionManager extends EventEmitter {
     if (EPHEMERAL_EVENTS.has(type)) {
       // Still deliver it to anyone attached right now, with a negative seq so
       // it can never be confused with a stored event during replay.
+      // Timed like a stored one, so a page can say how long it has lasted.
       this.emit(`session:${sessionId}`, {
         seq: -Date.now(),
         session_id: sessionId,
         type,
         payload: JSON.stringify(payload),
+        created_at: new Date().toISOString(),
       });
       return undefined;
     }
@@ -744,7 +749,10 @@ class SessionManager extends EventEmitter {
       // moments the portal happens to know about. agent_start covers a run
       // nobody here asked for — a queued follow-up picked up on its own, a
       // routine, a message that arrived through a channel.
-      if (msg.type === "agent_start") this.mark(sessionId, "running");
+      if (msg.type === "agent_start") {
+        this.runsStarted.set(sessionId, (this.runsStarted.get(sessionId) ?? 0) + 1);
+        this.mark(sessionId, "running");
+      }
       if (msg.type === "message_start" && msg.message?.role === "user") this.takeIn(sessionId, msg.message.content);
       // agent_settled, not agent_end: agent_end fires once per agent run, and
       // a run is followed by retries, auto-compaction and any queued message,
@@ -790,6 +798,9 @@ class SessionManager extends EventEmitter {
    * pi has unwound it, and both Stop and the next prompt have to wait.
    */
   private compacting = new Map<string, Promise<void>>();
+
+  /** Runs pi has started, per session: whether one began while something else was going. */
+  private runsStarted = new Map<string, number>();
 
   /** A Stop that arrived before there was anything to stop. */
   private cancelPending = new Set<string>();
@@ -843,13 +854,15 @@ class SessionManager extends EventEmitter {
     // already claimed the session. Without this the composer loses its Stop
     // and isBusy() reads false for however long pi takes to answer.
     this.mark(sessionId, "running");
-    const logged = { images: false, queued: false };
+    const logged = { images: false, queued: false, command: false };
     try {
       await this.submit(sessionId, message, options, insideEdit, logged);
     } catch (e) {
-      // Refused on its way into a run that goes on: that run is not what
-      // failed, and will settle the session itself.
-      if (!(logged.queued && this.live.get(sessionId)?.client.isIdle?.() === false)) {
+      // Refused on its way into a run that goes on — a message queued into
+      // it, or a command sent beside it: that run is not what failed, and
+      // will settle the session itself. Marked failed, the page would take
+      // every call still open in it for one that was cut off.
+      if (!((logged.queued || logged.command) && this.live.get(sessionId)?.client.isIdle?.() === false)) {
         const failure = (e as Error).message;
         updateSession(sessionId, { status: "error", last_error: failure });
         this.record(sessionId, "portal_status", { status: "error", error: failure });
@@ -868,7 +881,7 @@ class SessionManager extends EventEmitter {
     message: string,
     options?: PromptOptions,
     insideEdit = false,
-    logged = { images: false, queued: false },
+    logged = { images: false, queued: false, command: false },
   ): Promise<void> {
     const client = await this.ensureClient(sessionId, insideEdit);
     const images = options?.images ?? [];
@@ -879,6 +892,7 @@ class SessionManager extends EventEmitter {
     // a bare leading slash, so a message that merely starts with a path like
     // "/etc/hosts is wrong" is still shown.
     const isCommand = await this.looksLikeCommand(client, message);
+    logged.command = isCommand;
 
     // Portal builtins never reach the model — they act on the session itself.
     const builtin = /^\/([\w-]+)\s*(.*)$/.exec(message.trim());
@@ -886,6 +900,10 @@ class SessionManager extends EventEmitter {
     if (serverBuiltin) {
       // Not awaited: /compact is a model call and would hold the request open.
       // Same contract as a prompt — accept it, report through the event stream.
+      // Whether a run was going is read before it starts: afterwards, pi can
+      // still read as busy with the builtin's own work, a compaction unwinding.
+      const during = client.isIdle?.() === false;
+      const runs = this.runsStarted.get(sessionId) ?? 0;
       void (async () => {
         try {
           const text = await runBuiltin(serverBuiltin.name, builtin![2], client);
@@ -893,7 +911,12 @@ class SessionManager extends EventEmitter {
         } catch (e) {
           this.record(sessionId, "portal_notice", { text: (e as Error).message, error: true });
         } finally {
-          this.mark(sessionId, "idle");
+          // Sent into a run, or overtaken by one — started, or on its way to
+          // pi — it must not end it: the run settles the session itself, and
+          // a page told idle would take every call still open for one that
+          // was cut off. Sent from idle, nothing else will clear it.
+          const overtaken = (this.runsStarted.get(sessionId) ?? 0) !== runs || this.sending.has(sessionId);
+          if (!during && !overtaken && !this.compacting.has(sessionId)) this.mark(sessionId, "idle");
         }
       })();
       return;
