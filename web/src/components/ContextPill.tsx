@@ -272,7 +272,7 @@ export function ContextPill({
       </button>
 
       {open && (
-        <div style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           <div className="flex items-baseline justify-between">
             <p className="text-sm text-fg-muted">Context</p>
             <p className={`text-sm tabular-nums ${known ? t.text : "text-fg-subtle"}`}>{known ? `${pct.toFixed(1)}% full` : "just compacted"}</p>

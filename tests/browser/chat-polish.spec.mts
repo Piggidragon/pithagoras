@@ -1,0 +1,131 @@
+import { test, expect, type Page } from '@playwright/test';
+
+test('a tool call reads as its parameters, closed and opened, not as JSON', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=args');
+  const search = page.locator('.chat-tool', { hasText: 'web_search' });
+  // Closed: "Queries: …", where it said {"queries":[…]}.
+  await expect(search.locator('.chat-tool-detail')).toHaveText('Queries: pgvector vs qdrant 2026, homelab vector database · Num results: 5 · Include content: false');
+  await search.locator('.chat-tool-head').click();
+  // Opened: each parameter a label and its value, the queries a list.
+  const args = search.locator('.chat-tool-args');
+  await expect(args.locator('dt')).toHaveText(['Queries', 'Num results', 'Include content']);
+  await expect(args.locator('.chat-arg-list li')).toHaveText(['pgvector vs qdrant 2026', 'homelab vector database']);
+  await expect(args).not.toContainText('[');
+  await expect(args).not.toContainText('"');
+
+  // A list of changes: each one numbered, its fields labelled; code in a block of its own.
+  const edit = page.locator('.chat-tool', { hasText: 'web/src/main.tsx' }).filter({ hasText: 'edit' });
+  await edit.locator('.chat-tool-head').click();
+  await expect(edit.locator('.chat-arg-items > li')).toHaveCount(2);
+  await expect(edit.locator('.chat-arg-items dt').first()).toHaveText('Old text');
+  await expect(edit.locator('.chat-arg-items pre.chat-tool-value')).toHaveText('render(\n  <App />\n);');
+  await expect(edit.locator('.chat-tool-body')).not.toContainText('{');
+
+  // An MCP tool that answers in JSON: its answer is read the same way.
+  const mcp = page.locator('.chat-tool', { hasText: 'github_list_issues' });
+  await expect(mcp.locator('.chat-tool-detail')).toHaveText('Owner: Piggidragon · Repo: pithagoras · State: open · Labels: bug, ui');
+  await mcp.locator('.chat-tool-head').click();
+  const output = mcp.locator('.chat-tool-output');
+  await expect(output).toHaveClass(/is-structured/);
+  await expect(output.locator('.chat-arg-items > li')).toHaveCount(2);
+  await expect(output).toContainText('Jump button over the tools menu');
+  await expect(output).not.toContainText('{');
+});
+
+test('Copy is under the last answer, not beside it, and only there', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=args');
+  const answer = page.locator('.md', { hasText: 'pgvector is enough' });
+  // The agent's side of the conversation, not the messages sent, which keep theirs.
+  const copy = page.locator('.group:not(.items-end)').getByRole('button', { name: 'Copy', exact: true });
+  // One: the answer's, and not the paragraph before the tools.
+  await expect(copy).toHaveCount(1);
+  await expect(copy).toBeVisible();
+  const a = (await answer.boundingBox())!;
+  const c = (await copy.boundingBox())!;
+  // Under the words and lined up with them, not in the margin to their right.
+  expect(c.y).toBeGreaterThanOrEqual(a.y + a.height - 1);
+  expect(Math.abs(c.x + 6 - a.x)).toBeLessThan(4);
+});
+
+test('the way back to the end steps aside for a menu opened from the composer', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=args');
+  for (const name of ['web_search', 'github_list_issues']) await page.locator('.chat-tool-head', { hasText: name }).click();
+  await page.mouse.move(500, 400);
+  await page.mouse.wheel(0, -4000);
+  const jump = page.getByRole('button', { name: 'Jump to the end' });
+  await expect(jump).toBeVisible();
+  await page.getByTitle('Which tools this conversation may use').click();
+  await expect(page.getByText('Tools in this chat')).toBeVisible();
+  // It floated over the menu, in the middle of the list of tools.
+  await expect(jump).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('Tools in this chat')).toBeHidden();
+  await expect(jump).toBeVisible();
+});
+
+const streamHeight = (page: Page) => page.locator('.chat-thinking-stream').evaluate((e) => e.getBoundingClientRect().height);
+
+test('a few words of thinking take a line, not three; more fills it and it does not shrink back', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=brief');
+  const line = await page.locator('.chat-thinking-stream').evaluate((e) => parseFloat(getComputedStyle(e).lineHeight));
+  await expect(page.locator('.chat-thinking-stream')).toHaveText('Short one.');
+  // It was three lines high whatever it held: two empty ones between the heading and the words.
+  expect(await streamHeight(page)).toBeLessThan(line * 1.5);
+  await expect(page.locator('.chat-thinking-stream')).not.toHaveClass(/is-clipped/);
+
+  // A fast model: many small pieces. Measured after each, it only ever grows, to three lines.
+  const heights = await page.evaluate(async () => {
+    const seen: number[] = [];
+    const el = () => document.querySelector('.chat-thinking-stream')!;
+    const words = 'the regex expects the status at the very end\nso I should check how pi appends it and whether two newlines come first '.repeat(6).split(' ');
+    for (const w of words) {
+      (window as any).think(' ' + w);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      seen.push(parseFloat((el() as HTMLElement).style.height) || el().getBoundingClientRect().height);
+    }
+    return seen;
+  });
+  for (let i = 1; i < heights.length; i++) expect(heights[i]).toBeGreaterThanOrEqual(heights[i - 1]);
+  expect(heights.at(-1)).toBeCloseTo(line * 3, 0);
+  await expect(page.locator('.chat-thinking-stream')).toHaveClass(/is-clipped/);
+});
+
+test('a working chat shows a turning ring in the composer, not a pulsing yellow dot', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=tools');
+  const ring = page.locator('.composer-settings .status-dot.is-running');
+  await expect(ring).toBeVisible();
+  expect(await ring.evaluate((e) => getComputedStyle(e, '::before').animationName)).toBe('status-spin');
+  await expect(page.locator('.composer-settings .animate-pulse')).toHaveCount(0);
+  // Idle: nothing there.
+  await page.goto('/tests/chat.html?phase=args');
+  await expect(page.locator('.composer-settings')).toBeVisible();
+  await expect(page.locator('.composer-settings .status-dot')).toHaveCount(0);
+});
+
+test('a working chat in the sidebar shows the same ring', async ({ page }) => {
+  const session = { id: 's1', title: 'Busy chat', workspace: '/w/site', status: 'running', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
+  const idle = { ...session, id: 's2', title: 'Quiet chat', status: 'idle' };
+  await page.route('**/api/**', async (route) => {
+    const p = new URL(route.request().url()).pathname;
+    let reply: unknown = {};
+    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
+    else if (p === '/api/sessions') reply = { sessions: [session, idle], executor: 'host' };
+    else if (p === '/api/models') reply = { models: [], providers: {} };
+    await route.fulfill({ json: reply });
+  });
+  await page.addInitScript(() => {
+    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
+    localStorage.setItem('pithagoras.setup', 'done');
+  });
+  await page.goto('/');
+  const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
+  const busy = sidebar.getByText('Busy chat').locator('..').locator('.status-dot');
+  await expect(busy).toHaveClass(/is-running/);
+  // The ring turns; the dot it replaced sent out a ring of light instead.
+  expect(await busy.evaluate((e) => getComputedStyle(e, '::before').animationName)).toBe('status-spin');
+  expect(await busy.evaluate((e) => getComputedStyle(e).animationName)).toBe('none');
+  // It takes a dot's room: the titles beside a working and an idle chat line up.
+  const quietTitle = (await sidebar.getByText('Quiet chat').boundingBox())!;
+  const busyTitle = (await sidebar.getByText('Busy chat').boundingBox())!;
+  expect(Math.abs(quietTitle.x - busyTitle.x)).toBeLessThan(0.5);
+});

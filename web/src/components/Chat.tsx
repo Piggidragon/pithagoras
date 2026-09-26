@@ -1142,9 +1142,7 @@ export function Chat({
           }
           if (item.kind === "assistant") {
             return (
-              // Never closer than 2rem to the edge: Copy sits in that margin,
-              // and 10% of a phone is less than the button.
-              <div key={item.id} className={`group max-w-[min(90%,calc(100%_-_2rem))]${enter}`}>
+              <div key={item.id} className={`group max-w-[90%]${enter}`}>
                 {item.thinking && (
                   <ThinkingBlock
                     thinking={item.thinking}
@@ -1154,7 +1152,7 @@ export function Chat({
                   />
                 )}
                 {item.text && (
-                  <div className="md relative text-sm leading-relaxed text-fg">
+                  <div className="md text-sm leading-relaxed text-fg">
                     {/* Streamdown rather than plain markdown: a reply arrives a
                         token at a time, so half of it is briefly malformed —
                         an unclosed fence, a half-written link — and a strict
@@ -1172,16 +1170,16 @@ export function Chat({
                     >
                       {assistantText(item)}
                     </Streamdown>
-                    {/* Only the last bubble of the reply: one per tool call in
-                        between would be a Copy button after every paragraph.
-                        Beside the words rather than under them, so it adds no
-                        line of its own — and beside the words, not the
-                        thinking above them. */}
-                    {item.id === lastReply && (
-                      <div className="absolute -right-7 top-0 flex items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                        <CopyAction text={assistantText(item)} />
-                      </div>
-                    )}
+                  </div>
+                )}
+                {/* Under the answer, where it ends: only the last bubble of the
+                    reply, and only once nothing follows it. One per tool call
+                    in between would be a Copy button after every paragraph,
+                    and one beside the words sat in the margin where the eye
+                    does not go. */}
+                {item.id === lastReply && item.text && (
+                  <div className="reply-actions -ml-1.5 mt-1 flex items-center gap-0.5">
+                    <CopyAction text={assistantText(item)} />
                   </div>
                 )}
               </div>
@@ -1283,7 +1281,7 @@ export function Chat({
               reading.current = null;
               scroller.follow(true);
             }}
-            className="float-in absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
+            className="jump-to-end float-in absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
           >
             <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
             {running ? "Latest output" : "Jump to the end"}

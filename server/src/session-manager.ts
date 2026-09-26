@@ -14,6 +14,7 @@ import { AUDIO_MESSAGE_PREFIX } from "./pi/voice-first.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
+import { describeToolCall } from "./tool-summary.js";
 import {
   appendEvent,
   deleteEvent,
@@ -53,20 +54,6 @@ import {
  */
 export const stripThinkingMarkers = (text: string): string =>
   text.replace(/<\/?think(ing)?>/gi, "").trim();
-
-/** Mirrors what the web transcript shows, so a chat and the UI agree. */
-function summarizeToolInput(p: any): string | undefined {
-  const input = p.input ?? p.args ?? p.parameters;
-  if (!input) return undefined;
-  const trim = (v: string) => (v.length > 80 ? `${v.slice(0, 79)}…` : v);
-  if (typeof input === "string") return trim(input);
-  if (typeof input === "object") {
-    const first = input.command ?? input.file_path ?? input.path ?? input.pattern ?? input.query;
-    if (typeof first === "string") return trim(first);
-    return trim(JSON.stringify(input));
-  }
-  return undefined;
-}
 
 const SESSION_ROOT = path.resolve(process.env.SESSION_DIR || "./data/sessions");
 /** Where a container's pi finds a session's folder: see ContainerExecutor. */
@@ -1703,8 +1690,7 @@ class SessionManager extends EventEmitter {
           if (!onReply) break;
           // Prose first: a tool line landing mid-sentence reads badly.
           flush();
-          const name = String(payload.toolName ?? payload.name ?? "tool");
-          const detail = summarizeToolInput(payload);
+          const { name, detail } = describeToolCall(payload);
           relay(detail ? `⚙ ${name} · ${detail}` : `⚙ ${name}`);
           break;
         }

@@ -1,5 +1,6 @@
 import type { PortalEvent } from "./api";
 import { unwrap } from "./tool-activity";
+import { argsSummary } from "./tool-args";
 
 /** A picture that went with a message, by the name the server keeps it under. */
 export interface SentImage {
@@ -476,20 +477,7 @@ function summarizeToolInput(p: any): string | undefined {
   const raw = p.input ?? p.args ?? p.parameters;
   // Through the MCP adapter, what the tool inside was given.
   const input = String(p.toolName ?? p.name ?? "") === "mcp" && raw && typeof raw === "object" && typeof raw.tool === "string" ? unwrap(p).input : raw;
-  if (!input) return undefined;
-  if (typeof input === "string") return truncate(input);
-  if (typeof input === "object") {
-    const first =
-      input.command ?? input.file_path ?? input.path ?? input.pattern ?? input.query;
-    if (typeof first === "string") return truncate(first);
-    return truncate(JSON.stringify(input));
-  }
-  return undefined;
-}
-
-function truncate(s: string, n = 160): string {
-  const flat = s.replace(/\s+/g, " ").trim();
-  return flat.length > n ? flat.slice(0, n - 1) + "…" : flat;
+  return argsSummary(input);
 }
 
 /** Highest seq seen, so a reconnect resumes exactly where the stream left off. */

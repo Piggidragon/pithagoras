@@ -190,6 +190,8 @@
   transition: border-color .2s, box-shadow .2s;
 }
 .prompt-shell:focus-within { border-color: rgb(var(--fg-faint) / .65); box-shadow: 0 8px 30px #00000012; }
+/* A menu opened from the composer rises over the conversation, where the way back to its end floats: it steps aside until the menu closes. */
+.prompt-shell:has(.composer-menu) .jump-to-end { display: none; }
 .prompt-input { display: block; width: 100%; min-height: 58px; max-height: 200px; resize: none; border: 0; background: transparent; padding: 5px 8px 10px; font-size: 14px; line-height: 1.6; color: rgb(var(--fg)); outline: none !important; box-shadow: none; }
 .prompt-input::placeholder { color: rgb(var(--fg-subtle)); }
 .prompt-action { display: grid; place-items: center; height: 36px; width: 36px; flex-shrink: 0; border-radius: 12px; color: rgb(var(--fg-muted)); transition: color .18s, background .18s, transform .18s; }

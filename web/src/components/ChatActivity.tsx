@@ -22,6 +22,7 @@ import type { IconType } from "react-icons";
 import { Streamdown } from "streamdown";
 import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, stripAnsi, type Activity, type Item } from "../transcript";
 import { SHELL_TOOL, unwrapCall } from "../tool-activity";
+import { argLabel, isBlock, isScalar } from "../tool-args";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
@@ -102,6 +103,28 @@ export function ThinkingBlock({
   const label = streaming ? "Thinking" : seconds && seconds >= 1 ? `Thought for ${formatElapsed(seconds)}` : "Thought process";
   // The end of what it is thinking, under a closed header.
   const tail = streaming && !open ? recentText(thinking) : "";
+  // As high as what it shows, up to three lines — a sentence of reasoning is
+  // not a sentence and two empty lines — and never lower again while it runs:
+  // a window that shrank and grew with the text as it wrapped jumped with every
+  // token at a fast model's speed.
+  const stream = useRef<HTMLDivElement>(null);
+  const tallest = useRef(0);
+  useLayoutEffect(() => {
+    const el = stream.current;
+    if (!el) {
+      tallest.current = 0;
+      return;
+    }
+    const text = (el.firstElementChild as HTMLElement).offsetHeight;
+    const most = parseFloat(getComputedStyle(el).maxHeight) || Infinity;
+    const height = Math.max(tallest.current, Math.min(text, most));
+    if (height !== tallest.current) {
+      tallest.current = height;
+      el.style.height = `${height}px`;
+    }
+    // Older lines fade out at the top only once there are some leaving.
+    el.classList.toggle("is-clipped", text > height);
+  }, [tail]);
 
   return (
     <div className={`chat-thinking ${streaming ? "is-streaming" : ""} ${open ? "is-open" : ""}`}>
@@ -114,7 +137,7 @@ export function ThinkingBlock({
         <LuChevronRight className="chat-chevron" aria-hidden />
       </button>
       {tail && (
-        <div className="chat-thinking-stream" aria-hidden>
+        <div ref={stream} className="chat-thinking-stream" aria-hidden>
           <div>{tail}</div>
         </div>
       )}
@@ -274,6 +297,8 @@ export function ToolCall({
   const coarse = took !== undefined && item.since! % 1000 === 0 && item.until! % 1000 === 0;
   const output = useMemo(() => stripAnsi(item.output ?? ""), [item.output]);
   const clipped = output.length > INLINE_OUTPUT;
+  // A tool that answers in JSON is read like its parameters, not as braces and quotes.
+  const structured = useMemo(() => (open && !shell && item.status === "done" && !clipped ? jsonOutput(output) : undefined), [open, shell, item.status, clipped, output]);
   const running = item.status === "running";
   const now = useNow(running);
   const elapsed = running && item.since ? Math.max(0, Math.floor((now - item.since) / 1000)) : undefined;
@@ -353,7 +378,13 @@ export function ToolCall({
                 {item.status === "error" && !item.interrupted ? "Error" : "Output"}
                 {clipped && <span className="chat-faint"> · last {INLINE_OUTPUT.toLocaleString()} characters</span>}
               </div>
-              <pre className={`chat-tool-output ${item.status === "error" && !item.interrupted ? "is-error" : ""}`}>{clipped ? output.slice(-INLINE_OUTPUT) : output}</pre>
+              {structured ? (
+                <div className="chat-tool-output is-structured">
+                  <ArgValue value={structured} depth={0} />
+                </div>
+              ) : (
+                <pre className={`chat-tool-output ${item.status === "error" && !item.interrupted ? "is-error" : ""}`}>{clipped ? output.slice(-INLINE_OUTPUT) : output}</pre>
+              )}
             </div>
           ) : (
             item.status === "running" && <div className="chat-tool-label"><Shimmer>Waiting for output…</Shimmer></div>
@@ -370,23 +401,86 @@ export function ToolCall({
   );
 }
 
-function ToolArgs({ args }: { args: unknown }) {
+/**
+ * What a call was given, each parameter a label and its value: text as text,
+ * long or many-lined text in a block of its own, a list as a list, and
+ * whatever is inside an object the same way, a step in. See tool-args.ts.
+ */
+export function ToolArgs({ args }: { args: unknown }) {
   if (args === undefined || args === null) return <div className="chat-tool-label">No parameters</div>;
   if (typeof args !== "object") return <pre className="chat-tool-value">{String(args)}</pre>;
-  const entries = Object.entries(args as Record<string, unknown>);
-  if (!entries.length) return <div className="chat-tool-label">No parameters</div>;
+  if (!Object.keys(args as object).length) return <div className="chat-tool-label">No parameters</div>;
+  return <ArgValue value={args} depth={0} />;
+}
+
+/** Deeper than this, what is left is shown as the JSON it is. */
+const ARG_DEPTH = 4;
+
+function ArgValue({ value, depth }: { value: unknown; depth: number }): ReactNode {
+  if (value === null || value === undefined) return <span className="chat-arg-none">none</span>;
+  if (typeof value === "boolean") return <span className="chat-arg-scalar">{value ? "yes" : "no"}</span>;
+  if (typeof value === "number") return <span className="chat-arg-scalar tabular-nums">{value.toLocaleString()}</span>;
+  if (typeof value === "string") {
+    if (!value) return <span className="chat-arg-none">empty</span>;
+    return isBlock(value) ? <pre className="chat-tool-value">{value}</pre> : <span className="chat-arg-scalar">{value}</span>;
+  }
+  if (depth >= ARG_DEPTH) return <pre className="chat-tool-value">{JSON.stringify(value, null, 2)}</pre>;
+  if (Array.isArray(value)) {
+    if (!value.length) return <span className="chat-arg-none">none</span>;
+    // A list of words is read down, one to a line.
+    if (value.every(isScalar)) {
+      return (
+        <ul className="chat-arg-list">
+          {value.map((v, i) => (
+            <li key={i}>
+              <ArgValue value={v} depth={depth + 1} />
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    return (
+      <ol className="chat-arg-items">
+        {value.map((v, i) => (
+          <li key={i}>
+            <span className="chat-arg-index" aria-hidden>
+              {i + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <ArgValue value={v} depth={depth + 1} />
+            </div>
+          </li>
+        ))}
+      </ol>
+    );
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (!entries.length) return <span className="chat-arg-none">none</span>;
   return (
-    <dl className="chat-tool-args">
-      {entries.map(([key, value]) => (
-        <div key={key}>
-          <dt>{key}</dt>
+    <dl className={`chat-tool-args ${depth ? "is-nested" : ""}`}>
+      {entries.map(([key, v]) => (
+        // Short values beside their label; a block, a list or an object under it.
+        <div key={key} className={isScalar(v) && !(typeof v === "string" && isBlock(v)) ? "is-inline" : ""}>
+          <dt title={key}>{argLabel(key)}</dt>
           <dd>
-            <pre className="chat-tool-value">{typeof value === "string" ? value : JSON.stringify(value, null, 2)}</pre>
+            <ArgValue value={v} depth={depth + 1} />
           </dd>
         </div>
       ))}
     </dl>
   );
+}
+
+/** An output that is a JSON object or list, read as one; anything else, or cut short, is not. */
+export function jsonOutput(output: string): object | undefined {
+  const t = output.trim();
+  if (!/^[[{]/.test(t)) return undefined;
+  try {
+    const v = JSON.parse(t);
+    return v && typeof v === "object" && Object.keys(v).length ? v : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

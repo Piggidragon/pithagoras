@@ -1,4 +1,5 @@
 import { LuBlocks } from "react-icons/lu";
+import { StatusDot } from "./StatusDot";
 import { ToolSwitches } from "./ToolSwitches";
 import { useDismiss } from "../use-dismiss";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -522,16 +523,14 @@ export function ComposerBar({
             onChanged={load}
           />
         )}
-        <span
-          className={`ml-1 h-2 w-2 rounded-full ${running ? "animate-pulse bg-warn" : "bg-raised"}`}
-          title={running ? "working" : "idle"}
-        />
+        {/* The same ring as a working chat has in the lists. */}
+        {running && <StatusDot status="running" className="ml-1" />}
       </div>
       {actions && <div className="composer-actions">{actions}</div>}
 
       {/* Tools */}
       {open === "tools" && (
-        <div ref={menu} style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <p className="px-3 py-1 text-[11px] text-fg-subtle">Tools in this chat</p>
           <ToolSwitches sessionId={sessionId} />
         </div>
@@ -539,7 +538,7 @@ export function ComposerBar({
 
       {/* Models */}
       {open === "model" && (
-        <div ref={menu} style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <div className="flex items-center gap-2 px-3 py-1">
             <p className="text-[11px] text-fg-subtle">Models</p>
             <button
@@ -620,7 +619,7 @@ export function ComposerBar({
 
       {/* Effort */}
       {open === "effort" && levels.length > 1 && (
-        <div ref={menu} style={{ left: menuLeft }} className="float-in absolute bottom-full left-0 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           {onOff ? (
             // Reached through /effort; the pill flips the same switch directly.
             <button

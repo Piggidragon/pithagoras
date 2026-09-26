@@ -47,6 +47,20 @@ if (phase === 'commands') {
   );
 }
 if (phase === 'compacting') events.push(ev('compaction_start', {}, 6));
+// Tools called with more than a path: a search with several queries, an edit with a list of changes, an MCP tool that answers in JSON; then the answer, finished.
+if (phase === 'args') events.push(
+  ev('turn_start', {}, 20),
+  ev('tool_execution_start', { toolCallId: 'ws', toolName: 'web_search', args: { queries: ['pgvector vs qdrant 2026', 'homelab vector database'], numResults: 5, includeContent: false } }, 19),
+  ev('tool_execution_end', { toolCallId: 'ws', toolName: 'web_search', result: { content: [{ type: 'text', text: 'Found 10 results.' }] } }, 18),
+  ev('tool_execution_start', { toolCallId: 'ed', toolName: 'edit', args: { path: 'web/src/main.tsx', edits: [{ oldText: 'const a = 1;', newText: 'const a = 2;' }, { oldText: 'render(<App />);', newText: 'render(\n  <App />\n);' }] } }, 17),
+  ev('tool_execution_end', { toolCallId: 'ed', toolName: 'edit', result: { content: [{ type: 'text', text: 'Applied 2 edits.' }] } }, 16.5),
+  ev('tool_execution_start', { toolCallId: 'mc', toolName: 'mcp', args: { tool: 'github_list_issues', args: { owner: 'Piggidragon', repo: 'pithagoras', state: 'open', labels: ['bug', 'ui'] } } }, 16),
+  ev('tool_execution_end', { toolCallId: 'mc', toolName: 'mcp', result: { content: [{ type: 'text', text: JSON.stringify([{ number: 21, title: 'Jump button over the tools menu', labels: ['bug', 'ui'] }, { number: 23, title: 'Copy beside the reply', labels: ['ui'] }]) }] } }, 15.5),
+  ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'pgvector is enough below ten million vectors; both open issues are UI polish.' }] } }, 10),
+  ev('agent_end', {}, 9),
+);
+// A model that thinks a few words and a model that thinks a lot, fast: `window.think(text)` adds reasoning as it streams.
+if (phase === 'brief') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'Short one.' } }, 1));
 // The portal restarted mid-command: nothing says the call ended, only that the chat was interrupted.
 if (phase === 'interrupted') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run test:e2e', 'Running 42 tests using 4 workers\n  ✓ login (1.2s)\n', undefined, 12));
 if (phase === 'agents') {
@@ -128,7 +142,7 @@ if (phase === 'switch') {
   }) as typeof fetch;
 }
 
-const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
+const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.
 if (phase === 'nudge') {
@@ -149,6 +163,7 @@ function Fixture() {
   const [shownEvents, setShownEvents] = React.useState(events);
   const paste = () => fillFrom(session.id, { seq: -now * 1000 - 10, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: 'the ', paste: true } });
   React.useEffect(() => { for (const ev of fills) fillFrom(session.id, ev); }, []);
+  (window as any).think = (delta: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'message_update', at: Date.now(), payload: { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta } } }]);
   (window as any).fillBox = (text: string) => fillFrom(session.id, { seq: -now * 1000 - 20, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text } });
   React.useEffect(() => {
     if (phase !== 'nudge') return;

@@ -32,8 +32,13 @@
 
 /* ── Status dots (see StatusDot.tsx) ── */
 .status-dot { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: rgb(var(--fg-faint)); transition: background .3s; }
-.status-dot.is-running { background: rgb(var(--accent)); animation: status-ping 1.8s var(--ease-out) infinite; }
+/* Working: a ring whose bright end runs round it, rather than a dot that pulses. */
+/* A little larger than the dot, taking the same room: nothing beside it moves when a chat starts or stops. */
+.status-dot.is-running { position: relative; width: 10px; height: 10px; margin: -1px; background: none; }
+.status-dot.is-running::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgb(var(--accent) / 0) 10%, rgb(var(--accent))); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); animation: status-spin .9s linear infinite; }
+.status-dot.is-running::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 50% 1px, rgb(var(--accent)) 1px, transparent 1.5px); animation: status-spin .9s linear infinite; }
 .status-dot.is-error { background: rgb(var(--danger)); }
 .status-dot.is-interrupted { background: rgb(var(--warn)); }
-@keyframes status-ping { 0% { box-shadow: 0 0 0 0 rgb(var(--accent) / .55); } 70%, 100% { box-shadow: 0 0 0 5px rgb(var(--accent) / 0); } }
-@media (prefers-reduced-motion: reduce) { .status-dot.is-running { animation: none; } }
+@keyframes status-spin { to { transform: rotate(360deg); } }
+/* Still, it stays a ring: told apart from an idle dot all the same. */
+@media (prefers-reduced-motion: reduce) { .status-dot.is-running::before, .status-dot.is-running::after { animation: none; } .status-dot.is-running::before { background: rgb(var(--accent)); } }
