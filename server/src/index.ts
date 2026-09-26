@@ -1,6 +1,7 @@
 import { bindHost, loginThrottle, portalSecurityHeaders } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
 import { canvasEvents, listCanvases } from "./canvases.js";
+import { clampLevel } from "./pi/model-runtime.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -890,6 +891,22 @@ const CONTEXT_UNSUPPORTED =
  */
 const named = (session: { provider: string | null; model: string | null }) => ({ provider: session.provider, model: session.model });
 
+/**
+ * A running chat's config, with what its row names — read after pi has
+ * answered, and said only when pi is on the model the row comes to now. The
+ * row read before could be older than the model pi reports: one picked while
+ * pi was starting, and the page kept its levels as the default's. So could
+ * the default, changed in Settings while this chat's pi still ran the last.
+ */
+async function liveAnswer(id: string) {
+  const config = await liveConfig(await sessions.client(id));
+  const row = getSession(id);
+  if (!row) return config;
+  const want = chatModel(row);
+  const on = config.state.model;
+  return on.provider === want.provider && on.id === want.model ? { ...config, named: named(row) } : config;
+}
+
 /** Everything the pills under the composer show, from a running pi. */
 async function liveConfig(client: Awaited<ReturnType<typeof sessions.client>>) {
   const [state, levels, models, stats] = await Promise.all([
@@ -934,6 +951,11 @@ app.get("/api/sessions/:id/config", async (req, res) => {
     const defaults = getSettings();
     // What pi would be started on: the same halves, from the same places.
     const { provider, model } = chatModel(session, defaults);
+    // From pi's catalogue, which is kept outside any conversation: a page
+    // that had never seen the model otherwise drew the full slider until
+    // the chat was next run.
+    const levels = await modelLevels(provider, model);
+    const asked = session.thinking_level || defaults.thinkingLevel;
     return res.json({
       live: false,
       state: {
@@ -942,22 +964,22 @@ app.get("/api/sessions/:id/config", async (req, res) => {
           name: model || "pi's default",
           provider,
         },
-        thinkingLevel: session.thinking_level || defaults.thinkingLevel,
+        // The one pi would start on: a level the model does not offer is
+        // moved to the nearest it does, and the pill named one the slider
+        // could not show.
+        thinkingLevel: levels.length ? clampLevel(levels, asked) : asked,
       },
       // Unknowable without the session open, and a made-up zero reads as
       // "empty context" rather than "not measured yet".
       stats: null,
-      // From pi's catalogue, which is kept outside any conversation: a page
-      // that had never seen the model otherwise drew the full slider until
-      // the chat was next run.
-      thinking: { levels: await modelLevels(provider, model) },
+      thinking: { levels },
       models: { models: [] },
       named: named(session),
     });
   }
 
   try {
-    res.json({ ...(await liveConfig(await sessions.client(session.id))), named: named(session) });
+    res.json(await liveAnswer(session.id));
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -991,7 +1013,7 @@ app.get("/api/sessions/:id/models", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   try {
-    res.json({ ...(await liveConfig(await sessions.client(session.id))), named: named(session) });
+    res.json(await liveAnswer(session.id));
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -1164,6 +1186,9 @@ app.get("/api/sessions/:id/events/before", (req, res) => {
   });
 });
 
+/** How often a canvas being written is sent on its chat's stream, at most. */
+const CANVAS_EVERY_MS = 250;
+
 app.get("/api/sessions/:id/events", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
@@ -1187,6 +1212,38 @@ app.get("/api/sessions/:id/events", (req, res) => {
       payload: JSON.parse(row.payload),
     })}\n\n`);
   };
+
+  // The chat's canvases come on the same stream, under their own name. They
+  // had a stream of their own, and two per open chat is how three tabs used up
+  // the six connections a browser allows one address: a fourth chat, and every
+  // request its page made, waited for one of them to close.
+  //
+  // The list first, not after the conversation: a long one replayed over a
+  // slow link kept the panel empty until the last of it had come.
+  const writeCanvas = (message: unknown) => res.write(`event: canvas\ndata: ${JSON.stringify(message)}\n\n`);
+  // A document being written changes many times a second, each change the
+  // whole of it, and the conversation's own events wait behind them on this
+  // one connection. So only the latest of a document's changes goes, at most
+  // every CANVAS_EVERY_MS; anything else sends what was held first, in order.
+  const held = new Map<string, unknown>();
+  let heldTimer: ReturnType<typeof setTimeout> | undefined;
+  const sendHeld = () => {
+    clearTimeout(heldTimer);
+    heldTimer = undefined;
+    for (const message of held.values()) writeCanvas(message);
+    held.clear();
+  };
+  const onCanvas = (message: { type?: string; canvas?: { id?: string } }) => {
+    if (message?.type === "update" && message.canvas?.id) {
+      held.set(message.canvas.id, message);
+      heldTimer ??= setTimeout(sendHeld, CANVAS_EVERY_MS);
+      return;
+    }
+    sendHeld();
+    writeCanvas(message);
+  };
+  canvasEvents.on(session.id, onCanvas);
+  writeCanvas({ type: "snapshot", canvases: listCanvases(session.id) });
 
   // Replace stale in-memory deltas before durable replay, then restore the current snapshot.
   res.write("event: live-reset\ndata: {}\n\n");
@@ -1227,19 +1284,12 @@ app.get("/api/sessions/:id/events", (req, res) => {
   };
   sessions.on(`session:${session.id}`, onEvent);
 
-  // The chat's canvases come on the same stream, under their own name. They
-  // had a stream of their own, and two per open chat is how three tabs used up
-  // the six connections a browser allows one address: a fourth chat, and every
-  // request its page made, waited for one of them to close.
-  const onCanvas = (message: unknown) => res.write(`event: canvas\ndata: ${JSON.stringify(message)}\n\n`);
-  canvasEvents.on(session.id, onCanvas);
-  onCanvas({ type: "snapshot", canvases: listCanvases(session.id) });
-
   const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
   req.on("close", () => {
     clearInterval(heartbeat);
     sessions.off(`session:${session.id}`, onEvent);
     canvasEvents.off(session.id, onCanvas);
+    clearTimeout(heldTimer);
   });
 });
 
@@ -1325,7 +1375,11 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
 
   // pi's catalogue, built now rather than when the first chat is opened:
   // that chat's effort pill waits for it to say which levels its model has.
-  modelRuntime().catch((e) => console.error(`[portal] pi's model catalogue could not be built: ${(e as Error).message}`));
+  // Not for the container executor, whose pi runs inside the container: here
+  // it would load every extension's code on the host for no chat.
+  if (EXECUTOR_KIND !== "container") {
+    modelRuntime().catch((e) => console.error(`[portal] pi's model catalogue could not be built: ${(e as Error).message}`));
+  }
 
   channelSupervisor
     .sync()

@@ -62,3 +62,17 @@ test("after a failed build, one made since is used at once", async () => {
   await modelRuntime();
   assert.deepEqual(await modelLevels("test-server", "switch"), ["off", "medium"]);
 });
+
+test("a failed read of pi's files keeps the catalogue built", async () => {
+  const { modelRuntime } = await import("../dist/api/providers.js");
+  const rt = await modelRuntime();
+  assert.deepEqual(await modelLevels("test-server", "switch"), ["off", "medium"]);
+  // A file caught half written, say: the next read of them fails once.
+  const refresh = rt.refresh.bind(rt);
+  rt.refresh = async () => { rt.refresh = refresh; throw new Error("half written"); };
+  writeFileSync(path.join(dir, "auth.json"), JSON.stringify({}));
+  // Before, the catalogue was thrown away with it, and for a minute no chat
+  // had levels — then every extension ran again to build another.
+  assert.deepEqual(await modelLevels("test-server", "switch", 2000), ["off", "medium"]);
+  assert.equal(await modelRuntime(), rt);
+});

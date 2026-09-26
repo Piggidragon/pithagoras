@@ -59,3 +59,18 @@ export function thinkingLevelsOf(model: { reasoning?: boolean; thinkingLevelMap?
     return true;
   });
 }
+
+/**
+ * The level pi starts a model on when asked for `level`: that one if the
+ * model offers it, else the nearest above it, else below — as pi-ai's
+ * clampThinkingLevel does, which pi does not export either. `levels` are the
+ * model's, from thinkingLevelsOf.
+ */
+export function clampLevel(levels: string[], level: string): string {
+  if (levels.includes(level)) return level;
+  const asked = LEVELS.indexOf(level);
+  if (asked === -1) return levels[0] ?? "off";
+  for (let i = asked; i < LEVELS.length; i++) if (levels.includes(LEVELS[i])) return LEVELS[i];
+  for (let i = asked - 1; i >= 0; i--) if (levels.includes(LEVELS[i])) return LEVELS[i];
+  return levels[0] ?? "off";
+}

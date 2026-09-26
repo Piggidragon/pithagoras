@@ -10,7 +10,7 @@ const ALL = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const config = (model: typeof ornith, levels: string[], named: { provider: string | null; model: string | null } = { provider: null, model: null }, models = [ornith, qwen]) =>
   ({ live: false, state: { model, thinkingLevel: 'medium' }, stats: null, thinking: { levels }, models: { models }, named });
 
-async function portal(page: Page, opts: { streamsOpen?: boolean } = {}) {
+async function portal(page: Page, opts: { streamsOpen?: boolean; listHangs?: boolean } = {}) {
   const at = new Date().toISOString();
   const chat = (id: string, title: string, provider: string | null = null) =>
     ({ id, title, workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider, model: null, thinking_level: null });
@@ -19,6 +19,7 @@ async function portal(page: Page, opts: { streamsOpen?: boolean } = {}) {
     // Naming a provider and no model: the default model, run there.
     chat('c', 'Third chat', 'llama-swap'), chat('c2', 'Fourth chat', 'llama-swap'),
     chat('d', 'Fifth chat'), chat('e', 'Sixth chat'),
+    chat('f', 'Seventh chat'), chat('g', 'Eighth chat'),
   ];
   /** Whether a model was picked for chat a, which is then its own and no longer the default. */
   let picked = false;
@@ -45,6 +46,12 @@ async function portal(page: Page, opts: { streamsOpen?: boolean } = {}) {
     // No catalogue yet: opening the model menu asks pi for it, which says the default is Qwen now.
     else if (p === '/api/sessions/e/config') reply = config(ornith, ['off', 'medium'], undefined, []);
     else if (p === '/api/sessions/e/models') reply = { ...config(qwen, ALL), live: true };
+    // Still Ornith, the default, but pi's catalogue has not answered yet.
+    else if (p === '/api/sessions/f/config') reply = config(ornith, []);
+    // No default set in the portal: pi's own, which an idle chat cannot name.
+    else if (p === '/api/sessions/g/config') reply = config({ id: 'default', name: "pi's default", provider: 'llama-swap' }, []);
+    // The browser has no connection for it: asked, and never answered.
+    else if (p.endsWith('/canvases') && opts.listHangs) return;
     else if (p.endsWith('/canvases')) reply = [];
     else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
     else if (p === '/api/models') reply = { models: [], providers: {} };
@@ -83,9 +90,12 @@ const streams = (page: Page) => page.evaluate(() => (window as any).streams.filt
 /** Every stream the page has asked for, closed or not. */
 const everAsked = (page: Page) => page.evaluate(() => [...new Set((window as any).streams.map((s: any) => s.url))]);
 const pill = (page: Page) => page.locator('.composer-settings button').nth(1);
-/** What a page that has seen chats before keeps: the default's levels, as last reported. */
-const seen = (page: Page, levels: Record<string, string[]>) =>
-  page.addInitScript((l) => localStorage.setItem('pithagoras.thinkingLevels', JSON.stringify(l)), levels);
+/** What a page that has seen chats before keeps: the default's levels, as last reported, and which model they were for. */
+const seen = (page: Page, levels: Record<string, string[]>, follows: Record<string, string> = {}) =>
+  page.addInitScript(([l, f]) => {
+    localStorage.setItem('pithagoras.thinkingLevels', JSON.stringify(l));
+    localStorage.setItem('pithagoras.thinkingLevelsFollow', JSON.stringify(f));
+  }, [levels, follows] as const);
 const open = async (page: Page, title: string, id: string) => {
   await page.getByText(title).first().click();
   await expect(page).toHaveURL(new RegExp(`/s/${id}$`));
@@ -171,7 +181,7 @@ test("a model picked in a chat on the default is not kept as the default's", asy
 });
 
 test("a new default's control is not the old default's, when its levels are not known yet", async ({ page }) => {
-  await seen(page, { ':': ['off', 'medium'] });
+  await seen(page, { ':': ['off', 'medium'] }, { ':': 'llama-swap:Ornith1.5-35b' });
   await portal(page);
   // Chat d is drawn first with the default's levels as last seen: Ornith's.
   // Its answer names Qwen, the default now, with no levels yet. What was
@@ -194,4 +204,36 @@ test("the levels the model list reports are kept as the config's are", async ({ 
   await open(page, 'Second chat', 'b');
   await expect(page.locator('.composer-settings button').first()).toHaveText('default');
   await expect(page.getByTitle('Effort / thinking level')).toHaveText('medium');
+});
+
+test("the default's control stays while pi's catalogue has not answered", async ({ page }) => {
+  // Drawn from what was last seen for a chat on the default: Ornith's. Its
+  // answer names Ornith with no levels yet. The first paint named no model,
+  // and was taken for another's: the right control became the full slider
+  // whenever the catalogue was slow.
+  await seen(page, { ':': ['off', 'medium'] }, { ':': 'llama-swap:Ornith1.5-35b' });
+  await portal(page);
+  await page.goto('/s/f');
+  await expect(page.locator('.composer-settings button').first()).toHaveText('Ornith 1.5 35B');
+  await page.waitForTimeout(300);
+  await expect(page.getByTitle('Thinking on / off')).toHaveText('thinking on');
+});
+
+test("pi's own default, which cannot be named, keeps what was drawn", async ({ page }) => {
+  await seen(page, { ':': ['off', 'medium'] }, { ':': 'llama-swap:Ornith1.5-35b' });
+  await portal(page);
+  await page.goto('/s/g');
+  await expect(page.locator('.composer-settings button').first()).toHaveText("pi's default");
+  await page.waitForTimeout(300);
+  await expect(page.getByTitle('Thinking on / off')).toHaveText('thinking on');
+});
+
+test('the canvas list is asked for once at a time while no connection is free', async ({ page }) => {
+  // Neither the stream nor the list gets a connection. One more ask every
+  // five seconds piled up in the browser's queue, to go out together.
+  const { asked } = await portal(page, { streamsOpen: false, listHangs: true });
+  await page.goto('/s/a');
+  await expect.poll(() => asked['/api/sessions/a/canvases'] ?? 0, { timeout: 6000 }).toBe(1);
+  await page.waitForTimeout(11_000);
+  expect(asked['/api/sessions/a/canvases']).toBe(1);
 });

@@ -75,26 +75,51 @@ const cachedLevels = (provider: string | null | undefined, model: string | null 
   knownLevels(provider, model) ?? DEFAULT_LEVELS;
 
 /**
- * `named`: what the chat's row names, as the server read it. A chat naming no
- * model follows the default, and its first paint looks the levels up by what
- * the row names — its provider, if any, and no model — so they are kept there
- * too, and the next chat like it draws the default's control rather than the
- * full slider.
+ * For a chat naming no model: which model the levels kept under what it names
+ * were last reported for. Without it, levels drawn from there could not be
+ * told apart from another model's — the default's before it was changed —
+ * nor from the same model's, and either stayed wrongly or went wrongly.
+ */
+const FOLLOWS_KEY = "pithagoras.thinkingLevelsFollow";
+
+function readFollows(): Record<string, string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FOLLOWS_KEY) || "{}");
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The model the levels a chat's first paint draws are for, when that is known. */
+function levelsModel(provider: string | null | undefined, model: string | null | undefined): string | undefined {
+  if (model) return levelsKey(provider ?? "", model);
+  const known = readFollows()[levelsKey(provider ?? "", "")];
+  return typeof known === "string" ? known : undefined;
+}
+
+/**
+ * `named`: what the chat's row names, as the server read it — said only when
+ * pi is on the model the row comes to. A chat naming no model follows the
+ * default, and its first paint looks the levels up by what the row names —
+ * its provider, if any, and no model — so they are kept there too, with the
+ * model they were for, and the next chat like it draws the default's control
+ * rather than the full slider.
  */
 function cacheLevels(provider: string, model: string, levels: string[], named?: PiConfig["named"]) {
   if (!model || !levels.length) return;
+  const follows = named && !named.model ? levelsKey(named.provider ?? "", "") : undefined;
   try {
     localStorage.setItem(LEVELS_KEY, JSON.stringify({
       ...readLevels(),
       [levelsKey(provider, model)]: levels,
-      ...(named && !named.model ? { [levelsKey(named.provider ?? "", "")]: levels } : {}),
+      ...(follows ? { [follows]: levels } : {}),
     }));
+    if (follows) localStorage.setItem(FOLLOWS_KEY, JSON.stringify({ ...readFollows(), [follows]: levelsKey(provider, model) }));
   } catch {
     // Same as the catalogue: a full quota is not worth failing the pill over.
   }
 }
-
-const sameModel = (a: { provider: string; id: string }, b: { provider: string; id: string }) => a.provider === b.provider && a.id === b.id;
 
 const RECENTS_KEY = "pithagoras.recentModels";
 const MAX_RECENTS = 4;
@@ -196,6 +221,8 @@ export function ComposerBar({
   });
 
   const [cfg, setCfg] = useState<PiConfig>(() => seed(session));
+  /** Which model the levels drawn are for, when that is known; see load. */
+  const levelsFor = useRef<string | undefined>(levelsModel(session.provider, session.model));
   /** True while a catalogue fetch is in flight — not "has one ever run". */
   const [loadingCatalogue, setLoadingCatalogue] = useState(false);
   const [open, setOpen] = useState<null | "model" | "effort" | "tools">(null);
@@ -222,21 +249,31 @@ export function ComposerBar({
       .config(sessionId)
       .then((next) => {
         cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.named);
-        // /config is the cheap route and reports neither. The levels are then
-        // what was last reported for the model it names — not for the one the
-        // seed guessed, which for a chat with no model of its own (a fresh /new)
-        // was nothing at all, and drew the full slider for a model that only
-        // switches on and off. Failing that, what is already drawn stays — for
-        // the same model only: the default's, first drawn for a chat that
-        // follows it, is another model's once the default has changed.
+        // /config is the cheap route and reports neither when pi's catalogue
+        // has not answered. The levels are then what was last reported for the
+        // model it names — not for the one the seed guessed, which for a chat
+        // with no model of its own (a fresh /new) was nothing at all, and drew
+        // the full slider for a model that only switches on and off.
+        //
+        // Failing that, what is drawn stays, unless it is known to be another
+        // model's: the default's, drawn first for a chat that follows it, once
+        // the default has been changed. Not merely because the seed named no
+        // model — that is every chat on the default, and the right control
+        // went back to the full slider whenever the catalogue was slow. Nor for
+        // pi's own default, which an idle chat cannot name: its answer says
+        // "default", and there is nothing to tell the two apart by.
+        const nextKey = levelsKey(next.state.model.provider, next.state.model.id);
         const known = knownLevels(next.state.model.provider, next.state.model.id);
+        const unnamed = !next.live && next.state.model.id === "default";
+        let thinking: PiConfig["thinking"] | null;
+        if (next.thinking.levels.length) thinking = next.thinking;
+        else if (known) thinking = { levels: known };
+        else if (unnamed || levelsFor.current === undefined || levelsFor.current === nextKey) thinking = null;
+        else thinking = { levels: DEFAULT_LEVELS };
+        if (thinking) levelsFor.current = thinking.levels === DEFAULT_LEVELS ? undefined : nextKey;
         setCfg((prev) => ({
           ...next,
-          thinking: next.thinking.levels.length
-            ? next.thinking
-            : known
-              ? { levels: known }
-              : sameModel(prev.state.model, next.state.model) ? prev.thinking : { levels: DEFAULT_LEVELS },
+          thinking: thinking ?? prev.thinking,
           models: next.models.models.length ? next.models : prev.models,
         }));
       })
@@ -245,6 +282,7 @@ export function ComposerBar({
   /** Whether the chat had started when last looked at — see the effect on `started`. */
   const wasStarted = useRef(started);
   useEffect(() => {
+    levelsFor.current = levelsModel(session.provider, session.model);
     setCfg(seed(session));
     setOpen(null);
     setDragEffort(null);
@@ -259,6 +297,7 @@ export function ComposerBar({
       .models(sessionId)
       .then((next) => {
         setCfg(next);
+        levelsFor.current = levelsKey(next.state.model.provider, next.state.model.id);
         cacheModels(next.models?.models ?? []);
         cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.named);
       })

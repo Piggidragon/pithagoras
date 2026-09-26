@@ -11,8 +11,8 @@ import { ResizeHandles } from './ResizeHandles';
 /** How long the chat's stream may take to come up before the panel asks for the list itself. */
 const STALLED_MS=2000;
 type Canvas = { id:string; title:string; content:string; revision:number; status:string; active_call:string|null; updated_at:string; persisted:boolean };
-async function request(url:string,method:string,body?:unknown) {
-  const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
+async function request(url:string,method:string,body?:unknown,signal?:AbortSignal) {
+  const res=await fetch(url,{method,signal,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const data=await res.json();if(!res.ok)throw new Error(data.error||'Canvas request failed');return data;
 }
 export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{sessionId:string;folder:string;open:boolean;setOpen:(open:boolean)=>void;showToggle?:boolean}) {
@@ -62,10 +62,12 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
   // is connecting.
   useEffect(()=>{
     if(!askSelf)return;
-    let disposed=false;
-    const load=async()=>{const version=updates.current;try{const data=await request(root,'GET');if(!disposed&&version===updates.current){setRows(data);setError('');}}catch(e){if(!disposed)setError((e as Error).message);}};
+    // One ask at a time: with no connection free, each waits in the browser's
+    // queue, and one every five seconds piled up to go out together.
+    let disposed=false,waiting=false;const stop=new AbortController();
+    const load=async()=>{if(waiting)return;waiting=true;const version=updates.current;try{const data=await request(root,'GET',undefined,stop.signal);if(!disposed&&version===updates.current){setRows(data);setError('');}}catch(e){if(!disposed)setError((e as Error).message);}finally{waiting=false;}};
     const first=setTimeout(()=>{if(stalled||feedRef.current==='down')void load();},0);const timer=setInterval(()=>void load(),5000);
-    return()=>{disposed=true;clearTimeout(first);clearInterval(timer);};
+    return()=>{disposed=true;stop.abort();clearTimeout(first);clearInterval(timer);};
   },[root,open,askSelf]);
   useEffect(()=>{if(!editing&&!rows.some(row=>row.id===selected))setSelected(rows[0]?.id??'');},[rows,selected,editing]);
   useEffect(()=>{if(canvas?.active_call&&follow.current&&viewport.current)viewport.current.scrollTop=viewport.current.scrollHeight;},[canvas?.content,canvas?.active_call]);

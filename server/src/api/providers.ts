@@ -41,8 +41,15 @@ export function modelRuntime(cwd = agentHome()): Promise<any> {
   } else if (runtime.config !== config) {
     // A provider or a key changed: the same runtime reads pi's two files again, as an open chat's does.
     runtime.config = config;
-    runtime.value = runtime.value.then(async (rt) => {
-      await rereadConfig(rt);
+    const kept = runtime;
+    kept.value = kept.value.then(async (rt) => {
+      // One that fails — a file caught half written — keeps the catalogue as
+      // it was, rather than throwing away what was built and running every
+      // extension again to build another. Read again when next asked.
+      await rereadConfig(rt).catch((e) => {
+        console.error(`[portal] pi's model files could not be read again: ${(e as Error).message}`);
+        kept.config = "";
+      });
       return rt;
     });
   }
@@ -54,7 +61,7 @@ export function modelRuntime(cwd = agentHome()): Promise<any> {
   return value;
 }
 
-/** When building pi's catalogue last failed; see modelLevels. */
+/** When building pi's catalogue last failed — building, not reading its files again; see modelLevels. */
 let lastFailure = 0;
 const RETRY_AFTER_MS = 60_000;
 

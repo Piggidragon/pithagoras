@@ -134,6 +134,36 @@ test("an idle chat's model and levels are the ones it would be started on", asyn
   assert.deepEqual(other.thinking.levels, ["off"]);
 });
 
+test("an idle chat's effort is the one pi would start it on", async () => {
+  // Asked for xhigh, on a model that offers off and medium: pi starts it on
+  // medium. The pill said xhigh, which the slider could not show.
+  await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "switch", thinkingLevel: "xhigh" }) });
+  const chat = await json("/api/sessions", { method: "POST", body: JSON.stringify({}) });
+  const config = await configOf(chat.id);
+  assert.deepEqual(config.thinking.levels, ["off", "medium"]);
+  assert.equal(config.state.thinkingLevel, "medium");
+  await json("/api/settings", { method: "PUT", body: JSON.stringify({ thinkingLevel: "medium" }) });
+});
+
+test("a running chat's answer says what its row names only when pi is on the model it comes to", async () => {
+  await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "plain" }) });
+  const chat = await json("/api/sessions", { method: "POST", body: JSON.stringify({}) });
+  // Listing its commands starts pi, on the default.
+  await json(`/api/sessions/${chat.id}/commands`);
+  const live = await json(`/api/sessions/${chat.id}/config`);
+  assert.equal(live.live, true);
+  assert.equal(live.state.model.id, "plain");
+  assert.deepEqual(live.named, { provider: null, model: null });
+
+  // The default changed in Settings while this chat's pi still runs the last:
+  // its levels are not the default's now, and were kept as them.
+  await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "switch" }) });
+  const stale = await json(`/api/sessions/${chat.id}/config`);
+  assert.equal(stale.state.model.id, "plain");
+  assert.equal(stale.named, undefined);
+  await json(`/api/sessions/${chat.id}/abort`, { method: "POST" }).catch(() => {});
+});
+
 /** Reads a server-sent stream until `until` says it has what it wants. */
 async function readStream(url, until, ms = 5000) {
   const ac = new AbortController();
@@ -185,4 +215,27 @@ test("a chat's canvases come on its event stream, not a stream of their own", as
   const old = await fetch(`${base}/api/sessions/${chat.id}/canvases/events`);
   assert.equal(old.headers.get("content-type")?.includes("text/event-stream"), false);
   await old.body?.cancel();
+});
+
+test("the canvas list comes before the conversation, and a document being written comes as its latest", async () => {
+  const chat = await json("/api/sessions", { method: "POST", body: JSON.stringify({}) });
+  let doc = await json(`/api/sessions/${chat.id}/canvases`, { method: "POST", body: JSON.stringify({ title: "Draft" }) });
+  let edited = false;
+  const events = await readStream(`/api/sessions/${chat.id}/events?since=0`, async (events) => {
+    if (events.some((e) => e.name === "caught-up") && !edited) {
+      edited = true;
+      // Ten changes in a row, as a document being written makes them.
+      for (let i = 1; i <= 10; i++) {
+        doc = await json(`/api/sessions/${chat.id}/canvases/${doc.id}`, { method: "PUT", body: JSON.stringify({ revision: doc.revision, title: "Draft", content: "x".repeat(i) }) });
+      }
+    }
+    return events.some((e) => e.name === "canvas" && JSON.parse(e.data).canvas?.revision === 10);
+  });
+  const names = events.map((e) => e.name);
+  // Before the replay, not after it: a long one kept the panel empty until it had all come.
+  assert.ok(names.indexOf("canvas") < names.indexOf("live-reset"), names.join(","));
+  // Each change was the whole document, and the conversation waited behind them all.
+  const updates = events.filter((e) => e.name === "canvas" && JSON.parse(e.data).type === "update");
+  assert.ok(updates.length <= 3, `${updates.length} updates sent for 10 changes`);
+  assert.equal(JSON.parse(updates.at(-1).data).canvas.content, "x".repeat(10));
 });
