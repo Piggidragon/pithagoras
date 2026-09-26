@@ -5,7 +5,7 @@ import { Streamdown } from 'streamdown';
 import { asksBeforeDeleting } from '../confirm-prefs';
 import { canvasPictures } from '../canvas-pictures';
 import { api } from '../api';
-import { watchCanvases } from '../canvas-feed';
+import { watchCanvases, type FeedState } from '../canvas-feed';
 import { ResizeHandles } from './ResizeHandles';
 
 type Canvas = { id:string; title:string; content:string; revision:number; status:string; active_call:string|null; updated_at:string; persisted:boolean };
@@ -16,7 +16,8 @@ async function request(url:string,method:string,body?:unknown) {
 export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{sessionId:string;folder:string;open:boolean;setOpen:(open:boolean)=>void;showToggle?:boolean}) {
   const [rows,setRows]=useState<Canvas[]>([]),[selected,setSelected]=useState('');
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(''),[title,setTitle]=useState(''),[base,setBase]=useState(0);
-  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[connected,setConnected]=useState(false);
+  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[feed,setFeed]=useState<FeedState>('down');
+  const feedRef=useRef<FeedState>('down');
   const [confirmDelete,setConfirmDelete]=useState(false);
   const editingRef=useRef(editing);editingRef.current=editing;
   const lastActiveCall=useRef<string|null>(null);
@@ -28,7 +29,7 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
   useEffect(()=>{
     setRows([]);setSelected('');setOpen(false);setEditing(false);setError('');setConfirmDelete(false);
     // Heard on the chat's own stream, which the app keeps open: see canvas-feed.ts.
-    return watchCanvases(sessionId,{connected:setConnected,message:(data:any)=>{
+    return watchCanvases(sessionId,{state:s=>{feedRef.current=s;setFeed(s);},message:(data:any)=>{
       updates.current++;
       if(data.type==='snapshot'){setRows(data.canvases);return;}
       if(data.type==='delete'){setRows(prev=>prev.filter(row=>row.id!==data.id));return;}
@@ -38,13 +39,22 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
       if(data.type==='create'||data.type==='focus'||row.status==='writing'&&row.active_call!==lastActiveCall.current){lastActiveCall.current=row.active_call;if(!editingRef.current){setOpen(true);setSelected(row.id);}}
     }});
   },[sessionId]);
-  // Load the list independently of the live stream; refresh on opening and while reconnecting.
+  // Asked for only while the stream does not carry the list — on opening, and
+  // every few seconds until it does again. While it does, it sent the whole
+  // list on connecting and each change since, and asking as well fetched every
+  // canvas twice. Not while a hidden tab has given it back: nothing is looking,
+  // and it sends the list again when taken back.
+  //
+  // The first ask waits a moment: the panel's effects run before the app's,
+  // so on being drawn it always hears "down", just before the app says it is
+  // connecting.
   useEffect(()=>{
+    if(feed!=='down')return;
     let disposed=false;
     const load=async()=>{const version=updates.current;try{const data=await request(root,'GET');if(!disposed&&version===updates.current){setRows(data);setError('');}}catch(e){if(!disposed)setError((e as Error).message);}};
-    void load();const timer=!connected?setInterval(()=>void load(),5000):undefined;
-    return()=>{disposed=true;if(timer)clearInterval(timer);};
-  },[root,open,connected]);
+    const first=setTimeout(()=>{if(feedRef.current==='down')void load();},0);const timer=setInterval(()=>void load(),5000);
+    return()=>{disposed=true;clearTimeout(first);clearInterval(timer);};
+  },[root,open,feed]);
   useEffect(()=>{if(!editing&&!rows.some(row=>row.id===selected))setSelected(rows[0]?.id??'');},[rows,selected,editing]);
   useEffect(()=>{if(canvas?.active_call&&follow.current&&viewport.current)viewport.current.scrollTop=viewport.current.scrollHeight;},[canvas?.content,canvas?.active_call]);
   const beginEdit=()=>{if(!canvas)return;setDraft(canvas.content);setTitle(canvas.title);setBase(canvas.revision);setEditing(true);setError('');};
@@ -58,7 +68,7 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
     {open&&<section ref={panel} className="canvas-panel" aria-label="Session canvas workspace">
       <header><div><LuFileText/><strong>Session canvases</strong></div><div className="canvas-frame-actions"><button aria-label={canvas?.persisted?"Canvas stored":"Store canvas"} title={canvas?.persisted?"Stored — edits auto-save":"Store canvas permanently"} disabled={!canvas||canvas.persisted||busy||editing} onClick={()=>void store()}>{canvas?.persisted?<LuCheck/>:<LuSave/>}</button><button aria-label="Download canvas" title="Download Markdown" disabled={!canvas} onClick={download}><LuDownload/></button><button aria-label="Close canvas" disabled={editing} onClick={()=>setOpen(false)}><LuX/></button></div></header>
       <div className="canvas-picker"><Select aria-label="Select canvas" className="flex-1 min-w-0" size="sm" value={selected} disabled={editing} placeholder="Choose a document" onChange={v=>{setSelected(v);setConfirmDelete(false);setError('');follow.current=true}} options={rows.map(row=>({value:row.id,label:row.title,text:row.title,hint:row.persisted?undefined:"Temporary — not stored"}))}/><button disabled={editing||busy} aria-label="New canvas" onClick={()=>void create()}><LuPlus/></button></div>
-      {!connected&&<p className="canvas-notice">Reconnecting to live canvas…</p>}
+      {feed==='down'&&<p className="canvas-notice">Reconnecting to live canvas…</p>}
       {error&&<p role="alert" className="canvas-error">{error}</p>}
       {canvas?<>
         <div className="canvas-document-heading">{editing?<input aria-label="Canvas title" maxLength={200} value={title} onChange={e=>setTitle(e.target.value)}/>:<h3>{canvas.title}</h3>}<span>{canvas.active_call?'Writing live':canvas.status==='edited'?'Edited by you':canvas.status==='interrupted'?'Partial draft retained':canvas.persisted?'Auto-saved':'Temporary'} · {canvas.persisted?"Stored":"Not stored — lost on server restart"} · r{canvas.revision}</span></div>

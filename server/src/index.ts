@@ -923,6 +923,9 @@ app.get("/api/sessions/:id/config", async (req, res) => {
     const defaults = getSettings();
     const provider = session.provider || defaults.provider;
     const model = session.model || defaults.model;
+    // Looked up only as a pair from one place: the row's own, or the
+    // defaults. A row naming only one of them would pair it with the other's.
+    const pair = session.model ? (session.provider ? [session.provider, session.model] : []) : [defaults.provider, defaults.model];
     return res.json({
       live: false,
       state: {
@@ -939,13 +942,16 @@ app.get("/api/sessions/:id/config", async (req, res) => {
       // From pi's catalogue, which is kept outside any conversation: a page
       // that had never seen the model otherwise drew the full slider until
       // the chat was next run.
-      thinking: { levels: await modelLevels(provider, model) },
+      thinking: { levels: await modelLevels(pair[0], pair[1]) },
       models: { models: [] },
+      // A chat naming no model follows the default: the page keeps what it
+      // learns here as the default's, for the next such chat to draw first.
+      onDefault: !session.model,
     });
   }
 
   try {
-    res.json(await liveConfig(await sessions.client(session.id)));
+    res.json({ ...(await liveConfig(await sessions.client(session.id))), onDefault: !session.model });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -979,7 +985,7 @@ app.get("/api/sessions/:id/models", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   try {
-    res.json(await liveConfig(await sessions.client(session.id)));
+    res.json({ ...(await liveConfig(await sessions.client(session.id))), onDefault: !session.model });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }

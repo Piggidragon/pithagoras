@@ -47,19 +47,34 @@ export function modelRuntime(cwd = agentHome()): Promise<any> {
     });
   }
   const { value } = runtime;
-  value.catch(() => { if (runtime?.value === value) runtime = undefined; });
+  value.catch(() => {
+    lastFailure = Date.now();
+    if (runtime?.value === value) runtime = undefined;
+  });
   return value;
 }
+
+/** When building pi's catalogue last failed; see modelLevels. */
+let lastFailure = 0;
+const RETRY_AFTER_MS = 60_000;
 
 /**
  * The effort levels a model offers, without starting a conversation — for a
  * chat that is not running, whose pills otherwise drew the full slider for a
  * model that only switches thinking on and off. Empty when the model is not
- * known, or when pi's catalogue is not built within `wait`: the page then
+ * known, and when pi's catalogue is not ready within `wait`: the page then
  * keeps what it last saw for the model.
+ *
+ * Only a short wait. The catalogue is kept once built, and re-reading pi's
+ * two files is quick; building it runs every extension's code, which after a
+ * start or an install takes far longer than a pill should wait. That build is
+ * started here and left to finish for the next chat opened. One that failed
+ * is not tried again from here for a while: each chat opened would run every
+ * extension again, only to fail again.
  */
-export async function modelLevels(provider: string | undefined, id: string | undefined, wait = 1500): Promise<string[]> {
+export async function modelLevels(provider: string | undefined, id: string | undefined, wait = 150): Promise<string[]> {
   if (!provider || !id) return [];
+  if (Date.now() - lastFailure < RETRY_AFTER_MS) return [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), wait); });
   try {

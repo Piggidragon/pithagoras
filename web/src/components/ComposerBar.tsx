@@ -75,18 +75,20 @@ const cachedLevels = (provider: string | null | undefined, model: string | null 
   knownLevels(provider, model) ?? DEFAULT_LEVELS;
 
 /**
- * `ownModel`: false for a chat on the default model. Its row names none, so
- * its first paint looks the levels up under no name at all — they are kept
- * there too, and a chat opened on the default draws the default's control
- * rather than the full slider.
+ * `onDefault`: the answer is for a chat on the default model. Its row names
+ * none, so its first paint looks the levels up under no name at all — they
+ * are kept there too, and a chat opened on the default draws the default's
+ * control rather than the full slider. Said by the server, which reads the
+ * row as it is now: the page's copy still named no model just after one was
+ * picked, and kept the picked one's levels as the default's.
  */
-function cacheLevels(provider: string, model: string, levels: string[], ownModel = true) {
+function cacheLevels(provider: string, model: string, levels: string[], onDefault = false) {
   if (!model || !levels.length) return;
   try {
     localStorage.setItem(LEVELS_KEY, JSON.stringify({
       ...readLevels(),
       [levelsKey(provider, model)]: levels,
-      ...(ownModel ? {} : { [levelsKey("", "")]: levels }),
+      ...(onDefault ? { [levelsKey("", "")]: levels } : {}),
     }));
   } catch {
     // Same as the catalogue: a full quota is not worth failing the pill over.
@@ -218,7 +220,7 @@ export function ComposerBar({
     api
       .config(sessionId)
       .then((next) => {
-        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, !!session.model);
+        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.onDefault === true);
         // /config is the cheap route and reports neither. The levels are then
         // what was last reported for the model it names — not for the one the
         // seed guessed, which for a chat with no model of its own (a fresh /new)

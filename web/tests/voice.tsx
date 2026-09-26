@@ -77,5 +77,5 @@ function Fixture() {
 }
 // Inside a router, as in the app: the chat's links go through it.
 // What the app's stream would pass on for this chat's canvases.
-(window as any).canvasFeed = { message: (m: CanvasMessage) => canvasMessage('test', m), connected: (on: boolean) => canvasConnection('test', on) };
+(window as any).canvasFeed = { message: (m: CanvasMessage) => canvasMessage('test', m), connected: (on: boolean) => canvasConnection('test', on ? 'up' : 'down') };
 createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /></BrowserRouter>);

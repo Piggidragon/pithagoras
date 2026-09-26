@@ -787,6 +787,8 @@ export interface PiConfig {
   state: PiState;
   thinking: { levels: string[] };
   models: { models: PiModel[] };
+  /** The chat names no model of its own and follows the default. */
+  onDefault?: boolean;
   /** The context window set for this model, when it differs from its definition. */
   contextLimit?: number | null;
   /** The window every chat is held to, as a ceiling; set in Settings. */

@@ -26,12 +26,21 @@ writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({
         { id: "plain", name: "Plain", reasoning: false, input: ["text"], contextWindow: 1000, maxTokens: 100 },
       ],
     },
+    // A model of the same name elsewhere, which does not think.
+    "second-server": {
+      baseUrl: "http://127.0.0.1:1/v1", api: "openai-completions", apiKey: "none",
+      models: [{ id: "switch", name: "Switch", reasoning: false, input: ["text"], contextWindow: 1000, maxTokens: 100 }],
+    },
   },
 }));
 
 const freePort = () => new Promise((resolve) => {
   const s = createServer().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
 });
+
+// The server's database, to set what its rows say where no route does.
+process.env.DATA_DIR = home;
+const db = await import("../dist/db.js");
 
 let server;
 let base;
@@ -66,22 +75,57 @@ const json = async (url, init) => {
   return res.json();
 };
 
+/** The config of a chat, asked again until pi's catalogue, built at start-up, has answered. */
+async function configOf(id) {
+  for (let i = 0; ; i++) {
+    const config = await json(`/api/sessions/${id}/config`);
+    if (config.thinking.levels.length || i > 50) return config;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 test("a chat that is not running says which thinking levels its model has", async () => {
   // Before, it said none: a page that had not seen the model drew the full
   // effort slider for one that only switches thinking on and off, until the
   // chat was next run.
   await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "switch" }) });
   const chat = await json("/api/sessions", { method: "POST", body: JSON.stringify({}) });
-  const config = await json(`/api/sessions/${chat.id}/config`);
+  const config = await configOf(chat.id);
   assert.equal(config.live, false);
   assert.equal(config.state.model.id, "switch");
   assert.deepEqual(config.thinking.levels, ["off", "medium"]);
+  // It names no model, so the page may keep these as the default's.
+  assert.equal(config.onDefault, true);
 
   await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "plain" }) });
   assert.deepEqual((await json(`/api/sessions/${chat.id}/config`)).thinking.levels, ["off"]);
 
   // One pi does not know: nothing to say, rather than a guess.
   await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "gone" }) });
+  assert.deepEqual((await json(`/api/sessions/${chat.id}/config`)).thinking.levels, []);
+});
+
+test("a chat's own model is looked up as its own, and never paired with the default's half", async () => {
+  await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "plain" }) });
+  const chat = await json("/api/sessions", { method: "POST", body: JSON.stringify({}) });
+  await configOf(chat.id);
+
+  // Its own: not the default's, and not to be kept as it.
+  db.updateSession(chat.id, { provider: "test-server", model: "switch" });
+  const own = await json(`/api/sessions/${chat.id}/config`);
+  assert.deepEqual(own.thinking.levels, ["off", "medium"]);
+  assert.equal(own.onDefault, false);
+
+  // A row naming a provider and no model follows the default model, which
+  // was looked up under the row's provider: another server's model of the
+  // same name, which thinks where the default does not.
+  db.updateSession(chat.id, { provider: "test-server", model: null });
+  await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "second-server", model: "switch" }) });
+  assert.deepEqual((await json(`/api/sessions/${chat.id}/config`)).thinking.levels, ["off"]);
+
+  // One naming a model and no provider: not paired with the default's provider.
+  db.updateSession(chat.id, { provider: null, model: "switch" });
+  await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "plain" }) });
   assert.deepEqual((await json(`/api/sessions/${chat.id}/config`)).thinking.levels, []);
 });
 

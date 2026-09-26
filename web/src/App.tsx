@@ -32,6 +32,8 @@ const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general"
 
 /** How long a tab is hidden before an idle chat in it gives its stream back. */
 const HIDDEN_RELEASE_MS = 30_000;
+/** How often a chat whose stream was given back is asked whether a run has started in it. */
+const PAUSED_CHECK_MS = 15_000;
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -198,10 +200,13 @@ function Shell({
       if (cancelled) return;
       const es = new EventSource(`/api/sessions/${sessionId}/events?since=${seq}`);
       esRef.current = es;
+      // The canvas panel is drawn before the stream is up: it waits for the
+      // list the stream sends first, rather than asking for it as well.
+      canvasConnection(sessionId, "connecting");
       es.onopen = () => {
         failed = 0;
         setFailures(0);
-        canvasConnection(sessionId, true);
+        canvasConnection(sessionId, "up");
       };
       es.addEventListener("live-reset", () => setEvents(resetLiveEvents));
       es.addEventListener("canvas", (m) => canvasMessage(sessionId, JSON.parse((m as MessageEvent).data)));
@@ -301,7 +306,7 @@ function Shell({
         // Keep what arrived: the resume cursor has already moved past it.
         flush();
         es.close();
-        canvasConnection(sessionId, false);
+        canvasConnection(sessionId, "down");
         failed += 1;
         setFailures(failed);
         retry = setTimeout(connect, reconnectDelay(failed));
@@ -322,16 +327,26 @@ function Shell({
     // starts running, and then it catches up from where it left off.
     let paused = false;
     let pauseTimer: ReturnType<typeof setTimeout> | undefined;
+    let check: ReturnType<typeof setInterval> | undefined;
     const pause = () => {
       if (cancelled || paused || !document.hidden || runningRef.current) return;
       paused = true;
       clearTimeout(retry);
       close();
       esRef.current = null;
+      canvasConnection(sessionId, "paused");
+      // A run started elsewhere — a routine, a channel, another device — is
+      // news nothing brings a closed stream, and the list is not asked for
+      // while hidden. So the chat itself is, now and then: a short request
+      // rather than a connection held open.
+      check = setInterval(() => {
+        api.session(sessionId).then((s) => { if (s.status === "running") resume(); }, () => {});
+      }, PAUSED_CHECK_MS);
     };
     const resume = () => {
       clearTimeout(pauseTimer);
       if (cancelled || !paused) return;
+      clearInterval(check);
       paused = false;
       connect();
     };
@@ -352,10 +367,11 @@ function Shell({
       cancelled = true;
       clearTimeout(retry);
       clearTimeout(pauseTimer);
+      clearInterval(check);
       document.removeEventListener("visibilitychange", settle);
       streamSettle.current = () => {};
       esRef.current?.close();
-      canvasConnection(sessionId, false);
+      canvasConnection(sessionId, "down");
     };
   }, [sessionId, refreshSessions]);
 
