@@ -479,7 +479,11 @@ function ArgValue({ value, depth }: { value: unknown; depth: number }): ReactNod
  */
 export function jsonOutput(output: string): object | undefined {
   const t = output.trim();
-  if (!/^[[{]/.test(t) || /(?<![\w."])-?\d{16,}/.test(t)) return undefined;
+  // Sixteen digits or more in a row, a point or two among them: more than a
+  // JavaScript number holds, whole or after the point. A string with as many
+  // is shown as text too, which is no loss. No lookbehind: Safari before 16.4
+  // cannot read one, and the whole page failed to load there.
+  if (!/^[[{]/.test(t) || /\d[\d.]{15,}/.test(t)) return undefined;
   try {
     const v = JSON.parse(t);
     return v && typeof v === "object" && Object.keys(v).length ? v : undefined;

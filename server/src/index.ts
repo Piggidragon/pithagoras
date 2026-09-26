@@ -677,12 +677,6 @@ app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
   }
 });
 
-/** The versions of each message that has more than one: see SessionManager.messageVersions. */
-app.get("/api/sessions/:id/versions", (req, res) => {
-  if (!getSession(req.params.id)) return res.status(404).json({ error: "Not found" });
-  res.json({ versions: sessions.messageVersions(req.params.id) });
-});
-
 /** Shows another version of a message, and what followed it then. */
 app.post("/api/sessions/:id/messages/:seq/version", async (req, res) => {
   const to = Number(req.body?.to);
@@ -1268,6 +1262,9 @@ app.get("/api/sessions/:id/events", (req, res) => {
   // past (see bumpReloads): a page that last saw another count missed one, and
   // loads the chat again rather than go on from its cursor.
   res.write(`event: reloads\ndata: ${JSON.stringify({ reloads: session.reloads ?? 0 })}\n\n`);
+  // The versions of its messages, as they are now; later changes come live
+  // (portal_versions). A page does not ask for them after each change.
+  res.write(`event: versions\ndata: ${JSON.stringify({ versions: sessions.messageVersions(session.id) })}\n\n`);
   // Replace stale in-memory deltas before durable replay, then restore the current snapshot.
   res.write("event: live-reset\ndata: {}\n\n");
 

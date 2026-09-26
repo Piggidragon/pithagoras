@@ -39,16 +39,17 @@ test('a long summary is cut, and labels read as words', () => {
 });
 
 test('a channel says a call the way the chat does', () => {
-  const inputs: unknown[] = [
-    { queries: ['pgvector vs qdrant', 'homelab'], numResults: 5 },
-    { command: 'npm test' },
-    { path: 'a.ts', edits: [{ oldText: 'a', newText: 'b' }] },
-    { steps: [{ a: 1 }], title: 'x'.repeat(200) },
-    'plain',
-    {},
-  ];
-  for (const input of inputs) assert.equal(serverSummary(input, 80), argsSummary(input, 80), JSON.stringify(input));
+  // One module for both: two copies were kept alike only by this test's few inputs.
+  assert.equal(argsSummary, serverSummary);
   // It said "⚙ web_search · {"queries":[…]}", and "⚙ mcp · {"tool":…}" for anything behind the adapter.
   assert.deepEqual(describeToolCall({ toolName: 'web_search', args: { queries: ['a', 'b'] } }), { name: 'web_search', detail: 'Queries: a, b' });
   assert.deepEqual(describeToolCall({ toolName: 'mcp', args: { tool: 'github_list_issues', args: { state: 'open' } } }), { name: 'github_list_issues', detail: 'State: open' });
+});
+
+test('nothing in the page is written in a way older Safari cannot read', async () => {
+  // A regex lookbehind is a syntax error in Safari before 16.4, where the whole bundle then failed to load.
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const files = (readdirSync('web/src', { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f));
+  const found = files.filter((f) => /\(\?<[!=]/.test(readFileSync(`web/src/${f}`, 'utf8')));
+  assert.deepEqual(found, []);
 });

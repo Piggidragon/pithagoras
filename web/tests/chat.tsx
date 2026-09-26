@@ -59,6 +59,8 @@ if (phase === 'args') events.push(
   // Numbers as they were written, spaces as they were given, and an id too long for JavaScript's numbers.
   ev('tool_execution_start', { toolCallId: 'cf', toolName: 'configure', args: { port: 8080, threshold: 0.0001, old_string: '    return x;' } }, 15),
   ev('tool_execution_end', { toolCallId: 'cf', toolName: 'configure', result: { content: [{ type: 'text', text: '{"id": 12345678901234567890, "ok": true}' }] } }, 14.5),
+  ev('tool_execution_start', { toolCallId: 'lg', toolName: 'ledger', args: { account: 'main' } }, 14.4),
+  ev('tool_execution_end', { toolCallId: 'lg', toolName: 'ledger', result: { content: [{ type: 'text', text: '{"balance": 0.123456789012345678901}' }] } }, 14.3),
   ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'pgvector is enough below ten million vectors; both open issues are UI polish.' }] } }, 10),
   ev('agent_end', {}, 9),
 );

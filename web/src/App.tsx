@@ -130,6 +130,8 @@ function Shell({
   // somebody starts or stops a container.
   const [hasBrowser, setHasBrowser] = useState(false);
   const [events, setEvents] = useState<PortalEvent[]>([]);
+  /** The versions of the chat's messages, as its stream says: see messageVersions on the server. */
+  const [versions, setVersions] = useState<Record<number, number[]>>({});
   /** How often the chat shown was loaded again from the start: see portal_reload. */
   const loadedAgain = useRef(0);
   /** Whether anything older than what we hold is still on the server. */
@@ -180,6 +182,7 @@ function Shell({
   useEffect(() => {
     esRef.current?.close();
     setEvents([]);
+    setVersions({});
     setMoreBefore(false);
     setUiQueue([]);
     setLoadedSession(null);
@@ -225,6 +228,7 @@ function Shell({
         reloads = now;
         if (missed) reload();
       });
+      es.addEventListener("versions", (m) => setVersions((JSON.parse((m as MessageEvent).data) as { versions: Record<number, number[]> }).versions));
       es.addEventListener("live-reset", () => setEvents(resetLiveEvents));
       es.addEventListener("canvas", (m) => canvasMessage(sessionId, JSON.parse((m as MessageEvent).data)));
       // Until it has caught up, what arrives is history being replayed. It is
@@ -291,7 +295,9 @@ function Shell({
         if (ev.type === "portal_removed") {
           // `also` and `kept`: messages sent into a run go with the stretch the
           // agent read them in, not the one whose seq range they were sent in.
-          const { from, to, also = [], kept = [] } = ev.payload as { from: number; to: number | null; also?: number[]; kept?: number[] };
+          const { from, to, also = [], kept = [], reloads: now } = ev.payload as { from: number; to: number | null; also?: number[]; kept?: number[]; reloads?: number };
+          // Heard, so not missed: the count this brings is not a reason to load again.
+          if (now !== undefined) reloads = now;
           const covered = (at: number) =>
             also.includes(at) || (at >= from && (to == null || at < to) && !kept.includes(at));
           if (replay) replay = replay.filter((e) => !covered(e.seq));
@@ -301,6 +307,10 @@ function Shell({
         // Another version of a message was brought back, or an edit undone:
         // events came back under seqs this stream has read past, so it reads
         // the chat again from the start.
+        if (ev.type === "portal_versions") {
+          setVersions((ev.payload as { versions: Record<number, number[]> }).versions);
+          return;
+        }
         if (ev.type === "portal_reload") {
           reloads = (ev.payload as { reloads?: number }).reloads ?? reloads;
           reload();
@@ -542,6 +552,7 @@ function Shell({
               await api.prompt(active.id, msg, options);
               refreshSessions();
             }}
+            versions={versions}
             onEditMessage={async (seq, message) => {
               await api.editMessage(active.id, seq, message);
               refreshSessions();

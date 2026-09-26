@@ -117,7 +117,8 @@ test("a message sent again keeps what it replaced as a version to switch back to
   // Its events came back under seqs every page has read past: they load the chat again.
   assert.equal(reloaded.count, 1);
   // A page that was away hears it from the count its stream starts with; nothing is kept in the transcript.
-  assert.equal(getSession("again").reloads, 1);
+  // One for the edit's removal, one for this.
+  assert.equal(getSession("again").reloads, 2);
   assert.ok(!eventsSince("again").some((e) => e.type === "portal_reload"));
 
   // And forward again to the edit.
@@ -381,4 +382,79 @@ test("a version goes back onto its conversation after pi has written its setting
   await sessions.switchVersion("settings", seqs[0], v2);
   assert.deepEqual(sentMessages("settings").map((m) => m.message), ["number is 42"]);
   assert.equal(readFileSync(file, "utf8"), withV2);
+});
+
+test("a switch undone on a disk that takes nothing more still shows the conversation it showed", async () => {
+  const dir = mkdtempSync(path.join(home, "full-"));
+  const { file, seqs } = chat("fulldisk", ["s1", "s2"]);
+  const moved = path.join(dir, "fulldisk.jsonl");
+  writeFileSync(moved, readFileSync(file, "utf8"));
+  updateSession("fulldisk", { pi_session_file: moved });
+  await sessions.editMessage("fulldisk", seqs[1], "s2 again");
+  await until(() => answers("fulldisk").includes("answer to s2 again"));
+  const again = sentMessages("fulldisk")[1].seq;
+  // Once cut, the disk takes nothing more: not the switch's file, and not the undoing's either.
+  const cut = sessions.cut;
+  sessions.cut = async function (...args) {
+    const done = await cut.apply(this, args);
+    chmodSync(dir, 0o500);
+    return done;
+  };
+  try {
+    await assert.rejects(sessions.switchVersion("fulldisk", again, seqs[1]), /EACCES|permission/);
+  } finally {
+    sessions.cut = cut;
+    chmodSync(dir, 0o700);
+  }
+  // The file was written first and threw: the transcript was never put back, and neither version could be reached.
+  assert.deepEqual(sentMessages("fulldisk").map((m) => m.message), ["s1", "s2 again"]);
+  assert.deepEqual(answers("fulldisk"), ["answer to s1", "answer to s2 again"]);
+  assert.deepEqual(sessions.messageVersions("fulldisk"), { [again]: [seqs[1], again] });
+});
+
+test("every change to what a chat shows counts as one a page that was away must load again for", async () => {
+  const { seqs } = chat("counted", ["c1", "c2", "c3"]);
+  const told = [];
+  sessions.on("session:counted", (row) => ["portal_removed", "portal_versions"].includes(row.type) && told.push({ type: row.type, ...JSON.parse(row.payload) }));
+  await sessions.editMessage("counted", seqs[2], "c3 again");
+  await until(() => answers("counted").includes("answer to c3 again"));
+  const again = sentMessages("counted")[2].seq;
+  // Said live only: a page whose stream was down kept the old turn, the replacement under it.
+  assert.equal(getSession("counted").reloads, 1);
+  assert.equal(told.find((t) => t.type === "portal_removed").reloads, 1);
+  // And the versions, once the replacement has its seq, rather than each page asking.
+  assert.deepEqual(told.find((t) => t.type === "portal_versions").versions, { [again]: [seqs[2], again] });
+  await sessions.removeMessage("counted", seqs[1], "turn");
+  assert.equal(getSession("counted").reloads, 2);
+  assert.deepEqual(told.at(-1), { type: "portal_versions", versions: {} });
+});
+
+test("a version's part of pi's file does not start halfway through a character", async () => {
+  const { keptFile } = await import("../dist/session-manager.js");
+  // 😀 and 😃 share their first half: the split fell between the halves.
+  const kept = keptFile('{"text":"ab😀cd"}', '{"text":"ab😃xy"}');
+  assert.equal(kept.file, '😀cd"}');
+  assert.equal(kept.filePrefix, '{"text":"ab'.length);
+});
+
+test("a switch reads pi's file once pi has stopped, and refuses on what it finds then", async () => {
+  const { file, seqs } = chat("stopped", ["t1", "t2"]);
+  await sessions.editMessage("stopped", seqs[1], "t2 again");
+  await until(() => answers("stopped").includes("answer to t2 again"));
+  const again = sentMessages("stopped")[1].seq;
+  // pi, stopping, writes its file anew: another conversation from the start.
+  const other = [JSON.stringify({ type: "session", id: "z" }), entry("z0", null, "user", "t1, said otherwise"), entry("z1", "z0", "assistant", "hm")].join("\n") + "\n";
+  const stop = sessions.stop;
+  sessions.stop = async function (...args) {
+    writeFileSync(file, other);
+    return stop.apply(this, args);
+  };
+  try {
+    // Checked against the file read before it stopped, and then written over what pi had just written.
+    await assert.rejects(sessions.switchVersion("stopped", again, seqs[1]), /changed since that version was kept/);
+  } finally {
+    sessions.stop = stop;
+  }
+  assert.equal(readFileSync(file, "utf8"), other);
+  assert.deepEqual(sentMessages("stopped").map((m) => m.message), ["t1", "t2 again"]);
 });

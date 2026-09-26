@@ -158,6 +158,11 @@ test('parameters keep their numbers and their spaces, and an id too long for a n
   const output = call.locator('.chat-tool-output');
   await expect(output).not.toHaveClass(/is-structured/);
   await expect(output).toContainText('12345678901234567890');
+  // Nor a decimal longer than a number holds: read as JSON it was shown rounded.
+  const ledger = page.locator('.chat-tool', { hasText: 'ledger' });
+  await ledger.locator('.chat-tool-head').click();
+  await expect(ledger.locator('.chat-tool-output')).not.toHaveClass(/is-structured/);
+  await expect(ledger.locator('.chat-tool-output')).toContainText('0.123456789012345678901');
 });
 
 test('an agent conversation keeps its title in place when it starts working', async ({ page }) => {

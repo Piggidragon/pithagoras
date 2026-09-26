@@ -360,11 +360,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
-  /**
-   * The versions of each message that was edited or sent again, by the seq of
-   * the one shown: the seqs of all of them, oldest first.
-   */
-  versions: (id: string) => json<{ versions: Record<number, number[]> }>(`/api/sessions/${id}/versions`),
   /** Shows another version of a message, and what followed it then. */
   switchVersion: (id: string, seq: number, to: number) =>
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/version`, {

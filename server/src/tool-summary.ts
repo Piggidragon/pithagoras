@@ -1,10 +1,9 @@
 /**
- * What a tool was called with, in a line, for a channel: the command, the
- * file, the search — or else its short parameters labelled, "Queries: …, …",
- * rather than the JSON the model wrote.
- *
- * The same as the chat's header says it (web/src/tool-args.ts); a test holds
- * the two to it.
+ * What a tool was called with, in a line: the command, the file, the search
+ * — or else its short parameters labelled, "Queries: …, …", rather than the
+ * JSON the model wrote. For a channel, and for the chat's header too, which
+ * imports it (web/src/tool-args.ts): nothing here but plain JavaScript, so
+ * the page's bundle can take it as it is.
  */
 
 /** Parameters that are what a call acted on: said bare, without a label. */

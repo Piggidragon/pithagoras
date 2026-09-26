@@ -125,6 +125,7 @@ export function Chat({
   onClientCommand,
   onRename,
   onOpenNavigation,
+  versions = {},
   loading,
   hasEarlier,
   loadingEarlier,
@@ -149,6 +150,11 @@ export function Chat({
   onRename: (title: string) => Promise<void>;
   /** On a phone, where the sidebar is a drawer: opens it. */
   onOpenNavigation?: () => void;
+  /**
+   * The versions of messages edited or sent again, by the seq of the one
+   * shown: the seqs of all of them, oldest first. Said by the chat's stream.
+   */
+  versions?: Record<number, number[]>;
 }) {
   const [input, setInput] = useState(() => drafts.get(session.id));
   // Where dictated words go. Kept beside the state because several phrases can
@@ -329,39 +335,17 @@ export function Chat({
     return undefined;
   }, [items]);
   const lastReply = useMemo(() => lastReplyId(items), [items]);
-  // The versions of messages edited or sent again, by the seq of the one shown.
-  // Asked for when the chat opens, and again when a message sent is no longer
-  // there — an edit, a retry, a switch to another version, a delete — which
-  // each give it other ones. Not for every message sent: that only adds one
-  // without versions, and asking each time cost a request and, cleared while
-  // it went, a switch that blinked out. After a change, the next message to
-  // arrive is asked about too: an edit's replacement comes after its removal.
-  const sentKey = useMemo(
-    () => items.flatMap((it) => (it.kind === "user" && !it.queued && !it.unsent ? [it.seq] : [])).join(","),
-    [items],
-  );
-  const [versions, setVersions] = useState<Record<number, number[]>>({});
-  const versionsFor = useRef<{ id: string; seqs: number[]; changed: boolean } | null>(null);
-  const versionsAsked = useRef(0);
+  // A switch to another version, by the message clicked: until the chat has
+  // loaded again without it, a second click would ask about a message that is
+  // on its way out, and fail after the first had worked.
+  const [switching, setSwitching] = useState<number | null>(null);
   useEffect(() => {
-    if (loading) return;
-    const seqs = sentKey ? sentKey.split(",").map(Number) : [];
-    const was = versionsFor.current;
-    const same = was?.id === session.id;
-    if (!same) setVersions({});
-    const added = same && was.seqs.every((seq) => seqs.includes(seq));
-    const ask = !added || was.changed;
-    versionsFor.current = { id: session.id, seqs, changed: same && !added };
-    if (!ask || !seqs.length) return;
-    // The answer to the latest ask for this chat, whatever arrived since:
-    // a message sent meanwhile does not ask again, and must not drop it.
-    const id = session.id;
-    const ticket = ++versionsAsked.current;
-    api
-      .versions(id)
-      .then((r) => ticket === versionsAsked.current && versionsFor.current?.id === id && setVersions(r.versions))
-      .catch(() => {});
-  }, [session.id, sentKey, loading]);
+    if (switching === null) return;
+    if (!items.some((it) => it.kind === "user" && it.seq === switching)) return setSwitching(null);
+    // A stream that does not come back does not leave the switches locked.
+    const t = window.setTimeout(() => setSwitching(null), 15_000);
+    return () => window.clearTimeout(t);
+  }, [items, switching]);
 
   // Only the end of a conversation is drawn to begin with. Drawing all of a long
   // one is what made opening it slow, and the top of it is not what anybody
@@ -1120,7 +1104,18 @@ export function Chat({
                     seqs={versions[item.seq]}
                     seq={item.seq}
                     running={running}
-                    onSwitch={(to) => attempt(async () => void (await api.switchVersion(session.id, item.seq, to)))}
+                    busy={switching !== null}
+                    onSwitch={(to) => {
+                      setSwitching(item.seq);
+                      void attempt(async () => {
+                        try {
+                          await api.switchVersion(session.id, item.seq, to);
+                        } catch (e) {
+                          setSwitching(null);
+                          throw e;
+                        }
+                      });
+                    }}
                   />
                 )}
                 <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
@@ -1749,24 +1744,27 @@ function VersionSwitch({
   seqs,
   seq,
   running,
+  busy,
   onSwitch,
 }: {
   seqs: number[];
   seq: number;
   running: boolean;
+  /** A switch is on its way: one at a time. */
+  busy: boolean;
   onSwitch: (to: number) => void;
 }) {
   const at = seqs.indexOf(seq);
   if (at < 0) return null;
   return (
     <div className="message-versions flex items-center text-[11px] text-fg-subtle" role="group" aria-label="Versions of this message">
-      <MessageAction label={running ? "Stop the run to switch versions" : "Previous version"} disabled={running || at === 0} onClick={() => onSwitch(seqs[at - 1])}>
+      <MessageAction label={running ? "Stop the run to switch versions" : "Previous version"} disabled={running || busy || at === 0} onClick={() => onSwitch(seqs[at - 1])}>
         <LuChevronLeft className="h-3 w-3" />
       </MessageAction>
       <span className="min-w-[2.2rem] text-center tabular-nums" aria-live="polite">
         {at + 1} / {seqs.length}
       </span>
-      <MessageAction label={running ? "Stop the run to switch versions" : "Next version"} disabled={running || at === seqs.length - 1} onClick={() => onSwitch(seqs[at + 1])}>
+      <MessageAction label={running ? "Stop the run to switch versions" : "Next version"} disabled={running || busy || at === seqs.length - 1} onClick={() => onSwitch(seqs[at + 1])}>
         <LuChevronRight className="h-3 w-3" />
       </MessageAction>
     </div>
