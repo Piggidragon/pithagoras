@@ -41,3 +41,21 @@ export async function addExtensionProviders(pi: any, runtime: any, cwd: string):
   }
   await runtime.refresh({ allowNetwork: false });
 }
+
+const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * The effort levels pi offers for a model, worked out as pi-ai's
+ * getSupportedThinkingLevels does — pi does not export it, and the copy it
+ * uses sits inside its own node_modules. A level the model maps to null is
+ * not offered; xhigh and max only when the model names them.
+ */
+export function thinkingLevelsOf(model: { reasoning?: boolean; thinkingLevelMap?: Record<string, string | null | undefined> }): string[] {
+  if (!model.reasoning) return ["off"];
+  return LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === "xhigh" || level === "max") return mapped !== undefined;
+    return true;
+  });
+}

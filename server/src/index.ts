@@ -1,5 +1,6 @@
 import { bindHost, loginThrottle, portalSecurityHeaders } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
+import { canvasEvents, listCanvases } from "./canvases.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -40,7 +41,7 @@ import { routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js
 import { filesRouter } from "./api/files.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
-import { providersRouter } from "./api/providers.js";
+import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { browserRouter } from "./api/browser.js";
@@ -920,20 +921,25 @@ app.get("/api/sessions/:id/config", async (req, res) => {
   // here on the row.
   if (!sessions.isRunning(session.id)) {
     const defaults = getSettings();
+    const provider = session.provider || defaults.provider;
+    const model = session.model || defaults.model;
     return res.json({
       live: false,
       state: {
         model: {
-          id: session.model || defaults.model || "default",
-          name: session.model || defaults.model || "pi's default",
-          provider: session.provider || defaults.provider,
+          id: model || "default",
+          name: model || "pi's default",
+          provider,
         },
         thinkingLevel: session.thinking_level || defaults.thinkingLevel,
       },
       // Unknowable without the session open, and a made-up zero reads as
       // "empty context" rather than "not measured yet".
       stats: null,
-      thinking: { levels: [] },
+      // From pi's catalogue, which is kept outside any conversation: a page
+      // that had never seen the model otherwise drew the full slider until
+      // the chat was next run.
+      thinking: { levels: await modelLevels(provider, model) },
       models: { models: [] },
     });
   }
@@ -1209,10 +1215,19 @@ app.get("/api/sessions/:id/events", (req, res) => {
   };
   sessions.on(`session:${session.id}`, onEvent);
 
+  // The chat's canvases come on the same stream, under their own name. They
+  // had a stream of their own, and two per open chat is how three tabs used up
+  // the six connections a browser allows one address: a fourth chat, and every
+  // request its page made, waited for one of them to close.
+  const onCanvas = (message: unknown) => res.write(`event: canvas\ndata: ${JSON.stringify(message)}\n\n`);
+  canvasEvents.on(session.id, onCanvas);
+  onCanvas({ type: "snapshot", canvases: listCanvases(session.id) });
+
   const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
   req.on("close", () => {
     clearInterval(heartbeat);
     sessions.off(`session:${session.id}`, onEvent);
+    canvasEvents.off(session.id, onCanvas);
   });
 });
 
@@ -1295,6 +1310,10 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   // leave the agent unreachable.
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();
+
+  // pi's catalogue, built now rather than when the first chat is opened:
+  // that chat's effort pill waits for it to say which levels its model has.
+  modelRuntime().catch(() => {});
 
   channelSupervisor
     .sync()

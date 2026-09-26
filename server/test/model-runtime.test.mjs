@@ -55,3 +55,32 @@ test("a key saved is read into the runtime Settings keeps, without making it aga
   assert.equal(after, before, "the same runtime: no extension ran again");
   assert.equal((await providersOf(after)).has("openrouter"), true);
 });
+
+test("the effort levels worked out for a model are the ones pi offers for it", async () => {
+  // pi's own, from the copy of pi-ai it uses: beside it when npm hoists it, inside it otherwise.
+  const { existsSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const piEntry = import.meta.resolve("@earendil-works/pi-coding-agent");
+  const found = ["../node_modules/@earendil-works/pi-ai/dist/models.js", "../../pi-ai/dist/models.js"]
+    .map((p) => new URL(p, piEntry))
+    .find((u) => existsSync(fileURLToPath(u)));
+  assert.ok(found, "pi-ai was not found beside pi");
+  const { getSupportedThinkingLevels } = await import(found.href);
+  const { thinkingLevelsOf } = await import("../dist/pi/model-runtime.js");
+
+  const levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  const maps = [
+    undefined,
+    {},
+    Object.fromEntries(levels.map((l) => [l, ["off", "medium"].includes(l) ? l : null])),
+    { xhigh: "xhigh" },
+    { max: "max", off: null },
+    { low: "low", medium: "medium", xhigh: "xhigh", minimal: null, high: null, off: null, max: null },
+  ];
+  for (const reasoning of [true, false, undefined]) {
+    for (const thinkingLevelMap of maps) {
+      const model = { reasoning, thinkingLevelMap };
+      assert.deepEqual(thinkingLevelsOf(model), getSupportedThinkingLevels(model), JSON.stringify(model));
+    }
+  }
+});

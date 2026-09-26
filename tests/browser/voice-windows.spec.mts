@@ -2,8 +2,8 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    class CanvasEvents { onmessage: any; onopen: any; constructor() { (window as any).canvasEvents = this; setTimeout(() => this.onopen?.(), 20); } close() {} }
-    (window as any).EventSource = CanvasEvents;
+    // The terminal's stream, which has no server behind it here.
+    (window as any).EventSource = class { onmessage: any; onopen: any; close() {} };
   });
   await page.route('**/api/sessions/test/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/test/config', route => route.fulfill({ status: 503, json: {} }));
@@ -90,7 +90,7 @@ test('the browser maximizes within the stage, not the page, and gives its place 
 });
 
 test('a single window stays inside its workspace and the orb moves aside for it', async ({ page }) => {
-  await page.evaluate(() => (window as any).canvasEvents.onmessage({ data: JSON.stringify({ type: 'update', canvas: { id: 'doc', title: 'A shared draft', content: '# Draft', revision: 1, status: 'writing', active_call: 'draft', updated_at: '' } }) }));
+  await page.evaluate(() => (window as any).canvasFeed.message({ type: 'update', canvas: { id: 'doc', title: 'A shared draft', content: '# Draft', revision: 1, status: 'writing', active_call: 'draft', updated_at: '' } }));
   const canvas = page.getByLabel('Session canvas workspace');
   await expect(canvas).toBeVisible();
   await page.waitForTimeout(900);
@@ -121,7 +121,7 @@ async function drag2(page: Page, handle: Locator, dx: number, dy: number) {
 }
 
 const openCanvas = async (page: Page) => {
-  await page.evaluate(() => (window as any).canvasEvents.onmessage({ data: JSON.stringify({ type: 'update', canvas: { id: 'doc', title: 'A shared draft', content: '# Draft', revision: 1, status: 'writing', active_call: 'draft', updated_at: '' } }) }));
+  await page.evaluate(() => (window as any).canvasFeed.message({ type: 'update', canvas: { id: 'doc', title: 'A shared draft', content: '# Draft', revision: 1, status: 'writing', active_call: 'draft', updated_at: '' } }));
   await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
 };
 const overlap = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>

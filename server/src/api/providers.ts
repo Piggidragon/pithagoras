@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { agentHome } from "../agent-home.js";
-import { addExtensionProviders, rereadConfig } from "../pi/model-runtime.js";
+import { addExtensionProviders, rereadConfig, thinkingLevelsOf } from "../pi/model-runtime.js";
 import { readPiSettings } from "../pi-settings.js";
 import {
   APIS, PRESETS, ProbeError, TakenError, checkProviders, configStamp, listProviders, probeModels, removeProvider, saveProvider, savedServer,
@@ -49,6 +49,28 @@ export function modelRuntime(cwd = agentHome()): Promise<any> {
   const { value } = runtime;
   value.catch(() => { if (runtime?.value === value) runtime = undefined; });
   return value;
+}
+
+/**
+ * The effort levels a model offers, without starting a conversation — for a
+ * chat that is not running, whose pills otherwise drew the full slider for a
+ * model that only switches thinking on and off. Empty when the model is not
+ * known, or when pi's catalogue is not built within `wait`: the page then
+ * keeps what it last saw for the model.
+ */
+export async function modelLevels(provider: string | undefined, id: string | undefined, wait = 1500): Promise<string[]> {
+  if (!provider || !id) return [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), wait); });
+  try {
+    const rt = await Promise.race([modelRuntime(), late]);
+    const model = rt?.getModel?.(provider, id);
+    return model ? thinkingLevelsOf(model) : [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** pi's names for its hosted services, and which of them it finds a key for outside its files. */

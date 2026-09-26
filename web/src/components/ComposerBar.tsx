@@ -74,10 +74,20 @@ function knownLevels(provider: string | null | undefined, model: string | null |
 const cachedLevels = (provider: string | null | undefined, model: string | null | undefined) =>
   knownLevels(provider, model) ?? DEFAULT_LEVELS;
 
-function cacheLevels(provider: string, model: string, levels: string[]) {
+/**
+ * `ownModel`: false for a chat on the default model. Its row names none, so
+ * its first paint looks the levels up under no name at all — they are kept
+ * there too, and a chat opened on the default draws the default's control
+ * rather than the full slider.
+ */
+function cacheLevels(provider: string, model: string, levels: string[], ownModel = true) {
   if (!model || !levels.length) return;
   try {
-    localStorage.setItem(LEVELS_KEY, JSON.stringify({ ...readLevels(), [levelsKey(provider, model)]: levels }));
+    localStorage.setItem(LEVELS_KEY, JSON.stringify({
+      ...readLevels(),
+      [levelsKey(provider, model)]: levels,
+      ...(ownModel ? {} : { [levelsKey("", "")]: levels }),
+    }));
   } catch {
     // Same as the catalogue: a full quota is not worth failing the pill over.
   }
@@ -208,7 +218,7 @@ export function ComposerBar({
     api
       .config(sessionId)
       .then((next) => {
-        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels);
+        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, !!session.model);
         // /config is the cheap route and reports neither. The levels are then
         // what was last reported for the model it names — not for the one the
         // seed guessed, which for a chat with no model of its own (a fresh /new)

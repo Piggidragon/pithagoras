@@ -21,6 +21,7 @@ import { BrowserPage } from "./components/BrowserPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { pollWhileVisible, reconnectDelay } from "./poll";
+import { canvasConnection, canvasMessage } from "./canvas-feed";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
 import { notifyIfAway, notifyState } from "./notify";
 import { guardStrayDrops } from "./drop-guard";
@@ -28,6 +29,9 @@ import { guardStrayDrops } from "./drop-guard";
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 type Tab = "general" | "extensions" | "advanced";
 const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general" };
+
+/** How long a tab is hidden before an idle chat in it gives its stream back. */
+const HIDDEN_RELEASE_MS = 30_000;
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -141,6 +145,9 @@ function Shell({
   const [error, setError] = useState<string | null>(null);
   const [uiQueue, setUiQueue] = useState<UiRequest[]>([]);
   const esRef = useRef<EventSource | null>(null);
+  const runningRef = useRef(false);
+  /** Looks again at whether the open chat's stream should be up; see the stream's effect. */
+  const streamSettle = useRef<() => void>(() => {});
   /** Connection attempts to the open conversation that have failed in a row. */
   const [failures, setFailures] = useState(0);
 
@@ -194,8 +201,10 @@ function Shell({
       es.onopen = () => {
         failed = 0;
         setFailures(0);
+        canvasConnection(sessionId, true);
       };
       es.addEventListener("live-reset", () => setEvents(resetLiveEvents));
+      es.addEventListener("canvas", (m) => canvasMessage(sessionId, JSON.parse((m as MessageEvent).data)));
       // Until it has caught up, what arrives is history being replayed. It is
       // gathered and applied in one go: drawing the conversation once per event
       // is what made a long one open at the top, build downwards over seconds and
@@ -292,16 +301,61 @@ function Shell({
         // Keep what arrived: the resume cursor has already moved past it.
         flush();
         es.close();
+        canvasConnection(sessionId, false);
         failed += 1;
         setFailures(failed);
         retry = setTimeout(connect, reconnectDelay(failed));
       };
+      close = () => {
+        flush();
+        es.close();
+      };
     };
+    let close = () => {};
+
+    // A chat left idle in a hidden tab gives its connection back. A browser
+    // allows six to one address, and each tab kept one open whatever it
+    // showed: with enough of them, a chat opened in another waited — its
+    // transcript, its pills, every request its page made — for one to close.
+    // One that is running keeps it, for the dialogs it may ask and the end it
+    // comes to; one idle has nothing to say until it is looked at again, or
+    // starts running, and then it catches up from where it left off.
+    let paused = false;
+    let pauseTimer: ReturnType<typeof setTimeout> | undefined;
+    const pause = () => {
+      if (cancelled || paused || !document.hidden || runningRef.current) return;
+      paused = true;
+      clearTimeout(retry);
+      close();
+      esRef.current = null;
+    };
+    const resume = () => {
+      clearTimeout(pauseTimer);
+      if (cancelled || !paused) return;
+      paused = false;
+      connect();
+    };
+    // Not the moment it is hidden: a glance at another tab and back is common,
+    // and each return would replay what was missed.
+    const settle = () => {
+      clearTimeout(pauseTimer);
+      if (!document.hidden) return resume();
+      if (runningRef.current) return resume();
+      pauseTimer = setTimeout(pause, HIDDEN_RELEASE_MS);
+    };
+    document.addEventListener("visibilitychange", settle);
+    streamSettle.current = settle;
+    settle();
+
     connect();
     return () => {
       cancelled = true;
       clearTimeout(retry);
+      clearTimeout(pauseTimer);
+      document.removeEventListener("visibilitychange", settle);
+      streamSettle.current = () => {};
       esRef.current?.close();
+      canvasConnection(sessionId, false);
     };
   }, [sessionId, refreshSessions]);
 
@@ -327,6 +381,12 @@ function Shell({
   }, [sessionId, listed]);
 
   const active = listed ?? (other?.id === sessionId ? other : null);
+
+  // Whether the open chat is running, for the stream above to decide whether
+  // a hidden tab may give its connection back — and to take it again when a
+  // run starts elsewhere while it is hidden.
+  runningRef.current = active?.status === "running";
+  useEffect(() => streamSettle.current(), [active?.status]);
 
   // What the tab says while you are looking at something else, and — if you
   // asked for them — a notification when a chat you left running is done.

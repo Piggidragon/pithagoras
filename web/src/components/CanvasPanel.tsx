@@ -5,6 +5,7 @@ import { Streamdown } from 'streamdown';
 import { asksBeforeDeleting } from '../confirm-prefs';
 import { canvasPictures } from '../canvas-pictures';
 import { api } from '../api';
+import { watchCanvases } from '../canvas-feed';
 import { ResizeHandles } from './ResizeHandles';
 
 type Canvas = { id:string; title:string; content:string; revision:number; status:string; active_call:string|null; updated_at:string; persisted:boolean };
@@ -26,19 +27,17 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
   const canvas=rows.find(row=>row.id===selected);
   useEffect(()=>{
     setRows([]);setSelected('');setOpen(false);setEditing(false);setError('');setConfirmDelete(false);
-    const source=new EventSource(root+'/events');
-    source.onopen=()=>setConnected(true);source.onerror=()=>setConnected(false);
-    source.onmessage=event=>{
-      const data=JSON.parse(event.data);updates.current++;
+    // Heard on the chat's own stream, which the app keeps open: see canvas-feed.ts.
+    return watchCanvases(sessionId,{connected:setConnected,message:(data:any)=>{
+      updates.current++;
       if(data.type==='snapshot'){setRows(data.canvases);return;}
       if(data.type==='delete'){setRows(prev=>prev.filter(row=>row.id!==data.id));return;}
       const row=data.canvas as Canvas;
       setRows(prev=>[row,...prev.filter(item=>item.id!==row.id)]);
       // Follow an agent's new document unless a different canvas is being edited.
       if(data.type==='create'||data.type==='focus'||row.status==='writing'&&row.active_call!==lastActiveCall.current){lastActiveCall.current=row.active_call;if(!editingRef.current){setOpen(true);setSelected(row.id);}}
-    };
-    return ()=>source.close();
-  },[root]);
+    }});
+  },[sessionId]);
   // Load the list independently of the live stream; refresh on opening and while reconnecting.
   useEffect(()=>{
     let disposed=false;

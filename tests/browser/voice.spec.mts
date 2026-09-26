@@ -208,8 +208,8 @@ test('live transcription begins before turn completion and previews recognized w
 
 test('voice panels animate into browser, terminal and simultaneous layouts', async ({ page }) => {
   await page.addInitScript(() => {
-    class CanvasEvents { onmessage:any; onopen:any; constructor(){(window as any).canvasEvents=this;setTimeout(()=>this.onopen?.(),20)}close(){} }
-    (window as any).EventSource=CanvasEvents;
+    // The terminal's stream, which has no server behind it here.
+    (window as any).EventSource=class { onmessage:any; onopen:any; close(){} };
   });
   const failures: string[] = []; page.on('pageerror', e => failures.push(e.message));
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
@@ -238,7 +238,7 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   expect(browser!.width).toBeGreaterThan(terminal!.width * 1.8);
   expect(browser!.x + browser!.width).toBeLessThan(terminal!.x);
   await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-both.png' });
-  await page.evaluate(() => (window as any).canvasEvents.onmessage({data:JSON.stringify({type:'update',canvas:{id:'doc',title:'A shared draft',content:'# Live canvas\n\nWriting alongside the terminal.',revision:1,status:'writing',active_call:'draft',updated_at:''}})}));
+  await page.evaluate(() => (window as any).canvasFeed.message({type:'update',canvas:{id:'doc',title:'A shared draft',content:'# Live canvas\n\nWriting alongside the terminal.',revision:1,status:'writing',active_call:'draft',updated_at:''}}));
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels','2');
   await expect(page.locator('.voice-stage')).not.toHaveClass(/is-browsing/);
   await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
