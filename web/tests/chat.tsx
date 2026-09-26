@@ -74,6 +74,8 @@ if (phase === 'stream') events.push(
   ]).flat(),
   ev('portal_prompt', { message: 'And the last one?' }, 6),
   ev('turn_start', {}, 5),
+  // A finished command at the end, its output folded away until opened.
+  ...bash('bl', 'cat build.log', Array.from({ length: 40 }, (_, i) => `line ${i + 1} of the build log`).join('\n'), {}, 5),
   ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta: 'The last step' } }, 1),
 );
 // The portal restarted mid-command: nothing says the call ended, only that the chat was interrupted.
@@ -179,6 +181,8 @@ function Fixture() {
   const paste = () => fillFrom(session.id, { seq: -now * 1000 - 10, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: 'the ', paste: true } });
   React.useEffect(() => { for (const ev of fills) fillFrom(session.id, ev); }, []);
   (window as any).think = (delta: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'message_update', at: Date.now(), payload: { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta } } }]);
+  // More of the running command's output, all of it so far.
+  (window as any).bashOut = (text: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'tool_execution_update', at: Date.now(), payload: { toolCallId: 'b3', partialResult: { content: [{ type: 'text', text }] } } }]);
   (window as any).say = (delta: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'message_update', at: Date.now(), payload: { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta } } }]);
   (window as any).fillBox = (text: string) => fillFrom(session.id, { seq: -now * 1000 - 20, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text } });
   React.useEffect(() => {

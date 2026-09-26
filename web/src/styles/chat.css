@@ -348,8 +348,10 @@ button.running-chip-command:hover { text-decoration: underline; }
 
 /* Carrying the panels by their header: the edges they dock at, the one under
    the pointer lit, and where they would go if let go now. */
-.chat-aside-head { cursor: grab; }
-@media (max-width: 767px) { .chat-aside-head { cursor: auto; } }
+/* Not panned or zoomed by the browser: a touch on it carries the panels. */
+.chat-aside-head { cursor: grab; touch-action: none; }
+@media (max-width: 767px) { .chat-aside-head { cursor: auto; touch-action: auto; } }
+.dock-zones[hidden], .dock-preview[hidden] { display: none; }
 body.is-carrying, body.is-carrying * { cursor: grabbing !important; }
 .dock-zones { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
 .dock-edge { position: absolute; border-radius: 999px; background: rgb(var(--accent) / .3); transition: background-color .15s, box-shadow .15s; }

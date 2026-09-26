@@ -83,13 +83,13 @@ export function VoiceTerminal({ events, limit, maxOutput, ended, focus, onFocuse
   /** Behind another tab: kept as it was, rather than worked out anew with every token. */
   hidden?: boolean;
 }) {
-  const { ref, onScroll, follow } = useFollowBottom<HTMLDivElement>();
+  // The command being shown, while it is: new output does not scroll away from it.
+  const focused = useRef<string | null>(null);
+  const { ref, onScroll, follow } = useFollowBottom<HTMLDivElement>({ paused: () => !!focused.current });
   const seen = useRef(events);
   if (!hidden) seen.current = events;
   const shownEvents = seen.current;
   const runs = useMemo(() => terminalRuns(shownEvents, limit, maxOutput, ended), [shownEvents, limit, maxOutput, ended]);
-  // The command being shown, while it is: new output does not scroll away from it.
-  const focused = useRef<string | null>(null);
   const release = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(release.current), []);
   // Follows new output, but leaves you where you scrolled to read earlier lines.

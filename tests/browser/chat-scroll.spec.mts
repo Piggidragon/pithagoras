@@ -5,7 +5,14 @@ const scroller = (page: Page) => page.locator('.chat-list').locator('..');
 const left = (page: Page) => scroller(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
 const say = (page: Page, text: string) => page.evaluate((t) => (window as any).say(t), text);
 const frames = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-const paragraph = ' More of the answer, long enough to take a line or two of the conversation as it is written.\n\n';
+/** Says more, and waits until it is drawn: measured before, nothing had grown to follow. */
+const sayDrawn = async (page: Page, text: string) => {
+  const before = await scroller(page).evaluate((el) => el.scrollHeight);
+  await say(page, text);
+  await expect.poll(() => scroller(page).evaluate((el) => el.scrollHeight)).toBeGreaterThan(before);
+  await frames(page);
+};
+const paragraph = '\n\nMore of the answer, long enough to take a line or two of the conversation as it is written.\n\n';
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 600 });
@@ -68,4 +75,80 @@ test('a shorter box, as when the keyboard opens, still ends at the last word', a
   await page.setViewportSize({ width: 900, height: 380 });
   await frames(page);
   expect(await left(page)).toBeLessThanOrEqual(1);
+});
+
+test('a tool call opened at the end stays where it was clicked, not carried up out of sight', async ({ page }) => {
+  const head = page.locator('.chat-tool-head', { hasText: 'cat build.log' });
+  await expect(head).toBeVisible();
+  const before = (await head.boundingBox())!;
+  await head.click();
+  await expect(page.locator('.chat-tool', { hasText: 'cat build.log' }).locator('.chat-tool-output')).toBeVisible();
+  await frames(page);
+  // It went up by all the output it opened.
+  expect(Math.abs((await head.boundingBox())!.y - before.y)).toBeLessThan(2);
+  // Opened over the end: reading it, not following. New words wait below.
+  await say(page, paragraph);
+  await frames(page);
+  expect(Math.abs((await head.boundingBox())!.y - before.y)).toBeLessThan(2);
+  await expect(page.getByRole('button', { name: 'Latest output' })).toBeVisible();
+});
+
+test('a click in the words being written does not stop following them', async ({ page }) => {
+  await page.getByText('The last step').click();
+  for (let i = 0; i < 3; i++) await sayDrawn(page, paragraph);
+  expect(await left(page)).toBeLessThanOrEqual(1);
+});
+
+test('the wheel turned back in a box of its own inside the conversation leaves it following', async ({ page }) => {
+  // A long thinking or a block of code, scrolled on its own.
+  await page.evaluate(() => {
+    const inner = document.createElement('div');
+    inner.id = 'inner';
+    Object.assign(inner.style, { height: '120px', overflowY: 'auto' });
+    inner.innerHTML = '<div style="height:600px">a long block</div>';
+    document.querySelector('.chat-list')!.lastElementChild!.appendChild(inner);
+    inner.scrollTop = 200;
+  });
+  await frames(page);
+  const inner = (await page.locator('#inner').boundingBox())!;
+  await page.mouse.move(inner.x + 20, inner.y + 60);
+  await page.mouse.wheel(0, -100);
+  await expect.poll(() => page.locator('#inner').evaluate((e) => e.scrollTop)).toBeLessThan(200);
+  // The conversation itself never moved: it still follows what is written.
+  await sayDrawn(page, paragraph);
+  expect(await left(page)).toBeLessThanOrEqual(1);
+});
+
+test('what leaves the conversation box is no longer watched for its size', async ({ page }) => {
+  const unwatched = await page.evaluate(async () => {
+    const seen: string[] = [];
+    const unobserve = ResizeObserver.prototype.unobserve;
+    ResizeObserver.prototype.unobserve = function (target: Element) { seen.push(target.id); return unobserve.call(this, target); };
+    const box = document.querySelector('.chat-list')!.parentElement!;
+    const extra = document.createElement('div');
+    extra.id = 'passing';
+    box.appendChild(extra);
+    await new Promise((r) => requestAnimationFrame(r));
+    extra.remove();
+    await new Promise((r) => requestAnimationFrame(r));
+    ResizeObserver.prototype.unobserve = unobserve;
+    return seen;
+  });
+  expect(unwatched).toContain('passing');
+});
+
+test('a command shown in the terminal stays in view while its output grows', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=tools');
+  await page.locator('.chat-tool-head', { hasText: 'seq 1 40' }).click();
+  await page.getByRole('button', { name: /in the agent terminal/ }).last().click();
+  const run = page.locator('.voice-terminal-run').last();
+  await expect(run).toBeVisible();
+  await expect(run).toContainText('seq 1 40');
+  // Much more output, at once, while it is being shown.
+  await page.evaluate(() => (window as any).bashOut(Array.from({ length: 120 }, (_, i) => `step ${i + 1}`).join('\n')));
+  await frames(page);
+  const box = (await page.locator('.voice-terminal-output').first().boundingBox())!;
+  // Its command line, at the top of it: the output grew under it, not over it.
+  const command = (await run.locator('.voice-terminal-command').boundingBox())!;
+  expect(command.y).toBeGreaterThanOrEqual(box.y - 1);
 });

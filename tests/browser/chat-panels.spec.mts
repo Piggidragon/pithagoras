@@ -23,7 +23,7 @@ const carry = async (page: Page, where: string, during?: () => Promise<void>) =>
   await page.mouse.move(x, y, { steps: 10 });
   await during?.();
   await page.mouse.up();
-  await expect(page.locator('.dock-zones')).toHaveCount(0);
+  await expect(page.locator('.dock-zones')).toBeHidden();
 };
 const place = async (page: Page, where: string) => {
   await carry(page, where);
@@ -99,7 +99,7 @@ test('a press on the header that goes nowhere, or on a button in it, carries not
   await page.mouse.move(g.x + 4, g.y + 4);
   await page.mouse.down();
   await page.mouse.move(g.x + 6, g.y + 5);
-  await expect(page.locator('.dock-zones')).toHaveCount(0);
+  await expect(page.locator('.dock-zones')).toBeHidden();
   await page.mouse.up();
   await page.getByRole('tab', { name: 'Background' }).click();
   expect(await panels(page).boundingBox()).toEqual(before);
@@ -188,4 +188,68 @@ test('on a phone the panels cover the chat wherever they were put', async ({ pag
   expect((await panels(page).boundingBox())!.width).toBe(390);
   // Nothing to carry them by there.
   await expect(page.locator('.chat-aside-head span[title]').first()).toBeHidden();
+});
+
+test('panels leave the conversation and its composer room when the chat gets smaller', async ({ page }) => {
+  await place(page, 'Bottom');
+  // Made as tall as they may be.
+  const edge = (await page.locator('[title="Drag to resize"]').first().boundingBox())!;
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + 1);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + edge.width / 2, 0, { steps: 6 });
+  await page.mouse.up();
+  // Shorter, as the keyboard makes it on a tablet: the composer was squeezed to nothing under them.
+  await page.setViewportSize({ width: 1300, height: 480 });
+  await expect.poll(async () => (await box(page, '.prompt-shell')).y + (await box(page, '.prompt-shell')).height).toBeLessThanOrEqual((await panels(page).boundingBox())!.y + 1);
+  // And a few lines of the conversation above it.
+  expect((await page.locator('.chat-list').locator('..').boundingBox())!.height).toBeGreaterThan(40);
+
+  // Narrower, docked at a side: the conversation keeps its width.
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await place(page, 'Left');
+  await page.setViewportSize({ width: 800, height: 800 });
+  await expect.poll(async () => (await page.locator('.chat-list').locator('..').locator('..').boundingBox())!.width).toBeGreaterThanOrEqual(315);
+});
+
+test('a carry the browser takes over drops nothing, and a touch on the header is the carry\'s, not a pan', async ({ page }) => {
+  expect(await page.locator('.chat-aside-head').first().evaluate((e) => getComputedStyle(e).touchAction)).toBe('none');
+  const g = await grip(page);
+  await page.mouse.move(g.x + 6, g.y + 6);
+  await page.mouse.down();
+  const [x, y] = spots.Floating(await body(page));
+  await page.mouse.move(x, y, { steps: 8 });
+  await expect(page.locator('.dock-zones')).toBeVisible();
+  // A pan or a system gesture: the browser cancels the pointer.
+  await page.locator('.chat-aside-head').first().evaluate((e) => e.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1, bubbles: true })));
+  await page.mouse.up();
+  await expect(page.locator('.dock-zones')).toBeHidden();
+  // Where it was: it jumped into a floating window nobody let go.
+  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'right');
+});
+
+test('a floating window moved or sized is drawn along without the chat, and kept once', async ({ page }) => {
+  await place(page, 'Floating');
+  const writes = () => page.evaluate(() => (window as any).floatWrites as number);
+  await page.evaluate(() => {
+    (window as any).floatWrites = 0;
+    const set = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key: string, value: string) { if (key === 'panelFloat') (window as any).floatWrites++; return set.call(this, key, value); };
+  });
+  const g = await grip(page);
+  await page.mouse.move(g.x + 6, g.y + 6);
+  await page.mouse.down();
+  await page.mouse.move(g.x - 200, g.y + 60, { steps: 10 });
+  // Along with the pointer already, before it is let go.
+  expect((await grip(page)).x).toBeLessThan(g.x - 150);
+  // It was written at every move.
+  expect(await writes()).toBe(0);
+  await page.mouse.up();
+  expect(await writes()).toBe(1);
+  const corner = (await page.locator('.chat-aside-grip').boundingBox())!;
+  await page.mouse.move(corner.x + 8, corner.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(corner.x + 60, corner.y + 40, { steps: 10 });
+  expect(await writes()).toBe(1);
+  await page.mouse.up();
+  expect(await writes()).toBe(2);
 });

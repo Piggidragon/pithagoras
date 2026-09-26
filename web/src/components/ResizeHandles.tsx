@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { GAP, MIN, dockBox, dockSize, type Box } from "../voice-windows";
+import { followPointer } from "../pointer-drag";
 
 export type Edge = "e" | "w" | "s" | "se" | "sw";
 
@@ -25,8 +26,6 @@ export function clearSize(el: HTMLElement | null) {
   for (const p of ["left", "top", "right", "bottom", "width", "height", "transform", "maxWidth", "maxHeight"] as const) el.style[p] = "";
   delete el.dataset.sized;
 }
-
-const ENDS = ["pointerup", "pointercancel", "lostpointercapture"] as const;
 
 /** Every window a voice stage or a chat can have open, the canvas included. */
 export const WINDOWS = ".voice-browser-window.is-open, .voice-terminal-window.is-open, .voice-files-window.is-open, .session-canvases.is-open .canvas-panel";
@@ -120,8 +119,6 @@ const fit = (want: number, least: number, room: number) => Math.min(room, Math.m
 function begin(e: ReactPointerEvent, el: HTMLElement, edge: Edge, mode: ResizeMode) {
   if (e.button !== 0) return;
   e.preventDefault(); e.stopPropagation();
-  const handle = e.currentTarget as HTMLElement;
-  handle.setPointerCapture(e.pointerId);
   const box = el.getBoundingClientRect();
   const area = areaFor(el), obstacles = obstaclesFor(el);
   const parent = (el.offsetParent as HTMLElement | null)?.getBoundingClientRect() ?? { left: 0, top: 0, width: innerWidth, height: innerHeight, right: innerWidth, bottom: innerHeight };
@@ -169,20 +166,13 @@ function begin(e: ReactPointerEvent, el: HTMLElement, edge: Edge, mode: ResizeMo
     moved();
   };
   // Over when the pointer is let go — or when the window closes mid-drag and
-  // takes the handle with it: then the capture is lost at the document, and
-  // no pointerup ever reaches the handle. Heard on the way down from window,
-  // which every one of these passes, wherever it is fired.
-  const end = (ev: PointerEvent) => {
-    if (ev.pointerId !== e.pointerId) return;
-    handle.removeEventListener("pointermove", move);
-    for (const name of ENDS) window.removeEventListener(name, end, true);
+  // takes the handle with it (see followPointer).
+  followPointer(e, move, () => {
     if (!dragging) return;
     el.style.transition = "";
     document.body.classList.remove("is-resizing");
     moved();
-  };
-  handle.addEventListener("pointermove", move);
-  for (const name of ENDS) window.addEventListener(name, end, true);
+  });
 }
 
 /** Grips on a window's edges and bottom corners. Hidden on phones, where windows take the width. */

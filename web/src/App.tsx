@@ -430,7 +430,7 @@ function Shell({
   }, [askedId]);
 
   return (
-    <div className="flex h-[calc(100dvh-var(--keyboard,0px))] min-h-0 overflow-hidden bg-canvas">
+    <div data-fits-keyboard className="flex h-[calc(100dvh-var(--keyboard,0px))] min-h-0 overflow-hidden bg-canvas">
       {mobileNav && <button aria-label="Dismiss navigation" onClick={() => setMobileNav(false)} className="ui-backdrop fixed inset-0 z-40 bg-black/50 md:hidden" />}
       <div id="mobile-navigation" className={`${mobileNav ? "mobile-drawer fixed inset-y-0 left-0 z-50 flex" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
       {mobileNav && <button type="button" aria-label="Close navigation" onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-20 rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
