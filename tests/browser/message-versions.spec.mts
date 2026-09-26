@@ -47,16 +47,23 @@ const turn = (seq: number, question: string, answer: string) => [
   ev(seq + 1, 'message_end', { message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: answer }] } }),
 ];
 
-/** Sends a replay down the newest open stream the page has for the chat, and says it has caught up. */
-async function replay(page: Page, events: unknown[]) {
+/**
+ * Sends a replay down the newest open stream the page has for the chat, and
+ * says it has caught up: first, as the server does, how often the chat was
+ * loaded again (`reloads`).
+ */
+async function replay(page: Page, events: unknown[], reloads = 0) {
   await expect.poll(() => page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).length)).toBeGreaterThan(0);
-  await page.evaluate((events) => {
+  await page.evaluate(([events, reloads]) => {
     const s = (window as any).streams.filter((x: any) => !x.closed).at(-1);
+    s.emit('reloads', { reloads });
     s.emit('live-reset', {});
-    for (const e of events) s.emit('message', e);
+    for (const e of events as unknown[]) s.emit('message', e);
     s.emit('caught-up', {});
-  }, events);
+  }, [events, reloads] as const);
 }
+/** The newest open stream drops. */
+const drop = (page: Page) => page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).onerror());
 
 const openStreams = (page: Page) => page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).map((s: any) => s.url));
 
@@ -72,10 +79,10 @@ test('a message sent again shows which version it is, and switches to the other'
 
   // The server brought the old version back, under the seqs it had: the page is told to load the chat again.
   state.versions = { 2: [2, 5] };
-  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('message', { seq: 9, type: 'portal_reload', at: Date.now(), payload: {} }));
+  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('message', { seq: -1, type: 'portal_reload', at: Date.now(), payload: { reloads: 1 } }));
   await expect.poll(() => openStreams(page)).toEqual(['/api/sessions/a/events?since=0']);
-  // What comes replaces what was there. The reload it passes, stored, is not taken for another one.
-  await replay(page, [...turn(2, 'What is pi?', 'About 3.14.'), ev(9, 'portal_reload', {})]);
+  // What comes replaces what was there.
+  await replay(page, turn(2, 'What is pi?', 'About 3.14.'), 1);
   await expect(page.getByText('What is pi?')).toBeVisible();
   await expect(page.getByText('About 3.14.')).toBeVisible();
   await expect(page.getByText('What is tau?')).toHaveCount(0);
@@ -87,22 +94,69 @@ test('a message sent again shows which version it is, and switches to the other'
   expect(await openStreams(page)).toEqual(['/api/sessions/a/events?since=0']);
 });
 
-test('a page that was away when a version came back loads the chat again on catching up', async ({ page }) => {
+test('a page that was away when a version came back loads the chat again on catching up, and only then', async ({ page }) => {
   await portal(page);
   await page.goto('/s/a');
   await replay(page, turn(5, 'What is tau?', 'About 6.28.'));
-  // The stream drops, and comes back from where it had read to.
-  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).onerror());
+  // The stream drops, and comes back from where it had read to: the count is not the one it last saw.
+  await drop(page);
   await expect.poll(() => openStreams(page), { timeout: 10000 }).toEqual(['/api/sessions/a/events?since=6']);
-  await page.evaluate(() => {
-    const s = (window as any).streams.filter((x: any) => !x.closed).at(-1);
-    s.emit('live-reset', {});
-    s.emit('message', { seq: 9, type: 'portal_reload', at: Date.now(), payload: {} });
-  });
+  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('reloads', { reloads: 1 }));
   await expect.poll(() => openStreams(page)).toEqual(['/api/sessions/a/events?since=0']);
-  await replay(page, turn(2, 'What is pi?', 'About 3.14.'));
+  await replay(page, turn(2, 'What is pi?', 'About 3.14.'), 1);
   await expect(page.getByText('What is pi?')).toBeVisible();
   await expect(page.getByText('What is tau?')).toHaveCount(0);
+  // It drops again, and the count is the same: it goes on from its cursor. A stored
+  // marker it never read past sent every reconnect back to the start.
+  await drop(page);
+  await expect.poll(() => openStreams(page), { timeout: 10000 }).toEqual(['/api/sessions/a/events?since=3']);
+  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('reloads', { reloads: 1 }));
+  await page.waitForTimeout(300);
+  expect(await openStreams(page)).toEqual(['/api/sessions/a/events?since=3']);
+});
+
+test('a reload whose stream drops before anything came keeps the chat on screen', async ({ page }) => {
+  await portal(page);
+  await page.goto('/s/a');
+  await replay(page, turn(5, 'What is tau?', 'About 6.28.'));
+  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('message', { seq: -1, type: 'portal_reload', at: Date.now(), payload: { reloads: 1 } }));
+  await expect.poll(() => openStreams(page)).toEqual(['/api/sessions/a/events?since=0']);
+  await drop(page);
+  // Nothing had come, and that nothing replaced the chat until the next try.
+  await expect(page.getByText('What is tau?')).toBeVisible();
+  await expect.poll(() => openStreams(page), { timeout: 10000 }).toEqual(['/api/sessions/a/events?since=0']);
+  await replay(page, turn(2, 'What is pi?', 'About 3.14.'), 1);
+  await expect(page.getByText('What is pi?')).toBeVisible();
+  await expect(page.getByText('What is tau?')).toHaveCount(0);
+});
+
+test('earlier messages asked for before the chat was loaded again are not put above it', async ({ page }) => {
+  await portal(page);
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let asked = 0;
+  await page.route('**/api/sessions/a/events/before**', async (route) => {
+    const limit = new URL(route.request().url()).searchParams.get('limit');
+    // Whether there is more above: yes.
+    if (limit === '1') return route.fulfill({ json: { events: [ev(1, 'portal_prompt', { message: 'x' })], more: true } });
+    // The first page of it is slow, and comes after the reload; any later one finds nothing.
+    if (asked++ === 0) {
+      await held;
+      return route.fulfill({ json: { events: turn(1, 'Ancient question', 'Ancient answer'), more: false } });
+    }
+    await route.fulfill({ json: { events: [], more: false } });
+  });
+  await page.goto('/s/a');
+  await replay(page, turn(5, 'What is tau?', 'About 6.28.'));
+  // Asked for on its own when the top of a short chat is in view; else by the button.
+  await page.getByRole('button', { name: 'Load earlier messages' }).click({ timeout: 1500 }).catch(() => {});
+  await expect.poll(() => asked).toBeGreaterThan(0);
+  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('message', { seq: -1, type: 'portal_reload', at: Date.now(), payload: { reloads: 1 } }));
+  await replay(page, turn(2, 'What is pi?', 'About 3.14.'), 1);
+  await expect(page.getByText('What is pi?')).toBeVisible();
+  release();
+  await page.waitForTimeout(500);
+  await expect(page.getByText('Ancient question')).toHaveCount(0);
 });
 
 test('a message with one version has no switch', async ({ page }) => {

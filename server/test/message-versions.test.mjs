@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,7 +11,7 @@ process.env.WORKSPACE_ROOT = path.join(home, "ws");
 process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 
-const { createSession, eventsSince, sentMessages, getDb, appendEvent, updateSession } = await import("../dist/db.js");
+const { createSession, eventsSince, sentMessages, getDb, getSession, appendEvent, updateSession } = await import("../dist/db.js");
 const { sessions } = await import("../dist/session-manager.js");
 test.after(() => {
   getDb().close();
@@ -54,10 +54,11 @@ function chat(id, turns, answer = (m) => `answer to ${m}`) {
     running: false,
     prompt: async (message) => {
       // pi adds what it was sent and its answer to its file, under the last entry, and says so.
-      const text = readFileSync(file, "utf8");
+      const at = getSession(id).pi_session_file ?? file;
+      const text = readFileSync(at, "utf8");
       const leaf = JSON.parse(text.trim().split("\n").at(-1)).id;
       const n = ++written;
-      writeFileSync(file, text + entry(`n${n}`, leaf, "user", message) + "\n" + entry(`r${n}`, `n${n}`, "assistant", answer(message)) + "\n");
+      writeFileSync(at, text + entry(`n${n}`, leaf, "user", message) + "\n" + entry(`r${n}`, `n${n}`, "assistant", answer(message)) + "\n");
       setImmediate(() => {
         sessions.record(id, "agent_start", {});
         sessions.record(id, "message_end", reply(answer(message)));
@@ -113,8 +114,9 @@ test("a message sent again keeps what it replaced as a version to switch back to
   assert.deepEqual(sessions.messageVersions("again"), { [seqs[1]]: [seqs[1], now[1]] });
   // Its events came back under seqs every page has read past: they load the chat again.
   assert.equal(reloaded.count, 1);
-  // Stored, so a page that was away hears it on catching up.
-  assert.ok(eventsSince("again").some((e) => e.type === "portal_reload"));
+  // A page that was away hears it from the count its stream starts with; nothing is kept in the transcript.
+  assert.equal(getSession("again").reloads, 1);
+  assert.ok(!eventsSince("again").some((e) => e.type === "portal_reload"));
 
   // And forward again to the edit.
   await sessions.switchVersion("again", seqs[1], now[1]);
@@ -270,4 +272,96 @@ test("a compaction after an edited message goes and comes back with its version"
   await sessions.switchVersion("compacted", seqs[1], sAgain);
   assert.equal(readFileSync(file, "utf8"), compacted);
   assert.equal(compactions(), 1);
+});
+
+test("a version keeps what follows the start it shares, not the whole of pi's file again", async () => {
+  const { file, seqs } = chat("suffix", ["first " + "long words ".repeat(400), "second"]);
+  const before = readFileSync(file, "utf8");
+  await sessions.editMessage("suffix", seqs[1], "second again");
+  await until(() => answers("suffix").includes("answer to second again"));
+  const kept = getDb().prepare("SELECT file, file_prefix FROM message_versions WHERE session_id = 'suffix'").get();
+  // It kept all of it: a long chat's file again with every retry.
+  assert.ok(kept.file.length < before.length / 2, `kept ${kept.file.length} of ${before.length}`);
+  assert.equal(before.slice(kept.file_prefix), kept.file);
+  await sessions.switchVersion("suffix", sentMessages("suffix")[1].seq, seqs[1]);
+  assert.equal(readFileSync(file, "utf8"), before);
+});
+
+test("a version whose conversation pi's file no longer starts with is refused, and nothing changes", async () => {
+  const { file, seqs } = chat("replaced", ["u", "v"]);
+  await sessions.editMessage("replaced", seqs[1], "v again");
+  await until(() => answers("replaced").includes("answer to v again"));
+  const vAgain = sentMessages("replaced")[1].seq;
+  // pi's file is another now: rewritten outside the portal, or another file altogether.
+  const other = [JSON.stringify({ type: "session", id: "t" }), entry("x0", null, "user", "u, said otherwise"), entry("x1", "x0", "assistant", "hm")].join("\n") + "\n";
+  writeFileSync(file, other);
+  // It was written over with the old one, whatever was in it now.
+  await assert.rejects(sessions.switchVersion("replaced", vAgain, seqs[1]), /changed since that version was kept/);
+  assert.equal(readFileSync(file, "utf8"), other);
+  assert.deepEqual(sentMessages("replaced").map((m) => m.message), ["u", "v again"]);
+  assert.deepEqual(sessions.messageVersions("replaced"), { [vAgain]: [seqs[1], vAgain] });
+});
+
+test("a version kept when there was no file of pi's is refused once there is one", async () => {
+  const { file, seqs } = chat("nofile", ["g", "h"]);
+  const text = readFileSync(file, "utf8");
+  updateSession("nofile", { pi_session_file: null });
+  await sessions.editMessage("nofile", seqs[1], "h again");
+  await until(() => answers("nofile").includes("answer to h again"));
+  const hAgain = sentMessages("nofile")[1].seq;
+  updateSession("nofile", { pi_session_file: file });
+  writeFileSync(file, text);
+  // pi's file stayed cut back, without the turn shown.
+  await assert.rejects(sessions.switchVersion("nofile", hAgain, seqs[1]), /changed since/);
+  assert.equal(readFileSync(file, "utf8"), text);
+  assert.deepEqual(sentMessages("nofile").map((m) => m.message), ["g", "h again"]);
+});
+
+test("a switch whose file and then whose putting back both fail still shows what it showed", async () => {
+  const dir = mkdtempSync(path.join(home, "locked-"));
+  const { file, seqs } = chat("twice", ["k", "l"]);
+  const moved = path.join(dir, "twice.jsonl");
+  writeFileSync(moved, readFileSync(file, "utf8"));
+  updateSession("twice", { pi_session_file: moved });
+  await sessions.editMessage("twice", seqs[1], "l again");
+  await until(() => answers("twice").includes("answer to l again"));
+  const lAgain = sentMessages("twice")[1].seq;
+  const shown = readFileSync(moved, "utf8");
+  // Once cut, the disk takes nothing more, and keeping the version being taken fails too.
+  const cut = sessions.cut;
+  sessions.cut = async function (...args) {
+    const done = await cut.apply(this, args);
+    chmodSync(dir, 0o500);
+    getDb().exec(`CREATE TRIGGER no_keep BEFORE INSERT ON message_versions WHEN NEW.seq = ${seqs[1]} BEGIN SELECT RAISE(ABORT, 'database is locked'); END`);
+    const undo = done.undo;
+    return { ...done, undo: async () => (chmodSync(dir, 0o700), undo()) };
+  };
+  try {
+    // The error from the rollback took the place of the switch's own, and what was shown was never put back.
+    await assert.rejects(sessions.switchVersion("twice", lAgain, seqs[1]), /EACCES|permission/);
+  } finally {
+    sessions.cut = cut;
+    chmodSync(dir, 0o700);
+    getDb().exec("DROP TRIGGER IF EXISTS no_keep");
+  }
+  assert.deepEqual(sentMessages("twice").map((m) => m.message), ["k", "l again"]);
+  assert.deepEqual(answers("twice"), ["answer to k", "answer to l again"]);
+  assert.equal(readFileSync(moved, "utf8"), shown);
+});
+
+test("a message is taken out with the versions it takes, or not at all", async () => {
+  const { file, seqs } = chat("together", ["m", "n", "o"]);
+  await sessions.editMessage("together", seqs[2], "o again");
+  await until(() => answers("together").includes("answer to o again"));
+  const before = readFileSync(file, "utf8");
+  getDb().exec("CREATE TRIGGER no_forget BEFORE DELETE ON message_versions BEGIN SELECT RAISE(ABORT, 'database is locked'); END");
+  try {
+    await assert.rejects(sessions.removeMessage("together", seqs[1], "turn"), /database is locked/);
+  } finally {
+    getDb().exec("DROP TRIGGER no_forget");
+  }
+  // It was gone from the transcript and pi's file, the page never told, and the versions left to bring it back.
+  assert.deepEqual(sentMessages("together").map((m) => m.message), ["m", "n", "o again"]);
+  assert.equal(readFileSync(file, "utf8"), before);
+  assert.equal(Object.keys(sessions.messageVersions("together")).length, 1);
 });

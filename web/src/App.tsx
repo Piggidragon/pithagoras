@@ -130,6 +130,8 @@ function Shell({
   // somebody starts or stops a container.
   const [hasBrowser, setHasBrowser] = useState(false);
   const [events, setEvents] = useState<PortalEvent[]>([]);
+  /** How often the chat shown was loaded again from the start: see portal_reload. */
+  const loadedAgain = useRef(0);
   /** Whether anything older than what we hold is still on the server. */
   const [moreBefore, setMoreBefore] = useState(false);
   const [loadingBefore, setLoadingBefore] = useState(false);
@@ -190,11 +192,21 @@ function Shell({
     // Loading the chat again, from the start: what arrives replaces what is
     // held, once it has all come. See portal_reload.
     let replacing = false;
+    // How often the chat's events were put back under seqs this page had read
+    // past, as its stream last said: see bumpReloads on the server.
+    let reloads: number | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const connect = () => {
       if (cancelled) return;
       const fresh = seq === 0;
       const es = new EventSource(`/api/sessions/${sessionId}/events?since=${seq}`);
+      /** Reads the chat again from the start, keeping what is shown until it has all come. */
+      const reload = () => {
+        es.close();
+        seq = 0;
+        replacing = true;
+        connect();
+      };
       esRef.current = es;
       // The canvas panel is drawn before the stream is up: it waits for the
       // list the stream sends first, rather than asking for it as well.
@@ -204,6 +216,15 @@ function Shell({
         setFailures(0);
         canvasConnection(sessionId, "up");
       };
+      // A count other than the last one seen: events came back while this page
+      // was away, under seqs it had read past, and going on from its cursor
+      // would never show them. A stream reading from the start has them all.
+      es.addEventListener("reloads", (m) => {
+        const now = (JSON.parse((m as MessageEvent).data) as { reloads: number }).reloads;
+        const missed = reloads !== undefined && now !== reloads && !fresh;
+        reloads = now;
+        if (missed) reload();
+      });
       es.addEventListener("live-reset", () => setEvents(resetLiveEvents));
       es.addEventListener("canvas", (m) => canvasMessage(sessionId, JSON.parse((m as MessageEvent).data)));
       // Until it has caught up, what arrives is history being replayed. It is
@@ -249,6 +270,8 @@ function Shell({
         if (!batch) return;
         if (replacing) {
           replacing = false;
+          // What was being fetched from above the old list belongs to it.
+          loadedAgain.current++;
           setEvents(batch.reduce(appendLiveEvent, [] as PortalEvent[]));
         } else if (batch.length) setEvents((prev) => batch.reduce(appendLiveEvent, prev));
         if (!batch.length) return;
@@ -277,14 +300,10 @@ function Shell({
         }
         // Another version of a message was brought back, or an edit undone:
         // events came back under seqs this stream has read past, so it reads
-        // the chat again from the start. One replayed to a stream reading from
-        // the start already is behind it, with nothing to reload.
+        // the chat again from the start.
         if (ev.type === "portal_reload") {
-          if (fresh && replay) return;
-          es.close();
-          seq = 0;
-          replacing = true;
-          connect();
+          reloads = (ev.payload as { reloads?: number }).reloads ?? reloads;
+          reload();
           return;
         }
         // Live-only events (dialogs) use a negative seq and must not move the
@@ -316,7 +335,12 @@ function Shell({
       });
       es.onerror = () => {
         // Keep what arrived: the resume cursor has already moved past it.
-        flush();
+        // Unless the chat is being read again: part of it would replace all
+        // of what is shown, so that stays, and the reading starts over.
+        if (replacing) {
+          replay = null;
+          seq = 0;
+        } else flush();
         es.close();
         canvasConnection(sessionId, "down");
         failed += 1;
@@ -501,8 +525,11 @@ function Shell({
               const oldest = events.find((e) => e.seq > 0)?.seq;
               if (!oldest || loadingBefore) return;
               setLoadingBefore(true);
+              const asked = loadedAgain.current;
               try {
                 const r = await api.olderEvents(active.id, oldest);
+                // Loaded again meanwhile: what is above the new list is another question.
+                if (asked !== loadedAgain.current) return;
                 setEvents((prev) => [...r.events, ...prev]);
                 setMoreBefore(r.more);
               } catch {

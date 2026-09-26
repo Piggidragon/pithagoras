@@ -1264,6 +1264,10 @@ app.get("/api/sessions/:id/events", (req, res) => {
   canvasEvents.on(session.id, onCanvas);
   writeCanvas({ type: "snapshot", canvases: listCanvases(session.id) });
 
+  // How often this chat's events were put back under seqs a page had read
+  // past (see bumpReloads): a page that last saw another count missed one, and
+  // loads the chat again rather than go on from its cursor.
+  res.write(`event: reloads\ndata: ${JSON.stringify({ reloads: session.reloads ?? 0 })}\n\n`);
   // Replace stale in-memory deltas before durable replay, then restore the current snapshot.
   res.write("event: live-reset\ndata: {}\n\n");
 
