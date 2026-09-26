@@ -5,7 +5,7 @@ import type { Session } from "../api";
 import { when } from "../time";
 import { filterSessions } from "../session-filter";
 import { confirmDialog } from "./ConfirmDialog";
-import { StatusDot } from "./StatusDot";
+import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 
 /**
@@ -131,7 +131,9 @@ export function SessionsPage({
                   }}
                   className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:bg-fg/5"
                 >
-                  <StatusDot status={s.status} />
+                  <span className="status-slot">
+                    <StatusDot status={s.status} />
+                  </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
                       {renaming === s.id ? (
@@ -144,7 +146,7 @@ export function SessionsPage({
                         />
                       ) : (
                         <p
-                          className="truncate text-sm text-fg"
+                          className={`truncate text-sm text-fg ${workingText(s.status)}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             window.clearTimeout(opening.current);

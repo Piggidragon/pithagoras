@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { StatusDot } from "./StatusDot";
+import { StatusDot, workingText } from "./StatusDot";
 import {
   LuBot,
   LuPanelLeftClose,
@@ -332,7 +332,9 @@ function SessionItem({
       }`}
     >
       <div className="flex items-center gap-2">
-        <StatusDot status={s.status} />
+        <span className="status-slot">
+          <StatusDot status={s.status} />
+        </span>
         {renaming ? (
           <TitleInput
             value={s.title}
@@ -346,7 +348,7 @@ function SessionItem({
           />
         ) : (
           <span
-            className="truncate text-sm text-fg"
+            className={`truncate text-sm text-fg ${workingText(s.status)}`}
             onDoubleClick={(e) => {
               e.stopPropagation();
               setRenaming(true);

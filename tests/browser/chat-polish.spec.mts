@@ -90,19 +90,29 @@ test('a few words of thinking take a line, not three; more fills it and it does 
   await expect(page.locator('.chat-thinking-stream')).toHaveClass(/is-clipped/);
 });
 
-test('a working chat shows a turning ring in the composer, not a pulsing yellow dot', async ({ page }) => {
+const animation = (el: Element, pseudo?: string) => getComputedStyle(el, pseudo).animationName;
+
+test('a working chat shows the π mark and a shimmering word in the composer, and its title shimmers', async ({ page }) => {
   await page.goto('/tests/chat.html?phase=tools');
-  const ring = page.locator('.composer-settings .status-dot.is-running');
-  await expect(ring).toBeVisible();
-  expect(await ring.evaluate((e) => getComputedStyle(e, '::before').animationName)).toBe('status-spin');
+  const working = page.locator('.composer-working');
+  await expect(working).toBeVisible();
+  // The app's π, breathing in a glow — not the pulsing yellow dot, nor a spinner.
+  const mark = working.locator('.status-working');
+  await expect(mark).toHaveText('π');
+  expect(await mark.evaluate(animation, '::before')).toBe('chat-halo');
+  expect(await mark.locator('span').evaluate(animation)).toBe('working-breathe');
   await expect(page.locator('.composer-settings .animate-pulse')).toHaveCount(0);
-  // Idle: nothing there.
+  // "Working" shimmers the way "Thinking" does, and so does the chat's title.
+  expect(await working.getByText('Working').evaluate(animation)).toBe('chat-shimmer');
+  expect(await page.getByRole('button', { name: 'Fix the build' }).evaluate(animation)).toBe('chat-shimmer');
+  // Idle: none of it.
   await page.goto('/tests/chat.html?phase=args');
   await expect(page.locator('.composer-settings')).toBeVisible();
-  await expect(page.locator('.composer-settings .status-dot')).toHaveCount(0);
+  await expect(page.locator('.composer-working, .composer-settings .status-working')).toHaveCount(0);
+  expect(await page.getByRole('button', { name: 'Fix the build' }).evaluate(animation)).toBe('none');
 });
 
-test('a working chat in the sidebar shows the same ring', async ({ page }) => {
+test('a working chat in the sidebar has the π mark and a shimmering title', async ({ page }) => {
   const session = { id: 's1', title: 'Busy chat', workspace: '/w/site', status: 'running', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   const idle = { ...session, id: 's2', title: 'Quiet chat', status: 'idle' };
   await page.route('**/api/**', async (route) => {
@@ -119,13 +129,17 @@ test('a working chat in the sidebar shows the same ring', async ({ page }) => {
   });
   await page.goto('/');
   const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
-  const busy = sidebar.getByText('Busy chat').locator('..').locator('.status-dot');
-  await expect(busy).toHaveClass(/is-running/);
-  // The ring turns; the dot it replaced sent out a ring of light instead.
-  expect(await busy.evaluate((e) => getComputedStyle(e, '::before').animationName)).toBe('status-spin');
-  expect(await busy.evaluate((e) => getComputedStyle(e).animationName)).toBe('none');
-  // It takes a dot's room: the titles beside a working and an idle chat line up.
-  const quietTitle = (await sidebar.getByText('Quiet chat').boundingBox())!;
-  const busyTitle = (await sidebar.getByText('Busy chat').boundingBox())!;
-  expect(Math.abs(quietTitle.x - busyTitle.x)).toBeLessThan(0.5);
+  const busyTitle = sidebar.getByText('Busy chat');
+  const mark = busyTitle.locator('..').locator('.status-working');
+  await expect(mark).toHaveText('π');
+  expect(await mark.evaluate(animation, '::before')).toBe('chat-halo');
+  expect(await busyTitle.evaluate(animation)).toBe('chat-shimmer');
+  // The idle one: a still dot and a still title.
+  const quietTitle = sidebar.getByText('Quiet chat');
+  await expect(quietTitle.locator('..').locator('.status-dot')).toBeVisible();
+  expect(await quietTitle.evaluate(animation)).toBe('none');
+  // Every mark has the same slot: the titles beside a working and an idle chat line up.
+  const q = (await quietTitle.boundingBox())!;
+  const b = (await busyTitle.boundingBox())!;
+  expect(Math.abs(q.x - b.x)).toBeLessThan(0.5);
 });

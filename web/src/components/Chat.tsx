@@ -1,4 +1,5 @@
 import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
+import { workingText } from "./StatusDot";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
 import { CommandLine } from "./CommandLine";
@@ -881,7 +882,7 @@ export function Chat({
                 type="button"
                 onClick={() => setRenaming(true)}
                 title="Rename this chat"
-                className="max-w-full truncate rounded text-left hover:text-accent"
+                className={`max-w-full truncate rounded text-left hover:text-accent ${workingText(session.status)}`}
               >
                 {session.title}
               </button>

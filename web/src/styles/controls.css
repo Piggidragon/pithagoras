@@ -32,13 +32,16 @@
 
 /* ── Status dots (see StatusDot.tsx) ── */
 .status-dot { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: rgb(var(--fg-faint)); transition: background .3s; }
-/* Working: a ring whose bright end runs round it, rather than a dot that pulses. */
-/* A little larger than the dot, taking the same room: nothing beside it moves when a chat starts or stops. */
-.status-dot.is-running { position: relative; width: 10px; height: 10px; margin: -1px; background: none; }
-.status-dot.is-running::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgb(var(--accent) / 0) 10%, rgb(var(--accent))); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); animation: status-spin .9s linear infinite; }
-.status-dot.is-running::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 50% 1px, rgb(var(--accent)) 1px, transparent 1.5px); animation: status-spin .9s linear infinite; }
 .status-dot.is-error { background: rgb(var(--danger)); }
 .status-dot.is-interrupted { background: rgb(var(--warn)); }
-@keyframes status-spin { to { transform: rotate(360deg); } }
-/* Still, it stays a ring: told apart from an idle dot all the same. */
-@media (prefers-reduced-motion: reduce) { .status-dot.is-running::before, .status-dot.is-running::after { animation: none; } .status-dot.is-running::before { background: rgb(var(--accent)); } }
+/* Working: the app's π on a small badge, breathing, with a glow behind it
+   that swells and fades. Lists give every mark a 16px slot (status-slot), so
+   nothing beside it moves when a chat starts or stops. */
+.status-slot { display: inline-grid; place-items: center; width: 16px; height: 16px; flex-shrink: 0; }
+.status-working { position: relative; display: inline-grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; background: rgb(var(--accent) / .14); box-shadow: inset 0 0 0 1px rgb(var(--accent) / .4); color: rgb(var(--accent)); font: 700 11px/1 Georgia, "Times New Roman", serif; }
+.status-working::before { content: ""; position: absolute; inset: -5px; border-radius: 50%; background: radial-gradient(circle, rgb(var(--accent) / .4), transparent 65%); animation: chat-halo 1.8s ease-in-out infinite; }
+.status-working > span { position: relative; margin-top: -1px; animation: working-breathe 1.8s ease-in-out infinite; }
+@keyframes working-breathe { 0%, 100% { transform: scale(.92); opacity: .8; } 50% { transform: scale(1.12); opacity: 1; } }
+/* A working chat's title: the sheen that passes over "Thinking", a shade brighter for a title. */
+.working-text { background: linear-gradient(90deg, rgb(var(--fg-muted)) 0%, rgb(var(--fg-muted)) 35%, rgb(var(--fg)) 50%, rgb(var(--fg-muted)) 65%, rgb(var(--fg-muted)) 100%); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chat-shimmer 2.2s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .status-working::before, .status-working > span, .working-text { animation: none; } .working-text { color: rgb(var(--fg)); background: none; } }

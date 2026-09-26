@@ -523,8 +523,13 @@ export function ComposerBar({
             onChanged={load}
           />
         )}
-        {/* The same ring as a working chat has in the lists. */}
-        {running && <StatusDot status="running" className="ml-1" />}
+        {/* The same mark as a working chat has in the lists, and its word shimmering as "Thinking" does. */}
+        {running && (
+          <span className="composer-working ml-1 inline-flex items-center gap-1.5">
+            <StatusDot status="running" />
+            <span className="working-text max-sm:hidden">Working</span>
+          </span>
+        )}
       </div>
       {actions && <div className="composer-actions">{actions}</div>}
 
