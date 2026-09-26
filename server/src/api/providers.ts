@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { agentHome } from "../agent-home.js";
-import { addExtensionProviders, rereadConfig } from "../pi/model-runtime.js";
+import { addExtensionProviders, rereadConfig, thinkingLevelsOf } from "../pi/model-runtime.js";
 import { readPiSettings } from "../pi-settings.js";
 import {
   APIS, PRESETS, ProbeError, TakenError, checkProviders, configStamp, listProviders, probeModels, removeProvider, saveProvider, savedServer,
@@ -41,14 +41,59 @@ export function modelRuntime(cwd = agentHome()): Promise<any> {
   } else if (runtime.config !== config) {
     // A provider or a key changed: the same runtime reads pi's two files again, as an open chat's does.
     runtime.config = config;
-    runtime.value = runtime.value.then(async (rt) => {
-      await rereadConfig(rt);
+    const kept = runtime;
+    kept.value = kept.value.then(async (rt) => {
+      // One that fails — a file caught half written — keeps the catalogue as
+      // it was, rather than throwing away what was built and running every
+      // extension again to build another. Read again when next asked.
+      await rereadConfig(rt).catch((e) => {
+        console.error(`[portal] pi's model files could not be read again: ${(e as Error).message}`);
+        kept.config = "";
+      });
       return rt;
     });
   }
   const { value } = runtime;
-  value.catch(() => { if (runtime?.value === value) runtime = undefined; });
+  value.catch(() => {
+    lastFailure = Date.now();
+    if (runtime?.value === value) runtime = undefined;
+  });
   return value;
+}
+
+/** When building pi's catalogue last failed — building, not reading its files again; see modelLevels. */
+let lastFailure = 0;
+const RETRY_AFTER_MS = 60_000;
+
+/**
+ * The effort levels a model offers, without starting a conversation — for a
+ * chat that is not running, whose pills otherwise drew the full slider for a
+ * model that only switches thinking on and off. Empty when the model is not
+ * known, and when pi's catalogue is not ready within `wait`: the page then
+ * keeps what it last saw for the model.
+ *
+ * Only a short wait. The catalogue is kept once built, and re-reading pi's
+ * two files is quick; building it runs every extension's code, which after a
+ * start or an install takes far longer than a pill should wait. That build is
+ * started here and left to finish for the next chat opened. One that failed
+ * is not tried again from here for a while: each chat opened would run every
+ * extension again, only to fail again.
+ */
+export async function modelLevels(provider: string | undefined, id: string | undefined, wait = 150): Promise<string[]> {
+  if (!provider || !id) return [];
+  // Only while there is none: one built since, for Settings, is used at once.
+  if (!runtime && Date.now() - lastFailure < RETRY_AFTER_MS) return [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), wait); });
+  try {
+    const rt = await Promise.race([modelRuntime(), late]);
+    const model = rt?.getModel?.(provider, id);
+    return model ? thinkingLevelsOf(model) : [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** pi's names for its hosted services, and which of them it finds a key for outside its files. */

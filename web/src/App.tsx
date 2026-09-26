@@ -21,6 +21,7 @@ import { BrowserPage } from "./components/BrowserPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { pollWhileVisible, reconnectDelay } from "./poll";
+import { canvasConnection, canvasMessage } from "./canvas-feed";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
 import { notifyIfAway, notifyState } from "./notify";
 import { guardStrayDrops } from "./drop-guard";
@@ -191,11 +192,16 @@ function Shell({
       if (cancelled) return;
       const es = new EventSource(`/api/sessions/${sessionId}/events?since=${seq}`);
       esRef.current = es;
+      // The canvas panel is drawn before the stream is up: it waits for the
+      // list the stream sends first, rather than asking for it as well.
+      canvasConnection(sessionId, "connecting");
       es.onopen = () => {
         failed = 0;
         setFailures(0);
+        canvasConnection(sessionId, "up");
       };
       es.addEventListener("live-reset", () => setEvents(resetLiveEvents));
+      es.addEventListener("canvas", (m) => canvasMessage(sessionId, JSON.parse((m as MessageEvent).data)));
       // Until it has caught up, what arrives is history being replayed. It is
       // gathered and applied in one go: drawing the conversation once per event
       // is what made a long one open at the top, build downwards over seconds and
@@ -292,6 +298,7 @@ function Shell({
         // Keep what arrived: the resume cursor has already moved past it.
         flush();
         es.close();
+        canvasConnection(sessionId, "down");
         failed += 1;
         setFailures(failed);
         retry = setTimeout(connect, reconnectDelay(failed));
@@ -302,6 +309,7 @@ function Shell({
       cancelled = true;
       clearTimeout(retry);
       esRef.current?.close();
+      canvasConnection(sessionId, "down");
     };
   }, [sessionId, refreshSessions]);
 

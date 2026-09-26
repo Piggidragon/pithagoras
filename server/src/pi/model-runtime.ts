@@ -41,3 +41,36 @@ export async function addExtensionProviders(pi: any, runtime: any, cwd: string):
   }
   await runtime.refresh({ allowNetwork: false });
 }
+
+const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * The effort levels pi offers for a model, worked out as pi-ai's
+ * getSupportedThinkingLevels does — pi does not export it, and the copy it
+ * uses sits inside its own node_modules. A level the model maps to null is
+ * not offered; xhigh and max only when the model names them.
+ */
+export function thinkingLevelsOf(model: { reasoning?: boolean; thinkingLevelMap?: Record<string, string | null | undefined> }): string[] {
+  if (!model.reasoning) return ["off"];
+  return LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === "xhigh" || level === "max") return mapped !== undefined;
+    return true;
+  });
+}
+
+/**
+ * The level pi starts a model on when asked for `level`: that one if the
+ * model offers it, else the nearest above it, else below — as pi-ai's
+ * clampThinkingLevel does, which pi does not export either. `levels` are the
+ * model's, from thinkingLevelsOf.
+ */
+export function clampLevel(levels: string[], level: string): string {
+  if (levels.includes(level)) return level;
+  const asked = LEVELS.indexOf(level);
+  if (asked === -1) return levels[0] ?? "off";
+  for (let i = asked; i < LEVELS.length; i++) if (levels.includes(LEVELS[i])) return LEVELS[i];
+  for (let i = asked - 1; i >= 0; i--) if (levels.includes(LEVELS[i])) return LEVELS[i];
+  return levels[0] ?? "off";
+}

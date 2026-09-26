@@ -7,10 +7,6 @@ test('canvas streams on the stage, retains a partial draft and supports inline e
  await page.route('**/api/voice',r=>r.fulfill({json:{enabled:false}}));
  await page.route('**/api/sessions/test/commands',r=>r.fulfill({json:{commands:[]}}));
  await page.route('**/api/sessions/test/config',r=>r.fulfill({status:503,json:{}}));
- await page.addInitScript(()=>{
-   class FakeEvents {onmessage:any;onopen:any;onerror:any;constructor(){(window as any).canvasStream=this;setTimeout(()=>{this.onopen?.();this.onmessage?.({data:JSON.stringify({type:'snapshot',canvases:[]})});(window as any).canvasStreamReady=true},100)}close(){}}
-   (window as any).EventSource=FakeEvents;
- });
  let row={id:'canvas-1',title:'A live document',content:'',revision:0,status:'writing',active_call:'call-1',updated_at:'',persisted:false};
  await page.route('**/api/sessions/test/canvases/canvas-1',async route=>{
    if(route.request().method()==='DELETE'){deleted=true;return route.fulfill({json:{ok:true}});}
@@ -19,10 +15,11 @@ test('canvas streams on the stage, retains a partial draft and supports inline e
  await page.route('**/api/sessions/test/canvases/canvas-1/persist',r=>{row={...row,persisted:true};return r.fulfill({json:row});});
  await page.goto('/tests/voice.html');
  await expect(page.getByLabel('Session canvases')).toBeVisible();
- await page.waitForFunction(()=>(window as any).canvasStreamReady);
- const emit=async()=>page.evaluate(row=>(window as any).canvasStream.onmessage({data:JSON.stringify({type:'update',canvas:row})}),row);
+ // What the chat's stream passes on once it is up: see canvas-feed.ts.
+ await page.evaluate(()=>{(window as any).canvasFeed.connected(true);(window as any).canvasFeed.message({type:'snapshot',canvases:[]});});
+ const emit=async()=>page.evaluate(row=>(window as any).canvasFeed.message({type:'update',canvas:row}),row);
  // Creation should open the panel before the first write.
- await page.evaluate(row=>(window as any).canvasStream.onmessage({data:JSON.stringify({type:'create',canvas:{...row,status:'saved',active_call:null}})}),row);
+ await page.evaluate(row=>(window as any).canvasFeed.message({type:'create',canvas:{...row,status:'saved',active_call:null}}),row);
  await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
  await page.getByLabel('Close canvas',{exact:true}).click();
  row.content='# A live document\n\nThe first sentence.';row.revision=1;await emit();
@@ -48,7 +45,7 @@ test('canvas streams on the stage, retains a partial draft and supports inline e
  await expect.poll(async()=>{const box=await page.getByLabel('Session canvas workspace').boundingBox();return box!.x>=0&&box!.x+box!.width<=390;}).toBe(true);
  await page.getByLabel('Delete canvas').click();await page.getByRole('button',{name:'Delete',exact:true}).click();
  await expect(page.getByText('A place for your documents')).toBeVisible();
- await page.evaluate(()=>(window as any).canvasStream.onmessage({data:JSON.stringify({type:'focus',canvas:{id:'read-doc',title:'Document being read',content:'The AI is reading this document.',revision:1,status:'saved',active_call:null}})}));
+ await page.evaluate(()=>(window as any).canvasFeed.message({type:'focus',canvas:{id:'read-doc',title:'Document being read',content:'The AI is reading this document.',revision:1,status:'saved',active_call:null}}));
  await expect(page.getByLabel('Select canvas')).toHaveText('Document being read');
  await expect(page.locator('.canvas-document')).toContainText('The AI is reading this document.');expect(failures).toEqual([]);
 });
@@ -59,7 +56,6 @@ test('saved canvas list loads even when its live stream is disconnected',async({
  await page.route('**/api/sessions/test/commands',r=>r.fulfill({json:{commands:[]}}));
  await page.route('**/api/sessions/test/config',r=>r.fulfill({status:503,json:{}}));
  await page.route('**/api/sessions/test/canvases',r=>r.fulfill({json:[{id:'saved',title:'Saved document',content:'Persisted words',revision:1,status:'saved',active_call:null}]}));
- await page.addInitScript(()=>{(window as any).EventSource=class{close(){}};});
  await page.goto('/tests/voice.html');
  await page.getByLabel('Session canvases',{exact:true}).click();
  await expect(page.getByLabel('Select canvas')).toHaveText('Saved document');
