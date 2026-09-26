@@ -69,7 +69,7 @@
   .composer-settings > button:first-child { max-width: 145px; }
   .voice-stage-header { padding: 16px; }
   .voice-presence { width: min(360px, 92%); }
-  .voice-browser-window, .voice-terminal-window { left: 12px; right: 12px; top: 62px; width: auto; height: calc(100% - 160px); transform: translateY(24px) scale(.96); }
+  .voice-browser-window, .voice-terminal-window { left: 12px; right: 12px; top: var(--window-top); width: auto; height: var(--window-room); transform: translateY(24px) scale(.96); }
   .voice-browser-window.is-open, .voice-terminal-window.is-open { transform: translateY(0) scale(1); }
   .is-browsing .voice-presence, .is-terminal .voice-presence { left: 50%; top: calc(100% - 48px); width: 268px; max-width: none; height: 68px; flex-direction: row; border-radius: 22px; background: rgb(var(--surface) / .8); border: 1px solid rgb(var(--line) / .55); padding: 0 12px 0 0; }
   .is-terminal .voice-avatar { width: 76px; flex-shrink: 0; }
@@ -80,8 +80,8 @@
   .voice-terminal-output { font-size: 11px; padding: 14px; }
 }
 @media (max-width: 600px) {
-  .is-browsing.is-terminal .voice-browser-window { left: 12px; width: auto; height: calc(62% - 106px); }
-  .is-browsing.is-terminal .voice-terminal-window { left: 12px; right: 12px; top: calc(62% - 34px); width: auto; height: calc(38% - 66px); }
+  .is-browsing.is-terminal .voice-browser-window { left: 12px; width: auto; height: var(--window-upper); }
+  .is-browsing.is-terminal .voice-terminal-window { left: 12px; right: 12px; top: var(--window-lower-top); width: auto; height: var(--window-lower); }
   .is-browsing.is-terminal .voice-presence { left: 50%; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -105,7 +105,20 @@
    the stage's bottom its middle is, and what it keeps clear at the sides. */
 .voice-orb { filter: saturate(1.2) contrast(1.08); }
 .voice-stage { --dock-width: 520px; --dock-height: 80px; --dock-middle: 50px; --dock-inset: 16px; }
-@media (max-width: 600px) { .voice-stage { --dock-middle: 94px; } }
+/* On a phone the windows take the width, one above the other, and end
+   above the dock: they reached 36px under it, the terminal's last lines
+   behind the orb and its buttons. The dock is lower there too, a row of
+   buttons for the windows under it. */
+@media (max-width: 600px) {
+  .voice-stage {
+    --dock-middle: 88px; --dock-height: 68px;
+    --window-top: 62px;
+    --window-room: calc(100% - var(--window-top) - var(--dock-middle) - var(--dock-height) / 2 - 12px);
+    --window-upper: calc((var(--window-room) - 10px) * .6);
+    --window-lower-top: calc(var(--window-top) + var(--window-upper) + 10px);
+    --window-lower: calc((var(--window-room) - 10px) * .4);
+  }
+}
 .voice-stage.is-docked .voice-presence {
   left: 50%; top: calc(100% - var(--dock-middle)); width: var(--dock-width); max-width: calc(100% - 2 * var(--dock-inset));
   height: var(--dock-height); flex-direction: row; border-radius: 26px; padding: 0 14px 0 0;
@@ -157,7 +170,7 @@
 .voice-stage.is-docked .voice-dock-center .voice-status { flex: none; justify-content: flex-start; font-size: 10px; color: #acc9ee; }
 .voice-thought-stream { height: 34px; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; color: #edf5ff; font-size: 12px; line-height: 17px; mask-image: linear-gradient(to bottom, #0008, #000 7px); }
 .voice-stage.is-docked .voice-stage-controls { flex-shrink: 0; }
-@media (max-width: 600px) { .voice-stage.is-docked .voice-avatar { width: 76px; } }
+@media (max-width: 600px) { .voice-stage.is-docked .voice-avatar { width: 64px; } }
 
 /* Flights share the orb's origin, with alternating destinations kept in view. */
 .voice-stage { container-type: inline-size; }
@@ -174,7 +187,7 @@
   65% { opacity: .8; transform: translate(calc(-50% + var(--flight-x)), calc(var(--flight-y) - 28px)) scale(1); animation-timing-function: linear; }
   100% { opacity: 0; transform: translate(calc(-50% + var(--flight-x)), calc(var(--flight-y) - 50px)) scale(.98); }
 }
-@media (max-width: 600px) { .voice-stage.is-docked .voice-tool-activity { --origin-x: calc(38px - min(260px, 50cqw - 16px)); } }
+@media (max-width: 600px) { .voice-stage.is-docked .voice-tool-activity { --origin-x: calc(32px - min(260px, 50cqw - 16px)); } }
 @media (prefers-reduced-motion: reduce) { .voice-tool-float { animation: none; transform: translate(calc(-50% + var(--flight-x)), var(--flight-y)); } }
 
 /* Session documents stay on the same stage in chat and voice mode. */
@@ -317,10 +330,10 @@
   .voice-stage.is-terminal:not(.is-browsing) .voice-files-window.as-side { top: 47%; height: calc(100% - 164px); }
 }
 @media (max-width: 600px) {
-  .voice-files-window.as-main, .voice-files-window.as-side { left: 12px; right: 12px; top: 62px; width: auto; height: calc(100% - 160px); transform: translateY(24px) scale(.96); }
+  .voice-files-window.as-main, .voice-files-window.as-side { left: 12px; right: 12px; top: var(--window-top); width: auto; height: var(--window-room); transform: translateY(24px) scale(.96); }
   .voice-files-window.as-main.is-open, .voice-files-window.as-side.is-open { transform: translateY(0) scale(1); }
-  .is-browsing.is-terminal .voice-files-window.as-main { left: 12px; width: auto; height: calc(62% - 106px); }
-  .is-browsing.is-terminal .voice-files-window.as-side { left: 12px; right: 12px; top: calc(62% - 34px); width: auto; height: calc(38% - 66px); }
+  .is-browsing.is-terminal .voice-files-window.as-main { left: 12px; width: auto; height: var(--window-upper); }
+  .is-browsing.is-terminal .voice-files-window.as-side { left: 12px; right: 12px; top: var(--window-lower-top); width: auto; height: var(--window-lower); }
 }
 @media (prefers-reduced-motion: reduce) { .voice-files-window { transition: none; } }
 
@@ -411,10 +424,17 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
 .voice-stage.is-docked .voice-attachments figure { width: 36px; height: 36px; border-radius: 9px; }
 .voice-stage.is-docked .voice-attachments button { top: 1px; right: 1px; width: 16px; height: 16px; }
 .voice-stage.is-docked .voice-attachments > span { display: none; }
-/* On a phone the dock sits higher; the cards fly from where it is, so they stay clear of its buttons. */
+/* On a phone the dock sits higher; the cards fly from where it is, so they
+   stay clear of its buttons. With windows over the stage there, a card is a
+   line or two, just above the dock: two lines of title and the call under
+   them covered the terminal's last lines, which say the same. */
 @media (max-width: 600px) {
-  .voice-stage.is-docked .voice-tool-float { --flight-y: -140px; }
-  .voice-stage.is-docked .voice-tool-float.flight-lane-1 { --flight-y: -225px; }
+  .voice-stage.is-docked .voice-tool-float { --flight-y: -88px; width: min(180px, 44cqw); gap: 8px; padding: 7px 11px; border-radius: 12px; }
+  .voice-stage.is-docked .voice-tool-float.flight-lane-1 { --flight-y: -142px; }
+  .voice-stage.is-docked .voice-tool-float > svg { width: 14px; height: 14px; }
+  .voice-stage.is-docked .voice-tool-float span { display: block; font-size: 11px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .voice-stage.is-docked .voice-tool-float p { margin-top: 1px; font-size: 10px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .voice-stage.is-docked .voice-tool-float > div { min-width: 0; }
 }
 .voice-terminal-empty { color: #8f9bb0; font-family: system-ui, sans-serif; }
 

@@ -24,6 +24,7 @@ export function clearSize(el: HTMLElement | null) {
   if (!el?.dataset.sized) return;
   for (const p of ["left", "top", "right", "bottom", "width", "height", "transform", "maxWidth", "maxHeight"] as const) el.style[p] = "";
   delete el.dataset.sized;
+  delete el.dataset.floor;
 }
 
 const ENDS = ["pointerup", "pointercancel", "lostpointercapture"] as const;
@@ -126,6 +127,14 @@ function begin(e: ReactPointerEvent, el: HTMLElement, edge: Edge, mode: ResizeMo
   const area = areaFor(el), obstacles = obstaclesFor(el);
   const parent = (el.offsetParent as HTMLElement | null)?.getBoundingClientRect() ?? { left: 0, top: 0, width: innerWidth, height: innerHeight, right: innerWidth, bottom: innerHeight };
   const start = { x: e.clientX, y: e.clientY, left: box.left - parent.left, top: box.top - parent.top, width: box.width, height: box.height };
+  // In voice mode a window goes no deeper than the stage opened it: its
+  // bottom there is the floor, kept while it is sized by hand. Dragged down
+  // to the stage's foot, beside an orb standing free, two windows reached
+  // under where the dock goes; drawn over the orb, it went back to the dock,
+  // over them, and they were lifted clear of it again — a flicker, and a
+  // window's foot under the dock's buttons.
+  if (stageOf(el) && !el.dataset.sized) el.dataset.floor = String(box.bottom - parent.top);
+  const floor = el.dataset.floor ? parent.top + Number(el.dataset.floor) : Infinity;
   // Heard by whatever arranges itself around the windows — the voice orb.
   const moved = () => el.dispatchEvent(new Event("panel-resize", { bubbles: true }));
   // Taken out of the layout only once the pointer moves: a press on an edge
@@ -151,7 +160,7 @@ function begin(e: ReactPointerEvent, el: HTMLElement, edge: Edge, mode: ResizeMo
     const want = { ...box.toJSON() as Box };
     if (edge.includes("e")) want.right = box.left + fit(start.width + dx, MIN.width, Math.max(area.right, box.right) - box.left);
     if (edge.includes("w")) want.left = box.right - fit(start.width - dx, MIN.width, box.right - Math.min(area.left, box.left));
-    if (edge.includes("s")) want.bottom = box.top + fit(start.height + dy, MIN.height, Math.max(area.bottom, box.bottom) - box.top);
+    if (edge.includes("s")) want.bottom = box.top + fit(start.height + dy, MIN.height, Math.max(Math.min(area.bottom, floor), box.bottom) - box.top);
     const got = clear(box, want, edge, obstacles());
     const width = Math.max(0, got.right - got.left), height = Math.max(0, got.bottom - got.top);
     if (edge.includes("e") || edge.includes("w")) el.style.width = `${width}px`;

@@ -295,8 +295,14 @@ button.running-chip-command:hover { text-decoration: underline; }
 .chat-aside-panel { animation: aside-panel-in .32s var(--ease-out); }
 @keyframes aside-in { from { translate: 24px 0; clip-path: inset(0 0 0 30%); } to { translate: 0 0; clip-path: inset(0); } }
 @keyframes aside-panel-in { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
-/* On a phone they cover the chat, so they rise over it instead. */
+/* Docked elsewhere, from there; floating, the window rises into place. On a
+   phone they cover the chat, so they rise over it too. */
+[data-dock="left"] > .chat-aside { animation-name: aside-in-left; }
+[data-dock="top"] > .chat-aside { animation-name: aside-down; }
+:is([data-dock="bottom"], [data-dock="float"]) > .chat-aside { animation-name: aside-up; }
 @media (max-width: 767px) { .chat-aside { animation-name: aside-up; } }
+@keyframes aside-in-left { from { translate: -24px 0; clip-path: inset(0 30% 0 0); } to { translate: 0 0; clip-path: inset(0); } }
+@keyframes aside-down { from { translate: 0 -24px; clip-path: inset(0 0 30% 0); } to { translate: 0 0; clip-path: inset(0); } }
 @keyframes aside-up { from { translate: 0 24px; clip-path: inset(30% 0 0 0); } to { translate: 0 0; clip-path: inset(0); } }
 /* The header's panel buttons give a little under a press. */
 .panel-toggle:active { transform: scale(.93); }
@@ -337,3 +343,7 @@ button.running-chip-command:hover { text-decoration: underline; }
 .command-line-said { font-size: 11px; color: rgb(var(--fg-faint)); padding-right: 10px; animation: view-in .3s var(--ease-out) both; }
 .command-line-said.is-error { color: rgb(var(--danger)); white-space: pre-wrap; text-align: right; max-width: 36rem; }
 @media (prefers-reduced-motion: reduce) { .command-line-pill, .command-line-state, .command-line-said { animation: none !important; } }
+
+/* A floating panel window's corner, which sizes it — the voice windows' grip. */
+.chat-aside-grip { position: absolute; right: 0; bottom: 0; z-index: 5; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; }
+.chat-aside-grip::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px; border-right: 2px solid rgb(var(--fg) / .35); border-bottom: 2px solid rgb(var(--fg) / .35); border-bottom-right-radius: 3px; }
