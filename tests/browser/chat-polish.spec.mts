@@ -143,3 +143,45 @@ test('a working chat in the sidebar has the π mark and a shimmering title', asy
   const b = (await busyTitle.boundingBox())!;
   expect(Math.abs(q.x - b.x)).toBeLessThan(0.5);
 });
+
+test('parameters keep their numbers and their spaces, and an id too long for a number is not rewritten', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=args');
+  const call = page.locator('.chat-tool', { hasText: 'configure' });
+  await call.locator('.chat-tool-head').click();
+  const value = (label: string) => call.locator('.chat-tool-args > div', { has: page.locator('dt', { hasText: label }) }).locator('dd');
+  // They read "8,080" and "0".
+  await expect(value('Port')).toHaveText('8080');
+  await expect(value('Threshold')).toHaveText('0.0001');
+  // Drawn, not only in the page: the indent to replace was dropped from sight.
+  expect(await value('Old string').evaluate((e) => (e as HTMLElement).innerText)).toBe('    return x;');
+  // Read as JSON it came out as 12345678901234567000: shown as the text it was.
+  const output = call.locator('.chat-tool-output');
+  await expect(output).not.toHaveClass(/is-structured/);
+  await expect(output).toContainText('12345678901234567890');
+});
+
+test('an agent conversation keeps its title in place when it starts working', async ({ page }) => {
+  const at = new Date().toISOString();
+  const row = (id: string, title: string, status: string) => ({ id, title, status, workspace: '/a', kind: 'agent', pinned: false, updated_at: at, channel_key: `tg:${id}`, channel: null });
+  await page.route('**/api/**', async (route) => {
+    const p = new URL(route.request().url()).pathname;
+    let reply: unknown = {};
+    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
+    else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
+    else if (p === '/api/agent/sessions') reply = { sessions: [row('x', 'Working agent chat', 'running'), row('y', 'Resting agent chat', 'idle')], agentHome: '/a' };
+    else if (p === '/api/agent/setup') reply = { initialised: true, home: '/a', files: [] };
+    else if (p === '/api/models') reply = { models: [], providers: {} };
+    await route.fulfill({ json: reply });
+  });
+  await page.addInitScript(() => {
+    (window as any).EventSource = class { addEventListener() {} close() {} };
+    localStorage.setItem('pithagoras.setup', 'done');
+  });
+  await page.goto('/agent');
+  const main = page.getByRole('main');
+  const busy = (await main.getByText('Working agent chat').boundingBox())!;
+  const idle = (await main.getByText('Resting agent chat').boundingBox())!;
+  // The π is twice a dot's width, and without its slot pushed the title along.
+  expect(Math.abs(busy.x - idle.x)).toBeLessThan(0.5);
+  await expect(main.locator('.status-slot > .status-working')).toHaveCount(1);
+});

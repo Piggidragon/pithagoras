@@ -131,9 +131,7 @@ export function SessionsPage({
                   }}
                   className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:bg-fg/5"
                 >
-                  <span className="status-slot">
-                    <StatusDot status={s.status} />
-                  </span>
+                  <StatusDot status={s.status} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
                       {renaming === s.id ? (

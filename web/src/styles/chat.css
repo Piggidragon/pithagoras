@@ -99,7 +99,8 @@
 .chat-tool-args > div.is-inline > dt { flex-shrink: 0; min-width: 5.5rem; margin: 0; }
 .chat-tool-args dd { margin: 0; min-width: 0; }
 .chat-tool-args.is-nested { padding-left: 10px; border-left: 2px solid rgb(var(--line)); gap: 6px; }
-.chat-arg-scalar { color: rgb(var(--fg)); overflow-wrap: anywhere; }
+/* Spaces as they were given: an indented line to replace is not the same line unindented. */
+.chat-arg-scalar { color: rgb(var(--fg)); overflow-wrap: anywhere; white-space: pre-wrap; }
 .chat-arg-none { color: rgb(var(--fg-faint)); font-style: italic; }
 .chat-arg-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
 .chat-arg-list > li { position: relative; padding-left: 14px; }

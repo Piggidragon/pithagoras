@@ -330,24 +330,37 @@ export function Chat({
   }, [items]);
   const lastReply = useMemo(() => lastReplyId(items), [items]);
   // The versions of messages edited or sent again, by the seq of the one shown.
-  // Asked for again whenever the messages sent change: an edit, a retry, a
-  // switch to another version, which each give the conversation other ones.
+  // Asked for when the chat opens, and again when a message sent is no longer
+  // there — an edit, a retry, a switch to another version, a delete — which
+  // each give it other ones. Not for every message sent: that only adds one
+  // without versions, and asking each time cost a request and, cleared while
+  // it went, a switch that blinked out. After a change, the next message to
+  // arrive is asked about too: an edit's replacement comes after its removal.
   const sentKey = useMemo(
     () => items.flatMap((it) => (it.kind === "user" && !it.queued && !it.unsent ? [it.seq] : [])).join(","),
     [items],
   );
   const [versions, setVersions] = useState<Record<number, number[]>>({});
+  const versionsFor = useRef<{ id: string; seqs: number[]; changed: boolean } | null>(null);
+  const versionsAsked = useRef(0);
   useEffect(() => {
-    setVersions({});
-    if (loading || !sentKey) return;
-    let gone = false;
+    if (loading) return;
+    const seqs = sentKey ? sentKey.split(",").map(Number) : [];
+    const was = versionsFor.current;
+    const same = was?.id === session.id;
+    if (!same) setVersions({});
+    const added = same && was.seqs.every((seq) => seqs.includes(seq));
+    const ask = !added || was.changed;
+    versionsFor.current = { id: session.id, seqs, changed: same && !added };
+    if (!ask || !seqs.length) return;
+    // The answer to the latest ask for this chat, whatever arrived since:
+    // a message sent meanwhile does not ask again, and must not drop it.
+    const id = session.id;
+    const ticket = ++versionsAsked.current;
     api
-      .versions(session.id)
-      .then((r) => !gone && setVersions(r.versions))
+      .versions(id)
+      .then((r) => ticket === versionsAsked.current && versionsFor.current?.id === id && setVersions(r.versions))
       .catch(() => {});
-    return () => {
-      gone = true;
-    };
   }, [session.id, sentKey, loading]);
 
   // Only the end of a conversation is drawn to begin with. Drawing all of a long

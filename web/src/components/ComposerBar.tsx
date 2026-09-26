@@ -526,7 +526,7 @@ export function ComposerBar({
         {/* The same mark as a working chat has in the lists, and its word shimmering as "Thinking" does. */}
         {running && (
           <span className="composer-working ml-1 inline-flex items-center gap-1.5">
-            <StatusDot status="running" />
+            <StatusDot status="running" bare />
             <span className="working-text max-sm:hidden">Working</span>
           </span>
         )}

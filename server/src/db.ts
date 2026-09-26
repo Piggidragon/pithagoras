@@ -892,11 +892,33 @@ export function dropVersion(id: number): void {
 }
 
 /**
- * Forgets the branches that went on from a message at or after `seq`: taken
- * out of the conversation, it is no longer there for them to go back to.
+ * Forgets the versions kept after the messages at `anchors`, and the versions
+ * inside those that nothing else can reach any more: their anchors are
+ * messages kept only in what is being forgotten.
  */
-export function dropVersionsAfter(sessionId: string, seq: number): void {
-  getDb().prepare("DELETE FROM message_versions WHERE session_id = ? AND anchor >= ?").run(sessionId, seq);
+export function dropVersionsAt(sessionId: string, anchors: number[]): void {
+  const d = getDb();
+  d.transaction(() => {
+    const find = d.prepare("SELECT id, rows FROM message_versions WHERE session_id = ? AND anchor = ?");
+    const drop = d.prepare("DELETE FROM message_versions WHERE id = ?");
+    const queue = [...anchors];
+    for (let anchor = queue.shift(); anchor !== undefined; anchor = queue.shift()) {
+      for (const v of find.all(sessionId, anchor) as { id: number; rows: string }[]) {
+        drop.run(v.id);
+        for (const r of JSON.parse(v.rows) as EventRow[]) if (r.type === "portal_prompt") queue.push(r.seq);
+      }
+    }
+  })();
+}
+
+/** Takes events out by seq: see restoreEvents, which this undoes. */
+export function deleteEventSeqs(seqs: number[]): void {
+  getDb().prepare("DELETE FROM events WHERE seq IN (SELECT value FROM json_each(?))").run(JSON.stringify(seqs));
+}
+
+/** Runs `fn` as one transaction: all of what it writes, or none of it. */
+export function atomically<T>(fn: () => T): T {
+  return getDb().transaction(fn)();
 }
 
 /** Puts events back under the seq they had — the inverse of deleteEventsBetween. */

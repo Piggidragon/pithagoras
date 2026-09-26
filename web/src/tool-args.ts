@@ -53,7 +53,10 @@ export function argsSummary(input: unknown, max = 160): string | undefined {
   if (input === undefined || input === null) return undefined;
   const cut = (s: string) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
   if (typeof input !== "object") return cut(flat(String(input))) || undefined;
-  if (Array.isArray(input)) return (inline(input) && cut(inline(input)!)) || undefined;
+  if (Array.isArray(input)) {
+    const said = inline(input);
+    return said && cut(said);
+  }
   const args = input as Record<string, unknown>;
   for (const key of PRIMARY) {
     const v = args[key];

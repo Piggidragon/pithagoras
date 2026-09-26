@@ -419,7 +419,8 @@ const ARG_DEPTH = 4;
 function ArgValue({ value, depth }: { value: unknown; depth: number }): ReactNode {
   if (value === null || value === undefined) return <span className="chat-arg-none">none</span>;
   if (typeof value === "boolean") return <span className="chat-arg-scalar">{value ? "yes" : "no"}</span>;
-  if (typeof value === "number") return <span className="chat-arg-scalar tabular-nums">{value.toLocaleString()}</span>;
+  // As written: 8080 is a port, not "8,080", and 0.0001 is not 0.
+  if (typeof value === "number") return <span className="chat-arg-scalar tabular-nums">{String(value)}</span>;
   if (typeof value === "string") {
     if (!value) return <span className="chat-arg-none">empty</span>;
     return isBlock(value) ? <pre className="chat-tool-value">{value}</pre> : <span className="chat-arg-scalar">{value}</span>;
@@ -471,10 +472,14 @@ function ArgValue({ value, depth }: { value: unknown; depth: number }): ReactNod
   );
 }
 
-/** An output that is a JSON object or list, read as one; anything else, or cut short, is not. */
+/**
+ * An output that is a JSON object or list, read as one; anything else, or cut
+ * short, is not. Nor is one with a number too long for JavaScript to hold —
+ * an id, most often — which read back would be shown as another number.
+ */
 export function jsonOutput(output: string): object | undefined {
   const t = output.trim();
-  if (!/^[[{]/.test(t)) return undefined;
+  if (!/^[[{]/.test(t) || /(?<![\w."])-?\d{16,}/.test(t)) return undefined;
   try {
     const v = JSON.parse(t);
     return v && typeof v === "object" && Object.keys(v).length ? v : undefined;

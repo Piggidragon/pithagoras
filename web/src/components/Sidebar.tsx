@@ -134,7 +134,7 @@ export function Sidebar({
           <hr />
           {destinations.map((d) => (
             <RailButton key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} current={view === d.to}>
-              {d.to === "sessions" && anyRunning && <StatusDot status="running" />}
+              {d.to === "sessions" && anyRunning && <StatusDot status="running" bare />}
             </RailButton>
           ))}
           <div className="mt-auto" />
@@ -332,9 +332,7 @@ function SessionItem({
       }`}
     >
       <div className="flex items-center gap-2">
-        <span className="status-slot">
-          <StatusDot status={s.status} />
-        </span>
+        <StatusDot status={s.status} />
         {renaming ? (
           <TitleInput
             value={s.title}

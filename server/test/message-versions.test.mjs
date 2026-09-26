@@ -178,3 +178,96 @@ test("a version that is not there, or a chat that is working, is refused", async
   }
   assert.deepEqual(sentMessages("refused").map((m) => m.message), ["y"]);
 });
+
+test("taking a message out keeps the versions kept in branches it was never in", async () => {
+  // M1 → M2; M1 edited to M1'; in that branch M3, edited to M3'; back to M1, and M2 taken out.
+  const { seqs } = chat("hidden", ["m1", "m2"]);
+  await sessions.editMessage("hidden", seqs[0], "m1 again");
+  await until(() => answers("hidden").includes("answer to m1 again"));
+  const m1again = sentMessages("hidden")[0].seq;
+  await sessions.prompt("hidden", "m3");
+  await until(() => answers("hidden").includes("answer to m3"));
+  const m3 = sentMessages("hidden")[1].seq;
+  await sessions.editMessage("hidden", m3, "m3 again");
+  await until(() => answers("hidden").includes("answer to m3 again"));
+  const m3again = sentMessages("hidden")[1].seq;
+  await sessions.switchVersion("hidden", m1again, seqs[0]);
+  // Every seq in the branch shown now is lower than M3's: "at or after" took M3's versions too.
+  await sessions.removeMessage("hidden", seqs[1], "turn");
+  await sessions.switchVersion("hidden", seqs[0], m1again);
+  assert.deepEqual(sentMessages("hidden").map((m) => m.message), ["m1 again", "m3 again"]);
+  assert.deepEqual(sessions.messageVersions("hidden")[m3again], [m3, m3again]);
+});
+
+test("a message taken out takes its own versions with it, rather than leaving them to the next", async () => {
+  const { seqs } = chat("ownversions", ["a", "b", "c"]);
+  await sessions.editMessage("ownversions", seqs[1], "b again");
+  await until(() => answers("ownversions").includes("answer to b again"));
+  await sessions.prompt("ownversions", "c again");
+  await until(() => answers("ownversions").includes("answer to c again"));
+  const bAgain = sentMessages("ownversions")[1].seq;
+  await sessions.removeMessage("ownversions", bAgain, "turn");
+  assert.deepEqual(sentMessages("ownversions").map((m) => m.message), ["a", "c again"]);
+  // "b"'s old version showed under "c again" as 1/2, and switching to it brought "b" back.
+  assert.deepEqual(sessions.messageVersions("ownversions"), {});
+});
+
+test("an edit whose version cannot be kept changes nothing", async () => {
+  const { file, seqs } = chat("unkept", ["x", "y"]);
+  const before = readFileSync(file, "utf8");
+  const schema = getDb().prepare("SELECT sql FROM sqlite_master WHERE name = 'message_versions'").get().sql;
+  getDb().exec("DROP TABLE message_versions");
+  try {
+    await assert.rejects(sessions.editMessage("unkept", seqs[1], "y again"), /message_versions/);
+  } finally {
+    getDb().exec(schema);
+  }
+  // It was cut, the version failed to save, and the turn was gone.
+  assert.deepEqual(sentMessages("unkept").map((m) => m.message), ["x", "y"]);
+  assert.deepEqual(answers("unkept"), ["answer to x", "answer to y"]);
+  assert.equal(readFileSync(file, "utf8"), before);
+});
+
+test("a switch that fails to bring a version back leaves the conversation and both versions as they were", async () => {
+  const { file, seqs } = chat("halfway", ["p", "q"]);
+  await sessions.editMessage("halfway", seqs[1], "q again");
+  await until(() => answers("halfway").includes("answer to q again"));
+  const qAgain = sentMessages("halfway")[1].seq;
+  const edited = readFileSync(file, "utf8");
+  // Putting the old events back fails partway, as a locked or full database would.
+  getDb().exec(`CREATE TRIGGER no_restore BEFORE INSERT ON events WHEN NEW.payload LIKE '%answer to q"%'
+    BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`);
+  try {
+    await assert.rejects(sessions.switchVersion("halfway", qAgain, seqs[1]), /disk I\/O error/);
+  } finally {
+    getDb().exec("DROP TRIGGER no_restore");
+  }
+  // The version asked for was taken out first, and lost with the chat cut short.
+  assert.deepEqual(sentMessages("halfway").map((m) => m.message), ["p", "q again"]);
+  assert.deepEqual(answers("halfway"), ["answer to p", "answer to q again"]);
+  assert.equal(readFileSync(file, "utf8"), edited);
+  assert.deepEqual(sessions.messageVersions("halfway"), { [qAgain]: [seqs[1], qAgain] });
+  await sessions.switchVersion("halfway", qAgain, seqs[1]);
+  assert.deepEqual(answers("halfway"), ["answer to p", "answer to q"]);
+});
+
+test("a compaction after an edited message goes and comes back with its version", async () => {
+  const { file, seqs } = chat("compacted", ["r", "s"]);
+  const before = readFileSync(file, "utf8");
+  await sessions.editMessage("compacted", seqs[1], "s again");
+  await until(() => answers("compacted").includes("answer to s again"));
+  const sAgain = sentMessages("compacted")[1].seq;
+  // Compacted since: in the transcript, and in pi's file after the edited message.
+  sessions.record("compacted", "compaction_end", { result: { summary: "r and s again", tokensBefore: 900 } });
+  const leaf = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1)).id;
+  writeFileSync(file, readFileSync(file, "utf8") + JSON.stringify({ type: "compaction", id: "c1", parentId: leaf, summary: "r and s again" }) + "\n");
+  const compacted = readFileSync(file, "utf8");
+  const compactions = () => eventsSince("compacted").filter((e) => e.type === "compaction_end").length;
+  // The older version never had it: neither its transcript nor pi's file does.
+  await sessions.switchVersion("compacted", sAgain, seqs[1]);
+  assert.equal(readFileSync(file, "utf8"), before);
+  assert.equal(compactions(), 0);
+  await sessions.switchVersion("compacted", seqs[1], sAgain);
+  assert.equal(readFileSync(file, "utf8"), compacted);
+  assert.equal(compactions(), 1);
+});

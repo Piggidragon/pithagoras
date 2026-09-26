@@ -113,3 +113,28 @@ test('a message with one version has no switch', async ({ page }) => {
   await expect(page.getByText('About 6.28.')).toBeVisible();
   await expect(page.getByRole('group', { name: 'Versions of this message' })).toHaveCount(0);
 });
+
+test('versions are asked for when messages change, not for every message sent', async ({ page }) => {
+  const state = await portal(page);
+  const asked: number[] = [];
+  page.on('request', (r) => r.url().endsWith('/api/sessions/a/versions') && asked.push(Date.now()));
+  await page.goto('/s/a');
+  await replay(page, turn(5, 'What is tau?', 'About 6.28.'));
+  const versions = page.getByRole('group', { name: 'Versions of this message' });
+  await expect(versions).toContainText('2 / 2');
+  await expect.poll(() => asked.length).toBe(1);
+  // A message sent: one more without versions. It asked, and the switch blinked out while it did.
+  const live = (e: unknown) => page.evaluate((e) => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('message', e), e);
+  for (const e of turn(7, 'And e?', 'About 2.72.')) await live(e);
+  await expect(page.getByText('About 2.72.')).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(asked.length).toBe(1);
+  await expect(versions).toContainText('2 / 2');
+  // An edit of the last one: its turn goes, and its replacement comes after. That is asked about.
+  state.versions = { 5: [2, 5], 11: [7, 11] };
+  await live({ seq: -1, type: 'portal_removed', at: Date.now(), payload: { from: 7, to: 11 } });
+  for (const e of turn(11, 'And e, roughly?', 'About 2.7.')) await live(e);
+  await expect(page.getByText('And e?')).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Versions of this message' }).nth(1)).toContainText('2 / 2');
+  expect(asked.length).toBeGreaterThan(1);
+});

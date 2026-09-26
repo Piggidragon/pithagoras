@@ -21,7 +21,9 @@ import {
   deleteEventsAfter,
   deleteEventsBetween,
   dropVersion,
-  dropVersionsAfter,
+  dropVersionsAt,
+  atomically,
+  deleteEventSeqs,
   saveVersion,
   takeVersion,
   versionSeqs,
@@ -1327,10 +1329,15 @@ class SessionManager extends EventEmitter {
    */
   async removeMessage(sessionId: string, seq: number, scope: Scope): Promise<void> {
     await this.withEdit(sessionId, async () => {
+      // Its own other versions, and those of the messages after it: those went
+      // on from a conversation with it in, and would bring it back. Its own,
+      // left, would pass to the message after it. Versions kept inside other
+      // branches are left: this message was never in those.
+      const sent = sentMessages(sessionId);
+      const at = sent.findIndex((m) => m.seq === seq);
+      const anchors = at < 0 ? [] : [sent[at - 1]?.seq ?? 0, ...sent.slice(at).map((m) => m.seq)];
       const { removed } = await this.cut(sessionId, seq, scope);
-      // The versions of later messages went on from a conversation with this
-      // one in it: switched to, they would bring it back.
-      dropVersionsAfter(sessionId, seq);
+      dropVersionsAt(sessionId, anchors);
       this.record(sessionId, "portal_removed", removed);
     });
   }
@@ -1419,17 +1426,23 @@ class SessionManager extends EventEmitter {
     // was read later, and what the agent did in between is still in its file.
     const from = sent[ordinal].at;
     const to = scope === "tail" ? null : (sent[ordinal + 1]?.at ?? null);
+    // The events and the version that keeps them go together, or neither
+    // does: kept after the fact, a version that failed to save lost the turn.
     let gone: ReturnType<typeof deleteEventsBetween>;
+    let kept: number | undefined;
     try {
-      gone = deleteEventsBetween(sessionId, from, to);
+      ({ gone, kept } = atomically(() => {
+        const gone = deleteEventsBetween(sessionId, from, to);
+        const kept =
+          keep && scope === "tail"
+            ? saveVersion(sessionId, { anchor: sent[ordinal - 1]?.seq ?? 0, seq, rows: gone.rows, file: original ?? null })
+            : undefined;
+        return { gone, kept };
+      }));
     } catch (e) {
       if (original !== undefined) write(original);
       throw e;
     }
-    const kept =
-      keep && scope === "tail"
-        ? saveVersion(sessionId, { anchor: sent[ordinal - 1]?.seq ?? 0, seq, rows: gone.rows, file: original ?? null })
-        : undefined;
     const undo = async () => {
       // A client started since would hold the edited conversation in memory.
       await this.stop(sessionId);
@@ -1559,14 +1572,38 @@ class SessionManager extends EventEmitter {
         throw new SessionEditError("missing", "That version of the message is gone");
       }
       const { undo } = await this.cut(sessionId, seq, "tail", true);
-      const target = takeVersion(sessionId, anchor, to);
+      // Taken out of the kept versions and put back in the transcript in one
+      // go: a failure between the two lost the version asked for. Anything
+      // failing puts the conversation back as it was, with both versions.
+      let target: ReturnType<typeof takeVersion>;
+      try {
+        target = atomically(() => {
+          const t = takeVersion(sessionId, anchor, to);
+          if (t) restoreEvents(t.rows);
+          return t;
+        });
+      } catch (e) {
+        await undo();
+        throw e;
+      }
       if (!target) {
         await undo();
         throw new SessionEditError("missing", "That version of the message is gone");
       }
-      restoreEvents(target.rows);
       const file = getSession(sessionId)?.pi_session_file;
-      if (file && target.file !== null) rewrite(file, target.file);
+      if (file && target.file !== null) {
+        try {
+          rewrite(file, target.file);
+        } catch (e) {
+          const back = target;
+          atomically(() => {
+            deleteEventSeqs(back.rows.map((r) => r.seq));
+            saveVersion(sessionId, { anchor: back.anchor, seq: back.seq, rows: back.rows, file: back.file });
+          });
+          await undo();
+          throw e;
+        }
+      }
       this.reloadPages(sessionId);
     });
   }
