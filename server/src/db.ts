@@ -964,6 +964,19 @@ export function getSettings(): GlobalSettings {
   };
 }
 
+/**
+ * The model a chat is started on: what its row names, and the defaults for
+ * whatever it does not — each half on its own, so a row naming only a
+ * provider runs the default model there. Kept in one place, for what the
+ * page is told about an idle chat to be what it would run.
+ */
+export function chatModel(
+  session: { provider?: string | null; model?: string | null },
+  settings: GlobalSettings = getSettings(),
+): { provider: string; model: string } {
+  return { provider: session.provider || settings.provider, model: session.model || settings.model };
+}
+
 export { SETTING_DEFAULTS as getSettingDefaults };
 
 /**

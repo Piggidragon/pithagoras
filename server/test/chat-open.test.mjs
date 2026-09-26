@@ -94,8 +94,8 @@ test("a chat that is not running says which thinking levels its model has", asyn
   assert.equal(config.live, false);
   assert.equal(config.state.model.id, "switch");
   assert.deepEqual(config.thinking.levels, ["off", "medium"]);
-  // It names no model, so the page may keep these as the default's.
-  assert.equal(config.onDefault, true);
+  // What its row names: nothing, so the page keeps these for chats like it.
+  assert.deepEqual(config.named, { provider: null, model: null });
 
   await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "plain" }) });
   assert.deepEqual((await json(`/api/sessions/${chat.id}/config`)).thinking.levels, ["off"]);
@@ -105,28 +105,33 @@ test("a chat that is not running says which thinking levels its model has", asyn
   assert.deepEqual((await json(`/api/sessions/${chat.id}/config`)).thinking.levels, []);
 });
 
-test("a chat's own model is looked up as its own, and never paired with the default's half", async () => {
+test("an idle chat's model and levels are the ones it would be started on", async () => {
   await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "plain" }) });
   const chat = await json("/api/sessions", { method: "POST", body: JSON.stringify({}) });
   await configOf(chat.id);
 
-  // Its own: not the default's, and not to be kept as it.
+  // Its own, named on its row.
   db.updateSession(chat.id, { provider: "test-server", model: "switch" });
   const own = await json(`/api/sessions/${chat.id}/config`);
   assert.deepEqual(own.thinking.levels, ["off", "medium"]);
-  assert.equal(own.onDefault, false);
+  assert.deepEqual(own.named, { provider: "test-server", model: "switch" });
 
-  // A row naming a provider and no model follows the default model, which
-  // was looked up under the row's provider: another server's model of the
-  // same name, which thinks where the default does not.
+  // A row naming a provider and no model runs the default model there — as
+  // pi is started. The levels were looked up for the default's provider
+  // instead: another server's model of the same name, which does not think,
+  // beside a model named for the row's.
   db.updateSession(chat.id, { provider: "test-server", model: null });
   await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "second-server", model: "switch" }) });
-  assert.deepEqual((await json(`/api/sessions/${chat.id}/config`)).thinking.levels, ["off"]);
+  const half = await json(`/api/sessions/${chat.id}/config`);
+  assert.deepEqual(half.state.model, { id: "switch", name: "switch", provider: "test-server" });
+  assert.deepEqual(half.thinking.levels, ["off", "medium"]);
+  assert.deepEqual(half.named, { provider: "test-server", model: null });
 
-  // One naming a model and no provider: not paired with the default's provider.
+  // And one naming a model and no provider runs it on the default's provider.
   db.updateSession(chat.id, { provider: null, model: "switch" });
-  await json("/api/settings", { method: "PUT", body: JSON.stringify({ provider: "test-server", model: "plain" }) });
-  assert.deepEqual((await json(`/api/sessions/${chat.id}/config`)).thinking.levels, []);
+  const other = await json(`/api/sessions/${chat.id}/config`);
+  assert.equal(other.state.model.provider, "second-server");
+  assert.deepEqual(other.thinking.levels, ["off"]);
 });
 
 /** Reads a server-sent stream until `until` says it has what it wants. */

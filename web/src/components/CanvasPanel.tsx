@@ -8,6 +8,8 @@ import { api } from '../api';
 import { watchCanvases, type FeedState } from '../canvas-feed';
 import { ResizeHandles } from './ResizeHandles';
 
+/** How long the chat's stream may take to come up before the panel asks for the list itself. */
+const STALLED_MS=2000;
 type Canvas = { id:string; title:string; content:string; revision:number; status:string; active_call:string|null; updated_at:string; persisted:boolean };
 async function request(url:string,method:string,body?:unknown) {
   const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
@@ -39,22 +41,32 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
       if(data.type==='create'||data.type==='focus'||row.status==='writing'&&row.active_call!==lastActiveCall.current){lastActiveCall.current=row.active_call;if(!editingRef.current){setOpen(true);setSelected(row.id);}}
     }});
   },[sessionId]);
-  // Asked for only while the stream does not carry the list — on opening, and
-  // every few seconds until it does again. While it does, it sent the whole
-  // list on connecting and each change since, and asking as well fetched every
-  // canvas twice. Not while a hidden tab has given it back: nothing is looking,
-  // and it sends the list again when taken back.
-  //
-  // The first ask waits a moment: the panel's effects run before the app's,
-  // so on being drawn it always hears "down", just before the app says it is
-  // connecting.
+  // A stream that does not come up — the browser out of connections to give
+  // it, or a proxy holding it — is not waited on for ever: after a moment the
+  // list is asked for as if it were down.
+  const [stalled,setStalled]=useState(false);
   useEffect(()=>{
-    if(feed!=='down')return;
+    setStalled(false);
+    if(feed!=='connecting')return;
+    const t=setTimeout(()=>setStalled(true),STALLED_MS);
+    return()=>clearTimeout(t);
+  },[feed]);
+  const askSelf=feed==='down'||stalled;
+  // Asked for only while the stream does not carry the list — on opening, and
+  // every few seconds until it does. While it does, it sent the whole list on
+  // connecting and each change since, and asking as well fetched every canvas
+  // twice.
+  //
+  // On being drawn the first ask waits a moment: the panel's effects run
+  // before the app's, so it always hears "down", just before the app says it
+  // is connecting.
+  useEffect(()=>{
+    if(!askSelf)return;
     let disposed=false;
     const load=async()=>{const version=updates.current;try{const data=await request(root,'GET');if(!disposed&&version===updates.current){setRows(data);setError('');}}catch(e){if(!disposed)setError((e as Error).message);}};
-    const first=setTimeout(()=>{if(feedRef.current==='down')void load();},0);const timer=setInterval(()=>void load(),5000);
+    const first=setTimeout(()=>{if(stalled||feedRef.current==='down')void load();},0);const timer=setInterval(()=>void load(),5000);
     return()=>{disposed=true;clearTimeout(first);clearInterval(timer);};
-  },[root,open,feed]);
+  },[root,open,askSelf]);
   useEffect(()=>{if(!editing&&!rows.some(row=>row.id===selected))setSelected(rows[0]?.id??'');},[rows,selected,editing]);
   useEffect(()=>{if(canvas?.active_call&&follow.current&&viewport.current)viewport.current.scrollTop=viewport.current.scrollHeight;},[canvas?.content,canvas?.active_call]);
   const beginEdit=()=>{if(!canvas)return;setDraft(canvas.content);setTitle(canvas.title);setBase(canvas.revision);setEditing(true);setError('');};
@@ -68,7 +80,7 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
     {open&&<section ref={panel} className="canvas-panel" aria-label="Session canvas workspace">
       <header><div><LuFileText/><strong>Session canvases</strong></div><div className="canvas-frame-actions"><button aria-label={canvas?.persisted?"Canvas stored":"Store canvas"} title={canvas?.persisted?"Stored — edits auto-save":"Store canvas permanently"} disabled={!canvas||canvas.persisted||busy||editing} onClick={()=>void store()}>{canvas?.persisted?<LuCheck/>:<LuSave/>}</button><button aria-label="Download canvas" title="Download Markdown" disabled={!canvas} onClick={download}><LuDownload/></button><button aria-label="Close canvas" disabled={editing} onClick={()=>setOpen(false)}><LuX/></button></div></header>
       <div className="canvas-picker"><Select aria-label="Select canvas" className="flex-1 min-w-0" size="sm" value={selected} disabled={editing} placeholder="Choose a document" onChange={v=>{setSelected(v);setConfirmDelete(false);setError('');follow.current=true}} options={rows.map(row=>({value:row.id,label:row.title,text:row.title,hint:row.persisted?undefined:"Temporary — not stored"}))}/><button disabled={editing||busy} aria-label="New canvas" onClick={()=>void create()}><LuPlus/></button></div>
-      {feed==='down'&&<p className="canvas-notice">Reconnecting to live canvas…</p>}
+      {askSelf&&<p className="canvas-notice">Reconnecting to live canvas…</p>}
       {error&&<p role="alert" className="canvas-error">{error}</p>}
       {canvas?<>
         <div className="canvas-document-heading">{editing?<input aria-label="Canvas title" maxLength={200} value={title} onChange={e=>setTitle(e.target.value)}/>:<h3>{canvas.title}</h3>}<span>{canvas.active_call?'Writing live':canvas.status==='edited'?'Edited by you':canvas.status==='interrupted'?'Partial draft retained':canvas.persisted?'Auto-saved':'Temporary'} · {canvas.persisted?"Stored":"Not stored — lost on server restart"} · r{canvas.revision}</span></div>

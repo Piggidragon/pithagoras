@@ -80,6 +80,7 @@ import {
   getContextLimit,
   getDefaultContextLimit,
   getSettingDefaults,
+  chatModel,
   getSettings,
   getStoredSettings,
   knownTools,
@@ -879,6 +880,16 @@ app.post("/api/sessions/:id/subagents/:agent/stop", (req, res) => {
 const CONTEXT_UNSUPPORTED =
   "The context window cannot be changed with EXECUTOR=container: pi runs inside the container, where the portal has no hold on its model";
 
+/**
+ * The model a chat's row names, as it is now — what the page looks a chat's
+ * levels up by before anything has answered. A row naming none follows the
+ * default: the page keeps what it learns for such a chat under what the row
+ * names, for the next like it to draw first. Its own copy of the row still
+ * named none just after a model was picked, and kept the picked one's levels
+ * as the default's.
+ */
+const named = (session: { provider: string | null; model: string | null }) => ({ provider: session.provider, model: session.model });
+
 /** Everything the pills under the composer show, from a running pi. */
 async function liveConfig(client: Awaited<ReturnType<typeof sessions.client>>) {
   const [state, levels, models, stats] = await Promise.all([
@@ -921,11 +932,8 @@ app.get("/api/sessions/:id/config", async (req, res) => {
   // here on the row.
   if (!sessions.isRunning(session.id)) {
     const defaults = getSettings();
-    const provider = session.provider || defaults.provider;
-    const model = session.model || defaults.model;
-    // Looked up only as a pair from one place: the row's own, or the
-    // defaults. A row naming only one of them would pair it with the other's.
-    const pair = session.model ? (session.provider ? [session.provider, session.model] : []) : [defaults.provider, defaults.model];
+    // What pi would be started on: the same halves, from the same places.
+    const { provider, model } = chatModel(session, defaults);
     return res.json({
       live: false,
       state: {
@@ -942,16 +950,14 @@ app.get("/api/sessions/:id/config", async (req, res) => {
       // From pi's catalogue, which is kept outside any conversation: a page
       // that had never seen the model otherwise drew the full slider until
       // the chat was next run.
-      thinking: { levels: await modelLevels(pair[0], pair[1]) },
+      thinking: { levels: await modelLevels(provider, model) },
       models: { models: [] },
-      // A chat naming no model follows the default: the page keeps what it
-      // learns here as the default's, for the next such chat to draw first.
-      onDefault: !session.model,
+      named: named(session),
     });
   }
 
   try {
-    res.json({ ...(await liveConfig(await sessions.client(session.id))), onDefault: !session.model });
+    res.json({ ...(await liveConfig(await sessions.client(session.id))), named: named(session) });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -985,7 +991,7 @@ app.get("/api/sessions/:id/models", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   try {
-    res.json({ ...(await liveConfig(await sessions.client(session.id))), onDefault: !session.model });
+    res.json({ ...(await liveConfig(await sessions.client(session.id))), named: named(session) });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -1319,7 +1325,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
 
   // pi's catalogue, built now rather than when the first chat is opened:
   // that chat's effort pill waits for it to say which levels its model has.
-  modelRuntime().catch(() => {});
+  modelRuntime().catch((e) => console.error(`[portal] pi's model catalogue could not be built: ${(e as Error).message}`));
 
   channelSupervisor
     .sync()

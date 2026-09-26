@@ -75,25 +75,26 @@ const cachedLevels = (provider: string | null | undefined, model: string | null 
   knownLevels(provider, model) ?? DEFAULT_LEVELS;
 
 /**
- * `onDefault`: the answer is for a chat on the default model. Its row names
- * none, so its first paint looks the levels up under no name at all — they
- * are kept there too, and a chat opened on the default draws the default's
- * control rather than the full slider. Said by the server, which reads the
- * row as it is now: the page's copy still named no model just after one was
- * picked, and kept the picked one's levels as the default's.
+ * `named`: what the chat's row names, as the server read it. A chat naming no
+ * model follows the default, and its first paint looks the levels up by what
+ * the row names — its provider, if any, and no model — so they are kept there
+ * too, and the next chat like it draws the default's control rather than the
+ * full slider.
  */
-function cacheLevels(provider: string, model: string, levels: string[], onDefault = false) {
+function cacheLevels(provider: string, model: string, levels: string[], named?: PiConfig["named"]) {
   if (!model || !levels.length) return;
   try {
     localStorage.setItem(LEVELS_KEY, JSON.stringify({
       ...readLevels(),
       [levelsKey(provider, model)]: levels,
-      ...(onDefault ? { [levelsKey("", "")]: levels } : {}),
+      ...(named && !named.model ? { [levelsKey(named.provider ?? "", "")]: levels } : {}),
     }));
   } catch {
     // Same as the catalogue: a full quota is not worth failing the pill over.
   }
 }
+
+const sameModel = (a: { provider: string; id: string }, b: { provider: string; id: string }) => a.provider === b.provider && a.id === b.id;
 
 const RECENTS_KEY = "pithagoras.recentModels";
 const MAX_RECENTS = 4;
@@ -220,16 +221,22 @@ export function ComposerBar({
     api
       .config(sessionId)
       .then((next) => {
-        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.onDefault === true);
+        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.named);
         // /config is the cheap route and reports neither. The levels are then
         // what was last reported for the model it names — not for the one the
         // seed guessed, which for a chat with no model of its own (a fresh /new)
         // was nothing at all, and drew the full slider for a model that only
-        // switches on and off. Failing that, whatever is already known stays.
+        // switches on and off. Failing that, what is already drawn stays — for
+        // the same model only: the default's, first drawn for a chat that
+        // follows it, is another model's once the default has changed.
         const known = knownLevels(next.state.model.provider, next.state.model.id);
         setCfg((prev) => ({
           ...next,
-          thinking: next.thinking.levels.length ? next.thinking : known ? { levels: known } : prev.thinking,
+          thinking: next.thinking.levels.length
+            ? next.thinking
+            : known
+              ? { levels: known }
+              : sameModel(prev.state.model, next.state.model) ? prev.thinking : { levels: DEFAULT_LEVELS },
           models: next.models.models.length ? next.models : prev.models,
         }));
       })
@@ -253,6 +260,7 @@ export function ComposerBar({
       .then((next) => {
         setCfg(next);
         cacheModels(next.models?.models ?? []);
+        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.named);
       })
       .catch(() => {})
       .finally(() => setLoadingCatalogue(false));

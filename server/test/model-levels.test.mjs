@@ -42,3 +42,23 @@ test("a chat's levels do not wait for pi's catalogue to be built", async () => {
   }
   assert.deepEqual(levels, ["off", "medium"]);
 });
+
+test("after a failed build, one made since is used at once", async () => {
+  const pi = await import("@earendil-works/pi-coding-agent");
+  const { modelRuntime } = await import("../dist/api/providers.js");
+  const create = pi.ModelRuntime.create;
+  // Something else installed, so the catalogue is made anew — and that fails.
+  writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ extensions: [] }));
+  pi.ModelRuntime.create = async () => { throw new Error("catalogue broke"); };
+  try {
+    assert.deepEqual(await modelLevels("test-server", "switch"), []);
+    await modelRuntime().catch(() => {});
+  } finally {
+    pi.ModelRuntime.create = create;
+  }
+  // Settings, opened, builds it again, and that works. The chats opened in the
+  // rest of the minute had no levels all the same: the wait after a failure
+  // was looked at before whether there was a catalogue.
+  await modelRuntime();
+  assert.deepEqual(await modelLevels("test-server", "switch"), ["off", "medium"]);
+});

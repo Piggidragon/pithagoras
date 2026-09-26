@@ -26,21 +26,14 @@ test("a panel drawn after the list came has it, with every change since", () => 
   stop();
 });
 
-test("a stream given back is said to be paused, and keeps the list; one that fails forgets it", () => {
+test("a panel hears the stream connecting, up and down; one that fails forgets the list", () => {
   const w = watcher();
   const stop = watchCanvases("two", w.watcher);
   assert.deepEqual(w.states, ["down"]);
   canvasConnection("two", "connecting");
   canvasConnection("two", "up");
   canvasMessage("two", { type: "snapshot", canvases: [doc("a")] });
-
-  // A hidden tab gave it back: not up, and not a failure to ask about.
-  canvasConnection("two", "paused");
-  assert.deepEqual(w.states, ["down", "connecting", "up", "paused"]);
-  const during = watcher();
-  watchCanvases("two", during.watcher)();
-  assert.deepEqual(during.states, ["paused"]);
-  assert.deepEqual(during.heard, [{ type: "snapshot", canvases: [doc("a")] }]);
+  assert.deepEqual(w.states, ["down", "connecting", "up"]);
 
   // Down: what it left may since have changed unheard, so it is not offered.
   canvasConnection("two", "down");

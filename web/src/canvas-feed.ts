@@ -11,11 +11,10 @@ export type CanvasMessage = { type: string; [key: string]: unknown };
 
 /**
  * Whether the chat's stream is carrying them: "connecting", and the list
- * comes first once it is up; "up"; "paused", given back by a hidden tab while
- * the chat is idle, and sending the whole list again when it is taken back;
- * or "down", when the panel has to ask for the list itself.
+ * comes first once it is up; "up"; or "down", when the panel has to ask for
+ * the list itself.
  */
-export type FeedState = "connecting" | "up" | "paused" | "down";
+export type FeedState = "connecting" | "up" | "down";
 
 type Watcher = { message: (m: CanvasMessage) => void; state: (s: FeedState) => void };
 type Row = { id: string; [key: string]: unknown };

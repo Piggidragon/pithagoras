@@ -27,6 +27,7 @@ import {
   sentMessages,
   unsettledMessages,
   unansweredCommands,
+  chatModel,
   getSettings,
   markOrphanedSessionsInterrupted,
   browserAllowed,
@@ -819,11 +820,12 @@ class SessionManager extends EventEmitter {
     // The session's own choices win over the portal defaults. Without this a
     // restart relaunched pi on the default model, quietly undoing the pick.
     const settings = getSettings();
+    const chosen = chatModel(session, settings);
     const client = await executor.launch({
       sessionId,
       workspacePath: session.workspace,
-      provider: session.provider || settings.provider,
-      model: session.model || settings.model || undefined,
+      provider: chosen.provider,
+      model: chosen.model || undefined,
       thinkingLevel: session.thinking_level || settings.thinkingLevel || undefined,
       sessionFile: session.pi_session_file || undefined,
       // Channels only. A task session works inside somebody's repository and

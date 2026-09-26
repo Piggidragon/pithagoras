@@ -74,7 +74,8 @@ const RETRY_AFTER_MS = 60_000;
  */
 export async function modelLevels(provider: string | undefined, id: string | undefined, wait = 150): Promise<string[]> {
   if (!provider || !id) return [];
-  if (Date.now() - lastFailure < RETRY_AFTER_MS) return [];
+  // Only while there is none: one built since, for Settings, is used at once.
+  if (!runtime && Date.now() - lastFailure < RETRY_AFTER_MS) return [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), wait); });
   try {
