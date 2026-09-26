@@ -132,6 +132,22 @@ export function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);
 
+    -- The other versions of a message: what followed a message that was
+    -- edited or sent again, kept so the page can switch back to it. Each row
+    -- is one branch not shown now — its events and pi's file as they were —
+    -- after the message sent at seq "anchor" (0: the first message). "seq"
+    -- is the branch's own first message, which orders it among the others.
+    CREATE TABLE IF NOT EXISTS message_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      anchor INTEGER NOT NULL,
+      seq INTEGER NOT NULL,
+      rows TEXT NOT NULL,
+      file TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_message_versions ON message_versions(session_id, anchor);
+
     -- Two-way links into the agent session. Each row is one connection
     -- (a Telegram bot, a Slack app, an inbound webhook); messages arriving on
     -- any of them go to the same agent, and its replies go back the same way.
@@ -577,6 +593,7 @@ export function deleteSession(id: string): void {
   const d = getDb();
   d.prepare("DELETE FROM canvases WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
+  d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
 }
 
@@ -829,6 +846,57 @@ export function deleteEventsBetween(
     for (const seq of also) drop.run(seq);
     return { rows: gone, also, kept };
   })();
+}
+
+/** A branch of a conversation not shown now: see message_versions. */
+export interface MessageVersion {
+  id: number;
+  anchor: number;
+  seq: number;
+  rows: EventRow[];
+  file: string | null;
+}
+
+/** Keeps a branch the conversation is leaving; returns its id. */
+export function saveVersion(sessionId: string, v: Omit<MessageVersion, "id">): number {
+  return Number(
+    getDb()
+      .prepare("INSERT INTO message_versions (session_id, anchor, seq, rows, file) VALUES (?, ?, ?, ?, ?)")
+      .run(sessionId, v.anchor, v.seq, JSON.stringify(v.rows), v.file).lastInsertRowid,
+  );
+}
+
+/** The first messages of the branches kept after `anchor`, oldest first. */
+export function versionSeqs(sessionId: string): { anchor: number; seq: number }[] {
+  return getDb()
+    .prepare("SELECT anchor, seq FROM message_versions WHERE session_id = ? ORDER BY seq")
+    .all(sessionId) as { anchor: number; seq: number }[];
+}
+
+/** Takes a kept branch out, to be shown again: undefined if there is none. */
+export function takeVersion(sessionId: string, anchor: number, seq: number): MessageVersion | undefined {
+  const d = getDb();
+  return d.transaction(() => {
+    const row = d
+      .prepare("SELECT id, anchor, seq, rows, file FROM message_versions WHERE session_id = ? AND anchor = ? AND seq = ?")
+      .get(sessionId, anchor, seq) as { id: number; anchor: number; seq: number; rows: string; file: string | null } | undefined;
+    if (!row) return undefined;
+    d.prepare("DELETE FROM message_versions WHERE id = ?").run(row.id);
+    return { ...row, rows: JSON.parse(row.rows) as EventRow[] };
+  })();
+}
+
+/** Forgets one kept branch. */
+export function dropVersion(id: number): void {
+  getDb().prepare("DELETE FROM message_versions WHERE id = ?").run(id);
+}
+
+/**
+ * Forgets the branches that went on from a message at or after `seq`: taken
+ * out of the conversation, it is no longer there for them to go back to.
+ */
+export function dropVersionsAfter(sessionId: string, seq: number): void {
+  getDb().prepare("DELETE FROM message_versions WHERE session_id = ? AND anchor >= ?").run(sessionId, seq);
 }
 
 /** Puts events back under the seq they had — the inverse of deleteEventsBetween. */

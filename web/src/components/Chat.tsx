@@ -19,7 +19,7 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuMenu, LuBot, LuArrowDown, LuCheck, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
@@ -329,6 +329,26 @@ export function Chat({
     return undefined;
   }, [items]);
   const lastReply = useMemo(() => lastReplyId(items), [items]);
+  // The versions of messages edited or sent again, by the seq of the one shown.
+  // Asked for again whenever the messages sent change: an edit, a retry, a
+  // switch to another version, which each give the conversation other ones.
+  const sentKey = useMemo(
+    () => items.flatMap((it) => (it.kind === "user" && !it.queued && !it.unsent ? [it.seq] : [])).join(","),
+    [items],
+  );
+  const [versions, setVersions] = useState<Record<number, number[]>>({});
+  useEffect(() => {
+    setVersions({});
+    if (loading || !sentKey) return;
+    let gone = false;
+    api
+      .versions(session.id)
+      .then((r) => !gone && setVersions(r.versions))
+      .catch(() => {});
+    return () => {
+      gone = true;
+    };
+  }, [session.id, sentKey, loading]);
 
   // Only the end of a conversation is drawn to begin with. Drawing all of a long
   // one is what made opening it slow, and the top of it is not what anybody
@@ -1081,6 +1101,15 @@ export function Chat({
                     run that is answering it leaves the agent replying to
                     something that no longer exists. Sending it again is fine —
                     it just queues, like any other message. */}
+                <div className="flex items-center gap-1">
+                {versions[item.seq] && (
+                  <VersionSwitch
+                    seqs={versions[item.seq]}
+                    seq={item.seq}
+                    running={running}
+                    onSwitch={(to) => attempt(async () => void (await api.switchVersion(session.id, item.seq, to)))}
+                  />
+                )}
                 <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                   {text && <CopyAction text={text} />}
                   {item.id === lastSaid ? (
@@ -1137,6 +1166,7 @@ export function Chat({
                   >
                     <LuTrash2 className="h-3 w-3" />
                   </MessageAction>
+                </div>
                 </div>
               </div>
             );
@@ -1694,6 +1724,39 @@ function PanelToggle({
       {children}
       {live && <i className="header-live-dot" aria-hidden />}
     </button>
+  );
+}
+
+/**
+ * Which version of a message is shown, and a way to the others: every time
+ * it was edited or sent again, with what followed it that time. Not while a
+ * run is going — it would be answering a conversation being swapped under it.
+ */
+function VersionSwitch({
+  seqs,
+  seq,
+  running,
+  onSwitch,
+}: {
+  seqs: number[];
+  seq: number;
+  running: boolean;
+  onSwitch: (to: number) => void;
+}) {
+  const at = seqs.indexOf(seq);
+  if (at < 0) return null;
+  return (
+    <div className="message-versions flex items-center text-[11px] text-fg-subtle" role="group" aria-label="Versions of this message">
+      <MessageAction label={running ? "Stop the run to switch versions" : "Previous version"} disabled={running || at === 0} onClick={() => onSwitch(seqs[at - 1])}>
+        <LuChevronLeft className="h-3 w-3" />
+      </MessageAction>
+      <span className="min-w-[2.2rem] text-center tabular-nums" aria-live="polite">
+        {at + 1} / {seqs.length}
+      </span>
+      <MessageAction label={running ? "Stop the run to switch versions" : "Next version"} disabled={running || at === seqs.length - 1} onClick={() => onSwitch(seqs[at + 1])}>
+        <LuChevronRight className="h-3 w-3" />
+      </MessageAction>
+    </div>
   );
 }
 

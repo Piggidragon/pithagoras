@@ -187,9 +187,13 @@ function Shell({
     let cancelled = false;
     let seq = 0;
     let failed = 0;
+    // Loading the chat again, from the start: what arrives replaces what is
+    // held, once it has all come. See portal_reload.
+    let replacing = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const connect = () => {
       if (cancelled) return;
+      const fresh = seq === 0;
       const es = new EventSource(`/api/sessions/${sessionId}/events?since=${seq}`);
       esRef.current = es;
       // The canvas panel is drawn before the stream is up: it waits for the
@@ -242,8 +246,12 @@ function Shell({
       const flush = () => {
         const batch = replay;
         replay = null;
-        if (!batch?.length) return;
-        setEvents((prev) => batch.reduce(appendLiveEvent, prev));
+        if (!batch) return;
+        if (replacing) {
+          replacing = false;
+          setEvents(batch.reduce(appendLiveEvent, [] as PortalEvent[]));
+        } else if (batch.length) setEvents((prev) => batch.reduce(appendLiveEvent, prev));
+        if (!batch.length) return;
         // Only where the session ended up is news; the statuses it passed
         // through on the way were each a request for the session list.
         const last = [...batch].reverse().find((e) => e.type === "portal_status");
@@ -265,6 +273,18 @@ function Shell({
             also.includes(at) || (at >= from && (to == null || at < to) && !kept.includes(at));
           if (replay) replay = replay.filter((e) => !covered(e.seq));
           else setEvents((prev) => prev.filter((e) => !covered(e.seq)));
+          return;
+        }
+        // Another version of a message was brought back, or an edit undone:
+        // events came back under seqs this stream has read past, so it reads
+        // the chat again from the start. One replayed to a stream reading from
+        // the start already is behind it, with nothing to reload.
+        if (ev.type === "portal_reload") {
+          if (fresh && replay) return;
+          es.close();
+          seq = 0;
+          replacing = true;
+          connect();
           return;
         }
         // Live-only events (dialogs) use a negative seq and must not move the

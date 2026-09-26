@@ -459,7 +459,7 @@ test("an edit whose model is down puts the conversation back, though nothing thr
   assert.match(payloads("editdown", "portal_notice").at(-1).text, /ECONNREFUSED/);
 });
 
-test("an edit lets the chat go once pi has the replacement, and stands once it is answered", async () => {
+test("an edit lets the chat go once pi has the replacement, and the page drops the old turn at once", async () => {
   const { file, original, asked } = answered("editlong");
   const removed = removals("editlong");
   const client = { ...busyClient(), prompt: async (message) => void client.sent.push(message) };
@@ -470,11 +470,13 @@ test("an edit lets the chat go once pi has the replacement, and stands once it i
   await sessions.prompt("editlong", "and also this", { steer: true });
   assert.deepEqual(client.sent, ["second", "and also this"], "a steer is not held behind the edit");
   assert.notEqual(readFileSync(file, "utf8"), original);
-  assert.deepEqual(removed, [], "the page keeps the old turn until the answer");
+  // Kept on screen until the answer, the replacement read as added under it.
+  assert.equal(removed.length, 1);
+  assert.equal(removed[0].from, asked.seq);
   sessions.record("editlong", "agent_start", {});
   sessions.record("editlong", "message_end", { message: { role: "assistant", stopReason: "stop", content: [] } });
-  await until(() => removed.length === 1);
-  assert.equal(removed[0].from, asked.seq);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(removed.length, 1, "nothing more to drop once it is answered");
   sessions.waiting.delete("editlong");
 });
 
@@ -487,7 +489,9 @@ test("an edit whose run fails after the chat has gone on from it is not undone",
   await sessions.prompt("editon", "and then this", { steer: true });
   sessions.record("editon", "agent_start", {});
   sessions.record("editon", "portal_status", { status: "error", error: "gone" });
-  await until(() => removed.length === 1);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(removed.length, 1);
+  assert.equal(payloads("editon", "portal_reload").length, 0, "nothing came back");
   assert.notEqual(readFileSync(file, "utf8"), original, "what was said since stays");
   assert.ok(sentMessages("editon").some((m) => m.message === "and then this"));
   sessions.waiting.delete("editon");

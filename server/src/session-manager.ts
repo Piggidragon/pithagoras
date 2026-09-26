@@ -20,6 +20,11 @@ import {
   deleteEvent,
   deleteEventsAfter,
   deleteEventsBetween,
+  dropVersion,
+  dropVersionsAfter,
+  saveVersion,
+  takeVersion,
+  versionSeqs,
   getSession,
   latestSeq,
   restoreEvents,
@@ -54,6 +59,13 @@ import {
  */
 export const stripThinkingMarkers = (text: string): string =>
   text.replace(/<\/?think(ing)?>/gi, "").trim();
+
+/** Writes pi's file beside it, then renames it over, so a crash mid-write leaves the old one rather than half of each. */
+function rewrite(file: string, text: string): void {
+  const tmp = `${file}.edit`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, file);
+}
 
 const SESSION_ROOT = path.resolve(process.env.SESSION_DIR || "./data/sessions");
 /** Where a container's pi finds a session's folder: see ContainerExecutor. */
@@ -1316,6 +1328,9 @@ class SessionManager extends EventEmitter {
   async removeMessage(sessionId: string, seq: number, scope: Scope): Promise<void> {
     await this.withEdit(sessionId, async () => {
       const { removed } = await this.cut(sessionId, seq, scope);
+      // The versions of later messages went on from a conversation with this
+      // one in it: switched to, they would bring it back.
+      dropVersionsAfter(sessionId, seq);
       this.record(sessionId, "portal_removed", removed);
     });
   }
@@ -1364,6 +1379,8 @@ class SessionManager extends EventEmitter {
     sessionId: string,
     seq: number,
     scope: Scope,
+    /** Keep what goes as a version of the message, to switch back to: see message_versions. */
+    keep = false,
   ): Promise<{ removed: Removed; undo: () => Promise<void> }> {
     const session = getSession(sessionId);
     if (!session) throw new SessionEditError("missing", "Unknown session");
@@ -1381,13 +1398,7 @@ class SessionManager extends EventEmitter {
     await this.stop(sessionId);
 
     const file = session.pi_session_file;
-    // Beside it, then renamed over it, so a crash mid-write leaves the
-    // original rather than half of each.
-    const write = (text: string) => {
-      const tmp = `${file}.edit`;
-      writeFileSync(tmp, text);
-      renameSync(tmp, file!);
-    };
+    const write = (text: string) => rewrite(file!, text);
     let original: string | undefined;
     if (file && existsSync(file)) {
       original = readFileSync(file, "utf8");
@@ -1415,11 +1426,16 @@ class SessionManager extends EventEmitter {
       if (original !== undefined) write(original);
       throw e;
     }
+    const kept =
+      keep && scope === "tail"
+        ? saveVersion(sessionId, { anchor: sent[ordinal - 1]?.seq ?? 0, seq, rows: gone.rows, file: original ?? null })
+        : undefined;
     const undo = async () => {
       // A client started since would hold the edited conversation in memory.
       await this.stop(sessionId);
       if (original !== undefined) write(original);
       restoreEvents(gone.rows);
+      if (kept !== undefined) dropVersion(kept);
     };
     return { removed: { from, to, also: gone.also, kept: gone.kept }, undo };
   }
@@ -1443,8 +1459,12 @@ class SessionManager extends EventEmitter {
       // Before the cut, which would otherwise be done only to be undone.
       const refused = images.length ? await picturesRefused(message) : undefined;
       if (refused) throw new SessionEditError("unsupported", refused);
-      const { removed, undo } = await this.cut(sessionId, seq, "tail");
+      // What followed is kept, as the message's earlier version, and goes from
+      // the page now: shown until the answer came, the replacement looked
+      // added under the old conversation rather than put in its place.
+      const { removed, undo } = await this.cut(sessionId, seq, "tail", true);
       const before = latestSeq();
+      this.record(sessionId, "portal_removed", { ...removed, to: before + 1 });
       const answered = this.firstAnswer(sessionId);
       try {
         await this.prompt(sessionId, message, images.length ? { images } : undefined, true);
@@ -1458,7 +1478,7 @@ class SessionManager extends EventEmitter {
       }
       // Nothing else could be sent while the edit held the chat: what comes
       // after this is the chat going on from the replacement.
-      return { removed, undo, before, sent: latestSeq(), answered: answered.promise };
+      return { undo, before, sent: latestSeq(), answered: answered.promise };
     });
     void this.settleEdit(sessionId, edit);
   }
@@ -1467,28 +1487,27 @@ class SessionManager extends EventEmitter {
    * An edit whose replacement pi has taken, once its run has answered or
    * failed.
    *
-   * Answered, it stands: the page is told what went, which it has kept on
-   * screen until now. Failed before a word of answer — the model down, the
+   * Answered, it stands. Failed before a word of answer — the model down, the
    * run refused — the conversation it replaced comes back, as it would have
    * had the replacement been refused outright. Unless the chat has gone on
    * from the replacement in the meantime — something else sent, or on its
    * way — when going back would take that with it: the edit stands then, with
-   * the error that says what happened to its run.
+   * the error that says what happened to its run, and the old conversation is
+   * one of the message's versions.
    */
   private async settleEdit(
     sessionId: string,
-    edit: { removed: Removed; undo: () => Promise<void>; before: number; sent: number; answered: Promise<void> },
+    edit: { undo: () => Promise<void>; before: number; sent: number; answered: Promise<void> },
   ): Promise<void> {
     const failure = await edit.answered.then(
       () => undefined,
       (e: Error) => e,
     );
-    const stand = () => this.record(sessionId, "portal_removed", { ...edit.removed, to: edit.before + 1 });
-    if (!failure) return void stand();
+    if (!failure) return;
     try {
       await this.withEdit(sessionId, async () => {
         const since = sentMessages(sessionId).some((m) => m.seq > edit.sent);
-        if (since || this.prompting.get(sessionId) || this.sending.has(sessionId)) return void stand();
+        if (since || this.prompting.get(sessionId) || this.sending.has(sessionId)) return;
         await this.revertEdit(sessionId, edit.undo, edit.before);
         this.record(sessionId, "portal_notice", {
           text: `The edited message got no answer (${failure.message}), so the conversation is back as it was.`,
@@ -1499,17 +1518,74 @@ class SessionManager extends EventEmitter {
       // Another edit got there first: it is working on the conversation as
       // it now stands, replacement and all.
       console.error(`[portal] could not settle the edit of ${sessionId}: ${(e as Error).message}`);
-      stand();
     }
   }
 
-  /** The conversation an edit replaced, back; what the replacement recorded, gone. */
+  /**
+   * The conversation an edit replaced, back; what the replacement recorded,
+   * gone. The page had already dropped the old one, so it loads the chat again.
+   */
   private async revertEdit(sessionId: string, undo: () => Promise<void>, before: number): Promise<void> {
     await undo();
     // The transcript recorded the replacement, and whatever its run did
     // before it failed. The error that says why stays.
-    const gone = deleteEventsAfter(sessionId, before);
-    if (gone.length) this.record(sessionId, "portal_removed", { from: 0, to: 0, also: gone });
+    deleteEventsAfter(sessionId, before);
+    this.reloadPages(sessionId);
+  }
+
+  /**
+   * Events came back under the seqs they had, below where every page's
+   * stream has read to: each page holding the chat loads it again. Stored,
+   * unlike portal_removed, so a page that was away when it happened hears it
+   * on catching up; one loading the chat afresh has nothing to reload.
+   */
+  private reloadPages(sessionId: string): void {
+    this.record(sessionId, "portal_reload", {});
+  }
+
+  /**
+   * Shows another version of a message: what followed it when it was sent
+   * the time that `to` names. What follows it now is kept as a version in
+   * turn, and the agent's own record of the conversation goes back with it —
+   * the next message goes on from what is on screen.
+   */
+  async switchVersion(sessionId: string, seq: number, to: number): Promise<void> {
+    await this.withEdit(sessionId, async () => {
+      const sent = sentMessages(sessionId);
+      const ordinal = sent.findIndex((m) => m.seq === seq);
+      if (ordinal < 0) throw new SessionEditError("missing", "That message is not in this conversation");
+      const anchor = sent[ordinal - 1]?.seq ?? 0;
+      if (!versionSeqs(sessionId).some((v) => v.anchor === anchor && v.seq === to)) {
+        throw new SessionEditError("missing", "That version of the message is gone");
+      }
+      const { undo } = await this.cut(sessionId, seq, "tail", true);
+      const target = takeVersion(sessionId, anchor, to);
+      if (!target) {
+        await undo();
+        throw new SessionEditError("missing", "That version of the message is gone");
+      }
+      restoreEvents(target.rows);
+      const file = getSession(sessionId)?.pi_session_file;
+      if (file && target.file !== null) rewrite(file, target.file);
+      this.reloadPages(sessionId);
+    });
+  }
+
+  /**
+   * The versions of each message that has more than one, by the seq of the
+   * one shown: the seqs of all of them, oldest first, that one among them.
+   */
+  messageVersions(sessionId: string): Record<number, number[]> {
+    const kept = versionSeqs(sessionId);
+    if (!kept.length) return {};
+    const sent = sentMessages(sessionId);
+    const out: Record<number, number[]> = {};
+    sent.forEach((m, i) => {
+      const anchor = sent[i - 1]?.seq ?? 0;
+      const others = kept.filter((v) => v.anchor === anchor).map((v) => v.seq);
+      if (others.length) out[m.seq] = [...others, m.seq].sort((a, b) => a - b);
+    });
+    return out;
   }
 
   /**

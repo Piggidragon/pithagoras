@@ -677,6 +677,25 @@ app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
   }
 });
 
+/** The versions of each message that has more than one: see SessionManager.messageVersions. */
+app.get("/api/sessions/:id/versions", (req, res) => {
+  if (!getSession(req.params.id)) return res.status(404).json({ error: "Not found" });
+  res.json({ versions: sessions.messageVersions(req.params.id) });
+});
+
+/** Shows another version of a message, and what followed it then. */
+app.post("/api/sessions/:id/messages/:seq/version", async (req, res) => {
+  const to = Number(req.body?.to);
+  if (!Number.isInteger(to) || to <= 0) return res.status(400).json({ error: "to required" });
+  try {
+    await sessions.switchVersion(req.params.id, Number(req.params.seq), to);
+    res.json({ ok: true });
+  } catch (e) {
+    if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
+    res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
+  }
+});
+
 /** A picture sent with a message, for the transcript to show. */
 app.get("/api/sessions/:id/images/:name", (req, res) => {
   const file = imagePath(IMAGE_ROOT, req.params.id, req.params.name);
