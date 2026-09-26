@@ -31,6 +31,8 @@ export interface SessionRow {
   auto_title: number;
   /** pi's own session file, so the exact conversation is reopened on restart. */
   pi_session_file: string | null;
+  /** How often its events were put back under seqs pages had read past: see bumpReloads. */
+  reloads?: number;
   /**
    * "task" for the ones you create here, "agent" for one reached through a
    * channel, "routine" for one a schedule owns.
@@ -100,7 +102,8 @@ export function getDb(): Database.Database {
       kind TEXT NOT NULL DEFAULT 'task',
       channel_slug TEXT,
       channel_key TEXT,
-      routine_slug TEXT
+      routine_slug TEXT,
+      reloads INTEGER NOT NULL DEFAULT 0
     );
     -- The index on (channel_id, channel_key) is created in migrate(), not here.
     -- CREATE TABLE IF NOT EXISTS is a no-op against an existing table, so on an
@@ -131,6 +134,27 @@ export function getDb(): Database.Database {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);
+
+    -- The other versions of a message: what followed a message that was
+    -- edited or sent again, kept so the page can switch back to it. Each row
+    -- is one branch not shown now — its events, and pi's file as it was —
+    -- after the message sent at seq "anchor" (0: the first message). "seq"
+    -- is the branch's own first message, which orders it among the others.
+    -- Of pi's file only what differs from the conversation it went on from:
+    -- "file" is the rest after its first "file_prefix" characters, which
+    -- hash to "prefix_hash"; a switch checks that start is still the same.
+    CREATE TABLE IF NOT EXISTS message_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      anchor INTEGER NOT NULL,
+      seq INTEGER NOT NULL,
+      rows TEXT NOT NULL,
+      file TEXT,
+      file_prefix INTEGER,
+      prefix_hash TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_message_versions ON message_versions(session_id, anchor);
 
     -- Two-way links into the agent session. Each row is one connection
     -- (a Telegram bot, a Slack app, an inbound webhook); messages arriving on
@@ -358,6 +382,22 @@ function migrate(d: Database.Database): void {
     d.exec("ALTER TABLE sessions ADD COLUMN tools_on TEXT NOT NULL DEFAULT ''");
   }
 
+  // How often the chat's events were put back under seqs pages had read past:
+  // a page that last saw another count loads the chat again. See bumpReloads.
+  if (!names.includes("reloads")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN reloads INTEGER NOT NULL DEFAULT 0");
+  }
+  // Versions kept before pi's file was kept as the part after a checked start:
+  // one could not tell whether the conversation it would go back to was still
+  // there. Only ever on a test deploy; and the reload markers stored then.
+  const versionCols = (d.prepare("PRAGMA table_info(message_versions)").all() as { name: string }[]).map((c) => c.name);
+  if (versionCols.length && !versionCols.includes("prefix_hash")) {
+    d.exec("ALTER TABLE message_versions ADD COLUMN file_prefix INTEGER");
+    d.exec("ALTER TABLE message_versions ADD COLUMN prefix_hash TEXT");
+    d.exec("DELETE FROM message_versions");
+    d.exec("DELETE FROM events WHERE type = 'portal_reload'");
+  }
+
   if (!names.includes("kind")) {
     d.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'task'");
   }
@@ -577,6 +617,7 @@ export function deleteSession(id: string): void {
   const d = getDb();
   d.prepare("DELETE FROM canvases WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
+  d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
 }
 
@@ -829,6 +870,116 @@ export function deleteEventsBetween(
     for (const seq of also) drop.run(seq);
     return { rows: gone, also, kept };
   })();
+}
+
+/** A branch of a conversation not shown now: see message_versions. */
+export interface MessageVersion {
+  id: number;
+  anchor: number;
+  seq: number;
+  rows: EventRow[];
+  /** pi's file after its first `filePrefix` characters; null when there was no file. */
+  file: string | null;
+  filePrefix: number | null;
+  prefixHash: string | null;
+}
+
+type VersionRow = { id: number; anchor: number; seq: number; rows: string; file: string | null; file_prefix: number | null; prefix_hash: string | null };
+const versionOf = (r: VersionRow): MessageVersion => ({
+  id: r.id,
+  anchor: r.anchor,
+  seq: r.seq,
+  rows: JSON.parse(r.rows) as EventRow[],
+  file: r.file,
+  filePrefix: r.file_prefix,
+  prefixHash: r.prefix_hash,
+});
+
+/** Keeps a branch the conversation is leaving; returns its id. */
+export function saveVersion(sessionId: string, v: Omit<MessageVersion, "id">): number {
+  return Number(
+    getDb()
+      .prepare("INSERT INTO message_versions (session_id, anchor, seq, rows, file, file_prefix, prefix_hash) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(sessionId, v.anchor, v.seq, JSON.stringify(v.rows), v.file, v.filePrefix, v.prefixHash).lastInsertRowid,
+  );
+}
+
+/** The first messages of the branches kept after `anchor`, oldest first. */
+export function versionSeqs(sessionId: string): { anchor: number; seq: number }[] {
+  return getDb()
+    .prepare("SELECT anchor, seq FROM message_versions WHERE session_id = ? ORDER BY seq")
+    .all(sessionId) as { anchor: number; seq: number }[];
+}
+
+const VERSION_AT = "SELECT * FROM message_versions WHERE session_id = ? AND anchor = ? AND seq = ?";
+
+/** A kept branch, left where it is: undefined if there is none. */
+export function findVersion(sessionId: string, anchor: number, seq: number): MessageVersion | undefined {
+  const row = getDb().prepare(VERSION_AT).get(sessionId, anchor, seq) as VersionRow | undefined;
+  return row && versionOf(row);
+}
+
+/** Takes a kept branch out, to be shown again: undefined if there is none. */
+export function takeVersion(sessionId: string, anchor: number, seq: number): MessageVersion | undefined {
+  const d = getDb();
+  return d.transaction(() => {
+    const row = d.prepare(VERSION_AT).get(sessionId, anchor, seq) as VersionRow | undefined;
+    if (!row) return undefined;
+    d.prepare("DELETE FROM message_versions WHERE id = ?").run(row.id);
+    return versionOf(row);
+  })();
+}
+
+/** Forgets one kept branch. */
+export function dropVersion(id: number): void {
+  getDb().prepare("DELETE FROM message_versions WHERE id = ?").run(id);
+}
+
+/**
+ * Counts one more time a chat's events were put back under seqs its pages
+ * had read past, and returns the count: a page that last saw another loads
+ * the chat again.
+ */
+export function bumpReloads(sessionId: string): number {
+  const row = getDb().prepare("UPDATE sessions SET reloads = reloads + 1 WHERE id = ? RETURNING reloads").get(sessionId) as
+    | { reloads: number }
+    | undefined;
+  return row?.reloads ?? 0;
+}
+
+/**
+ * Forgets the versions kept after the messages at `anchors`, and the versions
+ * inside those that nothing else can reach any more: their anchors are
+ * messages kept only in what is being forgotten.
+ */
+export function dropVersionsAt(sessionId: string, anchors: number[]): void {
+  const d = getDb();
+  d.transaction(() => {
+    const find = d.prepare("SELECT id FROM message_versions WHERE session_id = ? AND anchor = ?");
+    // The messages inside one, found by SQLite: not the whole of it read into JavaScript.
+    const prompts = d.prepare(
+      `SELECT json_extract(value, '$.seq') AS seq FROM message_versions, json_each(message_versions.rows)
+       WHERE message_versions.id = ? AND json_extract(value, '$.type') = 'portal_prompt'`,
+    );
+    const drop = d.prepare("DELETE FROM message_versions WHERE id = ?");
+    const queue = [...anchors];
+    for (let anchor = queue.shift(); anchor !== undefined; anchor = queue.shift()) {
+      for (const v of find.all(sessionId, anchor) as { id: number }[]) {
+        for (const r of prompts.all(v.id) as { seq: number }[]) queue.push(r.seq);
+        drop.run(v.id);
+      }
+    }
+  })();
+}
+
+/** Takes events out by seq: see restoreEvents, which this undoes. */
+export function deleteEventSeqs(seqs: number[]): void {
+  getDb().prepare("DELETE FROM events WHERE seq IN (SELECT value FROM json_each(?))").run(JSON.stringify(seqs));
+}
+
+/** Runs `fn` as one transaction: all of what it writes, or none of it. */
+export function atomically<T>(fn: () => T): T {
+  return getDb().transaction(fn)();
 }
 
 /** Puts events back under the seq they had — the inverse of deleteEventsBetween. */

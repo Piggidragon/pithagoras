@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { StatusDot } from "./StatusDot";
+import { StatusDot, workingText } from "./StatusDot";
 import {
   LuBot,
   LuPanelLeftClose,
@@ -134,7 +134,7 @@ export function Sidebar({
           <hr />
           {destinations.map((d) => (
             <RailButton key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} current={view === d.to}>
-              {d.to === "sessions" && anyRunning && <StatusDot status="running" />}
+              {d.to === "sessions" && anyRunning && <StatusDot status="running" bare />}
             </RailButton>
           ))}
           <div className="mt-auto" />
@@ -346,7 +346,7 @@ function SessionItem({
           />
         ) : (
           <span
-            className="truncate text-sm text-fg"
+            className={`truncate text-sm text-fg ${workingText(s.status)}`}
             onDoubleClick={(e) => {
               e.stopPropagation();
               setRenaming(true);

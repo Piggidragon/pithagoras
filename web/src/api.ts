@@ -360,6 +360,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
+  /** Shows another version of a message, and what followed it then. */
+  switchVersion: (id: string, seq: number, to: number) =>
+    json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/version`, {
+      method: "POST",
+      body: JSON.stringify({ to }),
+    }),
   /** Every tool the portal has seen, for setting a default without opening a chat. */
   toolDefaults: () =>
     json<{

@@ -1,0 +1,192 @@
+import { test, expect, type Page } from '@playwright/test';
+
+test('a tool call reads as its parameters, closed and opened, not as JSON', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=args');
+  const search = page.locator('.chat-tool', { hasText: 'web_search' });
+  // Closed: "Queries: …", where it said {"queries":[…]}.
+  await expect(search.locator('.chat-tool-detail')).toHaveText('Queries: pgvector vs qdrant 2026, homelab vector database · Num results: 5 · Include content: false');
+  await search.locator('.chat-tool-head').click();
+  // Opened: each parameter a label and its value, the queries a list.
+  const args = search.locator('.chat-tool-args');
+  await expect(args.locator('dt')).toHaveText(['Queries', 'Num results', 'Include content']);
+  await expect(args.locator('.chat-arg-list li')).toHaveText(['pgvector vs qdrant 2026', 'homelab vector database']);
+  await expect(args).not.toContainText('[');
+  await expect(args).not.toContainText('"');
+
+  // A list of changes: each one numbered, its fields labelled; code in a block of its own.
+  const edit = page.locator('.chat-tool', { hasText: 'web/src/main.tsx' }).filter({ hasText: 'edit' });
+  await edit.locator('.chat-tool-head').click();
+  await expect(edit.locator('.chat-arg-items > li')).toHaveCount(2);
+  await expect(edit.locator('.chat-arg-items dt').first()).toHaveText('Old text');
+  await expect(edit.locator('.chat-arg-items pre.chat-tool-value')).toHaveText('render(\n  <App />\n);');
+  await expect(edit.locator('.chat-tool-body')).not.toContainText('{');
+
+  // An MCP tool that answers in JSON: its answer is read the same way.
+  const mcp = page.locator('.chat-tool', { hasText: 'github_list_issues' });
+  await expect(mcp.locator('.chat-tool-detail')).toHaveText('Owner: Piggidragon · Repo: pithagoras · State: open · Labels: bug, ui');
+  await mcp.locator('.chat-tool-head').click();
+  const output = mcp.locator('.chat-tool-output');
+  await expect(output).toHaveClass(/is-structured/);
+  await expect(output.locator('.chat-arg-items > li')).toHaveCount(2);
+  await expect(output).toContainText('Jump button over the tools menu');
+  await expect(output).not.toContainText('{');
+});
+
+test('Copy is under the last answer, not beside it, and only there', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=args');
+  const answer = page.locator('.md', { hasText: 'pgvector is enough' });
+  // The agent's side of the conversation, not the messages sent, which keep theirs.
+  const copy = page.locator('.group:not(.items-end)').getByRole('button', { name: 'Copy', exact: true });
+  // One: the answer's, and not the paragraph before the tools.
+  await expect(copy).toHaveCount(1);
+  await expect(copy).toBeVisible();
+  const a = (await answer.boundingBox())!;
+  const c = (await copy.boundingBox())!;
+  // Under the words and lined up with them, not in the margin to their right.
+  expect(c.y).toBeGreaterThanOrEqual(a.y + a.height - 1);
+  expect(Math.abs(c.x + 6 - a.x)).toBeLessThan(4);
+});
+
+test('the way back to the end steps aside for a menu opened from the composer', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=args');
+  for (const name of ['web_search', 'github_list_issues']) await page.locator('.chat-tool-head', { hasText: name }).click();
+  await page.mouse.move(500, 400);
+  await page.mouse.wheel(0, -4000);
+  const jump = page.getByRole('button', { name: 'Jump to the end' });
+  await expect(jump).toBeVisible();
+  await page.getByTitle('Which tools this conversation may use').click();
+  await expect(page.getByText('Tools in this chat')).toBeVisible();
+  // It floated over the menu, in the middle of the list of tools.
+  await expect(jump).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('Tools in this chat')).toBeHidden();
+  await expect(jump).toBeVisible();
+});
+
+const streamHeight = (page: Page) => page.locator('.chat-thinking-stream').evaluate((e) => e.getBoundingClientRect().height);
+
+test('a few words of thinking take a line, not three; more fills it and it does not shrink back', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=brief');
+  const line = await page.locator('.chat-thinking-stream').evaluate((e) => parseFloat(getComputedStyle(e).lineHeight));
+  await expect(page.locator('.chat-thinking-stream')).toHaveText('Short one.');
+  // It was three lines high whatever it held: two empty ones between the heading and the words.
+  expect(await streamHeight(page)).toBeLessThan(line * 1.5);
+  await expect(page.locator('.chat-thinking-stream')).not.toHaveClass(/is-clipped/);
+
+  // A fast model: many small pieces. Measured after each, it only ever grows, to three lines.
+  const heights = await page.evaluate(async () => {
+    const seen: number[] = [];
+    const el = () => document.querySelector('.chat-thinking-stream')!;
+    const words = 'the regex expects the status at the very end\nso I should check how pi appends it and whether two newlines come first '.repeat(6).split(' ');
+    for (const w of words) {
+      (window as any).think(' ' + w);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      seen.push(parseFloat((el() as HTMLElement).style.height) || el().getBoundingClientRect().height);
+    }
+    return seen;
+  });
+  for (let i = 1; i < heights.length; i++) expect(heights[i]).toBeGreaterThanOrEqual(heights[i - 1]);
+  expect(heights.at(-1)).toBeCloseTo(line * 3, 0);
+  await expect(page.locator('.chat-thinking-stream')).toHaveClass(/is-clipped/);
+});
+
+const animation = (el: Element, pseudo?: string) => getComputedStyle(el, pseudo).animationName;
+
+test('a working chat shows the π mark and a shimmering word in the composer, and its title shimmers', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=tools');
+  const working = page.locator('.composer-working');
+  await expect(working).toBeVisible();
+  // The app's π, breathing in a glow — not the pulsing yellow dot, nor a spinner.
+  const mark = working.locator('.status-working');
+  await expect(mark).toHaveText('π');
+  expect(await mark.evaluate(animation, '::before')).toBe('chat-halo');
+  expect(await mark.locator('span').evaluate(animation)).toBe('working-breathe');
+  await expect(page.locator('.composer-settings .animate-pulse')).toHaveCount(0);
+  // "Working" shimmers the way "Thinking" does, and so does the chat's title.
+  expect(await working.getByText('Working').evaluate(animation)).toBe('chat-shimmer');
+  expect(await page.getByRole('button', { name: 'Fix the build' }).evaluate(animation)).toBe('chat-shimmer');
+  // Idle: none of it.
+  await page.goto('/tests/chat.html?phase=args');
+  await expect(page.locator('.composer-settings')).toBeVisible();
+  await expect(page.locator('.composer-working, .composer-settings .status-working')).toHaveCount(0);
+  expect(await page.getByRole('button', { name: 'Fix the build' }).evaluate(animation)).toBe('none');
+});
+
+test('a working chat in the sidebar has the π mark and a shimmering title', async ({ page }) => {
+  const session = { id: 's1', title: 'Busy chat', workspace: '/w/site', status: 'running', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
+  const idle = { ...session, id: 's2', title: 'Quiet chat', status: 'idle' };
+  await page.route('**/api/**', async (route) => {
+    const p = new URL(route.request().url()).pathname;
+    let reply: unknown = {};
+    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
+    else if (p === '/api/sessions') reply = { sessions: [session, idle], executor: 'host' };
+    else if (p === '/api/models') reply = { models: [], providers: {} };
+    await route.fulfill({ json: reply });
+  });
+  await page.addInitScript(() => {
+    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
+    localStorage.setItem('pithagoras.setup', 'done');
+  });
+  await page.goto('/');
+  const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
+  const busyTitle = sidebar.getByText('Busy chat');
+  const mark = busyTitle.locator('..').locator('.status-working');
+  await expect(mark).toHaveText('π');
+  expect(await mark.evaluate(animation, '::before')).toBe('chat-halo');
+  expect(await busyTitle.evaluate(animation)).toBe('chat-shimmer');
+  // The idle one: a still dot and a still title.
+  const quietTitle = sidebar.getByText('Quiet chat');
+  await expect(quietTitle.locator('..').locator('.status-dot')).toBeVisible();
+  expect(await quietTitle.evaluate(animation)).toBe('none');
+  // Every mark has the same slot: the titles beside a working and an idle chat line up.
+  const q = (await quietTitle.boundingBox())!;
+  const b = (await busyTitle.boundingBox())!;
+  expect(Math.abs(q.x - b.x)).toBeLessThan(0.5);
+});
+
+test('parameters keep their numbers and their spaces, and an id too long for a number is not rewritten', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=args');
+  const call = page.locator('.chat-tool', { hasText: 'configure' });
+  await call.locator('.chat-tool-head').click();
+  const value = (label: string) => call.locator('.chat-tool-args > div', { has: page.locator('dt', { hasText: label }) }).locator('dd');
+  // They read "8,080" and "0".
+  await expect(value('Port')).toHaveText('8080');
+  await expect(value('Threshold')).toHaveText('0.0001');
+  // Drawn, not only in the page: the indent to replace was dropped from sight.
+  expect(await value('Old string').evaluate((e) => (e as HTMLElement).innerText)).toBe('    return x;');
+  // Read as JSON it came out as 12345678901234567000: shown as the text it was.
+  const output = call.locator('.chat-tool-output');
+  await expect(output).not.toHaveClass(/is-structured/);
+  await expect(output).toContainText('12345678901234567890');
+  // Nor a decimal longer than a number holds: read as JSON it was shown rounded.
+  const ledger = page.locator('.chat-tool', { hasText: 'ledger' });
+  await ledger.locator('.chat-tool-head').click();
+  await expect(ledger.locator('.chat-tool-output')).not.toHaveClass(/is-structured/);
+  await expect(ledger.locator('.chat-tool-output')).toContainText('0.123456789012345678901');
+});
+
+test('an agent conversation keeps its title in place when it starts working', async ({ page }) => {
+  const at = new Date().toISOString();
+  const row = (id: string, title: string, status: string) => ({ id, title, status, workspace: '/a', kind: 'agent', pinned: false, updated_at: at, channel_key: `tg:${id}`, channel: null });
+  await page.route('**/api/**', async (route) => {
+    const p = new URL(route.request().url()).pathname;
+    let reply: unknown = {};
+    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
+    else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
+    else if (p === '/api/agent/sessions') reply = { sessions: [row('x', 'Working agent chat', 'running'), row('y', 'Resting agent chat', 'idle')], agentHome: '/a' };
+    else if (p === '/api/agent/setup') reply = { initialised: true, home: '/a', files: [] };
+    else if (p === '/api/models') reply = { models: [], providers: {} };
+    await route.fulfill({ json: reply });
+  });
+  await page.addInitScript(() => {
+    (window as any).EventSource = class { addEventListener() {} close() {} };
+    localStorage.setItem('pithagoras.setup', 'done');
+  });
+  await page.goto('/agent');
+  const main = page.getByRole('main');
+  const busy = (await main.getByText('Working agent chat').boundingBox())!;
+  const idle = (await main.getByText('Resting agent chat').boundingBox())!;
+  // The π is twice a dot's width, and without its slot pushed the title along.
+  expect(Math.abs(busy.x - idle.x)).toBeLessThan(0.5);
+  await expect(main.locator('.status-slot > .status-working')).toHaveCount(1);
+});

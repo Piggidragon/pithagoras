@@ -5,7 +5,7 @@ import type { Session } from "../api";
 import { when } from "../time";
 import { filterSessions } from "../session-filter";
 import { confirmDialog } from "./ConfirmDialog";
-import { StatusDot } from "./StatusDot";
+import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 
 /**
@@ -144,7 +144,7 @@ export function SessionsPage({
                         />
                       ) : (
                         <p
-                          className="truncate text-sm text-fg"
+                          className={`truncate text-sm text-fg ${workingText(s.status)}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             window.clearTimeout(opening.current);

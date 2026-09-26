@@ -677,6 +677,19 @@ app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
   }
 });
 
+/** Shows another version of a message, and what followed it then. */
+app.post("/api/sessions/:id/messages/:seq/version", async (req, res) => {
+  const to = Number(req.body?.to);
+  if (!Number.isInteger(to) || to <= 0) return res.status(400).json({ error: "to required" });
+  try {
+    await sessions.switchVersion(req.params.id, Number(req.params.seq), to);
+    res.json({ ok: true });
+  } catch (e) {
+    if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
+    res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
+  }
+});
+
 /** A picture sent with a message, for the transcript to show. */
 app.get("/api/sessions/:id/images/:name", (req, res) => {
   const file = imagePath(IMAGE_ROOT, req.params.id, req.params.name);
@@ -1245,6 +1258,13 @@ app.get("/api/sessions/:id/events", (req, res) => {
   canvasEvents.on(session.id, onCanvas);
   writeCanvas({ type: "snapshot", canvases: listCanvases(session.id) });
 
+  // How often this chat's events were put back under seqs a page had read
+  // past (see bumpReloads): a page that last saw another count missed one, and
+  // loads the chat again rather than go on from its cursor.
+  res.write(`event: reloads\ndata: ${JSON.stringify({ reloads: session.reloads ?? 0 })}\n\n`);
+  // The versions of its messages, as they are now; later changes come live
+  // (portal_versions). A page does not ask for them after each change.
+  res.write(`event: versions\ndata: ${JSON.stringify({ versions: sessions.messageVersions(session.id) })}\n\n`);
   // Replace stale in-memory deltas before durable replay, then restore the current snapshot.
   res.write("event: live-reset\ndata: {}\n\n");
 

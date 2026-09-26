@@ -1,4 +1,5 @@
 import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
+import { workingText } from "./StatusDot";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
 import { CommandLine } from "./CommandLine";
@@ -18,7 +19,7 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuMenu, LuBot, LuArrowDown, LuCheck, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
@@ -124,6 +125,7 @@ export function Chat({
   onClientCommand,
   onRename,
   onOpenNavigation,
+  versions = {},
   loading,
   hasEarlier,
   loadingEarlier,
@@ -148,6 +150,11 @@ export function Chat({
   onRename: (title: string) => Promise<void>;
   /** On a phone, where the sidebar is a drawer: opens it. */
   onOpenNavigation?: () => void;
+  /**
+   * The versions of messages edited or sent again, by the seq of the one
+   * shown: the seqs of all of them, oldest first. Said by the chat's stream.
+   */
+  versions?: Record<number, number[]>;
 }) {
   const [input, setInput] = useState(() => drafts.get(session.id));
   // Where dictated words go. Kept beside the state because several phrases can
@@ -328,6 +335,17 @@ export function Chat({
     return undefined;
   }, [items]);
   const lastReply = useMemo(() => lastReplyId(items), [items]);
+  // A switch to another version, by the message clicked: until the chat has
+  // loaded again without it, a second click would ask about a message that is
+  // on its way out, and fail after the first had worked.
+  const [switching, setSwitching] = useState<number | null>(null);
+  useEffect(() => {
+    if (switching === null) return;
+    if (!items.some((it) => it.kind === "user" && it.seq === switching)) return setSwitching(null);
+    // A stream that does not come back does not leave the switches locked.
+    const t = window.setTimeout(() => setSwitching(null), 15_000);
+    return () => window.clearTimeout(t);
+  }, [items, switching]);
 
   // Only the end of a conversation is drawn to begin with. Drawing all of a long
   // one is what made opening it slow, and the top of it is not what anybody
@@ -881,7 +899,7 @@ export function Chat({
                 type="button"
                 onClick={() => setRenaming(true)}
                 title="Rename this chat"
-                className="max-w-full truncate rounded text-left hover:text-accent"
+                className={`max-w-full truncate rounded text-left hover:text-accent ${workingText(session.status)}`}
               >
                 {session.title}
               </button>
@@ -1080,6 +1098,26 @@ export function Chat({
                     run that is answering it leaves the agent replying to
                     something that no longer exists. Sending it again is fine —
                     it just queues, like any other message. */}
+                <div className="flex items-center gap-1">
+                {versions[item.seq] && (
+                  <VersionSwitch
+                    seqs={versions[item.seq]}
+                    seq={item.seq}
+                    running={running}
+                    busy={switching !== null}
+                    onSwitch={(to) => {
+                      setSwitching(item.seq);
+                      void attempt(async () => {
+                        try {
+                          await api.switchVersion(session.id, item.seq, to);
+                        } catch (e) {
+                          setSwitching(null);
+                          throw e;
+                        }
+                      });
+                    }}
+                  />
+                )}
                 <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                   {text && <CopyAction text={text} />}
                   {item.id === lastSaid ? (
@@ -1137,14 +1175,13 @@ export function Chat({
                     <LuTrash2 className="h-3 w-3" />
                   </MessageAction>
                 </div>
+                </div>
               </div>
             );
           }
           if (item.kind === "assistant") {
             return (
-              // Never closer than 2rem to the edge: Copy sits in that margin,
-              // and 10% of a phone is less than the button.
-              <div key={item.id} className={`group max-w-[min(90%,calc(100%_-_2rem))]${enter}`}>
+              <div key={item.id} className={`group max-w-[90%]${enter}`}>
                 {item.thinking && (
                   <ThinkingBlock
                     thinking={item.thinking}
@@ -1154,7 +1191,7 @@ export function Chat({
                   />
                 )}
                 {item.text && (
-                  <div className="md relative text-sm leading-relaxed text-fg">
+                  <div className="md text-sm leading-relaxed text-fg">
                     {/* Streamdown rather than plain markdown: a reply arrives a
                         token at a time, so half of it is briefly malformed —
                         an unclosed fence, a half-written link — and a strict
@@ -1172,16 +1209,16 @@ export function Chat({
                     >
                       {assistantText(item)}
                     </Streamdown>
-                    {/* Only the last bubble of the reply: one per tool call in
-                        between would be a Copy button after every paragraph.
-                        Beside the words rather than under them, so it adds no
-                        line of its own — and beside the words, not the
-                        thinking above them. */}
-                    {item.id === lastReply && (
-                      <div className="absolute -right-7 top-0 flex items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                        <CopyAction text={assistantText(item)} />
-                      </div>
-                    )}
+                  </div>
+                )}
+                {/* Under the answer, where it ends: only the last bubble of the
+                    reply, and only once nothing follows it. One per tool call
+                    in between would be a Copy button after every paragraph,
+                    and one beside the words sat in the margin where the eye
+                    does not go. */}
+                {item.id === lastReply && item.text && (
+                  <div className="reply-actions -ml-1.5 mt-1 flex items-center gap-0.5">
+                    <CopyAction text={assistantText(item)} />
                   </div>
                 )}
               </div>
@@ -1283,7 +1320,7 @@ export function Chat({
               reading.current = null;
               scroller.follow(true);
             }}
-            className="float-in absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
+            className="jump-to-end float-in absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
           >
             <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
             {running ? "Latest output" : "Jump to the end"}
@@ -1695,6 +1732,42 @@ function PanelToggle({
       {children}
       {live && <i className="header-live-dot" aria-hidden />}
     </button>
+  );
+}
+
+/**
+ * Which version of a message is shown, and a way to the others: every time
+ * it was edited or sent again, with what followed it that time. Not while a
+ * run is going — it would be answering a conversation being swapped under it.
+ */
+function VersionSwitch({
+  seqs,
+  seq,
+  running,
+  busy,
+  onSwitch,
+}: {
+  seqs: number[];
+  seq: number;
+  running: boolean;
+  /** A switch is on its way: one at a time. */
+  busy: boolean;
+  onSwitch: (to: number) => void;
+}) {
+  const at = seqs.indexOf(seq);
+  if (at < 0) return null;
+  return (
+    <div className="message-versions flex items-center text-[11px] text-fg-subtle" role="group" aria-label="Versions of this message">
+      <MessageAction label={running ? "Stop the run to switch versions" : "Previous version"} disabled={running || busy || at === 0} onClick={() => onSwitch(seqs[at - 1])}>
+        <LuChevronLeft className="h-3 w-3" />
+      </MessageAction>
+      <span className="min-w-[2.2rem] text-center tabular-nums" aria-live="polite">
+        {at + 1} / {seqs.length}
+      </span>
+      <MessageAction label={running ? "Stop the run to switch versions" : "Next version"} disabled={running || busy || at === seqs.length - 1} onClick={() => onSwitch(seqs[at + 1])}>
+        <LuChevronRight className="h-3 w-3" />
+      </MessageAction>
+    </div>
   );
 }
 
