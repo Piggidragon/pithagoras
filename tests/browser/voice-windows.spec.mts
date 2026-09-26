@@ -209,8 +209,8 @@ test('a window dragged by its corner stops short of a window off that corner', a
   expect(overlap(after, other)).toBe(false);
 });
 
-test('a window goes down to just above the dock and no further, so a window drawn over the orb has nothing under the dock to lift', async ({ page }) => {
-  // Tall, where the windows open well above the dock: about a centimetre was left there.
+test('a window opens down to just above the dock, and goes no further, so a window drawn over the orb has nothing under the dock to lift', async ({ page }) => {
+  // Tall, where the windows opened well above the dock: about a centimetre was left there.
   await page.setViewportSize({ width: 1400, height: 1200 });
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
@@ -226,12 +226,12 @@ test('a window goes down to just above the dock and no further, so a window draw
   // Where the dock's top is: 50px from the stage's foot to its middle, 80 tall.
   const stage = await box(page.locator('.voice-stage'));
   const dockTop = stage.y + stage.height - 50 - 40;
+  // Opened as deep as they go: the gap between two windows short of the dock.
+  for (const w of Object.values(opened)) expect(Math.abs(foot(w) - (dockTop - 16))).toBeLessThan(1);
   // Both dragged to the stage's foot: they went down to it, under where the dock goes.
   await drag2(page, browser.locator('.resize-s'), 0, 600);
   await drag2(page, terminal.locator('.resize-s'), 0, 600);
   for (const w of [browser, terminal]) expect(Math.abs(foot(await box(w)) - (dockTop - 16))).toBeLessThan(1);
-  // Further down than they opened: they stopped there, well above the dock.
-  expect(foot(await box(browser))).toBeGreaterThan(foot(opened.browser) + 5);
   // Up is still theirs.
   await drag2(page, terminal.locator('.resize-s'), 0, -120);
   expect(foot(await box(terminal))).toBeLessThan(dockTop - 120);
@@ -374,11 +374,11 @@ test('a press on an edge that goes nowhere changes nothing', async ({ page }) =>
 });
 
 test('a window that stands closer to the dock than the gap does not jump when its edge is taken', async ({ page }) => {
-  // Short enough that the browser's own place ends a few pixels short of the dock's margin.
-  await page.setViewportSize({ width: 1400, height: 700 });
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
   const browser = page.locator('.voice-browser-window');
+  // Placed a few pixels closer than the gap: as a stage whose dock grew after the windows were placed would leave them.
+  await page.locator('.voice-stage').evaluate(el => el.style.setProperty('--window-room', 'calc(100% - 52px - 98px)'));
   await page.waitForTimeout(1000);
   const before = await box(browser), dock = await box(page.locator('.voice-presence'));
   expect(dock.y - (before.y + before.height)).toBeLessThan(16);
@@ -471,4 +471,25 @@ test('on a phone the windows end above the dock, one or two of them, and the car
   expect(c.height).toBeLessThan(48);
   expect(foot(c)).toBeLessThanOrEqual((await dock()).y);
   await page.screenshot({ path: '/tmp/pithagoras-voice-phone-windows.png' });
+});
+
+test('a window\'s shadow falls downwards and does not reach across the gap onto the window beside it', async ({ page }) => {
+  await openCanvas(page);
+  await page.waitForTimeout(1000);
+  // How far each shadow reaches out at the sides: its offset, blur and spread. The right one's lay over the left one.
+  const reach = (el: Element) => getComputedStyle(el).boxShadow.split(/,(?![^(]*\))/).map(shadow => {
+    const [x, , blur = 0, spread = 0] = shadow.replace(/rgba?\([^)]*\)/, '').trim().split(/\s+/).map(parseFloat);
+    return Math.abs(x) + blur + spread;
+  });
+  // The canvas as it stands once it has slid in, then the windows of the stage.
+  const shadows = [await page.locator('.canvas-panel').evaluate(reach)];
+  await page.getByRole('button', { name: 'Session canvases' }).click();
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Show files' }).click();
+  await page.waitForTimeout(1000);
+  for (const selector of ['.voice-terminal-window', '.voice-files-window']) shadows.push(await page.locator(selector).first().evaluate(reach));
+  for (const reaches of shadows) {
+    expect(reaches.length).toBeGreaterThan(0);
+    for (const r of reaches) expect(r).toBeLessThan(16);
+  }
 });
