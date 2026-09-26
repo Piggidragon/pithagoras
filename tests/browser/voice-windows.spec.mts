@@ -209,7 +209,9 @@ test('a window dragged by its corner stops short of a window off that corner', a
   expect(overlap(after, other)).toBe(false);
 });
 
-test('a window goes no deeper than it opened, so a window drawn over the orb has nothing under the dock to lift', async ({ page }) => {
+test('a window goes down to just above the dock and no further, so a window drawn over the orb has nothing under the dock to lift', async ({ page }) => {
+  // Tall, where the windows open well above the dock: about a centimetre was left there.
+  await page.setViewportSize({ width: 1400, height: 1200 });
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
   const browser = page.locator('.voice-browser-window'), terminal = page.locator('.voice-terminal-window');
@@ -221,16 +223,20 @@ test('a window goes no deeper than it opened, so a window drawn over the orb has
   await drag(page, terminal.locator('.resize-w'), 300);
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'free');
   await page.waitForTimeout(900);
+  // Where the dock's top is: 50px from the stage's foot to its middle, 80 tall.
+  const stage = await box(page.locator('.voice-stage'));
+  const dockTop = stage.y + stage.height - 50 - 40;
   // Both dragged to the stage's foot: they went down to it, under where the dock goes.
-  await drag2(page, browser.locator('.resize-s'), 0, 400);
-  await drag2(page, terminal.locator('.resize-s'), 0, 400);
-  expect(foot(await box(browser))).toBeLessThanOrEqual(foot(opened.browser) + 0.5);
-  expect(foot(await box(terminal))).toBeLessThanOrEqual(foot(opened.terminal) + 0.5);
+  await drag2(page, browser.locator('.resize-s'), 0, 600);
+  await drag2(page, terminal.locator('.resize-s'), 0, 600);
+  for (const w of [browser, terminal]) expect(Math.abs(foot(await box(w)) - (dockTop - 16))).toBeLessThan(1);
+  // Further down than they opened: they stopped there, well above the dock.
+  expect(foot(await box(browser))).toBeGreaterThan(foot(opened.browser) + 5);
   // Up is still theirs.
   await drag2(page, terminal.locator('.resize-s'), 0, -120);
-  expect(foot(await box(terminal))).toBeLessThan(foot(opened.terminal) - 100);
+  expect(foot(await box(terminal))).toBeLessThan(dockTop - 120);
   await drag2(page, terminal.locator('.resize-s'), 0, 400);
-  expect(foot(await box(terminal))).toBeLessThanOrEqual(foot(opened.terminal) + 0.5);
+  expect(Math.abs(foot(await box(terminal)) - (dockTop - 16))).toBeLessThan(1);
 
   // The left one drawn slowly over the orb: it goes to its dock, and neither window is moved for it.
   await page.evaluate(() => {
@@ -250,7 +256,7 @@ test('a window goes no deeper than it opened, so a window drawn over the orb has
   // The browser's width changes as it is dragged; the terminal is not touched, nor either one's height.
   expect(heights).toEqual([]);
   const dock = await box(page.locator('.voice-presence'));
-  for (const w of [browser, terminal]) expect(foot(await box(w))).toBeLessThanOrEqual(dock.y - 14);
+  for (const w of [browser, terminal]) expect(foot(await box(w))).toBeLessThanOrEqual(dock.y - 15);
 });
 
 test('a window dragged while the orb goes back to its dock is not fought over, and ends clear of the dock', async ({ page }) => {

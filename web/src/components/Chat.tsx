@@ -19,7 +19,7 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
@@ -38,8 +38,7 @@ import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
-import { across, fitFrame, isDock, readFrame, type Dock, type Frame } from "../panel-dock";
-import { DockPicker } from "./DockPicker";
+import { across, dockedFrame, dropTarget, fitFrame, isDock, readFrame, type Dock, type Frame } from "../panel-dock";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -53,12 +52,11 @@ const watchBeside = (changed: () => void) => {
 };
 
 /** How the conversation and the panels line up, for each place the panels go. */
-const BODY: Record<Dock, string> = { right: "flex-row", left: "flex-row-reverse", top: "flex-col-reverse", bottom: "flex-col", float: "flex-row" };
+const BODY: Record<Dock, string> = { right: "flex-row", left: "flex-row-reverse", bottom: "flex-col", float: "flex-row" };
 /** The panels' edge towards the conversation, or a window's frame when they float. */
 const ASIDE: Record<Dock, string> = {
   right: "border-l border-line",
   left: "border-r border-line",
-  top: "border-b border-line",
   bottom: "border-t border-line",
   float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
 };
@@ -324,7 +322,7 @@ export function Chat({
    * it the frame swallows the move events and the panel stops following
    * halfway across.
    */
-  const drag = (e: React.PointerEvent, move: (dx: number, dy: number) => void) => {
+  const drag = (e: React.PointerEvent, move: (dx: number, dy: number) => void, end?: () => void) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -337,17 +335,18 @@ export function Chat({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       document.body.classList.remove("is-resizing");
+      end?.();
     };
     window.addEventListener("pointermove", moved);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
   };
 
-  /** The edge between the conversation and the panels: their width, or their height at the top or the bottom. */
+  /** The edge between the conversation and the panels: their width, or their height at the bottom. */
   const dragSize = (e: React.PointerEvent) => {
     const width = asideWidth, height = asideHeight, tall = body.current?.clientHeight ?? window.innerHeight;
     drag(e, (dx, dy) => {
-      if (sideBySide) setAsideHeight(Math.round(Math.min(Math.max(height + (placedAt === "top" ? dy : -dy), 160), tall - 160)));
+      if (sideBySide) setAsideHeight(Math.round(Math.min(Math.max(height - dy, 160), tall - 160)));
       else setAsideWidth(Math.round(Math.min(Math.max(width + (placedAt === "left" ? dx : -dx), 320), window.innerWidth * 0.75)));
     });
   };
@@ -362,19 +361,49 @@ export function Chat({
     });
   };
 
-  /** A floating window, moved by its header — not by a button or tab in it — or sized by its corner. */
-  const dragFrame = (e: React.PointerEvent, how: "move" | "size") => {
-    if (how === "move" && (e.target as Element).closest("button, a, input, [role=tab]")) return;
+  /** A floating window, sized by its corner. */
+  const sizeFrame = (e: React.PointerEvent) => {
     const from = placed, area = room;
-    drag(e, (dx, dy) =>
-      setFrame(
-        fitFrame(
-          how === "move"
-            ? { ...from, x: from.x + dx, y: from.y + dy }
-            : { ...from, w: Math.min(from.w + dx, area.w - from.x), h: Math.min(from.h + dy, area.h - from.y) },
-          area,
-        ),
-      ),
+    drag(e, (dx, dy) => setFrame(fitFrame({ ...from, w: Math.min(from.w + dx, area.w - from.x), h: Math.min(from.h + dy, area.h - from.y) }, area)));
+  };
+
+  // The panels being carried by their header: where they would go if let go
+  // now — docked at the edge they are over, or floating there — drawn over the chat.
+  const [carry, setCarry] = useState<{ to: Dock; frame: Frame } | null>(null);
+  /**
+   * Carrying the panels by their header — not by a button or tab in it — to
+   * an edge of the chat, where they dock, or anywhere else, where they float.
+   * Floating, the window goes along with the pointer.
+   */
+  const carryPanels = (e: React.PointerEvent) => {
+    const el = body.current;
+    if (!el || e.button !== 0 || (e.target as Element).closest("button, a, input, [role=tab]")) return;
+    const area = el.getBoundingClientRect(), size = { w: el.clientWidth, h: el.clientHeight };
+    const held = (e.currentTarget.closest("aside") as HTMLElement).getBoundingClientRect();
+    // As the window it floated as last, held by its header where it was taken.
+    const window = floating ? placed : fitFrame(frame, size);
+    const start = { x: e.clientX - area.left, y: e.clientY - area.top };
+    const grab = { x: Math.min(e.clientX - held.left, window.w - 24), y: Math.min(e.clientY - held.top, 24) };
+    let to: Dock | null = null, at = window;
+    document.body.classList.add("is-carrying");
+    drag(
+      e,
+      (dx, dy) => {
+        // A press that goes nowhere moves nothing.
+        if (!to && Math.hypot(dx, dy) < 6) return;
+        const x = start.x + dx, y = start.y + dy;
+        to = dropTarget({ x, y }, size);
+        at = fitFrame({ ...window, x: x - grab.x, y: y - grab.y }, size);
+        if (floating) setFrame(at);
+        setCarry({ to, frame: to === "float" ? at : dockedFrame(to, size, { width: asideWidth, height: asideHeight }) });
+      },
+      () => {
+        document.body.classList.remove("is-carrying");
+        setCarry(null);
+        if (!to) return;
+        if (to === "float") setFrame(at);
+        setDock(to);
+      },
     );
   };
   const scroller = useFollowBottom<HTMLDivElement>();
@@ -1667,10 +1696,13 @@ export function Chat({
                   style={{ flex: asidePanels.length === 1 ? "1 1 0%" : `${i === 0 ? split : 1 - split} 1 0%` }}
                 >
                   <div
-                    // Floating, the header is what the window is moved by.
-                    onPointerDown={floating ? (e) => dragFrame(e, "move") : undefined}
-                    className={`flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5 ${floating ? "cursor-move select-none" : ""}`}
+                    // What the panels are carried by, to an edge or to float.
+                    onPointerDown={beside ? carryPanels : undefined}
+                    className="chat-aside-head flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5"
                   >
+                    <span title="Drag to an edge to dock the panels there, anywhere else to float them" className="-ml-1.5 shrink-0 text-fg-faint max-md:hidden">
+                      <LuGripVertical aria-hidden className="h-3.5 w-3.5" />
+                    </span>
                     {kind === "terminal" ? (
                       <div className="chat-tabs" role="tablist" aria-label="Terminals">
                         <button type="button" role="tab" aria-selected={terminalTab === "agent"} onClick={() => setTerminalTab("agent")}>
@@ -1698,8 +1730,6 @@ export function Chat({
                           Fullscreen
                         </button>
                       )}
-                      {/* Once, for all of them: they go together. */}
-                      {i === 0 && <DockPicker dock={dock} onDock={setDock} />}
                       <button
                         onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? void closeFiles() : kind === "agents" ? setAgentsOpen(false) : setTerminal(false))}
                         title="Collapse"
@@ -1750,9 +1780,20 @@ export function Chat({
               </Fragment>
             ))}
             {floating && (
-              <div onPointerDown={(e) => dragFrame(e, "size")} title="Drag to resize" aria-hidden="true" className="chat-aside-grip max-md:hidden" />
+              <div onPointerDown={sizeFrame} title="Drag to resize" aria-hidden="true" className="chat-aside-grip max-md:hidden" />
             )}
           </aside>
+          {carry && (
+            <div aria-hidden="true" className="dock-zones">
+              {(["left", "right", "bottom"] as const).map((edge) => (
+                <i key={edge} className={`dock-edge is-${edge}${carry.to === edge ? " is-active" : ""}`} />
+              ))}
+              {/* Floating already, the window itself shows where it goes. */}
+              {!(floating && carry.to === "float") && (
+                <div className="dock-preview" style={{ left: carry.frame.x, top: carry.frame.y, width: carry.frame.w, height: carry.frame.h }} />
+              )}
+            </div>
+          )}
         </>
       )}
       </div>
