@@ -70,9 +70,14 @@ const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /**
  * What of pi's file a version keeps: what follows the start it shares with
- * the conversation it is cut back to, and a hash of that start to check it
- * by. Every version keeping the whole file was megabytes per retry on a long
- * chat, and could not tell whether what it went back onto was still there.
+ * the file put in its place — the conversation cut back, or the version
+ * switched to — and a hash of that start to check it by. That start is what
+ * the chat goes on from while this version is away; pi adds to the end of
+ * it. Not what the cut alone would leave: pi writes its settings into a
+ * conversation it opens again, before what it is sent, and those belong to
+ * this version, not the one it goes back onto. Every version keeping the
+ * whole file was megabytes per retry on a long chat, and could not tell
+ * whether what it went back onto was still there.
  */
 function keptFile(original: string | undefined, cut: string | undefined): Pick<MessageVersion, "file" | "filePrefix" | "prefixHash"> {
   if (original === undefined) return { file: null, filePrefix: null, prefixHash: null };
@@ -1378,7 +1383,7 @@ class SessionManager extends EventEmitter {
       const anchors = at < 0 ? [] : [sent[at - 1]?.seq ?? 0, ...sent.slice(at).map((m) => m.seq)];
       // With the cut: forgotten afterwards, a failure left the message gone
       // from the file and the transcript without the page being told.
-      const { removed } = await this.cut(sessionId, seq, scope, false, () => dropVersionsAt(sessionId, anchors));
+      const { removed } = await this.cut(sessionId, seq, scope, { within: () => dropVersionsAt(sessionId, anchors) });
       this.record(sessionId, "portal_removed", removed);
     });
   }
@@ -1427,11 +1432,20 @@ class SessionManager extends EventEmitter {
     sessionId: string,
     seq: number,
     scope: Scope,
-    /** Keep what goes as a version of the message, to switch back to: see message_versions. */
-    keep = false,
-    /** More to write in the same transaction as the cut: all of it lands, or none. */
-    within?: () => void,
+    options: {
+      /** Keep what goes as a version of the message, to switch back to: see message_versions. */
+      keep?: boolean;
+      /** More to write in the same transaction as the cut: all of it lands, or none. */
+      within?: () => void;
+      /**
+       * What pi's file will be once this is done, where not the cut itself —
+       * another version switched to. What the kept version shares with it is
+       * the conversation it goes back onto.
+       */
+      becomes?: string;
+    } = {},
   ): Promise<{ removed: Removed; undo: () => Promise<void> }> {
+    const { keep = false, within, becomes } = options;
     const session = getSession(sessionId);
     if (!session) throw new SessionEditError("missing", "Unknown session");
     if (this.isBusy(sessionId) || this.compacting.has(sessionId)) {
@@ -1478,7 +1492,7 @@ class SessionManager extends EventEmitter {
         const gone = deleteEventsBetween(sessionId, from, to);
         const kept =
           keep && scope === "tail"
-            ? saveVersion(sessionId, { anchor: sent[ordinal - 1]?.seq ?? 0, seq, rows: gone.rows, ...keptFile(original, cutText) })
+            ? saveVersion(sessionId, { anchor: sent[ordinal - 1]?.seq ?? 0, seq, rows: gone.rows, ...keptFile(original, becomes ?? cutText) })
             : undefined;
         within?.();
         return { gone, kept };
@@ -1519,7 +1533,7 @@ class SessionManager extends EventEmitter {
       // What followed is kept, as the message's earlier version, and goes from
       // the page now: shown until the answer came, the replacement looked
       // added under the old conversation rather than put in its place.
-      const { removed, undo } = await this.cut(sessionId, seq, "tail", true);
+      const { removed, undo } = await this.cut(sessionId, seq, "tail", { keep: true });
       const before = latestSeq();
       this.record(sessionId, "portal_removed", { ...removed, to: before + 1 });
       const answered = this.firstAnswer(sessionId);
@@ -1619,7 +1633,7 @@ class SessionManager extends EventEmitter {
       // checked before anything changes, so one that cannot be is refused.
       const file = getSession(sessionId)?.pi_session_file;
       const restored = fileFor(wanted, file && existsSync(file) ? readFileSync(file, "utf8") : undefined);
-      const { undo } = await this.cut(sessionId, seq, "tail", true);
+      const { undo } = await this.cut(sessionId, seq, "tail", { keep: true, becomes: restored });
       // Taken out of the kept versions and put back in the transcript in one
       // go: a failure between the two lost the version asked for. Anything
       // failing puts the conversation back as it was, with both versions.

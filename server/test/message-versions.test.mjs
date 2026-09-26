@@ -58,7 +58,9 @@ function chat(id, turns, answer = (m) => `answer to ${m}`) {
       const text = readFileSync(at, "utf8");
       const leaf = JSON.parse(text.trim().split("\n").at(-1)).id;
       const n = ++written;
-      writeFileSync(at, text + entry(`n${n}`, leaf, "user", message) + "\n" + entry(`r${n}`, `n${n}`, "assistant", answer(message)) + "\n");
+      // As pi does on opening a conversation again: its settings, before what it was sent.
+      const settings = JSON.stringify({ type: "thinking_level_change", id: `t${n}`, parentId: leaf, thinkingLevel: "medium" });
+      writeFileSync(at, text + settings + "\n" + entry(`n${n}`, `t${n}`, "user", message) + "\n" + entry(`r${n}`, `n${n}`, "assistant", answer(message)) + "\n");
       setImmediate(() => {
         sessions.record(id, "agent_start", {});
         sessions.record(id, "message_end", reply(answer(message)));
@@ -364,4 +366,19 @@ test("a message is taken out with the versions it takes, or not at all", async (
   assert.deepEqual(sentMessages("together").map((m) => m.message), ["m", "n", "o again"]);
   assert.equal(readFileSync(file, "utf8"), before);
   assert.equal(Object.keys(sessions.messageVersions("together")).length, 1);
+});
+
+test("a version goes back onto its conversation after pi has written its settings into the other", async () => {
+  // What the host showed: 7 edited to 42, back to 7, a question, and forward to 42 again was refused.
+  const { file, seqs } = chat("settings", ["number is 7"]);
+  await sessions.editMessage("settings", seqs[0], "number is 42");
+  await until(() => answers("settings").includes("answer to number is 42"));
+  const v2 = sentMessages("settings")[0].seq;
+  const withV2 = readFileSync(file, "utf8");
+  await sessions.switchVersion("settings", v2, seqs[0]);
+  await sessions.prompt("settings", "which number?");
+  await until(() => answers("settings").includes("answer to which number?"));
+  await sessions.switchVersion("settings", seqs[0], v2);
+  assert.deepEqual(sentMessages("settings").map((m) => m.message), ["number is 42"]);
+  assert.equal(readFileSync(file, "utf8"), withV2);
 });
