@@ -209,14 +209,78 @@ test('a window dragged by its corner stops short of a window off that corner', a
   expect(overlap(after, other)).toBe(false);
 });
 
-test('a window that reached down beside the orb is lifted clear of the dock when the orb goes back to it', async ({ page }) => {
+test('a window opens down to just above the dock, and goes no further, so a window drawn over the orb has nothing under the dock to lift', async ({ page }) => {
+  // Tall, where the windows opened well above the dock: about a centimetre was left there.
+  await page.setViewportSize({ width: 1400, height: 1200 });
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  const browser = page.locator('.voice-browser-window'), terminal = page.locator('.voice-terminal-window');
+  await page.waitForTimeout(1000);
+  const opened = { browser: await box(browser), terminal: await box(terminal) };
+  const foot = (b: { y: number; height: number }) => b.y + b.height;
+  // A gap between them, the orb standing in it: the dock is not there to stop them.
+  await drag(page, browser.locator('.resize-e'), -700);
+  await drag(page, terminal.locator('.resize-w'), 300);
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'free');
+  await page.waitForTimeout(900);
+  // Where the dock's top is: 50px from the stage's foot to its middle, 80 tall.
+  const stage = await box(page.locator('.voice-stage'));
+  const dockTop = stage.y + stage.height - 50 - 40;
+  // Opened as deep as they go: the gap between two windows short of the dock.
+  for (const w of Object.values(opened)) expect(Math.abs(foot(w) - (dockTop - 16))).toBeLessThan(1);
+  // Both dragged to the stage's foot: they went down to it, under where the dock goes.
+  await drag2(page, browser.locator('.resize-s'), 0, 600);
+  await drag2(page, terminal.locator('.resize-s'), 0, 600);
+  for (const w of [browser, terminal]) expect(Math.abs(foot(await box(w)) - (dockTop - 16))).toBeLessThan(1);
+  // Up is still theirs.
+  await drag2(page, terminal.locator('.resize-s'), 0, -120);
+  expect(foot(await box(terminal))).toBeLessThan(dockTop - 120);
+  await drag2(page, terminal.locator('.resize-s'), 0, 400);
+  expect(Math.abs(foot(await box(terminal)) - (dockTop - 16))).toBeLessThan(1);
+
+  // The left one drawn slowly over the orb: it goes to its dock, and neither window is moved for it.
+  await page.evaluate(() => {
+    const moved: string[] = ((window as any).moved = []);
+    for (const w of document.querySelectorAll<HTMLElement>('.voice-browser-window, .voice-terminal-window')) {
+      new MutationObserver(() => moved.push(`${w.className} ${w.style.top} ${w.style.height}`)).observe(w, { attributes: true, attributeFilter: ['style'] });
+    }
+  });
+  const grip = await box(browser.locator('.resize-e'));
+  const x = grip.x + 4, y = grip.y + 60;
+  await page.mouse.move(x, y); await page.mouse.down();
+  for (let i = 1; i <= 60; i++) { await page.mouse.move(x + i * 6, y); await page.waitForTimeout(16); }
+  await page.mouse.up();
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
+  await page.waitForTimeout(1000);
+  const heights = await page.evaluate(() => ((window as any).moved as string[]).filter(m => m.includes('terminal')));
+  // The browser's width changes as it is dragged; the terminal is not touched, nor either one's height.
+  expect(heights).toEqual([]);
+  const dock = await box(page.locator('.voice-presence'));
+  for (const w of [browser, terminal]) expect(foot(await box(w))).toBeLessThanOrEqual(dock.y - 15);
+});
+
+test('a window dragged while the orb goes back to its dock is not fought over, and ends clear of the dock', async ({ page }) => {
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
   const terminal = page.locator('.voice-terminal-window');
-  await expect(terminal).toHaveClass(/is-open/);
   await page.waitForTimeout(900);
-  await drag2(page, terminal.locator('.resize-s'), 0, 300);
-  await drag(page, terminal.locator('.resize-w'), -330);
+  // Sized by hand, shorter: the orb stands on its own in the room left of it.
+  await drag2(page, terminal.locator('.resize-s'), 0, -100);
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'free');
+  // Every height the window is given while its corner is dragged over the gap, so the orb goes to its dock mid-drag.
+  await terminal.evaluate(el => {
+    const heights: string[] = ((window as any).heights = []);
+    new MutationObserver(() => { if (heights.at(-1) !== el.style.height) heights.push(el.style.height); }).observe(el, { attributes: true, attributeFilter: ['style'] });
+  });
+  const grip = (await box(terminal.locator('.resize-sw')))!;
+  const x = grip.x + 8, y = grip.y + 8;
+  await page.mouse.move(x, y); await page.mouse.down();
+  for (let i = 1; i <= 30; i++) { await page.mouse.move(x - i * 11, y + i * 2); await page.waitForTimeout(20); }
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
+  const during = await page.evaluate(() => (window as any).heights.map(parseFloat) as number[]);
+  await page.mouse.up();
+  // Growing all the way, never pulled back up and pushed down again in turn.
+  const turns = during.slice(2).filter((h, i) => Math.sign(h - during[i + 1]) !== Math.sign(during[i + 1] - during[i])).length;
+  expect(turns).toBe(0);
   await page.waitForTimeout(1000);
   const t = await box(terminal), dock = await box(page.locator('.voice-presence'));
   expect(t.y + t.height).toBeLessThanOrEqual(dock.y - 15);
@@ -252,33 +316,6 @@ test('the orb is placed again when a window slides, not at every hover or fade o
   expect(await placings('.voice-utilities button', 'background-color')).toBe(0);
   expect(await placings('.voice-presence', 'padding-left')).toBe(0);
   expect(await placings('.voice-terminal-window', 'width')).toBeGreaterThan(0);
-});
-
-test('a window dragged while the orb goes back to its dock is not fought over, and ends clear of the dock', async ({ page }) => {
-  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  const terminal = page.locator('.voice-terminal-window');
-  await page.waitForTimeout(900);
-  // Down beside the orb, which stands on its own: nothing holds it there.
-  await drag2(page, terminal.locator('.resize-s'), 0, 300);
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'free');
-  // Every height the window is given while its corner is dragged over the gap, so the orb goes to its dock mid-drag.
-  await terminal.evaluate(el => {
-    const heights: string[] = ((window as any).heights = []);
-    new MutationObserver(() => { if (heights.at(-1) !== el.style.height) heights.push(el.style.height); }).observe(el, { attributes: true, attributeFilter: ['style'] });
-  });
-  const grip = (await box(terminal.locator('.resize-sw')))!;
-  const x = grip.x + 8, y = grip.y + 8;
-  await page.mouse.move(x, y); await page.mouse.down();
-  for (let i = 1; i <= 30; i++) { await page.mouse.move(x - i * 11, y + i * 2); await page.waitForTimeout(20); }
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
-  const during = await page.evaluate(() => (window as any).heights.map(parseFloat) as number[]);
-  await page.mouse.up();
-  // Growing all the way, never pulled back up and pushed down again in turn.
-  const turns = during.slice(2).filter((h, i) => Math.sign(h - during[i + 1]) !== Math.sign(during[i + 1] - during[i])).length;
-  expect(turns).toBe(0);
-  await page.waitForTimeout(1000);
-  const t = await box(terminal), dock = await box(page.locator('.voice-presence'));
-  expect(t.y + t.height).toBeLessThanOrEqual(dock.y - 15);
 });
 
 test('a window opening while the browser is maximized gives it its place back', async ({ page }) => {
@@ -337,11 +374,11 @@ test('a press on an edge that goes nowhere changes nothing', async ({ page }) =>
 });
 
 test('a window that stands closer to the dock than the gap does not jump when its edge is taken', async ({ page }) => {
-  // Short enough that the browser's own place ends a few pixels short of the dock's margin.
-  await page.setViewportSize({ width: 1400, height: 700 });
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
   const browser = page.locator('.voice-browser-window');
+  // Placed a few pixels closer than the gap: as a stage whose dock grew after the windows were placed would leave them.
+  await page.locator('.voice-stage').evaluate(el => el.style.setProperty('--window-room', 'calc(100% - 52px - 98px)'));
   await page.waitForTimeout(1000);
   const before = await box(browser), dock = await box(page.locator('.voice-presence'));
   expect(dock.y - (before.y + before.height)).toBeLessThan(16);
@@ -409,4 +446,50 @@ test('a drag measures the other windows once, not at every move of the pointer',
   }, { x: grip.x + 4, y: grip.y + 40 });
   await page.mouse.up();
   expect(reads).toBe(0);
+});
+
+test('on a phone the windows end above the dock, one or two of them, and the cards over them stay small', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 780 });
+  const dock = () => box(page.locator('.voice-presence'));
+  const foot = (b: { y: number; height: number }) => b.y + b.height;
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  await page.waitForTimeout(1000);
+  // The terminal reached 36px under the dock, its last lines behind the orb.
+  expect(foot(await box(page.locator('.voice-terminal-window')))).toBeLessThanOrEqual((await dock()).y - 10);
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await page.waitForTimeout(1000);
+  const upper = await box(page.locator('.voice-browser-window')), lower = await box(page.locator('.voice-terminal-window'));
+  expect(foot(upper)).toBeLessThanOrEqual(lower.y - 8);
+  expect(foot(lower)).toBeLessThanOrEqual((await dock()).y - 10);
+  // Room for a few lines of output: it was a header and one line.
+  expect(lower.height).toBeGreaterThan(150);
+  // A card is a line or two, just above the dock, not a block over the terminal's output.
+  const card = page.locator('.voice-tool-float').first();
+  await expect(card).toBeVisible();
+  await page.waitForTimeout(900);
+  const c = await box(card);
+  expect(c.height).toBeLessThan(48);
+  expect(foot(c)).toBeLessThanOrEqual((await dock()).y);
+  await page.screenshot({ path: '/tmp/pithagoras-voice-phone-windows.png' });
+});
+
+test('a window\'s shadow falls downwards and does not reach across the gap onto the window beside it', async ({ page }) => {
+  await openCanvas(page);
+  await page.waitForTimeout(1000);
+  // How far each shadow reaches out at the sides: its offset, blur and spread. The right one's lay over the left one.
+  const reach = (el: Element) => getComputedStyle(el).boxShadow.split(/,(?![^(]*\))/).map(shadow => {
+    const [x, , blur = 0, spread = 0] = shadow.replace(/rgba?\([^)]*\)/, '').trim().split(/\s+/).map(parseFloat);
+    return Math.abs(x) + blur + spread;
+  });
+  // The canvas as it stands once it has slid in, then the windows of the stage.
+  const shadows = [await page.locator('.canvas-panel').evaluate(reach)];
+  await page.getByRole('button', { name: 'Session canvases' }).click();
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Show files' }).click();
+  await page.waitForTimeout(1000);
+  for (const selector of ['.voice-terminal-window', '.voice-files-window']) shadows.push(await page.locator(selector).first().evaluate(reach));
+  for (const reaches of shadows) {
+    expect(reaches.length).toBeGreaterThan(0);
+    for (const r of reaches) expect(r).toBeLessThan(16);
+  }
 });

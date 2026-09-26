@@ -66,6 +66,18 @@ if (phase === 'args') events.push(
 );
 // A model that thinks a few words and a model that thinks a lot, fast: `window.think(text)` adds reasoning as it streams.
 if (phase === 'brief') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'Short one.' } }, 1));
+// A reply being written under a conversation long enough to scroll: `window.say(text)` adds to it as it streams.
+if (phase === 'stream') events.push(
+  ...Array.from({ length: 6 }, (_, i) => [
+    ev('portal_prompt', { message: `Question ${i + 1}: what does step ${i + 1} of the build do?` }, 50 - i * 5),
+    ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: Array.from({ length: 5 }, (_, j) => `Step ${i + 1}, part ${j + 1}: it reads the files, checks them and writes what it found.`).join('\n\n') }] } }, 48 - i * 5),
+  ]).flat(),
+  ev('portal_prompt', { message: 'And the last one?' }, 6),
+  ev('turn_start', {}, 5),
+  // A finished command at the end, its output folded away until opened.
+  ...bash('bl', 'cat build.log', Array.from({ length: 40 }, (_, i) => `line ${i + 1} of the build log`).join('\n'), {}, 5),
+  ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta: 'The last step' } }, 1),
+);
 // The portal restarted mid-command: nothing says the call ended, only that the chat was interrupted.
 if (phase === 'interrupted') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run test:e2e', 'Running 42 tests using 4 workers\n  ✓ login (1.2s)\n', undefined, 12));
 if (phase === 'agents') {
@@ -169,6 +181,9 @@ function Fixture() {
   const paste = () => fillFrom(session.id, { seq: -now * 1000 - 10, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text: 'the ', paste: true } });
   React.useEffect(() => { for (const ev of fills) fillFrom(session.id, ev); }, []);
   (window as any).think = (delta: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'message_update', at: Date.now(), payload: { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta } } }]);
+  // More of the running command's output, all of it so far.
+  (window as any).bashOut = (text: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'tool_execution_update', at: Date.now(), payload: { toolCallId: 'b3', partialResult: { content: [{ type: 'text', text }] } } }]);
+  (window as any).say = (delta: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'message_update', at: Date.now(), payload: { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta } } }]);
   (window as any).fillBox = (text: string) => fillFrom(session.id, { seq: -now * 1000 - 20, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text } });
   React.useEffect(() => {
     if (phase !== 'nudge') return;
