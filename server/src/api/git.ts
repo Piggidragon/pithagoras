@@ -65,8 +65,11 @@ export function gitRouter(): Router {
 
   /**
    * Where things stand: whether there is a repository at all, and if so its
-   * branch, what changed, and whether pull requests can be had through gh.
-   * No repository is an answer here, not an error: the panel offers to make one.
+   * branch and what changed. No repository is an answer here, not an error:
+   * the panel offers to make one.
+   *
+   * Not whether gh can be had: that asks GitHub, and a slow network held every
+   * refresh of what is on this disk behind it. The panel asks /git/gh apart.
    */
   router.get("/sessions/:id/git", async (req, res) => {
     try {
@@ -74,12 +77,14 @@ export function gitRouter(): Router {
       if (!folder) return;
       const repo = await g.findRepo(folder);
       if (!repo) return res.json({ repo: false, folder });
-      const [status, gh] = await Promise.all([g.status(repo), g.ghState(repo, flag(req.query.fresh))]);
-      res.json({ repo: true, root: repo.root, prefix: repo.prefix, ...status, gh });
+      res.json({ repo: true, root: repo.root, prefix: repo.prefix, ...(await g.status(repo)) });
     } catch (e) {
       fail(res, e);
     }
   });
+
+  /** Whether pull requests can be had here through gh, and for which repository on GitHub. */
+  router.get("/sessions/:id/git/gh", withRepo((repo, req) => g.ghState(repo, flag(req.query.fresh))));
 
   router.post("/sessions/:id/git/init", async (req, res) => {
     try {

@@ -1,8 +1,9 @@
 import { createContext, useContext } from "react";
-import type { DiffOf, GitState } from "../../git-api";
+import type { DiffOf, GhState, GitState } from "../../git-api";
 import type { DiffFile } from "../../git-diff";
 
-export type Repo = Extract<GitState, { repo: true }>;
+/** The repository, and what gh says about it — null while GitHub has not answered. */
+export type Repo = Extract<GitState, { repo: true }> & { gh: GhState | null };
 
 /** What the panel shows over its tab, one on top of another: Back goes to the one below. */
 export type View =

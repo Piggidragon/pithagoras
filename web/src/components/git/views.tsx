@@ -4,6 +4,7 @@ import { gitApi, type DiffOf } from "../../git-api";
 import { parseDiff, type DiffFile } from "../../git-diff";
 import { confirmDialog } from "../ConfirmDialog";
 import { Counts, ErrorNote, Quiet, TextButton } from "./bits";
+import { unstagePaths } from "./Changes";
 import { useGit, type View } from "./context";
 import { DiffView } from "./DiffView";
 import { CommitView, CompareView } from "./History";
@@ -97,7 +98,7 @@ function LoadedDiff({ title, path, what, onDone }: { title: string; path: string
         </>
       )}
       {what.of === "staged" && (
-        <TextButton disabled={!!busy} onClick={async () => (await act("Unstaging", () => gitApi.unstage(id, [path]))) && onDone()}>
+        <TextButton disabled={!!busy} onClick={async () => (await act("Unstaging", () => gitApi.unstage(id, unstagePaths({ path, from: what.from })))) && onDone()}>
           <LuMinus aria-hidden className="h-3 w-3" /> Unstage
         </TextButton>
       )}

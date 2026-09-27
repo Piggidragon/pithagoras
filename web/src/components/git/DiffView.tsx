@@ -49,9 +49,9 @@ export function DiffView({ file, truncated }: { file: DiffFile; truncated?: bool
               </span>
               <span
                 aria-hidden
-                className={`w-4 shrink-0 select-none text-center ${row.kind === "add" ? "text-ok" : row.kind === "del" ? "text-danger" : "text-fg-faint"}`}
+                className={`min-w-4 shrink-0 select-none whitespace-pre px-0.5 text-center ${row.kind === "add" ? "text-ok" : row.kind === "del" ? "text-danger" : "text-fg-faint"}`}
               >
-                {MARK[row.kind]}
+                {row.mark ?? MARK[row.kind]}
               </span>
               <span className="whitespace-pre pr-4 text-fg">{row.text || " "}</span>
             </div>

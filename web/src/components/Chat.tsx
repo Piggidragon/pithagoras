@@ -279,6 +279,10 @@ export function Chat({
     setFiles(true);
     setFileAsked({ path, seq: Date.now() });
   }, []);
+  // An ask is for the chat it was made in, and answered once: Files, drawn
+  // again later or for another chat, is not sent back to it.
+  const fileAnswered = useCallback(() => setFileAsked(null), []);
+  useEffect(() => setFileAsked(null), [session.id]);
   useWorkPanels(
     { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen },
     panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else setCanvasOpen(false); },
@@ -1870,7 +1874,7 @@ export function Chat({
                   {kind === "files" && (
                     <div className="min-h-0 flex-1 bg-surface">
                       {/* Not before the chat's events are here: what it did earlier is not news. */}
-                      {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} reveal={fileAsked} onDirtyChange={setFilesDirty} />}
+                      {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} reveal={fileAsked} onRevealed={fileAnswered} onDirtyChange={setFilesDirty} />}
                     </div>
                   )}
                   {kind === "git" && (

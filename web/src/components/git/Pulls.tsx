@@ -43,7 +43,7 @@ export function Pulls() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!gh.repo) return;
+    if (!gh?.repo) return;
     let gone = false;
     setList(null);
     gitApi.pulls(id, state).then(
@@ -53,10 +53,10 @@ export function Pulls() {
     return () => {
       gone = true;
     };
-  }, [id, gh.repo, state, repo.head]);
+  }, [id, gh?.repo, state, repo.head]);
 
   useEffect(() => {
-    if (!gh.repo) return;
+    if (!gh?.repo) return;
     let gone = false;
     gitApi.currentPull(id).then(
       (r) => !gone && setCurrent(r.pull),
@@ -65,9 +65,9 @@ export function Pulls() {
     return () => {
       gone = true;
     };
-  }, [id, gh.repo, repo.branch, repo.head]);
+  }, [id, gh?.repo, repo.branch, repo.head]);
 
-  const onDefault = !repo.branch || repo.branch === gh.defaultBranch;
+  const onDefault = !repo.branch || repo.branch === gh?.defaultBranch;
   const web = repo.remotes.find((r) => r.name === "origin")?.web ?? repo.remotes[0]?.web;
 
   return (
@@ -80,7 +80,9 @@ export function Pulls() {
         <LuGitCompareArrows aria-hidden className="h-3.5 w-3.5" />
         Compare {repo.branch ?? "HEAD"} with its base
       </button>
-      {!gh.repo ? (
+      {!gh ? (
+        <Quiet>Asking GitHub…</Quiet>
+      ) : !gh.repo ? (
         <div className="px-3 py-3 text-xs text-fg-subtle">
           <p>{gh.note ?? "Pull requests need gh and a repository on GitHub."}</p>
           {web && (
@@ -147,14 +149,15 @@ function OpenPull({ onOpened }: { onOpened: (n: number) => void }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [base, setBase] = useState(repo.gh.defaultBranch ?? "");
+  const defaultBranch = repo.gh?.defaultBranch ?? null;
+  const [base, setBase] = useState(defaultBranch ?? "");
   const [draft, setDraft] = useState(false);
   const [comparison, setComparison] = useState<Comparison | null>(null);
 
   // Filled in from what the branch adds: one commit is its own title; several are listed.
   useEffect(() => {
     if (!open) return;
-    gitApi.compare(id, repo.gh.defaultBranch ? `origin/${repo.gh.defaultBranch}` : undefined).then(
+    gitApi.compare(id, defaultBranch ? `origin/${defaultBranch}` : undefined).then(
       (r) => {
         const c = r.comparison;
         setComparison(c);
@@ -164,7 +167,7 @@ function OpenPull({ onOpened }: { onOpened: (n: number) => void }) {
       },
       () => {},
     );
-  }, [open, id, repo.gh.defaultBranch, repo.branch]);
+  }, [open, id, defaultBranch, repo.branch]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();

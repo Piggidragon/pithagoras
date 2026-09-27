@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LuArrowDown, LuArrowLeft, LuArrowUp, LuCloudDownload, LuGitBranch, LuRefreshCw } from "react-icons/lu";
-import { gitApi, type GitState } from "../../git-api";
+import { gitApi, type GhState, type GitState } from "../../git-api";
 import { Branches } from "./Branches";
 import { Changes } from "./Changes";
 import { Ctx, useGit, type GitCtx, type View } from "./context";
@@ -61,13 +61,28 @@ export function GitPanel({
   const [error, setError] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const [stack, setStack] = useState<View[]>([]);
+  const [gh, setGh] = useState<GhState | null>(null);
   const asked = useRef(0);
 
+  // Whether pull requests can be had: asked apart, since it asks GitHub, and
+  // what is on this disk is not held back while it answers. Again on Refresh.
+  const askGh = useCallback(
+    (fresh = false) =>
+      gitApi.gh(sessionId, fresh).then(setGh, (e) =>
+        setGh({ installed: true, authed: false, repo: null, url: null, defaultBranch: null, note: (e as Error).message }),
+      ),
+    [sessionId],
+  );
+  const isRepo = state?.repo === true;
+  useEffect(() => {
+    if (isRepo) void askGh();
+  }, [isRepo, askGh]);
+
   const reload = useCallback(
-    async (fresh = false) => {
+    async () => {
       const ask = ++asked.current;
       try {
-        const next = await gitApi.state(sessionId, fresh);
+        const next = await gitApi.state(sessionId);
         if (ask !== asked.current) return;
         setState(next);
         setLoadError(null);
@@ -141,7 +156,7 @@ export function GitPanel({
     const prefix = state.prefix ? `${state.prefix}/` : "";
     return {
       id: sessionId,
-      repo: state,
+      repo: { ...state, gh },
       reload: () => reload(),
       act,
       busy,
@@ -149,7 +164,7 @@ export function GitPanel({
       // Files shows the chat's folder; a file of the repository outside it is not there to open.
       openFile: onOpenFile ? (p) => (p.startsWith(prefix) ? onOpenFile(p.slice(prefix.length)) : undefined) : undefined,
     };
-  }, [state, sessionId, reload, act, busy, onOpenFile]);
+  }, [state, gh, sessionId, reload, act, busy, onOpenFile]);
 
   if (!state) {
     return loadError ? <ErrorNote>{loadError}</ErrorNote> : <Quiet>Loading…</Quiet>;
@@ -171,7 +186,7 @@ export function GitPanel({
   return (
     <Ctx.Provider value={ctx}>
       <div className="flex h-full min-h-0 flex-col text-sm" data-git-tab={tab}>
-        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => void act("Refreshing", () => reload(true))} />
+        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => void act("Refreshing", () => Promise.all([reload(), askGh(true)]))} />
         {state.operation && <Operation />}
         {busy && (
           <p role="status" className="shrink-0 border-b border-line bg-accent/5 px-3 py-1 text-[11px] text-accent">

@@ -85,6 +85,7 @@ export function FilesPanel({
   activity,
   since,
   reveal,
+  onRevealed,
   onDirtyChange,
 }: {
   sessionId: string;
@@ -93,6 +94,8 @@ export function FilesPanel({
   since?: number;
   /** A file somebody asked to see from elsewhere — Git — by its path in the folder; a new `seq` is a new ask. */
   reveal?: { path: string; seq: number } | null;
+  /** Told once the ask is answered, so that it is not answered again when the panel is drawn anew. */
+  onRevealed?: () => void;
   /** Told whether there are changes not saved, so that whoever can close the panel can ask first. */
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -213,19 +216,22 @@ export function FilesPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity?.seq]);
 
-  // Asked from elsewhere: shown as a file opened by hand is, so the agent does not take it away again.
+  // Asked from elsewhere: shown as a file opened by hand is, so the agent does
+  // not take it away again. Said to be answered at once, so that the panel drawn
+  // anew is not sent back to it; a later ask overtakes one still waiting on
+  // "discard your changes?".
+  const revealAsk = useRef(0);
   useEffect(() => {
     if (!reveal) return;
-    let gone = false;
+    const ask = ++revealAsk.current;
+    const target = reveal.path;
+    onRevealed?.();
     void mayLeave().then((ok) => {
-      if (!ok || gone) return;
+      if (!ok || ask !== revealAsk.current) return;
       setFollowing(false);
-      setDir(parentOf(reveal.path));
-      void loadFile(reveal.path);
+      setDir(parentOf(target));
+      void loadFile(target);
     });
-    return () => {
-      gone = true;
-    };
     // Only a new ask, not a new folder or a new file.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reveal?.seq]);

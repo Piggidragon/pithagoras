@@ -58,6 +58,8 @@ interface RunOptions {
   ok?: number[];
   /** A step that changes the repo: may take the index lock, and may run a hook. */
   writes?: boolean;
+  /** Config given as key and value apart, so that no name can be read as the other. */
+  config?: [string, string][];
 }
 
 /** What every git here runs with: no colour, no pager, names as they are, nothing the repo's config would run just to look. */
@@ -69,9 +71,12 @@ const GIT_CONFIG = [
   "-c", "advice.detachedHead=false",
 ];
 
-function environment(writes: boolean): NodeJS.ProcessEnv {
+function environment(writes: boolean, config: [string, string][] = []): NodeJS.ProcessEnv {
+  const pairs = Object.fromEntries(config.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]]));
   return {
     ...process.env,
+    GIT_CONFIG_COUNT: String(config.length),
+    ...pairs,
     // Nobody is at a terminal to answer: a question fails instead of hanging.
     GIT_TERMINAL_PROMPT: "0",
     GCM_INTERACTIVE: "never",
@@ -100,7 +105,7 @@ function run(command: "git" | "gh", cwd: string, args: string[], opts: RunOption
   return new Promise((resolve, reject) => {
     const child = spawn(command, command === "git" ? [...GIT_CONFIG, ...args] : args, {
       cwd,
-      env: environment(opts.writes ?? false),
+      env: environment(opts.writes ?? false, opts.config),
       stdio: ["pipe", "pipe", "pipe"],
     });
     const out: Buffer[] = [];
@@ -160,7 +165,55 @@ function said(text: string): string {
     .slice(0, 2000);
 }
 
-const git = (cwd: string, args: string[], opts?: RunOptions) => run("git", cwd, args, opts);
+/**
+ * What a filter the repository's config names would run is not run while
+ * looking. A `filter.<name>.clean` (or `process`) that .gitattributes points a
+ * file at runs whenever git compares that file with the index — every status
+ * and diff — and neither --no-ext-diff nor --no-textconv stops it. Each driver
+ * the config names is given empty commands instead, which git takes as "no
+ * filter", and made optional so that having none is not an error.
+ *
+ * git-lfs is left alone when it is configured exactly as `git lfs install`
+ * writes it: without its filter every file it tracks would read as changed.
+ * The agent can write that config as well, but then what runs is git-lfs.
+ *
+ * Only for looking. Staging and committing are what `git add` and
+ * `git commit` in the terminal are, filters included.
+ */
+const LFS: Record<string, string> = {
+  clean: "git-lfs clean -- %f",
+  smudge: "git-lfs smudge -- %f",
+  process: "git-lfs filter-process",
+  required: "true",
+};
+
+export async function filterOverrides(cwd: string): Promise<[string, string][]> {
+  const { stdout } = await run("git", cwd, ["config", "-z", "--get-regexp", "^filter\\."], { ok: [1] });
+  const drivers = new Map<string, Map<string, string>>();
+  // -z: each entry is the key, a newline, the value, and a NUL — a value may hold newlines.
+  for (const entry of stdout.split("\0")) {
+    if (!entry) continue;
+    const newline = entry.indexOf("\n");
+    const key = newline < 0 ? entry : entry.slice(0, newline);
+    const last = key.lastIndexOf(".");
+    if (last <= 7) continue;
+    const name = key.slice(7, last);
+    const field = key.slice(last + 1).toLowerCase();
+    if (!drivers.has(name)) drivers.set(name, new Map());
+    drivers.get(name)!.set(field, newline < 0 ? "" : entry.slice(newline + 1));
+  }
+  const config: [string, string][] = [];
+  for (const [name, fields] of drivers) {
+    if (name === "lfs" && [...fields].every(([field, value]) => LFS[field] === value)) continue;
+    for (const field of ["clean", "smudge", "process"]) config.push([`filter.${name}.${field}`, ""]);
+    config.push([`filter.${name}.required`, "false"]);
+  }
+  return config;
+}
+
+/** git, for looking or for changing: looking runs none of the repository's filters. */
+const git = async (cwd: string, args: string[], opts?: RunOptions) =>
+  run("git", cwd, args, opts?.writes ? opts : { ...opts, config: await filterOverrides(cwd) });
 const gh = (cwd: string, args: string[], opts?: RunOptions) => run("gh", cwd, args, opts);
 
 /** A path as git should take it: exactly that path, not a pattern. */
@@ -212,13 +265,16 @@ export interface Repo {
 /** The repository `folder` is in, or null when it is in none. */
 export async function findRepo(folder: string): Promise<Repo | null> {
   try {
-    const { stdout } = await git(folder, ["rev-parse", "--show-toplevel", "--absolute-git-dir", "--show-prefix"]);
+    const { stdout } = await run("git", folder, ["rev-parse", "--show-toplevel", "--absolute-git-dir", "--show-prefix"]);
     const [root, gitDir, prefix = ""] = stdout.split("\n");
     if (!root || !gitDir) return null;
     return { root, gitDir, prefix: prefix.replace(/\/$/, "") };
   } catch (e) {
-    if (e instanceof GitError && e.status === 501) throw e;
-    return null;
+    // Only "there is none" is none. Anything else — git refusing a repository
+    // somebody else owns ("dubious ownership"), a broken one — is said as it
+    // is: taken for none, the panel offered to make one inside it.
+    if (e instanceof GitError && e.status !== 501 && /not a git repository/i.test(e.message)) return null;
+    throw e;
   }
 }
 
@@ -520,7 +576,9 @@ export async function commit(repo: Repo, message: unknown, amend = false): Promi
   const text = typeof message === "string" ? message.trim() : "";
   if (!text && !amend) throw new GitError(400, "A commit needs a message");
   return serial(repo, async () => {
-    await git(repo.root, ["commit", "--cleanup=strip", ...(amend ? ["--amend"] : []), ...(text ? ["-F", "-"] : ["--no-edit"])], {
+    // Whitespace only: "strip" takes every line that starts with "#" as a
+    // comment, and "#42 fix login" is a message, not a comment.
+    await git(repo.root, ["commit", "--cleanup=whitespace", ...(amend ? ["--amend"] : []), ...(text ? ["-F", "-"] : ["--no-edit"])], {
       input: text,
       writes: true,
     });

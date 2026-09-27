@@ -1,5 +1,7 @@
 // Development-only fixture: the Git panel on a repository kept in the page, without a server.
-// Open /tests/git.html to see it; ?gh=off for a machine without gh, ?repo=none for a folder in no repository.
+// Open /tests/git.html to see it; ?gh=off for a machine without gh, ?repo=none for a folder in no repository,
+// ?ghslow=1 for a GitHub that takes seconds to answer, ?rename=1 for a renamed file with more changes in the
+// tree, ?conflict=1 for a merge stopped on a conflict.
 // What the panel asked for is in window.gitCalls; window.agentWrote() changes a file the way the agent would.
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -28,6 +30,13 @@ const repo = {
     { path: 'docs/login flow.md', x: '?', y: '?', kind: 'untracked' },
   ] as File[],
 };
+if (params.get('rename')) repo.files.push({ path: 'src/auth/token.ts', from: 'src/auth/jwt.ts', x: 'R', y: 'M', kind: 'renamed', staged: { added: 0, removed: 0, binary: false }, unstaged: { added: 3, removed: 1, binary: false } });
+if (params.get('conflict')) {
+  repo.operation = 'merge';
+  repo.files.push({ path: 'a.txt', x: 'U', y: 'U', kind: 'conflict' });
+}
+// `git diff` of a file in conflict, verbatim: a column per parent.
+const conflictDiff = 'diff --cc a.txt\nindex 2d33e85,2339517..0000000\n--- a/a.txt\n+++ b/a.txt\n@@@ -1,4 -1,3 +1,8 @@@\n  one\n++<<<<<<< HEAD\n +TWO main\n++=======\n+ TWO side\n++>>>>>>> side\n  three\n +four\n';
 const commits = [
   { sha: 'a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0', short: 'a1b2c3d', parents: ['b'], author: 'Ada', email: 'ada@example.com', date: now - 600, refs: ['HEAD -> feature/login', 'origin/feature/login'], subject: 'Check the password before the session is made' },
   { sha: 'b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0a1', short: 'b2c3d4e', parents: ['c'], author: 'Ada', email: 'ada@example.com', date: now - 7200, refs: [], subject: 'Add the login form' },
@@ -61,8 +70,12 @@ window.fetch = (async (input: any, init?: any) => {
   const path = url.replace('/api/sessions/s/git', '').split('?')[0];
   const q = new URLSearchParams(url.split('?')[1] ?? '');
   if (params.get('repo') === 'none' && path === '') return reply({ repo: false, folder: '/work/notes' });
-  if (path === '') return reply({ repo: true, root: '/work/app', prefix: '', ...repo, truncated: false, remotes: [{ name: 'origin', address: 'github.com:me/app', web: 'https://github.com/me/app' }], gh });
-  if (path === '/diff') return reply({ diff: diffOf(q.get('path') ?? 'x'), truncated: false });
+  if (path === '') return reply({ repo: true, root: '/work/app', prefix: '', ...repo, truncated: false, remotes: [{ name: 'origin', address: 'github.com:me/app', web: 'https://github.com/me/app' }] });
+  if (path === '/gh') {
+    if (params.get('ghslow')) await new Promise((r) => setTimeout(r, 4000));
+    return reply(gh);
+  }
+  if (path === '/diff') return reply({ diff: q.get('path') === 'a.txt' ? conflictDiff : diffOf(q.get('path') ?? 'x'), truncated: false });
   if (path === '/stage') {
     for (const f of repo.files) if (body.all || body.paths.includes(f.path)) Object.assign(f, { x: f.kind === 'untracked' ? 'A' : 'M', y: '.', kind: 'changed', staged: f.unstaged ?? { added: 1, removed: 0, binary: false }, unstaged: undefined });
     return reply({ ok: true });

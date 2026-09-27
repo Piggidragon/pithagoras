@@ -149,3 +149,44 @@ test('a folder in no repository is offered git init', async ({ page }) => {
   await page.getByRole('button', { name: 'Make it one (git init)' }).click();
   expect(await calls(page)).toEqual([{ url: '/init', body: {} }]);
 });
+
+test('amending with nothing staged changes only the last commit: the unstaged work is not swept into it', async ({ page }) => {
+  await page.goto('/tests/git.html');
+  await page.getByRole('button', { name: 'Unstage everything' }).click();
+  await page.getByRole('checkbox', { name: 'Amend' }).check();
+  await page.getByRole('textbox', { name: 'Commit message' }).fill('Better words');
+  await page.getByRole('button', { name: 'Amend', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'Amend' })).not.toBeChecked();
+  expect((await calls(page)).map((c) => c.url)).toEqual(['/unstage', '/commit']);
+  expect((await calls(page))[1].body).toEqual({ message: 'Better words', amend: true });
+});
+
+test('a renamed file with more changes is staged by its new name, and unstaged with its old one', async ({ page }) => {
+  await page.goto('/tests/git.html?rename=1');
+  await page.getByRole('button', { name: 'Stage token.ts', exact: true }).click();
+  await expect.poll(() => calls(page)).toEqual([{ url: '/stage', body: { paths: ['src/auth/token.ts'] } }]);
+  await page.getByRole('button', { name: 'Unstage token.ts', exact: true }).click();
+  await expect.poll(async () => (await calls(page))[1]).toEqual({ url: '/unstage', body: { paths: ['src/auth/token.ts', 'src/auth/jwt.ts'] } });
+});
+
+test("a file in conflict is shown a column per side: ours, theirs, and git's markers", async ({ page }) => {
+  await page.goto('/tests/git.html?conflict=1');
+  await expect(page.getByText('Merging —')).toBeVisible();
+  await row(page, 'a.txt').click();
+  const table = page.getByRole('table', { name: 'Changes to a.txt' });
+  const ours = table.locator('[role=row]', { hasText: 'TWO main' });
+  await expect(ours).toHaveAttribute('data-kind', 'add');
+  // Ours: line 2 before, line 3 now — not a line of context that reads "+TWO main".
+  await expect(ours).toHaveText(/^2\s*3\s*\+TWO main$/);
+  await expect(table.locator('[role=row]', { hasText: 'TWO side' })).toHaveText(/^\s*5\s*\+\s+TWO side$/);
+  await expect(table.locator('[data-kind=add]')).toHaveCount(6);
+});
+
+test('what changed is shown at once, however long GitHub takes to answer', async ({ page }) => {
+  await page.goto('/tests/git.html?ghslow=1&tab=pulls');
+  await expect(page.getByText('Asking GitHub…')).toBeVisible();
+  await page.getByRole('tab', { name: 'Changes' }).click();
+  await expect(page.getByText('session.ts')).toBeVisible({ timeout: 1500 });
+  await page.getByRole('tab', { name: 'Pull requests' }).click();
+  await expect(page.getByText('Dark mode for the settings')).toBeVisible({ timeout: 8000 });
+});

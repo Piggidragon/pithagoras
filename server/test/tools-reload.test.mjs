@@ -33,9 +33,19 @@ function fakeSession() {
       this.setActiveToolsByName([...session.active, name]);
     },
     async reload() {
+      // A new runner, bound as pi binds one, before the tools are refreshed.
+      session._bindExtensionCore({ runtime: {} });
       this.setActiveToolsByName([...session.active, ...session.extension]);
     },
+    /** What every extension's `pi.getActiveTools()` / `pi.setActiveTools()` goes through. */
+    _extensionRunner: null,
+    _bindExtensionCore(runner) {
+      runner.runtime.getActiveTools = () => session.getActiveToolNames();
+      runner.runtime.setActiveTools = (names) => session.setActiveToolsByName(names);
+      session._extensionRunner = runner;
+    },
   };
+  session._bindExtensionCore({ runtime: {} });
   return session;
 }
 
@@ -148,7 +158,8 @@ test("an extension taking its own tools out of the set leaves what was switched 
   session.register("goal_get");
   session.register("goal_set");
   await c.setToolsOff(["web_search"]);
-  session.setActiveToolsByName(session.getActiveToolNames().filter((name) => !name.startsWith("goal_")));
+  const pi = () => session._extensionRunner.runtime;
+  pi().setActiveTools(pi().getActiveTools().filter((name) => !name.startsWith("goal_")));
   const web = (await c.getTools()).find((t) => t.name === "web_search");
   assert.ok(web, "web_search is still offered");
   assert.equal(web.enabled, false);
@@ -156,4 +167,27 @@ test("an extension taking its own tools out of the set leaves what was switched 
   await c.setToolsOff([]);
   assert.ok(session.active.includes("web_search"));
   assert.ok(!session.active.includes("goal_get"));
+});
+
+test("a small plan mode that keeps half the tools still leaves out what it left out", async () => {
+  // Deciding by how much of the set a list kept was a guess: [read, bash] of
+  // four is half, and read as an edit — web_search, switched off, stayed wanted
+  // and came back on in plan mode the moment it was switched on.
+  const session = fakeSession();
+  session.active = ["read", "bash", "edit", "write", "web_search"];
+  const c = client(session);
+  await c.setToolsOff(["web_search"]);
+  session._extensionRunner.runtime.setActiveTools(["read", "bash"]);
+  await c.setToolsOff([]);
+  assert.deepEqual([...session.active].sort(), ["bash", "read"]);
+});
+
+test("after a reload extensions are still shown what is switched off", async () => {
+  const session = fakeSession();
+  const c = client(session);
+  await c.setToolsOff(["web_search"]);
+  await c.reload();
+  assert.ok(session._extensionRunner.runtime.getActiveTools().includes("web_search"));
+  // pi's own view, which writes the system prompt, does not have it.
+  assert.ok(!session.getActiveToolNames().includes("web_search"));
 });

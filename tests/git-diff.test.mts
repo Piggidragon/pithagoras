@@ -69,3 +69,29 @@ test('a name git put in quotes is read back as it is', () => {
   const [file] = parseDiff('diff --git "a/we\\"ird" "b/we\\"ird"\n--- "a/we\\"ird"\n+++ "b/we\\"ird"\n@@ -1 +1 @@\n-a\n+b\n');
   assert.equal(file.path, 'we"ird');
 });
+
+test("a file in conflict, as git shows it — a column per parent — is read column by column", () => {
+  // `git diff` of a conflicted a.txt, verbatim: ours added "TWO main" and
+  // "four", theirs "TWO side", and git's markers are new against both.
+  const [file] = parseDiff(
+    'diff --cc a.txt\nindex 2d33e85,2339517..0000000\n--- a/a.txt\n+++ b/a.txt\n@@@ -1,4 -1,3 +1,8 @@@\n  one\n++<<<<<<< HEAD\n +TWO main\n++=======\n+ TWO side\n++>>>>>>> side\n  three\n +four\n',
+  );
+  assert.equal(file.path, 'a.txt');
+  assert.equal(file.combined, true);
+  assert.deepEqual(
+    file.rows.slice(1).map((r) => [r.mark, r.kind, r.old, r.new, r.text]),
+    [
+      ['  ', 'ctx', 1, 1, 'one'],
+      ['++', 'add', undefined, 2, '<<<<<<< HEAD'],
+      [' +', 'add', 2, 3, 'TWO main'],
+      ['++', 'add', undefined, 4, '======='],
+      ['+ ', 'add', undefined, 5, 'TWO side'],
+      ['++', 'add', undefined, 6, '>>>>>>> side'],
+      ['  ', 'ctx', 3, 7, 'three'],
+      [' +', 'add', 4, 8, 'four'],
+    ],
+  );
+  // A line both sides had and the result does not.
+  const [gone] = parseDiff('diff --cc b.txt\n--- a/b.txt\n+++ b/b.txt\n@@@ -1,2 -1,2 +1,1 @@@\n--old\n  kept\n');
+  assert.deepEqual(gone.rows.slice(1).map((r) => [r.kind, r.old, r.new, r.text]), [['del', 1, undefined, 'old'], ['ctx', 2, 1, 'kept']]);
+});

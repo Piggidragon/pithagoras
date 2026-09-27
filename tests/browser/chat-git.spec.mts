@@ -16,6 +16,11 @@ test('Git is a panel of its own beside the chat, with its tabs in its header, an
   // Files opens beside it, on that file.
   await expect(panels.getByRole('textbox', { name: 'Contents of README.md' })).toHaveValue('# Pithagoras\n');
   await expect(tabs).toBeVisible();
+  // Asked once: Files closed and opened again shows the folder, not the file again.
+  await panels.getByRole('button', { name: 'Close the files' }).click();
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(panels.getByRole('button', { name: /README\.md/ }).first()).toBeVisible();
+  await expect(panels.getByRole('textbox', { name: 'Contents of README.md' })).toHaveCount(0);
 
   await tabs.getByRole('tab', { name: 'Pull requests' }).click();
   await expect(panels.getByText('Install gh')).toBeVisible();

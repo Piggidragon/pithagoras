@@ -316,3 +316,68 @@ test("a folder in no repository is said to be in none, and can be made one", asy
   mkdirSync(path.join(dir, "sub"));
   assert.equal((await g.findRepo(path.join(dir, "sub"))).prefix, "sub");
 });
+
+test("a message that starts with # is a message: kept whole, not taken for a comment", async () => {
+  const dir = repo();
+  const r = await open(dir);
+  writeFileSync(path.join(dir, "a.txt"), "changed\n");
+  await g.stage(r, [], true);
+  await g.commit(r, "#42 fix login\n\n#123 is related");
+  const [last] = await g.log(r, {});
+  assert.equal(last.subject, "#42 fix login");
+  assert.equal((await g.commitDetail(r, last.sha)).message, "#42 fix login\n\n#123 is related");
+});
+
+test("looking runs no filter the repository names — whatever the driver is called — but leaves git-lfs as it installs itself", async () => {
+  const dir = repo();
+  const marker = path.join(home, `filtered${n}`);
+  const script = path.join(home, `filter${n}.sh`);
+  writeFileSync(script, `#!/bin/sh\ntouch ${marker}\ncat\n`);
+  chmodSync(script, 0o755);
+  writeFileSync(path.join(dir, ".gitattributes"), "*.txt filter=evil\n*.md filter=a=b\n");
+  sh(dir, "config", "filter.evil.clean", script);
+  sh(dir, "config", "filter.evil.process", script);
+  sh(dir, "config", "filter.evil.required", "true");
+  // A name with "=" in it: as `-c filter.a=b.clean=` it would have named another key.
+  sh(dir, "config", "filter.a=b.clean", script);
+  sh(dir, "config", "filter.lfs.clean", "git-lfs clean -- %f");
+  sh(dir, "config", "filter.lfs.process", "git-lfs filter-process");
+  writeFileSync(path.join(dir, "a.txt"), "changed\n");
+  writeFileSync(path.join(dir, "n.md"), "new\n");
+  const r = await open(dir);
+  const s = await g.status(r);
+  assert.ok(s.files.some((f) => f.path === "a.txt"));
+  await g.diff(r, { of: "unstaged", path: "a.txt" });
+  await g.diff(r, { of: "untracked", path: "n.md" });
+  assert.equal(existsSync(marker), false, "the filter ran");
+  const keys = (await g.filterOverrides(dir)).map(([key]) => key);
+  assert.ok(keys.includes("filter.evil.process") && keys.includes("filter.a=b.clean"));
+  assert.ok(!keys.some((key) => key.startsWith("filter.lfs.")), "git-lfs as installed is left alone");
+});
+
+test("a repository git refuses — somebody else's — is said to be refused, not to be none, and is not made again", async () => {
+  const dir = repo();
+  process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = "1";
+  try {
+    await assert.rejects(g.findRepo(dir), (e) => e.status === 409 && /dubious ownership/.test(e.message));
+  } finally {
+    delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
+  }
+});
+
+test("a renamed file is staged by its new name, and unstaged by both", async () => {
+  const dir = repo();
+  const r = await open(dir);
+  sh(dir, "mv", "a.txt", "moved.txt");
+  writeFileSync(path.join(dir, "moved.txt"), "one\ntwo\nthree\nfour\n");
+  let s = await g.status(r);
+  const moved = s.files.find((f) => f.path === "moved.txt");
+  assert.deepEqual([moved.kind, moved.from, moved.x, moved.y], ["renamed", "a.txt", "R", "M"]);
+  await g.stage(r, ["moved.txt"]);
+  s = await g.status(r);
+  assert.equal(s.files.find((f) => f.path === "moved.txt").y, ".");
+  await g.unstage(r, ["moved.txt", "a.txt"]);
+  s = await g.status(r);
+  // Nothing of it staged any more: not the new file, not the old one's deletion.
+  assert.deepEqual(s.files.filter((f) => f.x !== "." && f.x !== "?"), []);
+});

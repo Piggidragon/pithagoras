@@ -18,8 +18,10 @@ export function Changes() {
   const staged = repo.files.filter((f) => f.kind !== "conflict" && f.kind !== "untracked" && f.x !== ".");
   const unstaged = repo.files.filter((f) => f.kind === "untracked" || (f.kind !== "conflict" && f.y !== "."));
   const nothing = !repo.files.length;
-  // With nothing staged, the button commits everything: the usual case, one click.
-  const all = !staged.length;
+  // With nothing staged, the button commits everything: the usual case, one
+  // click. Not when amending: that is mostly to put a message right, and the
+  // agent's unstaged work does not belong in the last commit unasked.
+  const all = !staged.length && !amend;
   const canCommit = !busy && !conflicts.length && (amend || (!!message.trim() && !nothing));
 
   const commit = async () => {
@@ -58,7 +60,7 @@ export function Changes() {
           </label>
           <span className="ml-auto" />
           <TextButton primary disabled={!canCommit} onClick={() => void commit()} title={conflicts.length ? "Resolve the conflicts first" : undefined}>
-            {amend ? "Amend" : all ? (nothing ? "Commit" : `Commit all ${unstaged.length}`) : `Commit ${staged.length} staged`}
+            {amend ? (staged.length ? `Amend with ${staged.length} staged` : "Amend") : all ? (nothing ? "Commit" : `Commit all ${unstaged.length}`) : `Commit ${staged.length} staged`}
           </TextButton>
         </div>
       </div>
@@ -123,6 +125,14 @@ export function Changes() {
   );
 }
 
+/**
+ * What unstaging a file takes back: a rename is a new file and the old one's
+ * deletion, and taking back only the first left the deletion staged, to go
+ * into the next commit. (Staging is by the new name alone: the old one is not
+ * in the tree to add, and naming it failed the whole add.)
+ */
+export const unstagePaths = (file: { path: string; from?: string }) => (file.from ? [file.path, file.from] : [file.path]);
+
 function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
   const { id, act, busy, show, openFile } = useGit();
   const letter = side === "conflict" ? "!" : side === "staged" ? file.x : file.kind === "untracked" ? "U" : file.y;
@@ -175,14 +185,14 @@ function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
           </IconButton>
         )}
         {side === "staged" ? (
-          <IconButton label={`Unstage ${name}`} disabled={!!busy} onClick={() => void act("Unstaging", () => gitApi.unstage(id, [file.path]))}>
+          <IconButton label={`Unstage ${name}`} disabled={!!busy} onClick={() => void act("Unstaging", () => gitApi.unstage(id, unstagePaths(file)))}>
             <LuMinus aria-hidden className="h-3.5 w-3.5" />
           </IconButton>
         ) : (
           <IconButton
             label={side === "conflict" ? `Mark ${name} resolved` : `Stage ${name}`}
             disabled={!!busy}
-            onClick={() => void act("Staging", () => gitApi.stage(id, file.from ? [file.path, file.from] : [file.path]))}
+            onClick={() => void act("Staging", () => gitApi.stage(id, [file.path]))}
           >
             <LuPlus aria-hidden className="h-3.5 w-3.5" />
           </IconButton>

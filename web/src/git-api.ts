@@ -54,7 +54,6 @@ export type GitState =
       files: ChangedFile[];
       truncated: boolean;
       remotes: Remote[];
-      gh: GhState;
     };
 
 export interface Commit {
@@ -170,8 +169,10 @@ const query = (params: Record<string, string | number | undefined>) =>
     .join("&");
 
 export const gitApi = {
-  state: (id: string, fresh = false) => json<GitState>(`${base(id)}${fresh ? "?fresh=1" : ""}`),
+  state: (id: string) => json<GitState>(base(id)),
   init: (id: string) => post(`${base(id)}/init`),
+  /** Asked apart from the state: it asks GitHub, and the state is what is on this disk. */
+  gh: (id: string, fresh = false) => json<GhState>(`${base(id)}/gh${fresh ? "?fresh=1" : ""}`),
   diff: (id: string, what: DiffOf) => json<Diff>(`${base(id)}/diff?${query(what as Record<string, string>)}`),
   stage: (id: string, paths: string[] | "all") => post(`${base(id)}/stage`, paths === "all" ? { all: true } : { paths }),
   unstage: (id: string, paths: string[] | "all") => post(`${base(id)}/unstage`, paths === "all" ? { all: true } : { paths }),

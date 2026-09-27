@@ -13,6 +13,11 @@ export interface DiffRow {
   old?: number;
   /** Its number in the new file, for a line that is there. */
   new?: number;
+  /**
+   * In a combined diff — a file in conflict, a merge — one column per parent,
+   * as git prints them: `++` in both, ` +` only against the second, and so on.
+   */
+  mark?: string;
 }
 
 export interface DiffFile {
@@ -24,6 +29,8 @@ export interface DiffFile {
   added: number;
   removed: number;
   rows: DiffRow[];
+  /** Combined: compared with more than one parent, a column each. */
+  combined?: boolean;
 }
 
 /** A name as git writes it: plain, or in quotes with C escapes when it holds something odd. */
@@ -59,6 +66,8 @@ export function parseDiff(text: string): DiffFile[] {
   let oldAt = 0;
   let newAt = 0;
   let inHunk = false;
+  // How many columns start a line: one, or one per parent in a combined diff.
+  let columns = 1;
   const lines = text.split("\n");
   // The newline that ends the last line is not a line of its own.
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
@@ -67,8 +76,12 @@ export function parseDiff(text: string): DiffFile[] {
     if (line.startsWith("diff --git ") || line.startsWith("diff --cc ") || line.startsWith("diff --combined ")) {
       // The names are read from ---/+++ when there are any; this is for a file without (binary, mode only, empty).
       const m = /^diff --git ("(?:[^"\\]|\\.)*"|\S+) ("(?:[^"\\]|\\.)*"|.+)$/.exec(line);
-      file = { path: m ? side(m[2]) : line.slice(11), status: "modified", binary: false, added: 0, removed: 0, rows: [] };
+      const combined = !line.startsWith("diff --git ");
+      // `diff --cc <name>`: one name, as it is, no a/ or b/.
+      const named = combined ? unquote(line.replace(/^diff --(cc|combined) /, "")) : m ? side(m[2]) : line.slice(11);
+      file = { path: named, status: "modified", binary: false, added: 0, removed: 0, rows: [], ...(combined ? { combined } : {}) };
       if (m && side(m[1]) !== side(m[2])) file.from = side(m[1]);
+      columns = 1;
       files.push(file);
       inHunk = false;
       continue;
@@ -96,9 +109,29 @@ export function parseDiff(text: string): DiffFile[] {
         const m = /^@@+ -(\d+)(?:,\d+)? (?:-\d+(?:,\d+)? )*\+(\d+)(?:,\d+)? @@+(.*)$/.exec(line);
         oldAt = m ? Number(m[1]) : 0;
         newAt = m ? Number(m[2]) : 0;
+        columns = Math.max(1, (/^@+/.exec(line)?.[0].length ?? 2) - 1);
         file.rows.push({ kind: "hunk", text: line });
         inHunk = true;
       }
+      continue;
+    }
+    if (columns > 1) {
+      // Combined: a column per parent. Added against any of them is an
+      // addition, gone from the result is a removal; the old number is the
+      // first parent's — ours, in a conflict — and counts only its lines.
+      const prefix = line.slice(0, columns);
+      if (!/^[ +-]+$/.test(prefix) && !(line === "" || prefix.trim() === "")) {
+        if (line.startsWith("\\")) file.rows.push({ kind: "note", text: line.slice(2) });
+        else inHunk = false;
+        continue;
+      }
+      const text = line.slice(columns);
+      const gone = prefix.includes("-");
+      const kind = gone ? "del" : prefix.includes("+") ? "add" : "ctx";
+      const inFirst = prefix[0] !== "+";
+      file.rows.push({ kind, text, mark: prefix, ...(inFirst ? { old: oldAt++ } : {}), ...(gone ? {} : { new: newAt++ }) });
+      if (kind === "add") file.added++;
+      if (kind === "del") file.removed++;
       continue;
     }
     const mark = line[0];
