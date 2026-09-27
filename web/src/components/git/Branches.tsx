@@ -23,8 +23,8 @@ export function Branches() {
     return () => {
       gone = true;
     };
-    // Again whenever something moved: a switch, a fetch, a push.
-  }, [id, repo.head, repo.branch, repo.upstream, repo.ahead, repo.behind, busy]);
+    // Again whenever something moved: a switch, a fetch, a push. A delete takes its row out itself.
+  }, [id, repo.head, repo.branch, repo.upstream, repo.ahead, repo.behind]);
 
   const create = async (e: FormEvent) => {
     e.preventDefault();

@@ -190,3 +190,43 @@ test('what changed is shown at once, however long GitHub takes to answer', async
   await page.getByRole('tab', { name: 'Pull requests' }).click();
   await expect(page.getByText('Dark mode for the settings')).toBeVisible({ timeout: 8000 });
 });
+
+test('in a chat whose folder is part of the repository, only its own files are offered to open in Files', async ({ page }) => {
+  await page.goto('/tests/git.html?prefix=src');
+  await expect(page.getByRole('button', { name: 'Open session.ts in Files' })).toBeAttached();
+  // README.md is at the repository's top, outside src/: Files does not show it.
+  await expect(page.getByText('README.md')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open README.md in Files' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open session.ts in Files' }).click();
+  await expect(page.getByTestId('opened')).toHaveText('auth/session.ts');
+});
+
+test('patches stopped half way are called that, not a rebase', async ({ page }) => {
+  await page.goto('/tests/git.html?op=am');
+  await expect(page.getByRole('status').filter({ hasText: 'Applying patches' })).toBeVisible();
+});
+
+test('a stash is acted on by what it is, not only by its place in the list', async ({ page }) => {
+  await page.goto('/tests/git.html');
+  await page.getByRole('button', { name: /1 stash/ }).click();
+  await page.getByRole('button', { name: 'Drop this stash' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Drop' }).click();
+  await expect.poll(() => calls(page)).toEqual([{ url: '/stashes/drop', body: { ref: 'stash@{0}', sha: '5'.repeat(40) } }]);
+});
+
+test('each question is asked once: a comparison when opened, the branches when one is made', async ({ page }) => {
+  const asked = (what: string) => page.evaluate((w) => (window as any).gitCalls.filter((c: any) => c.method === 'GET' && c.url.split('?')[0].endsWith(w)).length, what);
+  await page.goto('/tests/git.html?tab=history');
+  await page.getByText('Compare this branch with its base').click();
+  await expect(page.getByRole('combobox', { name: 'Compare with' })).toHaveValue('origin/main');
+  await page.waitForTimeout(500);
+  expect(await asked('/compare')).toBe(1);
+  await page.getByRole('tab', { name: 'Branches' }).click();
+  await expect(page.getByText('old/experiment')).toBeVisible();
+  const before = await asked('/branches');
+  await page.getByRole('textbox', { name: 'Name of the new branch' }).fill('fix/once');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.locator('[data-git-tab]').getByText('fix/once').first()).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(await asked('/branches') - before).toBe(1);
+});

@@ -40,3 +40,14 @@ test('before the first message the tools are listed and can be switched for this
   await expect(menu.getByRole('checkbox', { name: 'web_search' })).not.toBeChecked();
   await expect(menu.getByText('default on')).toBeVisible();
 });
+
+test('a file opened in Files from Git leaves Git open: the other panel makes room', async ({ page }) => {
+  await page.getByRole('button', { name: 'Git', exact: true }).click();
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  await expect(panels.getByRole('tablist', { name: 'Terminals' })).toBeVisible();
+  await panels.getByRole('button', { name: 'Open README.md in Files' }).click();
+  await expect(panels.getByRole('textbox', { name: 'Contents of README.md' })).toBeVisible();
+  await expect(panels.getByRole('tablist', { name: 'Git' })).toBeVisible();
+  await expect(panels.getByRole('tablist', { name: 'Terminals' })).toHaveCount(0);
+});

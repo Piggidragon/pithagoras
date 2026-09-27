@@ -134,7 +134,7 @@ export function Changes() {
 export const unstagePaths = (file: { path: string; from?: string }) => (file.from ? [file.path, file.from] : [file.path]);
 
 function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
-  const { id, act, busy, show, openFile } = useGit();
+  const { id, act, busy, show, openFile, inFolder } = useGit();
   const letter = side === "conflict" ? "!" : side === "staged" ? file.x : file.kind === "untracked" ? "U" : file.y;
   const counts = side === "staged" ? file.staged : side === "unstaged" ? file.unstaged : undefined;
   const { dir, name } = splitPath(file.path);
@@ -161,7 +161,7 @@ function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
         {counts && <Counts {...counts} />}
       </button>
       <div className="flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
-        {openFile && !deleted && (
+        {openFile && inFolder(file.path) && !deleted && (
           <IconButton label={`Open ${name} in Files`} onClick={() => openFile(file.path)}>
             <LuExternalLink aria-hidden className="h-3.5 w-3.5" />
           </IconButton>
@@ -204,7 +204,7 @@ function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
 
 /** What was put away with Stash: shown, brought back, or thrown away. */
 function Stashes({ count }: { count: number }) {
-  const { id, act, busy, show } = useGit();
+  const { id, repo, act, busy, show } = useGit();
   const [open, setOpen] = useState(false);
   const [list, setList] = useState<Stash[] | null>(null);
   useEffect(() => {
@@ -217,7 +217,8 @@ function Stashes({ count }: { count: number }) {
     return () => {
       gone = true;
     };
-  }, [open, id, count]);
+    // Again whenever the tree may have moved: the stashes can change without their count doing so.
+  }, [open, id, count, repo.head, repo.files.length]);
   return (
     <div className="mt-2 border-t border-line">
       <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1 px-3 py-1.5 text-left text-[11px] text-fg-subtle hover:text-fg">
@@ -232,10 +233,10 @@ function Stashes({ count }: { count: number }) {
               <span className="min-w-0 flex-1 truncate text-xs text-fg">{s.message}</span>
               <span className="shrink-0 text-[10px] text-fg-faint">{ago(s.date)}</span>
             </button>
-            <TextButton disabled={!!busy} onClick={() => void act("Applying the stash", () => gitApi.stashDo(id, "apply", s.ref))} title="Bring it back and keep the stash">
+            <TextButton disabled={!!busy} onClick={() => void act("Applying the stash", () => gitApi.stashDo(id, "apply", s.ref, s.sha))} title="Bring it back and keep the stash">
               Apply
             </TextButton>
-            <TextButton disabled={!!busy} onClick={() => void act("Popping the stash", () => gitApi.stashDo(id, "pop", s.ref))} title="Bring it back and drop the stash">
+            <TextButton disabled={!!busy} onClick={() => void act("Popping the stash", () => gitApi.stashDo(id, "pop", s.ref, s.sha))} title="Bring it back and drop the stash">
               Pop
             </TextButton>
             <IconButton
@@ -243,7 +244,7 @@ function Stashes({ count }: { count: number }) {
               danger
               disabled={!!busy}
               onClick={async () => {
-                if (await confirmDialog({ title: "Drop this stash?", message: s.message, confirmLabel: "Drop", danger: true })) await act("Dropping the stash", () => gitApi.stashDo(id, "drop", s.ref));
+                if (await confirmDialog({ title: "Drop this stash?", message: s.message, confirmLabel: "Drop", danger: true })) await act("Dropping the stash", () => gitApi.stashDo(id, "drop", s.ref, s.sha));
               }}
             >
               <LuTrash2 aria-hidden className="h-3.5 w-3.5" />

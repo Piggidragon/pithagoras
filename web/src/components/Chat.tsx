@@ -275,10 +275,17 @@ export function Chat({
   const [gitTab, setGitTab] = useState<GitTab>("changes");
   // How many files have changed, for the Changes tab: known only while the panel is open.
   const [gitCount, setGitCount] = useState(0);
+  // Files opened from Git beside it: a third panel closes the one open longest,
+  // and that must not be Git, which was just clicked in.
+  const [gitHeld, setGitHeld] = useState(false);
   const showInFiles = useCallback((path: string) => {
+    setGitHeld(true);
     setFiles(true);
     setFileAsked({ path, seq: Date.now() });
   }, []);
+  useEffect(() => {
+    if (!files || !git) setGitHeld(false);
+  }, [files, git]);
   // An ask is for the chat it was made in, and answered once: Files, drawn
   // again later or for another chat, is not sent back to it.
   const fileAnswered = useCallback(() => setFileAsked(null), []);
@@ -287,7 +294,7 @@ export function Chat({
     { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen },
     panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else setCanvasOpen(false); },
     // A third panel closes another one instead, while Files has an edit in it.
-    filesDirty ? ["files"] : [],
+    [...(filesDirty ? (["files"] as const) : []), ...(gitHeld ? (["git"] as const) : [])],
   );
   const closeFiles = async () => {
     if (

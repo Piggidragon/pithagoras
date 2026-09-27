@@ -25,8 +25,10 @@ export interface GitCtx {
   act: (label: string, step: () => Promise<unknown>) => Promise<boolean>;
   busy: string | null;
   show: (view: View) => void;
-  /** Open a file (by its path in the repository) in the Files panel, where it is in the chat's folder. */
+  /** Open a file (by its path in the repository) in the Files panel. Only one in the chat's folder: see inFolder. */
   openFile?: (path: string) => void;
+  /** Whether a file of the repository is in the chat's folder, which is all Files shows. */
+  inFolder: (path: string) => boolean;
 }
 
 export const Ctx = createContext<GitCtx | null>(null);

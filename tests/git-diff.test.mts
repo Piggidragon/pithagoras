@@ -95,3 +95,17 @@ test("a file in conflict, as git shows it — a column per parent — is read co
   const [gone] = parseDiff('diff --cc b.txt\n--- a/b.txt\n+++ b/b.txt\n@@@ -1,2 -1,2 +1,1 @@@\n--old\n  kept\n');
   assert.deepEqual(gone.rows.slice(1).map((r) => [r.kind, r.old, r.new, r.text]), [['del', 1, undefined, 'old'], ['ctx', 2, 1, 'kept']]);
 });
+
+test('a name with a space is one name, whether or not the diff has ---/+++ lines to say so', async () => {
+  const [text] = parseDiff('diff --git a/my file.txt b/my file.txt\nindex 1..2 100644\n--- a/my file.txt\n+++ b/my file.txt\n@@ -1 +1 @@\n-a\n+b\n');
+  assert.deepEqual([text.path, text.from, text.status], ['my file.txt', undefined, 'modified']);
+  // A binary one has no ---/+++: the header is all there is.
+  const [picture] = parseDiff('diff --git a/pic one.png b/pic one.png\nindex 1..2 100644\nBinary files a/pic one.png and b/pic one.png differ\n');
+  assert.deepEqual([picture.path, picture.from, picture.binary], ['pic one.png', undefined, true]);
+  // A rename with spaces on both sides: the rename lines have the last word.
+  const [moved] = parseDiff('diff --git a/old name.txt b/new name.txt\nsimilarity index 100%\nrename from old name.txt\nrename to new name.txt\n');
+  assert.deepEqual([moved.path, moved.from, moved.status], ['new name.txt', 'old name.txt', 'renamed']);
+  // A mode change only, with a space: no rename made up from half the name.
+  const [mode] = parseDiff('diff --git a/run me.sh b/run me.sh\nold mode 100644\nnew mode 100755\n');
+  assert.deepEqual([mode.path, mode.from], ['run me.sh', undefined]);
+});

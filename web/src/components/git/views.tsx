@@ -37,7 +37,7 @@ function FileDiff({ title, file, truncated, actions }: { title: string; file: Di
 
 /** A diff asked of the server: one file's changes, a commit's, a stash's. */
 function LoadedDiff({ title, path, what, onDone }: { title: string; path: string; what: DiffOf; onDone: () => void }) {
-  const { id, act, busy, openFile, repo } = useGit();
+  const { id, act, busy, openFile, inFolder, repo } = useGit();
   const [files, setFiles] = useState<DiffFile[] | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +70,7 @@ function LoadedDiff({ title, path, what, onDone }: { title: string; path: string
   const name = path.split("/").pop() ?? path;
   const actions = (
     <>
-      {openFile && path && version?.y !== "D" && version?.x !== "D" && live && (
+      {openFile && path && inFolder(path) && version?.y !== "D" && version?.x !== "D" && live && (
         <TextButton onClick={() => openFile(path)} title="Open it in Files">
           <LuExternalLink aria-hidden className="h-3 w-3" /> Open
         </TextButton>

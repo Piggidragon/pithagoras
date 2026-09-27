@@ -148,7 +148,7 @@ export function gitRouter(): Router {
     withRepo((repo, req) => {
       const action = req.params.action;
       if (action !== "apply" && action !== "pop" && action !== "drop") throw new g.GitError(400, "Apply, pop or drop");
-      return g.stashDo(repo, action, req.body?.ref);
+      return g.stashDo(repo, action, req.body?.ref, req.body?.sha);
     }),
   );
 

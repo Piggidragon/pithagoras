@@ -248,8 +248,9 @@ test("stashes: put away with new files, listed, shown and brought back", async (
   assert.equal(stash.ref, "stash@{0}");
   assert.match(stash.message, /half done/);
   assert.match((await g.diff(r, { of: "stash", stash: "stash@{0}" })).diff, /^\+wip$/m);
-  await assert.rejects(g.stashDo(r, "pop", "stash@{0}; rm -rf /"), { status: 400 });
-  await g.stashDo(r, "pop", "stash@{0}");
+  await assert.rejects(g.stashDo(r, "pop", "stash@{0}; rm -rf /", stash.sha), { status: 400 });
+  await assert.rejects(g.stashDo(r, "pop", "stash@{0}"), { status: 400 });
+  await g.stashDo(r, "pop", "stash@{0}", stash.sha);
   assert.equal(readFileSync(path.join(dir, "new.txt"), "utf8"), "new\n");
 });
 
@@ -380,4 +381,102 @@ test("a renamed file is staged by its new name, and unstaged by both", async () 
   s = await g.status(r);
   // Nothing of it staged any more: not the new file, not the old one's deletion.
   assert.deepEqual(s.files.filter((f) => f.x !== "." && f.x !== "?"), []);
+});
+
+test("a signed commit in the history runs nothing: not the gpg.program the repository names", async () => {
+  const dir = repo();
+  const marker = path.join(home, `gpg${n}`);
+  const script = path.join(home, `gpg${n}.sh`);
+  writeFileSync(script, `#!/bin/sh\ntouch ${marker}\nexit 1\n`);
+  chmodSync(script, 0o755);
+  // A commit carrying a signature, made by hand: what signing leaves in it.
+  const tree = sh(dir, "rev-parse", "HEAD^{tree}").trim();
+  const parent = sh(dir, "rev-parse", "HEAD").trim();
+  const raw = `tree ${tree}\nparent ${parent}\nauthor T <t@e> 1700000000 +0000\ncommitter T <t@e> 1700000000 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE\n -----END PGP SIGNATURE-----\n\nSigned\n`;
+  const sha = execFileSync("git", ["hash-object", "-t", "commit", "-w", "--stdin"], { cwd: dir, input: raw, encoding: "utf8" }).trim();
+  sh(dir, "reset", "-q", "--hard", sha);
+  sh(dir, "config", "log.showSignature", "true");
+  sh(dir, "config", "gpg.program", script);
+  const r = await open(dir);
+  const [top] = await g.log(r, {});
+  assert.equal(top.subject, "Signed");
+  assert.equal((await g.commitDetail(r, sha)).message, "Signed");
+  assert.equal(existsSync(marker), false, "gpg.program ran");
+});
+
+test("git am stopped half way is shown as am, and given up as am; picks stopped between two as a cherry-pick", async () => {
+  const dir = repo();
+  const r = await open(dir);
+  // A patch that cannot apply.
+  const patch = path.join(home, `bad${n}.patch`);
+  writeFileSync(patch, "From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nFrom: T <t@e>\nSubject: [PATCH] bad\n\n---\n a.txt | 1 +\n\ndiff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,3 @@\n-nothing like this\n+x\n two\n three\n");
+  try {
+    sh(dir, "am", patch);
+  } catch {
+    // Stopped.
+  }
+  assert.equal((await g.status(r)).operation, "am");
+  await g.abortOperation(r);
+  assert.equal((await g.status(r)).operation, null);
+
+  // Two picks, the first empty-handed: stopped between them, only the sequencer says so.
+  sh(dir, "switch", "-qc", "picks");
+  writeFileSync(path.join(dir, "p1.txt"), "1\n");
+  sh(dir, "add", "p1.txt");
+  sh(dir, "commit", "-qm", "p1");
+  writeFileSync(path.join(dir, "a.txt"), "clash\n");
+  sh(dir, "commit", "-qam", "p2");
+  sh(dir, "switch", "-q", "main");
+  writeFileSync(path.join(dir, "a.txt"), "ours\n");
+  sh(dir, "commit", "-qam", "ours");
+  try {
+    sh(dir, "cherry-pick", "picks~1", "picks");
+  } catch {
+    // Stopped on p2's conflict.
+  }
+  assert.equal((await g.status(r)).operation, "cherry-pick");
+  sh(dir, "checkout", "-q", "--theirs", "a.txt");
+  sh(dir, "add", "a.txt");
+  execFileSync("git", ["-c", "core.editor=true", "commit", "-q", "--no-edit"], { cwd: dir });
+  // The conflict is committed; what is left is the sequencer.
+  if (existsSync(path.join(dir, ".git", "sequencer"))) assert.equal((await g.status(r)).operation, "cherry-pick");
+});
+
+test("a stash is acted on only when it is still the one the page means", async () => {
+  const dir = repo();
+  const r = await open(dir);
+  writeFileSync(path.join(dir, "a.txt"), "first\n");
+  await g.stashPush(r, "first");
+  const [first] = await g.stashes(r);
+  assert.match(first.sha, /^[0-9a-f]{40}$/);
+  // Meanwhile: popped, and another pushed — stash@{0} is somebody else's now.
+  sh(dir, "stash", "pop", "-q");
+  writeFileSync(path.join(dir, "a.txt"), "second\n");
+  sh(dir, "stash", "push", "-q", "-m", "second");
+  await assert.rejects(g.stashDo(r, "drop", "stash@{0}", first.sha), { status: 409 });
+  assert.match((await g.stashes(r))[0].message, /second/);
+  const [second] = await g.stashes(r);
+  await g.stashDo(r, "drop", second.ref, second.sha);
+  assert.deepEqual(await g.stashes(r), []);
+});
+
+test("a refresh reads what to turn off once, not before every command", async () => {
+  const dir = repo();
+  // A git that writes down how it was called, first on the PATH.
+  const logged = path.join(home, `calls${n}`);
+  const wrap = path.join(home, `wrap${n}`);
+  mkdirSync(wrap);
+  const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  writeFileSync(path.join(wrap, "git"), `#!/bin/sh\necho "$*" >> ${logged}\nexec ${real} "$@"\n`);
+  chmodSync(path.join(wrap, "git"), 0o755);
+  const saved = process.env.PATH;
+  process.env.PATH = `${wrap}:${saved}`;
+  try {
+    const r = await open(dir);
+    await g.status(r);
+    const calls = readFileSync(logged, "utf8").split("\n").filter(Boolean);
+    assert.equal(calls.filter((c) => c.includes("--get-regexp ^filter")).length, 1, calls.join("\n"));
+  } finally {
+    process.env.PATH = saved;
+  }
 });

@@ -161,8 +161,10 @@ export function GitPanel({
       act,
       busy,
       show: (view) => setStack((s) => [...s, view]),
-      // Files shows the chat's folder; a file of the repository outside it is not there to open.
-      openFile: onOpenFile ? (p) => (p.startsWith(prefix) ? onOpenFile(p.slice(prefix.length)) : undefined) : undefined,
+      // Files shows the chat's folder; a file of the repository outside it is
+      // not there to open, and is offered no button that would do nothing.
+      inFolder: (p) => p.startsWith(prefix),
+      openFile: onOpenFile ? (p) => p.startsWith(prefix) && onOpenFile(p.slice(prefix.length)) : undefined,
     };
   }, [state, gh, sessionId, reload, act, busy, onOpenFile]);
 
@@ -298,7 +300,8 @@ function BarButton({ label, onClick, disabled, children }: { label: string; onCl
 function Operation() {
   const { id, repo, act, busy } = useGit();
   const conflicts = repo.files.filter((f) => f.kind === "conflict").length;
-  const name = repo.operation === "cherry-pick" ? "Cherry-picking" : repo.operation === "revert" ? "Reverting" : repo.operation === "rebase" ? "Rebasing" : "Merging";
+  const name =
+    repo.operation === "cherry-pick" ? "Cherry-picking" : repo.operation === "revert" ? "Reverting" : repo.operation === "rebase" ? "Rebasing" : repo.operation === "am" ? "Applying patches" : "Merging";
   return (
     <div role="status" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-warn/10 px-3 py-1.5 text-xs text-warn">
       <span className="min-w-0 flex-1">

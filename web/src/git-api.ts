@@ -50,7 +50,7 @@ export type GitState =
       ahead: number;
       behind: number;
       stashes: number;
-      operation: "merge" | "rebase" | "cherry-pick" | "revert" | null;
+      operation: "merge" | "rebase" | "am" | "cherry-pick" | "revert" | null;
       files: ChangedFile[];
       truncated: boolean;
       remotes: Remote[];
@@ -97,6 +97,7 @@ export interface Branch {
 
 export interface Stash {
   ref: string;
+  sha: string;
   date: number;
   message: string;
 }
@@ -192,7 +193,8 @@ export const gitApi = {
   push: (id: string) => post<{ said: string }>(`${base(id)}/push`),
   stashes: (id: string) => json<{ stashes: Stash[] }>(`${base(id)}/stashes`),
   stash: (id: string, message?: string) => post(`${base(id)}/stashes`, { message }),
-  stashDo: (id: string, action: "apply" | "pop" | "drop", ref: string) => post(`${base(id)}/stashes/${action}`, { ref }),
+  /** `sha` is the stash meant: nothing is done when `ref` has come to be another. */
+  stashDo: (id: string, action: "apply" | "pop" | "drop", ref: string, sha: string) => post(`${base(id)}/stashes/${action}`, { ref, sha }),
   compare: (id: string, baseRef?: string) => json<{ comparison: Comparison | null }>(`${base(id)}/compare?${query({ base: baseRef })}`),
   pulls: (id: string, state = "open") => json<{ pulls: PullSummary[] }>(`${base(id)}/pulls?state=${state}`),
   currentPull: (id: string) => json<{ pull: PullDetail | null }>(`${base(id)}/pulls/current`),

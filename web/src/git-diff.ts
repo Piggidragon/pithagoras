@@ -60,6 +60,23 @@ const side = (raw: string) => {
   return name === "/dev/null" ? name : name.replace(/^[ab]\//, "");
 };
 
+/**
+ * The two names of a `diff --git` line. git quotes a name only when it holds
+ * something odd — a space is not — so `a/my file.txt b/my file.txt` is split
+ * where the two halves are the same name; a rename with spaces in it is split
+ * at its last " b/", and put right by the "rename from/to" lines after it.
+ */
+export function headerNames(rest: string): [string, string] | null {
+  const quoted = /^("(?:[^"\\]|\\.)*"|\S+) ("(?:[^"\\]|\\.)*")$/.exec(rest) ?? /^("(?:[^"\\]|\\.)*") (.+)$/.exec(rest);
+  if (quoted && (quoted[1].startsWith('"') || quoted[2].startsWith('"'))) return [side(quoted[1]), side(quoted[2])];
+  if ((rest.length - 5) % 2 === 0) {
+    const name = rest.slice(2, 2 + (rest.length - 5) / 2);
+    if (rest === `a/${name} b/${name}`) return [name, name];
+  }
+  const at = rest.lastIndexOf(" b/");
+  return at > 0 ? [side(rest.slice(0, at)), side(rest.slice(at + 1))] : null;
+}
+
 export function parseDiff(text: string): DiffFile[] {
   const files: DiffFile[] = [];
   let file: DiffFile | null = null;
@@ -75,12 +92,12 @@ export function parseDiff(text: string): DiffFile[] {
   for (const line of lines) {
     if (line.startsWith("diff --git ") || line.startsWith("diff --cc ") || line.startsWith("diff --combined ")) {
       // The names are read from ---/+++ when there are any; this is for a file without (binary, mode only, empty).
-      const m = /^diff --git ("(?:[^"\\]|\\.)*"|\S+) ("(?:[^"\\]|\\.)*"|.+)$/.exec(line);
       const combined = !line.startsWith("diff --git ");
+      const names = combined ? null : headerNames(line.slice(11));
       // `diff --cc <name>`: one name, as it is, no a/ or b/.
-      const named = combined ? unquote(line.replace(/^diff --(cc|combined) /, "")) : m ? side(m[2]) : line.slice(11);
+      const named = combined ? unquote(line.replace(/^diff --(cc|combined) /, "")) : names ? names[1] : line.slice(11);
       file = { path: named, status: "modified", binary: false, added: 0, removed: 0, rows: [], ...(combined ? { combined } : {}) };
-      if (m && side(m[1]) !== side(m[2])) file.from = side(m[1]);
+      if (names && names[0] !== names[1]) file.from = names[0];
       columns = 1;
       files.push(file);
       inHunk = false;

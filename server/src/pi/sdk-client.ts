@@ -915,46 +915,50 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       this.wanted = new Set();
     }
     session.setActiveToolsByName = (names: string[]) => {
-      this.wanted = new Set([...names, ...this.heldBack(session, names)]);
+      this.wanted = new Set([...names, ...this.heldBack(session, names, this.fromExtension)]);
       original(names.filter((name) => !this.switchedOff.has(name)));
     };
-    this.showExtensionsWanted(session);
+    this.hearExtensions(session);
   }
 
+  /** True while an extension's `setActiveTools` is being carried out. */
+  private fromExtension = false;
+
   /**
-   * Extensions are shown what pi wants active, switched-off tools included.
+   * Tell an extension's list of tools from pi's own.
    *
-   * An extension that edits the set — pi-goal-x, on session start, sets what
-   * is active less its own goal tools — builds on `getActiveTools()`. Shown the
-   * set the switches had thinned, its list left out what was switched off,
-   * without having said anything about it; the chat's list lost the tool, and
-   * one switched off before the first message could not be switched on again.
-   * Shown what pi wants, its list is a whole answer: what it keeps is kept,
-   * switched off or not, and what it leaves out — a plan mode's
-   * `["read", "grep"]` — is left out, switched off or not. The switches take
-   * their names out on the way in, as ever.
+   * An extension is shown what is active — what the model is — so a switched-off
+   * tool is not in anything it reads, and whatever it writes into a prompt names
+   * only tools the model can call. So a list it sets says nothing about
+   * switched-off tools: pi-goal-x, on session start, sets what is active less
+   * its goal tools, and taken as a narrowing that dropped every switched-off
+   * tool from the chat's list for good — one switched off before the first
+   * message could not be switched on again. What is switched off is the
+   * switch's to decide: kept, and on again when it is switched on.
    *
-   * Only extensions: pi itself reads the active set to write the system
-   * prompt, which must not name a tool the model cannot call. They read it
-   * through the runtime every extension API shares, which pi fills when it
-   * binds a runner — at start, and a new one on every reload.
+   * Extensions reach pi through the runtime every extension API shares, which
+   * pi fills when it binds a runner — at start, and a new one on every reload.
    */
-  private showExtensionsWanted(session: any): void {
-    const show = (runner: any) => {
+  private hearExtensions(session: any): void {
+    const hear = (runner: any) => {
       const runtime = runner?.runtime;
-      if (!runtime || typeof runtime.getActiveTools !== "function") return;
-      runtime.getActiveTools = () => {
-        const active: string[] = session.getActiveToolNames();
-        const held = [...this.wanted].filter((name) => this.switchedOff.has(name) && !active.includes(name));
-        return [...active, ...held];
+      if (!runtime || typeof runtime.setActiveTools !== "function") return;
+      const set = runtime.setActiveTools;
+      runtime.setActiveTools = (names: string[]) => {
+        this.fromExtension = true;
+        try {
+          return set(names);
+        } finally {
+          this.fromExtension = false;
+        }
       };
     };
-    show(session._extensionRunner);
+    hear(session._extensionRunner);
     if (typeof session._bindExtensionCore !== "function") return;
     const bind = session._bindExtensionCore.bind(session);
     session._bindExtensionCore = (runner: any, ...rest: unknown[]) => {
       const bound = bind(runner, ...rest);
-      show(runner);
+      hear(runner);
       return bound;
     };
   }
@@ -967,12 +971,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * already thinned. Taken as it came, every refresh dropped whatever was off
    * from what pi wants: gone from the chat's list, with no way to switch it
    * back on. Such a list keeps everything that is active; one that leaves an
-   * active tool out is a choice — an extension narrowing the tools, having
-   * been shown the switched-off ones too (showExtensionsWanted) — and means
-   * what it says. Either way a tool pi no longer has, its extension unloaded,
-   * is not wanted any more.
+   * active tool out is a choice, and means what it says. An extension's list
+   * never says anything about what is switched off (hearExtensions): it keeps
+   * it. Either way a tool pi no longer has, its extension unloaded, is not
+   * wanted any more.
    */
-  private heldBack(session: any, names: string[]): string[] {
+  private heldBack(session: any, names: string[], always = false): string[] {
     let active: string[];
     let known: Set<string>;
     try {
@@ -981,7 +985,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     } catch {
       return [];
     }
-    if (!active.every((name) => names.includes(name))) return [];
+    if (!always && !active.every((name) => names.includes(name))) return [];
     return [...this.wanted].filter((name) => this.switchedOff.has(name) && !names.includes(name) && known.has(name));
   }
 

@@ -172,7 +172,9 @@ export function CommitView({ sha }: { sha: string }) {
  */
 export function CompareView({ base: asked }: { base?: string }) {
   const { id, repo, show } = useGit();
-  const [base, setBase] = useState(asked ?? "");
+  // What was picked, and what the answer was against: the default is only known once answered, and
+  // taking it as the pick asked the same question twice.
+  const [chosen, setChosen] = useState(asked ?? "");
   const [result, setResult] = useState<Comparison | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -182,18 +184,18 @@ export function CompareView({ base: asked }: { base?: string }) {
   useEffect(() => {
     let gone = false;
     setError(null);
-    gitApi.compare(id, base || undefined).then(
+    gitApi.compare(id, chosen || undefined).then(
       (r) => {
         if (gone) return;
         setResult(r.comparison);
-        if (r.comparison && !base) setBase(r.comparison.base);
       },
       (e) => !gone && setError((e as Error).message),
     );
     return () => {
       gone = true;
     };
-  }, [id, base, repo.head]);
+  }, [id, chosen, repo.head]);
+  const base = chosen || result?.base || "";
 
   const choices = branches.filter((b) => !b.current).map((b) => b.name);
   return (
@@ -203,7 +205,7 @@ export function CompareView({ base: asked }: { base?: string }) {
         <span className="shrink-0">compared with</span>
         <select
           value={base}
-          onChange={(e) => setBase(e.target.value)}
+          onChange={(e) => setChosen(e.target.value)}
           aria-label="Compare with"
           className="min-w-0 flex-1 rounded border border-line bg-canvas px-1 py-0.5 font-mono text-[11px] text-fg"
         >

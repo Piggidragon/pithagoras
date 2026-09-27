@@ -1,7 +1,8 @@
 // Development-only fixture: the Git panel on a repository kept in the page, without a server.
 // Open /tests/git.html to see it; ?gh=off for a machine without gh, ?repo=none for a folder in no repository,
 // ?ghslow=1 for a GitHub that takes seconds to answer, ?rename=1 for a renamed file with more changes in the
-// tree, ?conflict=1 for a merge stopped on a conflict.
+// tree, ?conflict=1 for a merge stopped on a conflict, ?op=am for patches stopped half way, ?prefix=src for a
+// chat whose folder is src/ in the repository.
 // What the panel asked for is in window.gitCalls; window.agentWrote() changes a file the way the agent would.
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -31,6 +32,7 @@ const repo = {
   ] as File[],
 };
 if (params.get('rename')) repo.files.push({ path: 'src/auth/token.ts', from: 'src/auth/jwt.ts', x: 'R', y: 'M', kind: 'renamed', staged: { added: 0, removed: 0, binary: false }, unstaged: { added: 3, removed: 1, binary: false } });
+if (params.get('op')) repo.operation = params.get('op');
 if (params.get('conflict')) {
   repo.operation = 'merge';
   repo.files.push({ path: 'a.txt', x: 'U', y: 'U', kind: 'conflict' });
@@ -70,7 +72,7 @@ window.fetch = (async (input: any, init?: any) => {
   const path = url.replace('/api/sessions/s/git', '').split('?')[0];
   const q = new URLSearchParams(url.split('?')[1] ?? '');
   if (params.get('repo') === 'none' && path === '') return reply({ repo: false, folder: '/work/notes' });
-  if (path === '') return reply({ repo: true, root: '/work/app', prefix: '', ...repo, truncated: false, remotes: [{ name: 'origin', address: 'github.com:me/app', web: 'https://github.com/me/app' }] });
+  if (path === '') return reply({ repo: true, root: '/work/app', prefix: params.get('prefix') ?? '', ...repo, truncated: false, remotes: [{ name: 'origin', address: 'github.com:me/app', web: 'https://github.com/me/app' }] });
   if (path === '/gh') {
     if (params.get('ghslow')) await new Promise((r) => setTimeout(r, 4000));
     return reply(gh);
@@ -112,7 +114,7 @@ window.fetch = (async (input: any, init?: any) => {
     repo.branch = body.remote ? body.name.split('/').slice(1).join('/') : body.name;
     return reply({ ok: true });
   }
-  if (path === '/stashes') return reply({ stashes: [{ ref: 'stash@{0}', date: now - 4000, message: 'On feature/login: half a refactor' }] });
+  if (path === '/stashes') return reply({ stashes: [{ ref: 'stash@{0}', sha: '5'.repeat(40), date: now - 4000, message: 'On feature/login: half a refactor' }] });
   if (path === '/compare') return reply({ comparison: { base: 'origin/main', head: repo.branch, mergeBase: 'c3d4e5f', commits: commits.slice(0, 2), files: [{ path: 'src/auth/login.ts', status: 'M', added: 12, removed: 3, binary: false }] } });
   if (path === '/pulls' && method === 'GET') return reply({ pulls });
   if (path === '/pulls/current') return reply({ pull: repo.branch === 'feature/login' ? { ...pulls[0], body: '' } : null });

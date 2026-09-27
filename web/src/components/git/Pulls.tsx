@@ -6,15 +6,8 @@ import { parseDiff, type DiffFile } from "../../git-diff";
 import { confirmDialog } from "../ConfirmDialog";
 import { Counts, ErrorNote, Letter, Quiet, SectionHead, splitPath, TextButton } from "./bits";
 import { useGit } from "./context";
+import { when } from "../../time";
 
-const since = (iso?: string) => {
-  if (!iso) return "";
-  const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
-  if (!Number.isFinite(mins)) return "";
-  if (mins < 60) return `${Math.max(mins, 0)}m ago`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
-  return `${Math.round(mins / 1440)}d ago`;
-};
 
 /** Where a pull request is: open, draft, merged or closed. */
 function StateBadge({ pull }: { pull: Pick<PullSummary, "state" | "isDraft"> }) {
@@ -137,7 +130,7 @@ function PullRow({ pull: p }: { pull: PullSummary }) {
         </span>
         {p.author && <span className="shrink-0">{p.author.login}</span>}
         {p.reviewDecision && <span className="shrink-0">{p.reviewDecision.toLowerCase().replace(/_/g, " ")}</span>}
-        <span className="ml-auto shrink-0">{since(p.updatedAt)}</span>
+        <span className="ml-auto shrink-0">{when(p.updatedAt)}</span>
       </span>
     </button>
   );
@@ -421,7 +414,7 @@ export function PullView({ n }: { n: number }) {
             {c.state === "APPROVED" && <span className="text-ok"> approved</span>}
             {c.state === "CHANGES_REQUESTED" && <span className="text-danger"> asked for changes</span>}
             {" · "}
-            {since(c.at)}
+            {when(c.at)}
           </p>
           {c.body && <Markdown>{c.body}</Markdown>}
         </div>

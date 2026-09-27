@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -69,6 +69,8 @@ const GIT_CONFIG = [
   "-c", "core.fsmonitor=false",
   "-c", "core.pager=cat",
   "-c", "advice.detachedHead=false",
+  // A signed commit in the history would run whatever gpg.program names.
+  "-c", "log.showSignature=false",
 ];
 
 function environment(writes: boolean, config: [string, string][] = []): NodeJS.ProcessEnv {
@@ -211,9 +213,17 @@ export async function filterOverrides(cwd: string): Promise<[string, string][]> 
   return config;
 }
 
-/** git, for looking or for changing: looking runs none of the repository's filters. */
-const git = async (cwd: string, args: string[], opts?: RunOptions) =>
-  run("git", cwd, args, opts?.writes ? opts : { ...opts, config: await filterOverrides(cwd) });
+/**
+ * git, for looking or for changing: looking runs none of the repository's
+ * filters. Given a Repo, what to turn off is read once for it — a Repo is made
+ * for each request — rather than before every command of a refresh.
+ */
+const git = async (where: string | Repo, args: string[], opts?: RunOptions) => {
+  const cwd = typeof where === "string" ? where : where.root;
+  if (opts?.writes) return run("git", cwd, args, opts);
+  const config = typeof where === "string" ? await filterOverrides(cwd) : await (where.filters ??= filterOverrides(where.root));
+  return run("git", cwd, args, { ...opts, config });
+};
 const gh = (cwd: string, args: string[], opts?: RunOptions) => run("gh", cwd, args, opts);
 
 /** A path as git should take it: exactly that path, not a pattern. */
@@ -239,7 +249,7 @@ export function checkSha(sha: unknown): string {
 }
 
 /** A branch or ref name: what git itself would accept, and never an option. */
-export async function checkRef(cwd: string, name: unknown, kind: "branch" | "ref" = "ref"): Promise<string> {
+export async function checkRef(cwd: string | Repo, name: unknown, kind: "branch" | "ref" = "ref"): Promise<string> {
   if (typeof name !== "string" || !name.trim() || name.startsWith("-") || name.length > 255 || /[\0\s]/.test(name)) {
     throw new GitError(400, kind === "branch" ? "Not a branch name" : "Not a ref");
   }
@@ -260,6 +270,8 @@ export interface Repo {
   gitDir: string;
   /** The chat's folder inside it, "" when it is the top. */
   prefix: string;
+  /** What looking turns off, read the first time it is needed (see git()). */
+  filters?: Promise<[string, string][]>;
 }
 
 /** The repository `folder` is in, or null when it is in none. */
@@ -312,7 +324,7 @@ export interface Status {
   behind: number;
   stashes: number;
   /** A merge, rebase, cherry-pick or revert that is under way and waiting. */
-  operation: "merge" | "rebase" | "cherry-pick" | "revert" | null;
+  operation: "merge" | "rebase" | "am" | "cherry-pick" | "revert" | null;
   files: ChangedFile[];
   truncated: boolean;
   remotes: Remote[];
@@ -389,18 +401,29 @@ export function parseNumstat(raw: string): Map<string, Counts> {
 }
 
 function operationIn(gitDir: string): Status["operation"] {
-  if (existsSync(path.join(gitDir, "rebase-merge")) || existsSync(path.join(gitDir, "rebase-apply"))) return "rebase";
+  if (existsSync(path.join(gitDir, "rebase-merge"))) return "rebase";
+  // `git am` keeps its patches where `git rebase --apply` does, and says so with "applying".
+  if (existsSync(path.join(gitDir, "rebase-apply"))) return existsSync(path.join(gitDir, "rebase-apply", "applying")) ? "am" : "rebase";
   if (existsSync(path.join(gitDir, "MERGE_HEAD"))) return "merge";
   if (existsSync(path.join(gitDir, "CHERRY_PICK_HEAD"))) return "cherry-pick";
   if (existsSync(path.join(gitDir, "REVERT_HEAD"))) return "revert";
+  // Several commits picked or reverted, stopped between two of them: only the sequencer is left.
+  if (existsSync(path.join(gitDir, "sequencer"))) {
+    try {
+      const next = readFileSync(path.join(gitDir, "sequencer", "todo"), "utf8").split("\n").find((line) => line.trim() && !line.startsWith("#")) ?? "";
+      return /^(revert|r)\s/.test(next) ? "revert" : "cherry-pick";
+    } catch {
+      return "cherry-pick";
+    }
+  }
   return null;
 }
 
 export async function status(repo: Repo): Promise<Status> {
   const [raw, unstaged, staged, remotes] = await Promise.all([
-    git(repo.root, ["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=all", "--ignore-submodules=dirty"]),
-    git(repo.root, ["diff", "--numstat", "-z", "-M", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]),
-    git(repo.root, ["diff", "--cached", "--numstat", "-z", "-M", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]),
+    git(repo, ["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=all", "--ignore-submodules=dirty"]),
+    git(repo, ["diff", "--numstat", "-z", "-M", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]),
+    git(repo, ["diff", "--cached", "--numstat", "-z", "-M", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]),
     listRemotes(repo),
   ]);
   const parsed = parseStatus(raw.stdout);
@@ -445,7 +468,7 @@ export function describeRemote(url: string): { address: string; web?: string } {
 }
 
 async function listRemotes(repo: Repo): Promise<Remote[]> {
-  const { stdout } = await git(repo.root, ["config", "--get-regexp", "^remote\\..*\\.url$"], { ok: [1] });
+  const { stdout } = await git(repo, ["config", "--get-regexp", "^remote\\..*\\.url$"], { ok: [1] });
   return stdout
     .split("\n")
     .filter(Boolean)
@@ -466,13 +489,13 @@ export interface Diff {
 
 /** An empty tree in this repository's hash: what a first commit is compared with. */
 async function emptyTree(repo: Repo): Promise<string> {
-  const { stdout } = await git(repo.root, ["hash-object", "-t", "tree", "/dev/null"]);
+  const { stdout } = await git(repo, ["hash-object", "-t", "tree", "/dev/null"]);
   return stdout.trim();
 }
 
 /** The commit a commit is shown against: its first parent, or nothing for the first. */
 async function parentOf(repo: Repo, sha: string): Promise<string> {
-  const { stdout } = await git(repo.root, ["rev-list", "--parents", "-n", "1", "--end-of-options", sha]);
+  const { stdout } = await git(repo, ["rev-list", "--parents", "-n", "1", "--end-of-options", sha]);
   const [, first] = stdout.trim().split(" ");
   return first ?? (await emptyTree(repo));
 }
@@ -492,29 +515,29 @@ export async function diff(repo: Repo, what: DiffOf): Promise<Diff> {
   switch (what.of) {
     case "unstaged":
     case "staged":
-      ran = await git(repo.root, ["diff", ...(what.of === "staged" ? ["--cached"] : []), ...DIFF, ...paths(what.path, what.from)], opts);
+      ran = await git(repo, ["diff", ...(what.of === "staged" ? ["--cached"] : []), ...DIFF, ...paths(what.path, what.from)], opts);
       break;
     case "untracked": {
       const file = checkPath(what.path);
       // Only a file git itself lists as new: --no-index takes any path at all.
-      const { stdout } = await git(repo.root, ["ls-files", "-z", "--others", "--exclude-standard", "--", literal(file)]);
+      const { stdout } = await git(repo, ["ls-files", "-z", "--others", "--exclude-standard", "--", literal(file)]);
       if (!stdout.split("\0").includes(file)) throw new GitError(404, "That file is not a new one here");
-      ran = await git(repo.root, ["diff", "--no-index", ...DIFF, "--", "/dev/null", file], { ...opts, ok: [1] });
+      ran = await git(repo, ["diff", "--no-index", ...DIFF, "--", "/dev/null", file], { ...opts, ok: [1] });
       break;
     }
     case "commit": {
       const sha = checkSha(what.sha);
-      ran = await git(repo.root, ["diff", ...DIFF, await parentOf(repo, sha), sha, ...paths(what.path, what.from)], opts);
+      ran = await git(repo, ["diff", ...DIFF, await parentOf(repo, sha), sha, ...paths(what.path, what.from)], opts);
       break;
     }
     case "range": {
-      const base = await checkRef(repo.root, what.base);
-      const head = what.head ? await checkRef(repo.root, what.head) : "HEAD";
-      ran = await git(repo.root, ["diff", ...DIFF, `${base}...${head}`, ...paths(what.path, what.from)], opts);
+      const base = await checkRef(repo, what.base);
+      const head = what.head ? await checkRef(repo, what.head) : "HEAD";
+      ran = await git(repo, ["diff", ...DIFF, `${base}...${head}`, ...paths(what.path, what.from)], opts);
       break;
     }
     case "stash":
-      ran = await git(repo.root, ["stash", "show", "-p", "--include-untracked", ...DIFF, checkStash(what.stash)], { ...opts, ok: [1] });
+      ran = await git(repo, ["stash", "show", "-p", "--include-untracked", ...DIFF, checkStash(what.stash)], { ...opts, ok: [1] });
       break;
   }
   return { diff: ran.stdout, truncated: ran.cut };
@@ -535,14 +558,14 @@ export function serial<T>(repo: Repo, step: () => Promise<T>): Promise<T> {
 }
 
 async function hasHead(repo: Repo): Promise<boolean> {
-  const { code } = await git(repo.root, ["rev-parse", "-q", "--verify", "HEAD"], { ok: [1] });
+  const { code } = await git(repo, ["rev-parse", "-q", "--verify", "HEAD"], { ok: [1] });
   return code === 0;
 }
 
 export async function stage(repo: Repo, paths: unknown, all = false): Promise<void> {
   const list = all ? [] : checkPaths(paths);
   return serial(repo, async () => {
-    await git(repo.root, ["add", "-A", ...(all ? [] : ["--", ...list.map(literal)])], { writes: true });
+    await git(repo, ["add", "-A", ...(all ? [] : ["--", ...list.map(literal)])], { writes: true });
   });
 }
 
@@ -551,8 +574,8 @@ export async function unstage(repo: Repo, paths: unknown, all = false): Promise<
   return serial(repo, async () => {
     const which = all ? ["."] : list.map(literal);
     // Before the first commit there is no HEAD to put the index back to.
-    if (await hasHead(repo)) await git(repo.root, ["reset", "-q", "--", ...which], { writes: true });
-    else await git(repo.root, ["rm", "--cached", "-r", "-q", "--", ...which], { writes: true });
+    if (await hasHead(repo)) await git(repo, ["reset", "-q", "--", ...which], { writes: true });
+    else await git(repo, ["rm", "--cached", "-r", "-q", "--", ...which], { writes: true });
   });
 }
 
@@ -563,12 +586,12 @@ export async function unstage(repo: Repo, paths: unknown, all = false): Promise<
 export async function discard(repo: Repo, paths: unknown): Promise<void> {
   const list = checkPaths(paths);
   return serial(repo, async () => {
-    const { stdout } = await git(repo.root, ["ls-files", "-z", "--others", "--exclude-standard", "--", ...list.map(literal)]);
+    const { stdout } = await git(repo, ["ls-files", "-z", "--others", "--exclude-standard", "--", ...list.map(literal)]);
     const untracked = new Set(stdout.split("\0").filter(Boolean));
     const fresh = list.filter((p) => untracked.has(p));
     const tracked = list.filter((p) => !untracked.has(p));
-    if (tracked.length) await git(repo.root, ["checkout", "-q", "--", ...tracked.map(literal)], { writes: true });
-    if (fresh.length) await git(repo.root, ["clean", "-f", "-q", "--", ...fresh.map(literal)], { writes: true });
+    if (tracked.length) await git(repo, ["checkout", "-q", "--", ...tracked.map(literal)], { writes: true });
+    if (fresh.length) await git(repo, ["clean", "-f", "-q", "--", ...fresh.map(literal)], { writes: true });
   });
 }
 
@@ -578,11 +601,11 @@ export async function commit(repo: Repo, message: unknown, amend = false): Promi
   return serial(repo, async () => {
     // Whitespace only: "strip" takes every line that starts with "#" as a
     // comment, and "#42 fix login" is a message, not a comment.
-    await git(repo.root, ["commit", "--cleanup=whitespace", ...(amend ? ["--amend"] : []), ...(text ? ["-F", "-"] : ["--no-edit"])], {
+    await git(repo, ["commit", "--cleanup=whitespace", ...(amend ? ["--amend"] : []), ...(text ? ["-F", "-"] : ["--no-edit"])], {
       input: text,
       writes: true,
     });
-    const { stdout } = await git(repo.root, ["rev-parse", "HEAD"]);
+    const { stdout } = await git(repo, ["rev-parse", "HEAD"]);
     return { sha: stdout.trim() };
   });
 }
@@ -592,7 +615,7 @@ export async function abortOperation(repo: Repo): Promise<void> {
   return serial(repo, async () => {
     const operation = operationIn(repo.gitDir);
     if (!operation) throw new GitError(409, "Nothing is in progress");
-    await git(repo.root, [operation, "--abort"], { writes: true });
+    await git(repo, [operation, "--abort"], { writes: true });
   });
 }
 
@@ -601,8 +624,8 @@ export async function continueOperation(repo: Repo): Promise<void> {
   return serial(repo, async () => {
     const operation = operationIn(repo.gitDir);
     if (!operation) throw new GitError(409, "Nothing is in progress");
-    if (operation === "merge") await git(repo.root, ["commit", "--no-edit"], { writes: true });
-    else await git(repo.root, [operation, "--continue"], { writes: true });
+    if (operation === "merge") await git(repo, ["commit", "--no-edit"], { writes: true });
+    else await git(repo, [operation, "--continue"], { writes: true });
   });
 }
 
@@ -647,8 +670,8 @@ export async function log(repo: Repo, opts: { ref?: unknown; skip?: number; limi
   if (!(await hasHead(repo)) && !opts.ref) return [];
   const limit = Math.min(Math.max(1, opts.limit ?? 100), 500);
   const skip = Math.max(0, opts.skip ?? 0);
-  const from = opts.range ?? (opts.ref ? await checkRef(repo.root, opts.ref) : "HEAD");
-  const { stdout } = await git(repo.root, [
+  const from = opts.range ?? (opts.ref ? await checkRef(repo, opts.ref) : "HEAD");
+  const { stdout } = await git(repo, [
     "log",
     `--format=${LOG_FORMAT}`,
     "--decorate=short",
@@ -693,8 +716,8 @@ export function parseNameStatus(raw: string, counts: Map<string, Counts>): FileC
 
 async function filesBetween(repo: Repo, from: string, to: string): Promise<FileChange[]> {
   const [names, nums] = await Promise.all([
-    git(repo.root, ["diff", "--name-status", "-z", ...DIFF, from, to]),
-    git(repo.root, ["diff", "--numstat", "-z", ...DIFF, from, to]),
+    git(repo, ["diff", "--name-status", "-z", ...DIFF, from, to]),
+    git(repo, ["diff", "--numstat", "-z", ...DIFF, from, to]),
   ]);
   return parseNameStatus(names.stdout, parseNumstat(nums.stdout)).slice(0, MAX_FILES);
 }
@@ -708,7 +731,7 @@ export interface CommitDetail extends Commit {
 
 export async function commitDetail(repo: Repo, shaIn: unknown): Promise<CommitDetail> {
   const sha = checkSha(shaIn);
-  const { stdout } = await git(repo.root, ["show", "-s", `--format=${LOG_FORMAT.replace("%x1e", "")}%x1f%cn%x1f%B`, "--decorate=short", "--end-of-options", sha]).catch(() => {
+  const { stdout } = await git(repo, ["show", "-s", `--format=${LOG_FORMAT.replace("%x1e", "")}%x1f%cn%x1f%B`, "--decorate=short", "--end-of-options", sha]).catch(() => {
     throw new GitError(404, "No such commit");
   });
   const fields = stdout.split("\x1f");
@@ -759,7 +782,7 @@ export function parseBranches(raw: string): Branch[] {
 }
 
 export async function branches(repo: Repo): Promise<Branch[]> {
-  const { stdout } = await git(repo.root, [
+  const { stdout } = await git(repo, [
     "for-each-ref",
     "--sort=-committerdate",
     "--format=%(refname)%1f%(refname:short)%1f%(objectname:short)%1f%(upstream:short)%1f%(upstream:track,nobracket)%1f%(HEAD)%1f%(committerdate:unix)%1f%(contents:subject)",
@@ -775,28 +798,28 @@ export async function branches(repo: Repo): Promise<Branch[]> {
  */
 export async function switchBranch(repo: Repo, nameIn: unknown, remote = false): Promise<void> {
   return serial(repo, async () => {
-    const name = await checkRef(repo.root, nameIn);
-    if (!remote) return void (await git(repo.root, ["switch", name], { writes: true }));
+    const name = await checkRef(repo, nameIn);
+    if (!remote) return void (await git(repo, ["switch", name], { writes: true }));
     const local = name.split("/").slice(1).join("/");
     if (!local) throw new GitError(400, "Not a remote branch");
-    const { code } = await git(repo.root, ["rev-parse", "-q", "--verify", `refs/heads/${local}`], { ok: [1] });
-    if (code === 0) await git(repo.root, ["switch", local], { writes: true });
-    else await git(repo.root, ["switch", "-c", local, "--track", name], { writes: true });
+    const { code } = await git(repo, ["rev-parse", "-q", "--verify", `refs/heads/${local}`], { ok: [1] });
+    if (code === 0) await git(repo, ["switch", local], { writes: true });
+    else await git(repo, ["switch", "-c", local, "--track", name], { writes: true });
   });
 }
 
 export async function createBranch(repo: Repo, nameIn: unknown, fromIn?: unknown): Promise<void> {
   return serial(repo, async () => {
-    const name = await checkRef(repo.root, nameIn, "branch");
-    const from = fromIn ? await checkRef(repo.root, fromIn) : undefined;
-    await git(repo.root, ["switch", "-c", name, ...(from ? [from] : [])], { writes: true });
+    const name = await checkRef(repo, nameIn, "branch");
+    const from = fromIn ? await checkRef(repo, fromIn) : undefined;
+    await git(repo, ["switch", "-c", name, ...(from ? [from] : [])], { writes: true });
   });
 }
 
 export async function deleteBranch(repo: Repo, nameIn: unknown, force = false): Promise<void> {
   return serial(repo, async () => {
-    const name = await checkRef(repo.root, nameIn, "branch");
-    await git(repo.root, ["branch", force ? "-D" : "-d", name], { writes: true });
+    const name = await checkRef(repo, nameIn, "branch");
+    await git(repo, ["branch", force ? "-D" : "-d", name], { writes: true });
   });
 }
 
@@ -804,7 +827,7 @@ export async function deleteBranch(repo: Repo, nameIn: unknown, force = false): 
 
 export async function fetch(repo: Repo): Promise<string> {
   return serial(repo, async () => {
-    const { stdout, stderr } = await git(repo.root, ["fetch", "--all", "--prune"], { writes: true });
+    const { stdout, stderr } = await git(repo, ["fetch", "--all", "--prune"], { writes: true });
     return said(stderr) || said(stdout);
   });
 }
@@ -812,7 +835,7 @@ export async function fetch(repo: Repo): Promise<string> {
 /** Only a fast-forward: a pull that would merge or rebase is something to decide, and the page says why it stopped. */
 export async function pull(repo: Repo): Promise<string> {
   return serial(repo, async () => {
-    const { stdout, stderr } = await git(repo.root, ["pull", "--ff-only"], { writes: true });
+    const { stdout, stderr } = await git(repo, ["pull", "--ff-only"], { writes: true });
     return said(stdout) || said(stderr);
   });
 }
@@ -831,9 +854,9 @@ async function pushRemote(repo: Repo): Promise<string> {
  */
 export async function push(repo: Repo): Promise<string> {
   return serial(repo, async () => {
-    const { stdout: upstream } = await git(repo.root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], { ok: [128] });
+    const { stdout: upstream } = await git(repo, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], { ok: [128] });
     const args = upstream.trim() ? ["push"] : ["push", "-u", await pushRemote(repo), "HEAD"];
-    const { stdout, stderr } = await git(repo.root, args, { writes: true });
+    const { stdout, stderr } = await git(repo, args, { writes: true });
     return said(stderr) || said(stdout);
   });
 }
@@ -842,6 +865,8 @@ export async function push(repo: Repo): Promise<string> {
 
 export interface Stash {
   ref: string;
+  /** The stash's own commit: what an action on `ref` checks it still is. */
+  sha: string;
   date: number;
   message: string;
 }
@@ -852,27 +877,36 @@ function checkStash(ref: unknown): string {
 }
 
 export async function stashes(repo: Repo): Promise<Stash[]> {
-  const { stdout } = await git(repo.root, ["stash", "list", "--format=%gd%x1f%ct%x1f%gs"]);
+  const { stdout } = await git(repo, ["stash", "list", "--format=%gd%x1f%H%x1f%ct%x1f%gs"]);
   return stdout
     .split("\n")
     .filter(Boolean)
     .map((line) => {
-      const [ref, date, message] = line.split("\x1f");
-      return { ref, date: Number(date), message: message ?? "" };
+      const [ref, sha, date, message] = line.split("\x1f");
+      return { ref, sha, date: Number(date), message: message ?? "" };
     });
 }
 
 export async function stashPush(repo: Repo, message?: unknown): Promise<void> {
   return serial(repo, async () => {
     const text = typeof message === "string" ? message.trim().slice(0, 500) : "";
-    await git(repo.root, ["stash", "push", "--include-untracked", ...(text ? ["-m", text] : [])], { writes: true });
+    await git(repo, ["stash", "push", "--include-untracked", ...(text ? ["-m", text] : [])], { writes: true });
   });
 }
 
-export async function stashDo(repo: Repo, action: "apply" | "pop" | "drop", ref: unknown): Promise<void> {
+/**
+ * Apply, pop or drop a stash. `stash@{0}` is a place in a list, not a stash:
+ * after the agent popped one and pushed another the same place holds another
+ * stash, and a list read before that would drop the wrong one for good. So the
+ * page says which stash it means, and nothing is done when that is not it.
+ */
+export async function stashDo(repo: Repo, action: "apply" | "pop" | "drop", ref: unknown, sha: unknown): Promise<void> {
   const stash = checkStash(ref);
+  const meant = checkSha(sha);
   return serial(repo, async () => {
-    await git(repo.root, ["stash", action, stash], { writes: true });
+    const { stdout } = await git(repo, ["rev-parse", "-q", "--verify", `${stash}^{commit}`], { ok: [1] });
+    if (!stdout.trim().startsWith(meant.toLowerCase())) throw new GitError(409, "The stashes changed since this list was read — look again");
+    await git(repo, ["stash", action, stash], { writes: true });
   });
 }
 
@@ -884,8 +918,8 @@ export async function stashDo(repo: Repo, action: "apply" | "pop" | "drop", ref:
  * compared with its upstream — what would go out on the next push.
  */
 export async function defaultBase(repo: Repo, current: string | null): Promise<string | null> {
-  const has = async (ref: string) => (await git(repo.root, ["rev-parse", "-q", "--verify", `${ref}^{commit}`], { ok: [1] })).code === 0;
-  const { stdout } = await git(repo.root, ["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], { ok: [1] });
+  const has = async (ref: string) => (await git(repo, ["rev-parse", "-q", "--verify", `${ref}^{commit}`], { ok: [1] })).code === 0;
+  const { stdout } = await git(repo, ["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], { ok: [1] });
   const candidates = [stdout.trim(), "origin/main", "origin/master", "main", "master"].filter(Boolean);
   for (const ref of candidates) {
     if (ref === current || !(await has(ref))) continue;
@@ -905,11 +939,11 @@ export interface Comparison {
 
 export async function compare(repo: Repo, baseIn?: unknown): Promise<Comparison | null> {
   if (!(await hasHead(repo))) return null;
-  const { stdout: branchOut } = await git(repo.root, ["symbolic-ref", "-q", "--short", "HEAD"], { ok: [1] });
+  const { stdout: branchOut } = await git(repo, ["symbolic-ref", "-q", "--short", "HEAD"], { ok: [1] });
   const head = branchOut.trim() || "HEAD";
-  const base = baseIn ? await checkRef(repo.root, baseIn) : await defaultBase(repo, branchOut.trim() || null);
+  const base = baseIn ? await checkRef(repo, baseIn) : await defaultBase(repo, branchOut.trim() || null);
   if (!base) return null;
-  const { stdout, code } = await git(repo.root, ["merge-base", "--end-of-options", base, "HEAD"], { ok: [1] });
+  const { stdout, code } = await git(repo, ["merge-base", "--end-of-options", base, "HEAD"], { ok: [1] });
   if (code !== 0) throw new GitError(409, `${base} and ${head} have nothing in common`);
   const mergeBase = stdout.trim();
   const [commits, files] = await Promise.all([log(repo, { range: `${base}..HEAD`, limit: 250 }), filesBetween(repo, mergeBase, "HEAD")]);
@@ -1012,8 +1046,8 @@ export async function createPull(repo: Repo, opts: { title?: unknown; body?: unk
   const title = typeof opts.title === "string" ? opts.title.trim() : "";
   if (!title) throw new GitError(400, "A pull request needs a title");
   const body = typeof opts.body === "string" ? opts.body : "";
-  const base = opts.base ? await checkRef(repo.root, opts.base) : undefined;
-  const { stdout: branchOut } = await git(repo.root, ["symbolic-ref", "-q", "--short", "HEAD"], { ok: [1] });
+  const base = opts.base ? await checkRef(repo, opts.base) : undefined;
+  const { stdout: branchOut } = await git(repo, ["symbolic-ref", "-q", "--short", "HEAD"], { ok: [1] });
   const branch = branchOut.trim();
   if (!branch) throw new GitError(409, "Check out a branch first: a detached HEAD has nothing to open a pull request from");
   await push(repo);
