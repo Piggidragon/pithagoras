@@ -52,6 +52,7 @@ import { MARKER, clearFinished, listJobs, readOutput, stopJob } from "./backgrou
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
+import { holdDataDir } from "./instance-lock.js";
 import { pinConnection } from "./api/browser.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -1379,12 +1380,19 @@ const tls =
     ? { cert: readFileSync(tlsCert), key: readFileSync(tlsKey) }
     : null;
 
+// Before anything below touches the database: see holdDataDir.
+const DATA_DIR = process.env.DATA_DIR || "./data";
+if (!holdDataDir(DATA_DIR)) {
+  console.error(`pithagoras is already running on ${path.resolve(DATA_DIR)}. Not starting a second one.`);
+  process.exit(1);
+}
+
 const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).listen(
   PORT,
   bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN),
   () => {
-  // Only now: until the port is its own, this may be a second server, and the
-  // chats it would call interrupted are the first one's, still running.
+  // Only once it is up: a server that fails on the port is not starting, and
+  // has no business settling what the last one left.
   sessions.recoverOrphans();
   getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
   pinConnection();
@@ -1425,7 +1433,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
 
 server.on("error", (e: NodeJS.ErrnoException) => {
   if (e.code !== "EADDRINUSE") throw e;
-  console.error(`pithagoras is already running on :${PORT}, or something else holds that port. Not starting a second one.`);
+  console.error(`Port ${PORT} is already in use. Set PORT to a free one.`);
   process.exit(1);
 });
 attachBrowserUpgrade(server);

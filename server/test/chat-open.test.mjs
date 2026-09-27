@@ -1,20 +1,15 @@
-import { test, after, before } from "node:test";
+import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
 
 /**
  * Opening a chat, against the whole server: what the page asks for first, and
  * what it keeps open.
  */
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-open-"));
+const home = testHome("pithagoras-open-");
 const agentDir = path.join(home, "agent");
-mkdirSync(agentDir, { recursive: true });
-mkdirSync(path.join(home, "agent-home"), { recursive: true });
 const map = (on) => Object.fromEntries(["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((l) => [l, on.includes(l) ? l : null]));
 writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({
   providers: {
@@ -34,40 +29,14 @@ writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({
   },
 }));
 
-const freePort = () => new Promise((resolve) => {
-  const s = createServer().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
-});
-
 // The server's database, to set what its rows say where no route does.
 process.env.DATA_DIR = home;
 const db = await import("../dist/db.js");
 
-let server;
 let base;
 before(async () => {
-  const port = await freePort();
-  base = `http://127.0.0.1:${port}`;
-  server = spawn(process.execPath, [fileURLToPath(new URL("../dist/index.js", import.meta.url))], {
-    env: {
-      ...process.env,
-      PORT: String(port), DATA_DIR: home, BIN_DIR: path.join(home, "bin"), SESSION_DIR: path.join(home, "sessions"), CHANNELS_DIR: path.join(home, "channels"),
-      AGENT_HOME: path.join(home, "agent-home"), WORKSPACE_ROOT: path.join(home, "ws"), PI_CODING_AGENT_DIR: agentDir,
-      PORTAL_PASSWORD: "", PORTAL_ALLOW_NO_PASSWORD: "1", EXECUTOR: "host", LLAMA_BASE_URL: "http://127.0.0.1:1",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let log = "";
-  server.stdout.on("data", (d) => { log += d; });
-  server.stderr.on("data", (d) => { log += d; });
-  for (let i = 0; ; i++) {
-    try {
-      if ((await fetch(`${base}/api/auth/status`)).ok) break;
-    } catch { /* not up yet */ }
-    if (i > 200) throw new Error(`the server did not start:\n${log}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  ({ base } = await startServer(serverEnv(home, await freePort())));
 });
-after(() => server?.kill());
 
 const json = async (url, init) => {
   const res = await fetch(base + url, { ...init, headers: { "Content-Type": "application/json" } });
