@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const NEAR_END = 48;
 /** At the end, not near it: where a box whose content shrank is put back. */
 const AT_END = 2;
+/** How long, in ms, a press on something that opens holds it where it was (see below). */
+export const HOLD = 1000;
 
 const distance = (el: { scrollHeight: number; scrollTop: number; clientHeight: number }) => el.scrollHeight - el.scrollTop - el.clientHeight;
 
@@ -41,6 +43,12 @@ export function atEnd(el: { scrollHeight: number; scrollTop: number; clientHeigh
  * box still follows is where that leaves it. Only then: a press on Copy in
  * the reply being written, which grows with every word, is not an opening.
  *
+ * While it follows, the browser does not hold the content in view itself
+ * (`overflow-anchor`): the oldest message dropped from the top of a long
+ * conversation as a new one arrives moved the box up by as much, which read as
+ * the person scrolling back, and following stopped on its own. Reading back, it
+ * does, so what settles above does not move what is read.
+ *
  * The jump is instant. A smooth one fires scroll events on its way that read as
  * the person leaving the end, and it ends up fighting them.
  *
@@ -54,16 +62,27 @@ export function atEnd(el: { scrollHeight: number; scrollTop: number; clientHeigh
 export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: () => boolean } = {}) {
   const ref = useRef<T | null>(null);
   const [node, setNode] = useState<T | null>(null);
-  const attach = useCallback((el: T | null) => {
-    ref.current = el;
-    setNode(el);
-  }, []);
   const following = useRef(true);
   // Where the box was last seen, to tell up from down.
   const top = useRef(0);
-  // The same, for drawing: whether to offer a way back to the end. Kept apart
-  // from the ref, which is read on every update and must not wait for a render.
+  // Whether to offer a way back to the end, for drawing. Kept apart from
+  // `following`, which is read on every update and must not wait for a render.
   const [away, setAway] = useState(false);
+  /** Following or not, and the browser's own anchoring off while it does (see above). */
+  const follows = useCallback((yes: boolean) => {
+    following.current = yes;
+    if (ref.current) ref.current.style.overflowAnchor = yes ? "none" : "";
+  }, []);
+  const attach = useCallback(
+    (el: T | null) => {
+      ref.current = el;
+      // Another element starts from where it is, not where the last one was.
+      if (el) top.current = el.scrollTop;
+      follows(following.current);
+      setNode(el);
+    },
+    [follows],
+  );
   // A button pressed in the box, for a moment: what it opens does not move it.
   const held = useRef<{ el: Element; item: Element; expanded: string | null; top: number; height: number; until: number } | null>(null);
   const isPaused = useRef(paused);
@@ -83,13 +102,13 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
   const heard = useCallback((el: HTMLElement) => {
     const left = distance(el);
     // At the very end — or put there because what was below it went away.
-    if (left <= AT_END) following.current = true;
+    if (left <= AT_END) follows(true);
     // Up, and not to the end: the person, reading back.
-    else if (el.scrollTop < top.current - 0.5) following.current = false;
+    else if (el.scrollTop < top.current - 0.5) follows(false);
     // Back down to near the end picks it up again.
-    else if (el.scrollTop > top.current + 0.5 && left <= NEAR_END) following.current = true;
+    else if (el.scrollTop > top.current + 0.5 && left <= NEAR_END) follows(true);
     top.current = el.scrollTop;
-  }, []);
+  }, [follows]);
 
   /** Wire to the box's onScroll. */
   const onScroll = useCallback(() => {
@@ -111,8 +130,8 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     for (let el = e.target instanceof Element ? e.target : null; el && el !== box; el = el.parentElement) {
       if (el.scrollTop > 0 && el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY)) return;
     }
-    following.current = false;
-  }, []);
+    follows(false);
+  }, [follows]);
 
   /**
    * Wire to the box's onPointerDown and onKeyDown: a press on something that
@@ -129,7 +148,7 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     const list = box.childElementCount === 1 ? box.firstElementChild! : box;
     let item: Element = target;
     while (item.parentElement && item.parentElement !== list && item.parentElement !== box) item = item.parentElement;
-    held.current = { el: target, item, expanded: target.getAttribute("aria-expanded"), top: target.getBoundingClientRect().top, height: item.getBoundingClientRect().height, until: performance.now() + 1000 };
+    held.current = { el: target, item, expanded: target.getAttribute("aria-expanded"), top: target.getBoundingClientRect().top, height: item.getBoundingClientRect().height, until: performance.now() + HOLD };
   }, []);
 
   /** Whatever a held button opened or closed: it stays put, and following is where that leaves it. True when it did. */
@@ -148,17 +167,17 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     const drift = h.el.getBoundingClientRect().top - h.top;
     if (Math.abs(drift) >= 1) el.scrollTop += drift;
     top.current = el.scrollTop;
-    following.current = distance(el) <= AT_END;
+    follows(distance(el) <= AT_END);
     setAway(!following.current && !atEnd(el));
     return true;
-  }, []);
+  }, [follows]);
 
   /** Call after content changed; `force` to go to the end whatever they were doing. */
   const follow = useCallback((force = false) => {
     const el = ref.current;
     if (!el) return;
     if (force) {
-      following.current = true;
+      follows(true);
       held.current = null;
     } else if (keepHeld(el)) return;
     else heard(el);
@@ -206,10 +225,10 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     const el = ref.current;
     if (!el) return;
     top.current = el.scrollTop;
-    following.current = atEnd(el);
+    follows(atEnd(el));
     if (following.current) toEnd(el);
     setAway(!following.current && !atEnd(el));
-  }, [toEnd]);
+  }, [toEnd, follows]);
 
   return { ref, attach, onScroll, onWheel, hold, follow, settle, following, away };
 }

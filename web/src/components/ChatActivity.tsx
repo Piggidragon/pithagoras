@@ -93,17 +93,7 @@ export function ThinkingBlock({
   until?: number;
 }) {
   const [open, setOpen] = useState(false);
-  // Opened while it is written, it shows the newest lines — until scrolled back
-  // to read one, which the next word must not undo: put back at the end with
-  // each word, it could not be read, nor the conversation scrolled over it.
-  const body = useFollowBottom<HTMLDivElement>();
   const now = useNow(streaming);
-  useLayoutEffect(() => {
-    if (open && streaming) body.follow(true);
-  }, [open]);
-  useLayoutEffect(() => {
-    if (open && streaming) body.follow();
-  }, [thinking]);
 
   const seconds = since ? Math.max(0, Math.round(((streaming ? now : until ?? since) - since) / 1000)) : undefined;
   const label = streaming ? "Thinking" : seconds && seconds >= 1 ? `Thought for ${formatElapsed(seconds)}` : "Thought process";
@@ -148,10 +138,33 @@ export function ThinkingBlock({
         </div>
       )}
       <Collapse open={open}>
-        <div ref={body.attach} onScroll={body.onScroll} onWheel={body.onWheel} className="chat-thinking-body">
-          {thinking}
-        </div>
+        <ThinkingBody thinking={thinking} streaming={streaming} />
       </Collapse>
+    </div>
+  );
+}
+
+/**
+ * The reasoning opened. While it is written it shows the newest lines — until
+ * scrolled back to read one, which the next word must not undo: put back at
+ * the end with each word, it could not be read, nor the conversation scrolled
+ * over it. Written, it opens at its start and stays wherever it is read.
+ *
+ * Drawn only once opened, so the reasoning of a long conversation, folded
+ * away, does not each keep watch over a box nobody sees.
+ */
+function ThinkingBody({ thinking, streaming }: { thinking: string; streaming: boolean }) {
+  const { attach, onScroll, onWheel, follow } = useFollowBottom<HTMLDivElement>({ paused: () => !streaming });
+  // Opened while it is written — or written to again, open: from its newest line.
+  useLayoutEffect(() => {
+    if (streaming) follow(true);
+  }, [streaming, follow]);
+  useLayoutEffect(() => {
+    if (streaming) follow();
+  }, [thinking, streaming, follow]);
+  return (
+    <div ref={attach} onScroll={onScroll} onWheel={onWheel} className="chat-thinking-body">
+      {thinking}
     </div>
   );
 }

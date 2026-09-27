@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { HOLD } from '../../web/src/use-follow-bottom';
 
 const scroller = (page: Page) => page.locator('.chat-list').locator('..');
 /** How far the conversation is from its end, in px. */
@@ -96,9 +97,52 @@ test('a reasoning block opened in the middle of the conversation while the model
   await expect(page.locator('.chat-thinking').nth(2).locator('.chat-thinking-body')).toBeVisible();
   for (let i = 0; i < 10; i++) await thinkDrawn(page);
   // Past the moment a press holds it: the words that came since have not moved it either.
-  await page.waitForTimeout(1100);
+  await page.waitForTimeout(HOLD + 200);
   for (let i = 0; i < 4; i++) await thinkDrawn(page);
   expect(Math.abs((await head.boundingBox())!.y - before.y)).toBeLessThan(2);
+});
+
+test('a finished reasoning opens at its start, and stays where it is read', async ({ page }) => {
+  const head = page.locator('.chat-thinking-head').nth(2);
+  await head.scrollIntoViewIfNeeded();
+  await head.click();
+  const body = page.locator('.chat-thinking').nth(2).locator('.chat-thinking-body');
+  await expect(body).toBeVisible();
+  await expect.poll(() => body.evaluate((el) => el.scrollHeight > el.clientHeight + 100)).toBe(true);
+  await frames(page);
+  // It opened at its first line, not its last.
+  expect(await body.evaluate((el) => el.scrollTop)).toBe(0);
+  // Read a little way down, then the window narrows and the lines wrap anew: still there, not at the end.
+  await body.evaluate((el) => (el.scrollTop = 40));
+  await frames(page);
+  await page.setViewportSize({ width: 700, height: 600 });
+  await frames(page);
+  await frames(page);
+  expect(await body.evaluate((el) => el.scrollTop)).toBe(40);
+});
+
+test('a long conversation, more than is drawn at once, keeps following as its oldest messages leave the top', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=reasoning&turns=20');
+  await expect(page.getByText('And the last one?')).toBeVisible();
+  await frames(page);
+  expect(await left(page)).toBeLessThanOrEqual(1);
+  // A command it runs is a message of its own: the oldest one drawn leaves the top, and the browser
+  // moved the box up by as much to keep what was on screen — read as the person scrolling back.
+  const oldest = () => page.locator('.chat-list > *').nth(1).textContent();
+  const before = await oldest();
+  await page.evaluate(() => (window as any).emit('tool_execution_start', { toolCallId: 'n1', toolName: 'bash', args: { command: 'ls dist' } }));
+  await expect(page.locator('.chat-tool-head', { hasText: 'ls dist' })).toBeVisible();
+  await frames(page);
+  expect(await oldest()).not.toBe(before);
+  expect(await left(page)).toBeLessThanOrEqual(1);
+  await expect(page.getByRole('button', { name: 'Latest output' })).toBeHidden();
+  for (let i = 2; i < 5; i++) {
+    await page.evaluate((i) => (window as any).emit('tool_execution_start', { toolCallId: `n${i}`, toolName: 'bash', args: { command: `ls dist/${i}` } }), i);
+    await frames(page);
+  }
+  await expect(page.locator('.chat-tool-head', { hasText: 'ls dist/4' })).toBeVisible();
+  await frames(page);
+  expect(await left(page)).toBeLessThanOrEqual(1);
 });
 
 test('what a message had attached, opened at the end, stays where it was pressed', async ({ page }) => {

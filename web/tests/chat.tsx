@@ -79,8 +79,9 @@ if (phase === 'stream') events.push(
   ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta: 'The last step' } }, 1),
 );
 // A long conversation whose replies each thought at length, and a model thinking now: `window.think(text)` adds to it.
+// `&turns=` for how many came before; enough of them are more than the chat draws at once.
 if (phase === 'reasoning') events.push(
-  ...Array.from({ length: 6 }, (_, i) => [
+  ...Array.from({ length: Number(new URLSearchParams(location.search).get('turns') ?? 6) }, (_, i) => [
     ev('portal_prompt', { message: `Question ${i + 1}: what does step ${i + 1} of the build do?` }, 50 - i * 5),
     ev('message_end', { message: { role: 'assistant', content: [
       { type: 'thinking', thinking: Array.from({ length: 30 }, (_, j) => `Reasoning ${i + 1}.${j + 1}: step ${i + 1} reads the files, so I should check what it reads first.`).join('\n') },
@@ -224,6 +225,8 @@ function Fixture() {
   // More of the running command's output, all of it so far.
   (window as any).bashOut = (text: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'tool_execution_update', at: Date.now(), payload: { toolCallId: 'b3', partialResult: { content: [{ type: 'text', text }] } } }]);
   (window as any).say = (delta: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'message_update', at: Date.now(), payload: { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta } } }]);
+  // Any event, as the server would send it: a tool call starting is a message of its own.
+  (window as any).emit = (type: string, payload: any) => setShownEvents((list) => [...list, { seq: ++seq, type, at: Date.now(), payload }]);
   (window as any).fillBox = (text: string) => fillFrom(session.id, { seq: -now * 1000 - 20, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text } });
   React.useEffect(() => {
     if (phase !== 'nudge') return;
