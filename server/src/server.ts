@@ -1383,6 +1383,20 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   PORT,
   bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN),
   () => {
+  // Only now: until the port is its own, this may be a second server, and the
+  // chats it would call interrupted are the first one's, still running.
+  sessions.recoverOrphans();
+  getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
+  pinConnection();
+  // Keeps the agent's browser rendering when nobody has the panel open.
+  watchBrowserFrames();
+  // Reports how far llama.cpp has got through a prompt, which is otherwise a
+  // silent minute or two before the first token.
+  startLlamaProxy(
+    (sessionId, prefill) => sessions.reportPrefill(sessionId, prefill),
+    (sessionId, load) => sessions.reportModelLoad(sessionId, load),
+  );
+
   console.log(`pithagoras listening on :${PORT}${tls ? " (https)" : ""}`);
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
@@ -1409,18 +1423,12 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   }
 );
 
+server.on("error", (e: NodeJS.ErrnoException) => {
+  if (e.code !== "EADDRINUSE") throw e;
+  console.error(`pithagoras is already running on :${PORT}, or something else holds that port. Not starting a second one.`);
+  process.exit(1);
+});
 attachBrowserUpgrade(server);
-// Keeps the agent's browser rendering when nobody has the panel open.
-watchBrowserFrames();
-// Reports how far llama.cpp has got through a prompt, which is otherwise a
-// silent minute or two before the first token.
-startLlamaProxy(
-  (sessionId, prefill) => sessions.reportPrefill(sessionId, prefill),
-  (sessionId, load) => sessions.reportModelLoad(sessionId, load),
-);
-sessions.recoverOrphans();
-getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
-pinConnection();
 
 async function shutdown(signal: string) {
   console.log(`${signal} received — stopping running sessions`);
