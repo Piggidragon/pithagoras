@@ -33,9 +33,19 @@ function fakeSession() {
       this.setActiveToolsByName([...session.active, name]);
     },
     async reload() {
+      // A new runner, bound as pi binds one, before the tools are refreshed.
+      session._bindExtensionCore({ runtime: {} });
       this.setActiveToolsByName([...session.active, ...session.extension]);
     },
+    /** What every extension's `pi.getActiveTools()` / `pi.setActiveTools()` goes through. */
+    _extensionRunner: null,
+    _bindExtensionCore(runner) {
+      runner.runtime.getActiveTools = () => session.getActiveToolNames();
+      runner.runtime.setActiveTools = (names) => session.setActiveToolsByName(names);
+      session._extensionRunner = runner;
+    },
   };
+  session._bindExtensionCore({ runtime: {} });
   return session;
 }
 
@@ -111,16 +121,27 @@ test("a tool switched off stays listed, and can come back, after pi refreshes it
   assert.ok(session.active.includes("web_search"));
 });
 
-test("an extension narrowing the tools is taken at its word, switched-off ones included", async () => {
+test("an extension narrowing the tools is taken at its word about what it could see; what is switched off stays the switch's", async () => {
   const session = fakeSession();
   const c = client(session);
   await c.setToolsOff(["web_search"]);
-  // `ctx.setActiveTools(["read", "grep"])`, a plan mode: bash and the rest are
-  // dropped on purpose, and so is web_search.
+  // `pi.setActiveTools(["read", "grep"])`, a plan mode: bash and the rest are
+  // dropped on purpose. web_search was not in what it could see, so it said
+  // nothing about it: off while switched off, on once switched on.
+  session._extensionRunner.runtime.setActiveTools(["read", "grep"]);
+  assert.deepEqual([...session.active].sort(), ["grep", "read"]);
+  assert.equal((await c.getTools()).find((t) => t.name === "web_search")?.enabled, false);
+  await c.setToolsOff([]);
+  assert.deepEqual([...session.active].sort(), ["grep", "read", "web_search"]);
+});
+
+test("a narrowing that is pi's own, not an extension's, means what it says", async () => {
+  const session = fakeSession();
+  const c = client(session);
+  await c.setToolsOff(["web_search"]);
   session.setActiveToolsByName(["read", "grep"]);
   await c.setToolsOff([]);
   assert.deepEqual([...session.active].sort(), ["grep", "read"]);
-  assert.ok(!(await c.getTools()).some((t) => t.name === "web_search"));
 });
 
 test("a switched-off tool whose extension is gone is not wanted any more", async () => {
@@ -135,4 +156,50 @@ test("a switched-off tool whose extension is gone is not wanted any more", async
   session.registry.push("web_search");
   await c.setToolsOff([]);
   assert.ok(!session.active.includes("web_search"));
+});
+
+test("an extension taking its own tools out of the set leaves what was switched off switchable", async () => {
+  // pi-goal-x on session start: `setActiveTools(getActiveTools() minus its goal
+  // tools)`. The switches were applied before it ran, so what it was shown had
+  // no web_search in it — it said nothing about web_search. Taken as a
+  // narrowing, web_search dropped out of the list for good: switched off before
+  // the first message, it could not be switched back on in that chat.
+  const session = fakeSession();
+  const c = client(session);
+  session.register("goal_get");
+  session.register("goal_set");
+  await c.setToolsOff(["web_search"]);
+  const pi = () => session._extensionRunner.runtime;
+  pi().setActiveTools(pi().getActiveTools().filter((name) => !name.startsWith("goal_")));
+  const web = (await c.getTools()).find((t) => t.name === "web_search");
+  assert.ok(web, "web_search is still offered");
+  assert.equal(web.enabled, false);
+  assert.ok(!session.active.includes("goal_get"), "what the extension took out stays out");
+  await c.setToolsOff([]);
+  assert.ok(session.active.includes("web_search"));
+  assert.ok(!session.active.includes("goal_get"));
+});
+
+
+
+test("extensions are shown only what the model can call — a switched-off tool is not in it", async () => {
+  // Shown switched-off tools as active, an extension writing "use web_search
+  // for …" into the prompt told the model of a tool it could not call.
+  const session = fakeSession();
+  const c = client(session);
+  await c.setToolsOff(["web_search"]);
+  assert.ok(!session._extensionRunner.runtime.getActiveTools().includes("web_search"));
+});
+
+test("after a reload an extension's list still leaves what is switched off switchable", async () => {
+  const session = fakeSession();
+  const c = client(session);
+  await c.setToolsOff(["web_search"]);
+  await c.reload();
+  const pi = session._extensionRunner.runtime;
+  pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "bash"));
+  assert.equal((await c.getTools()).find((t) => t.name === "web_search")?.enabled, false);
+  await c.setToolsOff([]);
+  assert.ok(session.active.includes("web_search"));
+  assert.ok(!session.active.includes("bash"));
 });

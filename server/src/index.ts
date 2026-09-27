@@ -40,6 +40,7 @@ import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
 import { routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
+import { gitRouter } from "./api/git.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
@@ -728,10 +729,9 @@ app.put("/api/sessions/:id/draft", (req, res) => {
 /**
  * The tools this conversation could use, and which of them are on.
  *
- * Only a running session can answer: pi builds the registry when it starts,
- * and what an extension registered is not knowable before that. A conversation
- * that is idle says so, and the page offers to wake it rather than showing an
- * empty list as though there were no tools.
+ * A running session answers from pi's registry. One that is not running —
+ * not started yet, or gone idle — from what the portal has seen registered,
+ * marked `live: false`: what is switched there is kept for when it starts.
  */
 /**
  * A container session reaches pi over RPC, which has no tool registry to ask
@@ -1162,6 +1162,7 @@ app.use("/api", channelsRouter());
 app.use("/api", routinesRouter());
 app.use("/api", skillsRouter());
 app.use("/api", filesRouter());
+app.use("/api", gitRouter());
 app.use("/api", mcpRouter());
 app.use("/api", providersRouter());
 app.use("/api", peopleRouter());

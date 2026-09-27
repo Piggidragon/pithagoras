@@ -915,8 +915,58 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       this.wanted = new Set();
     }
     session.setActiveToolsByName = (names: string[]) => {
-      this.wanted = new Set([...names, ...this.heldBack(session, names)]);
+      this.wanted = new Set([...names, ...this.heldBack(session, names, this.fromExtension)]);
       original(names.filter((name) => !this.switchedOff.has(name)));
+    };
+    this.hearExtensions(session);
+  }
+
+  /** True while an extension's `setActiveTools` is being carried out. */
+  private fromExtension = false;
+
+  /**
+   * Tell an extension's list of tools from pi's own.
+   *
+   * An extension is shown what is active — what the model is — so a switched-off
+   * tool is not in anything it reads, and whatever it writes into a prompt names
+   * only tools the model can call. So a list it sets says nothing about
+   * switched-off tools: pi-goal-x, on session start, sets what is active less
+   * its goal tools, and taken as a narrowing that dropped every switched-off
+   * tool from the chat's list for good — one switched off before the first
+   * message could not be switched on again. What is switched off is the
+   * switch's to decide: kept, and on again when it is switched on.
+   *
+   * Which also means an extension cannot hide a tool that is switched off: a
+   * list without it may be "not this one" or "one I could not see", and there
+   * is no telling the two apart. Switched on again, it is on — even where the
+   * extension, pi-goal-x with no goal set, would have kept its own tool
+   * hidden. That takes somebody switching it on on purpose; the other reading
+   * lost switched-off tools from the chat for good.
+   *
+   * Extensions reach pi through the runtime every extension API shares, which
+   * pi fills when it binds a runner — at start, and a new one on every reload.
+   */
+  private hearExtensions(session: any): void {
+    const hear = (runner: any) => {
+      const runtime = runner?.runtime;
+      if (!runtime || typeof runtime.setActiveTools !== "function") return;
+      const set = runtime.setActiveTools;
+      runtime.setActiveTools = (names: string[]) => {
+        this.fromExtension = true;
+        try {
+          return set(names);
+        } finally {
+          this.fromExtension = false;
+        }
+      };
+    };
+    hear(session._extensionRunner);
+    if (typeof session._bindExtensionCore !== "function") return;
+    const bind = session._bindExtensionCore.bind(session);
+    session._bindExtensionCore = (runner: any, ...rest: unknown[]) => {
+      const bound = bind(runner, ...rest);
+      hear(runner);
+      return bound;
     };
   }
 
@@ -928,11 +978,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * already thinned. Taken as it came, every refresh dropped whatever was off
    * from what pi wants: gone from the chat's list, with no way to switch it
    * back on. Such a list keeps everything that is active; one that leaves an
-   * active tool out is a choice — an extension narrowing the tools — and means
-   * what it says. Either way a tool pi no longer has, its extension unloaded,
-   * is not wanted any more.
+   * active tool out is a choice, and means what it says. An extension's list
+   * never says anything about what is switched off (hearExtensions): it keeps
+   * it. Either way a tool pi no longer has, its extension unloaded, is not
+   * wanted any more.
    */
-  private heldBack(session: any, names: string[]): string[] {
+  private heldBack(session: any, names: string[], always = false): string[] {
     let active: string[];
     let known: Set<string>;
     try {
@@ -941,7 +992,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     } catch {
       return [];
     }
-    if (!active.every((name) => names.includes(name))) return [];
+    if (!always && !active.every((name) => names.includes(name))) return [];
     return [...this.wanted].filter((name) => this.switchedOff.has(name) && !names.includes(name) && known.has(name));
   }
 

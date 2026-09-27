@@ -919,7 +919,7 @@ class SessionManager extends EventEmitter {
     // before you can say "off everywhere" would be the wrong way round.
     void client
       .getTools?.()
-      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source }))))
+      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source, description: t.description }))))
       .catch(() => {
         // A session that cannot list its tools still works; the catalogue
         // simply stays as it was.
@@ -2082,20 +2082,25 @@ class SessionManager extends EventEmitter {
   /**
    * Every tool this conversation could use, and whether it is on.
    *
-   * Only a running session can list them: pi builds the registry when it
-   * starts, and what an extension registered is not knowable before that. What
-   * it reports is remembered, so the settings page can offer a default for a
-   * tool without a conversation being open.
+   * A running session lists its own: pi builds the registry when it starts.
+   * What it reports is remembered, so the settings page can offer a default
+   * for a tool without a conversation being open — and so can a chat that has
+   * not started yet. Before the first message there is no registry to ask, and
+   * "send a message first" meant the one moment somebody wants to say "not the
+   * web this time" was the one moment they could not. So an idle chat is shown
+   * what the portal has seen registered (`live: false`), and what is switched
+   * there is stored as this chat's own and handed to pi when it starts.
    */
   async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
     const client = this.live.get(sessionId)?.client;
     const listed = client?.getTools ? await client.getTools() : [];
-    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source })));
+    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source, description: t.description })));
     const defaults = toolDefaultsOff();
     const exceptions = sessionTools(sessionId);
     const servers = mcpServerNames();
+    const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : knownTools();
     return {
-      tools: listed.map((tool) => ({
+      tools: shown.map((tool) => ({
         ...tool,
         source: toolSource(tool.name, tool.source, servers),
         enabled: toolEnabled(tool.name, defaults, exceptions),

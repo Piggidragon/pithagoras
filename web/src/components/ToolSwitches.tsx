@@ -84,14 +84,23 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
         {live
           ? "No tools registered."
           : off.length
-            ? `${off.length} switched off. The rest are only listed once this conversation is running.`
-            : "Send a message first — the tools exist once pi is running."}
+            ? `${off.length} switched off. The rest are listed once a conversation has run.`
+            : "No tools seen yet — they are listed once a conversation has run."}
       </p>
     );
   }
 
   return (
     <div className="max-h-80 overflow-y-auto">
+      {/* Before the first message pi has no registry to ask: the list is what
+          earlier chats registered, and what is switched here is this chat's
+          from its start — the default is not touched. */}
+      {!live && (
+        <p className="px-3 pb-1.5 text-[10px] text-fg-faint">
+          Not started yet — these are the tools earlier chats had. What you switch here holds for
+          this chat from its first message; the defaults stay as they are.
+        </p>
+      )}
       {groupTools(tools).map((group) => {
         const open = groups.isOpen(group.source);
         return (
@@ -160,10 +169,12 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
         </div>
         );
       })}
-      <p className="px-3 py-1.5 text-[10px] text-fg-faint">
-        Applies from the next message, for this conversation. Settings → Tools sets what every
-        conversation starts with.
-      </p>
+      {live && (
+        <p className="px-3 py-1.5 text-[10px] text-fg-faint">
+          Applies from the next message, for this conversation. Settings → Tools sets what every
+          conversation starts with.
+        </p>
+      )}
     </div>
   );
 }

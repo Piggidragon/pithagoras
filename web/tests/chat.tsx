@@ -159,6 +159,32 @@ if (phase === 'switch') {
   }) as typeof fetch;
 }
 
+// The Git panel, Files and the tools list of a chat that has not started: `?phase=git`. What the page sent is in window.sentTools.
+if (phase === 'git') {
+  const realFetch = window.fetch;
+  (window as any).sentTools = [];
+  let off: string[] = [];
+  window.fetch = (async (url: any, init?: any) => {
+    const u = String(url);
+    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    if (u.endsWith('/git/gh')) return reply({ installed: false, authed: false, repo: null, url: null, defaultBranch: null, note: 'Install gh' });
+    if (/\/git(\?|$)/.test(u)) return reply({ repo: true, root: '/workspaces/pithagoras', prefix: '', branch: 'main', head: 'a'.repeat(40), upstream: 'origin/main', ahead: 0, behind: 0, stashes: 0, operation: null, truncated: false, remotes: [], files: [{ path: 'README.md', x: '.', y: 'M', kind: 'changed', unstaged: { added: 2, removed: 1, binary: false } }, { path: 'notes.txt', x: '?', y: '?', kind: 'untracked' }] });
+    if (u.includes('/files?')) return reply({ path: '', entries: [{ name: 'README.md', type: 'file', size: 12, mtime: 1 }], truncated: false });
+    if (u.includes('/file?')) return reply({ content: '# Pithagoras\n', binary: false, size: 13, mtime: 1 });
+    if (u.endsWith('/tools') && init?.method === 'PUT') {
+      off = JSON.parse(init.body).off;
+      (window as any).sentTools.push(off);
+      return reply({ off });
+    }
+    if (u.endsWith('/tools')) return reply({ live: false, off, names: {}, tools: [
+      { name: 'web_search', source: 'pi-web-access', description: 'Search the web', enabled: !off.includes('web_search'), defaultOn: true },
+      { name: 'web_fetch', source: 'pi-web-access', enabled: !off.includes('web_fetch'), defaultOn: true },
+      { name: 'bash', source: 'builtin', enabled: true, defaultOn: true },
+    ] });
+    return realFetch(url, init);
+  }) as typeof fetch;
+}
+
 const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.

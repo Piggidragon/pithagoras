@@ -223,7 +223,7 @@ export interface PortalEvent {
  */
 export const SIGNED_OUT = "pithagoras:signed-out";
 
-async function json<T>(url: string, init?: RequestInit): Promise<T> {
+export async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },

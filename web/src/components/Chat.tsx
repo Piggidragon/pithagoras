@@ -17,10 +17,10 @@ import { VoiceControl } from "./VoiceControl";
 import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
@@ -31,6 +31,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { moveHighlight, paletteMatches, slashToken } from "../slash-palette";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
+import { GIT_TABS, GitPanel, type GitTab } from "./git/GitPanel";
 import { TitleInput } from "./TitleInput";
 import { latestFileActivity } from "../file-activity";
 import { caretFrom, drafts, withUnsent } from "../drafts";
@@ -268,11 +269,34 @@ export function Chat({
   // Whether Files has an edit that is not saved: closing it would lose it.
   const [filesDirty, setFilesDirty] = useState(false);
   const fileActivity = useMemo(() => latestFileActivity(events, session.workspace), [events, session.workspace]);
+  // A file Git asked Files to show, by its path in the chat's folder; `seq` makes the same file asked twice a new ask.
+  const [fileAsked, setFileAsked] = useState<{ path: string; seq: number } | null>(null);
+  const [git, setGit] = useState(false);
+  const [gitTab, setGitTab] = useState<GitTab>("changes");
+  // How many files have changed, for the Changes tab: known only while the panel is open.
+  const [gitCount, setGitCount] = useState(0);
+  // Files opened from Git beside it: a third panel closes the one open longest,
+  // and that must not be Git, which was just clicked in.
+  const [gitHeld, setGitHeld] = useState(false);
+  const showInFiles = useCallback((path: string) => {
+    setGitHeld(true);
+    setFiles(true);
+    setFileAsked({ path, seq: Date.now() });
+  }, []);
+  useEffect(() => {
+    if (!files || !git) setGitHeld(false);
+  }, [files, git]);
+  // An ask is for the chat it was made in, and answered once: Files, drawn
+  // again later or for another chat, is not sent back to it.
+  const fileAnswered = useCallback(() => setFileAsked(null), []);
+  useEffect(() => setFileAsked(null), [session.id]);
   useWorkPanels(
-    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, agents: !voiceMode && agentsOpen },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "agents") setAgentsOpen(false); else setCanvasOpen(false); },
+    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen },
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else setCanvasOpen(false); },
     // A third panel closes another one instead, while Files has an edit in it.
-    filesDirty ? ["files"] : [],
+    // An edit not saved outweighs keeping Git in view: with both kept nothing
+    // could go, and the fallback closed Files — edit and all — unasked.
+    filesDirty ? ["files"] : gitHeld ? ["git"] : [],
   );
   const closeFiles = async () => {
     if (
@@ -284,7 +308,7 @@ export function Chat({
     setFiles(false);
   };
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", terminal && "terminal"].filter(Boolean) as ("browser" | "agents" | "files" | "terminal")[];
+  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", terminal && "terminal"].filter(Boolean) as ("browser" | "agents" | "files" | "git" | "terminal")[];
   const browserPane = useRef<HTMLDivElement>(null);
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
@@ -1130,6 +1154,14 @@ export function Chat({
           >
             <LuFolderOpen />
           </PanelToggle>
+          <PanelToggle
+            open={git}
+            onClick={() => setGit((v) => !v)}
+            label="Git"
+            title={git ? "Hide git" : "What changed, commits, branches and pull requests — for this chat's repository"}
+          >
+            <LuGitBranch />
+          </PanelToggle>
           <PanelToggle open={canvasOpen} onClick={() => setCanvasOpen((v) => !v)} label="Session canvases" title="Session canvases">
             <LuFileText />
           </PanelToggle>
@@ -1803,6 +1835,15 @@ export function Chat({
                           Your shell
                         </button>
                       </div>
+                    ) : kind === "git" ? (
+                      <div className="chat-tabs" role="tablist" aria-label="Git">
+                        {GIT_TABS.map((t) => (
+                          <button key={t.id} type="button" role="tab" aria-selected={gitTab === t.id} onClick={() => setGitTab(t.id)}>
+                            {t.label}
+                            {t.id === "changes" && gitCount > 0 && <span className="ml-1 rounded-full bg-fg/10 px-1 text-[10px]">{gitCount}</span>}
+                          </button>
+                        ))}
+                      </div>
                     ) : (
                       <span className="text-[11px] text-fg-subtle">{kind === "browser" ? "Browser" : kind === "agents" ? "Subagents" : "Files"}</span>
                     )}
@@ -1817,9 +1858,9 @@ export function Chat({
                         </button>
                       )}
                       <button
-                        onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? void closeFiles() : kind === "agents" ? setAgentsOpen(false) : setTerminal(false))}
+                        onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? void closeFiles() : kind === "git" ? setGit(false) : kind === "agents" ? setAgentsOpen(false) : setTerminal(false))}
                         title="Collapse"
-                        aria-label={`Close the ${kind === "browser" ? "browser" : kind === "files" ? "files" : kind === "agents" ? "subagents" : "terminal"}`}
+                        aria-label={`Close the ${kind === "browser" ? "browser" : kind === "files" ? "files" : kind === "git" ? "git panel" : kind === "agents" ? "subagents" : "terminal"}`}
                         className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
                       >
                         ✕
@@ -1842,7 +1883,12 @@ export function Chat({
                   {kind === "files" && (
                     <div className="min-h-0 flex-1 bg-surface">
                       {/* Not before the chat's events are here: what it did earlier is not news. */}
-                      {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} onDirtyChange={setFilesDirty} />}
+                      {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} reveal={fileAsked} onRevealed={fileAnswered} onDirtyChange={setFilesDirty} />}
+                    </div>
+                  )}
+                  {kind === "git" && (
+                    <div className="min-h-0 flex-1 bg-surface">
+                      <GitPanel key={session.id} sessionId={session.id} tab={gitTab} onTab={setGitTab} activity={fileActivity?.seq} running={running} onOpenFile={showInFiles} onCount={setGitCount} />
                     </div>
                   )}
                   {kind === "terminal" && (

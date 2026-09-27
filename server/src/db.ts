@@ -1665,6 +1665,8 @@ export function setToolDefaultsOff(names: string[]): string[] {
 export interface KnownTool {
   name: string;
   source: string;
+  /** What the tool says it does, for the list shown before a chat has started. */
+  description?: string;
 }
 
 /**
@@ -1714,7 +1716,11 @@ export function knownTools(): KnownTool[] {
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((t) => t && typeof t.name === "string")
-      .map((t) => ({ name: String(t.name), source: String(t.source ?? "") }));
+      .map((t) => ({
+        name: String(t.name),
+        source: String(t.source ?? ""),
+        ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
+      }));
   } catch {
     return [];
   }
@@ -1729,7 +1735,11 @@ export function rememberTools(tools: KnownTool[]): void {
   if (!tools.length) return;
   const merged = new Map(knownTools().map((t) => [t.name, t]));
   const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
-  for (const tool of tools) merged.set(tool.name, { name: tool.name, source: tool.source });
+  for (const tool of tools) {
+    // Kept short: it is a hint beside a checkbox, and the catalogue is one settings row.
+    const description = tool.description?.trim().slice(0, 300) || merged.get(tool.name)?.description;
+    merged.set(tool.name, { name: tool.name, source: tool.source, ...(description ? { description } : {}) });
+  }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   putSetting("tools_seen", JSON.stringify(sorted));
   // The first moment the browser's tools can be told apart from the rest, and
