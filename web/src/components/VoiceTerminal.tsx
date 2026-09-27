@@ -83,13 +83,13 @@ export function VoiceTerminal({ events, limit, maxOutput, ended, focus, onFocuse
   /** Behind another tab: kept as it was, rather than worked out anew with every token. */
   hidden?: boolean;
 }) {
-  const { ref, onScroll, follow } = useFollowBottom<HTMLDivElement>();
+  // The command being shown, while it is: new output does not scroll away from it.
+  const focused = useRef<string | null>(null);
+  const { ref, attach, onScroll, follow, settle } = useFollowBottom<HTMLDivElement>({ paused: () => !!focused.current });
   const seen = useRef(events);
   if (!hidden) seen.current = events;
   const shownEvents = seen.current;
   const runs = useMemo(() => terminalRuns(shownEvents, limit, maxOutput, ended), [shownEvents, limit, maxOutput, ended]);
-  // The command being shown, while it is: new output does not scroll away from it.
-  const focused = useRef<string | null>(null);
   const release = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(release.current), []);
   // Follows new output, but leaves you where you scrolled to read earlier lines.
@@ -107,9 +107,11 @@ export function VoiceTerminal({ events, limit, maxOutput, ended, focus, onFocuse
     el.classList.remove('is-focused');
     void el.offsetWidth;
     el.classList.add('is-focused');
-    release.current = window.setTimeout(() => { focused.current = null; }, 1200);
+    // Shown: from here it follows again if that left it near the end — moving
+    // up to show the command read as leaving the end.
+    release.current = window.setTimeout(() => { focused.current = null; settle(); }, 1200);
   }, [focus?.id, focus?.at]);
-  return <div ref={ref} onScroll={onScroll} className="voice-terminal-output" aria-label="Agent terminal output">
+  return <div ref={attach} onScroll={onScroll} className="voice-terminal-output" aria-label="Agent terminal output">
     {!runs.length && <p className="voice-terminal-empty">No commands yet. What the agent runs shows up here as it runs.</p>}
     {runs.map(run => <TerminalRun key={run.id} {...run} />)}
   </div>;

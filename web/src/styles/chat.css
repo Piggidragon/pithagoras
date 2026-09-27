@@ -295,8 +295,12 @@ button.running-chip-command:hover { text-decoration: underline; }
 .chat-aside-panel { animation: aside-panel-in .32s var(--ease-out); }
 @keyframes aside-in { from { translate: 24px 0; clip-path: inset(0 0 0 30%); } to { translate: 0 0; clip-path: inset(0); } }
 @keyframes aside-panel-in { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
-/* On a phone they cover the chat, so they rise over it instead. */
+/* Docked elsewhere, from there; floating, the window rises into place. On a
+   phone they cover the chat, so they rise over it too. */
+[data-dock="left"] > .chat-aside { animation-name: aside-in-left; }
+:is([data-dock="bottom"], [data-dock="float"]) > .chat-aside { animation-name: aside-up; }
 @media (max-width: 767px) { .chat-aside { animation-name: aside-up; } }
+@keyframes aside-in-left { from { translate: -24px 0; clip-path: inset(0 30% 0 0); } to { translate: 0 0; clip-path: inset(0); } }
 @keyframes aside-up { from { translate: 0 24px; clip-path: inset(30% 0 0 0); } to { translate: 0 0; clip-path: inset(0); } }
 /* The header's panel buttons give a little under a press. */
 .panel-toggle:active { transform: scale(.93); }
@@ -337,3 +341,22 @@ button.running-chip-command:hover { text-decoration: underline; }
 .command-line-said { font-size: 11px; color: rgb(var(--fg-faint)); padding-right: 10px; animation: view-in .3s var(--ease-out) both; }
 .command-line-said.is-error { color: rgb(var(--danger)); white-space: pre-wrap; text-align: right; max-width: 36rem; }
 @media (prefers-reduced-motion: reduce) { .command-line-pill, .command-line-state, .command-line-said { animation: none !important; } }
+
+/* A floating panel window's corner, which sizes it — the voice windows' grip. */
+.chat-aside-grip { position: absolute; right: 0; bottom: 0; z-index: 5; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; }
+.chat-aside-grip::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px; border-right: 2px solid rgb(var(--fg) / .35); border-bottom: 2px solid rgb(var(--fg) / .35); border-bottom-right-radius: 3px; }
+
+/* Carrying the panels by their header: the edges they dock at, the one under
+   the pointer lit, and where they would go if let go now. */
+/* Not panned or zoomed by the browser: a touch on it carries the panels. */
+.chat-aside-head { cursor: grab; touch-action: none; }
+@media (max-width: 767px) { .chat-aside-head { cursor: auto; touch-action: auto; } }
+.dock-zones[hidden], .dock-preview[hidden] { display: none; }
+body.is-carrying, body.is-carrying * { cursor: grabbing !important; }
+.dock-zones { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
+.dock-edge { position: absolute; border-radius: 999px; background: rgb(var(--accent) / .3); transition: background-color .15s, box-shadow .15s; }
+.dock-edge.is-left { left: 6px; top: 15%; bottom: 15%; width: 4px; }
+.dock-edge.is-right { right: 6px; top: 15%; bottom: 15%; width: 4px; }
+.dock-edge.is-bottom { bottom: 6px; left: 15%; right: 15%; height: 4px; }
+.dock-edge.is-active { background: rgb(var(--accent)); box-shadow: 0 0 14px rgb(var(--accent) / .6); }
+.dock-preview { position: absolute; border: 2px dashed rgb(var(--accent) / .7); border-radius: 12px; background: rgb(var(--accent) / .1); }

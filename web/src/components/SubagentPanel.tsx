@@ -62,7 +62,7 @@ function AgentView({ sessionId, agent, items }: { sessionId: string; agent: Suba
     const t = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(t);
   }, [running]);
-  const { ref, onScroll, follow } = useFollowBottom<HTMLDivElement>();
+  const { attach, onScroll, follow } = useFollowBottom<HTMLDivElement>();
   const childItems = useMemo(() => (agent.kind === "protocol" ? buildTranscript(agent.events) : []), [agent]);
   const tool = agent.kind === "tool" ? items.find((i): i is Extract<Item, { kind: "tool" }> => i.kind === "tool" && `tool:${i.callId ?? i.id}` === agent.id) : undefined;
   useLayoutEffect(() => follow(), [childItems, tool?.output, tool?.details]);
@@ -85,7 +85,7 @@ function AgentView({ sessionId, agent, items }: { sessionId: string; agent: Suba
           </button>
         )}
       </div>
-      <div ref={ref} onScroll={onScroll} className="sub-body">
+      <div ref={attach} onScroll={onScroll} className="sub-body">
         {agent.kind === "protocol" ? (
           childItems.length ? childItems.map((item) => <ChildItem key={item.id} item={item} running={running} />) : <p className="bg-jobs-empty"><Shimmer>Starting…</Shimmer></p>
         ) : (
