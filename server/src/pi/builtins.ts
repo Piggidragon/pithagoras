@@ -1,4 +1,5 @@
 import type { PiClient, PiCommand } from "./types.js";
+import { piFile } from "./package.js";
 
 /**
  * pi's built-in slash commands are implemented by whichever mode is running,
@@ -67,10 +68,7 @@ export async function getBuiltinCommands(): Promise<BuiltinCommand[]> {
 
   let sdkCommands: { name: string; description: string; argumentHint?: string }[] = [];
   try {
-    // import.meta.resolve, not require.resolve: the package's exports map
-    // declares only an "import" condition, so CJS resolution fails outright.
-    const entry = import.meta.resolve("@earendil-works/pi-coding-agent");
-    const mod: any = await import(new URL("core/slash-commands.js", entry).href);
+    const mod: any = await import(piFile("core/slash-commands.js").href);
     sdkCommands = mod.BUILTIN_SLASH_COMMANDS ?? [];
   } catch (e) {
     console.error(`[portal] builtin command list unavailable from SDK: ${(e as Error).message}`);
