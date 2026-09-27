@@ -84,12 +84,15 @@ export function FilesPanel({
   folder,
   activity,
   since,
+  reveal,
   onDirtyChange,
 }: {
   sessionId: string;
   folder: string;
   activity: FileActivity | null;
   since?: number;
+  /** A file somebody asked to see from elsewhere — Git — by its path in the folder; a new `seq` is a new ask. */
+  reveal?: { path: string; seq: number } | null;
   /** Told whether there are changes not saved, so that whoever can close the panel can ask first. */
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -209,6 +212,23 @@ export function FilesPanel({
     // Only a new activity should do this, not a change of folder.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity?.seq]);
+
+  // Asked from elsewhere: shown as a file opened by hand is, so the agent does not take it away again.
+  useEffect(() => {
+    if (!reveal) return;
+    let gone = false;
+    void mayLeave().then((ok) => {
+      if (!ok || gone) return;
+      setFollowing(false);
+      setDir(parentOf(reveal.path));
+      void loadFile(reveal.path);
+    });
+    return () => {
+      gone = true;
+    };
+    // Only a new ask, not a new folder or a new file.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal?.seq]);
 
   const goTo = async (path: string) => {
     if (!(await mayLeave())) return;

@@ -1,0 +1,37 @@
+import { test, expect } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await page.goto('/tests/chat.html?phase=git');
+});
+
+test('Git is a panel of its own beside the chat, with its tabs in its header, and a file opens from it in Files', async ({ page }) => {
+  await page.getByRole('button', { name: 'Git', exact: true }).click();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  const tabs = panels.getByRole('tablist', { name: 'Git' });
+  await expect(tabs.getByRole('tab')).toHaveText(['Changes2', 'History', 'Branches', 'Pull requests']);
+  await expect(panels.getByText('notes.txt')).toBeVisible();
+
+  await panels.getByRole('button', { name: 'Open README.md in Files' }).click();
+  // Files opens beside it, on that file.
+  await expect(panels.getByRole('textbox', { name: 'Contents of README.md' })).toHaveValue('# Pithagoras\n');
+  await expect(tabs).toBeVisible();
+
+  await tabs.getByRole('tab', { name: 'Pull requests' }).click();
+  await expect(panels.getByText('Install gh')).toBeVisible();
+  await panels.getByRole('button', { name: 'Close the git panel' }).click();
+  await expect(tabs).toHaveCount(0);
+});
+
+test('before the first message the tools are listed and can be switched for this chat alone', async ({ page }) => {
+  await page.getByRole('button', { name: 'Which tools this conversation may use' }).click();
+  const menu = page.locator('.composer-menu');
+  await expect(menu.getByText('Not started yet')).toBeVisible();
+  await expect(menu.getByText('the defaults stay as they are')).toBeVisible();
+  await expect(menu.getByText('Send a message first')).toHaveCount(0);
+  await menu.getByRole('button', { name: /pi-web-access/ }).click();
+  await menu.getByRole('checkbox', { name: 'web_search' }).uncheck();
+  await expect.poll(() => page.evaluate(() => (window as any).sentTools)).toEqual([['web_search']]);
+  await expect(menu.getByRole('checkbox', { name: 'web_search' })).not.toBeChecked();
+  await expect(menu.getByText('default on')).toBeVisible();
+});
