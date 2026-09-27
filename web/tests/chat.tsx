@@ -83,12 +83,12 @@ if (phase === 'stream') events.push(
 const turns = Number(new URLSearchParams(location.search).get('turns') ?? 6);
 if (phase === 'reasoning') events.push(
   ...Array.from({ length: turns }, (_, i) => [
-    // Five seconds apart, the last of them before the question being answered now.
-    ev('portal_prompt', { message: `Question ${i + 1}: what does step ${i + 1} of the build do?` }, 20 + (turns - i) * 5),
+    // After the compaction a minute ago, and before the question being answered now.
+    ev('portal_prompt', { message: `Question ${i + 1}: what does step ${i + 1} of the build do?` }, 8 + ((turns - i) * 50) / turns),
     ev('message_end', { message: { role: 'assistant', content: [
       { type: 'thinking', thinking: Array.from({ length: 30 }, (_, j) => `Reasoning ${i + 1}.${j + 1}: step ${i + 1} reads the files, so I should check what it reads first.`).join('\n') },
       { type: 'text', text: Array.from({ length: 3 }, (_, j) => `Step ${i + 1}, part ${j + 1}: it reads the files, checks them and writes what it found.`).join('\n\n') },
-    ] } }, 18 + (turns - i) * 5),
+    ] } }, 7 + ((turns - i) * 50) / turns),
   ]).flat(),
   // With what a routine attached to it, folded away under a chip until opened.
   ev('portal_prompt', { message: `And the last one?<routine name="build">${Array.from({ length: 12 }, (_, j) => `Routine line ${j + 1}: check the bundle.`).join('\n')}</routine>` }, 6),

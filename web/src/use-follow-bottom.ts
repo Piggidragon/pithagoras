@@ -55,11 +55,16 @@ export function atEnd(el: { scrollHeight: number; scrollTop: number; clientHeigh
  * `paused` holds it where it is while the caller shows something of its own —
  * the terminal, a command it was asked to show.
  *
+ * `nested`, for a box inside another that follows — the reasoning, opened in
+ * the chat: it leaves the browser's anchoring alone. Turned off there, it took
+ * the box and all in it out of what the chat's own anchoring holds in view
+ * while reading back; and its content only ever grows at the end.
+ *
  * The box is given as `ref={attach}`: what watches it for growth goes with the
  * element, so a box drawn later, or drawn again as another element, is
  * watched too. `ref` is there to read it.
  */
-export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: () => boolean } = {}) {
+export function useFollowBottom<T extends HTMLElement>({ paused, nested = false }: { paused?: () => boolean; nested?: boolean } = {}) {
   const ref = useRef<T | null>(null);
   const [node, setNode] = useState<T | null>(null);
   const following = useRef(true);
@@ -68,21 +73,33 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
   // Whether to offer a way back to the end, for drawing. Kept apart from
   // `following`, which is read on every update and must not wait for a render.
   const [away, setAway] = useState(false);
+  const anchor = useCallback(
+    (el: HTMLElement) => {
+      if (!nested) el.style.overflowAnchor = following.current ? "none" : "";
+    },
+    [nested],
+  );
   /** Following or not, and the browser's own anchoring off while it does (see above). */
-  const follows = useCallback((yes: boolean) => {
-    if (following.current === yes) return;
-    following.current = yes;
-    if (ref.current) ref.current.style.overflowAnchor = yes ? "none" : "";
-  }, []);
-  const attach = useCallback((el: T | null) => {
-    ref.current = el;
-    if (el) {
-      // Another element starts from where it is, not where the last one was.
-      top.current = el.scrollTop;
-      el.style.overflowAnchor = following.current ? "none" : "";
-    }
-    setNode(el);
-  }, []);
+  const follows = useCallback(
+    (yes: boolean) => {
+      if (following.current === yes) return;
+      following.current = yes;
+      if (ref.current) anchor(ref.current);
+    },
+    [anchor],
+  );
+  const attach = useCallback(
+    (el: T | null) => {
+      ref.current = el;
+      if (el) {
+        // Another element starts from where it is, not where the last one was.
+        top.current = el.scrollTop;
+        anchor(el);
+      }
+      setNode(el);
+    },
+    [anchor],
+  );
   // Not drawn at all — the chat, while voice mode shows instead.
   const hidden = useRef(false);
   // A button pressed in the box, for a moment: what it opens does not move it.
@@ -104,13 +121,15 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
   const heard = useCallback((el: HTMLElement) => {
     // A box that is not drawn measures nothing, which reads as being at its
     // end: whoever had scrolled back to read was taken to the end on coming
-    // back. Drawn again, it goes on from wherever it is now.
+    // back. Drawn again, it is where it was last seen — put back there, should
+    // the browser have let go of it.
     if (!el.clientHeight) {
       hidden.current = true;
       return;
     }
     if (hidden.current) {
       hidden.current = false;
+      if (!following.current && Math.abs(el.scrollTop - top.current) > 0.5) el.scrollTop = top.current;
       top.current = el.scrollTop;
       return;
     }
@@ -134,14 +153,16 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
 
   /**
    * Whether it follows, counting where the box has been taken and not yet
-   * heard: for what is decided before the next update is drawn — whether the
+   * heard: for what is decided while the next update is drawn — whether the
    * chat's oldest message leaves the top as a new one comes, which, read back
-   * but not yet heard, moved what was being read.
+   * but not yet heard, moved what was being read. It only looks; what it saw
+   * is taken in by `follow`, once the update is on screen.
    */
   const isFollowing = useCallback(() => {
-    if (ref.current) heard(ref.current);
-    return following.current;
-  }, [heard]);
+    const el = ref.current;
+    if (!el || !following.current || hidden.current || !el.clientHeight) return following.current;
+    return !(el.scrollTop < top.current - 0.5 && distance(el) > AT_END);
+  }, []);
 
   /**
    * Wire to the box's onWheel: a turn of the wheel upwards is the person
@@ -255,5 +276,6 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     setAway(!following.current && !atEnd(el));
   }, [toEnd, follows]);
 
-  return { ref, attach, onScroll, onWheel, hold, follow, settle, following, isFollowing, away };
+  // Not `following` itself: read as it is, it misses a move not yet heard.
+  return { ref, attach, onScroll, onWheel, hold, follow, settle, isFollowing, away };
 }

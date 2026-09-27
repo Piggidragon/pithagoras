@@ -37,6 +37,28 @@ async function openLongReasoning(page: Page) {
   expect(await reasoning(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(1);
 }
 
+test('the last words of the reasoning, come with the first of the answer, are shown', async ({ page }) => {
+  await openLongReasoning(page);
+  // One update: more thinking, and the answer that ends it.
+  await page.evaluate((line) => {
+    for (let i = 0; i < 4; i++) (window as any).think(line);
+    (window as any).say('The answer.');
+  }, line);
+  await expect(page.getByText('The answer.')).toBeVisible();
+  await frames(page);
+  expect(await reasoning(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(1);
+});
+
+test('the reasoning leaves the browser holding the conversation in view to the conversation', async ({ page }) => {
+  await openLongReasoning(page);
+  // Turned off in it, the reasoning and all in it were no longer anything the conversation's anchoring could hold on to.
+  expect(await reasoning(page).evaluate((el) => getComputedStyle(el).overflowAnchor)).toBe('auto');
+  expect(await scroller(page).evaluate((el) => getComputedStyle(el).overflowAnchor)).toBe('none');
+  // Reading back, the conversation's anchoring is on again.
+  await scroller(page).evaluate((el) => (el.scrollTop -= 300));
+  await expect.poll(() => scroller(page).evaluate((el) => getComputedStyle(el).overflowAnchor)).toBe('auto');
+});
+
 test('the reasoning being written, scrolled back inside, stays where it was taken', async ({ page }) => {
   await openLongReasoning(page);
   const box = (await reasoning(page).boundingBox())!;
@@ -171,17 +193,29 @@ test('a conversation not shown for a while, as in voice mode, comes back where i
   const more = async () => {
     for (let i = 0; i < 3; i++) await thinkDrawn(page);
   };
-  // Scrolled back to read: not taken to the end while hidden.
+  // Scrolled back to read: not taken to the end while hidden, nor anywhere else.
   await page.mouse.move(450, 300);
   await page.mouse.wheel(0, -400);
   await expect.poll(() => left(page)).toBeGreaterThan(300);
+  await frames(page);
+  const read = await scrollTop(page);
   await hidden(true);
   await more();
   await hidden(false);
   await frames(page);
   await more();
-  expect(await left(page)).toBeGreaterThan(300);
+  expect(await scrollTop(page)).toBe(read);
   await expect(page.getByRole('button', { name: 'Latest output' })).toBeVisible();
+  // A browser that lets go of where a box was while it was not drawn: put back where it was.
+  await hidden(true);
+  await more();
+  await scroller(page).evaluate((el) => {
+    el.style.display = '';
+    el.scrollTop = 0;
+  });
+  await frames(page);
+  await more();
+  expect(await scrollTop(page)).toBe(read);
   // At the end: still at the end, and following.
   await page.getByRole('button', { name: 'Latest output' }).click();
   await expect.poll(() => left(page)).toBeLessThanOrEqual(1);

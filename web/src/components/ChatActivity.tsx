@@ -154,14 +154,18 @@ export function ThinkingBlock({
  * away, does not each keep watch over a box nobody sees.
  */
 function ThinkingBody({ thinking, streaming, open }: { thinking: string; streaming: boolean; open: boolean }) {
-  const { attach, onScroll, onWheel, follow } = useFollowBottom<HTMLDivElement>({ paused: () => !streaming });
+  const { attach, onScroll, onWheel, follow } = useFollowBottom<HTMLDivElement>({ paused: () => !streaming, nested: true });
   // Opened while it is written — or written to again, open: from its newest
   // line. Opened again as well, before it has gone from closing.
   useLayoutEffect(() => {
     if (open && streaming) follow(true);
   }, [open, streaming, follow]);
+  // Its last words can come with the answer's first, which ends it: they are
+  // followed too, or they were left below the edge.
+  const wasStreaming = useRef(streaming);
   useLayoutEffect(() => {
-    if (streaming) follow();
+    if (streaming || wasStreaming.current) follow();
+    wasStreaming.current = streaming;
   }, [thinking, streaming, follow]);
   return (
     <div ref={attach} onScroll={onScroll} onWheel={onWheel} className="chat-thinking-body">
