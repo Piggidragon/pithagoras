@@ -23,6 +23,7 @@ import { Streamdown } from "streamdown";
 import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, stripAnsi, type Activity, type Item } from "../transcript";
 import { SHELL_TOOL, unwrapCall } from "../tool-activity";
 import { argLabel, isBlock, isScalar } from "../tool-args";
+import { useFollowBottom } from "../use-follow-bottom";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
@@ -92,12 +93,7 @@ export function ThinkingBlock({
   until?: number;
 }) {
   const [open, setOpen] = useState(false);
-  const body = useRef<HTMLDivElement>(null);
   const now = useNow(streaming);
-  useLayoutEffect(() => {
-    const el = body.current;
-    if (el && streaming && open) el.scrollTop = el.scrollHeight;
-  }, [thinking, streaming, open]);
 
   const seconds = since ? Math.max(0, Math.round(((streaming ? now : until ?? since) - since) / 1000)) : undefined;
   const label = streaming ? "Thinking" : seconds && seconds >= 1 ? `Thought for ${formatElapsed(seconds)}` : "Thought process";
@@ -142,10 +138,38 @@ export function ThinkingBlock({
         </div>
       )}
       <Collapse open={open}>
-        <div ref={body} className="chat-thinking-body">
-          {thinking}
-        </div>
+        <ThinkingBody thinking={thinking} streaming={streaming} open={open} />
       </Collapse>
+    </div>
+  );
+}
+
+/**
+ * The reasoning opened. While it is written it shows the newest lines — until
+ * scrolled back to read one, which the next word must not undo: put back at
+ * the end with each word, it could not be read, nor the conversation scrolled
+ * over it. Written, it opens at its start and stays wherever it is read.
+ *
+ * Drawn only once opened, so the reasoning of a long conversation, folded
+ * away, does not each keep watch over a box nobody sees.
+ */
+function ThinkingBody({ thinking, streaming, open }: { thinking: string; streaming: boolean; open: boolean }) {
+  const { attach, onScroll, onWheel, follow } = useFollowBottom<HTMLDivElement>({ paused: () => !streaming, nested: true });
+  // Opened while it is written — or written to again, open: from its newest
+  // line. Opened again as well, before it has gone from closing.
+  useLayoutEffect(() => {
+    if (open && streaming) follow(true);
+  }, [open, streaming, follow]);
+  // Its last words can come with the answer's first, which ends it: they are
+  // followed too, or they were left below the edge.
+  const wasStreaming = useRef(streaming);
+  useLayoutEffect(() => {
+    if (streaming || wasStreaming.current) follow();
+    wasStreaming.current = streaming;
+  }, [thinking, streaming, follow]);
+  return (
+    <div ref={attach} onScroll={onScroll} onWheel={onWheel} className="chat-thinking-body">
+      {thinking}
     </div>
   );
 }

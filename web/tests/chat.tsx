@@ -1,5 +1,5 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|compacting|tools|agents|interrupted to see each state,
+// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted to see each state,
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -77,6 +77,23 @@ if (phase === 'stream') events.push(
   // A finished command at the end, its output folded away until opened.
   ...bash('bl', 'cat build.log', Array.from({ length: 40 }, (_, i) => `line ${i + 1} of the build log`).join('\n'), {}, 5),
   ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta: 'The last step' } }, 1),
+);
+// A long conversation whose replies each thought at length, and a model thinking now: `window.think(text)` adds to it.
+// `&turns=` for how many came before; enough of them are more than the chat draws at once.
+const turns = Number(new URLSearchParams(location.search).get('turns') ?? 6);
+if (phase === 'reasoning') events.push(
+  ...Array.from({ length: turns }, (_, i) => [
+    // After the compaction a minute ago, and before the question being answered now.
+    ev('portal_prompt', { message: `Question ${i + 1}: what does step ${i + 1} of the build do?` }, 8 + ((turns - i) * 50) / turns),
+    ev('message_end', { message: { role: 'assistant', content: [
+      { type: 'thinking', thinking: Array.from({ length: 30 }, (_, j) => `Reasoning ${i + 1}.${j + 1}: step ${i + 1} reads the files, so I should check what it reads first.`).join('\n') },
+      { type: 'text', text: Array.from({ length: 3 }, (_, j) => `Step ${i + 1}, part ${j + 1}: it reads the files, checks them and writes what it found.`).join('\n\n') },
+    ] } }, 7 + ((turns - i) * 50) / turns),
+  ]).flat(),
+  // With what a routine attached to it, folded away under a chip until opened.
+  ev('portal_prompt', { message: `And the last one?<routine name="build">${Array.from({ length: 12 }, (_, j) => `Routine line ${j + 1}: check the bundle.`).join('\n')}</routine>` }, 6),
+  ev('turn_start', {}, 5),
+  ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'The last step writes the bundle.' } }, 1),
 );
 // The portal restarted mid-command: nothing says the call ended, only that the chat was interrupted.
 if (phase === 'interrupted') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run test:e2e', 'Running 42 tests using 4 workers\n  ✓ login (1.2s)\n', undefined, 12));
@@ -210,6 +227,8 @@ function Fixture() {
   // More of the running command's output, all of it so far.
   (window as any).bashOut = (text: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'tool_execution_update', at: Date.now(), payload: { toolCallId: 'b3', partialResult: { content: [{ type: 'text', text }] } } }]);
   (window as any).say = (delta: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'message_update', at: Date.now(), payload: { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta } } }]);
+  // Any event, as the server would send it: a tool call starting is a message of its own.
+  (window as any).emit = (type: string, payload: any) => setShownEvents((list) => [...list, { seq: ++seq, type, at: Date.now(), payload }]);
   (window as any).fillBox = (text: string) => fillFrom(session.id, { seq: -now * 1000 - 20, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text } });
   React.useEffect(() => {
     if (phase !== 'nudge') return;
