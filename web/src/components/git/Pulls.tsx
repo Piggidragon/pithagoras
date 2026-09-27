@@ -236,7 +236,7 @@ function CheckIcon({ check }: { check: Check }) {
 }
 
 const Markdown = ({ children }: { children: string }) => (
-  <div className="md text-xs leading-relaxed text-fg">
+  <div className="md text-xs leading-relaxed text-fg [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h1]:font-semibold [&_h2]:font-semibold">
     <Streamdown shikiTheme={["github-light", "github-dark"]}>{children}</Streamdown>
   </div>
 );
