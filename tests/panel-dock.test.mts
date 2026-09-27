@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { across, dockedFrame, dockedSize, dropTarget, fitFrame, isDock, readFrame } from '../web/src/panel-dock.ts';
+import { across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, fitSides, groupPanels, isDock, readFrame, readPlaces, readSizes } from '../web/src/panel-dock.ts';
 
 test('a floating window placed for the first time goes to the top right, inside the chat and above the composer', () => {
   // Ending 260px above the chat's foot, where the composer is: it reached down over Send and Stop.
@@ -50,14 +50,57 @@ test('panels let go near an edge dock there; anywhere else, and at the top, they
 });
 
 test('where docked panels would go is shown as the frame they take', () => {
-  const area = { w: 1200, h: 700 }, size = { width: 560, height: 320 };
-  assert.deepEqual(dockedFrame('left', area, size), { x: 0, y: 0, w: 560, h: 700 });
-  assert.deepEqual(dockedFrame('right', area, size), { x: 640, y: 0, w: 560, h: 700 });
-  assert.deepEqual(dockedFrame('bottom', area, size), { x: 0, y: 380, w: 1200, h: 320 });
+  const area = { w: 1200, h: 700 }, size = { width: 560, height: 320 }, none = { left: 0, right: 0 };
+  assert.deepEqual(dockedFrameAmong('left', area, size, none), { x: 0, y: 0, w: 560, h: 700 });
+  assert.deepEqual(dockedFrameAmong('right', area, size, none), { x: 640, y: 0, w: 560, h: 700 });
+  assert.deepEqual(dockedFrameAmong('bottom', area, size, none), { x: 0, y: 380, w: 1200, h: 320 });
   // As they are drawn: leaving the conversation its 320px of width and 260px of height.
-  assert.deepEqual(dockedFrame('right', { w: 800, h: 700 }, size), { x: 320, y: 0, w: 480, h: 700 });
-  assert.deepEqual(dockedFrame('bottom', { w: 1200, h: 500 }, size), { x: 0, y: 260, w: 1200, h: 240 });
-  assert.deepEqual(dockedFrame('right', { w: 300, h: 300 }, size), { x: 300, y: 0, w: 0, h: 300 });
+  assert.deepEqual(dockedFrameAmong('right', { w: 800, h: 700 }, size, none), { x: 320, y: 0, w: 480, h: 700 });
+  assert.deepEqual(dockedFrameAmong('bottom', { w: 1200, h: 500 }, size, none), { x: 0, y: 260, w: 1200, h: 240 });
+  assert.deepEqual(dockedFrameAmong('right', { w: 300, h: 300 }, size, none), { x: 300, y: 0, w: 0, h: 300 });
+});
+
+test('a panel carried to a side with panels at the other shows the width both would be drawn at', () => {
+  const area = { w: 1200, h: 700 }, size = { width: 400, height: 320 };
+  // Room for both: as it was made, beside what is there.
+  assert.deepEqual(dockedFrameAmong('left', area, size, { left: 0, right: 400 }), { x: 0, y: 0, w: 400, h: 700 });
+  assert.deepEqual(dockedFrameAmong('right', area, size, { left: 400, right: 0 }), { x: 800, y: 0, w: 400, h: 700 });
+  // Not: both give way, in proportion (880 of room for 1000).
+  assert.deepEqual(dockedFrameAmong('left', area, size, { left: 0, right: 600 }), { x: 0, y: 0, w: 352, h: 700 });
+  // At the bottom, under the conversation: between the sides, as they are drawn.
+  assert.deepEqual(dockedFrameAmong('bottom', area, size, { left: 300, right: 400 }), { x: 300, y: 380, w: 500, h: 320 });
+  assert.deepEqual(dockedFrameAmong('bottom', area, size, { left: 500, right: 600 }), { x: 400, y: 380, w: 320, h: 320 });
+});
+
+test('panels at both sides give way together only where they would leave the conversation less than its room', () => {
+  assert.deepEqual(fitSides(400, 400, 1200), { left: 400, right: 400 });
+  assert.deepEqual(fitSides(560, 560, 1000), { left: 340, right: 340 });
+  assert.deepEqual(fitSides(300, 600, 1000), { left: 226, right: 453 });
+  // One side: held to the room, as before.
+  assert.deepEqual(fitSides(0, 900, 1000), { left: 0, right: 680 });
+  // A chat not measured yet: as they were made, the page's own limit holding them.
+  assert.deepEqual(fitSides(560, 560, 0), { left: 560, right: 560 });
+  assert.deepEqual(fitSides(560, 560, 200), { left: 0, right: 0 });
+});
+
+test('each panel goes to its own place, and those in one place are together, in their order', () => {
+  const places: Record<string, 'left' | 'right' | 'bottom' | 'float'> = { terminal: 'left', files: 'right', browser: 'right', git: 'float' };
+  assert.deepEqual(groupPanels(['browser', 'files', 'git', 'terminal'], (k) => places[k]), [
+    { place: 'left', kinds: ['terminal'] },
+    { place: 'right', kinds: ['browser', 'files'] },
+    { place: 'float', kinds: ['git'] },
+  ]);
+  assert.deepEqual(groupPanels([], () => 'right'), []);
+});
+
+test('places and sizes are read back only where they are ones a panel can have', () => {
+  assert.deepEqual(readPlaces('{"terminal":"left","files":"top","git":"float","browser":3}'), { terminal: 'left', git: 'float' });
+  for (const raw of [null, '', 'nope', '[1]', '"left"', 'null']) assert.deepEqual(readPlaces(raw), {});
+  assert.deepEqual(readSizes('{"terminal":{"width":400,"height":40},"files":{"width":100},"git":{"height":200},"browser":null,"agents":{"width":"500"}}'), {
+    terminal: { width: 400 },
+    git: { height: 200 },
+  });
+  for (const raw of [null, '', 'nope', '[1]', 'null']) assert.deepEqual(readSizes(raw), {});
 });
 
 test('panels are dragged to no more than leaves the conversation its room, and never below the least', () => {

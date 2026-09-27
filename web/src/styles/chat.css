@@ -297,8 +297,8 @@ button.running-chip-command:hover { text-decoration: underline; }
 @keyframes aside-panel-in { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
 /* Docked elsewhere, from there; floating, the window rises into place. On a
    phone they cover the chat, so they rise over it too. */
-[data-dock="left"] > .chat-aside { animation-name: aside-in-left; }
-:is([data-dock="bottom"], [data-dock="float"]) > .chat-aside { animation-name: aside-up; }
+.chat-aside[data-dock="left"] { animation-name: aside-in-left; }
+.chat-aside:is([data-dock="bottom"], [data-dock="float"]) { animation-name: aside-up; }
 @media (max-width: 767px) { .chat-aside { animation-name: aside-up; } }
 @keyframes aside-in-left { from { translate: -24px 0; clip-path: inset(0 30% 0 0); } to { translate: 0 0; clip-path: inset(0); } }
 @keyframes aside-up { from { translate: 0 24px; clip-path: inset(30% 0 0 0); } to { translate: 0 0; clip-path: inset(0); } }

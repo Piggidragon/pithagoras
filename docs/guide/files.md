@@ -64,3 +64,12 @@ one that has been open longest — unless Files has an edit that is not saved, i
 which case another one is closed instead. Closing Files yourself, or reloading the
 page, asks first while there is an edit. The browser, the terminal, Files and
 [canvases](/guide/canvases) all count.
+
+Each panel is moved by its header. Let go at the left, the right or the bottom
+edge of the chat, it docks there; let go anywhere else, it floats in a window
+that you can move and size. Every panel remembers where you put it, so the
+terminal can sit at the left while Files is at the right. Two panels in the same
+place share it: one above the other at a side, side by side at the bottom, and
+one window when both float. At the bottom they sit under the conversation,
+between the panels at the sides. A panel you have never moved goes where all of
+them went before.

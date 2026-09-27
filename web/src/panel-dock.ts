@@ -1,15 +1,17 @@
 /**
- * Where the panels beside a chat go — the browser, Files, the terminal and
- * the subagents: docked at the conversation's right, left or bottom, or
- * floating over it in a window that can be moved and sized. They are carried
- * there by their header and dropped: at an edge they dock there, anywhere
- * else they float where they were let go.
+ * Where the panels beside a chat go — the browser, Files, the terminal, Git
+ * and the subagents: docked at the conversation's right, left or bottom, or
+ * floating over it in a window that can be moved and sized. Each is carried
+ * there by its header and dropped: at an edge it docks there, anywhere else
+ * it floats where it was let go. Each goes on its own, so the terminal can
+ * sit at the left while Files is at the right (see Places).
  *
  * Docked at the right is how they always were. At the bottom they take the
- * width, and two of them sit side by side rather than one above the other.
- * Not at the top: there they came between the chat's title and the
- * conversation, and covered the conversation's start. Floating, the window is
- * kept inside the chat, however the chat is resized after it was placed.
+ * width under the conversation, and two of them sit side by side rather than
+ * one above the other. Not at the top: there they came between the chat's
+ * title and the conversation, and covered the conversation's start.
+ * Floating, the window is kept inside the chat, however the chat is resized
+ * after it was placed.
  *
  * Kept per browser, like the panels' width: where they go is a preference,
  * not something about one chat.
@@ -100,12 +102,91 @@ export function dropTarget(at: { x: number; y: number }, area: { w: number; h: n
   return "float";
 }
 
-/** Where docked panels sit in the chat, as a frame — what a drop there would show: as they are drawn, held to the conversation's room. */
-export function dockedFrame(dock: Exclude<Dock, "float">, area: { w: number; h: number }, size: { width: number; height: number }): Frame {
-  if (dock === "bottom") {
-    const h = Math.max(0, Math.min(size.height, area.h - KEEP.h));
-    return { x: 0, y: area.h - h, w: area.w, h };
+/**
+ * Each panel goes where it was carried: the terminal at the left and Files at
+ * the right, say. One that was never carried anywhere goes where all of them
+ * went before they were placed one by one (`panelDock`), so that nothing moves
+ * for someone who kept them on one side. Panels in the same place share it as
+ * before: one above the other at a side, side by side at the bottom, and one
+ * window when they float.
+ */
+export type Places = Partial<Record<string, Dock>>;
+
+/** Places read back from storage: only those that are places a panel can go. */
+export function readPlaces(raw: string | null | undefined): Places {
+  if (!raw) return {};
+  try {
+    const stored = JSON.parse(raw) as unknown;
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+    return Object.fromEntries(Object.entries(stored).filter(([, place]) => isDock(place))) as Places;
+  } catch {
+    return {};
   }
-  const w = Math.max(0, Math.min(size.width, area.w - KEEP.w));
+}
+
+/** A panel's own size: its width at a side, its height at the bottom. */
+export type Size = { width: number; height: number };
+export type Sizes = Partial<Record<string, Partial<Size>>>;
+
+/** Sizes read back from storage: only those at least as large as docked panels are drawn. */
+export function readSizes(raw: string | null | undefined): Sizes {
+  if (!raw) return {};
+  try {
+    const stored = JSON.parse(raw) as unknown;
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+    const sizes: Sizes = {};
+    for (const [kind, size] of Object.entries(stored as Record<string, Partial<Size>>)) {
+      if (!size || typeof size !== "object") continue;
+      const kept: Partial<Size> = {};
+      if (typeof size.width === "number" && Number.isFinite(size.width) && size.width >= DOCKED_MIN.w) kept.width = size.width;
+      if (typeof size.height === "number" && Number.isFinite(size.height) && size.height >= DOCKED_MIN.h) kept.height = size.height;
+      if (kept.width !== undefined || kept.height !== undefined) sizes[kind] = kept;
+    }
+    return sizes;
+  } catch {
+    return {};
+  }
+}
+
+/** The panels open, in their order, gathered by the place each goes: left, right, bottom, then floating. */
+export function groupPanels<K extends string>(kinds: readonly K[], placeOf: (kind: K) => Dock): { place: Dock; kinds: K[] }[] {
+  return DOCKS_IN_ORDER.map((place) => ({ place, kinds: kinds.filter((k) => placeOf(k) === place) })).filter((g) => g.kinds.length > 0);
+}
+const DOCKS_IN_ORDER: Dock[] = ["left", "right", "bottom", "float"];
+
+/**
+ * The widths panels at the left and at the right are drawn at in a chat `w`
+ * wide: each as it was made, unless together they would leave the
+ * conversation less than its 320px — then both give way, each in proportion
+ * to its width. 0 for a side with nothing there. A chat not measured yet
+ * (`w` 0) has them as they were made.
+ */
+export function fitSides(left: number, right: number, w: number): { left: number; right: number } {
+  const room = Math.max(0, w - KEEP.w);
+  if (!w || left + right <= room) return { left, right };
+  const scale = room / (left + right);
+  return { left: Math.floor(left * scale), right: Math.floor(right * scale) };
+}
+
+/**
+ * Where a panel carried to `dock` would sit in the chat, as a frame — what a
+ * drop there shows, as it would be drawn. `size` is the size it would have
+ * there, and `others` the widths wanted at the sides without it: panels at a
+ * side give way to the other side as fitSides has them, and panels at the
+ * bottom sit under the conversation, between the sides.
+ */
+export function dockedFrameAmong(
+  dock: Exclude<Dock, "float">,
+  area: { w: number; h: number },
+  size: Size,
+  others: { left: number; right: number },
+): Frame {
+  if (dock === "bottom") {
+    const sides = fitSides(others.left, others.right, area.w);
+    const h = Math.max(0, Math.min(size.height, area.h - KEEP.h));
+    return { x: sides.left, y: area.h - h, w: Math.max(0, area.w - sides.left - sides.right), h };
+  }
+  const sides = dock === "left" ? fitSides(size.width, others.right, area.w) : fitSides(others.left, size.width, area.w);
+  const w = sides[dock];
   return { x: dock === "left" ? 0 : area.w - w, y: 0, w, h: area.h };
 }

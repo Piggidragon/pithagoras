@@ -17,6 +17,7 @@ import { VoiceControl } from "./VoiceControl";
 import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
+import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
@@ -40,7 +41,7 @@ import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
-import { DOCKED_MIN, across, dockedFrame, dockedSize, dropTarget, fitFrame, isDock, readFrame, type Dock, type Frame } from "../panel-dock";
+import { DOCKED_MIN, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, fitSides, groupPanels, isDock, readFrame, readPlaces, readSizes, type Dock, type Frame, type Places, type Size, type Sizes } from "../panel-dock";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -56,8 +57,6 @@ const watchBeside = (changed: () => void) => {
   return () => query.removeEventListener("change", changed);
 };
 
-/** How the conversation and the panels line up, for each place the panels go. */
-const BODY: Record<Dock, string> = { right: "flex-row", left: "flex-row-reverse", bottom: "flex-col", float: "flex-row" };
 /** The panels' edge towards the conversation, or a window's frame when they float. */
 const ASIDE: Record<Dock, string> = {
   right: "border-l border-line",
@@ -65,6 +64,9 @@ const ASIDE: Record<Dock, string> = {
   bottom: "border-t border-line",
   float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
 };
+
+/** The panels that sit beside the conversation, each in a place of its own. */
+type AsidePanel = "browser" | "agents" | "files" | "git" | "terminal";
 
 /** A size kept in storage, or `fallback` for one that is missing or smaller than may be drawn. */
 const storedSize = (key: string, fallback: number, least: number) => {
@@ -309,43 +311,50 @@ export function Chat({
     setFiles(false);
   };
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", terminal && "terminal"].filter(Boolean) as ("browser" | "agents" | "files" | "git" | "terminal")[];
-  const browserPane = useRef<HTMLDivElement>(null);
+  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", terminal && "terminal"].filter(Boolean) as AsidePanel[];
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
-  // every refresh makes the handle feel decorative. Where the panels go, and
-  // the height they take at the top or the bottom, the same.
-  const [asideWidth, setAsideWidth] = useState(() => storedSize("panelWidth", 560, DOCKED_MIN.w));
-  const [asideHeight, setAsideHeight] = useState(() => storedSize("panelHeight", 320, DOCKED_MIN.h));
-  const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || 0.55);
-  const [dock, setDock] = useState<Dock>(() => {
+  // every refresh makes the handle feel decorative. Where each panel goes, and
+  // the width or height it takes there, the same. What was kept for all of
+  // them before they were placed one by one is what a panel not placed or
+  // sized yet has.
+  const [asideWidth] = useState(() => storedSize("panelWidth", 560, DOCKED_MIN.w));
+  const [asideHeight] = useState(() => storedSize("panelHeight", 320, DOCKED_MIN.h));
+  const [dock] = useState<Dock>(() => {
     const stored = local.get("panelDock");
     return isDock(stored) ? stored : "right";
   });
+  const [places, setPlaces] = useState<Places>(() => readPlaces(local.get("panelPlaces")));
+  const [sizes, setSizes] = useState<Sizes>(() => readSizes(local.get("panelSizes")));
+  const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || 0.55);
   const [frame, setFrame] = useState<Frame | null>(() => readFrame(local.get("panelFloat")));
-  useEffect(() => local.set("panelWidth", String(asideWidth)), [asideWidth]);
-  useEffect(() => local.set("panelHeight", String(asideHeight)), [asideHeight]);
+  useEffect(() => local.set("panelPlaces", JSON.stringify(places)), [places]);
+  useEffect(() => local.set("panelSizes", JSON.stringify(sizes)), [sizes]);
   useEffect(() => local.set("panelSplit", String(split)), [split]);
-  useEffect(() => local.set("panelDock", dock), [dock]);
   useEffect(() => {
     if (frame) local.set("panelFloat", JSON.stringify(frame));
   }, [frame]);
   // On a phone the panels cover the conversation, wherever they are docked.
   const beside = useSyncExternalStore(watchBeside, () => besideNow().matches);
-  const placedAt: Dock = beside ? dock : "right";
-  const floating = placedAt === "float";
-  // Side by side at the top or the bottom, where the panels take the width.
-  const sideBySide = across(placedAt);
-  // The room the conversation and the panels share, which a floating window stays inside.
+  const placeOf = (kind: AsidePanel): Dock => (beside ? places[kind] ?? dock : "right");
+  const sizeOf = (kind: AsidePanel): Size => ({ width: sizes[kind]?.width ?? asideWidth, height: sizes[kind]?.height ?? asideHeight });
+  const groups = groupPanels(asidePanels, placeOf);
+  const groupAt = (place: Dock) => groups.find((g) => g.place === place);
+  // Panels sharing a place share its size: the first one's, which one
+  // carried there takes on (see carryPanel).
+  const groupSize = (kinds: readonly AsidePanel[]) => sizeOf(kinds[0]);
+  // The room the conversation and the panels share, which a floating window
+  // stays inside and panels at both sides share with the conversation.
   const body = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState({ w: 0, h: 0 });
   // Not while the window is carried or sized: drawn again for a new room, it
   // would be put back where it was until the next move. Measured when let go.
   const moving = useRef(false);
   const measureRoom = useRef(() => {});
+  const measuring = beside && asidePanels.length > 0;
   useLayoutEffect(() => {
     const el = body.current;
-    if (!el || !floating) return;
+    if (!el || !measuring) return;
     const measure = (measureRoom.current = () => {
       if (!moving.current) setRoom((r) => (r.w === el.clientWidth && r.h === el.clientHeight ? r : { w: el.clientWidth, h: el.clientHeight }));
     });
@@ -353,8 +362,40 @@ export function Chat({
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [floating]);
+  }, [measuring]);
   const placed = fitFrame(frame, room);
+  /** The widths wanted at the sides, leaving out `without`, which is being carried. */
+  const sidesWanted = (without?: AsidePanel) => {
+    const at = (side: "left" | "right") => {
+      const kinds = groupAt(side)?.kinds.filter((k) => k !== without) ?? [];
+      return kinds.length ? groupSize(kinds).width : 0;
+    };
+    return { left: at("left"), right: at("right") };
+  };
+  const wanted = sidesWanted();
+  const sides = fitSides(wanted.left, wanted.right, room.w);
+
+  /*
+   * Each panel is drawn once, into a box of its own that goes into whichever
+   * place it is in (see slotFor): carried elsewhere, it is the same panel —
+   * Files keeps an edit not saved, the terminal its lines — rather than
+   * one made anew there.
+   */
+  const panelBoxes = useRef<Partial<Record<AsidePanel, HTMLDivElement>>>({});
+  const panelBox = (kind: AsidePanel) => {
+    let el = panelBoxes.current[kind];
+    if (!el) {
+      el = panelBoxes.current[kind] = document.createElement("div");
+      el.className = `flex min-h-0 min-w-0 flex-1 flex-col${kind === "browser" ? " bg-black" : ""}`;
+    }
+    return el;
+  };
+  const slots = useRef<Partial<Record<AsidePanel, (el: HTMLDivElement | null) => void>>>({});
+  const slotFor = (kind: AsidePanel) =>
+    (slots.current[kind] ??= (el) => {
+      const box = panelBox(kind);
+      if (el && box.parentElement !== el) el.appendChild(box);
+    });
 
   /**
    * Dragging, on pointer events rather than mouse ones (see followPointer).
@@ -377,49 +418,60 @@ export function Chat({
     );
   };
 
-  // The panels, their dividers' effect, the floating window and what shows
-  // where carried panels would go. While a drag goes on they are moved here,
+  // The places, their dividers' effect, the floating window and what shows
+  // where a carried panel would go. While a drag goes on they are moved here,
   // on the elements, and the chat is drawn again once, when it ends: at every
   // move it drew the whole conversation again, and wrote the size or place to
   // storage each time.
-  const aside = useRef<HTMLElement>(null);
+  const asides = useRef<Partial<Record<Dock, HTMLElement | null>>>({});
   const zones = useRef<HTMLDivElement>(null);
-  const setBox = (el: HTMLElement | null, f: Frame) => {
+  const setBox = (el: HTMLElement | null | undefined, f: Frame) => {
     if (el) Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
   };
+  /** Sizes given to `kinds`: the width at a side, the height at the bottom. */
+  const resize = (kinds: readonly AsidePanel[], to: Partial<Size>) =>
+    setSizes((s) => {
+      const next = { ...s };
+      for (const k of kinds) next[k] = { ...next[k], ...to };
+      return next;
+    });
 
-  /** The edge between the conversation and the panels: their width, or their height at the bottom. */
-  const dragSize = (e: React.PointerEvent) => {
-    // From the size drawn, and within what is drawn: the conversation's room.
-    const area = { w: body.current?.clientWidth ?? window.innerWidth, h: body.current?.clientHeight ?? window.innerHeight };
-    const from = dockedSize({ width: asideWidth, height: asideHeight }, area);
+  /** The edge between the conversation and the panels in a place: their width, or their height at the bottom. */
+  const dragSize = (place: Exclude<Dock, "float">, kinds: readonly AsidePanel[]) => (e: React.PointerEvent) => {
+    // From the size drawn, and within what is drawn: the conversation's room,
+    // less what the other side takes.
+    const other = place === "left" ? sides.right : place === "right" ? sides.left : 0;
+    const area = { w: (body.current?.clientWidth ?? window.innerWidth) - other, h: body.current?.clientHeight ?? window.innerHeight };
+    const was = groupSize(kinds);
+    const from = dockedSize(place === "bottom" ? was : { ...was, width: sides[place] }, area);
     let to = from;
-    const draw = (size: { width: number; height: number }) => {
-      if (!aside.current) return;
-      if (sideBySide) aside.current.style.height = `${size.height}px`;
-      else aside.current.style.width = `${size.width}px`;
+    const draw = (size: Size) => {
+      const el = asides.current[place];
+      if (!el) return;
+      if (place === "bottom") el.style.height = `${size.height}px`;
+      else el.style.width = `${size.width}px`;
     };
     drag(
       e,
       (dx, dy) => {
-        to = dockedSize({ width: from.width + (placedAt === "left" ? dx : -dx), height: from.height - dy }, area);
+        to = dockedSize({ width: from.width + (place === "left" ? dx : -dx), height: from.height - dy }, area);
         draw(to);
       },
       (cancelled) => {
-        if (cancelled) return draw({ width: asideWidth, height: asideHeight });
-        if (sideBySide) setAsideHeight(to.height);
-        else setAsideWidth(to.width);
+        if (cancelled) return draw(place === "bottom" ? was : { ...was, width: sides[place] });
+        resize(kinds, place === "bottom" ? { height: to.height } : { width: to.width });
       },
     );
   };
 
-  /** The edge between two panels: one above the other, or side by side. */
-  const dragSplit = (e: React.PointerEvent) => {
-    const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+  /** The edge between two panels in one place: one above the other, or side by side. */
+  const dragSplit = (place: Dock) => (e: React.PointerEvent) => {
+    const aside = e.currentTarget.parentElement as HTMLElement;
+    const box = aside.getBoundingClientRect();
     const x = e.clientX, y = e.clientY;
     let ratio = split;
     const draw = (r: number) => {
-      const [first, second] = aside.current?.querySelectorAll<HTMLElement>(":scope > .chat-aside-panel") ?? [];
+      const [first, second] = aside.querySelectorAll<HTMLElement>(":scope > .chat-aside-panel");
       if (first && second) {
         first.style.flex = `${r} 1 0%`;
         second.style.flex = `${1 - r} 1 0%`;
@@ -428,7 +480,7 @@ export function Chat({
     drag(
       e,
       (dx, dy) => {
-        ratio = Math.min(Math.max(sideBySide ? (x + dx - box.left) / box.width : (y + dy - box.top) / box.height, 0.15), 0.85);
+        ratio = Math.min(Math.max(across(place) ? (x + dx - box.left) / box.width : (y + dy - box.top) / box.height, 0.15), 0.85);
         draw(ratio);
       },
       (cancelled) => (cancelled ? draw(split) : setSplit(ratio)),
@@ -452,10 +504,10 @@ export function Chat({
       e,
       (dx, dy) => {
         at = fitFrame({ ...from, w: Math.min(from.w + dx, area.w - from.x), h: Math.min(from.h + dy, area.h - from.y) }, area);
-        setBox(aside.current, at);
+        setBox(asides.current.float, at);
       },
       (cancelled) => {
-        if (cancelled) setBox(aside.current, from);
+        if (cancelled) setBox(asides.current.float, from);
         else setFrame(at);
         stopMoving();
       },
@@ -463,26 +515,37 @@ export function Chat({
   };
 
   /**
-   * Carrying the panels by their header — not by a button or tab in it — to
-   * an edge of the chat, where they dock, or anywhere else, where they float.
-   * While held, the edges show, the one under the pointer lit, and where they
-   * would go is drawn; floating, the window goes along with the pointer.
+   * Carrying a panel by its header — not by a button or tab in it — to an
+   * edge of the chat, where it docks, or anywhere else, where it floats. Only
+   * that panel goes: the terminal to the left, Files to the right. While held,
+   * the edges show, the one under the pointer lit, and where it would go is
+   * drawn; floating, the window goes along with the pointer, and let go
+   * anywhere but an edge, the window is put there, with all that is in it.
    */
-  const carryPanels = (e: React.PointerEvent) => {
+  const carryPanel = (kind: AsidePanel) => (e: React.PointerEvent) => {
     const el = body.current;
     if (!el || e.button !== 0 || (e.target as Element).closest("button, a, input, [role=tab]")) return;
+    const holder = e.currentTarget.closest("aside") as HTMLElement;
+    const place = placeOf(kind), afloat = place === "float";
     const area = el.getBoundingClientRect(), size = { w: el.clientWidth, h: el.clientHeight };
-    const held = (e.currentTarget.closest("aside") as HTMLElement).getBoundingClientRect();
+    const held = holder.getBoundingClientRect();
     // As the window it floated as last, held by its header where it was taken.
-    const from = floating ? placed : fitFrame(frame, size);
+    const from = afloat ? placed : fitFrame(frame, size);
     const start = { x: e.clientX - area.left, y: e.clientY - area.top };
     // For a floating window, an edge the press began in counts only once the
     // pointer has left it: one at the top right, nudged by its header near
     // its right end, was docked at the right. Docked panels are carried from
     // wherever their header is — at the bottom, from the left edge.
-    let from0: Dock | null = floating ? dropTarget(start, size) : null;
+    let from0: Dock | null = afloat ? dropTarget(start, size) : null;
     if (from0 === "float") from0 = null;
     const grab = { x: Math.min(e.clientX - held.left, from.w - 24), y: Math.min(e.clientY - held.top, 24) };
+    // Where it would go among what stays where it is, and the size it would
+    // have there: that of the panels it joins, or its own.
+    const others = sidesWanted(kind);
+    const sizeAt = (to: Dock) => {
+      const joins = groupAt(to)?.kinds.filter((k) => k !== kind) ?? [];
+      return joins.length ? groupSize(joins) : sizeOf(kind);
+    };
     let to: Dock | null = null, at = from;
     moving.current = true;
     drag(
@@ -495,7 +558,7 @@ export function Chat({
         if (to === from0) to = "float";
         else if (from0 && to !== from0) from0 = null;
         at = fitFrame({ ...from, x: x - grab.x, y: y - grab.y }, size);
-        if (floating) setBox(aside.current, at);
+        if (afloat) setBox(holder, at);
         const z = zones.current;
         if (!z) return;
         z.hidden = false;
@@ -503,16 +566,21 @@ export function Chat({
         for (const edge of z.querySelectorAll<HTMLElement>("[data-edge]")) edge.classList.toggle("is-active", edge.dataset.edge === to);
         const preview = z.querySelector<HTMLElement>(".dock-preview")!;
         // Floating already, the window itself shows where it goes.
-        preview.hidden = floating && to === "float";
-        setBox(preview, to === "float" ? at : dockedFrame(to, size, { width: asideWidth, height: asideHeight }));
+        preview.hidden = afloat && to === "float";
+        setBox(preview, to === "float" ? at : dockedFrameAmong(to, size, sizeAt(to), others));
       },
       (cancelled) => {
         document.body.classList.remove("is-carrying");
         if (zones.current) zones.current.hidden = true;
-        if (to && cancelled && floating) setBox(aside.current, from);
+        // Docked from a window, what stays in it stays where it was.
+        if (to && afloat && (cancelled || to !== "float")) setBox(holder, from);
         if (to && !cancelled) {
           if (to === "float") setFrame(at);
-          setDock(to);
+          if (to !== place) {
+            const joins = groupAt(to)?.kinds.filter((k) => k !== kind) ?? [];
+            if (joins.length && to !== "float") resize([kind], to === "bottom" ? { height: groupSize(joins).height } : { width: groupSize(joins).width });
+            setPlaces((p) => ({ ...p, [kind]: to! }));
+          }
         }
         stopMoving();
       },
@@ -1073,6 +1141,161 @@ export function Chat({
     if (voiceMode) void dictation.stop();
   }, [voiceMode, dictation.stop]);
 
+  /** What is in a panel: its header, which carries it, and what it shows. */
+  const panelContent = (kind: AsidePanel) => (
+    <>
+      <div
+        // What the panel is carried by, to an edge or to float.
+        onPointerDown={beside ? carryPanel(kind) : undefined}
+        className="chat-aside-head flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5"
+      >
+        <span title="Drag to an edge to dock this panel there, anywhere else to float it" className="-ml-1.5 shrink-0 text-fg-faint max-md:hidden">
+          <LuGripVertical aria-hidden className="h-3.5 w-3.5" />
+        </span>
+        {kind === "terminal" ? (
+          <div className="chat-tabs" role="tablist" aria-label="Terminals">
+            <button type="button" role="tab" aria-selected={terminalTab === "agent"} onClick={() => setTerminalTab("agent")}>
+              Agent
+              {running && <i className="chat-tab-live" aria-label="Running" />}
+            </button>
+            <button type="button" role="tab" aria-selected={terminalTab === "jobs"} onClick={() => setTerminalTab("jobs")}>
+              Background
+              {background.jobs.some((j) => j.state === "running" && !j.attached) && <i className="chat-tab-live" aria-label="Running" />}
+            </button>
+            <button type="button" role="tab" aria-selected={terminalTab === "shell"} onClick={() => setTerminalTab("shell")}>
+              Your shell
+            </button>
+          </div>
+        ) : kind === "git" ? (
+          <div className="chat-tabs" role="tablist" aria-label="Git">
+            {GIT_TABS.map((t) => (
+              <button key={t.id} type="button" role="tab" aria-selected={gitTab === t.id} onClick={() => setGitTab(t.id)}>
+                {t.label}
+                {t.id === "changes" && gitCount > 0 && <span className="ml-1 rounded-full bg-fg/10 px-1 text-[10px]">{gitCount}</span>}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="text-[11px] text-fg-subtle">{kind === "browser" ? "Browser" : kind === "agents" ? "Subagents" : "Files"}</span>
+        )}
+        {kind === "terminal" && terminalTab === "shell" && <span className="max-md:hidden truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
+        <div className="ml-auto flex items-center gap-0.5">
+          {kind === "browser" && (
+            <button
+              // The browser's own box is what goes fullscreen, not the place
+              // it shares: the terminal or Files beside it stays where it is,
+              // and closed, the box leaves the page, and fullscreen with it.
+              onClick={() => panelBox("browser").requestFullscreen?.()}
+              className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
+            >
+              Fullscreen
+            </button>
+          )}
+          <button
+            onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? void closeFiles() : kind === "git" ? setGit(false) : kind === "agents" ? setAgentsOpen(false) : setTerminal(false))}
+            title="Collapse"
+            aria-label={`Close the ${kind === "browser" ? "browser" : kind === "files" ? "files" : kind === "git" ? "git panel" : kind === "agents" ? "subagents" : "terminal"}`}
+            className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+      {kind === "browser" && (
+        <iframe
+          src="/browser-ui/"
+          title="The agent's browser"
+          className="min-h-0 flex-1 border-0"
+          allow="clipboard-read; clipboard-write; fullscreen"
+        />
+      )}
+      {kind === "agents" && (
+        <div className="min-h-0 flex-1 bg-surface">
+          <SubagentPanel sessionId={session.id} agents={agents} items={items} selected={selectedAgent} onSelect={setSelectedAgent} />
+        </div>
+      )}
+      {kind === "files" && (
+        <div className="min-h-0 flex-1 bg-surface">
+          {/* Not before the chat's events are here: what it did earlier is not news. */}
+          {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} reveal={fileAsked} onRevealed={fileAnswered} onDirtyChange={setFilesDirty} />}
+        </div>
+      )}
+      {kind === "git" && (
+        <div className="min-h-0 flex-1 bg-surface">
+          <GitPanel key={session.id} sessionId={session.id} tab={gitTab} onTab={setGitTab} activity={fileActivity?.seq} running={running} onOpenFile={showInFiles} onCount={setGitCount} />
+        </div>
+      )}
+      {kind === "terminal" && (
+        <div className="relative min-h-0 flex-1 bg-[#0b0b0d]">
+          <div className={terminalTab === "agent" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
+            <VoiceTerminal events={events} limit={500} maxOutput={200_000} ended={ended} hidden={terminalTab !== "agent"} focus={terminalFocus} onFocused={() => setTerminalFocus(null)} />
+          </div>
+          <div className={terminalTab === "jobs" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
+            {terminalTab === "jobs" && (
+              <BackgroundJobs sessionId={session.id} state={background} selected={selectedJob} onSelect={setSelectedJob} onChanged={refreshBackground} />
+            )}
+          </div>
+          {shellStarted && (
+            <div className={terminalTab === "shell" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
+              <TerminalPanel sessionId={session.id} />
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  /** The panels in one place, and the edge between them and the conversation that sizes them. */
+  const placeAside = (place: Dock) => {
+    const kinds = groupAt(place)?.kinds;
+    if (!kinds) return null;
+    const afloat = place === "float", wide = across(place);
+    const aside = (
+      <aside
+        ref={(el) => {
+          asides.current[place] = el;
+        }}
+        data-dock={place}
+        aria-label={afloat ? "Floating panels" : place === "bottom" ? "Panels at the bottom" : `Panels on the ${place}`}
+        style={afloat ? { left: placed.x, top: placed.y, width: placed.w, height: placed.h } : wide ? { height: groupSize(kinds).height } : { width: sides[place as "left" | "right"] }}
+        // Never so large that the conversation, and the composer in it, is
+        // squeezed out (260px: the composer and a few lines above it): a chat made shorter by the keyboard, or a window
+        // made smaller, keeps room for it. On a phone there is no room
+        // beside the conversation: the panels cover it, under the header
+        // that opened them, until closed.
+        className={`chat-aside flex shrink-0 overflow-hidden ${wide ? "max-h-[calc(100%-260px)] flex-row" : afloat ? "flex-col" : "max-w-[calc(100%-320px)] flex-col"} ${ASIDE[place]} max-md:absolute max-md:inset-0 max-md:z-20 max-md:!h-full max-md:!max-h-none max-md:!w-full max-md:!max-w-none max-md:border-0 max-md:bg-surface`}
+      >
+        {kinds.map((kind, i) => (
+          <Fragment key={kind}>
+            {i > 0 && (
+              <div
+                onPointerDown={dragSplit(place)}
+                title="Drag to resize"
+                className={`shrink-0 touch-none bg-line transition hover:bg-accent/40 ${wide ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize"}`}
+              />
+            )}
+            {/* Where the panel's own box goes (see slotFor). */}
+            <div
+              ref={slotFor(kind)}
+              className="chat-aside-panel flex min-h-0 min-w-0 flex-col"
+              style={{ flex: kinds.length === 1 ? "1 1 0%" : `${i === 0 ? split : 1 - split} 1 0%` }}
+            />
+          </Fragment>
+        ))}
+        {afloat && <div onPointerDown={sizeFrame} title="Drag to resize" aria-hidden="true" className="chat-aside-grip max-md:hidden" />}
+      </aside>
+    );
+    if (afloat) return aside;
+    const edge = (
+      <div
+        onPointerDown={dragSize(place, kinds)}
+        title="Drag to resize"
+        className={`chat-aside-edge shrink-0 touch-none bg-line transition hover:bg-accent/40 max-md:hidden ${wide ? "h-1 cursor-row-resize" : "w-1 cursor-col-resize"}`}
+      />
+    );
+    return place === "left" ? <>{aside}{edge}</> : <>{edge}{aside}</>;
+  };
+
   return (
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
       <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} folder={session.workspace} open={canvasOpen} setOpen={setCanvasOpen}/>
@@ -1170,7 +1393,8 @@ export function Chat({
         </div>
       </header>
 
-      <div ref={body} data-dock={placedAt} className={voiceMode ? "hidden" : `relative flex min-h-0 flex-1 ${BODY[placedAt]}`}>
+      <div ref={body} className={voiceMode ? "hidden" : "chat-body relative flex min-h-0 flex-1 flex-row"}>
+      {placeAside("left")}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div
         ref={scroller.attach}
@@ -1770,162 +1994,25 @@ export function Chat({
           />
         </div>
       </form>
+      {placeAside("bottom")}
       </div>
 
       {/* Beside the conversation rather than above it: the page changing while
           the agent explains what it is doing is the thing worth seeing, and a
-          strip across the top pushed the transcript out of view to show it. */}
-      {asidePanels.length > 0 && (
-        <>
-          {!floating && (
-            <div
-              onPointerDown={dragSize}
-              title="Drag to resize"
-              className={`shrink-0 touch-none bg-line transition hover:bg-accent/40 max-md:hidden ${sideBySide ? "h-1 cursor-row-resize" : "w-1 cursor-col-resize"}`}
-            />
-          )}
-          <aside
-            ref={aside}
-            aria-label="Panels"
-            style={floating ? { left: placed.x, top: placed.y, width: placed.w, height: placed.h } : sideBySide ? { height: asideHeight } : { width: asideWidth }}
-            // Never so large that the conversation, and the composer in it, is
-            // squeezed out (260px: the composer and a few lines above it): a chat made shorter by the keyboard, or a window
-            // made smaller, keeps room for it. On a phone there is no room
-            // beside the conversation: the panels cover it, under the header
-            // that opened them, until closed.
-            className={`chat-aside flex shrink-0 overflow-hidden ${sideBySide ? "max-h-[calc(100%-260px)] flex-row" : floating ? "flex-col" : "max-w-[calc(100%-320px)] flex-col"} ${ASIDE[placedAt]} max-md:absolute max-md:inset-0 max-md:z-20 max-md:!h-full max-md:!max-h-none max-md:!w-full max-md:!max-w-none max-md:border-0 max-md:bg-surface`}
-          >
-            {asidePanels.map((kind, i) => (
-              <Fragment key={kind}>
-                {i > 0 && (
-                  <div
-                    onPointerDown={dragSplit}
-                    title="Drag to resize"
-                    className={`shrink-0 touch-none bg-line transition hover:bg-accent/40 ${sideBySide ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize"}`}
-                  />
-                )}
-                <div
-                  // The browser's own panel is what goes fullscreen, not the
-                  // side panel it shares: the terminal or Files beside it stays
-                  // where it is, and however the browser is closed — ✕, or a
-                  // third panel taking its place — taking it away ends
-                  // fullscreen with it.
-                  ref={kind === "browser" ? browserPane : undefined}
-                  className={`chat-aside-panel flex min-h-0 min-w-0 flex-col ${kind === "browser" ? "bg-black" : ""}`}
-                  style={{ flex: asidePanels.length === 1 ? "1 1 0%" : `${i === 0 ? split : 1 - split} 1 0%` }}
-                >
-                  <div
-                    // What the panels are carried by, to an edge or to float.
-                    onPointerDown={beside ? carryPanels : undefined}
-                    className="chat-aside-head flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5"
-                  >
-                    <span title="Drag to an edge to dock the panels there, anywhere else to float them" className="-ml-1.5 shrink-0 text-fg-faint max-md:hidden">
-                      <LuGripVertical aria-hidden className="h-3.5 w-3.5" />
-                    </span>
-                    {kind === "terminal" ? (
-                      <div className="chat-tabs" role="tablist" aria-label="Terminals">
-                        <button type="button" role="tab" aria-selected={terminalTab === "agent"} onClick={() => setTerminalTab("agent")}>
-                          Agent
-                          {running && <i className="chat-tab-live" aria-label="Running" />}
-                        </button>
-                        <button type="button" role="tab" aria-selected={terminalTab === "jobs"} onClick={() => setTerminalTab("jobs")}>
-                          Background
-                          {background.jobs.some((j) => j.state === "running" && !j.attached) && <i className="chat-tab-live" aria-label="Running" />}
-                        </button>
-                        <button type="button" role="tab" aria-selected={terminalTab === "shell"} onClick={() => setTerminalTab("shell")}>
-                          Your shell
-                        </button>
-                      </div>
-                    ) : kind === "git" ? (
-                      <div className="chat-tabs" role="tablist" aria-label="Git">
-                        {GIT_TABS.map((t) => (
-                          <button key={t.id} type="button" role="tab" aria-selected={gitTab === t.id} onClick={() => setGitTab(t.id)}>
-                            {t.label}
-                            {t.id === "changes" && gitCount > 0 && <span className="ml-1 rounded-full bg-fg/10 px-1 text-[10px]">{gitCount}</span>}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-[11px] text-fg-subtle">{kind === "browser" ? "Browser" : kind === "agents" ? "Subagents" : "Files"}</span>
-                    )}
-                    {kind === "terminal" && terminalTab === "shell" && <span className="max-md:hidden truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
-                    <div className="ml-auto flex items-center gap-0.5">
-                      {kind === "browser" && (
-                        <button
-                          onClick={() => browserPane.current?.requestFullscreen?.()}
-                          className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
-                        >
-                          Fullscreen
-                        </button>
-                      )}
-                      <button
-                        onClick={() => (kind === "browser" ? setWatching(false) : kind === "files" ? void closeFiles() : kind === "git" ? setGit(false) : kind === "agents" ? setAgentsOpen(false) : setTerminal(false))}
-                        title="Collapse"
-                        aria-label={`Close the ${kind === "browser" ? "browser" : kind === "files" ? "files" : kind === "git" ? "git panel" : kind === "agents" ? "subagents" : "terminal"}`}
-                        className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                  {kind === "browser" && (
-                    <iframe
-                      src="/browser-ui/"
-                      title="The agent's browser"
-                      className="min-h-0 flex-1 border-0"
-                      allow="clipboard-read; clipboard-write; fullscreen"
-                    />
-                  )}
-                  {kind === "agents" && (
-                    <div className="min-h-0 flex-1 bg-surface">
-                      <SubagentPanel sessionId={session.id} agents={agents} items={items} selected={selectedAgent} onSelect={setSelectedAgent} />
-                    </div>
-                  )}
-                  {kind === "files" && (
-                    <div className="min-h-0 flex-1 bg-surface">
-                      {/* Not before the chat's events are here: what it did earlier is not news. */}
-                      {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} reveal={fileAsked} onRevealed={fileAnswered} onDirtyChange={setFilesDirty} />}
-                    </div>
-                  )}
-                  {kind === "git" && (
-                    <div className="min-h-0 flex-1 bg-surface">
-                      <GitPanel key={session.id} sessionId={session.id} tab={gitTab} onTab={setGitTab} activity={fileActivity?.seq} running={running} onOpenFile={showInFiles} onCount={setGitCount} />
-                    </div>
-                  )}
-                  {kind === "terminal" && (
-                    <div className="relative min-h-0 flex-1 bg-[#0b0b0d]">
-                      <div className={terminalTab === "agent" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
-                        <VoiceTerminal events={events} limit={500} maxOutput={200_000} ended={ended} hidden={terminalTab !== "agent"} focus={terminalFocus} onFocused={() => setTerminalFocus(null)} />
-                      </div>
-                      <div className={terminalTab === "jobs" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
-                        {terminalTab === "jobs" && (
-                          <BackgroundJobs sessionId={session.id} state={background} selected={selectedJob} onSelect={setSelectedJob} onChanged={refreshBackground} />
-                        )}
-                      </div>
-                      {shellStarted && (
-                        <div className={terminalTab === "shell" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
-                          <TerminalPanel sessionId={session.id} />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </Fragment>
-            ))}
-            {floating && (
-              <div onPointerDown={sizeFrame} title="Drag to resize" aria-hidden="true" className="chat-aside-grip max-md:hidden" />
-            )}
-          </aside>
-          {/* Shown while the panels are carried (see carryPanels). */}
-          {beside && (
-            <div ref={zones} aria-hidden="true" className="dock-zones" hidden>
-              {(["left", "right", "bottom"] as const).map((edge) => (
-                <i key={edge} data-edge={edge} className={`dock-edge is-${edge}`} />
-              ))}
-              <div className="dock-preview" />
-            </div>
-          )}
-        </>
+          strip across the top pushed the transcript out of view to show it.
+          Each panel where it was put: at the right or the left, under the
+          conversation, or floating over it. */}
+      {placeAside("right")}
+      {placeAside("float")}
+      {asidePanels.map((kind) => createPortal(panelContent(kind), panelBox(kind), kind))}
+      {/* Shown while a panel is carried (see carryPanel). */}
+      {beside && asidePanels.length > 0 && (
+        <div ref={zones} aria-hidden="true" className="dock-zones" hidden>
+          {(["left", "right", "bottom"] as const).map((edge) => (
+            <i key={edge} data-edge={edge} className={`dock-edge is-${edge}`} />
+          ))}
+          <div className="dock-preview" />
+        </div>
       )}
       </div>
     </div>
