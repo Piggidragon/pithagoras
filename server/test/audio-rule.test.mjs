@@ -1,0 +1,333 @@
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+/**
+ * The rule for spoken replies, against pi itself: which conversations have it
+ * in the system prompt the model is sent.
+ */
+const home = mkdtempSync(path.join(tmpdir(), "pithagoras-audio-rule-"));
+process.env.DATA_DIR = home;
+process.env.WORKSPACE_ROOT = path.join(home, "ws");
+process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
+process.env.SESSION_DIR = path.join(home, "sessions");
+mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
+
+/** Each request's system prompt, in the order they came. */
+const sent = [];
+/** Held until let go, for a run that is still going when the next message comes. */
+let hold;
+const model = createServer((req, res) => {
+  let body = "";
+  req.on("data", (d) => { body += d; });
+  req.on("end", async () => {
+    const system = JSON.parse(body).messages.find((m) => m.role === "system" || m.role === "developer");
+    sent.push(typeof system?.content === "string" ? system.content : system?.content?.map((c) => c.text).join("") ?? "");
+    if (hold) await hold;
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    const chunk = (delta, finish = null) =>
+      `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+    res.end(chunk({ role: "assistant", content: "Sure." }) + chunk({}, "stop") + "data: [DONE]\n\n");
+  });
+});
+model.listen(0, "127.0.0.1");
+await once(model, "listening");
+after(() => model.close());
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify({
+  providers: {
+    fake: {
+      baseUrl: `http://127.0.0.1:${model.address().port}/v1`, api: "openai-completions", apiKey: "none",
+      models: [{ id: "m", name: "M", reasoning: false, input: ["text"], contextWindow: 10000, maxTokens: 100 }],
+    },
+  },
+}));
+
+// Sets the prompt of every run while a test asks it to: adding to what it is
+// given, as pi-background-tasks does with its shell policy, or writing its own.
+// And takes a message out of pi's hands, as an input extension can.
+mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "policy.ts"), `
+export default function (pi: any) {
+  pi.on("before_agent_start", (event: any) => {
+    if ((globalThis as any).addPolicy) return { systemPrompt: event.systemPrompt + "\\n\\nSHELL POLICY" };
+    if ((globalThis as any).ownPrompt) return { systemPrompt: "AN EXTENSION'S OWN PROMPT" };
+  });
+  pi.on("input", (event: any) => (event.text.includes("take this") ? { action: "handled" } : undefined));
+}
+`);
+// Compaction keeps as little as it can, so a message can be compacted away.
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.stringify({ compaction: { keepRecentTokens: 1 } }));
+
+const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
+const { AUDIO_SYSTEM_RULE } = await import("../dist/pi/voice-first.js");
+
+let chats = 0;
+const open = (sessionFile) => {
+  const dir = path.join(home, "chats", String(++chats));
+  mkdirSync(dir, { recursive: true });
+  return SdkPiClient.create({ cwd: process.env.WORKSPACE_ROOT, sessionDir: dir, sessionFile, provider: "fake", modelId: "m" });
+};
+/** Waits for `ready`, and fails rather than waiting for ever. */
+async function until(ready, what) {
+  for (let i = 0; !ready(); i++) {
+    assert.ok(i < 500, `waited 5 s for ${what}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+/** The end of the run going now, or a failure after 10 s. */
+const settled = (client) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => { client.off("event", on); reject(new Error("the run did not settle within 10 s")); }, 10_000);
+  const on = (e) => { if (e?.type === "agent_settled") { clearTimeout(timer); client.off("event", on); resolve(); } };
+  client.on("event", on);
+});
+/** Sends one message, and gives the system prompt its run was answered with. */
+async function say(client, text, voice) {
+  const before = sent.length;
+  const done = settled(client);
+  await client.prompt(text, voice ? { voice: true } : undefined);
+  await done;
+  assert.equal(sent.length, before + 1);
+  return sent.at(-1);
+}
+
+test("a typed conversation's system prompt says nothing of [Audio mode]", async () => {
+  // The model read the rule there as the message having the marker, and gave
+  // a typed question a spoken answer: issue #26.
+  const client = await open();
+  try {
+    assert.doesNotMatch(await say(client, "How do image models work?"), /Audio mode/);
+    assert.doesNotMatch(await say(client, "And video ones?"), /Audio mode/);
+  } finally {
+    client.dispose();
+  }
+});
+
+test("a conversation keeps the rule from its first spoken message on, reopened too", async () => {
+  const client = await open();
+  let file;
+  try {
+    assert.doesNotMatch(await say(client, "Typed first"), /Audio mode/);
+    const spoken = await say(client, "Now spoken", true);
+    assert.ok(spoken.includes(AUDIO_SYSTEM_RULE));
+    // Typed again: the same prompt, so what the model cached of it still counts.
+    assert.equal(await say(client, "Typed again"), spoken);
+    file = client.sessionFile;
+  } finally {
+    client.dispose();
+  }
+  // After a restart, from what the conversation holds.
+  const reopened = await open(file);
+  try {
+    assert.ok((await say(reopened, "Typed after a restart")).includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    reopened.dispose();
+  }
+});
+
+test("a spoken message sent while a typed run is going is answered with the rule", async () => {
+  // Voice switched on while the agent works: the message waits for the run,
+  // and is taken in by it without a new one starting.
+  const client = await open();
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  try {
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    await client.prompt("Spoken meanwhile", { voice: true });
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2, "one run, two answers");
+    assert.doesNotMatch(sent[before], /Audio mode/);
+    assert.ok(sent[before + 1].includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    hold = undefined;
+    release?.();
+    client.dispose();
+  }
+});
+
+test("a spoken message queued into a run whose prompt an extension set is answered with the rule", async () => {
+  globalThis.addPolicy = true;
+  const client = await open();
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  try {
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    await client.prompt("Spoken meanwhile", { voice: true });
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2, "one run, two answers");
+    assert.match(sent[before], /SHELL POLICY/);
+    assert.doesNotMatch(sent[before], /Audio mode/);
+    // What the extension added is still there, and the rule with it.
+    assert.match(sent[before + 1], /SHELL POLICY/);
+    assert.ok(sent[before + 1].includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    hold = undefined;
+    release?.();
+    delete globalThis.addPolicy;
+    client.dispose();
+  }
+});
+
+test("a typed message after a queued spoken one does not take the rule away before it is answered", async () => {
+  const client = await open();
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  try {
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    await client.prompt("Spoken meanwhile", { voice: true });
+    await client.prompt("And typed after it");
+    hold = undefined;
+    release();
+    await done;
+    assert.ok(sent.length >= before + 2, "the queued messages were answered");
+    assert.doesNotMatch(sent[before], /Audio mode/);
+    for (const prompt of sent.slice(before + 1)) assert.ok(prompt.includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    hold = undefined;
+    release?.();
+    client.dispose();
+  }
+});
+
+test("a spoken message queued after the tools changed in a run whose prompt an extension set has the rule", async () => {
+  globalThis.addPolicy = true;
+  const client = await open();
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  try {
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    // pi builds its prompt again, and the one the extension set keeps the
+    // prompt it was given: the two no longer match.
+    client.session.setActiveToolsByName(["read"]);
+    await client.prompt("Spoken meanwhile", { voice: true });
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2);
+    assert.match(sent[before + 1], /SHELL POLICY/);
+    assert.ok(sent[before + 1].includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    hold = undefined;
+    release?.();
+    delete globalThis.addPolicy;
+    client.dispose();
+  }
+});
+
+test("a spoken message queued into a run whose prompt an extension wrote itself has the rule", async () => {
+  globalThis.ownPrompt = true;
+  const client = await open();
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  try {
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    await client.prompt("Spoken meanwhile", { voice: true });
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2);
+    assert.equal(sent[before], "AN EXTENSION'S OWN PROMPT");
+    // Nothing of pi's to put it after: at the end.
+    assert.equal(sent[before + 1], `AN EXTENSION'S OWN PROMPT\n\n${AUDIO_SYSTEM_RULE}`);
+  } finally {
+    hold = undefined;
+    release?.();
+    delete globalThis.ownPrompt;
+    client.dispose();
+  }
+});
+
+test("a spoken message an extension takes leaves no rule behind", async () => {
+  // Issue #26 again otherwise: the rule, and no spoken message it is about.
+  const client = await open();
+  try {
+    assert.equal((await client.prompt("Please take this", { voice: true })).outcome, "handled");
+    assert.doesNotMatch(await say(client, "Typed"), /Audio mode/);
+    // Where one did reach the conversation, it stays.
+    assert.ok((await say(client, "Spoken", true)).includes(AUDIO_SYSTEM_RULE));
+    assert.equal((await client.prompt("Please take this", { voice: true })).outcome, "handled");
+    assert.ok((await say(client, "Typed again")).includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    client.dispose();
+  }
+});
+
+test("a conversation whose spoken messages were compacted away opens without the rule", async () => {
+  const client = await open();
+  let file;
+  try {
+    await say(client, "Spoken", true);
+    await say(client, "Typed");
+    await client.session.compact();
+    file = client.sessionFile;
+  } finally {
+    client.dispose();
+  }
+  const reopened = await open(file);
+  try {
+    assert.doesNotMatch(await say(reopened, "Typed after it"), /Audio mode/);
+  } finally {
+    reopened.dispose();
+  }
+});
+
+test("a spoken conversation's prompt follows its tools during a run, and keeps the rule", async () => {
+  const client = await open();
+  let release;
+  try {
+    assert.match(await say(client, "Spoken", true), /- bash:/);
+    hold = new Promise((resolve) => { release = resolve; });
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    // Mid-run, as an MCP server connecting or an extension's tool going away
+    // does it; the next turn of the same run is the one that must know.
+    client.session.setActiveToolsByName(["read"]);
+    await client.prompt("And one more");
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2, "one run, two answers");
+    assert.doesNotMatch(sent[before + 1], /- bash:/);
+    assert.ok(sent[before + 1].includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    hold = undefined;
+    release?.();
+    client.dispose();
+  }
+});
+
+test("with VOICE_RESPONSE_INSTRUCTIONS=false no conversation has the rule", async () => {
+  process.env.VOICE_RESPONSE_INSTRUCTIONS = "false";
+  const client = await open();
+  try {
+    assert.doesNotMatch(await say(client, "Spoken", true), /Audio mode/);
+  } finally {
+    client.dispose();
+    delete process.env.VOICE_RESPONSE_INSTRUCTIONS;
+  }
+});

@@ -413,9 +413,26 @@ models swaps through all of them.
 On the host executor with a llama.cpp provider, each voice prompt disables
 thinking for its first model call and asks for a brief spoken answer before
 tools. Later calls after tools use the session’s existing thinking setting.
-A permanent conditional rule in the base system prompt asks for plain, concise
-speech when the latest user message begins with `[Audio mode]`. The portal adds
-that prefix to microphone submissions and typed requests sent in voice mode.
+A conditional rule in the system prompt asks for plain, concise speech when the
+latest user message begins with `[Audio mode]`. The portal adds that prefix to
+microphone submissions and typed requests sent in voice mode. The rule is only in
+the system prompt of a conversation that has had voice, and it is part of the
+prompt pi builds, so it stays when tools come and go. It comes in with the first
+spoken message, including one sent while a typed run is still going, and typing
+again does not take it out, so the prompt does not change back and forth. It is
+left out again when a spoken message never reached the conversation (refused, or
+taken by an extension) and no other spoken one is there, and when the
+conversation is opened with no spoken message in what the model is given: after
+a restart, a compaction, or an edit that removed the spoken messages. A
+typed-only conversation never mentions `[Audio mode]`; with the rule there, a
+model took typed messages for spoken ones.
+
+The first spoken message in a conversation that was typed until then changes
+the system prompt once. A local model keeps a cache of the prompt it has
+already read, and that cache starts at the system prompt, so the whole
+conversation is read again before that first spoken reply. In a long
+conversation on llama.cpp, that can be a noticeable wait; every spoken or typed
+message after it has the cache again.
 The marker stays in model conversation history, while the chat UI shows the
 original user text. No temporary system messages are inserted. Ordinary text
 requests have no marker and use normal chat formatting, even after voice turns.

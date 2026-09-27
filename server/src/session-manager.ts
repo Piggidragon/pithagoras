@@ -12,6 +12,7 @@ import { mcpServerNames } from "./api/mcp.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/session-edit.js";
 import { AUDIO_MESSAGE_PREFIX } from "./pi/voice-first.js";
+import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
@@ -476,9 +477,8 @@ class SessionManager extends EventEmitter {
       if (own.waiting) this.placeTaken(sessionId, own.waiting);
       return;
     }
-    const parts: any[] = typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : [];
-    const text = parts.map((c) => (c?.type === "text" && typeof c.text === "string" ? c.text : "")).join("");
-    const images = parts.filter((c) => c?.type === "image").length;
+    const text = textOf(content);
+    const images = Array.isArray(content) ? content.filter((c) => c?.type === "image").length : 0;
     const list = this.waiting.get(sessionId) ?? [];
     // As pi finds it in its own queue: the steers first, then the follow-ups,
     // each by the words pi queued, oldest first — a typed steer overtakes a
