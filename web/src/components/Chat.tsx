@@ -41,7 +41,7 @@ import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
-import { DOCKED_MIN, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, fitSides, groupPanels, isDock, readFrame, readPlaces, readSizes, type Dock, type Frame, type Places, type Size, type Sizes } from "../panel-dock";
+import { DOCKED_MIN, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, fitSides, groupPanels, isDock, readFrame, readPlaceSizes, readPlaces, type Dock, type Frame, type PlaceSizes, type Places, type Size } from "../panel-dock";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -315,17 +315,19 @@ export function Chat({
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where each panel goes, and
-  // the width or height it takes there, the same. What was kept for all of
-  // them before they were placed one by one is what a panel not placed or
-  // sized yet has.
-  const [asideWidth] = useState(() => storedSize("panelWidth", 560, DOCKED_MIN.w));
-  const [asideHeight] = useState(() => storedSize("panelHeight", 320, DOCKED_MIN.h));
-  const [dock] = useState<Dock>(() => {
+  // the width or height each place has, the same. What was kept for all of
+  // them before they were placed one by one — where they went, and how wide
+  // or tall — is what a panel not placed yet, or a place not sized yet, has.
+  const [before] = useState(() => {
     const stored = local.get("panelDock");
-    return isDock(stored) ? stored : "right";
+    return {
+      dock: isDock(stored) ? stored : ("right" as Dock),
+      width: storedSize("panelWidth", 560, DOCKED_MIN.w),
+      height: storedSize("panelHeight", 320, DOCKED_MIN.h),
+    };
   });
   const [places, setPlaces] = useState<Places>(() => readPlaces(local.get("panelPlaces")));
-  const [sizes, setSizes] = useState<Sizes>(() => readSizes(local.get("panelSizes")));
+  const [sizes, setSizes] = useState<PlaceSizes>(() => readPlaceSizes(local.get("panelSizes")));
   const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || 0.55);
   const [frame, setFrame] = useState<Frame | null>(() => readFrame(local.get("panelFloat")));
   useEffect(() => local.set("panelPlaces", JSON.stringify(places)), [places]);
@@ -336,22 +338,22 @@ export function Chat({
   }, [frame]);
   // On a phone the panels cover the conversation, wherever they are docked.
   const beside = useSyncExternalStore(watchBeside, () => besideNow().matches);
-  const placeOf = (kind: AsidePanel): Dock => (beside ? places[kind] ?? dock : "right");
-  const sizeOf = (kind: AsidePanel): Size => ({ width: sizes[kind]?.width ?? asideWidth, height: sizes[kind]?.height ?? asideHeight });
+  const placeOf = (kind: AsidePanel): Dock => (beside ? places[kind] ?? before.dock : "right");
+  const widthAt = (side: "left" | "right") => sizes[side] ?? before.width;
+  const heightAt = () => sizes.bottom ?? before.height;
   const groups = groupPanels(asidePanels, placeOf);
   const groupAt = (place: Dock) => groups.find((g) => g.place === place);
-  // Panels sharing a place share its size: the first one's, which one
-  // carried there takes on (see carryPanel).
-  const groupSize = (kinds: readonly AsidePanel[]) => sizeOf(kinds[0]);
   // The room the conversation and the panels share, which a floating window
-  // stays inside and panels at both sides share with the conversation.
+  // stays inside and panels at both sides share with the conversation. With
+  // neither, the page's own limits hold docked panels, and it is not
+  // measured: every change to it drew the whole conversation again.
   const body = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState({ w: 0, h: 0 });
   // Not while the window is carried or sized: drawn again for a new room, it
   // would be put back where it was until the next move. Measured when let go.
   const moving = useRef(false);
   const measureRoom = useRef(() => {});
-  const measuring = beside && asidePanels.length > 0;
+  const measuring = beside && (!!groupAt("float") || (!!groupAt("left") && !!groupAt("right")));
   useLayoutEffect(() => {
     const el = body.current;
     if (!el || !measuring) return;
@@ -361,19 +363,20 @@ export function Chat({
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      measureRoom.current = () => {};
+    };
   }, [measuring]);
   const placed = fitFrame(frame, room);
   /** The widths wanted at the sides, leaving out `without`, which is being carried. */
   const sidesWanted = (without?: AsidePanel) => {
-    const at = (side: "left" | "right") => {
-      const kinds = groupAt(side)?.kinds.filter((k) => k !== without) ?? [];
-      return kinds.length ? groupSize(kinds).width : 0;
-    };
+    const at = (side: "left" | "right") => (groupAt(side)?.kinds.some((k) => k !== without) ? widthAt(side) : 0);
     return { left: at("left"), right: at("right") };
   };
   const wanted = sidesWanted();
-  const sides = fitSides(wanted.left, wanted.right, room.w);
+  // Not measured, the room kept is from when it last was: as they were made, the page holding them.
+  const sides = fitSides(wanted.left, wanted.right, measuring ? room.w : 0);
 
   /*
    * Each panel is drawn once, into a box of its own that goes into whichever
@@ -428,38 +431,51 @@ export function Chat({
   const setBox = (el: HTMLElement | null | undefined, f: Frame) => {
     if (el) Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
   };
-  /** Sizes given to `kinds`: the width at a side, the height at the bottom. */
-  const resize = (kinds: readonly AsidePanel[], to: Partial<Size>) =>
-    setSizes((s) => {
-      const next = { ...s };
-      for (const k of kinds) next[k] = { ...next[k], ...to };
-      return next;
-    });
-
   /** The edge between the conversation and the panels in a place: their width, or their height at the bottom. */
-  const dragSize = (place: Exclude<Dock, "float">, kinds: readonly AsidePanel[]) => (e: React.PointerEvent) => {
-    // From the size drawn, and within what is drawn: the conversation's room,
-    // less what the other side takes.
-    const other = place === "left" ? sides.right : place === "right" ? sides.left : 0;
-    const area = { w: (body.current?.clientWidth ?? window.innerWidth) - other, h: body.current?.clientHeight ?? window.innerHeight };
-    const was = groupSize(kinds);
-    const from = dockedSize(place === "bottom" ? was : { ...was, width: sides[place] }, area);
-    let to = from;
-    const draw = (size: Size) => {
-      const el = asides.current[place];
-      if (!el) return;
-      if (place === "bottom") el.style.height = `${size.height}px`;
-      else el.style.width = `${size.width}px`;
-    };
+  const dragSize = (place: Exclude<Dock, "float">) => (e: React.PointerEvent) => {
+    const el = asides.current[place];
+    const area = { w: body.current?.clientWidth ?? window.innerWidth, h: body.current?.clientHeight ?? window.innerHeight };
+    if (place === "bottom") {
+      // From the height drawn, and within the conversation's room.
+      const was = heightAt(), from = dockedSize({ width: 0, height: was }, area).height;
+      let to = from;
+      drag(
+        e,
+        (_dx, dy) => {
+          to = dockedSize({ width: 0, height: from - dy }, area).height;
+          if (el) el.style.height = `${to}px`;
+        },
+        (cancelled) => {
+          if (cancelled) {
+            if (el) el.style.height = `${was}px`;
+          } else setSizes((s) => ({ ...s, bottom: to }));
+        },
+      );
+      return;
+    }
+    // From the width drawn — at both sides, what the two were given way to —
+    // and no wider than leaves the conversation its room beside the other
+    // side as it is drawn. No narrower than of use, unless drawn narrower
+    // already: then from there, not with a jump to the least.
+    const other: "left" | "right" = place === "left" ? "right" : "left";
+    const now = fitSides(wanted.left, wanted.right, area.w);
+    const least = Math.min(DOCKED_MIN.w, now[place]);
+    const most = Math.max(least, area.w - now[other] - KEEP.w);
+    let to = now[place];
     drag(
       e,
-      (dx, dy) => {
-        to = dockedSize({ width: from.width + (place === "left" ? dx : -dx), height: from.height - dy }, area);
-        draw(to);
+      (dx) => {
+        to = Math.round(Math.min(most, Math.max(least, now[place] + (place === "left" ? dx : -dx))));
+        if (el) el.style.width = `${to}px`;
       },
       (cancelled) => {
-        if (cancelled) return draw(place === "bottom" ? was : { ...was, width: sides[place] });
-        resize(kinds, place === "bottom" ? { height: to.height } : { width: to.width });
+        if (cancelled) {
+          if (el) el.style.width = `${sides[place]}px`;
+          return;
+        }
+        // The other side kept as it is drawn: kept as it was made, the two
+        // gave way to each other again when let go, and it moved as well.
+        setSizes((s) => ({ ...s, [place]: to, ...(now[other] ? { [other]: now[other] } : {}) }));
       },
     );
   };
@@ -539,13 +555,12 @@ export function Chat({
     let from0: Dock | null = afloat ? dropTarget(start, size) : null;
     if (from0 === "float") from0 = null;
     const grab = { x: Math.min(e.clientX - held.left, from.w - 24), y: Math.min(e.clientY - held.top, 24) };
-    // Where it would go among what stays where it is, and the size it would
-    // have there: that of the panels it joins, or its own.
+    // Where it would go among what stays where it is, at the size of the place.
     const others = sidesWanted(kind);
-    const sizeAt = (to: Dock) => {
-      const joins = groupAt(to)?.kinds.filter((k) => k !== kind) ?? [];
-      return joins.length ? groupSize(joins) : sizeOf(kind);
-    };
+    const sizeOf = (to: Exclude<Dock, "float">): Size => ({ width: to === "bottom" ? 0 : widthAt(to), height: heightAt() });
+    // A window other panels float in already: it joins them there, and the
+    // window stays where it was put — it jumped to where this one was let go.
+    const window0 = !afloat && groupAt("float") ? placed : null;
     let to: Dock | null = null, at = from;
     moving.current = true;
     drag(
@@ -567,7 +582,7 @@ export function Chat({
         const preview = z.querySelector<HTMLElement>(".dock-preview")!;
         // Floating already, the window itself shows where it goes.
         preview.hidden = afloat && to === "float";
-        setBox(preview, to === "float" ? at : dockedFrameAmong(to, size, sizeAt(to), others));
+        setBox(preview, to === "float" ? window0 ?? at : dockedFrameAmong(to, size, sizeOf(to), others));
       },
       (cancelled) => {
         document.body.classList.remove("is-carrying");
@@ -575,12 +590,8 @@ export function Chat({
         // Docked from a window, what stays in it stays where it was.
         if (to && afloat && (cancelled || to !== "float")) setBox(holder, from);
         if (to && !cancelled) {
-          if (to === "float") setFrame(at);
-          if (to !== place) {
-            const joins = groupAt(to)?.kinds.filter((k) => k !== kind) ?? [];
-            if (joins.length && to !== "float") resize([kind], to === "bottom" ? { height: groupSize(joins).height } : { width: groupSize(joins).width });
-            setPlaces((p) => ({ ...p, [kind]: to! }));
-          }
+          if (to === "float" && !window0) setFrame(at);
+          if (to !== place) setPlaces((p) => ({ ...p, [kind]: to! }));
         }
         stopMoving();
       },
@@ -1257,7 +1268,7 @@ export function Chat({
         }}
         data-dock={place}
         aria-label={afloat ? "Floating panels" : place === "bottom" ? "Panels at the bottom" : `Panels on the ${place}`}
-        style={afloat ? { left: placed.x, top: placed.y, width: placed.w, height: placed.h } : wide ? { height: groupSize(kinds).height } : { width: sides[place as "left" | "right"] }}
+        style={afloat ? { left: placed.x, top: placed.y, width: placed.w, height: placed.h } : wide ? { height: heightAt() } : { width: sides[place as "left" | "right"] }}
         // Never so large that the conversation, and the composer in it, is
         // squeezed out (260px: the composer and a few lines above it): a chat made shorter by the keyboard, or a window
         // made smaller, keeps room for it. On a phone there is no room
@@ -1288,7 +1299,7 @@ export function Chat({
     if (afloat) return aside;
     const edge = (
       <div
-        onPointerDown={dragSize(place, kinds)}
+        onPointerDown={dragSize(place)}
         title="Drag to resize"
         className={`chat-aside-edge shrink-0 touch-none bg-line transition hover:bg-accent/40 max-md:hidden ${wide ? "h-1 cursor-row-resize" : "w-1 cursor-col-resize"}`}
       />

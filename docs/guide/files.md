@@ -71,5 +71,6 @@ that you can move and size. Every panel remembers where you put it, so the
 terminal can sit at the left while Files is at the right. Two panels in the same
 place share it: one above the other at a side, side by side at the bottom, and
 one window when both float. At the bottom they sit under the conversation,
-between the panels at the sides. A panel you have never moved goes where all of
-them went before.
+between the panels at the sides. Each place keeps the size you gave it, whichever
+panels are in it. A panel you have never moved goes where all of them went
+before.

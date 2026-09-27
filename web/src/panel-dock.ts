@@ -124,23 +124,26 @@ export function readPlaces(raw: string | null | undefined): Places {
   }
 }
 
-/** A panel's own size: its width at a side, its height at the bottom. */
+/** A width at a side, a height at the bottom. */
 export type Size = { width: number; height: number };
-export type Sizes = Partial<Record<string, Partial<Size>>>;
 
-/** Sizes read back from storage: only those at least as large as docked panels are drawn. */
-export function readSizes(raw: string | null | undefined): Sizes {
+/**
+ * The size of each place, kept by the place rather than by the panels in it:
+ * a side made 400px wide stays so whichever panels are opened there, and a
+ * panel carried to it takes that width.
+ */
+export type PlaceSizes = { left?: number; right?: number; bottom?: number };
+
+/** Place sizes read back from storage: only those at least as large as docked panels are drawn. */
+export function readPlaceSizes(raw: string | null | undefined): PlaceSizes {
   if (!raw) return {};
   try {
-    const stored = JSON.parse(raw) as unknown;
+    const stored = JSON.parse(raw) as Record<string, unknown> | null;
     if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
-    const sizes: Sizes = {};
-    for (const [kind, size] of Object.entries(stored as Record<string, Partial<Size>>)) {
-      if (!size || typeof size !== "object") continue;
-      const kept: Partial<Size> = {};
-      if (typeof size.width === "number" && Number.isFinite(size.width) && size.width >= DOCKED_MIN.w) kept.width = size.width;
-      if (typeof size.height === "number" && Number.isFinite(size.height) && size.height >= DOCKED_MIN.h) kept.height = size.height;
-      if (kept.width !== undefined || kept.height !== undefined) sizes[kind] = kept;
+    const sizes: PlaceSizes = {};
+    for (const place of ["left", "right", "bottom"] as const) {
+      const n = stored[place];
+      if (typeof n === "number" && Number.isFinite(n) && n >= (place === "bottom" ? DOCKED_MIN.h : DOCKED_MIN.w)) sizes[place] = n;
     }
     return sizes;
   } catch {

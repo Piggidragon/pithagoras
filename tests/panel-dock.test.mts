@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, fitSides, groupPanels, isDock, readFrame, readPlaces, readSizes } from '../web/src/panel-dock.ts';
+import { across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, fitSides, groupPanels, isDock, readFrame, readPlaceSizes, readPlaces } from '../web/src/panel-dock.ts';
 
 test('a floating window placed for the first time goes to the top right, inside the chat and above the composer', () => {
   // Ending 260px above the chat's foot, where the composer is: it reached down over Send and Stop.
@@ -96,11 +96,9 @@ test('each panel goes to its own place, and those in one place are together, in 
 test('places and sizes are read back only where they are ones a panel can have', () => {
   assert.deepEqual(readPlaces('{"terminal":"left","files":"top","git":"float","browser":3}'), { terminal: 'left', git: 'float' });
   for (const raw of [null, '', 'nope', '[1]', '"left"', 'null']) assert.deepEqual(readPlaces(raw), {});
-  assert.deepEqual(readSizes('{"terminal":{"width":400,"height":40},"files":{"width":100},"git":{"height":200},"browser":null,"agents":{"width":"500"}}'), {
-    terminal: { width: 400 },
-    git: { height: 200 },
-  });
-  for (const raw of [null, '', 'nope', '[1]', 'null']) assert.deepEqual(readSizes(raw), {});
+  assert.deepEqual(readPlaceSizes('{"left":400,"right":100,"bottom":200,"float":500}'), { left: 400, bottom: 200 });
+  assert.deepEqual(readPlaceSizes('{"left":"400","right":null,"bottom":40}'), {});
+  for (const raw of [null, '', 'nope', '[1]', 'null']) assert.deepEqual(readPlaceSizes(raw), {});
 });
 
 test('panels are dragged to no more than leaves the conversation its room, and never below the least', () => {
