@@ -22,8 +22,22 @@ test('voice mode never injects or mutates messages', () => {
  const result = request();
  assert.equal(result.messages, payload.messages);
  assert.equal(result.messages.length, 2);
- assert.equal(handlers.has('before_agent_start'), false);
+ const start = handlers.get('before_agent_start')!({ prompt: audioMessage('Hi'), systemPrompt: 'Base' }, { sessionManager: { getBranch: () => [] } });
+ assert.deepEqual(Object.keys(start), ['systemPrompt'], 'the rule only, and no message');
  assert.deepEqual(request(), result);
+});
+test('the rule is added once a conversation has had voice, and kept', () => {
+ const { handlers } = setup();
+ let branch: any[] = [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Typed' }] } }];
+ const start = (prompt: string) => handlers.get('before_agent_start')!({ prompt, systemPrompt: 'Base' }, { sessionManager: { getBranch: () => branch } });
+ assert.equal(start('Typed'), undefined);
+ assert.deepEqual(start(audioMessage('Spoken')), { systemPrompt: `Base\n\n${AUDIO_SYSTEM_RULE}` });
+ branch = [];
+ assert.deepEqual(start('Typed again'), { systemPrompt: `Base\n\n${AUDIO_SYSTEM_RULE}` });
+ // Reopened: known from what the conversation holds, a picture's message too.
+ const reopened = setup().handlers;
+ branch = [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: audioMessage('Look') }, { type: 'image', data: '', mimeType: 'image/png' }] } }];
+ assert.deepEqual(reopened.get('before_agent_start')!({ prompt: 'Typed', systemPrompt: 'Base' }, { sessionManager: { getBranch: () => branch } }), { systemPrompt: `Base\n\n${AUDIO_SYSTEM_RULE}` });
 });
 test('only the first call skips thinking, preserving saved settings', () => {
  const { turn, handlers, payload, request } = setup(); turn.arm();

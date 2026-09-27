@@ -5,13 +5,40 @@ export const AUDIO_SYSTEM_RULE = 'The portal prefixes user requests sent in voic
 export function audioSystemRules(): string[] { return process.env.VOICE_RESPONSE_INSTRUCTIONS === 'false' ? [] : [AUDIO_SYSTEM_RULE]; }
 export function audioMessage(text: string) { return process.env.VOICE_RESPONSE_INSTRUCTIONS === 'false' ? text : AUDIO_MESSAGE_PREFIX + text; }
 
-/** First-call thinking is transient; formatting is governed by the stable system rule. */
+/** Whether a message in this conversation was spoken, or typed in voice mode. */
+function spokenIn(entries: any[]): boolean {
+  return entries.some((entry) => {
+    const message = entry?.type === 'message' ? entry.message : undefined;
+    if (message?.role !== 'user') return false;
+    const text = typeof message.content === 'string' ? message.content : message.content?.find?.((part: any) => part?.type === 'text')?.text;
+    return typeof text === 'string' && text.startsWith(AUDIO_MESSAGE_PREFIX);
+  });
+}
+
+/**
+ * First-call thinking is transient; formatting is governed by the stable system rule.
+ *
+ * That rule is only in the system prompt of a conversation that has had voice.
+ * In every other one it was a paragraph about [Audio mode] that no message
+ * carried, and the model took a typed message for a spoken one: in the chat
+ * behind issue #26 its thinking said the message began with the marker. Once
+ * a conversation has had voice it keeps the rule, so going back to typing
+ * does not change the prompt and throw away what the model has cached of it.
+ * It comes in when the first run with voice starts. A spoken message queued
+ * into a run that was already going is answered within that run, before it.
+ */
 export class VoiceFirstTurn {
   private active = false;
   private first = false;
+  private spoken = false;
   arm(first = true) { this.active = true; this.first = first; }
   reset() { this.active = false; this.first = false; }
   extension = (pi: any) => {
+    pi.on('before_agent_start', (event: any, ctx: any) => {
+      if (!audioSystemRules().length) return;
+      this.spoken ||= event.prompt?.startsWith(AUDIO_MESSAGE_PREFIX) || spokenIn(ctx.sessionManager?.getBranch?.() ?? []);
+      if (this.spoken) return { systemPrompt: `${event.systemPrompt}\n\n${AUDIO_SYSTEM_RULE}` };
+    });
     pi.on('before_provider_request', (event: any, ctx: any) => {
       if (process.env.VOICE_SKIP_FIRST_THINKING === 'false') return;
       const provider = ctx.model?.provider as string | undefined;

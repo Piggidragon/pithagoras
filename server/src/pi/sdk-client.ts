@@ -1,7 +1,7 @@
 import { CanvasTools } from "./canvas-tools.js";
 import { showImageTool } from "./show-image-tool.js";
 import { acceptPrompt } from "./accept-prompt.js";
-import { VoiceFirstTurn, audioSystemRules, audioMessage } from "./voice-first.js";
+import { VoiceFirstTurn, audioMessage } from "./voice-first.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
@@ -119,7 +119,9 @@ function framing(cwd: string, role?: string): string[] {
       return false;
     }
   });
-  const lines: string[] = [...audioSystemRules(), BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE];
+  // The rule for spoken replies is not here: voice-first adds it, to the
+  // conversations that have had voice.
+  const lines: string[] = [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE];
   if (present.length) {
     lines.push(
       `${present.join(", ")} in your working directory are yours, not reference material about someone else. Each opens with a block saying what it is for; follow it.`,

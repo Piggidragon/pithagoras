@@ -413,9 +413,13 @@ models swaps through all of them.
 On the host executor with a llama.cpp provider, each voice prompt disables
 thinking for its first model call and asks for a brief spoken answer before
 tools. Later calls after tools use the session’s existing thinking setting.
-A permanent conditional rule in the base system prompt asks for plain, concise
-speech when the latest user message begins with `[Audio mode]`. The portal adds
-that prefix to microphone submissions and typed requests sent in voice mode.
+A conditional rule in the system prompt asks for plain, concise speech when the
+latest user message begins with `[Audio mode]`. The portal adds that prefix to
+microphone submissions and typed requests sent in voice mode. The rule is only in
+the system prompt of a conversation that has had voice. It is added when the
+first run with a voice message starts, and stays from then on, so the prompt does
+not change back and forth. A typed-only conversation never mentions
+`[Audio mode]`; with the rule there, a model took typed messages for spoken ones.
 The marker stays in model conversation history, while the chat UI shows the
 original user text. No temporary system messages are inserted. Ordinary text
 requests have no marker and use normal chat formatting, even after voice turns.
