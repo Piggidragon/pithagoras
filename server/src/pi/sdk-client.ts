@@ -734,11 +734,26 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // No path to read: this message alone decides.
     }
     if (!this.audioRule.set(spoken || spokenIn(path))) return;
+    const session = this.session;
+    const before: unknown = session._baseSystemPrompt;
+    const override: unknown = session._systemPromptOverride;
     try {
-      this.activate?.(this.session.getActiveToolNames());
+      this.activate?.(session.getActiveToolNames());
     } catch (e) {
       console.error(`[portal] the system prompt could not be built again: ${(e as Error).message}`);
+      return;
     }
+    // A run whose prompt an extension set at its start keeps that one to its
+    // end, and the rebuilt prompt is not seen until the next run: every run on
+    // the test host, where pi-background-tasks adds its shell policy to what
+    // it is given. Where the prompt it set is the one it was given with more
+    // added, the new one goes in its place. Otherwise the next run has it.
+    const after: unknown = session._baseSystemPrompt;
+    if (typeof override !== "string" || typeof before !== "string" || typeof after !== "string") return;
+    if (before === after || !override.includes(before)) return;
+    const updated = override.replace(before, () => after);
+    session._systemPromptOverride = updated;
+    session.agent.state.systemPrompt = updated;
   }
 
   /** Messages being handed to pi right now, oldest first: see noteQueue(). */

@@ -47,6 +47,17 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.st
   },
 }));
 
+// Adds to the prompt it is given at the start of every run, as pi-background-tasks
+// does with its shell policy; only while a test asks it to.
+mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "policy.ts"), `
+export default function (pi: any) {
+  pi.on("before_agent_start", (event: any) => {
+    if ((globalThis as any).addPolicy) return { systemPrompt: event.systemPrompt + "\\n\\nSHELL POLICY" };
+  });
+}
+`);
+
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { AUDIO_SYSTEM_RULE } = await import("../dist/pi/voice-first.js");
 
@@ -125,6 +136,34 @@ test("a spoken message sent while a typed run is going is answered with the rule
   } finally {
     hold = undefined;
     release?.();
+    client.dispose();
+  }
+});
+
+test("a spoken message queued into a run whose prompt an extension set is answered with the rule", async () => {
+  globalThis.addPolicy = true;
+  const client = await open();
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  try {
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    while (sent.length === before) await new Promise((r) => setTimeout(r, 10));
+    await client.prompt("Spoken meanwhile", { voice: true });
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2, "one run, two answers");
+    assert.match(sent[before], /SHELL POLICY/);
+    assert.doesNotMatch(sent[before], /Audio mode/);
+    // What the extension added is still there, and the rule with it.
+    assert.match(sent[before + 1], /SHELL POLICY/);
+    assert.ok(sent[before + 1].includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    hold = undefined;
+    release?.();
+    delete globalThis.addPolicy;
     client.dispose();
   }
 });
