@@ -420,8 +420,10 @@ the system prompt of a conversation that has had voice, and it is part of the
 prompt pi builds, so it stays when tools come and go. It comes in with the first
 spoken message, including one sent while a typed run is still going, and typing
 again does not take it out, so the prompt does not change back and forth. It is
-left out again only when the conversation is opened with no spoken message on
-its path: after a restart, or after the spoken messages were edited away. A
+left out again when a spoken message never reached the conversation (refused, or
+taken by an extension) and no other spoken one is there, and when the
+conversation is opened with no spoken message in what the model is given: after
+a restart, a compaction, or an edit that removed the spoken messages. A
 typed-only conversation never mentions `[Audio mode]`; with the rule there, a
 model took typed messages for spoken ones.
 

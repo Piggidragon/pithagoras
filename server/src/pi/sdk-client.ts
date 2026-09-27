@@ -1,7 +1,7 @@
 import { CanvasTools } from "./canvas-tools.js";
 import { showImageTool } from "./show-image-tool.js";
 import { acceptPrompt } from "./accept-prompt.js";
-import { AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
+import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
@@ -154,6 +154,10 @@ function portalLoader(pi: any): new (options: unknown, rule: AudioRule) => any {
     getAppendSystemPrompt(): string[] {
       return [...super.getAppendSystemPrompt(), ...(this.rule?.lines() ?? [])];
     }
+    /** What pi appends without the rule: where the rule goes after. */
+    appendedByPi(): string {
+      return super.getAppendSystemPrompt().join("\n\n");
+    }
   });
 }
 
@@ -265,7 +269,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private canvases?: CanvasTools;
   private voiceFirst?: VoiceFirstTurn;
   private audioRule?: AudioRule;
-  private loader?: { getAppendSystemPrompt(): string[] };
+  private loader?: { appendedByPi(): string };
   /** Dialogs an extension is waiting on, keyed by request id. */
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
   /** The chat box's text, kept by the portal: see useDrafts. */
@@ -447,8 +451,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       opts.sessionFile && existsSync(opts.sessionFile)
         ? pi.SessionManager.open(opts.sessionFile, opts.sessionDir, opts.cwd)
         : pi.SessionManager.create(opts.cwd, opts.sessionDir);
-    // Before the prompt is first built: a reopened conversation may have had voice.
-    audioRule.set(spokenIn(sessionManager.getBranch()));
+    // Before the prompt is first built: a reopened conversation may have had
+    // voice. What the model is given, not the whole path: a spoken message
+    // compacted away left nothing the rule is about.
+    audioRule.set(spokenIn(sessionManager.buildContextEntries()));
 
     const { session } = await pi.createAgentSession({
       cwd: opts.cwd,
@@ -470,6 +476,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       client.voiceFirst = voiceFirst;
       client.audioRule = audioRule;
       client.loader = resourceLoader;
+      client.sayAudioRuleEachTurn();
     }
     const unsub = session.subscribe((event: any) => {
       // Before anything is measured against the window: pi swaps the model for the
@@ -685,7 +692,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     } else {
       this.voiceFirst?.reset();
     }
-    this.sayAudioRule(options?.voice === true);
+    const ruleFromThis = this.sayAudioRule(options?.voice === true);
     const promptOptions = {
       expandPromptTemplates: true,
       // Mid-run, a message waits for the run to end — unless it was said to
@@ -718,61 +725,105 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           }),
         error => {
           if (options?.voice) this.voiceFirst?.reset();
+          if (ruleFromThis) this.unsayAudioRule();
           const reason = error instanceof Error ? error.message : String(error);
           this.emit("event", { type: "portal_failed", error: `${options?.voice ? "Voice turn" : "The run"} failed: ${reason}` });
         },
       );
-    } catch (error) { if (options?.voice) this.voiceFirst?.reset(); throw error; }
+    } catch (error) {
+      if (options?.voice) this.voiceFirst?.reset();
+      if (ruleFromThis) this.unsayAudioRule();
+      throw error;
+    }
     finally {
       this.handoffs.splice(this.handoffs.indexOf(handoff), 1);
     }
     if (handoff.queued !== undefined) return { outcome: "queued", lane: handoff.lane, text: handoff.queued };
-    return idleWhenTaken && !this.session.isIdle ? { outcome: "started" } : { outcome: "handled" };
+    if (idleWhenTaken && !this.session.isIdle) return { outcome: "started" };
+    // Taken by an extension, and not into the conversation.
+    if (ruleFromThis) this.unsayAudioRule();
+    return { outcome: "handled" };
   }
 
   /**
-   * The rule for spoken replies, in from this spoken message on.
+   * The rule for spoken replies, in from this spoken message on. True when it
+   * was this message that put it in.
    *
-   * Only ever put in here, never taken out: a spoken message still waiting in
-   * pi's queue is not on the conversation's path yet, and a typed one sent
-   * after it would take the rule away before it was answered. Out it goes when
-   * the conversation is opened again without a spoken message on its path —
-   * after a restart, or an edit, which stops pi and reopens it.
+   * Not taken out by a typed message: a spoken one still waiting in pi's queue
+   * is not on the conversation's path yet, and would be answered without it.
+   * Out it goes when this message was refused and no other spoken one is
+   * there (unsayAudioRule), or when the conversation is opened again with none
+   * in what the model is given — after a restart, a compaction, or an edit,
+   * which stops pi and reopens it.
    *
-   * On before pi takes the message, so a run it starts has the rule from its
-   * first turn. The prompt is built again at once, with the tools as they are:
-   * `activate` is pi's own setter, beneath the tool switches. pi reads the
-   * prompt afresh before every turn, so a message queued into a run that is
-   * going is answered with it.
+   * In before pi takes the message, so a run it starts has the rule from its
+   * first turn: pi's prompt is built again at once. Every turn after that is
+   * seen to by sayAudioRuleEachTurn, whoever set its prompt.
    */
-  private sayAudioRule(spoken: boolean): void {
-    const rule = this.audioRule;
-    const loader = this.loader;
-    const activate = this.activate;
-    if (!spoken || !rule || !loader || !activate) return;
-    const before = loader.getAppendSystemPrompt().join("\n\n");
-    if (!rule.set(true)) return;
-    const session = this.session;
+  private sayAudioRule(spoken: boolean): boolean {
+    if (!spoken || !this.audioRule?.set(true)) return false;
+    if (this.buildPromptAgain()) return true;
+    // Off again, so the next spoken message tries once more.
+    this.audioRule.set(false);
+    return false;
+  }
+
+  /**
+   * The rule out again, for a spoken message pi refused or an extension took
+   * — unless another spoken one is in the conversation, in pi's queue, or
+   * being handed to it now.
+   */
+  private unsayAudioRule(): void {
+    const spoken = (text: string) => text.startsWith(AUDIO_MESSAGE_PREFIX);
+    let context: readonly unknown[] = [];
     try {
-      activate(session.getActiveToolNames());
-    } catch (e) {
-      // Off again, so the next spoken message tries once more.
-      rule.set(false);
-      console.error(`[portal] the system prompt could not be built again: ${(e as Error).message}`);
+      context = this.session.sessionManager.buildContextEntries();
+    } catch {
       return;
     }
-    // A run whose prompt an extension set at its start keeps that one to its
-    // end, and the rebuilt prompt is not seen until the next run: every run on
-    // the test host, where pi-background-tasks adds its shell policy to what
-    // it is given. What the loader appends is in that prompt as it is in pi's
-    // own, whatever tools came or went since, and the rule goes in after it.
-    // A prompt that does not hold it gets the rule with the next run.
-    const override: unknown = session._systemPromptOverride;
-    if (typeof override !== "string" || !before || !override.includes(before)) return;
-    const after = loader.getAppendSystemPrompt().join("\n\n");
-    const updated = override.replace(before, () => after);
-    session._systemPromptOverride = updated;
-    session.agent.state.systemPrompt = updated;
+    if (spokenIn(context)) return;
+    if ([...this.queue.steering, ...this.queue.followUp].some(spoken)) return;
+    if (this.handoffs.some((h) => spoken(h.text))) return;
+    if (this.audioRule?.set(false)) this.buildPromptAgain();
+  }
+
+  /**
+   * pi's prompt built again, with the tools as they are: `activate` is pi's own
+   * setter, beneath the tool switches, so nothing about them changes.
+   */
+  private buildPromptAgain(): boolean {
+    try {
+      this.activate?.(this.session.getActiveToolNames());
+      return !!this.activate;
+    } catch (e) {
+      console.error(`[portal] the system prompt could not be built again: ${(e as Error).message}`);
+      return false;
+    }
+  }
+
+  /**
+   * The rule as it should be, in the prompt of every turn after a run's first.
+   *
+   * pi takes that prompt afresh between turns, and that is how a message
+   * queued into a run that is going is answered: from pi's own prompt, which
+   * has the rule once it is on, or from one an extension set for the run when
+   * it started, which keeps whatever it was given then. pi-background-tasks
+   * sets one for every run on the test host. So the prompt each turn is to be
+   * sent is made to say what the rule says now, whoever built it.
+   */
+  private sayAudioRuleEachTurn(): void {
+    const agent = this.session?.agent;
+    const rule = this.audioRule;
+    const loader = this.loader;
+    const prepare = agent?.prepareNextTurnWithContext;
+    if (!rule || !loader || typeof prepare !== "function") return;
+    agent.prepareNextTurnWithContext = async (turn: unknown, signal: unknown) => {
+      const next = await prepare.call(agent, turn, signal);
+      const prompt = next?.context?.systemPrompt;
+      if (typeof prompt !== "string") return next;
+      const said = rule.into(prompt, loader.appendedByPi());
+      return said === prompt ? next : { ...next, context: { ...next.context, systemPrompt: said } };
+    };
   }
 
   /** Messages being handed to pi right now, oldest first: see noteQueue(). */

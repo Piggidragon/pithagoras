@@ -50,7 +50,6 @@ interface Entry {
   [key: string]: unknown;
 }
 
-
 /** Root to leaf, following parent links from the last entry. */
 function pathTo(byId: Map<string, Entry>, leaf: string): Entry[] {
   const out: Entry[] = [];

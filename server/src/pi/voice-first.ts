@@ -38,6 +38,19 @@ export class AudioRule {
     this.on = on;
     return true;
   }
+  /**
+   * `prompt` as it should be now: with the rule, after `after` where it holds
+   * that and at its end where it does not, or without it.
+   *
+   * For a prompt built elsewhere than pi's own — an extension's, set for a
+   * run — which says what it was given when it started, whatever since.
+   */
+  into(prompt: string, after: string): string {
+    if (prompt.includes(AUDIO_SYSTEM_RULE) === this.on) return prompt;
+    if (!this.on) return prompt.replace(`\n\n${AUDIO_SYSTEM_RULE}`, '').replace(AUDIO_SYSTEM_RULE, '');
+    if (after && prompt.includes(after)) return prompt.replace(after, () => `${after}\n\n${AUDIO_SYSTEM_RULE}`);
+    return `${prompt}\n\n${AUDIO_SYSTEM_RULE}`;
+  }
 }
 
 /** First-call thinking is transient; formatting is governed by AudioRule. */

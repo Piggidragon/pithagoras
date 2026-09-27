@@ -35,6 +35,17 @@ test('a conversation is spoken when a user message on its path has the marker', 
  assert.equal(spokenIn([user([{ type: 'text', text: audioMessage('Look') }, { type: 'image', data: '', mimeType: 'image/png' }])]), true);
  assert.equal(spokenIn([user([{ type: 'text', text: 'Look [Audio mode]' }])]), false);
 });
+test('a prompt built elsewhere is made to say what the rule says now', () => {
+ const rule = new AudioRule();
+ assert.equal(rule.into('Base\n\nAppended', 'Appended'), 'Base\n\nAppended', 'off, and not there: as it is');
+ rule.set(true);
+ assert.equal(rule.into('Base\n\nAppended\n\nPolicy', 'Appended'), `Base\n\nAppended\n\n${AUDIO_SYSTEM_RULE}\n\nPolicy`, 'after what pi appends');
+ assert.equal(rule.into('Own prompt', 'Appended'), `Own prompt\n\n${AUDIO_SYSTEM_RULE}`, 'at the end when that is not there');
+ const said = `Base\n\nAppended\n\n${AUDIO_SYSTEM_RULE}`;
+ assert.equal(rule.into(said, 'Appended'), said, 'there already');
+ rule.set(false);
+ assert.equal(rule.into(`${said}\n\nPolicy`, 'Appended'), 'Base\n\nAppended\n\nPolicy', 'out again');
+});
 test('the rule says whether it changed, so the prompt is built again only then', () => {
  const rule = new AudioRule();
  assert.deepEqual(rule.lines(), []);

@@ -47,16 +47,21 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.st
   },
 }));
 
-// Adds to the prompt it is given at the start of every run, as pi-background-tasks
-// does with its shell policy; only while a test asks it to.
+// Sets the prompt of every run while a test asks it to: adding to what it is
+// given, as pi-background-tasks does with its shell policy, or writing its own.
+// And takes a message out of pi's hands, as an input extension can.
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "policy.ts"), `
 export default function (pi: any) {
   pi.on("before_agent_start", (event: any) => {
     if ((globalThis as any).addPolicy) return { systemPrompt: event.systemPrompt + "\\n\\nSHELL POLICY" };
+    if ((globalThis as any).ownPrompt) return { systemPrompt: "AN EXTENSION'S OWN PROMPT" };
   });
+  pi.on("input", (event: any) => (event.text.includes("take this") ? { action: "handled" } : undefined));
 }
 `);
+// Compaction keeps as little as it can, so a message can be compacted away.
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.stringify({ compaction: { keepRecentTokens: 1 } }));
 
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { AUDIO_SYSTEM_RULE } = await import("../dist/pi/voice-first.js");
@@ -226,6 +231,66 @@ test("a spoken message queued after the tools changed in a run whose prompt an e
     release?.();
     delete globalThis.addPolicy;
     client.dispose();
+  }
+});
+
+test("a spoken message queued into a run whose prompt an extension wrote itself has the rule", async () => {
+  globalThis.ownPrompt = true;
+  const client = await open();
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  try {
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    await client.prompt("Spoken meanwhile", { voice: true });
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2);
+    assert.equal(sent[before], "AN EXTENSION'S OWN PROMPT");
+    // Nothing of pi's to put it after: at the end.
+    assert.equal(sent[before + 1], `AN EXTENSION'S OWN PROMPT\n\n${AUDIO_SYSTEM_RULE}`);
+  } finally {
+    hold = undefined;
+    release?.();
+    delete globalThis.ownPrompt;
+    client.dispose();
+  }
+});
+
+test("a spoken message an extension takes leaves no rule behind", async () => {
+  // Issue #26 again otherwise: the rule, and no spoken message it is about.
+  const client = await open();
+  try {
+    assert.equal((await client.prompt("Please take this", { voice: true })).outcome, "handled");
+    assert.doesNotMatch(await say(client, "Typed"), /Audio mode/);
+    // Where one did reach the conversation, it stays.
+    assert.ok((await say(client, "Spoken", true)).includes(AUDIO_SYSTEM_RULE));
+    assert.equal((await client.prompt("Please take this", { voice: true })).outcome, "handled");
+    assert.ok((await say(client, "Typed again")).includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    client.dispose();
+  }
+});
+
+test("a conversation whose spoken messages were compacted away opens without the rule", async () => {
+  const client = await open();
+  let file;
+  try {
+    await say(client, "Spoken", true);
+    await say(client, "Typed");
+    await client.session.compact();
+    file = client.sessionFile;
+  } finally {
+    client.dispose();
+  }
+  const reopened = await open(file);
+  try {
+    assert.doesNotMatch(await say(reopened, "Typed after it"), /Audio mode/);
+  } finally {
+    reopened.dispose();
   }
 });
 
