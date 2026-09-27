@@ -728,10 +728,9 @@ app.put("/api/sessions/:id/draft", (req, res) => {
 /**
  * The tools this conversation could use, and which of them are on.
  *
- * Only a running session can answer: pi builds the registry when it starts,
- * and what an extension registered is not knowable before that. A conversation
- * that is idle says so, and the page offers to wake it rather than showing an
- * empty list as though there were no tools.
+ * A running session answers from pi's registry. One that is not running —
+ * not started yet, or gone idle — from what the portal has seen registered,
+ * marked `live: false`: what is switched there is kept for when it starts.
  */
 /**
  * A container session reaches pi over RPC, which has no tool registry to ask
