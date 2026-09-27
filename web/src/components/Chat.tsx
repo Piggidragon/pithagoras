@@ -127,6 +127,7 @@ function ContextChip({ label, body }: { label: string; body: string }) {
     <>
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         className={`rounded-full px-2 py-0.5 text-[11px] transition ${
           open
             ? "bg-accent/20 text-accent"

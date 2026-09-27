@@ -23,6 +23,7 @@ import { Streamdown } from "streamdown";
 import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, stripAnsi, type Activity, type Item } from "../transcript";
 import { SHELL_TOOL, unwrapCall } from "../tool-activity";
 import { argLabel, isBlock, isScalar } from "../tool-args";
+import { useFollowBottom } from "../use-follow-bottom";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
@@ -92,12 +93,17 @@ export function ThinkingBlock({
   until?: number;
 }) {
   const [open, setOpen] = useState(false);
-  const body = useRef<HTMLDivElement>(null);
+  // Opened while it is written, it shows the newest lines — until scrolled back
+  // to read one, which the next word must not undo: put back at the end with
+  // each word, it could not be read, nor the conversation scrolled over it.
+  const body = useFollowBottom<HTMLDivElement>();
   const now = useNow(streaming);
   useLayoutEffect(() => {
-    const el = body.current;
-    if (el && streaming && open) el.scrollTop = el.scrollHeight;
-  }, [thinking, streaming, open]);
+    if (open && streaming) body.follow(true);
+  }, [open]);
+  useLayoutEffect(() => {
+    if (open && streaming) body.follow();
+  }, [thinking]);
 
   const seconds = since ? Math.max(0, Math.round(((streaming ? now : until ?? since) - since) / 1000)) : undefined;
   const label = streaming ? "Thinking" : seconds && seconds >= 1 ? `Thought for ${formatElapsed(seconds)}` : "Thought process";
@@ -142,7 +148,7 @@ export function ThinkingBlock({
         </div>
       )}
       <Collapse open={open}>
-        <div ref={body} className="chat-thinking-body">
+        <div ref={body.attach} onScroll={body.onScroll} onWheel={body.onWheel} className="chat-thinking-body">
           {thinking}
         </div>
       </Collapse>

@@ -74,10 +74,13 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     top.current = el.scrollTop;
   }, []);
 
-  /** Wire to the box's onScroll. */
-  const onScroll = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
+  /**
+   * Where the box has been taken since it was last seen. Its scroll event says
+   * so, but only with the next frame: a touch or a drag of the scrollbar has
+   * moved it before then, and a word arriving in between was put at the end
+   * over it — so what grows asks first, too.
+   */
+  const heard = useCallback((el: HTMLElement) => {
     const left = distance(el);
     // At the very end — or put there because what was below it went away.
     if (left <= AT_END) following.current = true;
@@ -86,8 +89,15 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     // Back down to near the end picks it up again.
     else if (el.scrollTop > top.current + 0.5 && left <= NEAR_END) following.current = true;
     top.current = el.scrollTop;
-    setAway(!following.current && !atEnd(el));
   }, []);
+
+  /** Wire to the box's onScroll. */
+  const onScroll = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    heard(el);
+    setAway(!following.current && !atEnd(el));
+  }, [heard]);
 
   /**
    * Wire to the box's onWheel: a turn of the wheel upwards is the person
@@ -151,12 +161,13 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
       following.current = true;
       held.current = null;
     } else if (keepHeld(el)) return;
+    else heard(el);
     if (following.current) toEnd(el);
     // Said here as well as on scroll: a conversation too short to scroll fires
     // no scroll event, and the way back to the end offered in the last one,
     // scrolled up, stayed on screen in this one for good.
     setAway(!following.current && !atEnd(el));
-  }, [toEnd, keepHeld]);
+  }, [toEnd, keepHeld, heard]);
 
   // Whatever grows — the box's content, or the box itself shrinking as the
   // composer or the keyboard takes room — keeps the end in view while following.
@@ -165,6 +176,7 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     if (!el) return;
     const observer = new ResizeObserver(() => {
       if (isPaused.current?.() || keepHeld(el)) return;
+      heard(el);
       if (following.current) toEnd(el);
       else setAway(!atEnd(el));
     });
@@ -183,7 +195,7 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
       observer.disconnect();
       added.disconnect();
     };
-  }, [node, toEnd, keepHeld]);
+  }, [node, toEnd, keepHeld, heard]);
 
   /**
    * Following again if it is near the end, whichever way it got there: after
