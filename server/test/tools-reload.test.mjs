@@ -136,3 +136,24 @@ test("a switched-off tool whose extension is gone is not wanted any more", async
   await c.setToolsOff([]);
   assert.ok(!session.active.includes("web_search"));
 });
+
+test("an extension taking its own tools out of the set leaves what was switched off switchable", async () => {
+  // pi-goal-x on session start: `setActiveTools(getActiveTools() minus its goal
+  // tools)`. The switches were applied before it ran, so what it was shown had
+  // no web_search in it — it said nothing about web_search. Taken as a
+  // narrowing, web_search dropped out of the list for good: switched off before
+  // the first message, it could not be switched back on in that chat.
+  const session = fakeSession();
+  const c = client(session);
+  session.register("goal_get");
+  session.register("goal_set");
+  await c.setToolsOff(["web_search"]);
+  session.setActiveToolsByName(session.getActiveToolNames().filter((name) => !name.startsWith("goal_")));
+  const web = (await c.getTools()).find((t) => t.name === "web_search");
+  assert.ok(web, "web_search is still offered");
+  assert.equal(web.enabled, false);
+  assert.ok(!session.active.includes("goal_get"), "what the extension took out stays out");
+  await c.setToolsOff([]);
+  assert.ok(session.active.includes("web_search"));
+  assert.ok(!session.active.includes("goal_get"));
+});
