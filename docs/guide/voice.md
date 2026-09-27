@@ -416,9 +416,11 @@ tools. Later calls after tools use the session’s existing thinking setting.
 A conditional rule in the system prompt asks for plain, concise speech when the
 latest user message begins with `[Audio mode]`. The portal adds that prefix to
 microphone submissions and typed requests sent in voice mode. The rule is only in
-the system prompt of a conversation that has had voice. It is added when the
-first run with a voice message starts, and stays from then on, so the prompt does
-not change back and forth. A typed-only conversation never mentions
+the system prompt of a conversation that has had voice, and it is part of the
+prompt pi builds, so it stays when tools come and go. It comes in with the first
+spoken message, including one sent while a typed run is still going, and stays
+while a spoken message is on the conversation's path, so typing again does not
+change the prompt back and forth. A typed-only conversation never mentions
 `[Audio mode]`; with the rule there, a model took typed messages for spoken ones.
 The marker stays in model conversation history, while the chat UI shows the
 original user text. No temporary system messages are inserted. Ordinary text

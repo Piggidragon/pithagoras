@@ -1,4 +1,5 @@
 import { AUDIO_MESSAGE_PREFIX } from "./voice-first.js";
+import { isUser, textOf } from "./entries.js";
 
 /**
  * Taking a message back out of pi's own record of the conversation.
@@ -49,14 +50,6 @@ interface Entry {
   [key: string]: unknown;
 }
 
-const textOf = (content: unknown): string =>
-  typeof content === "string"
-    ? content
-    : Array.isArray(content)
-      ? content.map((c) => (c?.type === "text" ? (c.text ?? "") : "")).join("")
-      : "";
-
-const isUser = (e: Entry) => e.type === "message" && e.message?.role === "user";
 
 /** Root to leaf, following parent links from the last entry. */
 function pathTo(byId: Map<string, Entry>, leaf: string): Entry[] {

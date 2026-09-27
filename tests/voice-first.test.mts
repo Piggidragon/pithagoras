@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VoiceFirstTurn, AUDIO_SYSTEM_RULE, audioSystemRules, audioMessage } from '../server/src/pi/voice-first.js';
+import { AudioRule, VoiceFirstTurn, AUDIO_SYSTEM_RULE, voiceRulesOn, audioMessage, spokenIn } from '../server/src/pi/voice-first.js';
 function setup() {
  const turn = new VoiceFirstTurn(), handlers = new Map<string, (...args: any[]) => any>();
  turn.extension({ on: (name: string, fn: any) => handlers.set(name, fn) });
@@ -16,28 +16,34 @@ test('audio requests carry a persistent marker and a stable conditional system r
  assert.match(AUDIO_SYSTEM_RULE, /plain conversational text/);
  assert.match(AUDIO_SYSTEM_RULE, /Before every tool call or group of tool calls/);
  assert.match(AUDIO_SYSTEM_RULE, /including subsequent actions after earlier tool results/);
+ // Not to be read as saying the message in hand has the marker: issue #26.
+ assert.match(AUDIO_SYSTEM_RULE, /does not mean any request has it/);
 });
 test('voice mode never injects or mutates messages', () => {
  const { turn, payload, request, handlers } = setup(); turn.arm();
  const result = request();
  assert.equal(result.messages, payload.messages);
  assert.equal(result.messages.length, 2);
- const start = handlers.get('before_agent_start')!({ prompt: audioMessage('Hi'), systemPrompt: 'Base' }, { sessionManager: { getBranch: () => [] } });
- assert.deepEqual(Object.keys(start), ['systemPrompt'], 'the rule only, and no message');
+ assert.equal(handlers.has('before_agent_start'), false, 'the rule is in pi\'s own prompt: see AudioRule');
  assert.deepEqual(request(), result);
 });
-test('the rule is added once a conversation has had voice, and kept', () => {
- const { handlers } = setup();
- let branch: any[] = [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Typed' }] } }];
- const start = (prompt: string) => handlers.get('before_agent_start')!({ prompt, systemPrompt: 'Base' }, { sessionManager: { getBranch: () => branch } });
- assert.equal(start('Typed'), undefined);
- assert.deepEqual(start(audioMessage('Spoken')), { systemPrompt: `Base\n\n${AUDIO_SYSTEM_RULE}` });
- branch = [];
- assert.deepEqual(start('Typed again'), { systemPrompt: `Base\n\n${AUDIO_SYSTEM_RULE}` });
- // Reopened: known from what the conversation holds, a picture's message too.
- const reopened = setup().handlers;
- branch = [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: audioMessage('Look') }, { type: 'image', data: '', mimeType: 'image/png' }] } }];
- assert.deepEqual(reopened.get('before_agent_start')!({ prompt: 'Typed', systemPrompt: 'Base' }, { sessionManager: { getBranch: () => branch } }), { systemPrompt: `Base\n\n${AUDIO_SYSTEM_RULE}` });
+test('a conversation is spoken when a user message on its path has the marker', () => {
+ const user = (content: unknown) => ({ type: 'message', message: { role: 'user', content } });
+ assert.equal(spokenIn([user('Typed'), { type: 'message', message: { role: 'assistant', content: audioMessage('echo') } }]), false);
+ assert.equal(spokenIn([user(audioMessage('Hi'))]), true);
+ // With a picture, as pi keeps it.
+ assert.equal(spokenIn([user([{ type: 'text', text: audioMessage('Look') }, { type: 'image', data: '', mimeType: 'image/png' }])]), true);
+ assert.equal(spokenIn([user([{ type: 'text', text: 'Look [Audio mode]' }])]), false);
+});
+test('the rule says whether it changed, so the prompt is built again only then', () => {
+ const rule = new AudioRule();
+ assert.deepEqual(rule.lines(), []);
+ assert.equal(rule.set(true), true);
+ assert.deepEqual(rule.lines(), [AUDIO_SYSTEM_RULE]);
+ assert.equal(rule.set(true), false);
+ // Its spoken message edited away.
+ assert.equal(rule.set(false), true);
+ assert.deepEqual(rule.lines(), []);
 });
 test('only the first call skips thinking, preserving saved settings', () => {
  const { turn, handlers, payload, request } = setup(); turn.arm();
@@ -67,10 +73,13 @@ test('unoptimized voice baseline omits voice instructions and the audio marker',
  const previous = process.env.VOICE_RESPONSE_INSTRUCTIONS;
  try {
   process.env.VOICE_RESPONSE_INSTRUCTIONS = 'false';
-  assert.deepEqual(audioSystemRules(), []);
+  assert.equal(voiceRulesOn(), false);
   assert.equal(audioMessage('Write a detailed report'), 'Write a detailed report');
+  const rule = new AudioRule();
+  assert.equal(rule.set(true), false);
+  assert.deepEqual(rule.lines(), []);
   delete process.env.VOICE_RESPONSE_INSTRUCTIONS;
-  assert.deepEqual(audioSystemRules(), [AUDIO_SYSTEM_RULE]);
+  assert.equal(voiceRulesOn(), true);
   assert.equal(audioMessage('Hello'), '[Audio mode]\nHello');
  } finally {
   if(previous === undefined)delete process.env.VOICE_RESPONSE_INSTRUCTIONS;
