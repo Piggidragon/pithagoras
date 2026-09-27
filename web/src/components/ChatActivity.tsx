@@ -138,7 +138,7 @@ export function ThinkingBlock({
         </div>
       )}
       <Collapse open={open}>
-        <ThinkingBody thinking={thinking} streaming={streaming} />
+        <ThinkingBody thinking={thinking} streaming={streaming} open={open} />
       </Collapse>
     </div>
   );
@@ -153,12 +153,13 @@ export function ThinkingBlock({
  * Drawn only once opened, so the reasoning of a long conversation, folded
  * away, does not each keep watch over a box nobody sees.
  */
-function ThinkingBody({ thinking, streaming }: { thinking: string; streaming: boolean }) {
+function ThinkingBody({ thinking, streaming, open }: { thinking: string; streaming: boolean; open: boolean }) {
   const { attach, onScroll, onWheel, follow } = useFollowBottom<HTMLDivElement>({ paused: () => !streaming });
-  // Opened while it is written — or written to again, open: from its newest line.
+  // Opened while it is written — or written to again, open: from its newest
+  // line. Opened again as well, before it has gone from closing.
   useLayoutEffect(() => {
-    if (streaming) follow(true);
-  }, [streaming, follow]);
+    if (open && streaming) follow(true);
+  }, [open, streaming, follow]);
   useLayoutEffect(() => {
     if (streaming) follow();
   }, [thinking, streaming, follow]);

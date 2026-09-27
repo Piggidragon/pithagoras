@@ -80,13 +80,15 @@ if (phase === 'stream') events.push(
 );
 // A long conversation whose replies each thought at length, and a model thinking now: `window.think(text)` adds to it.
 // `&turns=` for how many came before; enough of them are more than the chat draws at once.
+const turns = Number(new URLSearchParams(location.search).get('turns') ?? 6);
 if (phase === 'reasoning') events.push(
-  ...Array.from({ length: Number(new URLSearchParams(location.search).get('turns') ?? 6) }, (_, i) => [
-    ev('portal_prompt', { message: `Question ${i + 1}: what does step ${i + 1} of the build do?` }, 50 - i * 5),
+  ...Array.from({ length: turns }, (_, i) => [
+    // Five seconds apart, the last of them before the question being answered now.
+    ev('portal_prompt', { message: `Question ${i + 1}: what does step ${i + 1} of the build do?` }, 20 + (turns - i) * 5),
     ev('message_end', { message: { role: 'assistant', content: [
       { type: 'thinking', thinking: Array.from({ length: 30 }, (_, j) => `Reasoning ${i + 1}.${j + 1}: step ${i + 1} reads the files, so I should check what it reads first.`).join('\n') },
       { type: 'text', text: Array.from({ length: 3 }, (_, j) => `Step ${i + 1}, part ${j + 1}: it reads the files, checks them and writes what it found.`).join('\n\n') },
-    ] } }, 48 - i * 5),
+    ] } }, 18 + (turns - i) * 5),
   ]).flat(),
   // With what a routine attached to it, folded away under a chip until opened.
   ev('portal_prompt', { message: `And the last one?<routine name="build">${Array.from({ length: 12 }, (_, j) => `Routine line ${j + 1}: check the bundle.`).join('\n')}</routine>` }, 6),

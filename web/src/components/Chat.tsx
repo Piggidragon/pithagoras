@@ -579,7 +579,7 @@ export function Chat({
       // The one that was last is gone, so this is not something added after it.
       if (appended === items.length) appended = 0;
     }
-    if (appended > 0 && !scroller.following.current) setShown((n) => n + appended);
+    if (appended > 0 && !scroller.isFollowing()) setShown((n) => n + appended);
     setTail({ id: lastId, count: items.length });
   }
   const visible = shown >= items.length ? items : items.slice(items.length - shown);

@@ -145,6 +145,68 @@ test('a long conversation, more than is drawn at once, keeps following as its ol
   expect(await left(page)).toBeLessThanOrEqual(1);
 });
 
+test('in a long conversation, a scroll back not heard yet when a message comes keeps what is read in place', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=reasoning&turns=20');
+  await expect(page.getByText('And the last one?')).toBeVisible();
+  await frames(page);
+  // The move a touch makes, a frame before it is heard.
+  await page.evaluate(() => {
+    const box = document.querySelector('.chat-list')!.parentElement!;
+    (window as any).unheard = (e: Event) => e.target === box && e.stopImmediatePropagation();
+    window.addEventListener('scroll', (window as any).unheard, true);
+    box.scrollTop -= 300;
+  });
+  const read = page.getByText('Question 20: what does step 20 of the build do?');
+  const before = (await read.boundingBox())!.y;
+  // A new message: the oldest one drawn left the top, and what was read went up by as much under the finger.
+  await page.evaluate(() => (window as any).emit('tool_execution_start', { toolCallId: 'n1', toolName: 'bash', args: { command: 'ls dist' } }));
+  await expect(page.locator('.chat-tool-head', { hasText: 'ls dist' })).toBeAttached();
+  await frames(page);
+  expect(Math.abs((await read.boundingBox())!.y - before)).toBeLessThan(2);
+  await page.evaluate(() => window.removeEventListener('scroll', (window as any).unheard, true));
+});
+
+test('a conversation not shown for a while, as in voice mode, comes back where it was left', async ({ page }) => {
+  const hidden = (yes: boolean) => scroller(page).evaluate((el, yes) => (el.style.display = yes ? 'none' : ''), yes);
+  const more = async () => {
+    for (let i = 0; i < 3; i++) await thinkDrawn(page);
+  };
+  // Scrolled back to read: not taken to the end while hidden.
+  await page.mouse.move(450, 300);
+  await page.mouse.wheel(0, -400);
+  await expect.poll(() => left(page)).toBeGreaterThan(300);
+  await hidden(true);
+  await more();
+  await hidden(false);
+  await frames(page);
+  await more();
+  expect(await left(page)).toBeGreaterThan(300);
+  await expect(page.getByRole('button', { name: 'Latest output' })).toBeVisible();
+  // At the end: still at the end, and following.
+  await page.getByRole('button', { name: 'Latest output' }).click();
+  await expect.poll(() => left(page)).toBeLessThanOrEqual(1);
+  await hidden(true);
+  await more();
+  await hidden(false);
+  await frames(page);
+  await more();
+  expect(await left(page)).toBeLessThanOrEqual(1);
+});
+
+test('the reasoning being written, closed and opened again at once, shows its newest line', async ({ page }) => {
+  await openLongReasoning(page);
+  const box = (await reasoning(page).boundingBox())!;
+  await page.mouse.move(box.x + 40, box.y + box.height / 2);
+  await page.mouse.wheel(0, -200);
+  await expect.poll(() => reasoning(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeGreaterThan(100);
+  // Opened again before it has finished closing: the same body, not a new one.
+  const head = page.locator('.chat-thinking-head').last();
+  await head.click();
+  await head.click();
+  await thinkDrawn(page);
+  expect(await reasoning(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(1);
+});
+
 test('what a message had attached, opened at the end, stays where it was pressed', async ({ page }) => {
   const chip = page.getByRole('button', { name: 'Routine' });
   await expect(chip).toBeVisible();
