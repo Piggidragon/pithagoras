@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "no
 import { createRequire } from "node:module";
 import path from "node:path";
 import { piAgentDir } from "./pi-settings.js";
+import { piEntry } from "./pi/package.js";
 
 /**
  * Where models come from, as the Settings → Models page offers them.
@@ -210,7 +211,7 @@ let lockfile: Lockfile | undefined;
  * `change` says whether it changed anything.
  */
 async function changeAuth<T>(change: (auth: Json) => T | false): Promise<T | false> {
-  lockfile ??= createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"))("proper-lockfile") as Lockfile;
+  lockfile ??= createRequire(piEntry())("proper-lockfile") as Lockfile;
   const file = authJsonPath();
   mkdirSync(path.dirname(file), { recursive: true });
   // As pi takes it when it waits: a few tries, backing off, and a lock left by a process that died is taken over.
