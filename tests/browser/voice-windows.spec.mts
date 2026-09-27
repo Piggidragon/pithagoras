@@ -493,3 +493,32 @@ test('a window\'s shadow falls downwards and does not reach across the gap onto 
     for (const r of reaches) expect(r).toBeLessThan(16);
   }
 });
+
+test('a window sized by hand is lifted clear of the dock when the stage gets shorter under it', async ({ page }) => {
+  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+  await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+  const browser = page.locator('.voice-browser-window'), terminal = page.locator('.voice-terminal-window');
+  await page.waitForTimeout(1000);
+  // Sized by hand, with no gap for the orb: it is in its dock, and the windows are pinned in pixels.
+  await drag(page, browser.locator('.resize-e'), 60);
+  await drag2(page, terminal.locator('.resize-s'), 0, -2);
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
+  // A shorter window: the dock moves up, under the windows' feet.
+  await page.setViewportSize({ width: 1400, height: 700 });
+  await page.waitForTimeout(1200);
+  const dock = await box(page.locator('.voice-presence'));
+  for (const w of [browser, terminal]) { const b = await box(w); expect(b.y + b.height).toBeLessThanOrEqual(dock.y - 15); }
+});
+
+test('the windows have their place at any width, not only on either side of the phone\'s', async ({ page }) => {
+  // Zoom can make the page 600.5px wide, between the two queries; the places were only set inside them.
+  const unset = await page.evaluate(() => {
+    for (const sheet of document.styleSheets) {
+      for (const rule of sheet.cssRules) {
+        if (rule instanceof CSSStyleRule && rule.selectorText === '.voice-stage' && rule.style.getPropertyValue('--window-room')) return false;
+      }
+    }
+    return true;
+  });
+  expect(unset).toBe(false);
+});

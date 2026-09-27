@@ -83,3 +83,15 @@ test('a box in a dialog, or outside the app, stays where the page was pushed to 
   // Put back to the top, which left the field under the keyboard.
   expect(await scrolled).toEqual([300, 300]);
 });
+
+test('zoomed in on a small field as the keyboard opens, the app is still made as short as the keyboard leaves it', async ({ page }) => {
+  await open(page);
+  const composer = page.getByLabel('Message', { exact: true });
+  await composer.focus();
+  // Safari zooms in twice on the terminal's small field: the visual viewport is half as tall again.
+  await page.evaluate(() => {
+    const v = window.visualViewport as any;
+    v.scale = 2; v.height = (innerHeight - 320) / 2; v.dispatchEvent(new Event('resize'));
+  });
+  await expect.poll(async () => { const b = (await composer.boundingBox())!; return b.y + b.height; }).toBeLessThanOrEqual(780 - 320);
+});

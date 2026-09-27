@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { across, dockedFrame, dropTarget, fitFrame, isDock, readFrame } from '../web/src/panel-dock.ts';
+import { across, dockedFrame, dockedSize, dropTarget, fitFrame, isDock, readFrame } from '../web/src/panel-dock.ts';
 
 test('a floating window placed for the first time goes to the top right, inside the chat', () => {
   assert.deepEqual(fitFrame(null, { w: 1200, h: 700 }), { x: 664, y: 16, w: 520, h: 560 });
@@ -50,5 +50,16 @@ test('where docked panels would go is shown as the frame they take', () => {
   assert.deepEqual(dockedFrame('left', area, size), { x: 0, y: 0, w: 560, h: 700 });
   assert.deepEqual(dockedFrame('right', area, size), { x: 640, y: 0, w: 560, h: 700 });
   assert.deepEqual(dockedFrame('bottom', area, size), { x: 0, y: 380, w: 1200, h: 320 });
-  assert.deepEqual(dockedFrame('right', { w: 400, h: 300 }, size), { x: 0, y: 0, w: 400, h: 300 });
+  // As they are drawn: leaving the conversation its 320px of width and 260px of height.
+  assert.deepEqual(dockedFrame('right', { w: 800, h: 700 }, size), { x: 320, y: 0, w: 480, h: 700 });
+  assert.deepEqual(dockedFrame('bottom', { w: 1200, h: 500 }, size), { x: 0, y: 260, w: 1200, h: 240 });
+  assert.deepEqual(dockedFrame('right', { w: 300, h: 300 }, size), { x: 300, y: 0, w: 0, h: 300 });
+});
+
+test('panels are dragged to no more than leaves the conversation its room, and never below the least', () => {
+  assert.deepEqual(dockedSize({ width: 900, height: 600 }, { w: 1000, h: 800 }), { width: 680, height: 540 });
+  assert.deepEqual(dockedSize({ width: 100, height: 50 }, { w: 1000, h: 800 }), { width: 320, height: 160 });
+  // A chat too small for both: the least, never a height of 40 or below nothing, which was kept and drawn after a reload.
+  assert.deepEqual(dockedSize({ width: 500, height: 320 }, { w: 500, h: 300 }), { width: 320, height: 160 });
+  assert.deepEqual(dockedSize({ width: 500, height: 320 }, { w: 200, h: 200 }), { width: 320, height: 160 });
 });

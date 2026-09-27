@@ -85,7 +85,7 @@ export function VoiceTerminal({ events, limit, maxOutput, ended, focus, onFocuse
 }) {
   // The command being shown, while it is: new output does not scroll away from it.
   const focused = useRef<string | null>(null);
-  const { ref, onScroll, follow } = useFollowBottom<HTMLDivElement>({ paused: () => !!focused.current });
+  const { ref, onScroll, follow, settle } = useFollowBottom<HTMLDivElement>({ paused: () => !!focused.current });
   const seen = useRef(events);
   if (!hidden) seen.current = events;
   const shownEvents = seen.current;
@@ -107,7 +107,9 @@ export function VoiceTerminal({ events, limit, maxOutput, ended, focus, onFocuse
     el.classList.remove('is-focused');
     void el.offsetWidth;
     el.classList.add('is-focused');
-    release.current = window.setTimeout(() => { focused.current = null; }, 1200);
+    // Shown: from here it follows again if that left it near the end — moving
+    // up to show the command read as leaving the end.
+    release.current = window.setTimeout(() => { focused.current = null; settle(); }, 1200);
   }, [focus?.id, focus?.at]);
   return <div ref={ref} onScroll={onScroll} className="voice-terminal-output" aria-label="Agent terminal output">
     {!runs.length && <p className="voice-terminal-empty">No commands yet. What the agent runs shows up here as it runs.</p>}

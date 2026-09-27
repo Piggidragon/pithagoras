@@ -11,6 +11,9 @@
  * the capture with it: then no pointerup ever comes, and `end` is told the
  * drag was cancelled rather than dropped. The ends are heard on the way down
  * from window, which every one of them passes, wherever it is fired.
+ *
+ * Returns what stops listening without ending, for a component that goes
+ * away mid-drag.
  */
 const ENDS = ["pointerup", "pointercancel", "lostpointercapture"] as const;
 
@@ -18,18 +21,22 @@ export function followPointer(
   press: { pointerId: number; currentTarget: EventTarget | null },
   move: (ev: PointerEvent) => void,
   end?: (cancelled: boolean) => void,
-): void {
+): () => void {
   const handle = press.currentTarget as HTMLElement;
   handle.setPointerCapture(press.pointerId);
   const moved = (ev: PointerEvent) => {
     if (ev.pointerId === press.pointerId) move(ev);
   };
-  const done = (ev: PointerEvent) => {
-    if (ev.pointerId !== press.pointerId) return;
+  const stop = () => {
     handle.removeEventListener("pointermove", moved);
     for (const name of ENDS) window.removeEventListener(name, done, true);
+  };
+  const done = (ev: PointerEvent) => {
+    if (ev.pointerId !== press.pointerId) return;
+    stop();
     end?.(ev.type !== "pointerup");
   };
   handle.addEventListener("pointermove", moved);
   for (const name of ENDS) window.addEventListener(name, done, true);
+  return stop;
 }

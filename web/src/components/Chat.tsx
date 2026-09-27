@@ -39,7 +39,7 @@ import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
-import { across, dockedFrame, dropTarget, fitFrame, isDock, readFrame, type Dock, type Frame } from "../panel-dock";
+import { DOCKED_MIN, across, dockedFrame, dockedSize, dropTarget, fitFrame, isDock, readFrame, type Dock, type Frame } from "../panel-dock";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -63,6 +63,12 @@ const ASIDE: Record<Dock, string> = {
   left: "border-r border-line",
   bottom: "border-t border-line",
   float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
+};
+
+/** A size kept in storage, or `fallback` for one that is missing or smaller than may be drawn. */
+const storedSize = (key: string, fallback: number, least: number) => {
+  const n = Number(local.get(key));
+  return Number.isFinite(n) && n >= least ? n : fallback;
 };
 
 const COMPOSER_HEIGHT_KEY = "pithagoras.composerHeight";
@@ -284,8 +290,8 @@ export function Chat({
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where the panels go, and
   // the height they take at the top or the bottom, the same.
-  const [asideWidth, setAsideWidth] = useState(() => Number(local.get("panelWidth")) || 560);
-  const [asideHeight, setAsideHeight] = useState(() => Number(local.get("panelHeight")) || 320);
+  const [asideWidth, setAsideWidth] = useState(() => storedSize("panelWidth", 560, DOCKED_MIN.w));
+  const [asideHeight, setAsideHeight] = useState(() => storedSize("panelHeight", 320, DOCKED_MIN.h));
   const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || 0.55);
   const [dock, setDock] = useState<Dock>(() => {
     const stored = local.get("panelDock");
@@ -308,10 +314,16 @@ export function Chat({
   // The room the conversation and the panels share, which a floating window stays inside.
   const body = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState({ w: 0, h: 0 });
+  // Not while the window is carried or sized: drawn again for a new room, it
+  // would be put back where it was until the next move. Measured when let go.
+  const moving = useRef(false);
+  const measureRoom = useRef(() => {});
   useLayoutEffect(() => {
     const el = body.current;
     if (!el || !floating) return;
-    const measure = () => setRoom((r) => (r.w === el.clientWidth && r.h === el.clientHeight ? r : { w: el.clientWidth, h: el.clientHeight }));
+    const measure = (measureRoom.current = () => {
+      if (!moving.current) setRoom((r) => (r.w === el.clientWidth && r.h === el.clientHeight ? r : { w: el.clientWidth, h: el.clientHeight }));
+    });
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
@@ -342,10 +354,13 @@ export function Chat({
 
   /** The edge between the conversation and the panels: their width, or their height at the bottom. */
   const dragSize = (e: React.PointerEvent) => {
-    const width = asideWidth, height = asideHeight, tall = body.current?.clientHeight ?? window.innerHeight;
+    // From the size drawn, and within what is drawn: the conversation's room.
+    const area = { w: body.current?.clientWidth ?? window.innerWidth, h: body.current?.clientHeight ?? window.innerHeight };
+    const from = dockedSize({ width: asideWidth, height: asideHeight }, area);
     drag(e, (dx, dy) => {
-      if (sideBySide) setAsideHeight(Math.round(Math.min(Math.max(height - dy, 160), tall - 260)));
-      else setAsideWidth(Math.round(Math.min(Math.max(width + (placedAt === "left" ? dx : -dx), 320), window.innerWidth * 0.75)));
+      const to = dockedSize({ width: from.width + (placedAt === "left" ? dx : -dx), height: from.height - dy }, area);
+      if (sideBySide) setAsideHeight(to.height);
+      else setAsideWidth(to.width);
     });
   };
 
@@ -369,17 +384,28 @@ export function Chat({
     if (el) Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
   };
 
+  /** Done carrying or sizing: the room measured again, for whatever changed meanwhile. */
+  const stopMoving = () => {
+    moving.current = false;
+    measureRoom.current();
+  };
+
   /** A floating window, sized by its corner. */
   const sizeFrame = (e: React.PointerEvent) => {
     const from = placed, area = room;
     let at = from;
+    moving.current = true;
     drag(
       e,
       (dx, dy) => {
         at = fitFrame({ ...from, w: Math.min(from.w + dx, area.w - from.x), h: Math.min(from.h + dy, area.h - from.y) }, area);
         setBox(aside.current, at);
       },
-      (cancelled) => (cancelled ? setBox(aside.current, from) : setFrame(at)),
+      (cancelled) => {
+        if (cancelled) setBox(aside.current, from);
+        else setFrame(at);
+        stopMoving();
+      },
     );
   };
 
@@ -399,7 +425,7 @@ export function Chat({
     const start = { x: e.clientX - area.left, y: e.clientY - area.top };
     const grab = { x: Math.min(e.clientX - held.left, from.w - 24), y: Math.min(e.clientY - held.top, 24) };
     let to: Dock | null = null, at = from;
-    const shown = () => zones.current;
+    moving.current = true;
     drag(
       e,
       (dx, dy) => {
@@ -409,7 +435,7 @@ export function Chat({
         to = dropTarget({ x, y }, size);
         at = fitFrame({ ...from, x: x - grab.x, y: y - grab.y }, size);
         if (floating) setBox(aside.current, at);
-        const z = shown();
+        const z = zones.current;
         if (!z) return;
         z.hidden = false;
         document.body.classList.add("is-carrying");
@@ -421,14 +447,13 @@ export function Chat({
       },
       (cancelled) => {
         document.body.classList.remove("is-carrying");
-        if (shown()) shown()!.hidden = true;
-        if (!to) return;
-        if (cancelled) {
-          if (floating) setBox(aside.current, from);
-          return;
+        if (zones.current) zones.current.hidden = true;
+        if (to && cancelled && floating) setBox(aside.current, from);
+        if (to && !cancelled) {
+          if (to === "float") setFrame(at);
+          setDock(to);
         }
-        if (to === "float") setFrame(at);
-        setDock(to);
+        stopMoving();
       },
     );
   };
@@ -755,7 +780,6 @@ export function Chat({
   const startComposerResize = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     resizeCleanupRef.current?.();
-    event.currentTarget.setPointerCapture(event.pointerId);
     const startY = event.clientY;
     const maxHeight = Math.round(window.innerHeight * 0.45);
     const startHeight = Math.min(maxHeight, box.current?.getBoundingClientRect().height ?? composerHeight);
@@ -763,21 +787,11 @@ export function Chat({
     const move = (moveEvent: PointerEvent) => {
       setComposerHeight(Math.max(MIN_COMPOSER_HEIGHT, Math.min(maxHeight, startHeight + startY - moveEvent.clientY)));
     };
-    const cleanup = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
+    // Kept however it ends — let go, cancelled, or the capture lost with no pointerup at all.
+    resizeCleanupRef.current = followPointer(event, move, () => {
       resizeCleanupRef.current = null;
-    };
-    const finish = () => {
-      cleanup();
       persistComposerHeight(box.current?.getBoundingClientRect().height ?? composerHeight);
-    };
-
-    resizeCleanupRef.current = cleanup;
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
+    });
   };
 
   /**

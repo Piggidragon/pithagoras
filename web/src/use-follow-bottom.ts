@@ -36,9 +36,10 @@ export function atEnd(el: { scrollHeight: number; scrollTop: number; clientHeigh
  * But not over something the person just opened. A tool call or the thinking
  * expanded at the end grows the content as much as new words do, and keeping
  * the end in view took what they clicked up and out of sight. For a moment
- * after a press on a button in the box, what that press opened or closed
- * keeps the button where it was, and whether it still follows is where that
- * leaves it.
+ * after a press on something that opens and closes (`aria-expanded`), once
+ * the press has opened or closed it, it stays where it was, and whether the
+ * box still follows is where that leaves it. Only then: a press on Copy in
+ * the reply being written, which grows with every word, is not an opening.
  *
  * The jump is instant. A smooth one fires scroll events on its way that read as
  * the person leaving the end, and it ends up fighting them.
@@ -55,7 +56,7 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
   // from the ref, which is read on every update and must not wait for a render.
   const [away, setAway] = useState(false);
   // A button pressed in the box, for a moment: what it opens does not move it.
-  const held = useRef<{ el: Element; item: Element; top: number; height: number; until: number } | null>(null);
+  const held = useRef<{ el: Element; item: Element; expanded: string | null; top: number; height: number; until: number } | null>(null);
   const isPaused = useRef(paused);
   isPaused.current = paused;
 
@@ -95,18 +96,18 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
   }, []);
 
   /**
-   * Wire to the box's onPointerDown and onKeyDown: a press on a button in it
-   * — a tool call's header, the thinking's — keeps that button where it is
-   * while what it opens grows (see above). Words and the empty space are not
-   * held: a click there to select or copy lets it go on following.
+   * Wire to the box's onPointerDown and onKeyDown: a press on something that
+   * opens — a tool call's header, the thinking's — keeps it where it is while
+   * what it opens grows (see above). Anything else is not held: a click to
+   * select or copy lets it go on following.
    */
   const hold = useCallback((e: { target: EventTarget | null }) => {
-    const box = ref.current, target = e.target instanceof Element ? e.target.closest("button, summary, [role=button]") : null;
+    const box = ref.current, target = e.target instanceof Element ? e.target.closest("[aria-expanded]") : null;
     if (!box || !target || !box.contains(target)) return;
     // The entry it is in — a child of the list the box holds, or of the box — whose size says whether it opened.
     let item: Element = target;
     while (item.parentElement && item.parentElement !== box && item.parentElement !== box.firstElementChild) item = item.parentElement;
-    held.current = { el: target, item, top: target.getBoundingClientRect().top, height: item.getBoundingClientRect().height, until: performance.now() + 1000 };
+    held.current = { el: target, item, expanded: target.getAttribute("aria-expanded"), top: target.getBoundingClientRect().top, height: item.getBoundingClientRect().height, until: performance.now() + 1000 };
   }, []);
 
   /** Whatever a held button opened or closed: it stays put, and following is where that leaves it. True when it did. */
@@ -117,6 +118,8 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
       held.current = null;
       return false;
     }
+    // Not opened or closed (yet): whatever else grew is followed as ever.
+    if (h.el.getAttribute("aria-expanded") === h.expanded) return false;
     const height = h.item.getBoundingClientRect().height;
     if (height === h.height) return false;
     h.height = height;
@@ -170,5 +173,19 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     };
   }, [toEnd, keepHeld]);
 
-  return { ref, onScroll, onWheel, hold, follow, following, away };
+  /**
+   * Following again if it is near the end, whichever way it got there: after
+   * the caller has moved the box itself — the terminal, up a little to show a
+   * command at its top, which read as the person scrolling up.
+   */
+  const settle = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    top.current = el.scrollTop;
+    following.current = atEnd(el);
+    if (following.current) toEnd(el);
+    setAway(!following.current && !atEnd(el));
+  }, [toEnd]);
+
+  return { ref, onScroll, onWheel, hold, follow, settle, following, away };
 }

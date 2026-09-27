@@ -31,6 +31,7 @@ const place = async (page: Page, where: string) => {
   if (where !== 'Floating' && where !== 'Top') expect(await panels(page).evaluate((e) => getComputedStyle(e).animationName)).toBe(SLIDE[where]);
   await settled(page);
 };
+const frames = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 const SLIDE: Record<string, string> = { Right: 'aside-in', Left: 'aside-in-left', Bottom: 'aside-up', Floating: 'aside-up' };
 /** Done coming in: measured on the way, they are where they are going plus the slide. */
 const settled = (page: Page) => panels(page).evaluate((e) => Promise.all(e.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished)));
@@ -252,4 +253,55 @@ test('a floating window moved or sized is drawn along without the chat, and kept
   expect(await writes()).toBe(1);
   await page.mouse.up();
   expect(await writes()).toBe(2);
+});
+
+test('a height or width kept from before that is too small to draw opens at the usual size', async ({ page }) => {
+  // What a drag in a short chat could keep: a height below the least, or below nothing.
+  for (const height of ['40', '-40']) {
+    await page.evaluate((h) => { localStorage.setItem('panelDock', 'bottom'); localStorage.setItem('panelHeight', h); }, height);
+    await page.reload();
+    await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+    await settled(page);
+    expect((await panels(page).boundingBox())!.height).toBeGreaterThanOrEqual(159);
+  }
+});
+
+test('the edge moves the panels from the size they are drawn at, and a drop shows that size', async ({ page }) => {
+  // Narrower than the three quarters a drag allowed: what was kept was wider than could be drawn.
+  await page.setViewportSize({ width: 1000, height: 800 });
+  const edge = page.locator('[title="Drag to resize"]').first();
+  const drag = async (to: number) => {
+    const e = (await edge.boundingBox())!;
+    await page.mouse.move(e.x + e.width / 2, e.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(to, e.y + 200, { steps: 6 });
+    await page.mouse.up();
+  };
+  await drag(0);
+  const widest = (await panels(page).boundingBox())!.width;
+  expect(widest).toBeCloseTo(1000 - 320, 0);
+  // Back by 50: it went nowhere for the first 70.
+  const e = (await edge.boundingBox())!;
+  await drag(e.x + e.width / 2 + 50);
+  expect((await panels(page).boundingBox())!.width).toBeCloseTo(widest - 50, 0);
+  // Held over the left edge: the preview is the width they will have there.
+  await carry(page, 'Left', async () => {
+    expect((await page.locator('.dock-preview').boundingBox())!.width).toBeCloseTo(widest - 50, 0);
+  });
+});
+
+test('a floating window carried while the chat changes size stays under the pointer', async ({ page }) => {
+  await place(page, 'Floating');
+  const g = await grip(page);
+  await page.mouse.move(g.x + 6, g.y + 6);
+  await page.mouse.down();
+  await page.mouse.move(g.x - 200, g.y + 40, { steps: 8 });
+  const held = (await panels(page).boundingBox())!;
+  // The chat gets much shorter meanwhile, as the keyboard makes it: it was put back where it was taken from.
+  await page.setViewportSize({ width: 1300, height: 420 });
+  await frames(page);
+  const now = (await panels(page).boundingBox())!;
+  expect(now.x).toBeCloseTo(held.x, 0);
+  expect(now.y).toBeCloseTo(held.y, 0);
+  await page.mouse.up();
 });

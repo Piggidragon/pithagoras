@@ -110,13 +110,13 @@
    the deepest a window can be dragged (see ResizeHandles), so it opens as
    deep as it goes. Centred on --window-middle, as the windows slide in on
    transforms that centre them. The canvas, which hangs outside the stage,
-   ends at the same place (106px: 50 + 80 / 2 + 16). */
-@media (min-width: 601px) {
-  .voice-stage {
-    --window-top: 52px;
-    --window-room: calc(100% - var(--window-top) - var(--dock-middle) - var(--dock-height) / 2 - 16px);
-    --window-middle: calc(var(--window-top) + var(--window-room) / 2);
-  }
+   ends at the same place (106px: 50 + 80 / 2 + 16). Set for every width, not
+   only from 601px: a phone's (below) are set over them, and a width between
+   the two queries, as zoom can make, would have had none at all. */
+.voice-stage {
+  --window-top: 52px;
+  --window-room: calc(100% - var(--window-top) - var(--dock-middle) - var(--dock-height) / 2 - 16px);
+  --window-middle: calc(var(--window-top) + var(--window-room) / 2);
 }
 /* On a phone the windows take the width, one above the other, and end
    above the dock: they reached 36px under it, the terminal's last lines

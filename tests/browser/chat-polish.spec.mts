@@ -190,3 +190,20 @@ test('an agent conversation keeps its title in place when it starts working', as
   expect(Math.abs(busy.x - idle.x)).toBeLessThan(0.5);
   await expect(main.locator('.status-slot > .status-working')).toHaveCount(1);
 });
+
+test('the composer stops following the pointer when the drag is lost without a let-go', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=args');
+  const grip = page.getByRole('slider', { name: 'Resize message composer vertically' }).or(page.getByLabel('Resize message composer vertically'));
+  const g = (await grip.first().boundingBox())!;
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2, g.y - 40, { steps: 4 });
+  // The capture lost with no pointerup — the page took it, or the grip went away.
+  await grip.first().evaluate((e) => e.dispatchEvent(new PointerEvent('lostpointercapture', { pointerId: 1, bubbles: true })));
+  const box = page.getByLabel('Message', { exact: true });
+  const height = (await box.boundingBox())!.height;
+  // It went on growing with the pointer until the next click.
+  await page.mouse.move(g.x + g.width / 2, g.y - 160, { steps: 4 });
+  expect((await box.boundingBox())!.height).toBeCloseTo(height, 0);
+  await page.mouse.up();
+});
