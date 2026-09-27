@@ -230,3 +230,54 @@ test('each question is asked once: a comparison when opened, the branches when o
   await page.waitForTimeout(500);
   expect(await asked('/branches') - before).toBe(1);
 });
+
+test("a pull request is filled in against the repository's own default branch — upstream/main in a fork — and says so when it cannot be", async ({ page }) => {
+  await page.goto('/tests/git.html?tab=branches');
+  await page.getByRole('textbox', { name: 'Name of the new branch' }).fill('feature/export');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('tab', { name: 'Pull requests' }).click();
+  await page.getByRole('button', { name: 'Open a pull request for feature/export' }).click();
+  await expect(page.getByRole('textbox', { name: 'Title of the pull request' })).not.toHaveValue('');
+  const compared = await page.evaluate(() => (window as any).gitCalls.filter((c: any) => c.url.includes('/compare')).map((c: any) => c.url));
+  expect(compared.at(-1)).toContain('base=upstream%2Fmain');
+
+  await page.goto('/tests/git.html?tab=branches&comparefail=1');
+  await page.getByRole('textbox', { name: 'Name of the new branch' }).fill('feature/export');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('tab', { name: 'Pull requests' }).click();
+  await page.getByRole('button', { name: 'Open a pull request for feature/export' }).click();
+  await expect(page.getByText('Not filled in: upstream/main and HEAD have nothing in common')).toBeVisible();
+});
+
+test('once opened, the pull request is the branch’s — no second offer to open it, even where gh named no number', async ({ page }) => {
+  // With a number the pull request is shown, and the list drawn anew behind
+  // it; without one nothing is shown, and the list was left offering it.
+  await page.goto('/tests/git.html?tab=branches&prurl=odd');
+  await page.getByRole('textbox', { name: 'Name of the new branch' }).fill('feature/export');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('tab', { name: 'Pull requests' }).click();
+  await page.getByRole('button', { name: 'Open a pull request for feature/export' }).click();
+  await page.getByRole('textbox', { name: 'Title of the pull request' }).fill('Export to CSV');
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Export to CSV/ }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /Open a pull request for/ })).toHaveCount(0);
+});
+
+test('a history that failed once shows the commits when asked again, not the old error', async ({ page }) => {
+  await page.goto('/tests/git.html?tab=history&logfail=1');
+  await expect(page.getByRole('alert')).toContainText('index.lock');
+  await page.evaluate(() => (window as any).moveHead());
+  await expect(page.getByText('Add the login form')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('Refresh reads the state once', async ({ page }) => {
+  await page.goto('/tests/git.html');
+  await expect(page.getByText('session.ts')).toBeVisible();
+  const states = () => page.evaluate(() => (window as any).gitCalls.filter((c: any) => c.method === 'GET' && c.url === '/api/sessions/s/git').length);
+  const before = await states();
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Refreshing' })).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect((await states()) - before).toBe(1);
+});

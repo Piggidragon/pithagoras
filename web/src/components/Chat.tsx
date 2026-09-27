@@ -294,7 +294,9 @@ export function Chat({
     { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen },
     panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else setCanvasOpen(false); },
     // A third panel closes another one instead, while Files has an edit in it.
-    [...(filesDirty ? (["files"] as const) : []), ...(gitHeld ? (["git"] as const) : [])],
+    // An edit not saved outweighs keeping Git in view: with both kept nothing
+    // could go, and the fallback closed Files — edit and all — unasked.
+    filesDirty ? ["files"] : gitHeld ? ["git"] : [],
   );
   const closeFiles = async () => {
     if (

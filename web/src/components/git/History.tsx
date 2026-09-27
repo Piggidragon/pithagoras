@@ -17,6 +17,8 @@ export function History() {
   // Read again when HEAD moves: a commit, a checkout, a pull.
   useEffect(() => {
     let gone = false;
+    // What went wrong last time is not what is shown this time.
+    setError(null);
     gitApi
       .log(id, { limit: PAGE })
       .then((r) => {
@@ -40,10 +42,11 @@ export function History() {
     }
   };
 
-  if (error) return <ErrorNote>{error}</ErrorNote>;
+  if (error && !commits) return <ErrorNote>{error}</ErrorNote>;
   if (!commits) return <Quiet>Loading…</Quiet>;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
+      {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
       {repo.head && (
         <button
           type="button"
@@ -131,6 +134,7 @@ export function CommitView({ sha }: { sha: string }) {
   const [detail, setDetail] = useState<CommitDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    setError(null);
     gitApi.commitDetail(id, sha).then(setDetail, (e) => setError((e as Error).message));
   }, [id, sha]);
   if (error) return <ErrorNote>{error}</ErrorNote>;

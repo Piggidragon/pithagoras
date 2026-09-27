@@ -188,7 +188,7 @@ export function GitPanel({
   return (
     <Ctx.Provider value={ctx}>
       <div className="flex h-full min-h-0 flex-col text-sm" data-git-tab={tab}>
-        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => void act("Refreshing", () => Promise.all([reload(), askGh(true)]))} />
+        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => void act("Refreshing", () => askGh(true))} />
         {state.operation && <Operation />}
         {busy && (
           <p role="status" className="shrink-0 border-b border-line bg-accent/5 px-3 py-1 text-[11px] text-accent">

@@ -812,7 +812,9 @@ export async function createBranch(repo: Repo, nameIn: unknown, fromIn?: unknown
   return serial(repo, async () => {
     const name = await checkRef(repo, nameIn, "branch");
     const from = fromIn ? await checkRef(repo, fromIn) : undefined;
-    await git(repo, ["switch", "-c", name, ...(from ? [from] : [])], { writes: true });
+    // Not following what it was made from: a branch made from origin/main
+    // followed origin/main, and its first push went nowhere — or onto main.
+    await git(repo, ["switch", "-c", name, ...(from ? ["--no-track", from] : [])], { writes: true });
   });
 }
 
@@ -852,10 +854,38 @@ async function pushRemote(repo: Repo): Promise<string> {
  * follows it from then on. Never forced: rewriting what others may have is not
  * something a button does.
  */
+/** The branch checked out, and where it pushes to — null for a detached HEAD, `upstream` null where it follows nothing. */
+async function tracking(repo: Repo): Promise<{ branch: string; upstream: { remote: string; ref: string } | null } | null> {
+  const { stdout: head } = await git(repo, ["symbolic-ref", "-q", "--short", "HEAD"], { ok: [1] });
+  const branch = head.trim();
+  if (!branch) return null;
+  const { stdout } = await git(repo, ["for-each-ref", "--format=%(upstream:remotename)%1f%(upstream:remoteref)", `refs/heads/${branch}`]);
+  const [remote = "", ref = ""] = stdout.trim().split("\x1f");
+  return { branch, upstream: remote && ref ? { remote, ref } : null };
+}
+
+/** Whether a push has anything to do: no branch of its own on the remote yet, or commits it does not have. */
+async function needsPush(repo: Repo): Promise<boolean> {
+  const t = await tracking(repo);
+  if (!t) return false;
+  if (!t.upstream || t.upstream.ref !== `refs/heads/${t.branch}`) return true;
+  const { stdout } = await git(repo, ["rev-list", "--count", "@{upstream}..HEAD"]);
+  return Number(stdout.trim()) > 0;
+}
+
+/**
+ * Push the branch. One that is not on the remote yet is published there and
+ * follows it from then on — and so is one that follows a branch of another
+ * name, as a branch made from origin/main does: a plain push of it fails, or
+ * with push.default=upstream puts its commits on main. Never forced:
+ * rewriting what others may have is not something a button does.
+ */
 export async function push(repo: Repo): Promise<string> {
   return serial(repo, async () => {
-    const { stdout: upstream } = await git(repo, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], { ok: [128] });
-    const args = upstream.trim() ? ["push"] : ["push", "-u", await pushRemote(repo), "HEAD"];
+    const t = await tracking(repo);
+    if (!t) throw new GitError(409, "Check out a branch first: a detached HEAD has no branch to push");
+    const own = t.upstream && t.upstream.ref === `refs/heads/${t.branch}`;
+    const args = own ? ["push"] : ["push", "-u", t.upstream?.remote ?? (await pushRemote(repo)), "HEAD"];
     const { stdout, stderr } = await git(repo, args, { writes: true });
     return said(stderr) || said(stdout);
   });
@@ -960,6 +990,11 @@ export interface GhState {
   repo: string | null;
   url: string | null;
   defaultBranch: string | null;
+  /**
+   * The default branch as this clone has it: on the remote that is that
+   * repository — not always origin, which in a fork's clone is the fork.
+   */
+  baseRef?: string | null;
   /** Why pull requests are not on offer, when they are not. */
   note?: string;
 }
@@ -975,7 +1010,16 @@ export async function ghState(repo: Repo, fresh = false): Promise<GhState> {
   try {
     const view = await gh(repo.root, ["repo", "view", "--json", "nameWithOwner,url,defaultBranchRef"]);
     const parsed = JSON.parse(view.stdout) as { nameWithOwner: string; url: string; defaultBranchRef?: { name: string } };
-    state = { installed: true, authed: true, repo: parsed.nameWithOwner, url: parsed.url, defaultBranch: parsed.defaultBranchRef?.name ?? null };
+    const defaultBranch = parsed.defaultBranchRef?.name ?? null;
+    const remote = remoteFor(await listRemotes(repo), parsed.url);
+    state = {
+      installed: true,
+      authed: true,
+      repo: parsed.nameWithOwner,
+      url: parsed.url,
+      defaultBranch,
+      baseRef: remote && defaultBranch ? `${remote.name}/${defaultBranch}` : null,
+    };
   } catch (e) {
     if (e instanceof GitError && e.status === 501) {
       state = { installed: false, authed: false, repo: null, url: null, defaultBranch: null, note: "Install the GitHub CLI (gh) to see and open pull requests here" };
@@ -994,6 +1038,12 @@ export async function ghState(repo: Repo, fresh = false): Promise<GhState> {
   }
   ghStates.set(repo.root, { at: Date.now(), state });
   return state;
+}
+
+/** The remote whose address is this page on the web. */
+function remoteFor(remotes: Remote[], web: string): Remote | undefined {
+  const plain = (u: string) => u.toLowerCase().replace(/\.git$/, "").replace(/\/$/, "");
+  return remotes.find((r) => r.web && plain(r.web) === plain(web));
 }
 
 async function needGh(repo: Repo): Promise<GhState> {
@@ -1047,14 +1097,22 @@ export async function createPull(repo: Repo, opts: { title?: unknown; body?: unk
   if (!title) throw new GitError(400, "A pull request needs a title");
   const body = typeof opts.body === "string" ? opts.body : "";
   const base = opts.base ? await checkRef(repo, opts.base) : undefined;
-  const { stdout: branchOut } = await git(repo, ["symbolic-ref", "-q", "--short", "HEAD"], { ok: [1] });
-  const branch = branchOut.trim();
-  if (!branch) throw new GitError(409, "Check out a branch first: a detached HEAD has nothing to open a pull request from");
-  await push(repo);
+  const t = await tracking(repo);
+  if (!t) throw new GitError(409, "Check out a branch first: a detached HEAD has nothing to open a pull request from");
+  // Pushed only when there is something to push: a branch already on the
+  // remote, and behind it, has nothing to add, and a push would be refused.
+  if (await needsPush(repo)) await push(repo);
+  // Named with its owner: in a fork's clone gh opens the pull request on the
+  // repository forked from, which has no branch of that name — the branch is
+  // on the fork it was pushed to.
+  const after = await tracking(repo);
+  const where = after?.upstream ? (await listRemotes(repo)).find((r) => r.name === after.upstream!.remote) : undefined;
+  const owner = where?.web ? /^https:\/\/[^/]+\/([^/]+)\//.exec(where.web)?.[1] : undefined;
+  const head = owner ? `${owner}:${t.branch}` : t.branch;
   return serial(repo, async () => {
     const { stdout } = await gh(
       repo.root,
-      ["pr", "create", "--title", title, "--body-file", "-", "--head", branch, ...(base ? ["--base", base] : []), ...(opts.draft ? ["--draft"] : [])],
+      ["pr", "create", "--title", title, "--body-file", "-", "--head", head, ...(base ? ["--base", base] : []), ...(opts.draft ? ["--draft"] : [])],
       { input: body, writes: true },
     );
     const url = stdout.trim().split("\n").reverse().find((line) => /^https?:\/\//.test(line)) ?? stdout.trim();

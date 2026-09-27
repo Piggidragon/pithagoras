@@ -2,7 +2,8 @@
 // Open /tests/git.html to see it; ?gh=off for a machine without gh, ?repo=none for a folder in no repository,
 // ?ghslow=1 for a GitHub that takes seconds to answer, ?rename=1 for a renamed file with more changes in the
 // tree, ?conflict=1 for a merge stopped on a conflict, ?op=am for patches stopped half way, ?prefix=src for a
-// chat whose folder is src/ in the repository.
+// chat whose folder is src/ in the repository, ?comparefail=1 for a comparison git refuses, ?logfail=1 for a
+// history that fails the first time it is asked. window.moveHead() moves HEAD, as a commit in the shell would.
 // What the panel asked for is in window.gitCalls; window.agentWrote() changes a file the way the agent would.
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -55,7 +56,10 @@ const branches = [
 ];
 const gh = params.get('gh') === 'off'
   ? { installed: false, authed: false, repo: null, url: null, defaultBranch: null, note: 'Install the GitHub CLI (gh) to see and open pull requests here' }
-  : { installed: true, authed: true, repo: 'me/app', url: 'https://github.com/me/app', defaultBranch: 'main' };
+  : { installed: true, authed: true, repo: 'me/app', url: 'https://github.com/me/app', defaultBranch: 'main', baseRef: 'upstream/main' };
+// The pull request opened here, once it is.
+let created: any = null;
+let logAsked = 0;
 const pulls = [
   { number: 41, title: 'Login with a password', author: { login: 'ada' }, headRefName: 'feature/login', baseRefName: 'main', isDraft: false, state: 'OPEN', updatedAt: new Date(Date.now() - 3600_000).toISOString(), url: 'https://github.com/me/app/pull/41', reviewDecision: 'REVIEW_REQUIRED', additions: 40, deletions: 6 },
   { number: 38, title: 'Dark mode for the settings', author: { login: 'grace' }, headRefName: 'feature/dark', baseRefName: 'main', isDraft: true, state: 'OPEN', updatedAt: new Date(Date.now() - 86400_000).toISOString(), url: 'https://github.com/me/app/pull/38' },
@@ -100,7 +104,10 @@ window.fetch = (async (input: any, init?: any) => {
     repo.ahead = 0;
     return reply({ said: 'To github.com:me/app\n   a1b2c3d..f000000  feature/login -> feature/login' });
   }
-  if (path === '/log') return reply({ commits });
+  if (path === '/log') {
+    if (params.get('logfail') && logAsked++ === 0) return reply({ error: 'Unable to create index.lock: File exists' }, 409);
+    return reply({ commits });
+  }
   if (path.startsWith('/commits/')) {
     const c = commits.find((x) => x.sha === path.slice(9))!;
     return reply({ ...c, committer: c.author, message: `${c.subject}\n\nWith a body that explains why.`, files: [{ path: 'src/auth/login.ts', status: 'M', added: 12, removed: 3, binary: false }, { path: 'src/auth/new.ts', status: 'A', added: 30, removed: 0, binary: false }] });
@@ -115,10 +122,15 @@ window.fetch = (async (input: any, init?: any) => {
     return reply({ ok: true });
   }
   if (path === '/stashes') return reply({ stashes: [{ ref: 'stash@{0}', sha: '5'.repeat(40), date: now - 4000, message: 'On feature/login: half a refactor' }] });
+  if (path === '/compare' && params.get('comparefail')) return reply({ error: 'upstream/main and HEAD have nothing in common' }, 409);
   if (path === '/compare') return reply({ comparison: { base: 'origin/main', head: repo.branch, mergeBase: 'c3d4e5f', commits: commits.slice(0, 2), files: [{ path: 'src/auth/login.ts', status: 'M', added: 12, removed: 3, binary: false }] } });
   if (path === '/pulls' && method === 'GET') return reply({ pulls });
-  if (path === '/pulls/current') return reply({ pull: repo.branch === 'feature/login' ? { ...pulls[0], body: '' } : null });
-  if (path === '/pulls' && method === 'POST') return reply({ url: 'https://github.com/me/app/pull/42' });
+  if (path === '/pulls/current') return reply({ pull: repo.branch === 'feature/login' ? { ...pulls[0], body: '' } : created?.headRefName === repo.branch ? created : null });
+  if (path === '/pulls' && method === 'POST') {
+    created = { ...pulls[0], number: 42, title: body.title, headRefName: repo.branch, body: body.body };
+    // ?prurl=odd: an answer with no number in it to read.
+    return reply({ url: params.get('prurl') === 'odd' ? 'https://github.com/me/app/pulls' : 'https://github.com/me/app/pull/42' });
+  }
   if (/^\/pulls\/\d+$/.test(path)) {
     const p = pulls.find((x) => String(x.number) === path.slice(7)) ?? { ...pulls[0], number: 42, title: 'New', headRefName: repo.branch };
     return reply({ pull: { ...p, body: 'Adds **login** with a password.\n\n- checks the hash in constant time', mergeable: 'MERGEABLE', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS', status: 'COMPLETED' }, { name: 'lint', status: 'IN_PROGRESS' }], commits: [{ oid: commits[0].sha, messageHeadline: commits[0].subject }], comments: [{ author: { login: 'grace' }, body: 'Looks good — one question about the hash.', createdAt: new Date(Date.now() - 1800_000).toISOString() }], reviews: [] } });
@@ -132,6 +144,10 @@ function Fixture() {
   const [tab, setTab] = useState<GitTab>((params.get('tab') as GitTab) ?? 'changes');
   const [activity, setActivity] = useState(0);
   const [opened, setOpened] = useState<string[]>([]);
+  (window as any).moveHead = () => {
+    repo.head = 'e'.repeat(40);
+    setActivity((n) => n + 1);
+  };
   (window as any).agentWrote = (path: string) => {
     repo.files.push({ path, x: '?', y: '?', kind: 'untracked' });
     setActivity((n) => n + 1);

@@ -480,3 +480,81 @@ test("a refresh reads what to turn off once, not before every command", async ()
     process.env.PATH = saved;
   }
 });
+
+/** Two remotes named as GitHub has them — a fork and what it was forked from — that are bare repositories here. */
+function forked() {
+  const dir = repo();
+  for (const [name, owner] of [["origin", "forker"], ["upstream", "me"]]) {
+    const bare = path.join(home, `${owner}-demo${n}.git`);
+    execFileSync("git", ["init", "-q", "--bare", bare]);
+    sh(dir, "config", `url.${bare}.insteadOf`, `https://github.com/${owner}/demo.git`);
+    sh(dir, "remote", "add", name, `https://github.com/${owner}/demo.git`);
+    sh(dir, "push", "-q", name, "main");
+  }
+  sh(dir, "fetch", "-q", "--all");
+  sh(dir, "branch", "-q", "--set-upstream-to=origin/main");
+  return dir;
+}
+
+test("in a fork's clone the pull request names the fork's branch, and is compared with the repository forked from", async () => {
+  const dir = forked();
+  const r = await open(dir);
+  // gh (the stand-in) says the repository is me/demo — upstream here, not origin.
+  const state = await g.ghState(r, true);
+  assert.equal(state.baseRef, "upstream/main");
+  await g.createBranch(r, "topic");
+  writeFileSync(path.join(dir, "t.txt"), "t\n");
+  await g.stage(r, [], true);
+  await g.commit(r, "Topic");
+  writeFileSync(ghLog, "");
+  await g.createPull(r, { title: "Topic", body: "", base: "main" });
+  // Pushed to the fork, and asked for as the fork's.
+  assert.equal((await g.status(r)).upstream, "origin/topic");
+  assert.match(readFileSync(ghLog, "utf8"), /^pr create --title Topic --body-file - --head forker:topic --base main$/m);
+});
+
+test("a branch already on the remote and behind it gets its pull request without a push that would be refused", async () => {
+  const dir = forked();
+  const r = await open(dir);
+  await g.createBranch(r, "behind");
+  writeFileSync(path.join(dir, "b.txt"), "b\n");
+  await g.stage(r, [], true);
+  await g.commit(r, "Mine");
+  await g.push(r);
+  // Somebody else adds to it.
+  const other = path.join(home, `collab${n}`);
+  execFileSync("git", ["clone", "-q", "-b", "behind", path.join(home, `forker-demo${n}.git`), other]);
+  writeFileSync(path.join(other, "c.txt"), "c\n");
+  sh(other, "add", "c.txt");
+  sh(other, "commit", "-qm", "Theirs");
+  sh(other, "push", "-q");
+  await g.fetch(r);
+  assert.equal((await g.status(r)).behind, 1);
+  writeFileSync(ghLog, "");
+  await g.createPull(r, { title: "Behind", body: "" });
+  assert.match(readFileSync(ghLog, "utf8"), /^pr create /m);
+});
+
+test("a branch made from a remote one follows nothing until pushed, and one that follows a branch of another name is published as itself", async () => {
+  const dir = forked();
+  const r = await open(dir);
+  await g.createBranch(r, "fresh", "origin/main");
+  assert.equal((await g.status(r)).upstream, null);
+  writeFileSync(path.join(dir, "f.txt"), "f\n");
+  await g.stage(r, [], true);
+  await g.commit(r, "Fresh");
+  await g.push(r);
+  assert.equal((await g.status(r)).upstream, "origin/fresh");
+  assert.equal(sh(dir, "rev-parse", "origin/main").trim(), sh(dir, "rev-parse", "upstream/main").trim(), "main was not pushed to");
+
+  // Made in the shell, following origin/main: a plain push fails, or goes onto main.
+  sh(dir, "switch", "-q", "-c", "shell", "--track", "origin/main");
+  writeFileSync(path.join(dir, "s.txt"), "s\n");
+  sh(dir, "add", "s.txt");
+  sh(dir, "commit", "-qm", "Shell");
+  const mainBefore = sh(dir, "rev-parse", "origin/main").trim();
+  await g.push(r);
+  assert.equal((await g.status(r)).upstream, "origin/shell");
+  sh(dir, "fetch", "-q", "origin");
+  assert.equal(sh(dir, "rev-parse", "origin/main").trim(), mainBefore);
+});

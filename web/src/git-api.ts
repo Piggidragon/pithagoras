@@ -34,6 +34,8 @@ export interface GhState {
   repo: string | null;
   url: string | null;
   defaultBranch: string | null;
+  /** The default branch on the remote that is that repository, e.g. "upstream/main" in a fork's clone. */
+  baseRef?: string | null;
   note?: string;
 }
 

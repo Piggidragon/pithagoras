@@ -936,6 +936,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * message could not be switched on again. What is switched off is the
    * switch's to decide: kept, and on again when it is switched on.
    *
+   * Which also means an extension cannot hide a tool that is switched off: a
+   * list without it may be "not this one" or "one I could not see", and there
+   * is no telling the two apart. Switched on again, it is on — even where the
+   * extension, pi-goal-x with no goal set, would have kept its own tool
+   * hidden. That takes somebody switching it on on purpose; the other reading
+   * lost switched-off tools from the chat for good.
+   *
    * Extensions reach pi through the runtime every extension API shares, which
    * pi fills when it binds a runner — at start, and a new one on every reload.
    */

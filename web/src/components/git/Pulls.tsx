@@ -34,11 +34,15 @@ export function Pulls() {
   const [list, setList] = useState<PullSummary[] | null>(null);
   const [current, setCurrent] = useState<PullDetail | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  // Bumped when a pull request is opened here: nothing on this disk moved, and
+  // both lists would go on offering to open it.
+  const [opened, setOpened] = useState(0);
 
   useEffect(() => {
     if (!gh?.repo) return;
     let gone = false;
     setList(null);
+    setError(null);
     gitApi.pulls(id, state).then(
       (r) => !gone && setList(r.pulls),
       (e) => !gone && setError((e as Error).message),
@@ -46,7 +50,7 @@ export function Pulls() {
     return () => {
       gone = true;
     };
-  }, [id, gh?.repo, state, repo.head]);
+  }, [id, gh?.repo, state, repo.head, opened]);
 
   useEffect(() => {
     if (!gh?.repo) return;
@@ -58,7 +62,7 @@ export function Pulls() {
     return () => {
       gone = true;
     };
-  }, [id, gh?.repo, repo.branch, repo.head]);
+  }, [id, gh?.repo, repo.branch, repo.head, opened]);
 
   const onDefault = !repo.branch || repo.branch === gh?.defaultBranch;
   const web = repo.remotes.find((r) => r.name === "origin")?.web ?? repo.remotes[0]?.web;
@@ -94,7 +98,12 @@ export function Pulls() {
           ) : onDefault ? (
             <Quiet>On {repo.branch ?? "no branch"} — switch to a branch of your own to open a pull request from it.</Quiet>
           ) : (
-            <OpenPull onOpened={(n) => show({ kind: "pull", n })} />
+            <OpenPull
+              onOpened={(n) => {
+                setOpened((k) => k + 1);
+                if (n) show({ kind: "pull", n });
+              }}
+            />
           )}
           <SectionHead title="Pull requests">
             <select value={state} onChange={(e) => setState(e.target.value)} aria-label="Which pull requests" className="rounded border border-line bg-canvas px-1 py-0.5 text-[11px] text-fg">
@@ -137,30 +146,36 @@ function PullRow({ pull: p }: { pull: PullSummary }) {
 }
 
 /** Open a pull request for the branch checked out: pushed first if it is not on GitHub yet. */
-function OpenPull({ onOpened }: { onOpened: (n: number) => void }) {
+/** `onOpened` is told of every pull request opened, with its number where gh's answer gave one. */
+function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
   const { id, repo, act, busy } = useGit();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const defaultBranch = repo.gh?.defaultBranch ?? null;
+  // Where the default branch is in this clone: on the remote that is the
+  // repository — in a fork's clone not origin, which is the fork.
+  const baseRef = repo.gh?.baseRef ?? null;
   const [base, setBase] = useState(defaultBranch ?? "");
+  const [unfilled, setUnfilled] = useState<string | null>(null);
   const [draft, setDraft] = useState(false);
   const [comparison, setComparison] = useState<Comparison | null>(null);
 
   // Filled in from what the branch adds: one commit is its own title; several are listed.
   useEffect(() => {
     if (!open) return;
-    gitApi.compare(id, defaultBranch ? `origin/${defaultBranch}` : undefined).then(
+    setUnfilled(null);
+    gitApi.compare(id, baseRef ?? undefined).then(
       (r) => {
         const c = r.comparison;
         setComparison(c);
-        if (!c) return;
+        if (!c) return setUnfilled("Nothing to compare the branch with, so nothing is filled in.");
         setTitle((t) => t || (c.commits.length === 1 ? c.commits[0].subject : (repo.branch ?? "").replace(/^[^/]+\//, "").replace(/[-_]/g, " ")));
         setBody((b) => b || (c.commits.length > 1 ? c.commits.map((x) => `- ${x.subject}`).reverse().join("\n") : ""));
       },
-      () => {},
+      (e) => setUnfilled(`Not filled in: ${(e as Error).message}`),
     );
-  }, [open, id, defaultBranch, repo.branch]);
+  }, [open, id, baseRef, repo.branch]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -169,7 +184,7 @@ function OpenPull({ onOpened }: { onOpened: (n: number) => void }) {
       url = (await gitApi.createPull(id, { title, body, base: base || undefined, draft })).url;
     });
     const n = Number(/\/pull\/(\d+)/.exec(url)?.[1]);
-    if (ok && n) onOpened(n);
+    if (ok) onOpened(n || undefined);
   };
 
   if (!open) {
@@ -218,6 +233,7 @@ function OpenPull({ onOpened }: { onOpened: (n: number) => void }) {
           {repo.upstream ? "Open" : "Push and open"}
         </TextButton>
       </div>
+      {unfilled && <p className="text-[10.5px] text-fg-faint">{unfilled}</p>}
       {repo.files.length > 0 && <p className="text-[10.5px] text-warn">{repo.files.length} changed files are not committed — they are not part of it.</p>}
     </form>
   );

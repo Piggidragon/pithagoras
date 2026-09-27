@@ -51,3 +51,16 @@ test('a file opened in Files from Git leaves Git open: the other panel makes roo
   await expect(panels.getByRole('tablist', { name: 'Git' })).toBeVisible();
   await expect(panels.getByRole('tablist', { name: 'Terminals' })).toHaveCount(0);
 });
+
+test('an edit not saved in Files outweighs keeping Git open: a third panel closes Git, not the edit', async ({ page }) => {
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: 'Git', exact: true }).click();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  await panels.getByRole('button', { name: 'Open README.md in Files' }).click();
+  const text = panels.getByRole('textbox', { name: 'Contents of README.md' });
+  await text.fill('# Pithagoras\nnot saved yet\n');
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await expect(text).toHaveValue('# Pithagoras\nnot saved yet\n');
+  await expect(panels.getByRole('tablist', { name: 'Git' })).toHaveCount(0);
+  await expect(panels.getByRole('tablist', { name: 'Terminals' })).toBeVisible();
+});
