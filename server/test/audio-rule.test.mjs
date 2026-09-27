@@ -67,8 +67,17 @@ const open = (sessionFile) => {
   mkdirSync(dir, { recursive: true });
   return SdkPiClient.create({ cwd: process.env.WORKSPACE_ROOT, sessionDir: dir, sessionFile, provider: "fake", modelId: "m" });
 };
-const settled = (client) => new Promise((resolve) => {
-  const on = (e) => { if (e?.type === "agent_settled") { client.off("event", on); resolve(); } };
+/** Waits for `ready`, and fails rather than waiting for ever. */
+async function until(ready, what) {
+  for (let i = 0; !ready(); i++) {
+    assert.ok(i < 500, `waited 5 s for ${what}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+/** The end of the run going now, or a failure after 10 s. */
+const settled = (client) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => { client.off("event", on); reject(new Error("the run did not settle within 10 s")); }, 10_000);
+  const on = (e) => { if (e?.type === "agent_settled") { clearTimeout(timer); client.off("event", on); resolve(); } };
   client.on("event", on);
 });
 /** Sends one message, and gives the system prompt its run was answered with. */
@@ -125,7 +134,7 @@ test("a spoken message sent while a typed run is going is answered with the rule
     const before = sent.length;
     const done = settled(client);
     await client.prompt("Typed, and slow");
-    while (sent.length === before) await new Promise((r) => setTimeout(r, 10));
+    await until(() => sent.length > before, "the first request");
     await client.prompt("Spoken meanwhile", { voice: true });
     hold = undefined;
     release();
@@ -149,7 +158,7 @@ test("a spoken message queued into a run whose prompt an extension set is answer
     const before = sent.length;
     const done = settled(client);
     await client.prompt("Typed, and slow");
-    while (sent.length === before) await new Promise((r) => setTimeout(r, 10));
+    await until(() => sent.length > before, "the first request");
     await client.prompt("Spoken meanwhile", { voice: true });
     hold = undefined;
     release();
@@ -158,6 +167,58 @@ test("a spoken message queued into a run whose prompt an extension set is answer
     assert.match(sent[before], /SHELL POLICY/);
     assert.doesNotMatch(sent[before], /Audio mode/);
     // What the extension added is still there, and the rule with it.
+    assert.match(sent[before + 1], /SHELL POLICY/);
+    assert.ok(sent[before + 1].includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    hold = undefined;
+    release?.();
+    delete globalThis.addPolicy;
+    client.dispose();
+  }
+});
+
+test("a typed message after a queued spoken one does not take the rule away before it is answered", async () => {
+  const client = await open();
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  try {
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    await client.prompt("Spoken meanwhile", { voice: true });
+    await client.prompt("And typed after it");
+    hold = undefined;
+    release();
+    await done;
+    assert.ok(sent.length >= before + 2, "the queued messages were answered");
+    assert.doesNotMatch(sent[before], /Audio mode/);
+    for (const prompt of sent.slice(before + 1)) assert.ok(prompt.includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    hold = undefined;
+    release?.();
+    client.dispose();
+  }
+});
+
+test("a spoken message queued after the tools changed in a run whose prompt an extension set has the rule", async () => {
+  globalThis.addPolicy = true;
+  const client = await open();
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  try {
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    // pi builds its prompt again, and the one the extension set keeps the
+    // prompt it was given: the two no longer match.
+    client.session.setActiveToolsByName(["read"]);
+    await client.prompt("Spoken meanwhile", { voice: true });
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2);
     assert.match(sent[before + 1], /SHELL POLICY/);
     assert.ok(sent[before + 1].includes(AUDIO_SYSTEM_RULE));
   } finally {
@@ -177,7 +238,7 @@ test("a spoken conversation's prompt follows its tools during a run, and keeps t
     const before = sent.length;
     const done = settled(client);
     await client.prompt("Typed, and slow");
-    while (sent.length === before) await new Promise((r) => setTimeout(r, 10));
+    await until(() => sent.length > before, "the first request");
     // Mid-run, as an MCP server connecting or an extension's tool going away
     // does it; the next turn of the same run is the one that must know.
     client.session.setActiveToolsByName(["read"]);
