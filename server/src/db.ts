@@ -75,7 +75,7 @@ export interface EventRow {
   created_at: string;
 }
 
-const DATA_DIR = process.env.DATA_DIR || "./data";
+export const DATA_DIR = process.env.DATA_DIR || "./data";
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {

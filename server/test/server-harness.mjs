@@ -51,6 +51,23 @@ export const serverEnv = (home, port) => ({
   PORTAL_PASSWORD: "", PORTAL_ALLOW_NO_PASSWORD: "1", EXECUTOR: "host", LLAMA_BASE_URL: "http://127.0.0.1:1",
 });
 
+/**
+ * Runs `args` with this runtime to its end, with what it printed. One that is
+ * still going after `ms` is stopped, and has code null: a test that meant it
+ * to fail at once fails, rather than waiting for ever.
+ */
+export function runToEnd(args, env, { cwd, ms = 60_000 } = {}) {
+  cleanUp();
+  const child = spawn(process.execPath, args, { env, cwd, stdio: ["ignore", "pipe", "pipe"] });
+  started.push(child);
+  let out = "";
+  let err = "";
+  child.stdout.on("data", (d) => { out += d; });
+  child.stderr.on("data", (d) => { err += d; });
+  const timer = setTimeout(() => child.kill(), ms);
+  return new Promise((resolve) => child.on("exit", (code) => { clearTimeout(timer); resolve({ code, out, err }); }));
+}
+
 /** Starts the server and waits until it answers. When it never does, the error carries what it printed. */
 export async function startServer(env) {
   cleanUp();

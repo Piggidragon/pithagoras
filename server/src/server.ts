@@ -62,7 +62,7 @@ import {
   readCompactionSettings,
   writeCompactionSettings,
 } from "./pi-settings.js";
-import { eventTime, getDb } from "./db.js";
+import { DATA_DIR, eventTime, getDb } from "./db.js";
 import { getBuiltinCommands, picturesRefused } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
@@ -1380,31 +1380,17 @@ const tls =
     ? { cert: readFileSync(tlsCert), key: readFileSync(tlsKey) }
     : null;
 
-// Before anything below touches the database: see holdDataDir.
-const DATA_DIR = process.env.DATA_DIR || "./data";
+// Before the start-up below settles what the last server left: see holdDataDir.
 if (!holdDataDir(DATA_DIR)) {
   console.error(`pithagoras is already running on ${path.resolve(DATA_DIR)}. Not starting a second one.`);
   process.exit(1);
 }
 
+const host = bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN);
 const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).listen(
   PORT,
-  bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN),
+  host,
   () => {
-  // Only once it is up: a server that fails on the port is not starting, and
-  // has no business settling what the last one left.
-  sessions.recoverOrphans();
-  getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
-  pinConnection();
-  // Keeps the agent's browser rendering when nobody has the panel open.
-  watchBrowserFrames();
-  // Reports how far llama.cpp has got through a prompt, which is otherwise a
-  // silent minute or two before the first token.
-  startLlamaProxy(
-    (sessionId, prefill) => sessions.reportPrefill(sessionId, prefill),
-    (sessionId, load) => sessions.reportModelLoad(sessionId, load),
-  );
-
   console.log(`pithagoras listening on :${PORT}${tls ? " (https)" : ""}`);
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
@@ -1431,12 +1417,27 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   }
 );
 
-server.on("error", (e: NodeJS.ErrnoException) => {
-  if (e.code !== "EADDRINUSE") throw e;
-  console.error(`Port ${PORT} is already in use. Set PORT to a free one.`);
+// Said in a line, not a stack trace: a port in use, one below 1024 without the
+// right, an address this machine does not have. Only while it is starting; what
+// goes wrong once it is up is not about where it listens.
+const cannotListen = (e: Error) => {
+  console.error(`pithagoras could not listen on ${host}:${PORT}: ${e.message}`);
   process.exit(1);
-});
+};
+server.once("error", cannotListen);
+server.once("listening", () => server.off("error", cannotListen));
 attachBrowserUpgrade(server);
+// Keeps the agent's browser rendering when nobody has the panel open.
+watchBrowserFrames();
+// Reports how far llama.cpp has got through a prompt, which is otherwise a
+// silent minute or two before the first token.
+startLlamaProxy(
+  (sessionId, prefill) => sessions.reportPrefill(sessionId, prefill),
+  (sessionId, load) => sessions.reportModelLoad(sessionId, load),
+);
+sessions.recoverOrphans();
+getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
+pinConnection();
 
 async function shutdown(signal: string) {
   console.log(`${signal} received — stopping running sessions`);

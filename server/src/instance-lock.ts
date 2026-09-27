@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
-/** Open for as long as this server runs: closing it lets the next one in. */
+/** Kept for as long as this server runs: collected or closed, it lets the next one in. */
 let held: Database.Database | undefined;
 
 /**
@@ -13,14 +13,15 @@ let held: Database.Database | undefined;
  * agent starts from a chat with another PORT reads the same database. So the
  * data itself is locked. SQLite's exclusive lock is held by the process, and
  * the system lets go of it when the process ends however it ends, so a crash
- * leaves nothing behind to clear.
+ * leaves nothing behind to clear. The transaction is never ended.
  */
 export function holdDataDir(dir: string): boolean {
-  if (held) return true;
   mkdirSync(dir, { recursive: true });
   const lock = new Database(path.join(dir, "portal.lock"), { timeout: 0 });
   try {
-    lock.pragma("locking_mode = EXCLUSIVE");
+    // The file holds nothing, so nothing to roll back: without this, the
+    // transaction left a journal beside it every time the server stopped.
+    lock.pragma("journal_mode = OFF");
     lock.exec("BEGIN EXCLUSIVE");
   } catch (e) {
     lock.close();
