@@ -19,9 +19,10 @@ export function holdDataDir(dir: string): boolean {
   mkdirSync(dir, { recursive: true });
   const lock = new Database(path.join(dir, "portal.lock"), { timeout: 0 });
   try {
-    // The file holds nothing, so nothing to roll back: without this, the
-    // transaction left a journal beside it every time the server stopped.
-    lock.pragma("journal_mode = OFF");
+    // The file holds nothing, so its journal need not be one: on disk, the
+    // open transaction left it beside the lock whenever the server was stopped.
+    // (OFF is refused for a file that is empty.)
+    lock.pragma("journal_mode = MEMORY");
     lock.exec("BEGIN EXCLUSIVE");
   } catch (e) {
     lock.close();
