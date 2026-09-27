@@ -38,13 +38,20 @@ writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({
 writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }));
 
 // An extension saying what pi is to extensions in the server: what the
-// deep-research extension reads to start another.
+// deep-research extension reads to start another. It also reads every file in
+// the data directory once, as the agent's read tool could: a lock on a file
+// was let go by the whole process when any of it closed that file.
 const seen = path.join(home, "argv.json");
 mkdirSync(path.join(agentDir, "extensions"), { recursive: true });
 writeFileSync(path.join(agentDir, "extensions", "argv.ts"), `
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 export default function () {
-  if (!existsSync(${JSON.stringify(seen)})) writeFileSync(${JSON.stringify(seen)}, JSON.stringify([process.execPath, process.argv[1]]));
+  if (existsSync(${JSON.stringify(seen)})) return;
+  for (const name of readdirSync(${JSON.stringify(home)})) {
+    try { readFileSync(path.join(${JSON.stringify(home)}, name)); } catch {}
+  }
+  writeFileSync(${JSON.stringify(seen)}, JSON.stringify([process.execPath, process.argv[1]]));
 }
 `);
 
@@ -102,9 +109,31 @@ test("a second server on the same data says so, and leaves the first one's chats
     assert.equal(code, 1, out + err);
     assert.match(err, new RegExp(`already running on ${home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.doesNotMatch(out + err, /at Server\.|at listen/, "no stack trace");
-    // It marked them interrupted before it found out, and said so in each.
+    // Before, it had marked them interrupted by the time it found out, and
+    // said so in each.
     untouched(id);
   }
+});
+
+test("a server killed outright does not keep the next one out", async () => {
+  const other = testHome("pithagoras-second-killed-");
+  const { child } = await startServer(serverEnv(other, await freePort()));
+  child.kill("SIGKILL");
+  await once(child, "exit");
+  // Its socket is still there, and answers nobody.
+  await startServer(serverEnv(other, await freePort()));
+});
+
+test("a data directory too long for a socket in it is held all the same", async () => {
+  const deep = path.join(testHome("pithagoras-second-deep-"), "x".repeat(60), "y".repeat(60));
+  const lock = new URL("../dist/instance-lock.js", import.meta.url).href;
+  const { code, out, err } = await runToEnd(["--input-type=module", "-e", `
+    import { holdDataDir } from ${JSON.stringify(lock)};
+    process.stdout.write(String(await holdDataDir(${JSON.stringify(deep)})) + " " + String(await holdDataDir(${JSON.stringify(deep)})));
+  `], process.env);
+  assert.equal(code, 0, err);
+  assert.equal(out.trim(), "true false", "held, and then refused");
+  assert.ok(!existsSync(path.join(deep, "portal.sock")));
 });
 
 test("a server that cannot listen says where and why, without a stack trace", async () => {

@@ -1,14 +1,35 @@
-import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { DATA_DIR } from "./data-dir.js";
+import { holdDataDir } from "./instance-lock.js";
+import { piCli } from "./pi/package.js";
 
 /**
  * The server's entry.
  *
+ * The data is held first, before anything that opens the database is loaded:
+ * a second server on it would mark the running one's chats interrupted. One
+ * that is turned away has loaded nothing else.
+ */
+let ours: boolean;
+try {
+  ours = await holdDataDir(DATA_DIR);
+} catch (e) {
+  console.error(`pithagoras could not hold its data in ${path.resolve(DATA_DIR)}: ${(e as Error).message}`);
+  process.exit(1);
+}
+if (!ours) {
+  console.error(`pithagoras is already running on ${path.resolve(DATA_DIR)}. Not starting a second one.`);
+  process.exit(1);
+}
+
+/*
  * pi runs inside this process, and an extension that starts another pi the way
  * pi's own examples do — this runtime and `process.argv[1]` — started this file
- * again: a second server, which failed on the port, and before that had marked
- * every chat the running one had going as interrupted. In pi, `argv[1]` is
- * pi's command line; here it is made so, before anything is loaded, whatever
- * the extension passes on. Nothing in the server reads it.
+ * again: a second server. In pi, `argv[1]` is pi's command line; here it is made
+ * so, whatever the extension passes on. Nothing in the server reads it.
  */
-process.argv[1] = fileURLToPath(new URL("./cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")));
+const cli = piCli();
+if (cli) process.argv[1] = cli;
+else console.error("[portal] pi's command line was not found: an extension that starts pi from process.argv[1] starts the server instead, and is turned away.");
+
 await import("./server.js");

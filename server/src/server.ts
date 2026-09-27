@@ -52,7 +52,6 @@ import { MARKER, clearFinished, listJobs, readOutput, stopJob } from "./backgrou
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
-import { holdDataDir } from "./instance-lock.js";
 import { pinConnection } from "./api/browser.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -62,7 +61,7 @@ import {
   readCompactionSettings,
   writeCompactionSettings,
 } from "./pi-settings.js";
-import { DATA_DIR, eventTime, getDb } from "./db.js";
+import { eventTime, getDb } from "./db.js";
 import { getBuiltinCommands, picturesRefused } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
@@ -1379,12 +1378,6 @@ const tls =
   tlsCert && tlsKey && existsSync(tlsCert) && existsSync(tlsKey)
     ? { cert: readFileSync(tlsCert), key: readFileSync(tlsKey) }
     : null;
-
-// Before the start-up below settles what the last server left: see holdDataDir.
-if (!holdDataDir(DATA_DIR)) {
-  console.error(`pithagoras is already running on ${path.resolve(DATA_DIR)}. Not starting a second one.`);
-  process.exit(1);
-}
 
 const host = bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN);
 const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).listen(

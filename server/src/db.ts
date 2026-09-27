@@ -5,6 +5,7 @@ import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { agentHome } from "./agent-home.js";
+import { DATA_DIR } from "./data-dir.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -75,7 +76,6 @@ export interface EventRow {
   created_at: string;
 }
 
-export const DATA_DIR = process.env.DATA_DIR || "./data";
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
