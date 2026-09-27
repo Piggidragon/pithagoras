@@ -352,36 +352,62 @@ export function Chat({
     );
   };
 
+  // The panels, their dividers' effect, the floating window and what shows
+  // where carried panels would go. While a drag goes on they are moved here,
+  // on the elements, and the chat is drawn again once, when it ends: at every
+  // move it drew the whole conversation again, and wrote the size or place to
+  // storage each time.
+  const aside = useRef<HTMLElement>(null);
+  const zones = useRef<HTMLDivElement>(null);
+  const setBox = (el: HTMLElement | null, f: Frame) => {
+    if (el) Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
+  };
+
   /** The edge between the conversation and the panels: their width, or their height at the bottom. */
   const dragSize = (e: React.PointerEvent) => {
     // From the size drawn, and within what is drawn: the conversation's room.
     const area = { w: body.current?.clientWidth ?? window.innerWidth, h: body.current?.clientHeight ?? window.innerHeight };
     const from = dockedSize({ width: asideWidth, height: asideHeight }, area);
-    drag(e, (dx, dy) => {
-      const to = dockedSize({ width: from.width + (placedAt === "left" ? dx : -dx), height: from.height - dy }, area);
-      if (sideBySide) setAsideHeight(to.height);
-      else setAsideWidth(to.width);
-    });
+    let to = from;
+    const draw = (size: { width: number; height: number }) => {
+      if (!aside.current) return;
+      if (sideBySide) aside.current.style.height = `${size.height}px`;
+      else aside.current.style.width = `${size.width}px`;
+    };
+    drag(
+      e,
+      (dx, dy) => {
+        to = dockedSize({ width: from.width + (placedAt === "left" ? dx : -dx), height: from.height - dy }, area);
+        draw(to);
+      },
+      (cancelled) => {
+        if (cancelled) return draw({ width: asideWidth, height: asideHeight });
+        if (sideBySide) setAsideHeight(to.height);
+        else setAsideWidth(to.width);
+      },
+    );
   };
 
   /** The edge between two panels: one above the other, or side by side. */
   const dragSplit = (e: React.PointerEvent) => {
     const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
     const x = e.clientX, y = e.clientY;
-    drag(e, (dx, dy) => {
-      const ratio = sideBySide ? (x + dx - box.left) / box.width : (y + dy - box.top) / box.height;
-      setSplit(Math.min(Math.max(ratio, 0.15), 0.85));
-    });
-  };
-
-  // The floating window and what shows where carried panels would go. While
-  // a drag goes on they are moved here, on the elements, and the chat is
-  // drawn again once, when it ends: at every move it drew the whole
-  // conversation again, and wrote the window's place to storage each time.
-  const aside = useRef<HTMLElement>(null);
-  const zones = useRef<HTMLDivElement>(null);
-  const setBox = (el: HTMLElement | null, f: Frame) => {
-    if (el) Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
+    let ratio = split;
+    const draw = (r: number) => {
+      const [first, second] = aside.current?.querySelectorAll<HTMLElement>(":scope > .chat-aside-panel") ?? [];
+      if (first && second) {
+        first.style.flex = `${r} 1 0%`;
+        second.style.flex = `${1 - r} 1 0%`;
+      }
+    };
+    drag(
+      e,
+      (dx, dy) => {
+        ratio = Math.min(Math.max(sideBySide ? (x + dx - box.left) / box.width : (y + dy - box.top) / box.height, 0.15), 0.85);
+        draw(ratio);
+      },
+      (cancelled) => (cancelled ? draw(split) : setSplit(ratio)),
+    );
   };
 
   /** Done carrying or sizing: the room measured again, for whatever changed meanwhile. */
@@ -392,6 +418,8 @@ export function Chat({
 
   /** A floating window, sized by its corner. */
   const sizeFrame = (e: React.PointerEvent) => {
+    // Only a press that drag() takes: another button would leave the room unmeasured for good.
+    if (e.button !== 0) return;
     const from = placed, area = room;
     let at = from;
     moving.current = true;
@@ -423,6 +451,12 @@ export function Chat({
     // As the window it floated as last, held by its header where it was taken.
     const from = floating ? placed : fitFrame(frame, size);
     const start = { x: e.clientX - area.left, y: e.clientY - area.top };
+    // For a floating window, an edge the press began in counts only once the
+    // pointer has left it: one at the top right, nudged by its header near
+    // its right end, was docked at the right. Docked panels are carried from
+    // wherever their header is — at the bottom, from the left edge.
+    let from0: Dock | null = floating ? dropTarget(start, size) : null;
+    if (from0 === "float") from0 = null;
     const grab = { x: Math.min(e.clientX - held.left, from.w - 24), y: Math.min(e.clientY - held.top, 24) };
     let to: Dock | null = null, at = from;
     moving.current = true;
@@ -433,6 +467,8 @@ export function Chat({
         if (!to && Math.hypot(dx, dy) < 6) return;
         const x = start.x + dx, y = start.y + dy;
         to = dropTarget({ x, y }, size);
+        if (to === from0) to = "float";
+        else if (from0 && to !== from0) from0 = null;
         at = fitFrame({ ...from, x: x - grab.x, y: y - grab.y }, size);
         if (floating) setBox(aside.current, at);
         const z = zones.current;
@@ -1104,7 +1140,7 @@ export function Chat({
       <div ref={body} data-dock={placedAt} className={voiceMode ? "hidden" : `relative flex min-h-0 flex-1 ${BODY[placedAt]}`}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div
-        ref={scroller.ref}
+        ref={scroller.attach}
         onScroll={scroller.onScroll}
         // Reading takes over from the automatic placement.
         onWheel={(e) => {

@@ -192,8 +192,9 @@ test('the terminal moved up a little to show a command follows its output again 
   await page.mouse.wheel(0, 4000);
   await expect.poll(() => output.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(1);
   await link.click();
-  // Done sliding up to it (a smooth scroll), inside the moment it is held there.
-  await page.waitForTimeout(700);
+  // Done sliding up to it (a smooth scroll): the same place twice in a row, inside the moment it is held there.
+  let last = -1;
+  await expect.poll(async () => { const now = await output.evaluate((el) => el.scrollTop); const still = now === last; last = now; return still && now > 0; }, { intervals: [50] }).toBe(true);
   const gap = await output.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
   expect(gap).toBeGreaterThan(2);
   expect(gap).toBeLessThanOrEqual(48);

@@ -46,9 +46,18 @@ export function atEnd(el: { scrollHeight: number; scrollTop: number; clientHeigh
  *
  * `paused` holds it where it is while the caller shows something of its own —
  * the terminal, a command it was asked to show.
+ *
+ * The box is given as `ref={attach}`: what watches it for growth goes with the
+ * element, so a box drawn later, or drawn again as another element, is
+ * watched too. `ref` is there to read it.
  */
 export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: () => boolean } = {}) {
-  const ref = useRef<T>(null);
+  const ref = useRef<T | null>(null);
+  const [node, setNode] = useState<T | null>(null);
+  const attach = useCallback((el: T | null) => {
+    ref.current = el;
+    setNode(el);
+  }, []);
   const following = useRef(true);
   // Where the box was last seen, to tell up from down.
   const top = useRef(0);
@@ -104,9 +113,12 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
   const hold = useCallback((e: { target: EventTarget | null }) => {
     const box = ref.current, target = e.target instanceof Element ? e.target.closest("[aria-expanded]") : null;
     if (!box || !target || !box.contains(target)) return;
-    // The entry it is in — a child of the list the box holds, or of the box — whose size says whether it opened.
+    // The entry it is in, whose size says whether it opened: a child of the
+    // list the box holds — the one element in it, as the chat's — or, where
+    // the entries are the box's own children, of the box.
+    const list = box.childElementCount === 1 ? box.firstElementChild! : box;
     let item: Element = target;
-    while (item.parentElement && item.parentElement !== box && item.parentElement !== box.firstElementChild) item = item.parentElement;
+    while (item.parentElement && item.parentElement !== list && item.parentElement !== box) item = item.parentElement;
     held.current = { el: target, item, expanded: target.getAttribute("aria-expanded"), top: target.getBoundingClientRect().top, height: item.getBoundingClientRect().height, until: performance.now() + 1000 };
   }, []);
 
@@ -149,7 +161,7 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
   // Whatever grows — the box's content, or the box itself shrinking as the
   // composer or the keyboard takes room — keeps the end in view while following.
   useEffect(() => {
-    const el = ref.current;
+    const el = node;
     if (!el) return;
     const observer = new ResizeObserver(() => {
       if (isPaused.current?.() || keepHeld(el)) return;
@@ -171,7 +183,7 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
       observer.disconnect();
       added.disconnect();
     };
-  }, [toEnd, keepHeld]);
+  }, [node, toEnd, keepHeld]);
 
   /**
    * Following again if it is near the end, whichever way it got there: after
@@ -187,5 +199,5 @@ export function useFollowBottom<T extends HTMLElement>({ paused }: { paused?: ()
     setAway(!following.current && !atEnd(el));
   }, [toEnd]);
 
-  return { ref, onScroll, onWheel, hold, follow, settle, following, away };
+  return { ref, attach, onScroll, onWheel, hold, follow, settle, following, away };
 }

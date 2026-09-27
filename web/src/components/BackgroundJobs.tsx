@@ -119,7 +119,7 @@ function JobOutput({ sessionId, jobKey, live }: { sessionId: string; jobKey: str
   const [text, setText] = useState("");
   const [gone, setGone] = useState<string | null>(null);
   const offset = useRef<number | undefined>(undefined);
-  const { ref, onScroll, follow } = useFollowBottom<HTMLPreElement>();
+  const { attach, onScroll, follow } = useFollowBottom<HTMLPreElement>();
   useEffect(() => {
     let stop = false;
     let timer = 0;
@@ -144,7 +144,7 @@ function JobOutput({ sessionId, jobKey, live }: { sessionId: string; jobKey: str
   useLayoutEffect(() => follow(), [text]);
   if (gone) return <p className="bg-jobs-empty">{gone}</p>;
   return (
-    <pre ref={ref} onScroll={onScroll} className="bg-job-output">
+    <pre ref={attach} onScroll={onScroll} className="bg-job-output">
       {stripAnsi(text) || (live ? "Waiting for output…" : "(no output)")}
     </pre>
   );

@@ -71,12 +71,16 @@ const clamp = (value: number, least: number, most: number) => Math.min(most, Mat
  * Where a floating window goes in a chat of `area`'s size: where it was put,
  * made to fit — no larger than the chat, no smaller than it may be unless the
  * chat itself is, and wholly inside it. With nowhere put yet, at the top right,
- * where the docked panels were.
+ * where the docked panels were, and ending above the composer — the room
+ * docked panels leave it (KEEP): it covered Send and Stop, and nothing could
+ * be sent until it was moved.
  */
 export function fitFrame(frame: Frame | null, area: { w: number; h: number }): Frame {
   const want = frame ?? { w: 520, h: 560, x: Infinity, y: MARGIN };
   const w = clamp(want.w, Math.min(FRAME_MIN.w, area.w), area.w);
-  const h = clamp(want.h, Math.min(FRAME_MIN.h, area.h), frame ? area.h : Math.max(0, area.h - 2 * MARGIN));
+  const least = Math.min(FRAME_MIN.h, area.h);
+  const most = frame ? area.h : Math.min(Math.max(least, area.h - KEEP.h - MARGIN), Math.max(0, area.h - 2 * MARGIN));
+  const h = clamp(want.h, least, most);
   const x = clamp(frame ? want.x : area.w - w - MARGIN, 0, area.w - w);
   const y = clamp(want.y, 0, area.h - h);
   return { x, y, w, h };

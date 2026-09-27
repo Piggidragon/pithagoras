@@ -16,6 +16,8 @@ const spots: Record<string, (b: { x: number; y: number; width: number; height: n
 const grip = async (page: Page) => (await page.locator('.chat-aside-head').first().locator('span[title]').boundingBox())!;
 /** Carries the panels by their header to `where`, in steps as a hand would; `during` looks while they are held there. */
 const carry = async (page: Page, where: string, during?: () => Promise<void>) => {
+  // Not while they are still sliding in from the last place: the grip is not where it is going.
+  await settled(page);
   const g = await grip(page);
   await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
   await page.mouse.down();
@@ -304,4 +306,86 @@ test('a floating window carried while the chat changes size stays under the poin
   expect(now.x).toBeCloseTo(held.x, 0);
   expect(now.y).toBeCloseTo(held.y, 0);
   await page.mouse.up();
+});
+
+test('a floating window is fitted to the chat again after a press on its corner with another button', async ({ page }) => {
+  await place(page, 'Floating');
+  const corner = (await page.locator('.chat-aside-grip').boundingBox())!;
+  await page.mouse.move(corner.x + 8, corner.y + 8);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.up({ button: 'right' });
+  // Narrower: it was left where the wider chat had it, past the chat's right edge.
+  await page.setViewportSize({ width: 900, height: 800 });
+  await expect.poll(async () => { const a = (await panels(page).boundingBox())!, b = await body(page); return a.x + a.width - (b.x + b.width); }).toBeLessThanOrEqual(0.5);
+});
+
+test('a floating window nudged by the right end of its header moves, rather than docking at the right', async ({ page }) => {
+  // Floating where it first goes, at the top right: its header's right end is within the right edge's reach.
+  await page.evaluate(() => { localStorage.setItem('panelDock', 'float'); localStorage.removeItem('panelFloat'); });
+  await page.reload();
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await settled(page);
+  const head = (await page.locator('.chat-aside-head').first().boundingBox())!, b = await body(page);
+  const x = head.x + head.width - 60, y = head.y + head.height / 2;
+  expect(x).toBeGreaterThan(b.x + b.width - 96);
+  const before = (await panels(page).boundingBox())!;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  // Still within that reach.
+  await page.mouse.move(x - 10, y + 30, { steps: 5 });
+  expect(x - 10).toBeGreaterThan(b.x + b.width - 96);
+  await page.mouse.up();
+  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'float');
+  const after = (await panels(page).boundingBox())!;
+  expect(after.x).toBeCloseTo(before.x - 10, 0);
+  // Out of that edge and back into it: then it is meant, and it docks.
+  const h2 = (await page.locator('.chat-aside-head').first().boundingBox())!;
+  await page.mouse.move(h2.x + h2.width - 60, h2.y + h2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2, h2.y + 40, { steps: 5 });
+  await page.mouse.move(b.x + b.width - 10, h2.y + 40, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'right');
+});
+
+test('floating where it first goes, the window leaves Stop and Send uncovered', async ({ page }) => {
+  await page.evaluate(() => { localStorage.setItem('panelDock', 'float'); localStorage.removeItem('panelFloat'); });
+  await page.reload();
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await settled(page);
+  // It reached down over the composer's right end, where Stop and Send are.
+  const w = (await panels(page).boundingBox())!, c = await box(page, '.prompt-shell');
+  expect(w.y + w.height).toBeLessThanOrEqual(c.y);
+  await expect(page.getByRole('button', { name: 'Stop generation' })).toBeVisible();
+});
+
+test('the edge and the divider are drawn along as they are dragged, and kept once', async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).writes = {};
+    const set = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key: string, value: string) { (window as any).writes[key] = ((window as any).writes[key] ?? 0) + 1; return set.call(this, key, value); };
+  });
+  const writes = (key: string) => page.evaluate((k) => (window as any).writes[k] ?? 0, key);
+  const pull = async (handle: import('@playwright/test').Locator, dx: number, dy: number, during: () => Promise<void>) => {
+    const h = (await handle.boundingBox())!;
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(h.x + h.width / 2 + dx, h.y + h.height / 2 + dy, { steps: 10 });
+    await during();
+    await page.mouse.up();
+  };
+  const before = (await panels(page).boundingBox())!.width;
+  await pull(page.locator('[title="Drag to resize"]').first(), -100, 0, async () => {
+    expect((await panels(page).boundingBox())!.width).toBeCloseTo(before + 100, 0);
+    // Written at every move, and the chat drawn again each time.
+    expect(await writes('panelWidth')).toBe(0);
+  });
+  expect(await writes('panelWidth')).toBe(1);
+  const first = page.locator('.chat-aside-panel').first();
+  const top = (await first.boundingBox())!.height;
+  await pull(page.locator('.chat-aside [title="Drag to resize"]'), 0, 60, async () => {
+    expect((await first.boundingBox())!.height).toBeCloseTo(top + 60, -1);
+    expect(await writes('panelSplit')).toBe(0);
+  });
+  expect(await writes('panelSplit')).toBe(1);
 });

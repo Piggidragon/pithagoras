@@ -2,10 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { across, dockedFrame, dockedSize, dropTarget, fitFrame, isDock, readFrame } from '../web/src/panel-dock.ts';
 
-test('a floating window placed for the first time goes to the top right, inside the chat', () => {
-  assert.deepEqual(fitFrame(null, { w: 1200, h: 700 }), { x: 664, y: 16, w: 520, h: 560 });
-  // A short chat: as tall as there is room for, with its margin.
-  assert.deepEqual(fitFrame(null, { w: 1200, h: 400 }), { x: 664, y: 16, w: 520, h: 368 });
+test('a floating window placed for the first time goes to the top right, inside the chat and above the composer', () => {
+  // Ending 260px above the chat's foot, where the composer is: it reached down over Send and Stop.
+  assert.deepEqual(fitFrame(null, { w: 1200, h: 700 }), { x: 664, y: 16, w: 520, h: 424 });
+  assert.deepEqual(fitFrame(null, { w: 1200, h: 1000 }), { x: 664, y: 16, w: 520, h: 560 });
+  // A short chat: no smaller than of use.
+  assert.deepEqual(fitFrame(null, { w: 1200, h: 400 }), { x: 664, y: 16, w: 520, h: 200 });
+  // Put somewhere by hand, it may go down there.
+  assert.deepEqual(fitFrame({ x: 0, y: 100, w: 520, h: 560 }, { w: 1200, h: 700 }), { x: 0, y: 100, w: 520, h: 560 });
 });
 
 test('a floating window stays wholly inside the chat, however it was moved or the chat resized', () => {
