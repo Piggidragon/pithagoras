@@ -175,14 +175,21 @@ const COMPOSE = `services:
 volumes:
   understory-memory:`;
 
-/** How often Understory tidies its memory up, as it reads it; empty for never. */
-const DREAMS: { value: string; label: string }[] = [
-  { value: "", label: "Never" },
+/** How often Understory tidies its memory up, on its own timer, as it reads it. */
+const INTERVALS: { value: string; label: string }[] = [
   { value: "1h", label: "Every hour" },
   { value: "6h", label: "Every 6 hours" },
   { value: "12h", label: "Every 12 hours" },
-  { value: "1d", label: "Every day" },
+  { value: "1d", label: "Every 24 hours" },
   { value: "7d", label: "Every week" },
+];
+
+/** Never, once a day at a time of day (started by the portal), or on Understory's own interval — one of them. */
+type DreamMode = "never" | "time" | "interval";
+const DREAM_MODES: { value: DreamMode; label: string }[] = [
+  { value: "never", label: "Never" },
+  { value: "time", label: "At a time of day" },
+  { value: "interval", label: "On an interval" },
 ];
 
 /** The form's copy of the settings, before they are saved. */
@@ -195,7 +202,10 @@ interface Draft {
   format: "openai" | "anthropic";
   /** Typed anew; empty keeps the one saved. */
   apiKey: string;
+  dream: DreamMode;
+  /** Kept for each while the other is chosen, so switching back finds it. */
   dreamInterval: string;
+  dreamAt: string;
 }
 
 function draftOf(m: ManagedUnderstory): Draft {
@@ -209,7 +219,9 @@ function draftOf(m: ManagedUnderstory): Draft {
     model: llm?.source === "custom" ? llm.model : "",
     format: llm?.source === "custom" ? llm.format : "openai",
     apiKey: "",
-    dreamInterval: m.config.dreamInterval,
+    dream: m.config.dreamAt ? "time" : m.config.dreamInterval ? "interval" : "never",
+    dreamInterval: m.config.dreamInterval || "6h",
+    dreamAt: m.config.dreamAt || "03:00",
   };
 }
 
@@ -265,6 +277,8 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
       return true;
     } catch (e) {
       onError((e as Error).message);
+      // What did happen, all the same: a pass that failed is kept as the last one.
+      api.features().then(setFeatures).catch(() => {});
       return false;
     } finally {
       setBusy(null);
@@ -274,7 +288,9 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
   const saveSettings = async () => {
     if (!choice) return;
     const ok = await act(runsHere ? "Restarting Understory…" : "Saving…", () =>
-      api.setUnderstoryConfig({ llm: choice, dreamInterval: form.dreamInterval }),
+      api.setUnderstoryConfig(
+        { llm: choice, dreamInterval: form.dream === "interval" ? form.dreamInterval : "", dreamAt: form.dream === "time" ? form.dreamAt : "" },
+      ),
     );
     if (ok) setDraft(null);
   };
@@ -399,18 +415,72 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
 
             <div className="text-xs text-fg-muted">
               Tidying up
-              <Select
-                aria-label="Tidying up"
-                size="sm"
-                className="mt-1 w-full"
-                value={form.dreamInterval}
-                onChange={(dreamInterval) => edit({ dreamInterval })}
-                options={(DREAMS.some((d) => d.value === form.dreamInterval) ? DREAMS : [...DREAMS, { value: form.dreamInterval, label: `Every ${form.dreamInterval}` }]).map((d) => ({ value: d.value, label: d.label }))}
-              />
+              <div role="radiogroup" aria-label="Tidying up" className="mt-1 flex gap-1 rounded-lg bg-fg/5 p-0.5">
+                {DREAM_MODES.map((d) => (
+                  <button
+                    key={d.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={form.dream === d.value}
+                    onClick={() => edit({ dream: d.value })}
+                    className={`flex-1 rounded-md px-2 py-1 transition ${form.dream === d.value ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"}`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+              {form.dream === "time" && (
+                <label className="mt-2 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
+                  Every day at
+                  <input
+                    type="time"
+                    value={form.dreamAt}
+                    onChange={(e) => edit({ dreamAt: e.target.value })}
+                    aria-label="Tidy up at"
+                    className="rounded-lg border border-line bg-raised/60 px-2 py-1 text-sm tabular-nums outline-none focus:border-accent/60"
+                  />
+                  <span className="text-[11px] text-fg-faint">the portal's time ({m.timeZone})</span>
+                </label>
+              )}
+              {form.dream === "interval" && (
+                <Select
+                  aria-label="How often"
+                  size="sm"
+                  className="mt-2 w-full"
+                  value={form.dreamInterval}
+                  onChange={(dreamInterval) => edit({ dreamInterval })}
+                  options={(INTERVALS.some((d) => d.value === form.dreamInterval) ? INTERVALS : [...INTERVALS, { value: form.dreamInterval, label: `Every ${form.dreamInterval}` }]).map((d) => ({ value: d.value, label: d.label }))}
+                />
+              )}
               <p className="mt-1 text-[11px] text-fg-faint">
                 Understory's own pass over the memory — merging, linking and pruning notes with the model above, which costs tokens each
-                time. The first comes one interval after Understory starts, and starting it again begins the count anew.
+                time, and does nothing when the memory is already tidy.{" "}
+                {form.dream === "time"
+                  ? "At a time of day the portal starts it, once a day while Understory runs; Understory's own timer stays off."
+                  : form.dream === "interval"
+                    ? "An interval is Understory's own timer: it counts from when Understory starts, so saving here begins the count anew."
+                    : ""}
               </p>
+              {(runsHere || m.lastDream) && (
+                <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                  {m.lastDream && (
+                    <span className={m.lastDream.ok ? "text-fg-muted" : "text-warn"}>
+                      Last: {new Date(m.lastDream.at).toLocaleString()} — {m.lastDream.said}
+                    </span>
+                  )}
+                  {m.nextDream && m.config.dreamAt && <span className="text-fg-faint">Next: {new Date(m.nextDream).toLocaleString()}</span>}
+                  {m.container === "running" && (
+                    <button
+                      type="button"
+                      disabled={busy !== null || m.dreaming}
+                      onClick={() => void act("Tidying up — this takes as long as the model needs…", () => api.dreamUnderstory())}
+                      className="text-accent hover:underline disabled:opacity-40"
+                    >
+                      Tidy up now
+                    </button>
+                  )}
+                </p>
+              )}
             </div>
 
             {(!saved || !m.config.llm) && (

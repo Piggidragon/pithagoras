@@ -171,7 +171,7 @@ test("the Understory the portal runs: its model from a provider or an address of
   // A key the page never holds is kept when it sends none.
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d" });
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai" }, dreamInterval: "1d" });
-  assert.deepEqual(service.config(), { llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d" });
+  assert.deepEqual(service.config(), { llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d", dreamAt: "" });
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "" }, dreamInterval: "" });
   assert.equal((service.config().llm as { apiKey?: string }).apiKey, "", "an empty one clears it");
 });
@@ -182,4 +182,30 @@ test("the portal's own Understory is written with its token; one run elsewhere n
   process.env.SOME_TOKEN = "from-env";
   assert.equal(understoryTokenOf({ bearerTokenEnv: "SOME_TOKEN" }), "from-env");
   assert.equal(understoryTokenOf({ url: "x" }), undefined);
+});
+
+test("tidying up at a set time: the next time it comes round, Understory's own timer off, the report read from what the pass printed", async () => {
+  const service = await import("../server/src/extensions/understory-service.ts");
+  assert.equal(service.validTime("03:00"), true);
+  assert.equal(service.validTime(""), true);
+  assert.equal(service.validTime("3am"), false);
+  assert.equal(service.validTime("24:00"), false);
+
+  const evening = new Date(2026, 8, 28, 22, 15);
+  assert.deepEqual(service.nextAt("03:00", evening), new Date(2026, 8, 29, 3, 0));
+  const night = new Date(2026, 8, 29, 2, 0);
+  assert.deepEqual(service.nextAt("03:00", night), new Date(2026, 8, 29, 3, 0), "later the same night");
+  assert.deepEqual(service.nextAt("03:00", new Date(2026, 8, 29, 3, 0)), new Date(2026, 8, 30, 3, 0), "not twice in the same minute");
+
+  const llm = { source: "custom" as const, baseUrl: "http://gpu:8080/v1", model: "m", format: "openai" as const };
+  assert.ok(!service.spec({ llm, dreamInterval: "6h", dreamAt: "03:00" }, "t").Env.some((l) => l.startsWith("DREAM_INTERVAL")), "a set time wins");
+  service.saveConfig({ llm, dreamInterval: "6h", dreamAt: "03:00" });
+  assert.deepEqual([service.config().dreamInterval, service.config().dreamAt], ["", "03:00"]);
+  assert.ok(service.nextDreamAt(), "scheduled once saved");
+  service.saveConfig({ llm, dreamInterval: "", dreamAt: "" });
+  assert.equal(service.nextDreamAt(), undefined, "and no longer once it is not");
+
+  assert.deepEqual(service.readReport('\u001b[0mloading\r\n{"ran":false,"reason":"memory healthy"}\r\n'), { ran: false, reason: "memory healthy" });
+  assert.deepEqual(service.readReport('{"ran":true,"summary":"merged two","filesChanged":["/a.md"]}\nbye'), { ran: true, summary: "merged two", filesChanged: ["/a.md"] });
+  assert.equal(service.readReport("Error: boom"), null);
 });

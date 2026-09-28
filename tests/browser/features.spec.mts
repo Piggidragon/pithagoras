@@ -9,8 +9,9 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       enabled: false, url: 'http://localhost:3800/mcp', tokenSet: false, adapterInstalled: false, reachable,
       managed: {
         available: docker, image: false, container: 'absent', pulling: { active: false, line: '' }, url: 'http://127.0.0.1:3800/mcp',
-        config: { llm, dreamInterval: '' },
+        config: { llm, dreamInterval: '', dreamAt: '' },
         providers: [{ id: 'llama-swap', models: ['Ornith', 'Small'] }, { id: 'vllm', models: ['Qwen'] }],
+        dreaming: false, lastDream: null as any, nextDream: null as string | null, timeZone: 'Europe/Berlin',
       },
     },
   };
@@ -43,7 +44,8 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       const patch = route.request().postDataJSON();
       sent.push({ path: p, body: patch });
       const { apiKey, ...llm } = patch.llm;
-      state.understory.managed.config = { llm: llm.source === 'custom' ? { ...llm, hasKey: Boolean(apiKey) || state.understory.managed.config.llm?.hasKey } : llm, dreamInterval: patch.dreamInterval };
+      state.understory.managed.config = { llm: llm.source === 'custom' ? { ...llm, hasKey: Boolean(apiKey) || state.understory.managed.config.llm?.hasKey } : llm, dreamInterval: patch.dreamInterval, dreamAt: patch.dreamAt };
+      state.understory.managed.nextDream = patch.dreamAt ? '2026-09-29T01:00:00.000Z' : null;
       body = { understory: state.understory };
     } else if (p === '/api/features/understory/install' && method === 'POST') {
       sent.push({ path: p, body: null });
@@ -55,6 +57,10 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       Object.assign(state.understory.managed, { container: 'absent' });
       Object.assign(state.understory, { enabled: false });
       body = { understory: state.understory, reloaded: 1, waiting: 0 };
+    } else if (p === '/api/features/understory/dream' && method === 'POST') {
+      sent.push({ path: p, body: null });
+      state.understory.managed.lastDream = { at: '2026-09-28T12:00:00.000Z', ok: true, ran: true, said: '2 files changed — merged two notes' };
+      body = { understory: state.understory };
     } else if (p === '/api/features/understory/stop' && method === 'POST') {
       sent.push({ path: p, body: null });
       state.understory.managed.container = 'stopped';
@@ -160,27 +166,41 @@ test('the portal runs Understory: a provider and model set up here, how often it
 
   await here.getByRole('combobox', { name: 'Model' }).click();
   await page.getByRole('option', { name: 'Small' }).click();
-  await here.getByRole('combobox', { name: 'Tidying up' }).click();
-  await page.getByRole('option', { name: 'Every 6 hours' }).click();
+  await here.getByRole('radio', { name: 'On an interval' }).click();
+  await expect(here.getByLabel('Tidy up at')).toHaveCount(0);
+  await expect(here.getByRole('combobox', { name: 'How often' })).toContainText('Every 6 hours');
   await here.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(install).toBeEnabled();
   await install.click();
   await expect(here.getByText('running')).toBeVisible();
   await expect(addons(page).getByRole('switch', { name: "Use Understory as the agent's memory" })).toHaveAttribute('aria-checked', 'true');
   expect(sent.map((s) => [s.path, s.body])).toEqual([
-    ['/api/features/understory/config', { llm: { source: 'provider', provider: 'llama-swap', model: 'Small' }, dreamInterval: '6h' }],
+    ['/api/features/understory/config', { llm: { source: 'provider', provider: 'llama-swap', model: 'Small' }, dreamInterval: '6h', dreamAt: '' }],
     ['/api/features/understory/install', null],
   ]);
 
   // A change now makes it again.
-  await here.getByRole('combobox', { name: 'Tidying up' }).click();
-  await page.getByRole('option', { name: 'Never' }).click();
+  await here.getByRole('radio', { name: 'Never' }).click();
   await here.getByRole('button', { name: 'Save and restart Understory' }).click();
   await expect(here.getByRole('button', { name: 'Save and restart Understory' })).toHaveCount(0);
   expect(sent.at(-1)!.body.dreamInterval).toBe('');
 
+  // Once a night at a set time instead, and now.
+  // A time of day or an interval, never both: the interval is not sent with a time.
+  await here.getByRole('radio', { name: 'At a time of day' }).click();
+  await expect(here.getByRole('combobox', { name: 'How often' })).toHaveCount(0);
+  await expect(here.getByLabel('Tidy up at')).toHaveValue('03:00');
+  await expect(here.getByText("the portal's time (Europe/Berlin)")).toBeVisible();
+  await here.getByLabel('Tidy up at').fill('02:30');
+  await here.getByRole('button', { name: 'Save and restart Understory' }).click();
+  expect(sent.at(-1)!.body).toMatchObject({ dreamInterval: '', dreamAt: '02:30' });
+  await expect(here.getByText(/^Next: /)).toBeVisible();
+  await here.getByRole('button', { name: 'Tidy up now' }).click();
+  await expect(here.getByText(/Last: .* — 2 files changed — merged two notes/)).toBeVisible();
+
   await here.getByRole('button', { name: 'Stop' }).click();
   await expect(here.getByText('stopped')).toBeVisible();
+  await expect(here.getByRole('button', { name: 'Tidy up now' })).toHaveCount(0);
 });
 
 test("a model at an address of its own keeps its saved key unless one is typed", async ({ page }) => {

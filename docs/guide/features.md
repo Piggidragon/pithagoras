@@ -80,9 +80,15 @@ with its memory in a volume (`pithagoras_understory-memory`). In Settings → Ad
   or Anthropic). A saved key is never shown again; leave the field empty to
   keep it.
 - **Tidying up.** How often Understory goes over the whole memory on its own —
-  merging, linking and pruning notes (its "dreaming"): never (the default),
-  hourly, every 6 or 12 hours, daily or weekly. Each pass costs tokens. The
-  first comes one interval after Understory starts.
+  merging duplicates, linking orphans, splitting notes grown too long (its
+  "dreaming"). One of three: **never** (the default); **at a time of day** —
+  every day at, say, 03:00 when nobody is using the model, in the portal's
+  time zone, started by the portal while Understory runs, with Understory's
+  own timer left off; or **on an interval** — every hour, 6, 12 or 24 hours
+  or week, Understory's own timer, which counts from when it starts, so
+  saving begins the count anew. Never both. Each pass costs tokens, and does
+  nothing when the memory is already tidy. **Tidy up now** runs a
+  pass at once, and the last one's outcome is shown beside it.
 - **Install and use as the agent's memory** pulls the image the first time,
   starts it, and switches it on as the memory. Then **Stop / Start**,
   **Remove** (the memory stays in its volume) and **Remove and forget the
@@ -90,7 +96,9 @@ with its memory in a volume (`pithagoras_understory-memory`). In Settings → Ad
 
 Understory reads its model and interval only when it starts, so **Save and
 restart Understory** makes its container again with the new ones; the memory
-is untouched. It runs on the host network, like the browser, so a model server
+is untouched. Understory has no way to be asked for a pass, so at a set time
+the portal runs the very pass its timer runs, inside its container with its
+own settings (`docker exec`). It runs on the host network, like the browser, so a model server
 the portal reaches on `localhost` is reached the same way. It is given a token
 of its own (`AUTH_TOKEN`), which the portal writes into the agent's MCP entry
 and uses for the Memory page; nothing else can read the memory through it.

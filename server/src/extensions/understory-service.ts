@@ -35,10 +35,17 @@ export interface UnderstoryConfig {
   llm: LlmChoice | null;
   /** How often it tidies the memory up — Understory's "dreaming" — as it reads it: "6h", "1d". Empty for never. */
   dreamInterval: string;
+  /**
+   * Or once a day at this time, "03:00", in the portal's time zone: the
+   * portal starts the pass itself, since Understory only counts from its own
+   * start. Wins over the interval.
+   */
+  dreamAt: string;
 }
 
 const KEY = "understory_config";
 const TOKEN = "understory_token";
+const LAST_DREAM = "understory_last_dream";
 
 /** Understory's own reading of an interval, and its floor: five minutes. */
 export function intervalMs(raw: string): number | null {
@@ -46,6 +53,9 @@ export function intervalMs(raw: string): number | null {
   if (!m) return null;
   return Math.round(Number(m[1]) * { m: 60_000, h: 3_600_000, d: 86_400_000 }[m[2].toLowerCase() as "m" | "h" | "d"]);
 }
+
+/** A time of day, "HH:MM", or empty. */
+export const validTime = (raw: string): boolean => !raw || /^([01]\d|2[0-3]):[0-5]\d$/.test(raw);
 
 export function validInterval(raw: string): boolean {
   if (!raw) return true;
@@ -59,9 +69,10 @@ export function config(): UnderstoryConfig {
     return {
       llm: raw.llm && typeof raw.llm === "object" ? (raw.llm as LlmChoice) : null,
       dreamInterval: typeof raw.dreamInterval === "string" && validInterval(raw.dreamInterval) ? raw.dreamInterval : "",
+      dreamAt: typeof raw.dreamAt === "string" && validTime(raw.dreamAt) ? raw.dreamAt : "",
     };
   } catch {
-    return { llm: null, dreamInterval: "" };
+    return { llm: null, dreamInterval: "", dreamAt: "" };
   }
 }
 
@@ -79,7 +90,9 @@ export function saveConfig(next: UnderstoryConfig): UnderstoryConfig {
   const had = config().llm;
   let llm = next.llm;
   if (llm?.source === "custom" && llm.apiKey === undefined && had?.source === "custom") llm = { ...llm, apiKey: had.apiKey };
-  put(KEY, JSON.stringify({ llm, dreamInterval: next.dreamInterval }));
+  // A set time wins, and Understory's own timer is left off: two passes a day would be one too many.
+  put(KEY, JSON.stringify({ llm, dreamInterval: next.dreamAt ? "" : next.dreamInterval, dreamAt: next.dreamAt }));
+  scheduleDreams();
   return config();
 }
 
@@ -130,7 +143,8 @@ export function spec(cfg: UnderstoryConfig, auth: string) {
       `LLM_API_KEY=${llm.apiKey}`,
       `LLM_API_FORMAT=${llm.format}`,
       `LLM_MODEL=${llm.model}`,
-      ...(cfg.dreamInterval ? [`DREAM_INTERVAL=${cfg.dreamInterval}`] : []),
+      // At a set time the portal starts the pass itself: Understory's timer stays off.
+      ...(cfg.dreamInterval && !cfg.dreamAt ? [`DREAM_INTERVAL=${cfg.dreamInterval}`] : []),
     ],
     Labels: { "pithagoras.managed": "true" },
     HostConfig: {
@@ -203,4 +217,127 @@ export async function forgetMemory(): Promise<void> {
   await remove();
   const res = await request<{ message?: string }>("DELETE", `/volumes/${VOLUME}`);
   if (res.status >= 400 && res.status !== 404) throw new Error(res.body?.message || `Could not remove the memory (${res.status})`);
+}
+
+// --- tidying up at a set time ---
+
+/** What the last pass the portal started came to. */
+export interface DreamRun {
+  at: string;
+  ok: boolean;
+  /** It found something to do. */
+  ran?: boolean;
+  /** What it did, or why it did nothing, or what went wrong. */
+  said: string;
+}
+
+export function lastDream(): DreamRun | null {
+  try {
+    const raw = (getStoredSettings() as Record<string, string>)[LAST_DREAM];
+    return raw ? (JSON.parse(raw) as DreamRun) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One pass, run inside Understory's container with its own library, its own
+ * model settings and its own bundle — the same pass its timer runs. Understory
+ * has no way to be asked for one, so it is started beside it; at night, with
+ * nobody writing, that is the pass alone. Prints its report as the last line.
+ */
+const DREAM_SCRIPT = `import("@understory/core").then(async (m) => {
+  const kb = new m.KnowledgeBase(process.env.BUNDLE_ROOT, { gitAutocommit: process.env.GIT_AUTOCOMMIT === "true" });
+  const report = await m.runDream(kb);
+  console.log(JSON.stringify(report));
+}).catch((e) => { console.log(JSON.stringify({ error: String(e?.message ?? e) })); process.exit(1); });`;
+
+let dreaming = false;
+export const isDreaming = () => dreaming;
+
+/** The report a pass printed last, from all it printed. */
+export function readReport(output: string): { ran?: boolean; reason?: string; summary?: string; filesChanged?: string[]; error?: string } | null {
+  const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].startsWith("{")) continue;
+    try {
+      return JSON.parse(lines[i]);
+    } catch {
+      // Not the report; look further up.
+    }
+  }
+  return null;
+}
+
+/** Tidies the memory up now, and keeps what came of it. */
+export async function dreamNow(): Promise<DreamRun> {
+  if (dreaming) throw new Error("It is tidying up already");
+  if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
+  dreaming = true;
+  let run: DreamRun;
+  try {
+    const exec = await request<{ Id?: string; message?: string }>("POST", `/containers/${CONTAINER}/exec`, {
+      Cmd: ["node", "-e", DREAM_SCRIPT],
+      WorkingDir: "/app/server",
+      AttachStdout: true,
+      AttachStderr: true,
+      // A terminal: its output comes back as it was printed, not in Docker's framed stream.
+      Tty: true,
+    });
+    if (exec.status >= 400 || !exec.body?.Id) throw new Error(exec.body?.message || `Could not start the pass (${exec.status})`);
+    const out = await request<unknown>("POST", `/exec/${exec.body.Id}/start`, { Detach: false, Tty: true });
+    const report = readReport(typeof out.body === "string" ? out.body : JSON.stringify(out.body ?? ""));
+    if (!report) throw new Error("The pass ended without saying what it did");
+    if (report.error) throw new Error(report.error);
+    run = {
+      at: new Date().toISOString(),
+      ok: true,
+      ran: report.ran === true,
+      said: report.ran
+        ? `${report.filesChanged?.length ?? 0} ${report.filesChanged?.length === 1 ? "file" : "files"} changed${report.summary ? ` — ${report.summary.slice(0, 300)}` : ""}`
+        : report.reason || "Nothing to do",
+    };
+  } catch (e) {
+    run = { at: new Date().toISOString(), ok: false, said: (e as Error).message };
+  } finally {
+    dreaming = false;
+  }
+  put(LAST_DREAM, JSON.stringify(run));
+  return run;
+}
+
+/** The next time `at` ("HH:MM") comes round after `from`, in the portal's time zone. */
+export function nextAt(at: string, from = new Date()): Date {
+  const [h, m] = at.split(":").map(Number);
+  const next = new Date(from);
+  next.setHours(h, m, 0, 0);
+  if (next <= from) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+let timer: NodeJS.Timeout | undefined;
+let nextDream: Date | undefined;
+export const nextDreamAt = () => nextDream;
+
+/**
+ * The pass at the set time, once a day, while the portal runs Understory.
+ * Set anew whenever the settings are saved, and when the portal starts.
+ */
+export function scheduleDreams(): void {
+  if (timer) clearTimeout(timer);
+  timer = undefined;
+  nextDream = undefined;
+  const { dreamAt } = config();
+  if (!dreamAt) return;
+  nextDream = nextAt(dreamAt);
+  timer = setTimeout(async () => {
+    try {
+      if (dockerAvailable() && (await containerState(CONTAINER)).running) await dreamNow();
+    } catch (e) {
+      console.error(`[portal] tidying the memory up failed: ${(e as Error).message}`);
+    }
+    scheduleDreams();
+  }, nextDream.getTime() - Date.now());
+  // Never what keeps the portal running.
+  timer.unref();
 }

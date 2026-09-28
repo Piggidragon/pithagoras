@@ -517,8 +517,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
-  setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string }) =>
+  setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string }) =>
     json<{ understory: UnderstoryFeature }>("/api/features/understory/config", { method: "PUT", body: JSON.stringify(config) }),
+  dreamUnderstory: () => json<{ understory: UnderstoryFeature }>("/api/features/understory/dream", { method: "POST" }),
   installUnderstory: () =>
     json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>("/api/features/understory/install", { method: "POST" }),
   understoryAction: (action: "start" | "stop") =>
@@ -1080,9 +1081,16 @@ export interface ManagedUnderstory {
   container: "absent" | "stopped" | "running";
   pulling: { active: boolean; line: string; error?: string };
   url: string;
-  config: { llm: UnderstoryLlm | null; dreamInterval: string };
+  /** `dreamAt`: once a day at this time ("03:00"), started by the portal; wins over the interval. */
+  config: { llm: UnderstoryLlm | null; dreamInterval: string; dreamAt: string };
   /** Providers set up here that Understory can be pointed at. */
   providers: { id: string; models: string[] }[];
+  /** A pass the portal started is running now. */
+  dreaming: boolean;
+  lastDream: { at: string; ok: boolean; ran?: boolean; said: string } | null;
+  nextDream: string | null;
+  /** The portal's time zone, which a set time is in. */
+  timeZone: string;
 }
 
 /** Understory as the agent's memory, over MCP. */

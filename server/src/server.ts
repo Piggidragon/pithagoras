@@ -56,6 +56,7 @@ import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
 import { pinConnection } from "./api/browser.js";
+import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
 import {
@@ -1445,6 +1446,8 @@ startLlamaProxy(
 sessions.recoverOrphans();
 getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
 pinConnection();
+// The memory tidied up at its set time, when the portal runs Understory.
+scheduleDreams();
 
 async function shutdown(signal: string) {
   console.log(`${signal} received — stopping running sessions`);

@@ -44,10 +44,10 @@ async function reachable(url: string): Promise<boolean> {
 
 /** What the page is told of the saved settings: never the key itself. */
 function shownConfig() {
-  const { llm, dreamInterval } = service.config();
-  if (llm?.source !== "custom") return { llm, dreamInterval };
+  const { llm, dreamInterval, dreamAt } = service.config();
+  if (llm?.source !== "custom") return { llm, dreamInterval, dreamAt };
   const { apiKey, ...rest } = llm;
-  return { llm: { ...rest, hasKey: Boolean(apiKey) }, dreamInterval };
+  return { llm: { ...rest, hasKey: Boolean(apiKey) }, dreamInterval, dreamAt };
 }
 
 /** Providers set up here that have an address Understory can be pointed at, with their models. */
@@ -76,6 +76,11 @@ async function understoryState() {
       url: service.managedUrl(),
       config: shownConfig(),
       providers: providersForUnderstory(),
+      dreaming: service.isDreaming(),
+      lastDream: service.lastDream(),
+      nextDream: service.nextDreamAt()?.toISOString() ?? null,
+      // What "03:00" means: the portal's clock.
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     },
     ...(error ? { configError: error } : {}),
   };
@@ -225,12 +230,24 @@ export function featuresRouter(): Router {
     if (llm === undefined) return res.status(400).json({ error: "Choose a provider and model, or an http(s) address, a model and a format" });
     const dreamInterval = typeof req.body?.dreamInterval === "string" ? req.body.dreamInterval.trim() : "";
     if (!service.validInterval(dreamInterval)) return res.status(400).json({ error: "Tidying up takes an interval like 30m, 6h or 1d, of at least 5 minutes" });
+    const dreamAt = typeof req.body?.dreamAt === "string" ? req.body.dreamAt.trim() : "";
+    if (!service.validTime(dreamAt)) return res.status(400).json({ error: "Tidying up at a time takes one like 03:00" });
     try {
-      service.saveConfig({ llm, dreamInterval });
+      service.saveConfig({ llm, dreamInterval, dreamAt });
       if (await service.installed()) await service.install();
       res.json({ understory: await understoryState() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /** Tidies the memory up now, with Understory's own pass; answers once it is done. */
+  router.post("/features/understory/dream", async (_req, res) => {
+    try {
+      const run = await service.dreamNow();
+      res.status(run.ok ? 200 : 502).json({ run, understory: await understoryState() });
+    } catch (e) {
+      res.status(409).json({ error: (e as Error).message });
     }
   });
 
