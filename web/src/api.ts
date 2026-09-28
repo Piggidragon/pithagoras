@@ -1101,7 +1101,8 @@ export interface ManagedUnderstory {
   /** The portal can reach Docker. */
   available: boolean;
   image: boolean;
-  container: "absent" | "stopped" | "running";
+  /** "foreign": a container by that name the portal did not make, which it leaves alone. */
+  container: "absent" | "stopped" | "running" | "foreign";
   pulling: { active: boolean; line: string; error?: string };
   url: string;
   /** `dreamAt`: once a day at this time ("03:00"), started by the portal; wins over the interval. */

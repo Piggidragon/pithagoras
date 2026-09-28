@@ -319,3 +319,23 @@ test('the mode a chat was loaded with is the one it runs in, as its tool says',{
  assert.equal(r.content[0].text,'the whole answer','interrupt, as it was told: the change reaches it when it is reloaded');
  mode();
 });
+test('waiting for a slot leaves no listener behind on the parent\'s signal, nor itself in the shared list',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode();
+ const {tool,events}=load();
+ let first='';events.on('subagent:v1:start',(d:any)=>first||=d.id);
+ const running=tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ await new Promise(r=>setTimeout(r,100));
+ const stop=new AbortController();
+ let listeners=0;
+ const add=stop.signal.addEventListener.bind(stop.signal),remove=stop.signal.removeEventListener.bind(stop.signal);
+ (stop.signal as any).addEventListener=(t:string,f:any,o:any)=>{listeners++;add(t,f,o);};
+ (stop.signal as any).removeEventListener=(t:string,f:any)=>{listeners--;remove(t,f);};
+ const waiting=tool.execute('b',{task:'two'},stop.signal,undefined,{cwd:dir});
+ await new Promise(r=>setTimeout(r,100));
+ stop.abort();
+ await waiting;
+ assert.equal(listeners,0);
+ assert.equal((globalThis as any)[Symbol.for('pithagoras-subagent:slots')].waiting.length,0);
+ events.emit('subagent:v1:stop',{id:first});
+ await running;
+});

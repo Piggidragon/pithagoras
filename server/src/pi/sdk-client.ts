@@ -118,7 +118,8 @@ export function extraContextFiles(cwd: string, role?: string): { path: string; c
  * material, and the model read its own identity as notes about a third party.
  * One line at system level is enough to change what they are.
  */
-function framing(cwd: string, role?: string): string[] {
+/** The line saying the agent's own files are its own: the ones handed to it now. */
+function ownFiles(cwd: string, role?: string): string[] {
   const present = filesFor(role).filter((name) => {
     try {
       return existsSync(path.join(cwd, name));
@@ -126,14 +127,18 @@ function framing(cwd: string, role?: string): string[] {
       return false;
     }
   });
+  return present.length
+    ? [`${present.join(", ")} in your working directory are yours, not reference material about someone else. Each opens with a block saying what it is for; follow it.`]
+    : [];
+}
+
+function framing(): string[] {
   // The rule for spoken replies is not here: the resource loader adds it, to
   // the conversations that have had voice (see PortalLoader and AudioRule).
+  // Nor the line naming the agent's own files: which there are can change
+  // under an open chat (Understory switched on takes MEMORY.md away), so it is
+  // asked for each time the prompt is built — see ownFiles.
   const lines: string[] = [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE];
-  if (present.length) {
-    lines.push(
-      `${present.join(", ")} in your working directory are yours, not reference material about someone else. Each opens with a block saying what it is for; follow it.`,
-    );
-  }
   // The bracketed-ref trap that used to need a line here is handled in the
   // guard now, which normalises the argument for every session whether it
   // reads this or not. Nothing to say, so nothing spent saying it.
@@ -438,11 +443,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // you" from its own base identity — verified: it read a fact out of
         // MEMORY.md correctly while insisting it was Pi, made by Baidu. This
         // says what the files are for.
-        appendSystemPrompt: framing(opts.cwd, opts.role),
+        appendSystemPrompt: framing(),
         // Where MEMORY.md would have been, while Understory holds the memory:
         // asked each time the prompt is built, so a switch reaches a reloaded chat.
         // A conversation with anyone else had no memory to replace.
-      }, audioRule, () => ((!opts.role || opts.role === "primary") && understoryOn() ? [UNDERSTORY_RULE] : []));
+      }, audioRule, () => [
+        ...ownFiles(opts.cwd, opts.role),
+        ...((!opts.role || opts.role === "primary") && understoryOn() ? [UNDERSTORY_RULE] : []),
+      ]);
       await resourceLoader.reload();
     } catch (e) {
       console.error(`[portal] resource loader unavailable: ${(e as Error).message}`);

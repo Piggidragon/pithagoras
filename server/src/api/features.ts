@@ -15,7 +15,8 @@ import {
   understoryOn,
   understoryTokenOf,
 } from "../features.js";
-import { readPiSettings, updatePiSettings } from "../pi-settings.js";
+import path from "node:path";
+import { piAgentDir, readPiSettings, updatePiSettings } from "../pi-settings.js";
 import { sessions } from "../session-manager.js";
 import { switchPackage } from "./extensions.js";
 import { readMcpFile, writeMcpFile } from "./mcp.js";
@@ -99,7 +100,8 @@ async function switchUnderstory(enabled: boolean, url?: string): Promise<void> {
     else if (!adapter.enabled) await switchPackage(adapter.source, true);
     // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew.
     const { disabled: _off, auth: _a, bearerToken: _t, bearerTokenEnv: _e, ...had } = (config.mcpServers[UNDERSTORY] ?? {}) as Record<string, unknown>;
-    config.mcpServers[UNDERSTORY] = (await service.installed())
+    // An address given is the one meant; without one, the portal's own Understory where it runs one.
+    config.mcpServers[UNDERSTORY] = url === undefined && (await service.installed())
       ? { ...had, ...understoryEntry(service.managedUrl(), { token: service.token() }) }
       : {
           ...had,
@@ -202,7 +204,10 @@ export function featuresRouter(): Router {
         }
       }
       if (enabled === false && state.source) {
-        await pi(["remove", state.source]);
+        // A folder as pi's settings name it is relative to its folder; handed
+        // to `pi remove` as it is, pi reads it from where the portal runs.
+        const local = !/^(npm|git|https?):/.test(state.source);
+        await pi(["remove", local ? path.resolve(piAgentDir(), state.source) : state.source]);
         // What was kept aside for switching it back on has nothing left to go to.
         const stash = extensionStash();
         if (state.source in stash) {

@@ -297,7 +297,8 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
   const form = draft ?? draftOf(m);
   const edit = (patch: Partial<Draft>) => setDraft({ ...form, ...patch });
   const choice = choiceOf(form);
-  const runsHere = m.container !== "absent";
+  const runsHere = m.container === "running" || m.container === "stopped";
+  const foreign = m.container === "foreign";
   const address = url ?? u.url;
   const origin = (() => {
     try {
@@ -545,11 +546,16 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
             )}
           </fieldset>
 
+          {foreign && (
+            <p role="alert" className="text-[11px] text-warn">
+              A container named pithagoras-understory is there that the portal did not make. It is left alone: rename or remove it to run Understory here.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2 border-t border-line pt-3">
             {!runsHere ? (
               <button
                 type="button"
-                disabled={busy !== null || !saved}
+                disabled={busy !== null || !saved || foreign}
                 title={!saved ? "Save the settings first" : undefined}
                 onClick={() => void act(INSTALLING, () => api.installUnderstory())}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"

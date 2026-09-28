@@ -1,14 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /** The portal with no server: Settings → Add-ons, over canned answers for the opt-in features. */
-async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true, dreamFails = false } = {}) {
+async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true, dreamFails = false, container = 'absent' } = {}) {
   const sent: { path: string; body: any }[] = [];
   const state = {
     subagent: { available, installed: false, enabled: false, source: null as string | null, mode: 'interrupt', maxParallel: 1, model: 'auto' },
     understory: {
       enabled: false, url: 'http://localhost:3800/mcp', tokenSet: false, adapterInstalled: false, reachable,
       managed: {
-        available: docker, image: false, container: 'absent', pulling: { active: false, line: '' }, url: 'http://127.0.0.1:3800/mcp',
+        available: docker, image: false, container, pulling: { active: false, line: '' }, url: 'http://127.0.0.1:3800/mcp',
         config: { llm, dreamInterval: '', dreamAt: '' }, autoPossible,
         providers: [{ id: 'llama-swap', models: ['Ornith', 'Small'] }, { id: 'vllm', models: ['Qwen'] }],
         dreaming: false, lastDream: null as any, nextDream: null as string | null, timeZone: 'Europe/Berlin',
@@ -291,4 +291,14 @@ test("a tidy-up that fails says why, not the status it came with", async ({ page
   await here.getByRole('button', { name: 'Tidy up now' }).click();
   await expect(page.getByText('fetch failed').first()).toBeVisible();
   await expect(page.getByText('HTTP 502')).toHaveCount(0);
+});
+
+test("a container by Understory's name that the portal did not make is left alone, and said so", async ({ page }) => {
+  await portal(page, { docker: true, container: 'foreign' });
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Memory' }).click();
+  const here = addons(page).getByRole('region', { name: 'Understory run here' });
+  await expect(here.getByRole('alert')).toContainText('the portal did not make');
+  await expect(here.getByRole('button', { name: "Install and use as the agent's memory" })).toBeDisabled();
+  await expect(here.getByRole('button', { name: 'Remove' })).toHaveCount(0);
 });

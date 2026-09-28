@@ -1,10 +1,11 @@
+import { timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import express, { type Router } from "express";
 import { chatModel, getSession } from "./db.js";
 import { modelRuntime } from "./api/providers.js";
 import { UNDERSTORY } from "./features.js";
-import { llmToken } from "./extensions/understory-service.js";
+import { existingLlmToken } from "./extensions/understory-service.js";
 
 /**
  * The model Understory thinks with, when it is "the chat's": the one the
@@ -116,7 +117,16 @@ async function endpointOf(provider: string, id: string): Promise<{ url: string; 
 /** Mounted outside /api: Understory signs in with its own token, not a portal session. */
 export function memoryLlmRouter(modelOf: ModelOf): Router {
   const router = express.Router();
-  const signedIn = (req: express.Request) => req.headers.authorization === `Bearer ${llmToken()}`;
+  // Compared in constant time, and never against a key made for the asking:
+  // none is there until Understory is set up to think with the chat's model.
+  const signedIn = (req: express.Request) => {
+    const key = existingLlmToken();
+    const said = req.headers.authorization;
+    if (!key || typeof said !== "string") return false;
+    const want = Buffer.from(`Bearer ${key}`);
+    const got = Buffer.from(said);
+    return got.length === want.length && timingSafeEqual(got, want);
+  };
 
   router.get("/understory-llm/v1/models", (req, res) => {
     if (!signedIn(req)) return res.status(401).json({ error: { message: "Not signed in" } });

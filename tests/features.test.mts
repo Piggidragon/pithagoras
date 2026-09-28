@@ -28,6 +28,24 @@ const {
 } = await import("../server/src/features.ts");
 const { extraContextFiles } = await import("../server/src/pi/sdk-client.ts");
 
+test("a stranger at the memory's model route is turned away, and no key is made for the asking", async () => {
+  const express = (await import("express")).default;
+  const llm = await import("../server/src/memory-llm.ts");
+  const service = await import("../server/src/extensions/understory-service.ts");
+  assert.equal(service.existingLlmToken(), undefined, "none made yet");
+  const app = express().use(llm.memoryLlmRouter(async () => undefined));
+  const portal = app.listen(0, "127.0.0.1");
+  await new Promise((r) => portal.once("listening", r));
+  try {
+    const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/understory-llm/v1/chat/completions`;
+    const r = await fetch(at, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer guess" }, body: "{}" });
+    assert.equal(r.status, 401);
+    assert.equal(service.existingLlmToken(), undefined, "still none: asking does not make one");
+  } finally {
+    portal.close();
+  }
+});
+
 test("the subagent tool ships with the portal, as a pi package", () => {
   const dir = bundledSubagentDir();
   assert.ok(dir, "found from source");
@@ -397,4 +415,11 @@ test("the chat's model for the memory is off only when the portal really serves 
     delete process.env.PORTAL_TLS_CERT;
     delete process.env.PORTAL_TLS_KEY;
   }
+});
+
+test("the portal's Understory shares the portal's network and says it is the portal's", async () => {
+  const service = await import("../server/src/extensions/understory-service.ts");
+  const made = service.spec({ llm: { source: "custom", baseUrl: "http://gpu/v1", model: "m", format: "openai" }, dreamInterval: "", dreamAt: "" }, "t", "container:abc");
+  assert.equal(made.HostConfig.NetworkMode, "container:abc");
+  assert.deepEqual(made.Labels, { [service.LABEL]: "understory" });
 });

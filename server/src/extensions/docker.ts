@@ -21,7 +21,7 @@ const SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
  */
 export const dockerAvailable = (): boolean => existsSync(SOCKET);
 
-/** `timeoutMs`: given up after so long without an answer, rather than waited on for good. */
+/** `timeoutMs`: given up once so long has passed in all, answer or not — not only after a silence. */
 export function request<T = unknown>(
   method: string,
   path: string,
@@ -56,8 +56,11 @@ export function request<T = unknown>(
         });
       }
     );
+    const deadline = timeoutMs
+      ? setTimeout(() => req.destroy(Object.assign(new Error("Docker did not answer in time"), { code: "ETIMEDOUT" })), timeoutMs)
+      : undefined;
+    req.on("close", () => clearTimeout(deadline));
     req.on("error", reject);
-    if (timeoutMs) req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error("Docker did not answer in time"), { code: "ETIMEDOUT" })));
     if (payload) req.write(payload);
     req.end();
   });

@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { getDb, getStoredSettings } from "../db.js";
+import { getSetting, putSetting } from "../db.js";
 import { readModelsJson, storedKey } from "../providers.js";
-import { containerState, dockerAvailable, imagePresent, pullImage, request } from "./docker.js";
+import { dockerAvailable, imagePresent, pullImage, request } from "./docker.js";
+import { voiceNetworkMode as sharedNetworkMode } from "./voice-service.js";
 
 /**
  * Understory, run by the portal: installed from Settings → Add-ons → Memory
@@ -72,7 +73,7 @@ export function validInterval(raw: string): boolean {
 
 export function config(): UnderstoryConfig {
   try {
-    const raw = JSON.parse((getStoredSettings() as Record<string, string>)[KEY] || "{}");
+    const raw = JSON.parse(getSetting(KEY) || "{}");
     return {
       // Nothing chosen is the chat's: the model already loaded, which asks nothing of anyone.
       llm: raw.llm && typeof raw.llm === "object" ? (raw.llm as LlmChoice) : { source: "auto" },
@@ -84,11 +85,7 @@ export function config(): UnderstoryConfig {
   }
 }
 
-function put(key: string, value: string) {
-  getDb()
-    .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-    .run(key, value);
-}
+const put = putSetting;
 
 /**
  * Saved as given, except that a custom address sent without a key keeps the
@@ -118,7 +115,7 @@ export function restoreConfig(before: UnderstoryConfig): void {
 }
 
 function secret(key: string): string {
-  const had = (getStoredSettings() as Record<string, string>)[key];
+  const had = getSetting(key);
   if (had) return had;
   const made = randomBytes(24).toString("hex");
   put(key, made);
@@ -130,6 +127,9 @@ export const token = (): string => secret(TOKEN);
 
 /** The key Understory calls the portal's model server with, in "the chat's" mode; made once. */
 export const llmToken = (): string => secret(LLM_TOKEN);
+
+/** That key if one was ever made — never made by asking: a stranger's request must not make one. */
+export const existingLlmToken = (): string | undefined => getSetting(LLM_TOKEN);
 
 /**
  * Where Understory reaches the portal's model server: on the host network,
@@ -175,7 +175,16 @@ export function llmEnv(llm: LlmChoice): { baseUrl: string; apiKey: string; model
   };
 }
 
-export function spec(cfg: UnderstoryConfig, auth: string) {
+/** How the portal's own container is told from anything else by that name: its label. */
+export const LABEL = "pithagoras.addon";
+const ours = (labels: Record<string, string> | undefined) =>
+  labels?.[LABEL] === "understory" || labels?.["pithagoras.managed"] === "true";
+
+/**
+ * `networkMode`: the portal's own network — the host's, or the portal
+ * container's where it runs in one — so each reaches the other on loopback.
+ */
+export function spec(cfg: UnderstoryConfig, auth: string, networkMode = "host") {
   const llm = llmEnv(cfg.llm);
   return {
     Image: IMAGE,
@@ -190,9 +199,9 @@ export function spec(cfg: UnderstoryConfig, auth: string) {
       // At a set time the portal starts the pass itself: Understory's timer stays off.
       ...(cfg.dreamInterval && !cfg.dreamAt ? [`DREAM_INTERVAL=${cfg.dreamInterval}`] : []),
     ],
-    Labels: { "pithagoras.managed": "true" },
+    Labels: { [LABEL]: "understory" },
     HostConfig: {
-      NetworkMode: "host",
+      NetworkMode: networkMode,
       RestartPolicy: { Name: "unless-stopped" },
       Binds: [`${VOLUME}:/bundle`],
     },
@@ -201,20 +210,49 @@ export function spec(cfg: UnderstoryConfig, auth: string) {
 
 let pulling: { active: boolean; line: string; error?: string } = { active: false, line: "" };
 
+/** The container by that name: whether it is there, running, and the portal's own. */
+async function inspect(): Promise<{ exists: boolean; running: boolean; ours: boolean }> {
+  const { status, body } = await request<{ State?: { Running?: boolean }; Config?: { Labels?: Record<string, string> } }>(
+    "GET",
+    `/containers/${CONTAINER}/json`,
+  );
+  if (status !== 200) return { exists: false, running: false, ours: false };
+  return { exists: true, running: Boolean(body?.State?.Running), ours: ours(body?.Config?.Labels) };
+}
+
+/** Whether the portal's own Understory is running: what a script may be run in. */
+export async function runningHere(): Promise<boolean> {
+  if (!dockerAvailable()) return false;
+  const c = await inspect();
+  return c.ours && c.running;
+}
+
 export async function status() {
   if (!dockerAvailable()) return { available: false, image: false, container: "absent" as const, pulling };
-  const [image, state] = await Promise.all([imagePresent(IMAGE), containerState(CONTAINER)]);
+  const [image, c] = await Promise.all([imagePresent(IMAGE), inspect()]);
   return {
     available: true,
     image,
-    container: (!state.exists ? "absent" : state.running ? "running" : "stopped") as "absent" | "stopped" | "running",
+    // "foreign": one by that name that is not the portal's, which it leaves alone.
+    container: (!c.exists ? "absent" : !c.ours ? "foreign" : c.running ? "running" : "stopped") as "absent" | "stopped" | "running" | "foreign",
     pulling,
   };
 }
 
-/** Whether the portal runs Understory: its container is there. */
+/** Whether the portal runs Understory: its own container is there. */
 export async function installed(): Promise<boolean> {
-  return dockerAvailable() && (await containerState(CONTAINER)).exists;
+  if (!dockerAvailable()) return false;
+  const c = await inspect();
+  return c.exists && c.ours;
+}
+
+/** Refuses to touch a container by that name that the portal did not make. */
+async function onlyOurs(): Promise<{ exists: boolean; running: boolean }> {
+  const c = await inspect();
+  if (c.exists && !c.ours) {
+    throw Object.assign(new Error(`A container named ${CONTAINER} is there that the portal did not make; rename or remove it first`), { status: 409 });
+  }
+  return c;
 }
 
 /** Pulls the image if it is not there, and makes the container anew with what is saved — once nothing runs in it. */
@@ -226,7 +264,7 @@ export const remove = (): Promise<void> => exclusive(removeNow, WAIT_MS);
 async function installNow(): Promise<void> {
   if (!dockerAvailable()) throw new Error("The portal cannot reach Docker here, so it cannot run Understory");
   const cfg = config();
-  const made = spec(cfg, token());
+  const made = spec(cfg, token(), await sharedNetworkMode());
   if (!(await imagePresent(IMAGE))) {
     pulling = { active: true, line: "starting" };
     try {
@@ -238,24 +276,27 @@ async function installNow(): Promise<void> {
     }
   }
   await request("POST", "/volumes/create", { Name: VOLUME });
-  if ((await containerState(CONTAINER)).exists) await removeNow();
+  if ((await onlyOurs()).exists) await removeNow();
   const created = await request<{ message?: string }>("POST", `/containers/create?name=${CONTAINER}`, made);
   if (created.status >= 400) throw new Error(created.body?.message || `Create failed (${created.status})`);
   await startNow();
 }
 
 async function startNow(): Promise<void> {
+  await onlyOurs();
   const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/start`);
   if (res.status >= 400 && res.status !== 304) throw new Error(res.body?.message || `Start failed (${res.status})`);
 }
 
 async function stopNow(): Promise<void> {
+  await onlyOurs();
   const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/stop?t=10`);
   if (res.status >= 400 && res.status !== 304) throw new Error(res.body?.message || `Stop failed (${res.status})`);
 }
 
 /** Removes the container. The memory is in its volume, and stays. */
 async function removeNow(): Promise<void> {
+  if (!(await onlyOurs()).exists) return;
   await request("POST", `/containers/${CONTAINER}/stop?t=10`).catch(() => {});
   const res = await request<{ message?: string }>("DELETE", `/containers/${CONTAINER}?force=true`);
   if (res.status >= 400 && res.status !== 404) throw new Error(res.body?.message || `Remove failed (${res.status})`);
@@ -284,7 +325,7 @@ export interface DreamRun {
 
 export function lastDream(): DreamRun | null {
   try {
-    const raw = (getStoredSettings() as Record<string, string>)[LAST_DREAM];
+    const raw = getSetting(LAST_DREAM);
     return raw ? (JSON.parse(raw) as DreamRun) : null;
   } catch {
     return null;
@@ -298,8 +339,11 @@ export function lastDream(): DreamRun | null {
  * goes. Its input is handed over base64'd in the environment; it prints what
  * it came to, as JSON, as its last line.
  */
+/** In every script the portal runs there, so one given up on can be found and ended. */
+const MARK = "pithagoras-portal-run";
+
 function script(body: string): string {
-  return `(async () => {
+  return `/* ${MARK} */ (async () => {
   const m = await import("@understory/core");
   const kb = new m.KnowledgeBase(process.env.BUNDLE_ROOT, { gitAutocommit: process.env.GIT_AUTOCOMMIT === "true" });
   const input = process.env.PORTAL_INPUT ? JSON.parse(Buffer.from(process.env.PORTAL_INPUT, "base64").toString("utf8")) : {};
@@ -408,7 +452,7 @@ const refused = (message: string, status: number) => Object.assign(new Error(mes
 
 /** Runs one of the scripts in the container and reads what it said. */
 async function exec(name: keyof typeof SCRIPTS, input: unknown, timeoutMs: number): Promise<Record<string, any>> {
-  if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
+  if (!(await runningHere())) throw new Error("Understory is not running");
   const made = await request<{ Id?: string; message?: string }>("POST", `/containers/${CONTAINER}/exec`, {
     Cmd: ["node", "-e", SCRIPTS[name]],
     WorkingDir: "/app/server",
@@ -419,13 +463,27 @@ async function exec(name: keyof typeof SCRIPTS, input: unknown, timeoutMs: numbe
     Tty: true,
   });
   if (made.status >= 400 || !made.body?.Id) throw new Error(made.body?.message || `Could not reach Understory (${made.status})`);
-  const out = await request<unknown>("POST", `/exec/${made.body.Id}/start`, { Detach: false, Tty: true }, timeoutMs).catch((e) => {
-    throw (e as { code?: string }).code === "ETIMEDOUT" ? new Error("Understory did not finish in time") : e;
+  const out = await request<unknown>("POST", `/exec/${made.body.Id}/start`, { Detach: false, Tty: true }, timeoutMs).catch(async (e) => {
+    if ((e as { code?: string }).code !== "ETIMEDOUT") throw e;
+    // Given up on here, and ended there too: left, it would go on writing
+    // while the next run in the queue writes as well.
+    await endRuns().catch(() => {});
+    throw new Error("Understory did not finish in time");
   });
   const report = readReport(typeof out.body === "string" ? out.body : JSON.stringify(out.body ?? ""));
   if (!report) throw new Error("Understory ended without saying what it did");
   if (report.error) throw new Error(report.error);
   return report;
+}
+
+/** Ends whatever script of the portal's still runs in the container. */
+async function endRuns(): Promise<void> {
+  const made = await request<{ Id?: string }>("POST", `/containers/${CONTAINER}/exec`, {
+    Cmd: ["pkill", "-f", MARK],
+    AttachStdout: true,
+    AttachStderr: true,
+  });
+  if (made.body?.Id) await request("POST", `/exec/${made.body.Id}/start`, { Detach: false }, 10_000);
 }
 
 // Changes one at a time: two writers in the bundle at once would each rewrite
@@ -571,7 +629,7 @@ export async function dreamNow(): Promise<DreamRun> {
   dreaming = true;
   let result: DreamRun;
   try {
-    if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
+    if (!(await runningHere())) throw new Error("Understory is not running");
     const report = await run("dream");
     result = {
       at: new Date().toISOString(),
@@ -616,7 +674,7 @@ export function scheduleDreams(): void {
   nextDream = nextAt(dreamAt);
   timer = setTimeout(async () => {
     try {
-      if (dockerAvailable() && (await containerState(CONTAINER)).running) await dreamNow();
+      if (await runningHere()) await dreamNow();
     } catch (e) {
       console.error(`[portal] tidying the memory up failed: ${(e as Error).message}`);
     }

@@ -100,17 +100,30 @@ const slots: { running: number; waiting: (() => void)[] } = ((globalThis as any)
 
 /**
  * A slot, once one is free; its release hands it on. Undefined when `given
- * up` said so first — the parent stopped, the session ended.
+ * up` said so first — the parent stopped, the session ended. `onGiveUp` is
+ * given, once, what wakes it to look again, and may hand back how to stop
+ * listening: the wait leaves nothing behind in the shared list or on the signal.
  */
-async function takeSlot(givenUp: () => boolean, onGiveUp: (wake: () => void) => void): Promise<(() => void) | undefined> {
-  while (slots.running >= subagentLimit()) {
+async function takeSlot(givenUp: () => boolean, onGiveUp: (wake: () => void) => (() => void) | void): Promise<(() => void) | undefined> {
+  let waiting: (() => void) | undefined;
+  const cancel = () => waiting?.();
+  const unlisten = onGiveUp(cancel);
+  try {
+    while (slots.running >= subagentLimit()) {
+      if (givenUp()) return undefined;
+      await new Promise<void>((wake) => {
+        waiting = wake;
+        slots.waiting.push(wake);
+      });
+      // Woken by a release, the list was emptied; by giving up, this one is still in it.
+      const at = waiting ? slots.waiting.indexOf(waiting) : -1;
+      if (at >= 0) slots.waiting.splice(at, 1);
+      waiting = undefined;
+    }
     if (givenUp()) return undefined;
-    await new Promise<void>((wake) => {
-      slots.waiting.push(wake);
-      onGiveUp(wake);
-    });
+  } finally {
+    unlisten?.();
   }
-  if (givenUp()) return undefined;
   slots.running++;
   let released = false;
   return () => {
@@ -361,7 +374,10 @@ export default function (pi: any) {
       if (slots.running >= subagentLimit()) onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
       const release = await takeSlot(
         () => signal?.aborted === true || shutDown,
-        (wake) => signal?.addEventListener("abort", wake, { once: true }),
+        (wake) => {
+          signal?.addEventListener("abort", wake, { once: true });
+          return () => signal?.removeEventListener("abort", wake);
+        },
       );
       if (!release) return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
       try {

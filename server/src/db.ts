@@ -318,6 +318,15 @@ export function getDb(): Database.Database {
       value TEXT NOT NULL
     );
 
+    -- Background subagents started and not yet ended, kept as their events
+    -- are written: what a server that went left open is read from here at
+    -- start, not dug out of every event there ever was.
+    CREATE TABLE IF NOT EXISTS open_subagents (
+      session_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      PRIMARY KEY (session_id, id)
+    );
+
     -- Logins signed out before they ran out, by the signature of their cookie.
     -- The cookie carries no state of its own, so without this a copy of one
     -- would go on working for the rest of its thirty days.
@@ -620,6 +629,7 @@ export function deleteSession(id: string): void {
   d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   d.prepare("DELETE FROM settings WHERE key = ?").run(`subagent_model:${id}`);
+  d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
 }
 
 /**
@@ -647,6 +657,7 @@ export function appendEvent(sessionId: string, type: string, payload: unknown): 
   const info = getDb()
     .prepare("INSERT INTO events (session_id, type, payload, created_at) VALUES (?, ?, ?, ?)")
     .run(sessionId, type, encodedPayload, createdAt);
+  if (type === "portal_subagent") noteOpenSubagent(sessionId, payload);
   return {
     seq: Number(info.lastInsertRowid),
     session_id: sessionId,
@@ -1093,6 +1104,12 @@ const SETTING_DEFAULTS = (): GlobalSettings => ({
   thinkingLevel:
     process.env.PI_THINKING_LEVEL || piSetting("defaultThinkingLevel") || "medium",
 });
+
+/** One setting the portal keeps, read on its own rather than with the whole table. */
+export function getSetting(key: string): string | undefined {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
+  return row?.value || undefined;
+}
 
 /** Only what the portal was explicitly told; absent keys fall through. */
 export function getStoredSettings(): Partial<GlobalSettings> {
@@ -1613,7 +1630,7 @@ export function setSessionTools(sessionId: string, tools: SessionTools): Session
  * pi's, so they go straight to the table rather than widening a type that
  * every launch reads.
  */
-function putSetting(key: string, value: string): void {
+export function putSetting(key: string, value: string): void {
   const db = getDb();
   if (value)
     db.prepare(
@@ -1783,38 +1800,28 @@ export function setBrowserAllowlist(domains: string): void {
  * or "auto" for the one the chat is on. Null follows the portal's default.
  */
 export function sessionSubagentModel(sessionId: string): string | null {
-  return (getStoredSettings() as Record<string, string>)[`subagent_model:${sessionId}`] || null;
+  return getSetting(`subagent_model:${sessionId}`) ?? null;
 }
 
 export function setSessionSubagentModel(sessionId: string, model: string | null): void {
   putSetting(`subagent_model:${sessionId}`, model ?? "");
 }
 
+/** A background subagent's start or end, as written: kept in open_subagents while it runs. */
+function noteOpenSubagent(sessionId: string, payload: unknown): void {
+  const p = payload as { op?: unknown; id?: unknown; detached?: unknown } | null;
+  if (!p || p.detached !== true || typeof p.id !== "string") return;
+  if (p.op === "start") getDb().prepare("INSERT OR IGNORE INTO open_subagents (session_id, id) VALUES (?, ?)").run(sessionId, p.id);
+  else if (p.op === "end") getDb().prepare("DELETE FROM open_subagents WHERE session_id = ? AND id = ?").run(sessionId, p.id);
+}
+
 /**
  * Background subagents a chat started and whose end was never written: the
- * process that ran them went with the last server. Found by the one flag
- * their start and end both carry.
+ * process that ran them went with the last server.
  */
 export function openDetachedSubagents(): { sessionId: string; id: string }[] {
-  const rows = getDb()
-    // Their starts and ends only: each streamed step of theirs carries the flag too, and there are many.
-    .prepare(
-      `SELECT session_id, payload FROM events WHERE type = 'portal_subagent' AND payload LIKE '%"detached":true%'
-       AND (payload LIKE '%"op":"start"%' OR payload LIKE '%"op":"end"%') ORDER BY seq`,
-    )
-    .all() as { session_id: string; payload: string }[];
-  const open = new Map<string, { sessionId: string; id: string }>();
-  for (const row of rows) {
-    let p: { op?: string; id?: unknown };
-    try {
-      p = JSON.parse(row.payload);
-    } catch {
-      continue;
-    }
-    if (typeof p.id !== "string") continue;
-    const key = `${row.session_id}\u0000${p.id}`;
-    if (p.op === "start") open.set(key, { sessionId: row.session_id, id: p.id });
-    else if (p.op === "end") open.delete(key);
-  }
-  return [...open.values()];
+  return (getDb().prepare("SELECT session_id, id FROM open_subagents").all() as { session_id: string; id: string }[]).map((r) => ({
+    sessionId: r.session_id,
+    id: r.id,
+  }));
 }
