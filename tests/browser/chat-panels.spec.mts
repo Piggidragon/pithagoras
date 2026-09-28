@@ -1,8 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox())!;
-const panels = (page: Page) => page.getByRole('complementary', { name: 'Panels' });
-const body = async (page: Page) => (await page.locator('[data-dock]').boundingBox())!;
+/** The panels in one place; with all of them in one place, the panels. */
+const panels = (page: Page) => page.locator('.chat-aside');
+const placeAt = (page: Page, place: string) => page.locator(`.chat-aside[data-dock="${place}"]`);
+const body = async (page: Page) => (await page.locator('.chat-body').boundingBox())!;
+type Panel = 'Files' | 'Terminal' | 'Browser';
+/** A panel's header, which carries it. */
+const head = (page: Page, panel: Panel) => page.locator(panel === 'Terminal' ? '.chat-aside-head:has([aria-label="Terminals"])' : `.chat-aside-head:has-text("${panel}")`);
 /** Where in the chat to let the panels go for each place. */
 const spots: Record<string, (b: { x: number; y: number; width: number; height: number }) => [number, number]> = {
   Right: (b) => [b.x + b.width - 20, b.y + b.height / 2],
@@ -12,13 +17,14 @@ const spots: Record<string, (b: { x: number; y: number; width: number; height: n
   // Where the top was: floating there, not docked.
   Top: (b) => [b.x + b.width / 2, b.y + 12],
 };
-/** The panels' header, where they are carried by: its grip. */
-const grip = async (page: Page) => (await page.locator('.chat-aside-head').first().locator('span[title]').boundingBox())!;
-/** Carries the panels by their header to `where`, in steps as a hand would; `during` looks while they are held there. */
-const carry = async (page: Page, where: string, during?: () => Promise<void>) => {
+const DOCK: Record<string, string> = { Right: 'right', Left: 'left', Bottom: 'bottom', Floating: 'float', Top: 'float' };
+/** A panel's header's grip: Files, unless another is asked for. */
+const grip = async (page: Page, panel: Panel = 'Files') => (await head(page, panel).locator('span[title]').boundingBox())!;
+/** Carries a panel by its header to `where`, in steps as a hand would; `during` looks while it is held there. */
+const carry = async (page: Page, where: string, during?: () => Promise<void>, panel: Panel = 'Files') => {
   // Not while they are still sliding in from the last place: the grip is not where it is going.
   await settled(page);
-  const g = await grip(page);
+  const g = await grip(page, panel);
   await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
   await page.mouse.down();
   const [x, y] = spots[where](await body(page));
@@ -27,16 +33,37 @@ const carry = async (page: Page, where: string, during?: () => Promise<void>) =>
   await page.mouse.up();
   await expect(page.locator('.dock-zones')).toBeHidden();
 };
-const place = async (page: Page, where: string) => {
-  await carry(page, where);
+const place = async (page: Page, where: string, panel: Panel = 'Files') => {
+  await carry(page, where, undefined, panel);
   // Coming in from the side it sits on.
-  if (where !== 'Floating' && where !== 'Top') expect(await panels(page).evaluate((e) => getComputedStyle(e).animationName)).toBe(SLIDE[where]);
+  const at = placeAt(page, DOCK[where]);
+  await expect(at).toBeVisible();
+  if (where !== 'Floating' && where !== 'Top') expect(await at.evaluate((e) => getComputedStyle(e).animationName)).toBe(SLIDE[where]);
   await settled(page);
+};
+/** Both panels carried to an edge, one after the other: where all of them went at once before. */
+const placeBoth = async (page: Page, where: string) => {
+  await place(page, where, 'Files');
+  await place(page, where, 'Terminal');
+  await expect(panels(page)).toHaveCount(1);
 };
 const frames = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 const SLIDE: Record<string, string> = { Right: 'aside-in', Left: 'aside-in-left', Bottom: 'aside-up', Floating: 'aside-up' };
 /** Done coming in: measured on the way, they are where they are going plus the slide. */
-const settled = (page: Page) => panels(page).evaluate((e) => Promise.all(e.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished)));
+const settled = (page: Page) =>
+  page.evaluate(() =>
+    Promise.all(
+      [...document.querySelectorAll('.chat-aside')].flatMap((e) => e.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished)),
+    ),
+  );
+/** The one floating window, or of two, the one a panel is in. */
+const floating = (page: Page, panel?: Panel) => (panel ? placeAt(page, 'float').filter({ has: head(page, panel) }) : placeAt(page, 'float'));
+const reopen = async (page: Page, ...which: Panel[]) => {
+  await page.reload();
+  for (const panel of which) await page.getByRole('button', { name: panel, exact: true }).click();
+  await expect(panels(page).first()).toBeVisible();
+  await settled(page);
+};
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
@@ -47,7 +74,7 @@ test.beforeEach(async ({ page }) => {
   await settled(page);
 });
 
-test('the panels are carried by their header to the right, left or bottom of the conversation, side by side at the bottom', async ({ page }) => {
+test('panels carried to the right, left or bottom of the conversation sit together there, side by side at the bottom', async ({ page }) => {
   const composer = () => box(page, '.prompt-shell');
   const halves = async () => [await box(page, '.chat-aside-panel:nth-of-type(1)'), (await page.locator('.chat-aside-panel').nth(1).boundingBox())!];
 
@@ -59,18 +86,19 @@ test('the panels are carried by their header to the right, left or bottom of the
   // No button for it: carried, not chosen from a menu.
   await expect(panels(page).getByRole('button', { name: 'Where the panels go' })).toHaveCount(0);
 
-  // Held over the left edge: that edge lit, and where they would go shown.
+  // Held over the left edge: that edge lit, and where it would go shown.
   await carry(page, 'Left', async () => {
     await expect(page.locator('.dock-edge.is-active')).toHaveClass(/is-left/);
     const preview = (await page.locator('.dock-preview').boundingBox())!, b = await body(page);
     expect(preview.x).toBeCloseTo(b.x, 0);
     expect(Math.abs(preview.height - b.height)).toBeLessThan(1);
   });
-  await settled(page);
+  await place(page, 'Left', 'Terminal');
+  await expect(panels(page)).toHaveCount(1);
   a = (await panels(page).boundingBox())!;
   expect(a.x + a.width).toBeLessThanOrEqual((await composer()).x);
 
-  await place(page, 'Bottom');
+  await placeBoth(page, 'Bottom');
   a = (await panels(page).boundingBox())!;
   expect(a.y).toBeGreaterThanOrEqual((await composer()).y + (await composer()).height);
   expect(a.width).toBeGreaterThan(1200);
@@ -80,20 +108,17 @@ test('the panels are carried by their header to the right, left or bottom of the
   expect(two.y).toBeCloseTo(one.y, 0);
 
   // Kept: opened again, they are where they were put.
-  await page.reload();
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-  await settled(page);
+  await reopen(page, 'Terminal');
   a = (await panels(page).boundingBox())!;
   expect(a.y).toBeGreaterThanOrEqual((await composer()).y + (await composer()).height);
 
-  // Not at the top, between the chat's title and the conversation: carried there, they float.
-  await place(page, 'Top');
-  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'float');
-  // Nor where an earlier version put them.
-  await page.evaluate(() => localStorage.setItem('panelDock', 'top'));
-  await page.reload();
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'right');
+  // Not at the top, between the chat's title and the conversation: carried there, it floats.
+  await place(page, 'Top', 'Terminal');
+  await expect(panels(page)).toHaveAttribute('data-dock', 'float');
+  // Nor where an earlier version put them all.
+  await page.evaluate(() => { localStorage.setItem('panelDock', 'top'); localStorage.removeItem('panelPlaces'); });
+  await reopen(page, 'Terminal');
+  await expect(panels(page)).toHaveAttribute('data-dock', 'right');
 });
 
 test('a press on the header that goes nowhere, or on a button in it, carries nothing', async ({ page }) => {
@@ -106,11 +131,11 @@ test('a press on the header that goes nowhere, or on a button in it, carries not
   await page.mouse.up();
   await page.getByRole('tab', { name: 'Background' }).click();
   expect(await panels(page).boundingBox()).toEqual(before);
-  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'right');
+  await expect(panels(page)).toHaveAttribute('data-dock', 'right');
 });
 
 test('each edge between the conversation and the panels sizes them the way it is dragged', async ({ page }) => {
-  const edge = page.locator('[title="Drag to resize"]').first();
+  const edge = page.locator('.chat-aside-edge');
   const drag = async (dx: number, dy: number) => {
     const e = (await edge.boundingBox())!;
     await page.mouse.move(e.x + e.width / 2, e.y + e.height / 2);
@@ -119,7 +144,7 @@ test('each edge between the conversation and the panels sizes them the way it is
     await page.mouse.up();
   };
   for (const [where, dx, dy, grows] of [['Left', 100, 0, 'width'], ['Right', -100, 0, 'width'], ['Bottom', 0, -80, 'height']] as const) {
-    await place(page, where);
+    await placeBoth(page, where);
     const before = (await panels(page).boundingBox())![grows];
     await drag(dx, dy);
     // Towards the conversation is larger, wherever the panels are.
@@ -127,22 +152,23 @@ test('each edge between the conversation and the panels sizes them the way it is
   }
 });
 
-test('floating, the panels are a window carried by its header, sized by its corner, kept inside the chat, and docked again at an edge', async ({ page }) => {
+test('floating, a panel is a window carried by its header, sized by its corner, kept inside the chat, and docked again at an edge', async ({ page }) => {
+  await page.getByRole('button', { name: 'Close the files' }).click();
   // Let go in the middle: a window, held by its header where it was let go.
-  await place(page, 'Floating');
-  const window = panels(page);
+  await place(page, 'Floating', 'Terminal');
+  const window = floating(page);
   const area = await body(page);
   const [x, y] = spots.Floating(area);
   const at = (await window.boundingBox())!;
   expect(at.width).toBeLessThan(area.width / 2);
-  const g = await grip(page);
+  const g = await grip(page, 'Terminal');
   expect(Math.abs(g.x + g.width / 2 - x)).toBeLessThan(40);
   expect(Math.abs(g.y + g.height / 2 - y)).toBeLessThan(20);
   // Over the conversation, not beside it: the composer keeps its width.
   expect((await box(page, '.prompt-shell')).x + (await box(page, '.prompt-shell')).width).toBeGreaterThan(at.x);
 
   // Carried again, it goes along with the pointer.
-  const h = await grip(page);
+  const h = await grip(page, 'Terminal');
   await page.mouse.move(h.x + 4, h.y + 4);
   await page.mouse.down();
   await page.mouse.move(h.x + 4 - 200, h.y + 4 + 50, { steps: 8 });
@@ -163,9 +189,9 @@ test('floating, the panels are a window carried by its header, sized by its corn
   expect(now.height).toBeCloseTo(200, 0);
   expect(now.x).toBeGreaterThanOrEqual(area.x - 0.5);
 
-  // A button in the header is a button, not a place to carry the window from.
-  await page.getByRole('button', { name: 'Close the files' }).click();
-  await expect(page.locator('.chat-aside-panel')).toHaveCount(1);
+  // A tab in the header is a tab, not a place to carry the window from.
+  await page.getByRole('tab', { name: 'Background' }).click();
+  await expect(page.getByRole('tab', { name: 'Background' })).toHaveAttribute('aria-selected', 'true');
   expect((await window.boundingBox())!.x).toBeCloseTo(now.x, 0);
 
   // Where it was put and how large, kept.
@@ -179,14 +205,17 @@ test('floating, the panels are a window carried by its header, sized by its corn
   expect(again.width).toBeCloseTo(now.width, 0);
 
   // Carried to an edge, docked there again.
-  await place(page, 'Right');
-  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'right');
+  await place(page, 'Right', 'Terminal');
+  await expect(panels(page)).toHaveAttribute('data-dock', 'right');
   expect(Math.abs((await panels(page).boundingBox())!.height - area.height)).toBeLessThan(1);
 });
 
 test('on a phone the panels cover the chat wherever they were put', async ({ page }) => {
   await place(page, 'Floating');
+  await place(page, 'Left', 'Terminal');
   await page.setViewportSize({ width: 390, height: 780 });
+  // Together, as one.
+  await expect(panels(page)).toHaveCount(1);
   await expect.poll(async () => (await panels(page).boundingBox())!.x).toBe(0);
   expect((await panels(page).boundingBox())!.width).toBe(390);
   // Nothing to carry them by there.
@@ -194,9 +223,9 @@ test('on a phone the panels cover the chat wherever they were put', async ({ pag
 });
 
 test('panels leave the conversation and its composer room when the chat gets smaller', async ({ page }) => {
-  await place(page, 'Bottom');
+  await placeBoth(page, 'Bottom');
   // Made as tall as they may be.
-  const edge = (await page.locator('[title="Drag to resize"]').first().boundingBox())!;
+  const edge = (await page.locator('.chat-aside-edge').boundingBox())!;
   await page.mouse.move(edge.x + edge.width / 2, edge.y + 1);
   await page.mouse.down();
   await page.mouse.move(edge.x + edge.width / 2, 0, { steps: 6 });
@@ -209,7 +238,7 @@ test('panels leave the conversation and its composer room when the chat gets sma
 
   // Narrower, docked at a side: the conversation keeps its width.
   await page.setViewportSize({ width: 1300, height: 800 });
-  await place(page, 'Left');
+  await placeBoth(page, 'Left');
   await page.setViewportSize({ width: 800, height: 800 });
   await expect.poll(async () => (await page.locator('.chat-list').locator('..').locator('..').boundingBox())!.width).toBeGreaterThanOrEqual(315);
 });
@@ -227,7 +256,8 @@ test('a carry the browser takes over drops nothing, and a touch on the header is
   await page.mouse.up();
   await expect(page.locator('.dock-zones')).toBeHidden();
   // Where it was: it jumped into a floating window nobody let go.
-  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'right');
+  await expect(panels(page)).toHaveCount(1);
+  await expect(panels(page)).toHaveAttribute('data-dock', 'right');
 });
 
 test('a floating window moved or sized is drawn along without the chat, and kept once', async ({ page }) => {
@@ -236,7 +266,7 @@ test('a floating window moved or sized is drawn along without the chat, and kept
   await page.evaluate(() => {
     (window as any).floatWrites = 0;
     const set = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (key: string, value: string) { if (key === 'panelFloat') (window as any).floatWrites++; return set.call(this, key, value); };
+    Storage.prototype.setItem = function (key: string, value: string) { if (key === 'panelFloats') (window as any).floatWrites++; return set.call(this, key, value); };
   });
   const g = await grip(page);
   await page.mouse.move(g.x + 6, g.y + 6);
@@ -271,7 +301,9 @@ test('a height or width kept from before that is too small to draw opens at the 
 test('the edge moves the panels from the size they are drawn at, and a drop shows that size', async ({ page }) => {
   // Narrower than the three quarters a drag allowed: what was kept was wider than could be drawn.
   await page.setViewportSize({ width: 1000, height: 800 });
-  const edge = page.locator('[title="Drag to resize"]').first();
+  // One panel: carried to the other side, nothing is left at this one to give way to.
+  await page.getByRole('button', { name: 'Close the files' }).click();
+  const edge = page.locator('.chat-aside-edge');
   const drag = async (to: number) => {
     const e = (await edge.boundingBox())!;
     await page.mouse.move(e.x + e.width / 2, e.y + 200);
@@ -281,15 +313,23 @@ test('the edge moves the panels from the size they are drawn at, and a drop show
   };
   await drag(0);
   const widest = (await panels(page).boundingBox())!.width;
-  expect(widest).toBeCloseTo(1000 - 320, 0);
+  // The conversation's 320px, and the edge beside it.
+  expect(widest).toBeCloseTo(1000 - 320 - 4, 0);
   // Back by 50: it went nowhere for the first 70.
   const e = (await edge.boundingBox())!;
   await drag(e.x + e.width / 2 + 50);
   expect((await panels(page).boundingBox())!.width).toBeCloseTo(widest - 50, 0);
-  // Held over the left edge: the preview is the width they will have there.
+  // Held over the left edge: the preview is the width it will have there — the left's own.
+  let shown = 0;
   await carry(page, 'Left', async () => {
-    expect((await page.locator('.dock-preview').boundingBox())!.width).toBeCloseTo(widest - 50, 0);
-  });
+    shown = (await page.locator('.dock-preview').boundingBox())!.width;
+  }, 'Terminal');
+  await settled(page);
+  expect((await placeAt(page, 'left').boundingBox())!.width).toBeCloseTo(shown, 0);
+  expect(shown).toBeCloseTo(560, 0);
+  // And back at the right, the width it was made there.
+  await place(page, 'Right', 'Terminal');
+  expect((await panels(page).boundingBox())!.width).toBeCloseTo(widest - 50, 0);
 });
 
 test('a floating window carried while the chat changes size stays under the pointer', async ({ page }) => {
@@ -298,11 +338,11 @@ test('a floating window carried while the chat changes size stays under the poin
   await page.mouse.move(g.x + 6, g.y + 6);
   await page.mouse.down();
   await page.mouse.move(g.x - 200, g.y + 40, { steps: 8 });
-  const held = (await panels(page).boundingBox())!;
+  const held = (await floating(page).boundingBox())!;
   // The chat gets much shorter meanwhile, as the keyboard makes it: it was put back where it was taken from.
   await page.setViewportSize({ width: 1300, height: 420 });
   await frames(page);
-  const now = (await panels(page).boundingBox())!;
+  const now = (await floating(page).boundingBox())!;
   expect(now.x).toBeCloseTo(held.x, 0);
   expect(now.y).toBeCloseTo(held.y, 0);
   await page.mouse.up();
@@ -316,12 +356,12 @@ test('a floating window is fitted to the chat again after a press on its corner 
   await page.mouse.up({ button: 'right' });
   // Narrower: it was left where the wider chat had it, past the chat's right edge.
   await page.setViewportSize({ width: 900, height: 800 });
-  await expect.poll(async () => { const a = (await panels(page).boundingBox())!, b = await body(page); return a.x + a.width - (b.x + b.width); }).toBeLessThanOrEqual(0.5);
+  await expect.poll(async () => { const a = (await floating(page).boundingBox())!, b = await body(page); return a.x + a.width - (b.x + b.width); }).toBeLessThanOrEqual(0.5);
 });
 
 test('a floating window nudged by the right end of its header moves, rather than docking at the right', async ({ page }) => {
   // Floating where it first goes, at the top right: its header's right end is within the right edge's reach.
-  await page.evaluate(() => { localStorage.setItem('panelDock', 'float'); localStorage.removeItem('panelFloat'); });
+  await page.evaluate(() => { localStorage.setItem('panelDock', 'float'); localStorage.removeItem('panelFloat'); localStorage.removeItem('panelFloats'); });
   await page.reload();
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();
   await settled(page);
@@ -335,7 +375,8 @@ test('a floating window nudged by the right end of its header moves, rather than
   await page.mouse.move(x - 10, y + 30, { steps: 5 });
   expect(x - 10).toBeGreaterThan(b.x + b.width - 96);
   await page.mouse.up();
-  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'float');
+  await expect(panels(page)).toHaveCount(1);
+  await expect(panels(page)).toHaveAttribute('data-dock', 'float');
   const after = (await panels(page).boundingBox())!;
   expect(after.x).toBeCloseTo(before.x - 10, 0);
   // Out of that edge and back into it: then it is meant, and it docks.
@@ -345,11 +386,11 @@ test('a floating window nudged by the right end of its header moves, rather than
   await page.mouse.move(b.x + b.width / 2, h2.y + 40, { steps: 5 });
   await page.mouse.move(b.x + b.width - 10, h2.y + 40, { steps: 5 });
   await page.mouse.up();
-  await expect(page.locator('[data-dock]')).toHaveAttribute('data-dock', 'right');
+  await expect(panels(page)).toHaveAttribute('data-dock', 'right');
 });
 
 test('floating where it first goes, the window leaves Stop and Send uncovered', async ({ page }) => {
-  await page.evaluate(() => { localStorage.setItem('panelDock', 'float'); localStorage.removeItem('panelFloat'); });
+  await page.evaluate(() => { localStorage.setItem('panelDock', 'float'); localStorage.removeItem('panelFloat'); localStorage.removeItem('panelFloats'); });
   await page.reload();
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();
   await settled(page);
@@ -375,12 +416,12 @@ test('the edge and the divider are drawn along as they are dragged, and kept onc
     await page.mouse.up();
   };
   const before = (await panels(page).boundingBox())!.width;
-  await pull(page.locator('[title="Drag to resize"]').first(), -100, 0, async () => {
+  await pull(page.locator('.chat-aside-edge'), -100, 0, async () => {
     expect((await panels(page).boundingBox())!.width).toBeCloseTo(before + 100, 0);
     // Written at every move, and the chat drawn again each time.
-    expect(await writes('panelWidth')).toBe(0);
+    expect(await writes('panelSizes')).toBe(0);
   });
-  expect(await writes('panelWidth')).toBe(1);
+  expect(await writes('panelSizes')).toBe(1);
   const first = page.locator('.chat-aside-panel').first();
   const top = (await first.boundingBox())!.height;
   await pull(page.locator('.chat-aside [title="Drag to resize"]'), 0, 60, async () => {
@@ -388,4 +429,223 @@ test('the edge and the divider are drawn along as they are dragged, and kept onc
     expect(await writes('panelSplit')).toBe(0);
   });
   expect(await writes('panelSplit')).toBe(1);
+});
+
+test('one panel docked at the left and another at the right at once, each kept where it was put, neither made anew by the carry', async ({ page }) => {
+  // Something that is in the terminal's header only while it is the same one.
+  await head(page, 'Terminal').evaluate((e) => { (e as HTMLElement).dataset.mark = 'kept'; });
+  await place(page, 'Left', 'Terminal');
+  await expect(panels(page)).toHaveCount(2);
+  await expect(placeAt(page, 'left').getByRole('tablist', { name: 'Terminals' })).toBeVisible();
+  await expect(placeAt(page, 'right').locator('.chat-aside-head')).toHaveText(/Files/);
+  await expect(head(page, 'Terminal')).toHaveAttribute('data-mark', 'kept');
+  // The conversation between them, whole: the one left alone at the right takes its height.
+  const left = (await placeAt(page, 'left').boundingBox())!, right = (await placeAt(page, 'right').boundingBox())!, composer = await box(page, '.prompt-shell'), b = await body(page);
+  expect(left.x + left.width).toBeLessThanOrEqual(composer.x);
+  expect(composer.x + composer.width).toBeLessThanOrEqual(right.x);
+  expect(Math.abs(left.height - b.height)).toBeLessThan(1);
+  expect(Math.abs(right.height - b.height)).toBeLessThan(1);
+
+  await reopen(page, 'Terminal', 'Files');
+  await expect(placeAt(page, 'left').getByRole('tablist', { name: 'Terminals' })).toBeVisible();
+  await expect(placeAt(page, 'right').locator('.chat-aside-head')).toHaveText(/Files/);
+});
+
+test('at both sides at once the panels give way together, and the conversation keeps its room', async ({ page }) => {
+  await place(page, 'Left', 'Terminal');
+  await page.setViewportSize({ width: 1000, height: 800 });
+  // 560 each, as they were made: 1120 where less than 1000 is all there is.
+  const conversation = page.locator('.chat-list').locator('..').locator('..');
+  await expect.poll(async () => (await conversation.boundingBox())!.width).toBeGreaterThanOrEqual(310);
+  const left = (await placeAt(page, 'left').boundingBox())!, right = (await placeAt(page, 'right').boundingBox())!;
+  expect(left.width).toBeCloseTo(right.width, -1);
+  // Made wide again, as they were made.
+  await page.setViewportSize({ width: 1800, height: 800 });
+  await expect.poll(async () => (await placeAt(page, 'left').boundingBox())!.width).toBeCloseTo(560, 0);
+  expect((await placeAt(page, 'right').boundingBox())!.width).toBeCloseTo(560, 0);
+
+  // One side made as wide as it goes: the other gives way, as far as the least of use, and the conversation keeps its room.
+  const edge = (await placeAt(page, 'right').locator('xpath=preceding-sibling::*[1]').boundingBox())!;
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(0, edge.y + 200, { steps: 6 });
+  await page.mouse.up();
+  await frames(page);
+  const b = await body(page);
+  expect((await placeAt(page, 'left').boundingBox())!.width).toBeCloseTo(320, 0);
+  // Less the conversation's 320px and the two edges.
+  expect((await placeAt(page, 'right').boundingBox())!.width).toBeCloseTo(b.width - 320 - 320 - 8, 0);
+  // Given way, not made narrower: with room again, the left is as it was made.
+  await page.setViewportSize({ width: 2600, height: 800 });
+  await expect.poll(async () => (await placeAt(page, 'left').boundingBox())!.width).toBeCloseTo(560, 0);
+});
+
+test('a panel carried to a place that has one takes its size; under the conversation it sits between the sides', async ({ page }) => {
+  await place(page, 'Left', 'Terminal');
+  // Files, alone at the right, made narrower than it is drawn.
+  const was = (await placeAt(page, 'right').boundingBox())!.width;
+  const edge = (await placeAt(page, 'right').locator('xpath=preceding-sibling::*[1]').boundingBox())!;
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + edge.width / 2 + 160, edge.y + 200, { steps: 6 });
+  await page.mouse.up();
+  const narrow = (await placeAt(page, 'right').boundingBox())!.width;
+  expect(narrow).toBeCloseTo(was - 160, 0);
+  // The terminal joins it, and the preview says so.
+  await carry(page, 'Right', async () => {
+    expect((await page.locator('.dock-preview').boundingBox())!.width).toBeCloseTo(narrow, 0);
+  }, 'Terminal');
+  await settled(page);
+  await expect(panels(page)).toHaveCount(1);
+  expect((await panels(page).boundingBox())!.width).toBeCloseTo(narrow, 0);
+
+  // At the bottom, under the conversation only: Files keeps the height at the right.
+  await place(page, 'Bottom', 'Terminal');
+  const bottom = (await placeAt(page, 'bottom').boundingBox())!, right = (await placeAt(page, 'right').boundingBox())!, b = await body(page);
+  expect(bottom.x).toBeCloseTo(b.x, 0);
+  expect(bottom.x + bottom.width).toBeLessThanOrEqual(right.x);
+  expect(Math.abs(right.height - b.height)).toBeLessThan(1);
+  expect(bottom.y).toBeGreaterThanOrEqual((await box(page, '.prompt-shell')).y);
+});
+
+test('a panel not placed on its own yet goes where all of them went before', async ({ page }) => {
+  await page.evaluate(() => { localStorage.setItem('panelDock', 'left'); localStorage.removeItem('panelPlaces'); });
+  await reopen(page, 'Terminal', 'Files');
+  await expect(panels(page)).toHaveCount(1);
+  await expect(panels(page)).toHaveAttribute('data-dock', 'left');
+  // One carried away: only that one moves, and the other stays where they all were.
+  await place(page, 'Right');
+  await reopen(page, 'Terminal', 'Files');
+  await expect(placeAt(page, 'right').locator('.chat-aside-head')).toHaveText(/Files/);
+  await expect(placeAt(page, 'left').getByRole('tablist', { name: 'Terminals' })).toBeVisible();
+});
+
+test('a place keeps the size it was made, whichever panels are opened in it', async ({ page }) => {
+  await page.getByRole('button', { name: 'Close the files' }).click();
+  const edge = (await page.locator('.chat-aside-edge').boundingBox())!;
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + edge.width / 2 + 120, edge.y + 200, { steps: 6 });
+  await page.mouse.up();
+  const made = (await panels(page).boundingBox())!.width;
+  // Git, never sized, comes before the terminal: the place went to its size.
+  await page.getByRole('button', { name: 'Git', exact: true }).click();
+  await expect(page.locator('.chat-aside-panel')).toHaveCount(2);
+  expect((await panels(page).boundingBox())!.width).toBeCloseTo(made, 0);
+});
+
+test('with both sides giving way, one sized is let go as it was drawn, and the other keeps its own width', async ({ page }) => {
+  await place(page, 'Left', 'Terminal');
+  const left = placeAt(page, 'left'), right = placeAt(page, 'right');
+  const pull = async (dx: number, moves = dx) => {
+    const was = (await left.boundingBox())!.width;
+    const edge = (await left.locator('xpath=following-sibling::*[1]').boundingBox())!;
+    await page.mouse.move(edge.x + edge.width / 2, edge.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(edge.x + edge.width / 2 + dx, edge.y + 200, { steps: 3 });
+    // Moved from where it is drawn: not with a jump to the least a panel is made.
+    const drawn = { left: (await left.boundingBox())!.width, right: (await right.boundingBox())!.width };
+    expect(Math.abs(drawn.left - (was + moves))).toBeLessThanOrEqual(1);
+    await page.mouse.up();
+    await frames(page);
+    // Let go, nothing moves.
+    expect(Math.abs((await left.boundingBox())!.width - drawn.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs((await right.boundingBox())!.width - drawn.right)).toBeLessThanOrEqual(1);
+  };
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await expect.poll(async () => (await left.boundingBox())!.width).toBeLessThan(400);
+  // Narrower: the right takes back some of its own width while it is dragged.
+  const before = (await right.boundingBox())!.width;
+  await pull(-10);
+  expect((await right.boundingBox())!.width).toBeGreaterThan(before + 5);
+  // With room again, the right is as it was made — not kept at what it was given way to.
+  await page.setViewportSize({ width: 2600, height: 800 });
+  await expect.poll(async () => (await right.boundingBox())!.width).toBeCloseTo(560, 0);
+  // Narrower than of use already: it stays there, rather than jumping to the
+  // least a panel is made and taking the conversation's room.
+  await page.setViewportSize({ width: 900, height: 800 });
+  await expect.poll(async () => (await left.boundingBox())!.width).toBeLessThan(310);
+  await pull(8, 0);
+});
+
+test('each floating panel has a window of its own, put where it was let go, carried alone, and kept', async ({ page }) => {
+  await place(page, 'Floating');
+  const files = (await floating(page, 'Files').boundingBox())!, b = await body(page);
+  // The terminal let go lower down and to the left: there, in a window of its own.
+  const g = await grip(page, 'Terminal');
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + 260, b.y + 330, { steps: 10 });
+  await page.mouse.up();
+  await settled(page);
+  await expect(placeAt(page, 'float')).toHaveCount(2);
+  const terminal = (await floating(page, 'Terminal').boundingBox())!;
+  // Held by its header where it was let go, as far down as the chat lets it go.
+  const t = await grip(page, 'Terminal');
+  expect(Math.abs(t.x + t.width / 2 - (b.x + 260))).toBeLessThan(40);
+  expect(terminal.x).toBeLessThan(files.x - 100);
+  // Files' window is where it was.
+  expect(await floating(page, 'Files').boundingBox()).toEqual(files);
+  // Carried, only that window goes along.
+  const h = await grip(page, 'Files');
+  await page.mouse.move(h.x + 4, h.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(h.x + 4 - 120, h.y + 4 + 40, { steps: 6 });
+  expect((await floating(page, 'Terminal').boundingBox())!.x).toBeCloseTo(terminal.x, 0);
+  await page.mouse.up();
+  // The one last carried is on top; pressed in, the other comes up.
+  const z = (panel: Panel) => floating(page, panel).evaluate((e) => Number(getComputedStyle(e).zIndex));
+  expect(await z('Files')).toBeGreaterThan(await z('Terminal'));
+  // Pressed anywhere in it, not only by its header: in what the terminal shows.
+  await floating(page, 'Terminal').locator('.chat-terminal-pane').first().click({ position: { x: 20, y: 20 } });
+  expect(await z('Terminal')).toBeGreaterThan(await z('Files'));
+  await floating(page, 'Files').click({ position: { x: 60, y: 120 } });
+  expect(await z('Files')).toBeGreaterThan(await z('Terminal'));
+
+  await reopen(page, 'Terminal', 'Files');
+  await expect(placeAt(page, 'float')).toHaveCount(2);
+  expect((await floating(page, 'Terminal').boundingBox())!.x).toBeCloseTo(terminal.x, 0);
+});
+
+test('panels that floated together before each had a window are put apart, both seen', async ({ page }) => {
+  await page.evaluate(() => {
+    localStorage.setItem('panelDock', 'float');
+    localStorage.setItem('panelFloat', JSON.stringify({ x: 200, y: 40, w: 420, h: 360 }));
+    for (const key of ['panelPlaces', 'panelFloats']) localStorage.removeItem(key);
+  });
+  await reopen(page, 'Terminal', 'Files');
+  await expect(placeAt(page, 'float')).toHaveCount(2);
+  const files = (await floating(page, 'Files').boundingBox())!, terminal = (await floating(page, 'Terminal').boundingBox())!;
+  expect(files.width).toBeCloseTo(420, 0);
+  expect(terminal.width).toBeCloseTo(420, 0);
+  expect(Math.abs(files.x - terminal.x) + Math.abs(files.y - terminal.y)).toBeGreaterThan(40);
+  // Kept where it was put aside: the other closed, it does not go back onto its place.
+  await head(page, 'Files').click({ position: { x: 4, y: 4 } });
+  await page.getByRole('button', { name: 'Close the files' }).click();
+  await frames(page);
+  expect(await floating(page, 'Terminal').boundingBox()).toEqual(terminal);
+  await reopen(page, 'Terminal');
+  expect(await floating(page, 'Terminal').boundingBox()).toEqual(terminal);
+});
+
+test('a panel carried elsewhere is moved, not taken off the page: the browser in it keeps its page', async ({ page }) => {
+  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
+  await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body style="height:3000px;background:#171a20;color:#d1d8e3">A browser, in view.</body>' }));
+  await reopen(page, 'Browser');
+  const browser = () => page.frames().find((f) => f.url().includes('/browser-ui/'))!;
+  await expect.poll(() => !!browser()).toBe(true);
+  await browser().waitForLoadState();
+  await browser().evaluate(() => { (window as any).kept = 'this page'; window.scrollTo(0, 400); });
+  const kept = async () => browser().evaluate(() => [(window as any).kept, window.scrollY]);
+  for (const where of ['Left', 'Bottom', 'Floating', 'Right']) {
+    await place(page, where, 'Browser');
+    expect(await kept()).toEqual(['this page', 400]);
+  }
+  // Across the phone's width and back, where they all go to one place and back again.
+  await place(page, 'Left', 'Browser');
+  await page.setViewportSize({ width: 390, height: 780 });
+  await expect.poll(async () => (await panels(page).boundingBox())!.x).toBe(0);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await expect(placeAt(page, 'left')).toBeVisible();
+  expect(await kept()).toEqual(['this page', 400]);
 });
