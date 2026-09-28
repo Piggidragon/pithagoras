@@ -38,3 +38,19 @@ test('without the subagent tool, the model menu has nothing about subagents', as
   await expect(page.getByRole('button', { name: 'Add or change providers…' })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Subagents in this chat run on' })).toHaveCount(0);
 });
+
+test("the subagents' row is asked for with the chat, so the model menu opens with it already there", async ({ page }) => {
+  let asked = 0;
+  await page.route('**/api/features', (route) => route.fulfill({ json: { subagent: { enabled: true }, understory: {} } }));
+  await page.route('**/api/sessions/preview/subagent-model', async (route) => {
+    asked++;
+    await new Promise((r) => setTimeout(r, 300));
+    await route.fulfill({ json: { model: 'llama-swap/Qwen3.8-27b', default: 'auto' } });
+  });
+  await page.goto('/tests/chat.html?phase=model');
+  await expect.poll(() => asked).toBe(1);
+  await page.waitForTimeout(400);
+  await page.getByTitle('Qwen3.6 35B', { exact: true }).click();
+  // There in the first frame: nothing arrives after the menu to push it about.
+  await expect(page.getByRole('combobox', { name: 'Subagents in this chat run on' })).toContainText('llama-swap/Qwen3.8-27b', { timeout: 150 });
+});

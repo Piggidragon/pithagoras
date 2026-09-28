@@ -1,39 +1,65 @@
 import { useEffect, useState } from "react";
 import { api, type PiModel } from "../api";
+import { useCached } from "../settings-cache";
 import { Select } from "./Select";
 
+export interface SubagentChoice {
+  /** The subagent tool is on: there is something to decide. */
+  on: boolean;
+  /** This chat's own choice (null follows `default`), once known. */
+  choice?: { model: string | null; default: string };
+  set(model: string | null): void;
+}
+
 /**
- * What this chat's subagents run on, in its model menu: the portal's default,
- * the chat's own model, or one named. Only while the subagent tool is on —
- * otherwise there is nothing for it to decide. Asked when a subagent starts,
- * so a change needs no restart.
+ * What this chat's subagents run on, fetched with the chat rather than when
+ * its model menu opens: asked then, the menu opened without it and the row
+ * arrived a moment later, pushing the rest down. Kept per chat, so going back
+ * to one draws it at once, and asked again quietly.
  */
-export function SubagentModelPicker({ sessionId, models, onError }: { sessionId: string; models: PiModel[]; onError?: (e: string) => void }) {
-  const [on, setOn] = useState(false);
-  const [choice, setChoice] = useState<{ model: string | null; default: string } | null>(null);
+export function useSubagentChoice(sessionId: string, onError?: (e: string) => void): SubagentChoice {
+  const features = useCached("features", api.features, { freshMs: 30_000 });
+  const stored = useCached(`subagent-model:${sessionId}`, () => api.subagentModel(sessionId), { freshMs: 30_000 });
+  // What was just chosen here, until the server has said it back.
+  const [picked, setPicked] = useState<{ model: string | null } | null>(null);
+  useEffect(() => setPicked(null), [sessionId]);
 
+  // Settings → Add-ons says when it switches the tool on or off.
+  const reloadFeatures = features.reload;
   useEffect(() => {
-    let current = true;
-    api
-      .features()
-      .then((f) => {
-        if (!current || !f.subagent.enabled) return;
-        setOn(true);
-        return api.subagentModel(sessionId).then((c) => current && setChoice(c));
-      })
-      .catch(() => {});
-    return () => {
-      current = false;
-    };
-  }, [sessionId]);
+    const again = () => void reloadFeatures();
+    window.addEventListener("features-changed", again);
+    return () => window.removeEventListener("features-changed", again);
+  }, [reloadFeatures]);
 
+  // Only an answer that is one: a server that says something else leaves the menu as it was.
+  const known = typeof stored.value?.default === "string" ? stored.value : undefined;
+  const choice = known && (picked ? { ...known, ...picked } : known);
+  return {
+    on: features.value?.subagent?.enabled === true,
+    choice,
+    set: (model) => {
+      setPicked({ model });
+      api.setSubagentModel(sessionId, model).then(
+        () => stored.reload().then(() => setPicked(null)),
+        (e: Error) => {
+          setPicked(null);
+          onError?.(e.message);
+        },
+      );
+    },
+  };
+}
+
+/**
+ * The row in a chat's model menu: its subagents run on the portal's default,
+ * the chat's own model, or one named. Only while the subagent tool is on.
+ * Read when a subagent starts, so a change needs no restart.
+ */
+export function SubagentModelPicker({ subagents, models }: { subagents: SubagentChoice; models: PiModel[] }) {
+  const { on, choice, set } = subagents;
   if (!on || !choice) return null;
   const named = (value: string) => (value === "auto" ? "this chat's model" : value);
-  const change = (value: string) => {
-    const model = value === "" ? null : value;
-    setChoice({ ...choice, model });
-    api.setSubagentModel(sessionId, model).then(setChoice, (e: Error) => onError?.(e.message));
-  };
   const value = choice.model ?? "";
   return (
     <div className="px-3 py-1.5">
@@ -43,7 +69,7 @@ export function SubagentModelPicker({ sessionId, models, onError }: { sessionId:
         size="sm"
         className="mt-1 w-full"
         value={value}
-        onChange={change}
+        onChange={(v) => set(v === "" ? null : v)}
         options={[
           { value: "", label: `Default — ${named(choice.default)}` },
           { value: "auto", label: "This chat's model", hint: "The one it is on when it starts one" },

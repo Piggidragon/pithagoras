@@ -76,6 +76,8 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
       const { subagent, waiting } = await api.setSubagentFeature(patch);
       setFeatures({ ...features, subagent });
       setNote(reloadNote(waiting));
+      // A chat's model menu has the subagents' model while the tool is on.
+      window.dispatchEvent(new Event("features-changed"));
     } catch (e) {
       setFeatures(features);
       onError((e as Error).message);
