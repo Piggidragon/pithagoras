@@ -1,9 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {chmodSync, mkdtempSync, writeFileSync} from 'node:fs';
+import {chmodSync, mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import subagent from '../extensions/subagent/index.ts';
+import subagent, {childModel, subagentLimit} from '../extensions/subagent/index.ts';
 // A child pi in RPC mode, as far as the extension can tell. `retry`: its first run fails and is retried. `hang`: it works until stopped.
 const dir=mkdtempSync(path.join(tmpdir(),'subagent-'));
 const bin=path.join(dir,'pi');
@@ -11,6 +11,13 @@ writeFileSync(bin,`#!/usr/bin/env node
 const out=e=>process.stdout.write(JSON.stringify(e)+'\\n');
 const say=t=>out({type:'message_end',message:{role:'assistant',content:[{type:'text',text:t}]}});
 if(process.env.FAKE==='die')process.exit(1);
+// Deaf to abort: it only ever ends when killed.
+if(process.env.FAKE==='stubborn'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say('thinking forever');}});setInterval(()=>{},1000);}
+else
+// What it was started with, as its answer.
+if(process.env.FAKE==='childenv'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say('child='+process.env.PI_SUBAGENT_CHILD);out({type:'agent_end'});out({type:'agent_settled'});}});}
+else if(process.env.FAKE==='argv'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say(process.argv.slice(2).join(' '));out({type:'agent_end'});out({type:'agent_settled'});}});}
+else
 // Its input closed, still running: what the portal sends it next finds no reader.
 if(process.env.FAKE==='deaf'){require('node:fs').closeSync(0);setTimeout(()=>process.exit(1),800);}
 else
@@ -26,13 +33,25 @@ require('node:readline').createInterface({input:process.stdin}).on('line',l=>{co
 `);
 chmodSync(bin,0o755);
 process.env.PI_SUBAGENT_BIN=bin;
+// pi's settings, as the extension reads them: interrupt unless they say otherwise.
+const agentDir=path.join(dir,'agent');
+mkdirSync(agentDir);
+process.env.PI_CODING_AGENT_DIR=agentDir;
+const mode=(m?:string,more:Record<string,unknown>={})=>writeFileSync(path.join(agentDir,'settings.json'),JSON.stringify({...(m?{subagentMode:m}:{}),...more}));
+mode();
 function load(){
  const h=new Map<string,((d:any)=>void)[]>();
  const events={emit:(c:string,d:any)=>h.get(c)?.forEach(f=>f(d)),on:(c:string,f:(d:any)=>void)=>{h.set(c,[...(h.get(c)??[]),f]);return()=>h.set(c,(h.get(c)??[]).filter(x=>x!==f));}};
- let tool:any;subagent({registerTool:(t:any)=>tool=t,events});
+ const hooks=new Map<string,()=>void>();
+ const sent:{message:any,options:any}[]=[];
+ let tool:any;subagent({registerTool:(t:any)=>tool=t,events,on:(e:string,f:()=>void)=>hooks.set(e,f),sendMessage:(message:any,options:any)=>sent.push({message,options})});
  const ends:any[]=[];events.on('subagent:v1:end',d=>ends.push(d));
- return {tool,events,ends};
+ const seen:string[]=[];
+ events.on('subagent:v1:start',d=>seen.push(`start ${d.toolCallId}`));
+ events.on('subagent:v1:end',()=>seen.push('end'));
+ return {tool,events,ends,sent,seen,hooks};
 }
+const until=async(ok:()=>boolean)=>{for(let i=0;i<200&&!ok();i++)await new Promise(r=>setTimeout(r,20));assert.ok(ok());};
 test('a subagent whose run is retried answers with what it said at the end, not before the retry',async()=>{
  delete process.env.FAKE;
  const {tool,ends}=load();
@@ -83,4 +102,240 @@ test('a message for a child that no longer reads cannot bring down the portal',{
  events.emit('subagent:v1:stop',{id});
  await done;
  assert.equal(ends[0].status,'stopped');
+});
+test('in interrupt mode two subagents asked for at once run one after the other',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode();
+ const {tool,seen}=load();
+ assert.match(tool.description,/get its final answer back/);
+ const both=await Promise.all([tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir}),tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir})]);
+ assert.deepEqual(both.map(r=>r.content[0].text),['the whole answer','the whole answer']);
+ assert.deepEqual(seen,['start a','end','start b','end']);
+});
+test('in background mode the call returns at once, and the answer arrives later as a message that starts a turn',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode('background');
+ const {tool,ends,sent}=load();
+ assert.match(tool.description,/runs in the background/);
+ const result=await tool.execute('c7',{task:'Look into it',label:'Research'},undefined,undefined,{cwd:dir});
+ assert.match(result.content[0].text,/in the background/);
+ assert.equal(result.details.phase,'background');
+ assert.equal(ends.length,0);
+ await until(()=>sent.length===1);
+ assert.equal(ends[0].status,'done');
+ assert.match(sent[0].message.content,/Subagent "Research" finished:\n\nthe whole answer/);
+ assert.equal(sent[0].message.display,true);
+ assert.deepEqual(sent[0].options,{deliverAs:'followUp',triggerTurn:true});
+ mode();
+});
+test('a background subagent says it is detached, and stopping it waits for the person rather than starting a turn',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode('background');
+ const {tool,events,sent}=load();
+ let start:any;events.on('subagent:v1:start',d=>start=d);
+ await tool.execute('c8',{task:'Look into it'},undefined,undefined,{cwd:dir});
+ assert.equal(start.detached,true);
+ await new Promise(r=>setTimeout(r,200));
+ events.emit('subagent:v1:stop',{id:start.id});
+ await until(()=>sent.length===1);
+ assert.match(sent[0].message.content,/was stopped before it finished\. What it had so far:\n\nhalf of it/);
+ assert.deepEqual(sent[0].options,{deliverAs:'nextTurn'});
+ mode();
+});
+test('background subagents end with the session that started them',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode('background');
+ const {tool,ends,hooks}=load();
+ await tool.execute('c9',{task:'Look into it'},undefined,undefined,{cwd:dir});
+ await new Promise(r=>setTimeout(r,200));
+ hooks.get('session_shutdown')!();
+ await until(()=>ends.length===1);
+ assert.equal(ends[0].status,'stopped');
+ mode();
+});
+test('how many subagents may run at once: 1 unless the settings say more, and never past 16',()=>{
+ mode();assert.equal(subagentLimit(),1);
+ mode(undefined,{subagentMaxParallel:3});assert.equal(subagentLimit(),3);
+ mode(undefined,{subagentMaxParallel:0});assert.equal(subagentLimit(),1);
+ mode(undefined,{subagentMaxParallel:'lots'});assert.equal(subagentLimit(),1);
+ mode(undefined,{subagentMaxParallel:99});assert.equal(subagentLimit(),16);
+ mode();
+});
+test('with two allowed at once, two subagents asked for together run side by side',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode(undefined,{subagentMaxParallel:2});
+ const {tool,seen}=load();
+ await Promise.all([tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir}),tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir})]);
+ assert.deepEqual(seen,['start a','start b','end','end']);
+ mode();
+});
+test('in the background, one past the limit is queued and starts when the running one has finished',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode('background');
+ const {tool,seen,sent}=load();
+ const first=await tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ const second=await tool.execute('b',{task:'two',label:'Second'},undefined,undefined,{cwd:dir});
+ assert.equal(first.details.phase,'background');
+ assert.equal(second.details.phase,'queued');
+ assert.match(second.content[0].text,/Queued subagent "Second" in the background: 1 subagent is already running/);
+ await until(()=>sent.length===2);
+ // B is announced while it waits, and again when it starts: a slot is not taken before A's end.
+ assert.deepEqual(seen,['start a','start b','end','start b','end']);
+ mode();
+});
+test('a subagent still waiting for a slot does not start once its session has ended',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode('background');
+ const {tool,seen,hooks,ends}=load();
+ await tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ await tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir});
+ await new Promise(r=>setTimeout(r,150));
+ hooks.get('session_shutdown')!();
+ await until(()=>ends.length===2);
+ await new Promise(r=>setTimeout(r,200));
+ assert.deepEqual(seen,['start a','start b','end','end'],'announced while waiting, ended without starting');
+ assert.deepEqual(ends.map((e:any)=>e.status).sort(),['stopped','stopped']);
+ mode();
+});
+test('a waiting subagent counts as running, and stopping it before it starts tells the parent without a turn',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode('background');
+ const {tool,events,sent,ends}=load();
+ const running=new Set<string>();
+ events.on('subagent:v1:start',(d:any)=>running.add(d.id));
+ events.on('subagent:v1:end',(d:any)=>running.delete(d.id));
+ let first='';events.on('subagent:v1:start',(d:any)=>first||=d.id);
+ await tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ let waiting:any;events.on('subagent:v1:start',(d:any)=>{if(d.id!==first)waiting=d;});
+ await tool.execute('b',{task:'two',label:'Later'},undefined,undefined,{cwd:dir});
+ assert.equal(waiting.detail,'Waiting for a free slot');
+ assert.equal(running.size,2,'both counted: the chat is not reloaded from under the one waiting');
+ events.emit('subagent:v1:stop',{id:waiting.id});
+ await until(()=>sent.length===1);
+ assert.match(sent[0].message.content,/Subagent "Later" was stopped before it started\./);
+ assert.deepEqual(sent[0].options,{deliverAs:'nextTurn'});
+ events.emit('subagent:v1:stop',{id:first});
+ await until(()=>ends.length===2);
+ mode();
+});
+test('a background subagent that cannot start gives its slot back and says so',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode('background');
+ const {tool,sent}=load();
+ // A context that cannot be read: starting it throws.
+ const broken={get cwd(){throw new Error('the session is gone');}};
+ await tool.execute('a',{task:'one'},undefined,undefined,broken);
+ await until(()=>sent.length===1);
+ assert.match(sent[0].message.content,/failed: the session is gone/);
+ // The slot is free again: the next one starts at once.
+ const next=await tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir});
+ assert.equal(next.details.phase,'background');
+ await until(()=>sent.length===2);
+ mode();
+});
+test('an interrupt subagent waiting for a slot gives up when its parent is stopped',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode();
+ const {tool,events,seen}=load();
+ let id='';events.on('subagent:v1:start',d=>id=d.id);
+ const first=tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ const stop=new AbortController();
+ const phases:string[]=[];
+ const second=tool.execute('b',{task:'two'},stop.signal,(u:any)=>phases.push(u.details.phase),{cwd:dir});
+ await new Promise(r=>setTimeout(r,150));
+ stop.abort();
+ assert.deepEqual((await second).details,{phase:'stopped'});
+ assert.deepEqual(phases,['waiting for another subagent to finish']);
+ events.emit('subagent:v1:stop',{id});
+ await first;
+ assert.deepEqual(seen,['start a','end']);
+});
+test('the limit holds across conversations: two chats share it',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode();
+ const one=load(),two=load();
+ const order:string[]=[];
+ one.events.on('subagent:v1:start',()=>order.push('start one'));one.events.on('subagent:v1:end',()=>order.push('end one'));
+ two.events.on('subagent:v1:start',()=>order.push('start two'));two.events.on('subagent:v1:end',()=>order.push('end two'));
+ await Promise.all([one.tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir}),two.tool.execute('b',{task:'y'},undefined,undefined,{cwd:dir})]);
+ assert.deepEqual(order,['start one','end one','start two','end two']);
+});
+test('a child runs on the model its parent is on, unless the chat or the settings say another',{timeout:5000},async()=>{
+ process.env.FAKE='argv';mode();
+ const {tool,events}=load();
+ const parent={cwd:dir,model:{provider:'llama-swap',id:'qwen3.8'}};
+ let started:any;events.on('subagent:v1:start',d=>started=d);
+ assert.equal((await tool.execute('a',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider llama-swap --model qwen3.8');
+ assert.equal(started.detail,'Starting on llama-swap/qwen3.8');
+ // The chat's own choice, answered on the bus.
+ const off=events.on('subagent:v1:config',(d:any)=>d.reply({model:'vllm/Qwen-Coder'}));
+ assert.equal((await tool.execute('b',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider vllm --model Qwen-Coder');
+ off();
+ // The settings' choice, and auto there is the parent's again.
+ mode(undefined,{subagentModel:'openrouter/deepseek/deepseek-chat'});
+ assert.equal((await tool.execute('c',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider openrouter --model deepseek/deepseek-chat');
+ mode(undefined,{subagentModel:'auto'});
+ assert.match((await tool.execute('d',{task:'x'},undefined,undefined,parent)).content[0].text,/--model qwen3\.8$/);
+ // No model known at all: pi's own default.
+ assert.equal((await tool.execute('e',{task:'x'},undefined,undefined,{cwd:dir})).content[0].text,'--mode rpc --no-session');
+ mode();
+});
+test('what a chat says auto for is the parent\'s model, and a choice with no model in it is none',()=>{
+ mode();
+ assert.deepEqual(childModel('auto',{provider:'p',id:'m'}),{provider:'p',id:'m'});
+ assert.equal(childModel('nonsense',{provider:'p',id:'m'}),undefined);
+});
+test('a subagent gets no subagent tool of its own: the limit could not reach its children',{timeout:5000},async()=>{
+ process.env.FAKE='childenv';mode();
+ const {tool}=load();
+ assert.equal((await tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir})).content[0].text,'child=1');
+ process.env.PI_SUBAGENT_CHILD='1';
+ try{
+  let registered=false;
+  subagent({registerTool:()=>registered=true,events:{on:()=>()=>{},emit:()=>{}},on:()=>{}});
+  assert.equal(registered,false);
+ }finally{delete process.env.PI_SUBAGENT_CHILD;}
+});
+test('a background subagent\'s answer names the id it was announced under',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode('background');
+ const {tool,events,sent}=load();
+ let started='';events.on('subagent:v1:start',(d:any)=>started=d.id);
+ await tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir});
+ await until(()=>sent.length===1);
+ assert.equal(sent[0].message.details.id,started);
+ mode();
+});
+test('a background subagent that will not stop is killed when its session ends, and its slot freed',{timeout:10000},async()=>{
+ process.env.FAKE='stubborn';process.env.PI_SUBAGENT_GRACE_MS='300';mode('background');
+ try{
+  const {tool,hooks,ends}=load();
+  await tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir});
+  await new Promise(r=>setTimeout(r,200));
+  hooks.get('session_shutdown')!();
+  await until(()=>ends.length===1);
+  assert.equal(ends[0].status,'stopped');
+  // Its slot is every chat's: the next one starts at once.
+  delete process.env.FAKE;
+  const next=load();
+  const r=await next.tool.execute('b',{task:'y'},undefined,undefined,{cwd:dir});
+  assert.equal(r.details.phase,'background');
+ }finally{delete process.env.PI_SUBAGENT_GRACE_MS;mode();}
+});
+test('the mode a chat was loaded with is the one it runs in, as its tool says',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode();
+ const {tool}=load();
+ assert.match(tool.description,/get its final answer back/);
+ mode('background');
+ const r=await tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir});
+ assert.equal(r.content[0].text,'the whole answer','interrupt, as it was told: the change reaches it when it is reloaded');
+ mode();
+});
+test('waiting for a slot leaves no listener behind on the parent\'s signal, nor itself in the shared list',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode();
+ const {tool,events}=load();
+ let first='';events.on('subagent:v1:start',(d:any)=>first||=d.id);
+ const running=tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ await new Promise(r=>setTimeout(r,100));
+ const stop=new AbortController();
+ let listeners=0;
+ const add=stop.signal.addEventListener.bind(stop.signal),remove=stop.signal.removeEventListener.bind(stop.signal);
+ (stop.signal as any).addEventListener=(t:string,f:any,o:any)=>{listeners++;add(t,f,o);};
+ (stop.signal as any).removeEventListener=(t:string,f:any)=>{listeners--;remove(t,f);};
+ const waiting=tool.execute('b',{task:'two'},stop.signal,undefined,{cwd:dir});
+ await new Promise(r=>setTimeout(r,100));
+ stop.abort();
+ await waiting;
+ assert.equal(listeners,0);
+ assert.equal((globalThis as any)[Symbol.for('pithagoras-subagent:slots')].waiting.length,0);
+ events.emit('subagent:v1:stop',{id:first});
+ await running;
 });

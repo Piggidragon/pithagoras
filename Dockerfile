@@ -54,6 +54,10 @@ COPY channels channels
 # Skills the portal ships. Loaded from here for every session; anything the
 # agent writes goes to the data volume instead.
 COPY skills skills
+# The opt-in pi extensions the portal ships (the subagent tool). Nothing loads
+# them until a feature is switched on in Settings → Add-ons, which installs one
+# as a local pi package pointing here.
+COPY extensions extensions
 COPY deploy/voice deploy/voice
 
 # HOME lives on the data volume so pi packages and settings (~/.pi/agent)

@@ -16,7 +16,7 @@ const run = promisify(execFile);
  * They install under $HOME/.pi/agent, which the image points at a persistent
  * volume — otherwise every rebuild would silently wipe installed packages.
  */
-async function pi(args: string[]): Promise<{ stdout: string; stderr: string }> {
+export async function pi(args: string[]): Promise<{ stdout: string; stderr: string }> {
   try {
     return await run("pi", args, { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
   } catch (e) {

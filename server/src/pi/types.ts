@@ -80,6 +80,10 @@ export interface PiClient extends EventEmitter {
    */
   subagentInput?(id: string, text: string): boolean;
   subagentStop?(id: string): boolean;
+  /** How many subagents it announced are still running: a background one outlives the turn that started it. */
+  subagentsRunning?(): number;
+  /** Says each subagent still running has stopped: its pi is about to go. */
+  endSubagents?(why: string): void;
   /**
    * Where the chat box's text is kept — by the portal, one copy for the page
    * and pi alike — for an extension's getEditorText, and for what it puts in

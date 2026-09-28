@@ -223,17 +223,26 @@ listening and nothing changes.
 
 | Channel | Direction | Payload |
 |---|---|---|
-| `subagent:v1:start` | extension → portal | `{ id, label, toolCallId?, input?: boolean, stop?: boolean, detail? }` |
+| `subagent:v1:start` | extension → portal | `{ id, label, toolCallId?, input?: boolean, stop?: boolean, detail?, detached?: boolean }` |
 | `subagent:v1:event` | extension → portal | `{ id, event }` — one of the child's pi events, as `pi --mode json` or `--mode rpc` print them |
 | `subagent:v1:end` | extension → portal | `{ id, status: "done" \| "error" \| "stopped", error? }` |
 | `subagent:v1:input` | portal → extension | `{ id, text }` — only if `start` said `input: true` |
 | `subagent:v1:stop` | portal → extension | `{ id }` — only if `start` said `stop: true` |
+| `subagent:v1:config` | extension asks, portal answers at once | `{ reply(config) }` — `config.model`: what the chat says its subagents run on, `"provider/model"` or `"auto"`; nothing said when the chat has no choice of its own |
 
 Passing the child's events on unchanged is the whole integration: the portal
 draws them the way it draws the main conversation. A child started with
 `pi --mode rpc` can take `input` as an RPC `steer` command.
 
+A subagent is over when its tool call is, unless `start` said `detached: true`:
+then it runs on after the call has returned — a subagent in the background —
+until its `end`, or until the chat's pi stops. Open chats with one still
+running are not reloaded when a package is switched.
+
 `extensions/subagent` in this repository is a complete example: a `subagent`
-tool that hands a task to a second pi and can be steered while it works.
-Install it like any local package (`pi install ./extensions/subagent`). Only
-the in-process executor (`EXECUTOR=host`) shares the event bus with the portal.
+tool that hands a task to a second pi and can be steered while it works, in
+the foreground or the background. It ships with the portal and is switched on
+in Settings → Add-ons → Subagents (see [Opt-in features](/guide/features));
+outside the portal, install it like any local package
+(`pi install ./extensions/subagent`). Only the in-process executor
+(`EXECUTOR=host`) shares the event bus with the portal.

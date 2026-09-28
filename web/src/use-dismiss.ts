@@ -24,6 +24,8 @@ export function useDismiss(
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
+      // A list a select inside the popover opened, portaled to the body: still inside.
+      if ((target as Element).closest?.("[data-popover-layer]")) return;
       if (!latest.current.within.some((r) => r.current?.contains(target))) latest.current.close();
     };
     const onKey = (e: KeyboardEvent) => {

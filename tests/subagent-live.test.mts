@@ -74,3 +74,25 @@ test('what extensions say after the portal answered is taken from their events',
  assert.deepEqual(shown.widgets,[{key:'jobs',lines:['npm run dev']}]);
  assert.equal(withLiveUi(state as any,before as any,since),state,'nothing since: its answer as it was');
 });
+test('a subagent in the background goes on after the tool call that started it has returned',()=>{
+ const events:any[]=[
+  {seq:10,type:'tool_execution_start',at:0,payload:{toolCallId:'call-8',toolName:'subagent',args:{task:'x'}}},
+  {seq:11,type:'portal_subagent',at:0,payload:{op:'start',id:'bg',label:'BG',toolCallId:'call-8',detached:true}},
+  {seq:12,type:'tool_execution_end',at:0,payload:{toolCallId:'call-8',toolName:'subagent',result:{content:[{type:'text',text:'started'}]}}},
+  // Loaded without its start: its events still say so.
+  {seq:13,type:'portal_subagent',at:0,payload:{op:'event',id:'far',toolCallId:'call-8',detached:true,event:{type:'message_end',message:{role:'assistant',content:[]}}}},
+ ];
+ const found=subagents(events,buildTranscript(events));
+ assert.deepEqual(found.filter(s=>s.kind==='protocol').map(s=>[s.id,s.status]),[['bg','running'],['far','running']]);
+ // A turn of the chat failing is not its pi gone: the portal writes the end of one when that pi goes.
+ assert.deepEqual(subagents(events,buildTranscript(events),true).filter(s=>s.kind==='protocol').map(s=>s.status),['running','running']);
+});
+test('a subagent announced while it waited, and again as it starts, is one subagent with its new line',()=>{
+ const events:any[]=[
+  {seq:1,type:'portal_subagent',at:10,payload:{op:'start',id:'q',label:'Later',detail:'Waiting for a free slot',detached:true,input:true,stop:true}},
+  {seq:2,type:'portal_subagent',at:20,payload:{op:'start',id:'q',label:'Later',detail:'Starting on llama-swap/qwen',detached:true,input:true,stop:true}},
+  {seq:3,type:'portal_subagent',at:21,payload:{op:'event',id:'q',detached:true,event:{type:'message_end',message:{role:'assistant',content:[{type:'text',text:'hi'}]}}}},
+ ];
+ const found=subagents(events,[]);
+ assert.deepEqual(found.map(s=>[s.id,s.detail,s.since,s.events.length,s.status]),[['q','Starting on llama-swap/qwen',10,1,'running']]);
+});

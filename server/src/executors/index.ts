@@ -34,6 +34,8 @@ export interface LaunchOptions {
   browserNow?: () => { allowed: boolean; allowlist: string[] };
   /** Tools this conversation has switched off, by name. */
   toolsOff?: string[];
+  /** What its subagents run on, when it says: asked each time one starts. */
+  subagentModel?: () => string | undefined;
 }
 
 export interface Executor {
@@ -84,6 +86,7 @@ export class HostExecutor implements Executor {
       enforceTaint: opts.enforceTaint,
       browserNow: opts.browserNow,
       toolsOff: opts.toolsOff,
+      subagentModel: opts.subagentModel,
       provider: opts.provider,
       modelId: opts.model,
       thinkingLevel: opts.thinkingLevel,

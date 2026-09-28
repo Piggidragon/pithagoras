@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { LiveEvents } from "./live-events.js";
+import { forgetChat, noteToolCall, subagentGone } from "./memory-llm.js";
 import { ModelErrors } from "./model-errors.js";
 import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
@@ -43,6 +44,8 @@ import {
   chatModel,
   getSettings,
   markOrphanedSessionsInterrupted,
+  openDetachedSubagents,
+  openSubagentsIn,
   browserAllowed,
   sessionTools,
   setSessionTools,
@@ -53,6 +56,7 @@ import {
   routineGuards,
   updateSession,
   type EventRow,
+  sessionSubagentModel,
 } from "./db.js";
 
 /**
@@ -312,6 +316,14 @@ class SessionManager extends EventEmitter {
     // there for good, and not taken up again as running by the next run.
     for (const id of orphaned) this.record(id, "portal_status", { status: "interrupted", restarted: true });
     this.settleOrphanedMessages();
+    // A subagent in the background ran in the last server's process, in a chat
+    // that may well have been idle: nothing above ends it, and it would show
+    // as running for good.
+    for (const open of openDetachedSubagents()) {
+      this.record(open.sessionId, "portal_subagent", {
+        type: "portal_subagent", op: "end", id: open.id, detached: true, status: "stopped", error: "The portal restarted while it ran",
+      });
+    }
     // A command's end is written when pi answers it. One the last server was
     // holding never will be: it failed, with what it threw if it did. The page
     // cannot tell one still waiting on a dialog from one that never will.
@@ -780,6 +792,13 @@ class SessionManager extends EventEmitter {
   private noteCall(sessionId: string, msg: any): void {
     const sub = msg.type === "portal_subagent" && msg.op === "event" ? msg.event ?? {} : undefined;
     const event = sub ?? msg;
+    // Which chat Understory is thinking for, when its model is the chat's.
+    // By call, a subagent's under its own name: one ended mid-call takes its calls with it.
+    if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+      const call = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
+      noteToolCall(sessionId, call, event.toolName, event.type === "tool_execution_start" ? "start" : "end");
+    }
+    if (msg.type === "portal_subagent" && msg.op === "end") subagentGone(sessionId, String(msg.id));
     const id = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
     let calls = this.calls.get(sessionId);
     if (event.type === "tool_execution_start") {
@@ -790,6 +809,14 @@ class SessionManager extends EventEmitter {
     // A subagent that ended took whatever it was running with it.
     if (msg.type === "portal_subagent" && msg.op === "end") for (const c of [...(calls ?? [])]) if (c.startsWith(`${msg.id}:`)) calls!.delete(c);
     if (calls && !calls.size) this.calls.delete(sessionId);
+  }
+
+  /** The model a running chat is on now; undefined when it is not running here. */
+  async currentModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
+    const client = this.live.get(sessionId)?.client;
+    if (!client) return undefined;
+    const { model } = await client.getState();
+    return model?.provider && model.id ? { provider: model.provider, id: model.id } : undefined;
   }
 
   /** Whether a tool call is running in the chat: see calls. */
@@ -898,6 +925,7 @@ class SessionManager extends EventEmitter {
       // each tool call, so a group conversation follows whoever is speaking.
       role: session.role,
       toolsOff: this.offFor(sessionId),
+      subagentModel: () => sessionSubagentModel(sessionId) ?? undefined,
       whoNow: () => ({ role: this.speakerRole(sessionId), key: this.speakerKey(sessionId) }),
     });
 
@@ -1459,6 +1487,10 @@ class SessionManager extends EventEmitter {
     if (this.isBusy(sessionId) || this.compacting.has(sessionId)) {
       throw new SessionEditError("busy", "Stop the run first — the agent is still working.");
     }
+    // Editing restarts the chat's pi, which a subagent in the background goes with.
+    if (this.backgroundWork(sessionId)) {
+      throw new SessionEditError("busy", "A subagent is still working in the background here. Wait for its answer, or stop it, first.");
+    }
 
     const sent = sentMessages(sessionId);
     const ordinal = sent.findIndex((m) => m.seq === seq);
@@ -1511,6 +1543,9 @@ class SessionManager extends EventEmitter {
       throw e;
     }
     const undo = async () => {
+      if (this.backgroundWork(sessionId)) {
+        throw new SessionEditError("busy", "A subagent is still working in the background here. Wait for its answer, or stop it, first.");
+      }
       // A client started since would hold the edited conversation in memory.
       await this.stop(sessionId);
       // The transcript first, in one go, and the file last: a disk that
@@ -2029,6 +2064,11 @@ class SessionManager extends EventEmitter {
     return this.speaker.get(sessionId);
   }
 
+  /** Whether a subagent is working in the background here: its chat looks idle, and stopping it would end the subagent. */
+  backgroundWork(sessionId: string): boolean {
+    return (this.live.get(sessionId)?.client.subagentsRunning?.() ?? 0) > 0;
+  }
+
   isBusy(sessionId: string): boolean {
     if (this.asking.has(sessionId)) return true;
     return getSession(sessionId)?.status === "running";
@@ -2183,7 +2223,9 @@ class SessionManager extends EventEmitter {
     let waiting = 0;
     const done = await Promise.all(
       [...this.live.entries()].map(async ([sessionId, { client }]) => {
-        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId)) {
+        // A subagent in the background would be stopped by the reload: its
+        // chat is idle, and still working.
+        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId) || this.backgroundWork(sessionId)) {
           waiting++;
           return false;
         }
@@ -2282,6 +2324,9 @@ class SessionManager extends EventEmitter {
   async stop(sessionId: string): Promise<void> {
     const live = this.live.get(sessionId);
     if (!live) return;
+    // Said while its events are still heard: a background subagent goes with
+    // its pi, and nothing else would say it ended.
+    live.client.endSubagents?.("Its chat's pi was stopped");
     this.stopping.add(live.client);
     live.client.dispose();
     this.live.delete(sessionId);
@@ -2293,6 +2338,14 @@ class SessionManager extends EventEmitter {
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
     this.dropCommands(sessionId);
+    // No memory tool of its is running any more, whatever it last said.
+    forgetChat(sessionId);
+    // Nor a subagent in the background: it ran in this pi. Stopped, the
+    // bridge has said so already; crashed, nothing has — written here, once,
+    // for whichever is still open.
+    for (const id of openSubagentsIn(sessionId)) {
+      this.record(sessionId, "portal_subagent", { type: "portal_subagent", op: "end", id, detached: true, status: "stopped", error: "Its chat's pi went away" });
+    }
     // What the extensions showed went with the process that ran them: stopped
     // for a restart or a delete as much as crashed. Left, a status naming a
     // command had the page list the commands, starting pi.

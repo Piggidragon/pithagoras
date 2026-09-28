@@ -1,4 +1,4 @@
-import { bindHost, loginThrottle, portalSecurityHeaders } from "./http-security.js";
+import { bindHost, loginThrottle, portalSecurityHeaders, tlsFiles } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
 import { canvasEvents, listCanvases } from "./canvases.js";
 import { clampLevel } from "./pi/model-runtime.js";
@@ -44,6 +44,9 @@ import { filesRouter } from "./api/files.js";
 import { gitRouter } from "./api/git.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
+import { featuresRouter } from "./api/features.js";
+import { memoryRouter } from "./api/memory.js";
+import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
@@ -54,6 +57,7 @@ import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
 import { pinConnection } from "./api/browser.js";
+import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
 import {
@@ -86,6 +90,7 @@ import {
   chatModel,
   getSettings,
   getStoredSettings,
+  shownStoredSettings,
   knownTools,
   toolGroupNames,
   setToolGroupNames,
@@ -128,7 +133,8 @@ const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BY
 const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
 const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => {
-  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path)) return next();
+  // Understory's requests for a model carry whole conversations: its route reads its own.
+  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path.startsWith("/understory-llm/")) return next();
   smallJson(req, res, next);
 });
 app.use(cookieParser());
@@ -153,6 +159,8 @@ app.post("/api/auth/logout", (req, res) => {
   res.json({ ok: true });
 });
 
+// Understory's model server, in "the chat's" mode: its own token, not a portal login.
+app.use(memoryLlmRouter((id) => sessions.currentModel(id)));
 app.use("/api", requireAuth);
 
 // --- global settings (defaults for every new session) ---
@@ -163,7 +171,7 @@ app.get("/api/settings", (_req, res) => {
   // turning the next Save into a permanent pin.
   res.json({
     settings: getSettings(),
-    stored: getStoredSettings(),
+    stored: shownStoredSettings(),
     defaults: getSettingDefaults(),
     piSettingsPath: piSettingsPath(),
     // pi's own, not the portal's — kept separate in the response so the UI can
@@ -406,7 +414,7 @@ app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     const chats = workingIn(project.path, listSessions());
-    if (chats.some((s) => sessions.isBusy(s.id))) {
+    if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
     const routines = routinesIn(project.path);
@@ -1168,6 +1176,8 @@ app.get("/api/sessions/:id/commands", async (req, res) => {
 // --- pi packages (extensions, skills, prompts, themes) ---
 app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
+app.use("/api", featuresRouter());
+app.use("/api", memoryRouter());
 app.use("/api", channelsRouter());
 app.use("/api", routinesRouter());
 app.use("/api", skillsRouter());
@@ -1382,11 +1392,10 @@ mkdirSync(BIN_DIR, { recursive: true });
  * to think about certificates. Needed for the embedded browser, which refuses
  * to run unless every page above it is a secure context.
  */
-const tlsCert = process.env.PORTAL_TLS_CERT;
-const tlsKey = process.env.PORTAL_TLS_KEY;
+const tlsAt = tlsFiles();
 const tls =
-  tlsCert && tlsKey && existsSync(tlsCert) && existsSync(tlsKey)
-    ? { cert: readFileSync(tlsCert), key: readFileSync(tlsKey) }
+  tlsAt
+    ? { cert: readFileSync(tlsAt.cert), key: readFileSync(tlsAt.key) }
     : null;
 
 const host = bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN);
@@ -1441,6 +1450,8 @@ startLlamaProxy(
 sessions.recoverOrphans();
 getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
 pinConnection();
+// The memory tidied up at its set time, when the portal runs Understory.
+scheduleDreams();
 
 async function shutdown(signal: string) {
   console.log(`${signal} received — stopping running sessions`);

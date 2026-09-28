@@ -194,6 +194,28 @@ export function settingKeysOf(dir: string, installed: boolean): string[] {
   return keys;
 }
 
+/**
+ * Switch an installed package on or off in pi's settings, keeping a filter
+ * aside for switching it back. False where it is not listed there.
+ */
+export async function switchPackage(spec: string, enabled: boolean): Promise<boolean> {
+  let stashed: ReturnType<typeof extensionStash> | undefined;
+  await updatePiSettings(
+    (all) => {
+      // The stash is read and written in turn with the settings file: two
+      // switches at once would otherwise both start from the same stash,
+      // and the later write would drop what the earlier one kept.
+      const changed = setPackageEnabled(Array.isArray(all.packages) ? all.packages : [], spec, enabled, extensionStash());
+      if (!changed) return;
+      all.packages = changed.packages;
+      stashed = changed.stash;
+    },
+    // Written only once the file is: a failed write leaves both as they were.
+    () => stashed && setExtensionStash(stashed),
+  );
+  return stashed !== undefined;
+}
+
 export function extensionsRouter(): Router {
   const router = express.Router();
 
@@ -263,21 +285,7 @@ export function extensionsRouter(): Router {
       return res.status(400).json({ error: "spec and enabled are required" });
     }
     try {
-      let stashed: ReturnType<typeof extensionStash> | undefined;
-      await updatePiSettings(
-        (all) => {
-          // The stash is read and written in turn with the settings file: two
-          // switches at once would otherwise both start from the same stash,
-          // and the later write would drop what the earlier one kept.
-          const changed = setPackageEnabled(Array.isArray(all.packages) ? all.packages : [], spec, enabled, extensionStash());
-          if (!changed) return;
-          all.packages = changed.packages;
-          stashed = changed.stash;
-        },
-        // Written only once the file is: a failed write leaves both as they were.
-        () => stashed && setExtensionStash(stashed),
-      );
-      const found = stashed !== undefined;
+      const found = await switchPackage(spec, enabled);
       if (!found) return res.status(404).json({ error: "That package is not installed for this user" });
       const { reloaded, waiting } = await sessions.reloadIdle();
       res.json({ ok: true, enabled, reloaded, waiting });

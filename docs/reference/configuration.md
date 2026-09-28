@@ -54,6 +54,11 @@ an empty field inherits, and clearing one hands the setting back.
 | `PI_PROVIDER` | — | Override for pi's `defaultProvider`. |
 | `PI_MODEL` | — | Override for pi's `defaultModel`. |
 | `PI_THINKING_LEVEL` | — | Override for pi's `defaultThinkingLevel`. |
+| `PI_SUBAGENT_BIN` | `pi` | The `pi` the bundled subagent tool starts. |
+| `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | Where Settings → Add-ons → Memory looks for Understory first. |
+| `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Understory's bearer token, named in `mcp.json` rather than copied into it. |
+| `UNDERSTORY_PORT` | `3800` | The port the Understory the portal runs listens on (host network). |
+| `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume holding that Understory's memory. |
 
 The host executor inherits the portal environment. The container executor currently forwards `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PI_PROVIDER`, and `PI_MODEL`; it does not forward arbitrary extension variables. Explicit session provider/model choices are passed as CLI arguments.
 
@@ -78,6 +83,12 @@ before writing; a broken file stops every future session from starting.
   "compaction": { "enabled": true }
 }
 ```
+
+`subagentMode` (`"background"`, or absent for interrupt),
+`subagentMaxParallel` (how many at once; absent for 1, at most 16) and
+`subagentModel` (`"provider/model"`, or absent for the chat's own) are read by
+the bundled subagent tool; Settings → Add-ons → Subagents writes them. See
+[Opt-in features](/guide/features).
 
 Extension settings live here too, alongside pi's own. That is why the portal
 writes single keys rather than replacing the file: a wholesale overwrite would

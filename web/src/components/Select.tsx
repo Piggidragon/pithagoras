@@ -203,6 +203,8 @@ export function Select<T extends string | number = string>({
           <div
             ref={list}
             id={listId}
+            // Part of whatever popover the select is in, though drawn at the body: see useDismiss.
+            data-popover-layer
             role="listbox"
             aria-label={ariaLabel}
             tabIndex={-1}

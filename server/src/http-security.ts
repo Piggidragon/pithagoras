@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import { existsSync } from 'node:fs';
 
 export function bindHost(password: string | undefined, allowOpen: string | undefined): string {
   return password || allowOpen === '1' ? '0.0.0.0' : '127.0.0.1';
@@ -41,3 +42,14 @@ export const portalSecurityHeaders: RequestHandler = (_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   next();
 };
+
+/**
+ * The certificate and key the portal serves TLS with: both named, and both
+ * there. The one decision, read by the server and by whatever must know how
+ * the portal is reached.
+ */
+export function tlsFiles(): { cert: string; key: string } | null {
+  const cert = process.env.PORTAL_TLS_CERT;
+  const key = process.env.PORTAL_TLS_KEY;
+  return cert && key && existsSync(cert) && existsSync(key) ? { cert, key } : null;
+}

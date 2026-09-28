@@ -34,7 +34,7 @@ Context files split at the same boundary:
 | `SOUL.md` | Everyone — it is who the agent is |
 | `TEAM.md` | Everyone — the shared half |
 | `PrimaryUser.md` | You only |
-| `MEMORY.md` | You only |
+| `MEMORY.md` | You only — and nobody while [Understory](/guide/features#memory-understory) is the agent's memory |
 
 So a teammate messaging your bot gets an agent that knows its own name and your
 team's shared notes, and not your private context.

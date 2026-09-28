@@ -26,6 +26,8 @@ export interface Subagent {
   input: boolean;
   stop: boolean;
   toolCallId?: string;
+  /** Runs on after its tool call has returned: a subagent in the background. */
+  detached?: boolean;
   error?: string;
   /** Protocol subagents: the child's events, in the shape the main transcript reads. */
   events: PortalEvent[];
@@ -77,6 +79,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
     if (!id) continue;
     let sub = byId.get(id);
     if (p.op === "start") {
+      const had = sub;
       sub = {
         id,
         kind: "protocol",
@@ -87,8 +90,15 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
         input: p.input === true,
         stop: p.stop === true,
         ...(typeof p.toolCallId === "string" ? { toolCallId: p.toolCallId } : {}),
+        ...(p.detached === true ? { detached: true } : {}),
         events: [],
       };
+      // Said again — one that waited for a slot, now starting: the same
+      // subagent, told anew what it is doing, and where it began.
+      if (had) {
+        Object.assign(had, { ...sub, events: had.events, since: had.since ?? sub.since });
+        continue;
+      }
       byId.set(id, sub);
       order.push(sub);
       continue;
@@ -105,6 +115,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
         stop: false,
         // Tied to its tool call all the same: listed once, and over when it is.
         ...(typeof p.toolCallId === "string" ? { toolCallId: p.toolCallId } : {}),
+        ...(p.detached === true ? { detached: true } : {}),
         events: [],
       };
       byId.set(id, sub);
@@ -123,10 +134,13 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
   }
 
   // One whose end never came is over once its process is, or once the tool
-  // call that ran it has ended: nothing is left to run it.
+  // call that ran it has ended: nothing is left to run it. Not one that runs
+  // on in the background: its call returns at once, and the chat going into
+  // error is a turn that failed, not its pi gone — the portal writes its end
+  // when that pi goes.
   const tools = new Map(items.flatMap((i) => (i.kind === "tool" && i.callId ? [[i.callId, i] as const] : [])));
   for (const sub of order) {
-    if (sub.status !== "running") continue;
+    if (sub.status !== "running" || sub.detached) continue;
     const tool = sub.toolCallId ? tools.get(sub.toolCallId) : undefined;
     if (ended || (tool && tool.status !== "running")) {
       sub.status = "stopped";
