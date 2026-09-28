@@ -6,6 +6,7 @@ import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { isEnter } from "../shortcuts";
 import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { useDismiss } from "../use-dismiss";
+import { t } from "../i18n";
 
 /**
  * Context fill is the number that decides whether a long session keeps working,
@@ -105,7 +106,7 @@ function ContextWindow({
   return (
     <div className="rounded-lg bg-raised/40 px-2 py-2">
       <div className="flex items-baseline justify-between gap-2">
-        <p className="text-sm text-fg">Context window</p>
+        <p className="text-sm text-fg">{t("Context window")}</p>
         <p className="text-[11px] text-fg-subtle">{source}</p>
       </div>
       <div className="mt-1.5 flex items-center gap-1.5">
@@ -114,7 +115,7 @@ function ContextWindow({
           inputMode="numeric"
           value={text}
           disabled={busy}
-          aria-label="Context window in tokens"
+          aria-label={t("Context window in tokens")}
           onChange={(e) => {
             setText(e.target.value);
             setDirty(true);
@@ -133,7 +134,7 @@ function ContextWindow({
             title={
               byDefault
                 ? `Back to ${byDefault.toLocaleString()}, ${fallback && byDefault === fallback ? "the default from Settings" : "what the model says"}`
-                : "Back to what the model says"
+                : t("Back to what the model says")
             }
             onClick={() => {
               setDirty(false);
@@ -141,12 +142,12 @@ function ContextWindow({
             }}
             className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-raised disabled:opacity-50"
           >
-            Reset
+            {t("Reset")}
           </button>
         ) : null}
       </div>
       <p className="mt-1.5 text-[11px] text-fg-faint">
-        What the server holds for one chat. Applies to every chat on this model.
+        {t("What the server holds for one chat. Applies to every chat on this model.")}
       </p>
     </div>
   );
@@ -207,7 +208,7 @@ export function ContextPill({
   // ring and a dash say so; 0% claimed the summary and the recent turns weighed nothing.
   const known = usage.percent !== null && usage.tokens !== null;
   const pct = usage.percent ?? 0;
-  const t = tone(pct);
+  const look = tone(pct);
   const auto = cfg.state.autoCompactionEnabled !== false;
 
   const compactNow = async () => {
@@ -262,36 +263,36 @@ export function ContextPill({
         ref={pill}
         type="button"
         onClick={() => setOpen(!open)}
-        title={known ? `Context ${pct.toFixed(1)}% full` : "Context: counted again at the next reply"}
+        title={known ? `Context ${pct.toFixed(1)}% full` : t("Context: counted again at the next reply")}
         className={`flex items-center gap-1.5 rounded px-2 py-1 ${
           open ? "bg-raised" : "hover:bg-raised"
         }`}
       >
-        <Donut pct={pct} color={t.stroke} />
-        <span className={`tabular-nums ${known ? t.text : "text-fg-subtle"}`}>{known ? `${pct.toFixed(0)}%` : "–"}</span>
+        <Donut pct={pct} color={look.stroke} />
+        <span className={`tabular-nums ${known ? look.text : "text-fg-subtle"}`}>{known ? `${pct.toFixed(0)}%` : "–"}</span>
       </button>
 
       {open && (
         <div style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           <div className="flex items-baseline justify-between">
-            <p className="text-sm text-fg-muted">Context</p>
-            <p className={`text-sm tabular-nums ${known ? t.text : "text-fg-subtle"}`}>{known ? `${pct.toFixed(1)}% full` : "just compacted"}</p>
+            <p className="text-sm text-fg-muted">{t("Context")}</p>
+            <p className={`text-sm tabular-nums ${known ? look.text : "text-fg-subtle"}`}>{known ? `${pct.toFixed(1)}% full` : t("just compacted")}</p>
           </div>
 
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
             <div
-              className={`h-full rounded-full transition-all duration-500 ${t.bar}`}
+              className={`h-full rounded-full transition-all duration-500 ${look.bar}`}
               style={{ width: `${Math.min(100, pct)}%` }}
             />
           </div>
           <p className="mt-1.5 text-[11px] tabular-nums text-fg-subtle">
             {usage.tokens !== null ? (
               <>
-                {usage.tokens.toLocaleString()} of {usage.contextWindow.toLocaleString()} tokens ·{" "}
-                {Math.max(0, usage.contextWindow - usage.tokens).toLocaleString()} left
+                {usage.tokens.toLocaleString()} {t("of")} {usage.contextWindow.toLocaleString()} {t("tokens ·")}{" "}
+                {Math.max(0, usage.contextWindow - usage.tokens).toLocaleString()} {t("left")}
               </>
             ) : (
-              <>Counted again with the next reply · {usage.contextWindow.toLocaleString()} tokens in all</>
+              <>{t("Counted again with the next reply ·")} {usage.contextWindow.toLocaleString()} {t("tokens in all")}</>
             )}
           </p>
 
@@ -299,7 +300,7 @@ export function ContextPill({
 
           {cfg.contextLimitSupported === false ? (
             <p className="rounded-lg bg-raised/40 px-2 py-2 text-[11px] text-fg-faint">
-              {cfg.contextLimitNote ?? "The context window cannot be changed here."}
+              {cfg.contextLimitNote ?? t("The context window cannot be changed here.")}
             </p>
           ) : (
             <ContextWindow cfg={cfg} onChanged={onChanged} onError={(e) => setNote({ text: e.message, error: true })} />
@@ -314,8 +315,8 @@ export function ContextPill({
             className="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left hover:bg-raised disabled:opacity-50"
           >
             <div className="min-w-0 flex-1">
-              <p className="text-sm text-fg">Auto-compact</p>
-              <p className="text-[11px] text-fg-subtle">Summarise automatically before it fills</p>
+              <p className="text-sm text-fg">{t("Auto-compact")}</p>
+              <p className="text-[11px] text-fg-subtle">{t("Summarise automatically before it fills")}</p>
             </div>
             <span
               className={`relative h-5 w-9 shrink-0 rounded-full transition ${
@@ -340,8 +341,7 @@ export function ContextPill({
                 disabled={busy !== null}
               />
               <p className="mt-1.5 text-[11px] text-fg-faint">
-                Kept word for word; only what is older is summarised. This is where a compaction
-                lands, before the summary is added.
+                {t("Kept word for word; only what is older is summarised. This is where a compaction lands, before the summary is added.")}
               </p>
             </div>
           )}
@@ -353,8 +353,8 @@ export function ContextPill({
             className="mt-1 flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left hover:bg-raised disabled:opacity-50"
           >
             <div className="min-w-0 flex-1">
-              <p className="text-sm text-fg">Compact now</p>
-              <p className="text-[11px] text-fg-subtle">Summarise the conversation so far</p>
+              <p className="text-sm text-fg">{t("Compact now")}</p>
+              <p className="text-[11px] text-fg-subtle">{t("Summarise the conversation so far")}</p>
             </div>
             {busy === "compact" ? (
               <LuRefreshCw className="h-4 w-4 shrink-0 animate-spin text-fg-muted" />

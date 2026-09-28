@@ -21,6 +21,7 @@ import { VOICE_RATES } from "./VoiceSettings";
 import { describe, matches, useKeyLabels, useKeybindings } from "../keybindings";
 import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
+import { t } from "../i18n";
 
 /** How much of the last reply Repeat keeps: two minutes is about 11 MB of samples. */
 const REPEAT_SECONDS = 120;
@@ -644,9 +645,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         ptt={ptt} onPtt={value => { void choosePtt(value); }} holding={holding} onHold={hold} />, stageTarget,
     )}
     <div className="relative flex items-center gap-1">
-      <button type="button" className="prompt-action" aria-label="Profile voice latency" title="Profile voice latency" aria-pressed={profileOpen} onClick={()=>{setProfileOpen(v=>!v);if(profileOpen)profiler.current!.close('disabled');}}><LuGauge/></button>
+      <button type="button" className="prompt-action" aria-label={t("Profile voice latency")} title={t("Profile voice latency")} aria-pressed={profileOpen} onClick={()=>{setProfileOpen(v=>!v);if(profileOpen)profiler.current!.close('disabled');}}><LuGauge/></button>
       {error && !enabled && !starting && <p role="alert" className="absolute bottom-full right-0 mb-3 w-64 rounded-xl border border-line bg-surface p-3 text-xs text-danger shadow-pop">{error}</p>}
-      <button ref={startButton} type="button" onClick={() => { void start(); }} aria-label="Turn on hands-free voice" title={`Start voice conversation${bindings["voice.toggle"] ? ` (${describe(bindings["voice.toggle"], layout)})` : ""}`} className="prompt-action">
+      <button ref={startButton} type="button" onClick={() => { void start(); }} aria-label={t("Turn on hands-free voice")} title={`Start voice conversation${bindings["voice.toggle"] ? ` (${describe(bindings["voice.toggle"], layout)})` : ""}`} className="prompt-action">
         {starting ? <LuLoaderCircle aria-hidden className="animate-spin" /> : <LuAudioLines aria-hidden />}
       </button>
     </div>

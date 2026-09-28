@@ -4,6 +4,7 @@ import { gitApi, type Branch } from "../../git-api";
 import { confirmDialog } from "../ConfirmDialog";
 import { ago, ErrorNote, IconButton, Quiet, SectionHead, TextButton } from "./bits";
 import { useGit } from "./context";
+import { t } from "../../i18n";
 
 /** The branches here and on the remotes: switched to, made, deleted. */
 export function Branches() {
@@ -52,7 +53,7 @@ export function Branches() {
   };
 
   if (error) return <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>;
-  if (!list) return <Quiet>Loading…</Quiet>;
+  if (!list) return <Quiet>{t("Loading…")}</Quiet>;
   const match = (b: Branch) => !filter || b.name.toLowerCase().includes(filter.toLowerCase());
   const local = list.filter((b) => !b.remote && match(b));
   const remote = list.filter((b) => b.remote && match(b));
@@ -65,25 +66,25 @@ export function Branches() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={`New branch from ${repo.branch ?? "here"}`}
-          aria-label="Name of the new branch"
+          aria-label={t("Name of the new branch")}
           spellCheck={false}
           className="min-w-0 flex-1 rounded border border-line bg-canvas px-1.5 py-0.5 font-mono text-xs text-fg outline-none focus:border-accent/60"
         />
         <TextButton type="submit" primary disabled={!name.trim() || !!busy}>
-          Create
+          {t("Create")}
         </TextButton>
       </form>
       {list.length > 8 && (
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter"
-          aria-label="Filter the branches"
+          placeholder={t("Filter")}
+          aria-label={t("Filter the branches")}
           className="mx-2 my-1.5 shrink-0 rounded border border-line bg-canvas px-1.5 py-0.5 text-xs text-fg outline-none focus:border-accent/60"
         />
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <SectionHead title="Here" count={local.length} />
+        <SectionHead title={t("Here")} count={local.length} />
         {local.map((b) => (
           <BranchRow key={b.name} branch={b} onSwitch={() => void act(`Switching to ${b.name}`, () => gitApi.switch(id, b.name))} onDelete={() => void remove(b)} />
         ))}
@@ -96,7 +97,7 @@ export function Branches() {
               className="sticky top-0 flex w-full items-center gap-1 border-b border-line/60 bg-surface/95 px-3 py-1 text-left text-[11px] font-medium uppercase tracking-wide text-fg-subtle"
             >
               {remotesOpen || filter ? <LuChevronDown aria-hidden className="h-3 w-3" /> : <LuChevronRight aria-hidden className="h-3 w-3" />}
-              On the remote
+              {t("On the remote")}
               <span className="rounded-full bg-fg/8 px-1.5 text-[10px] normal-case">{remote.length}</span>
             </button>
             {(remotesOpen || filter) &&
@@ -122,11 +123,11 @@ function BranchRow({ branch: b, onSwitch, onDelete }: { branch: Branch; onSwitch
         type="button"
         onClick={onSwitch}
         disabled={b.current || !!busy}
-        title={b.current ? "Checked out" : b.remote ? `Check out ${b.name}, as a local branch following it` : `Switch to ${b.name}`}
+        title={b.current ? t("Checked out") : b.remote ? `Check out ${b.name}, as a local branch following it` : `Switch to ${b.name}`}
         className="flex min-w-0 flex-1 flex-col gap-0.5 py-1 text-left disabled:cursor-default"
       >
         <span className="flex min-w-0 items-center gap-1">
-          {b.current ? <LuCheck aria-label="Checked out" className="h-3 w-3 shrink-0 text-accent" /> : <span className="w-3 shrink-0" />}
+          {b.current ? <LuCheck aria-label={t("Checked out")} className="h-3 w-3 shrink-0 text-accent" /> : <span className="w-3 shrink-0" />}
           <span className={`min-w-0 truncate font-mono text-xs ${b.current ? "font-semibold text-fg" : "text-fg"}`}>{b.name}</span>
           {(b.ahead > 0 || b.behind > 0) && (
             <span className="shrink-0 font-mono text-[10px]">
@@ -135,8 +136,8 @@ function BranchRow({ branch: b, onSwitch, onDelete }: { branch: Branch; onSwitch
             </span>
           )}
           {b.gone && (
-            <span className="shrink-0 rounded px-1 text-[10px] text-warn ring-1 ring-inset ring-warn/30" title="Its branch on the remote was deleted">
-              gone
+            <span className="shrink-0 rounded px-1 text-[10px] text-warn ring-1 ring-inset ring-warn/30" title={t("Its branch on the remote was deleted")}>
+              {t("gone")}
             </span>
           )}
         </span>

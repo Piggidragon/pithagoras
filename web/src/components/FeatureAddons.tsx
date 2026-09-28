@@ -5,6 +5,7 @@ import { api, type AvailableModel, type Features, type ManagedUnderstory, type S
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { SwitchRow, inputCls } from "./SettingsUi";
+import { t } from "../i18n";
 
 /**
  * The opt-in features: off in a fresh install, one switch each. Both are
@@ -95,21 +96,20 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
   return (
     <div className="mt-4 space-y-3">
       <div className="rounded-xl border border-line bg-raised/40 p-3">
-        <Header Icon={LuBot} title="Subagents">
-          A <code>subagent</code> tool: the agent hands a self-contained task to a second agent with a context of its own, and gets its
-          answer back. You can watch it beside the chat and give it instructions while it works.
+        <Header Icon={LuBot} title={t("Subagents")}>
+          A <code>subagent</code> {t("tool: the agent hands a self-contained task to a second agent with a context of its own, and gets its answer back. You can watch it beside the chat and give it instructions while it works.")}
         </Header>
       </div>
       <SwitchRow
-        title="Subagent tool"
-        detail={s.enabled ? `Installed as a pi package (${s.source}).` : "Off: the agent has no subagent tool."}
+        title={t("Subagent tool")}
+        detail={s.enabled ? `Installed as a pi package (${s.source}).` : t("Off: the agent has no subagent tool.")}
         on={s.enabled}
         onChange={(enabled) => void change({ enabled })}
         disabled={busy || (!s.available && !s.installed)}
-        note={!s.available && !s.installed ? "This install does not carry the subagent tool." : undefined}
+        note={!s.available && !s.installed ? t("This install does not carry the subagent tool.") : undefined}
       />
       <fieldset className="rounded-xl border border-line bg-raised/40 p-3" disabled={busy}>
-        <legend className="px-1 text-xs text-fg-muted">How a subagent runs against the agent</legend>
+        <legend className="px-1 text-xs text-fg-muted">{t("How a subagent runs against the agent")}</legend>
         <div className="space-y-2">
           {MODES.map((m) => (
             <label key={m.value} className="flex cursor-pointer items-start gap-2.5 rounded-lg p-1.5 hover:bg-fg/5">
@@ -130,13 +130,12 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
         </div>
       </fieldset>
       <div className="rounded-xl border border-line bg-raised/40 p-3 text-sm text-fg">
-        Model
+        {t("Model")}
         <span className="mt-0.5 block text-xs text-fg-faint">
-          What a subagent runs on unless its chat says otherwise (in the chat's model menu). The chat's own is the one already
-          loaded, so no second model is started.
+          {t("What a subagent runs on unless its chat says otherwise (in the chat's model menu). The chat's own is the one already loaded, so no second model is started.")}
         </span>
         <Select
-          aria-label="Subagent model"
+          aria-label={t("Subagent model")}
           size="sm"
           className="mt-2 w-full"
           value={s.model}
@@ -151,16 +150,15 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
       </div>
       <div className="flex items-start gap-3 rounded-xl border border-line bg-raised/40 p-3">
         <div className="min-w-0 flex-1 text-sm text-fg">
-          Subagents at once
+          {t("Subagents at once")}
           <span className="mt-0.5 block text-xs text-fg-faint">
-            Across every chat. One asked for beyond it waits for a free slot — its call waits in interrupt mode, and in the background it
-            starts once another has finished. Each one is a model running.
+            {t("Across every chat. One asked for beyond it waits for a free slot — its call waits in interrupt mode, and in the background it starts once another has finished. Each one is a model running.")}
           </span>
         </div>
-        <div role="group" aria-label="Subagents at once" className="flex shrink-0 items-center gap-1">
+        <div role="group" aria-label={t("Subagents at once")} className="flex shrink-0 items-center gap-1">
           <button
             type="button"
-            aria-label="Fewer at once"
+            aria-label={t("Fewer at once")}
             disabled={busy || s.maxParallel <= 1}
             onClick={() => void change({ maxParallel: s.maxParallel - 1 })}
             className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
@@ -170,7 +168,7 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
           <output aria-live="polite" className="w-6 text-center text-sm tabular-nums text-fg">{s.maxParallel}</output>
           <button
             type="button"
-            aria-label="More at once"
+            aria-label={t("More at once")}
             disabled={busy || s.maxParallel >= (s.maxParallelLimit ?? MAX_PARALLEL)}
             onClick={() => void change({ maxParallel: s.maxParallel + 1 })}
             className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
@@ -181,7 +179,7 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
       </div>
       {busy && (
         <p className="flex items-center gap-2 text-xs text-fg-subtle">
-          <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> Applying…
+          <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
         </p>
       )}
       {note && !busy && <p role="status" className="text-xs text-fg-muted">{note}</p>}
@@ -350,29 +348,28 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
   return (
     <div className="mt-4 space-y-3">
       <div className="rounded-xl border border-line bg-raised/40 p-3">
-        <Header Icon={LuBrain} title="Memory: Understory">
-          A memory that grows: plain markdown on disk, cross-linked and kept tidy, which the agent looks things up in and adds to through
-          its <code>memory_*</code> tools. The portal can run it for you, or point the agent at one you run yourself.
+        <Header Icon={LuBrain} title={t("Memory: Understory")}>
+          {t("A memory that grows: plain markdown on disk, cross-linked and kept tidy, which the agent looks things up in and adds to through its")} <code>memory_*</code> {t("tools. The portal can run it for you, or point the agent at one you run yourself.")}
         </Header>
       </div>
 
       {m.available && (
-        <section aria-label="Understory run here" className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
+        <section aria-label={t("Understory run here")} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm text-fg">Run it here</p>
+            <p className="text-sm text-fg">{t("Run it here")}</p>
             {runsHere && (
               <span className={`inline-flex items-center gap-1 text-[11px] ${m.container === "running" ? "text-ok" : "text-fg-subtle"}`}>
-                <LuCheck className="h-3 w-3" /> {m.container === "running" ? "running" : "stopped"}
+                <LuCheck className="h-3 w-3" /> {m.container === "running" ? t("running") : t("stopped")}
               </span>
             )}
           </div>
           <p className="text-[11px] text-fg-faint">
-            In a container of its own beside the portal, with its memory in a volume that stays when it is removed or made again.
+            {t("In a container of its own beside the portal, with its memory in a volume that stays when it is removed or made again.")}
           </p>
 
           <fieldset disabled={busy !== null} className="space-y-3">
-            <legend className="text-xs text-fg-muted">The model that keeps the memory</legend>
-            <div role="radiogroup" aria-label="Where the model comes from" className="flex gap-1 rounded-lg bg-fg/5 p-0.5 text-xs">
+            <legend className="text-xs text-fg-muted">{t("The model that keeps the memory")}</legend>
+            <div role="radiogroup" aria-label={t("Where the model comes from")} className="flex gap-1 rounded-lg bg-fg/5 p-0.5 text-xs">
               {(["auto", "provider", "custom"] as const).map((src) => (
                 <button
                   key={src}
@@ -383,23 +380,21 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                   onClick={() => edit({ source: src })}
                   className={`flex-1 rounded-md px-2 py-1 transition disabled:opacity-40 ${form.source === src ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"}`}
                 >
-                  {src === "auto" ? "The chat's model" : src === "provider" ? "A provider set up here" : "An address of its own"}
+                  {src === "auto" ? t("The chat's model") : src === "provider" ? t("A provider set up here") : t("An address of its own")}
                 </button>
               ))}
             </div>
             {form.source === "auto" ? (
               <p className="text-[11px] text-fg-faint">
-                The model the chat asking is on — the one already loaded, so no second model is started for the memory. When no chat
-                is asking, as when it tidies up, the one that asked last; before any has, the default model for new chats. It needs
-                a model with an OpenAI-compatible API, as local servers and OpenRouter have.
-                {!m.autoPossible && " Not while the portal serves its own TLS: Understory cannot reach it through that."}
+                {t("The model the chat asking is on — the one already loaded, so no second model is started for the memory. When no chat is asking, as when it tidies up, the one that asked last; before any has, the default model for new chats. It needs a model with an OpenAI-compatible API, as local servers and OpenRouter have.")}
+                {!m.autoPossible && t(" Not while the portal serves its own TLS: Understory cannot reach it through that.")}
               </p>
             ) : form.source === "provider" ? (
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="text-xs text-fg-muted">
-                  Provider
+                  {t("Provider")}
                   <Select
-                    aria-label="Provider"
+                    aria-label={t("Provider")}
                     size="sm"
                     className="mt-1 w-full"
                     value={form.provider}
@@ -408,9 +403,9 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                   />
                 </div>
                 <div className="text-xs text-fg-muted">
-                  Model
+                  {t("Model")}
                   <Select
-                    aria-label="Model"
+                    aria-label={t("Model")}
                     size="sm"
                     className="mt-1 w-full"
                     value={form.providerModel}
@@ -418,12 +413,12 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                     options={providerModels.map((id) => ({ value: id, label: id }))}
                   />
                 </div>
-                <p className="text-[11px] text-fg-faint sm:col-span-2">Its address and key are taken from the provider each time Understory is started.</p>
+                <p className="text-[11px] text-fg-faint sm:col-span-2">{t("Its address and key are taken from the provider each time Understory is started.")}</p>
               </div>
             ) : (
               <div className="grid gap-2 sm:grid-cols-2">
                 <label className="text-xs text-fg-muted sm:col-span-2">
-                  API address
+                  {t("API address")}
                   <input
                     value={form.baseUrl}
                     onChange={(e) => edit({ baseUrl: e.target.value })}
@@ -433,30 +428,30 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                   />
                 </label>
                 <label className="text-xs text-fg-muted">
-                  API key
+                  {t("API key")}
                   <input
                     type="password"
                     value={form.apiKey}
                     onChange={(e) => edit({ apiKey: e.target.value })}
-                    placeholder={m.config.llm?.source === "custom" && m.config.llm.hasKey ? "saved — type to replace" : "none needed for a local server"}
+                    placeholder={m.config.llm?.source === "custom" && m.config.llm.hasKey ? t("saved — type to replace") : t("none needed for a local server")}
                     autoComplete="off"
                     className={`${inputCls} mt-1 text-xs`}
                   />
                 </label>
                 <label className="text-xs text-fg-muted">
-                  Model
+                  {t("Model")}
                   <input
                     value={form.model}
                     onChange={(e) => edit({ model: e.target.value })}
-                    placeholder="deepseek-chat"
+                    placeholder={t("deepseek-chat")}
                     spellCheck={false}
                     className={`${inputCls} mt-1 font-mono text-xs`}
                   />
                 </label>
                 <div className="text-xs text-fg-muted">
-                  Format
+                  {t("Format")}
                   <Select<"openai" | "anthropic">
-                    aria-label="Format"
+                    aria-label={t("Format")}
                     size="sm"
                     className="mt-1 w-full"
                     value={form.format}
@@ -471,8 +466,8 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
             )}
 
             <div className="text-xs text-fg-muted">
-              Tidying up
-              <div role="radiogroup" aria-label="Tidying up" className="mt-1 flex gap-1 rounded-lg bg-fg/5 p-0.5">
+              {t("Tidying up")}
+              <div role="radiogroup" aria-label={t("Tidying up")} className="mt-1 flex gap-1 rounded-lg bg-fg/5 p-0.5">
                 {DREAM_MODES.map((d) => (
                   <button
                     key={d.value}
@@ -488,20 +483,20 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
               </div>
               {form.dream === "time" && (
                 <label className="mt-2 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
-                  Every day at
+                  {t("Every day at")}
                   <input
                     type="time"
                     value={form.dreamAt}
                     onChange={(e) => edit({ dreamAt: e.target.value })}
-                    aria-label="Tidy up at"
+                    aria-label={t("Tidy up at")}
                     className="rounded-lg border border-line bg-raised/60 px-2 py-1 text-sm tabular-nums outline-none focus:border-accent/60"
                   />
-                  <span className="text-[11px] text-fg-faint">the portal's time ({m.timeZone})</span>
+                  <span className="text-[11px] text-fg-faint">{t("the portal's time (")}{m.timeZone})</span>
                 </label>
               )}
               {form.dream === "interval" && (
                 <Select
-                  aria-label="How often"
+                  aria-label={t("How often")}
                   size="sm"
                   className="mt-2 w-full"
                   value={form.dreamInterval}
@@ -510,12 +505,11 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                 />
               )}
               <p className="mt-1 text-[11px] text-fg-faint">
-                Understory's own pass over the memory — merging, linking and pruning notes with the model above, which costs tokens each
-                time, and does nothing when the memory is already tidy.{" "}
+                {t("Understory's own pass over the memory — merging, linking and pruning notes with the model above, which costs tokens each time, and does nothing when the memory is already tidy.")}{" "}
                 {form.dream === "time"
-                  ? "At a time of day the portal starts it, once a day while Understory runs; Understory's own timer stays off."
+                  ? t("At a time of day the portal starts it, once a day while Understory runs; Understory's own timer stays off.")
                   : form.dream === "interval"
-                    ? "An interval is Understory's own timer: it counts from when Understory starts, so saving here begins the count anew."
+                    ? t("An interval is Understory's own timer: it counts from when Understory starts, so saving here begins the count anew.")
                     : ""}
               </p>
               {(runsHere || m.lastDream) && (
@@ -533,7 +527,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                       onClick={() => void act("Tidying up — this takes as long as the model needs…", () => api.dreamUnderstory())}
                       className="text-accent hover:underline disabled:opacity-40"
                     >
-                      Tidy up now
+                      {t("Tidy up now")}
                     </button>
                   )}
                 </p>
@@ -547,14 +541,14 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                 onClick={() => void saveSettings()}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
               >
-                {runsHere ? "Save and restart Understory" : "Save"}
+                {runsHere ? t("Save and restart Understory") : t("Save")}
               </button>
             )}
           </fieldset>
 
           {foreign && (
             <p role="alert" className="text-[11px] text-warn">
-              A container named pithagoras-understory is there that the portal did not make. It is left alone: rename or remove it to run Understory here.
+              {t("A container named pithagoras-understory is there that the portal did not make. It is left alone: rename or remove it to run Understory here.")}
             </p>
           )}
           <div className="flex flex-wrap gap-2 border-t border-line pt-3">
@@ -562,11 +556,11 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
               <button
                 type="button"
                 disabled={busy !== null || !saved || foreign}
-                title={!saved ? "Save the settings first" : undefined}
+                title={!saved ? t("Save the settings first") : undefined}
                 onClick={() => void act(INSTALLING, () => api.installUnderstory())}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
               >
-                <LuDownload className="h-3.5 w-3.5" /> Install and use as the agent's memory
+                <LuDownload className="h-3.5 w-3.5" /> {t("Install and use as the agent's memory")}
               </button>
             ) : (
               <>
@@ -576,7 +570,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                   onClick={() => void act(m.container === "running" ? "Stopping…" : "Starting…", () => api.understoryAction(m.container === "running" ? "stop" : "start"))}
                   className="rounded-lg bg-fg/5 px-3 py-1.5 text-xs text-fg-muted transition hover:bg-fg/10"
                 >
-                  {m.container === "running" ? "Stop" : "Start"}
+                  {m.container === "running" ? t("Stop") : t("Start")}
                 </button>
                 <button
                   type="button"
@@ -584,7 +578,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                   onClick={() => void act("Removing…", () => api.removeUnderstory())}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-3 py-1.5 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger"
                 >
-                  <LuTrash2 className="h-3.5 w-3.5" /> Remove
+                  <LuTrash2 className="h-3.5 w-3.5" /> {t("Remove")}
                 </button>
                 <button
                   type="button"
@@ -601,48 +595,48 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                   }}
                   className="rounded-lg px-3 py-1.5 text-xs text-fg-subtle transition hover:bg-danger/10 hover:text-danger"
                 >
-                  Remove and forget the memory
+                  {t("Remove and forget the memory")}
                 </button>
               </>
             )}
           </div>
           {m.pulling.active && <p className="font-mono text-[11px] text-fg-faint">{m.pulling.line}</p>}
           {m.pulling.error && <p className="text-[11px] text-warn">{m.pulling.error}</p>}
-          {!runsHere && <p className="text-[11px] text-fg-faint">Installing downloads its image the first time.</p>}
+          {!runsHere && <p className="text-[11px] text-fg-faint">{t("Installing downloads its image the first time.")}</p>}
         </section>
       )}
 
       {!runsHere && (
         <details open={!m.available} className="rounded-xl border border-line p-3">
-          <summary className="cursor-pointer text-xs text-fg-muted">{m.available ? "Or use one you run yourself" : "Use one you run yourself"}</summary>
+          <summary className="cursor-pointer text-xs text-fg-muted">{m.available ? t("Or use one you run yourself") : t("Use one you run yourself")}</summary>
           <div className="mt-3 space-y-2">
-            {!m.available && <p className="text-[11px] text-fg-faint">The portal cannot reach Docker here, so it cannot run Understory itself.</p>}
+            {!m.available && <p className="text-[11px] text-fg-faint">{t("The portal cannot reach Docker here, so it cannot run Understory itself.")}</p>}
             <label className="block text-xs text-fg-muted">
-              Understory's MCP address
+              {t("Understory's MCP address")}
               <input
                 value={address}
                 onChange={(e) => setUrl(e.target.value)}
                 spellCheck={false}
-                aria-label="Understory's MCP address"
+                aria-label={t("Understory's MCP address")}
                 className={`${inputCls} mt-1.5 font-mono text-xs`}
               />
             </label>
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
               {u.reachable ? (
                 <span className="inline-flex items-center gap-1 text-ok">
-                  <LuCheck className="h-3 w-3" /> Something answers there
+                  <LuCheck className="h-3 w-3" /> {t("Something answers there")}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 text-warn">
-                  <LuTriangleAlert className="h-3 w-3" /> Nothing answers at {origin ?? u.url} — start Understory first
+                  <LuTriangleAlert className="h-3 w-3" /> {t("Nothing answers at")} {origin ?? u.url} {t("— start Understory first")}
                 </span>
               )}
               <span className="text-fg-faint">
-                {u.tokenSet ? "A token is set and sent." : "No token (MEMORY_UNDERSTORY_AUTH_TOKEN) — only needed when Understory has an AUTH_TOKEN."}
+                {u.tokenSet ? t("A token is set and sent.") : t("No token (MEMORY_UNDERSTORY_AUTH_TOKEN) — only needed when Understory has an AUTH_TOKEN.")}
               </span>
             </p>
             <p className="text-[11px] text-fg-faint">
-              Its model and how often it tidies up are set in its own environment (<code>LLM_*</code>, <code>DREAM_INTERVAL</code>):
+              {t("Its model and how often it tidies up are set in its own environment (")}<code>LLM_*</code>, <code>DREAM_INTERVAL</code>):
             </p>
             <pre className="overflow-x-auto rounded-lg bg-fg/5 p-2 font-mono text-[11px] text-fg-muted">{COMPOSE}</pre>
           </div>
@@ -650,10 +644,10 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
       )}
 
       <SwitchRow
-        title="Use Understory as the agent's memory"
+        title={t("Use Understory as the agent's memory")}
         detail={
           u.enabled
-            ? "On: MEMORY.md is not read while it is. The file is kept, and read again once this is off."
+            ? t("On: MEMORY.md is not read while it is. The file is kept, and read again once this is off.")
             : `Off: the agent's memory is MEMORY.md.${u.adapterInstalled ? "" : " Switching on also installs pi-mcp-adapter, which makes MCP servers into tools."}`
         }
         on={u.enabled}
@@ -663,12 +657,12 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
       />
       {u.enabled && !runsHere && url !== null && url.trim() !== u.url && (
         <button type="button" disabled={busy !== null} onClick={() => void act("Switching…", () => api.setUnderstoryFeature({ enabled: true, url: address.trim() }))} className="text-xs text-accent hover:underline">
-          Use the new address
+          {t("Use the new address")}
         </button>
       )}
       {u.enabled && (
         <Link to="/memory" className="inline-block text-xs text-accent hover:underline">
-          Read the memory
+          {t("Read the memory")}
         </Link>
       )}
       {busy && (
@@ -684,7 +678,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
 function Loading() {
   return (
     <p className="mt-4 flex items-center gap-2 text-sm text-fg-subtle">
-      <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading…
+      <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}
     </p>
   );
 }

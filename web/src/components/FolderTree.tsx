@@ -6,6 +6,7 @@ import type { Folder, FolderSort } from "../session-folders";
 import type { Grouping } from "../use-session-folders";
 import { Select } from "./Select";
 import { StatusDot } from "./StatusDot";
+import { t } from "../i18n";
 
 /** How far a grip is pulled before it is a drag rather than a press. */
 const DRAG_SLOP = 4;
@@ -160,7 +161,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
               {onMove && (
                 <span
                   aria-hidden
-                  title="Drag to move"
+                  title={t("Drag to move")}
                   onPointerDown={(e) => carry(f, e)}
                   className="folder-grip -ml-0.5 cursor-grab touch-none rounded p-0.5 text-fg-faint opacity-0 transition-opacity hover:text-fg-muted active:cursor-grabbing group-hover/folder:opacity-100 group-focus-within/folder:opacity-100 [@media(hover:none)]:opacity-100"
                 >
@@ -238,7 +239,7 @@ export function FolderControls({
       {byFolder && (
         <Select
           size="sm"
-          aria-label="Order of the folders"
+          aria-label={t("Order of the folders")}
           value={sort}
           onChange={onSort}
           options={SORTS}
@@ -248,8 +249,8 @@ export function FolderControls({
       <button
         type="button"
         onClick={() => onGrouping(byFolder ? "list" : "folders")}
-        aria-label={byFolder ? "List the chats together" : "Group the chats by folder"}
-        title={byFolder ? "List the chats together" : "Group the chats by folder"}
+        aria-label={byFolder ? t("List the chats together") : t("Group the chats by folder")}
+        title={byFolder ? t("List the chats together") : t("Group the chats by folder")}
         className="shrink-0 rounded p-1 text-fg-faint hover:bg-fg/5 hover:text-fg-muted"
       >
         {byFolder ? <LuList className="h-3.5 w-3.5" /> : <LuFolderTree className="h-3.5 w-3.5" />}

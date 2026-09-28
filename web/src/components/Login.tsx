@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import { t } from "../i18n";
 
 export function Login({ onSuccess }: { onSuccess: () => void }) {
   const [password, setPassword] = useState("");
@@ -25,9 +26,9 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
       <form onSubmit={submit} className="w-full max-w-[19rem]">
         <div className="mb-6 flex flex-col items-center text-center">
           <img src="/icon-512.png" alt="" className="h-16 w-16 object-contain p-3" draggable={false} />
-          <h1 className="mt-3 text-base font-semibold tracking-tight text-fg">Pithagoras</h1>
+          <h1 className="mt-3 text-base font-semibold tracking-tight text-fg">{t("Pithagoras")}</h1>
           <p className="mt-1 text-xs text-fg-subtle">
-            Give it a task, close the browser, come back later.
+            {t("Give it a task, close the browser, come back later.")}
           </p>
         </div>
 
@@ -36,7 +37,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
+          placeholder={t("Password")}
           className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-fg outline-none transition placeholder:text-fg-faint focus:border-accent/50 focus:ring-4 focus:ring-accent/10"
         />
         {error && <p className="mt-2 text-xs text-danger">{error}</p>}
@@ -46,7 +47,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
           disabled={busy || !password}
           className="mt-3 w-full rounded-xl bg-accent px-3 py-2.5 text-sm font-medium text-accent-fg transition hover:opacity-90 disabled:opacity-40"
         >
-          {busy ? "Checking…" : "Sign in"}
+          {busy ? t("Checking…") : t("Sign in")}
         </button>
       </form>
     </div>

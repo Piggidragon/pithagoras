@@ -3,6 +3,7 @@ import type { PortalEvent } from '../api';
 import { useFollowBottom } from '../use-follow-bottom';
 import { SHELL_TOOL, unwrap } from '../tool-activity';
 import { stripAnsi, toolOutputText } from '../transcript';
+import { t } from "../i18n";
 
 type Run = { id: string; command: string; output: string; running: boolean; error: boolean; interrupted?: boolean };
 
@@ -111,8 +112,8 @@ export function VoiceTerminal({ events, limit, maxOutput, ended, focus, onFocuse
     // up to show the command read as leaving the end.
     release.current = window.setTimeout(() => { focused.current = null; settle(); }, 1200);
   }, [focus?.id, focus?.at]);
-  return <div ref={attach} onScroll={onScroll} className="voice-terminal-output" aria-label="Agent terminal output">
-    {!runs.length && <p className="voice-terminal-empty">No commands yet. What the agent runs shows up here as it runs.</p>}
+  return <div ref={attach} onScroll={onScroll} className="voice-terminal-output" aria-label={t("Agent terminal output")}>
+    {!runs.length && <p className="voice-terminal-empty">{t("No commands yet. What the agent runs shows up here as it runs.")}</p>}
     {runs.map(run => <TerminalRun key={run.id} {...run} />)}
   </div>;
 }
@@ -121,7 +122,7 @@ export function VoiceTerminal({ events, limit, maxOutput, ended, focus, onFocuse
 const TerminalRun = memo(function TerminalRun({ id, command, output, running, error, interrupted }: Run) {
   const shown = useMemo(() => stripAnsi(output), [output]);
   return <div data-run={id} className="voice-terminal-run">
-    <div className="voice-terminal-command"><span aria-hidden>$</span><code>{command}</code>{running && <i aria-label="Command running" />}{interrupted && <small>interrupted</small>}</div>
+    <div className="voice-terminal-command"><span aria-hidden>$</span><code>{command}</code>{running && <i aria-label={t("Command running")} />}{interrupted && <small>{t("interrupted")}</small>}</div>
     {shown && <pre className={error ? 'is-error' : ''}>{shown}</pre>}
   </div>;
 });

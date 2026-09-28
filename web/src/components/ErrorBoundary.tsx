@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { LuRotateCw, LuTriangleAlert } from "react-icons/lu";
+import { t } from "../i18n";
 
 /**
  * What a page that threw is replaced with, instead of the whole portal going
@@ -29,7 +30,7 @@ export class ErrorBoundary extends Component<{ resetKey: string; children: React
         <div className="grid h-11 w-11 place-items-center rounded-2xl bg-danger/10 text-danger">
           <LuTriangleAlert className="h-5 w-5" />
         </div>
-        <p className="text-sm text-fg">This page ran into a problem and could not be shown.</p>
+        <p className="text-sm text-fg">{t("This page ran into a problem and could not be shown.")}</p>
         <p className="max-w-md break-words font-mono text-[11px] text-fg-faint">{error.message}</p>
         <div className="mt-1 flex gap-2">
           <button
@@ -37,14 +38,14 @@ export class ErrorBoundary extends Component<{ resetKey: string; children: React
             onClick={() => this.setState({ error: null })}
             className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20"
           >
-            <LuRotateCw className="h-3.5 w-3.5" /> Try again
+            <LuRotateCw className="h-3.5 w-3.5" /> {t("Try again")}
           </button>
           <button
             type="button"
             onClick={() => window.location.reload()}
             className="rounded-lg px-3 py-1.5 text-sm text-fg-muted transition hover:bg-fg/5 hover:text-fg"
           >
-            Reload the portal
+            {t("Reload the portal")}
           </button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { LuMonitor, LuMoon, LuSun } from "react-icons/lu";
 import { useTheme, type Theme } from "../theme";
+import { t } from "../i18n";
 
 const OPTIONS: { value: Theme; icon: typeof LuSun; label: string }[] = [
   { value: "light", icon: LuSun, label: "Light" },
@@ -19,7 +20,7 @@ export function ThemeSwitcher() {
     <div
       className="flex shrink-0 items-center gap-0.5 rounded-lg bg-raised/60 p-0.5"
       role="radiogroup"
-      aria-label="Theme"
+      aria-label={t("Theme")}
     >
       {OPTIONS.map(({ value, icon: Icon, label }) => (
         <button

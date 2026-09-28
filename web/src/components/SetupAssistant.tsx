@@ -8,6 +8,7 @@ import { PackageCatalog } from "./PackageCatalog";
 import { KindIcon, ProviderEditor, StatusBadge, useInstalledPackages, useProviderStatus } from "./ProvidersPanel";
 import { Select } from "./Select";
 import { EffortPicker, ghostCls, primaryCls } from "./SettingsUi";
+import { t } from "../i18n";
 
 const DONE_KEY = "pithagoras.setup";
 
@@ -115,37 +116,37 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
 
   return (
     <Modal
-      title="Set up Pithagoras"
-      subtitle="Three steps. Everything here can be changed later in Settings."
+      title={t("Set up Pithagoras")}
+      subtitle={t("Three steps. Everything here can be changed later in Settings.")}
       onClose={() => { dismiss("skipped"); onClose(); }}
       footer={
         <div className="flex items-center gap-2">
           {step > 0 ? (
-            <button type="button" onClick={() => go(step - 1)} className={ghostCls}><LuArrowLeft className="h-3.5 w-3.5" /> Back</button>
+            <button type="button" onClick={() => go(step - 1)} className={ghostCls}><LuArrowLeft className="h-3.5 w-3.5" /> {t("Back")}</button>
           ) : (
-            <button type="button" onClick={() => { dismiss("skipped"); onClose(); }} className={ghostCls}>Skip for now</button>
+            <button type="button" onClick={() => { dismiss("skipped"); onClose(); }} className={ghostCls}>{t("Skip for now")}</button>
           )}
           <span className="ml-auto" />
           {step === 0 && (
-            <button type="button" disabled={!ready} onClick={() => go(1)} className={primaryCls} title={ready ? undefined : "Add a provider with at least one model first"}>
-              Next <LuArrowRight className="h-4 w-4" />
+            <button type="button" disabled={!ready} onClick={() => go(1)} className={primaryCls} title={ready ? undefined : t("Add a provider with at least one model first")}>
+              {t("Next")} <LuArrowRight className="h-4 w-4" />
             </button>
           )}
           {step === 1 && (
             <button type="button" disabled={saving || !settings.value} onClick={() => void saveModel()} className={primaryCls}>
-              {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : null} Next <LuArrowRight className="h-4 w-4" />
+              {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : null} {t("Next")} <LuArrowRight className="h-4 w-4" />
             </button>
           )}
           {step === 2 && (
             <>
-              <button type="button" onClick={() => finish(false)} className={ghostCls}>Done</button>
-              <button type="button" onClick={() => finish(true)} className={primaryCls}><LuRocket className="h-4 w-4" /> Start a chat</button>
+              <button type="button" onClick={() => finish(false)} className={ghostCls}>{t("Done")}</button>
+              <button type="button" onClick={() => finish(true)} className={primaryCls}><LuRocket className="h-4 w-4" /> {t("Start a chat")}</button>
             </>
           )}
         </div>
       }
     >
-      <ol className="setup-steps mb-5" aria-label="Steps">
+      <ol className="setup-steps mb-5" aria-label={t("Steps")}>
         {STEPS.map((s, i) => (
           <li key={s.title} className={`setup-step ${i < step ? "is-done" : i === step ? "is-current" : ""}`} aria-current={i === step ? "step" : undefined}>
             <span className="flex items-center gap-1">
@@ -166,8 +167,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
         {step === 0 && (
           <div className="mt-1">
             <p className="mb-4 text-sm text-fg-subtle">
-              A server on your network — llama.cpp, llama-swap, Ollama — or a hosted service with a key. Its models are
-              looked up as soon as it answers.
+              {t("A server on your network — llama.cpp, llama-swap, Ollama — or a hosted service with a key. Its models are looked up as soon as it answers.")}
             </p>
             {!providers.value ? (
               <div className="skeleton-group space-y-2"><div className="skeleton h-10 w-full" /><div className="skeleton h-24 w-full" /></div>
@@ -180,15 +180,15 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm text-fg">{p.label}</p>
                         <p className="truncate text-[11px] text-fg-faint">
-                          {p.endpoint ? `${p.models.length} model${p.models.length === 1 ? "" : "s"} · ${p.baseUrl}` : "Hosted — every model pi knows of from it"}
+                          {p.endpoint ? `${p.models.length} model${p.models.length === 1 ? "" : "s"} · ${p.baseUrl}` : t("Hosted — every model pi knows of from it")}
                         </p>
                       </div>
                       {p.endpoint && <StatusBadge status={status.of[p.id]} />}
                     </li>
                   ))}
                 </ul>
-                <button type="button" onClick={() => setAdding(true)} className={`${ghostCls} mt-2`}><LuPlus className="h-3.5 w-3.5" /> Add another</button>
-                {!ready && models.value && <p className="mt-2 text-xs text-warn">None of these offers a model yet — edit one in Settings → Providers, or add another.</p>}
+                <button type="button" onClick={() => setAdding(true)} className={`${ghostCls} mt-2`}><LuPlus className="h-3.5 w-3.5" /> {t("Add another")}</button>
+                {!ready && models.value && <p className="mt-2 text-xs text-warn">{t("None of these offers a model yet — edit one in Settings → Providers, or add another.")}</p>}
               </>
             ) : (
               <div className="rounded-xl border border-line bg-raised/30 p-4">
@@ -202,7 +202,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
                   onError={setError}
                 />
                 {configured.length > 0 && (
-                  <button type="button" onClick={() => setAdding(false)} className={`${ghostCls} mt-2`}>Keep what is set up</button>
+                  <button type="button" onClick={() => setAdding(false)} className={`${ghostCls} mt-2`}>{t("Keep what is set up")}</button>
                 )}
               </div>
             )}
@@ -211,15 +211,15 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
 
         {step === 1 && (
           <div className="mt-1 space-y-4">
-            <p className="text-sm text-fg-subtle">Each chat can switch under its chat box; this is only where they start.</p>
-            <Select className="w-full" aria-label="Model for new chats" value={current} options={modelOptions} onChange={setChoice} placeholder="Choose a model…" />
+            <p className="text-sm text-fg-subtle">{t("Each chat can switch under its chat box; this is only where they start.")}</p>
+            <Select className="w-full" aria-label={t("Model for new chats")} value={current} options={modelOptions} onChange={setChoice} placeholder={t("Choose a model…")} />
             {picked?.reasoning ? (
               <div className="float-in">
-                <p className="mb-1 text-xs text-fg-muted">How hard it thinks <span className="text-fg-faint">— more is slower, and usually better</span></p>
-                <EffortPicker label="Effort for new chats" value={level} inherited={settings.value?.defaults.thinkingLevel} onChange={setEffort} />
+                <p className="mb-1 text-xs text-fg-muted">{t("How hard it thinks")} <span className="text-fg-faint">{t("— more is slower, and usually better")}</span></p>
+                <EffortPicker label={t("Effort for new chats")} value={level} inherited={settings.value?.defaults.thinkingLevel} onChange={setEffort} />
               </div>
             ) : picked ? (
-              <p className="text-xs text-fg-faint">This model answers straight away, without a thinking phase.</p>
+              <p className="text-xs text-fg-faint">{t("This model answers straight away, without a thinking phase.")}</p>
             ) : null}
           </div>
         )}
@@ -227,8 +227,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
         {step === 2 && (
           <div className="mt-1">
             <p className="mb-4 text-sm text-fg-subtle">
-              pi reads, writes and runs commands on its own. Packages add more — searching the web, delegating to
-              helpers, other tools. These are the most used; Settings → Extensions has the rest.
+              {t("pi reads, writes and runs commands on its own. Packages add more — searching the web, delegating to helpers, other tools. These are the most used; Settings → Extensions has the rest.")}
             </p>
             <PackageCatalog installed={installed.names} onInstalled={() => void installed.reload()} onError={setError} limit={5} searchable={false} />
           </div>

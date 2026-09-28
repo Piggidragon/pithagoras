@@ -7,6 +7,7 @@ import { confirmDialog } from "../ConfirmDialog";
 import { Counts, ErrorNote, Letter, Quiet, SectionHead, splitPath, TextButton } from "./bits";
 import { useGit } from "./context";
 import { when } from "../../time";
+import { t } from "../../i18n";
 
 
 /** Where a pull request is: open, draft, merged or closed. */
@@ -75,28 +76,28 @@ export function Pulls() {
         className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
       >
         <LuGitCompareArrows aria-hidden className="h-3.5 w-3.5" />
-        Compare {repo.branch ?? "HEAD"} with its base
+        {t("Compare")} {repo.branch ?? t("HEAD")} {t("with its base")}
       </button>
       {!gh ? (
-        <Quiet>Asking GitHub…</Quiet>
+        <Quiet>{t("Asking GitHub…")}</Quiet>
       ) : !gh.repo ? (
         <div className="px-3 py-3 text-xs text-fg-subtle">
-          <p>{gh.note ?? "Pull requests need gh and a repository on GitHub."}</p>
+          <p>{gh.note ?? t("Pull requests need gh and a repository on GitHub.")}</p>
           {web && (
             <a href={web} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-accent hover:underline">
-              Open the repository on the web <LuExternalLink aria-hidden className="h-3 w-3" />
+              {t("Open the repository on the web")} <LuExternalLink aria-hidden className="h-3 w-3" />
             </a>
           )}
         </div>
       ) : (
         <>
-          <SectionHead title="This branch" />
+          <SectionHead title={t("This branch")} />
           {current === undefined ? (
-            <Quiet>Loading…</Quiet>
+            <Quiet>{t("Loading…")}</Quiet>
           ) : current ? (
             <PullRow pull={current} />
           ) : onDefault ? (
-            <Quiet>On {repo.branch ?? "no branch"} — switch to a branch of your own to open a pull request from it.</Quiet>
+            <Quiet>{t("On")} {repo.branch ?? t("no branch")} {t("— switch to a branch of your own to open a pull request from it.")}</Quiet>
           ) : (
             <OpenPull
               onOpened={(n) => {
@@ -105,16 +106,16 @@ export function Pulls() {
               }}
             />
           )}
-          <SectionHead title="Pull requests">
-            <select value={state} onChange={(e) => setState(e.target.value)} aria-label="Which pull requests" className="rounded border border-line bg-canvas px-1 py-0.5 text-[11px] text-fg">
-              <option value="open">Open</option>
-              <option value="merged">Merged</option>
-              <option value="closed">Closed</option>
-              <option value="all">All</option>
+          <SectionHead title={t("Pull requests")}>
+            <select value={state} onChange={(e) => setState(e.target.value)} aria-label={t("Which pull requests")} className="rounded border border-line bg-canvas px-1 py-0.5 text-[11px] text-fg">
+              <option value="open">{t("Open")}</option>
+              <option value="merged">{t("Merged")}</option>
+              <option value="closed">{t("Closed")}</option>
+              <option value="all">{t("All")}</option>
             </select>
           </SectionHead>
           {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
-          {!list && !error && <Quiet>Loading…</Quiet>}
+          {!list && !error && <Quiet>{t("Loading…")}</Quiet>}
           {list && !list.length && <Quiet>None.</Quiet>}
           {list?.map((p) => <PullRow key={p.number} pull={p} />)}
         </>
@@ -191,7 +192,7 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
     return (
       <div className="px-3 py-2">
         <TextButton primary onClick={() => setOpen(true)}>
-          <LuGitPullRequest aria-hidden className="h-3.5 w-3.5" /> Open a pull request for {repo.branch}
+          <LuGitPullRequest aria-hidden className="h-3.5 w-3.5" /> {t("Open a pull request for")} {repo.branch}
         </TextButton>
       </div>
     );
@@ -201,49 +202,49 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        placeholder="Title"
-        aria-label="Title of the pull request"
+        placeholder={t("Title")}
+        aria-label={t("Title of the pull request")}
         className="rounded border border-line bg-canvas px-2 py-1 text-xs text-fg outline-none focus:border-accent/60"
       />
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
         rows={5}
-        placeholder="What it does, and why (Markdown)"
-        aria-label="Description of the pull request"
+        placeholder={t("What it does, and why (Markdown)")}
+        aria-label={t("Description of the pull request")}
         className="resize-y rounded border border-line bg-canvas px-2 py-1 text-xs text-fg outline-none focus:border-accent/60"
       />
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-fg-subtle">
         <label className="flex items-center gap-1">
-          into
-          <input value={base} onChange={(e) => setBase(e.target.value)} aria-label="Base branch" spellCheck={false} className="w-28 rounded border border-line bg-canvas px-1 py-0.5 font-mono text-[11px] text-fg" />
+          {t("into")}
+          <input value={base} onChange={(e) => setBase(e.target.value)} aria-label={t("Base branch")} spellCheck={false} className="w-28 rounded border border-line bg-canvas px-1 py-0.5 font-mono text-[11px] text-fg" />
         </label>
         <label className="flex cursor-pointer items-center gap-1">
           <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} className="h-3 w-3 accent-accent" />
-          Draft
+          {t("Draft")}
         </label>
         {comparison && (
           <span className="text-fg-faint">
-            {comparison.commits.length} {comparison.commits.length === 1 ? "commit" : "commits"}, {comparison.files.length} {comparison.files.length === 1 ? "file" : "files"}
+            {comparison.commits.length} {comparison.commits.length === 1 ? t("commit") : t("commits")}, {comparison.files.length} {comparison.files.length === 1 ? t("file") : t("files")}
           </span>
         )}
         <span className="ml-auto" />
-        <TextButton onClick={() => setOpen(false)}>Cancel</TextButton>
+        <TextButton onClick={() => setOpen(false)}>{t("Cancel")}</TextButton>
         <TextButton type="submit" primary disabled={!title.trim() || !!busy}>
-          {repo.upstream ? "Open" : "Push and open"}
+          {repo.upstream ? t("Open") : t("Push and open")}
         </TextButton>
       </div>
       {unfilled && <p className="text-[10.5px] text-fg-faint">{unfilled}</p>}
-      {repo.files.length > 0 && <p className="text-[10.5px] text-warn">{repo.files.length} changed files are not committed — they are not part of it.</p>}
+      {repo.files.length > 0 && <p className="text-[10.5px] text-warn">{repo.files.length} {t("changed files are not committed — they are not part of it.")}</p>}
     </form>
   );
 }
 
 function CheckIcon({ check }: { check: Check }) {
   const result = (check.conclusion || check.state || check.status || "").toUpperCase();
-  if (["SUCCESS", "NEUTRAL", "SKIPPED"].includes(result)) return <LuCircleCheck aria-label="Passed" className="h-3.5 w-3.5 shrink-0 text-ok" />;
-  if (["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(result)) return <LuCircleX aria-label="Failed" className="h-3.5 w-3.5 shrink-0 text-danger" />;
-  if (["IN_PROGRESS", "QUEUED", "PENDING", "EXPECTED", "WAITING", "REQUESTED"].includes(result)) return <LuLoader aria-label="Running" className="h-3.5 w-3.5 shrink-0 animate-spin text-warn" />;
+  if (["SUCCESS", "NEUTRAL", "SKIPPED"].includes(result)) return <LuCircleCheck aria-label={t("Passed")} className="h-3.5 w-3.5 shrink-0 text-ok" />;
+  if (["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(result)) return <LuCircleX aria-label={t("Failed")} className="h-3.5 w-3.5 shrink-0 text-danger" />;
+  if (["IN_PROGRESS", "QUEUED", "PENDING", "EXPECTED", "WAITING", "REQUESTED"].includes(result)) return <LuLoader aria-label={t("Running")} className="h-3.5 w-3.5 shrink-0 animate-spin text-warn" />;
   return <LuCircleDot aria-label={result.toLowerCase()} className="h-3.5 w-3.5 shrink-0 text-fg-faint" />;
 }
 
@@ -289,7 +290,7 @@ export function PullView({ n }: { n: number }) {
   }, [pull]);
 
   if (error) return <ErrorNote>{error}</ErrorNote>;
-  if (!pull) return <Quiet>Loading…</Quiet>;
+  if (!pull) return <Quiet>{t("Loading…")}</Quiet>;
   const open = pull.state === "OPEN";
   const checks = pull.statusCheckRollup ?? [];
   const here = repo.branch === pull.headRefName;
@@ -320,12 +321,12 @@ export function PullView({ n }: { n: number }) {
             {pull.title} <span className="font-normal text-fg-faint">#{pull.number}</span>
           </p>
           <StateBadge pull={pull} />
-          <a href={pull.url} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub" className="shrink-0 rounded p-0.5 text-fg-faint hover:text-fg">
+          <a href={pull.url} target="_blank" rel="noreferrer" title={t("Open on GitHub")} aria-label={t("Open on GitHub")} className="shrink-0 rounded p-0.5 text-fg-faint hover:text-fg">
             <LuExternalLink className="h-3.5 w-3.5" />
           </a>
         </div>
         <p className="mt-1 text-[10.5px] text-fg-faint">
-          {pull.author?.login} wants <span className="font-mono">{pull.headRefName}</span> in <span className="font-mono">{pull.baseRefName}</span>
+          {pull.author?.login} {t("wants")} <span className="font-mono">{pull.headRefName}</span> {t("in")} <span className="font-mono">{pull.baseRefName}</span>
           {pull.additions !== undefined && (
             <>
               {" · "}
@@ -333,27 +334,27 @@ export function PullView({ n }: { n: number }) {
             </>
           )}
           {pull.reviewDecision && ` · ${pull.reviewDecision.toLowerCase().replace(/_/g, " ")}`}
-          {pull.mergeable === "CONFLICTING" && <span className="text-danger"> · has conflicts</span>}
+          {pull.mergeable === "CONFLICTING" && <span className="text-danger"> {t("· has conflicts")}</span>}
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {!here && open && (
-            <TextButton disabled={!!busy} onClick={() => void act(`Checking out #${pull.number}`, () => gitApi.checkoutPull(id, pull.number))} title="Check its branch out here, to try it or work on it">
-              Check out
+            <TextButton disabled={!!busy} onClick={() => void act(`Checking out #${pull.number}`, () => gitApi.checkoutPull(id, pull.number))} title={t("Check its branch out here, to try it or work on it")}>
+              {t("Check out")}
             </TextButton>
           )}
           {open && (
             <>
-              <select value={method} onChange={(e) => setMethod(e.target.value as typeof method)} aria-label="How to merge" className="rounded border border-line bg-canvas px-1 py-0.5 text-[11px] text-fg">
-                <option value="squash">Squash</option>
-                <option value="merge">Merge commit</option>
-                <option value="rebase">Rebase</option>
+              <select value={method} onChange={(e) => setMethod(e.target.value as typeof method)} aria-label={t("How to merge")} className="rounded border border-line bg-canvas px-1 py-0.5 text-[11px] text-fg">
+                <option value="squash">{t("Squash")}</option>
+                <option value="merge">{t("Merge commit")}</option>
+                <option value="rebase">{t("Rebase")}</option>
               </select>
               <label className="flex cursor-pointer items-center gap-1 text-[11px] text-fg-subtle">
                 <input type="checkbox" checked={deleteBranch} onChange={(e) => setDeleteBranch(e.target.checked)} className="h-3 w-3 accent-accent" />
-                delete branch
+                {t("delete branch")}
               </label>
-              <TextButton primary disabled={!!busy || pull.isDraft} onClick={() => void merge()} title={pull.isDraft ? "A draft is not merged — mark it ready on GitHub first" : undefined}>
-                <LuGitMerge aria-hidden className="h-3.5 w-3.5" /> Merge
+              <TextButton primary disabled={!!busy || pull.isDraft} onClick={() => void merge()} title={pull.isDraft ? t("A draft is not merged — mark it ready on GitHub first") : undefined}>
+                <LuGitMerge aria-hidden className="h-3.5 w-3.5" /> {t("Merge")}
               </TextButton>
             </>
           )}
@@ -362,7 +363,7 @@ export function PullView({ n }: { n: number }) {
 
       {checks.length > 0 && (
         <>
-          <SectionHead title="Checks" count={checks.length} />
+          <SectionHead title={t("Checks")} count={checks.length} />
           <ul className="py-0.5">
             {checks.map((c, i) => (
               <li key={i} className="flex items-center gap-1.5 px-3 py-0.5 text-xs">
@@ -370,7 +371,7 @@ export function PullView({ n }: { n: number }) {
                 <span className="min-w-0 flex-1 truncate text-fg-muted">{c.name ?? c.context}</span>
                 {(c.detailsUrl || c.targetUrl) && (
                   <a href={c.detailsUrl || c.targetUrl} target="_blank" rel="noreferrer" className="shrink-0 text-[10.5px] text-fg-faint hover:text-fg hover:underline">
-                    details
+                    {t("details")}
                   </a>
                 )}
               </li>
@@ -385,9 +386,9 @@ export function PullView({ n }: { n: number }) {
         </div>
       )}
 
-      <SectionHead title="Files" count={files?.files.length ?? pull.changedFiles} />
+      <SectionHead title={t("Files")} count={files?.files.length ?? pull.changedFiles} />
       {!files ? (
-        <Quiet>Loading…</Quiet>
+        <Quiet>{t("Loading…")}</Quiet>
       ) : (
         <ul>
           {files.files.map((f) => {
@@ -404,13 +405,13 @@ export function PullView({ n }: { n: number }) {
               </li>
             );
           })}
-          {files.truncated && <Quiet>Too large to show whole — the last files are missing.</Quiet>}
+          {files.truncated && <Quiet>{t("Too large to show whole — the last files are missing.")}</Quiet>}
         </ul>
       )}
 
       {(pull.commits?.length ?? 0) > 0 && (
         <>
-          <SectionHead title="Commits" count={pull.commits!.length} />
+          <SectionHead title={t("Commits")} count={pull.commits!.length} />
           <ul>
             {pull.commits!.map((c) => (
               <li key={c.oid} className="flex items-baseline gap-1.5 px-3 py-0.5 text-xs">
@@ -422,13 +423,13 @@ export function PullView({ n }: { n: number }) {
         </>
       )}
 
-      <SectionHead title="Conversation" count={conversation.length} />
+      <SectionHead title={t("Conversation")} count={conversation.length} />
       {conversation.map((c, i) => (
         <div key={i} className="border-b border-line/50 px-3 py-2">
           <p className="mb-1 text-[10.5px] text-fg-faint">
             <span className="font-medium text-fg-subtle">{c.who}</span>
-            {c.state === "APPROVED" && <span className="text-ok"> approved</span>}
-            {c.state === "CHANGES_REQUESTED" && <span className="text-danger"> asked for changes</span>}
+            {c.state === "APPROVED" && <span className="text-ok"> {t("approved")}</span>}
+            {c.state === "CHANGES_REQUESTED" && <span className="text-danger"> {t("asked for changes")}</span>}
             {" · "}
             {when(c.at)}
           </p>
@@ -440,23 +441,23 @@ export function PullView({ n }: { n: number }) {
           value={reply}
           onChange={(e) => setReply(e.target.value)}
           rows={3}
-          placeholder="Write a comment (Markdown)"
-          aria-label="Comment on the pull request"
+          placeholder={t("Write a comment (Markdown)")}
+          aria-label={t("Comment on the pull request")}
           className="w-full resize-y rounded border border-line bg-canvas px-2 py-1 text-xs text-fg outline-none focus:border-accent/60"
         />
         <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
           {open && (
             <>
               <TextButton disabled={!!busy || !reply.trim()} onClick={() => void review("request-changes")}>
-                Request changes
+                {t("Request changes")}
               </TextButton>
               <TextButton disabled={!!busy} onClick={() => void review("approve")}>
-                Approve
+                {t("Approve")}
               </TextButton>
             </>
           )}
           <TextButton primary disabled={!!busy || !reply.trim()} onClick={() => void review("comment")}>
-            Comment
+            {t("Comment")}
           </TextButton>
         </div>
       </div>

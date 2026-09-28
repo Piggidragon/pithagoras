@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { LuCircleAlert } from "react-icons/lu";
+import { t } from "../../i18n";
 
 /** "5m ago", from seconds since the epoch. */
 export function ago(seconds: number): string {
@@ -51,7 +52,7 @@ export const LETTER_NAME: Record<string, string> = {
 };
 
 export function Counts({ added, removed, binary }: { added: number; removed: number; binary?: boolean }) {
-  if (binary) return <span className="shrink-0 text-[10px] text-fg-faint">binary</span>;
+  if (binary) return <span className="shrink-0 text-[10px] text-fg-faint">{t("binary")}</span>;
   if (!added && !removed) return null;
   return (
     <span className="shrink-0 font-mono text-[10px]">
@@ -139,7 +140,7 @@ export function ErrorNote({ children, onClose }: { children: ReactNode; onClose?
       <LuCircleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{children}</span>
       {onClose && (
-        <button type="button" onClick={onClose} aria-label="Dismiss" className="shrink-0 rounded px-1 hover:text-fg">
+        <button type="button" onClick={onClose} aria-label={t("Dismiss")} className="shrink-0 rounded px-1 hover:text-fg">
           ✕
         </button>
       )}

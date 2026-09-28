@@ -1,4 +1,5 @@
 import type { SessionStatus } from "./api";
+import { t } from "./i18n";
 
 export const APP_NAME = "Pithagoras";
 
@@ -14,9 +15,9 @@ export function tabTitle(
   waiting: boolean,
 ): string {
   if (!session) return APP_NAME;
-  const name = session.title.trim() || "New chat";
-  if (waiting) return `❓ ${name} · asks you`;
-  if (session.status === "running") return `● ${name} · working`;
+  const name = session.title.trim() || t("New chat");
+  if (waiting) return `❓ ${t("{name} · asks you", { name })}`;
+  if (session.status === "running") return `● ${t("{name} · working", { name })}`;
   return `${name} · ${APP_NAME}`;
 }
 

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { api } from "../api";
 import type { Item } from "../transcript";
+import { t } from "../i18n";
 
 /** How much of the conversation the window shows: enough to find what was just said. */
 const SHOWN = 30;
@@ -24,7 +25,7 @@ export function VoiceConversation({ sessionId, items }: { sessionId: string; ite
     if (el) el.scrollTop = el.scrollHeight;
   }, [last?.id, lastLength]);
   return <div ref={viewport} className="voice-conversation-list">
-      {!list.length && <p className="voice-conversation-empty">Nothing has been said yet.</p>}
+      {!list.length && <p className="voice-conversation-empty">{t("Nothing has been said yet.")}</p>}
       {list.map(item => item.kind === "user"
         ? <div key={item.id} className="voice-said is-user">
             {item.text && <p>{item.text}</p>}

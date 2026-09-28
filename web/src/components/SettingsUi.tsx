@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { t } from "../i18n";
+import { effortLabel } from "../effort";
 
 /**
  * The pieces every Settings page is built from, so the pages look like one
@@ -69,7 +71,7 @@ export function SwitchRow({ title, detail, on, onChange, disabled, note }: { tit
         {detail && <span className="mt-0.5 block text-xs text-fg-faint">{detail}</span>}
         {note && <span className="mt-1 block text-xs text-warn">{note}</span>}
       </div>
-      <Switch on={on} onChange={onChange} disabled={disabled} label={typeof title === "string" ? title : "Switch"} />
+      <Switch on={on} onChange={onChange} disabled={disabled} label={typeof title === "string" ? title : t("Switch")} />
     </div>
   );
 }
@@ -89,9 +91,9 @@ export const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"
  * How hard a model thinks, as a row of levels. `inherited` is the level that
  * applies when none is picked; clicking the picked one again hands it back.
  */
-export function EffortPicker({ value, inherited, onChange, label = "Effort" }: { value: string; inherited?: string; onChange: (level: string) => void; label?: string }) {
+export function EffortPicker({ value, inherited, onChange, label }: { value: string; inherited?: string; onChange: (level: string) => void; label?: string }) {
   return (
-    <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={label}>
+    <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={label ?? t("Effort")}>
       {LEVELS.map((lvl) => {
         const on = value === lvl;
         const fallback = !value && inherited === lvl;
@@ -110,7 +112,7 @@ export function EffortPicker({ value, inherited, onChange, label = "Effort" }: {
                   : "bg-fg/5 text-fg-muted hover:bg-fg/10"
             }`}
           >
-            {lvl}
+            {effortLabel(lvl)}
           </button>
         );
       })}

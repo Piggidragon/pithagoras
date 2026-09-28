@@ -2,6 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { registerServiceWorker } from "./register-sw";
+// Before the app: its first frame is already in the language chosen.
+import "./locales";
 import App from "./App";
 import "./styles";
 import { installTooltips } from "./tooltips";

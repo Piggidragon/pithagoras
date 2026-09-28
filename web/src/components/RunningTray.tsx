@@ -5,6 +5,7 @@ import type { Subagent } from "../subagents";
 import { formatElapsed } from "../transcript";
 import { Ring } from "./ChatActivity";
 import { statusParts } from "../status-commands";
+import { t } from "../i18n";
 
 /**
  * What is running beside the conversation, just above the box: subagents,
@@ -53,7 +54,7 @@ export function RunningTray({
   const since = (at?: number) => (at ? formatElapsed(Math.max(0, Math.floor((now - at) / 1000))) : "");
 
   return (
-    <div className="running-tray" aria-label="Running beside the conversation">
+    <div className="running-tray" aria-label={t("Running beside the conversation")}>
       {runningAgents.map((a) => (
         <button key={a.id} type="button" className="running-chip is-agent" onClick={() => onAgent(a.id)} title={a.detail ? `${a.label} — ${a.detail}` : a.label}>
           <span className="running-chip-icon"><Ring /></span>
@@ -68,7 +69,7 @@ export function RunningTray({
           <span className="running-chip-icon"><i className="running-dot" /></span>
           <LuSquareTerminal className="running-chip-kind" aria-hidden />
           <span className="running-chip-label is-mono">{j.command}</span>
-          <span className="running-chip-time">{j.state === "stopped" ? "paused" : since(j.startedAt)}</span>
+          <span className="running-chip-time">{j.state === "stopped" ? t("paused") : since(j.startedAt)}</span>
         </button>
       ))}
       {statuses.map((s) => {

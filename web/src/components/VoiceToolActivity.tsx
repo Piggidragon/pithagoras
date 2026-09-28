@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSparkles } from 'react-icons/lu';
 import type { PortalEvent } from '../api';
 import { describeCall, describeOutcome, elapsed, type ToolCall } from '../tool-activity';
+import { t } from "../i18n";
 
 /** A card for one tool call, in one of four places around the orb. */
 type Card = ToolCall & {
@@ -85,7 +86,7 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
   }, [running]);
   useEffect(() => () => { for (const timer of timers.current) clearTimeout(timer); }, []);
 
-  return <div className="voice-tool-activity" aria-label="Tool activity" aria-live="polite" aria-relevant="additions">
+  return <div className="voice-tool-activity" aria-label={t("Tool activity")} aria-live="polite" aria-relevant="additions">
     {shown.map(card => {
       const took = Date.now() - card.startedAt;
       const note = card.status === 'running' ? (took >= 3000 ? elapsed(took) : '') : card.outcome;
@@ -96,7 +97,7 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
           <span>{card.label}</span>
           {card.detail && <p>{card.detail}</p>}
           {note && <p className="voice-tool-note">{card.status === 'failed' ? `Failed: ${note}` : note}</p>}
-          {!note && card.status === 'failed' && <p className="voice-tool-note">Failed</p>}
+          {!note && card.status === 'failed' && <p className="voice-tool-note">{t("Failed")}</p>}
         </div>
       </>;
       return card.target

@@ -9,6 +9,8 @@ import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
 import { ContextPill } from "./ContextPill";
+import { t } from "../i18n";
+import { effortLabel } from "../effort";
 
 /**
  * pi's levels, and the same list the server falls back to.
@@ -172,7 +174,7 @@ function OriginTag({ provider }: { provider: string }) {
         o.local ? "bg-ok/10 text-ok" : "bg-fg/5 text-fg-subtle"
       }`}
     >
-      {o.local ? "local" : o.label}
+      {o.local ? t("local") : o.label}
     </span>
   );
 }
@@ -476,7 +478,7 @@ export function ComposerBar({
         >
           <span className="inline-flex items-center gap-1.5">
             {origin(cfg.state.model.provider).local && (
-              <span className="h-1.5 w-1.5 rounded-full bg-ok" title="Running locally" />
+              <span className="h-1.5 w-1.5 rounded-full bg-ok" title={t("Running locally")} />
             )}
             {shortName(cfg.state.model)}
           </span>
@@ -497,13 +499,13 @@ export function ComposerBar({
           }`}
           title={
             onOff
-              ? "Thinking on / off"
+              ? t("Thinking on / off")
               : fixed
-                ? "This model has a single thinking level"
-                : "Effort / thinking level"
+                ? t("This model has a single thinking level")
+                : t("Effort / thinking level")
           }
         >
-          {onOff ? `thinking ${thinkingOn ? "on" : "off"}` : cfg.state.thinkingLevel}
+          {onOff ? (thinkingOn ? t("thinking on") : t("thinking off")) : effortLabel(cfg.state.thinkingLevel)}
         </button>
         {/* Everything the agent may reach for in this conversation, the
             browser included — it brings tools like any other package, and a
@@ -515,7 +517,7 @@ export function ComposerBar({
           className={`rounded-lg px-2 py-1 transition ${
             open === "tools" ? "bg-fg/10 text-fg" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
           }`}
-          title="Which tools this conversation may use"
+          title={t("Which tools this conversation may use")}
         >
           <LuBlocks className="h-3.5 w-3.5" />
         </button>
@@ -530,7 +532,7 @@ export function ComposerBar({
         {running && (
           <span className="composer-working ml-1 inline-flex items-center gap-1.5">
             <StatusDot status="running" bare />
-            <span className="working-text max-sm:hidden">Working</span>
+            <span className="working-text max-sm:hidden">{t("Working")}</span>
           </span>
         )}
       </div>
@@ -539,7 +541,7 @@ export function ComposerBar({
       {/* Tools */}
       {open === "tools" && (
         <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
-          <p className="px-3 py-1 text-[11px] text-fg-subtle">Tools in this chat</p>
+          <p className="px-3 py-1 text-[11px] text-fg-subtle">{t("Tools in this chat")}</p>
           <ToolSwitches sessionId={sessionId} />
         </div>
       )}
@@ -548,15 +550,15 @@ export function ComposerBar({
       {open === "model" && (
         <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <div className="flex items-center gap-2 px-3 py-1">
-            <p className="text-[11px] text-fg-subtle">Models</p>
+            <p className="text-[11px] text-fg-subtle">{t("Models")}</p>
             <button
               type="button"
               onClick={refreshCatalogue}
               disabled={loadingCatalogue}
-              title="Re-read the list from pi — needed after starting a local server"
+              title={t("Re-read the list from pi — needed after starting a local server")}
               className="ml-auto rounded px-1 text-[11px] text-fg-faint transition hover:text-fg disabled:opacity-50"
             >
-              {loadingCatalogue ? "refreshing…" : "refresh"}
+              {loadingCatalogue ? t("refreshing…") : t("refresh")}
             </button>
           </div>
           {!showAll ? (
@@ -581,7 +583,7 @@ export function ComposerBar({
                 onClick={() => setShowAll(true)}
                 className="flex w-full items-center px-3 py-1.5 text-left text-sm text-fg-muted transition hover:bg-fg/5 disabled:opacity-50"
               >
-                {models.length ? "More models" : loadingCatalogue ? "Loading models…" : "No models — refresh"}
+                {models.length ? t("More models") : loadingCatalogue ? t("Loading models…") : t("No models — refresh")}
                 {models.length > 0 && <span className="ml-auto text-fg-subtle">›</span>}
               </button>
             </>
@@ -591,7 +593,7 @@ export function ComposerBar({
                 autoFocus
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter models…"
+                placeholder={t("Filter models…")}
                 className="mx-2 mb-1 w-[calc(100%-1rem)] rounded border border-line bg-canvas px-2 py-1 text-xs outline-none focus:border-accent"
               />
               <div className="max-h-72 overflow-y-auto">
@@ -609,7 +611,7 @@ export function ComposerBar({
                   </button>
                 ))}
                 {filtered.length === 0 && (
-                  <p className="px-3 py-2 text-xs text-fg-subtle">No matches</p>
+                  <p className="px-3 py-2 text-xs text-fg-subtle">{t("No matches")}</p>
                 )}
               </div>
             </>
@@ -621,7 +623,7 @@ export function ComposerBar({
             onClick={() => { setOpen(null); navigate(`/s/${sessionId}/settings/models`); }}
             className="flex w-full items-center px-3 py-1.5 text-left text-xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
           >
-            Add or change providers…
+            {t("Add or change providers…")}
           </button>
         </div>
       )}
@@ -639,7 +641,7 @@ export function ComposerBar({
               onClick={flipThinking}
               className="flex w-full items-center justify-between text-sm text-fg-muted disabled:opacity-50"
             >
-              <span>Thinking</span>
+              <span>{t("Thinking")}</span>
               <span className={`relative h-5 w-9 rounded-full transition ${thinkingOn ? "bg-warn" : "bg-raised"}`}>
                 <span
                   className={`absolute top-0.5 h-4 w-4 rounded-full bg-surface transition-all ${
@@ -651,11 +653,11 @@ export function ComposerBar({
           ) : (
             <>
               <p className="text-sm text-fg-muted">
-                Effort <span className="capitalize text-fg">{levels[effortIndex] ?? cfg.state.thinkingLevel}</span>
+                {t("Effort")} <span className="capitalize text-fg">{effortLabel(levels[effortIndex] ?? cfg.state.thinkingLevel)}</span>
               </p>
               <div className="mt-3 flex justify-between text-[11px] text-fg-subtle">
-                <span>Faster</span>
-                <span>Smarter</span>
+                <span>{t("Faster")}</span>
+                <span>{t("Smarter")}</span>
               </div>
               <input
                 type="range"

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { LuChevronLeft, LuX } from "react-icons/lu";
 import { isEscape } from "../shortcuts";
+import { t } from "../i18n";
 
 /**
  * Centered dialog with a dimmed backdrop. Escape and backdrop clicks close it.
@@ -70,7 +71,7 @@ export function Modal({
               type="button"
               onClick={() => setInRail(true)}
               className="-ml-2 rounded-lg p-1.5 text-fg-subtle transition hover:bg-fg/10 hover:text-fg sm:hidden"
-              aria-label="Back"
+              aria-label={t("Back")}
             >
               <LuChevronLeft className="h-4 w-4" />
             </button>
@@ -92,7 +93,7 @@ export function Modal({
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-fg-subtle transition hover:bg-fg/10 hover:text-fg"
-            aria-label="Close"
+            aria-label={t("Close")}
           >
             <LuX className="h-4 w-4" />
           </button>

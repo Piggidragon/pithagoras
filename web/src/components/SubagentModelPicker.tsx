@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type PiModel } from "../api";
 import { load, peek, useCached } from "../settings-cache";
 import { Select } from "./Select";
+import { t } from "../i18n";
 
 export interface SubagentChoice {
   /** The subagent tool is on: there is something to decide. */
@@ -77,9 +78,9 @@ export function SubagentModelPicker({ subagents, models }: { subagents: Subagent
   const value = choice.model ?? "";
   return (
     <div className="px-3 py-1.5">
-      <p className="text-[11px] text-fg-subtle">Subagents in this chat run on</p>
+      <p className="text-[11px] text-fg-subtle">{t("Subagents in this chat run on")}</p>
       <Select
-        aria-label="Subagents in this chat run on"
+        aria-label={t("Subagents in this chat run on")}
         size="sm"
         className="mt-1 w-full"
         value={value}

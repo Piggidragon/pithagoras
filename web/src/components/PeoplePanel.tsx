@@ -10,6 +10,7 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type Person, type Role, type ToolRule } from "../api";
+import { t } from "../i18n";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -69,7 +70,7 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
   if (loading) {
     return (
       <p className="flex items-center gap-2 text-sm text-fg-subtle">
-        <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading…
+        <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}
       </p>
     );
   }
@@ -96,20 +97,18 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
         <section className="mb-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 p-3">
           <LuTriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
           <p className="text-xs text-fg-muted">
-            {waiting.length === 1 ? "Someone has" : `${waiting.length} people have`} messaged the
-            agent and been turned away. Open them to let them through.
+            {waiting.length === 1 ? t("Someone has") : `${waiting.length} people have`} {t("messaged the agent and been turned away. Open them to let them through.")}
           </p>
         </section>
       )}
 
       <p className="mb-3 text-xs text-fg-faint">
-        The agent only talks to people listed here. Identities come from the platform's own id, so
-        renaming themselves changes nothing.
+        {t("The agent only talks to people listed here. Identities come from the platform's own id, so renaming themselves changes nothing.")}
       </p>
 
       {people.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-fg-faint">
-          Nobody yet. People appear here the first time they message a channel.
+          {t("Nobody yet. People appear here the first time they message a channel.")}
         </p>
       ) : (
         <ul className="space-y-1">
@@ -134,7 +133,7 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
       {roleWide.length > 0 && (
         <section className="mt-6">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            Allowed for a whole role
+            {t("Allowed for a whole role")}
           </h3>
           <ul className="mt-2 space-y-1">
             {roleWide.map((r) => (
@@ -179,7 +178,7 @@ function RuleRow({
       </span>
       <button
         onClick={onDelete}
-        title="Revoke"
+        title={t("Revoke")}
         className="shrink-0 rounded-lg p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger"
       >
         <LuTrash2 className="h-3.5 w-3.5" />
@@ -236,12 +235,12 @@ function PersonDetail({
           onClick={onBack}
           className="inline-flex items-center gap-1 text-xs text-fg-subtle transition hover:text-fg-muted"
         >
-          <LuChevronLeft className="h-3.5 w-3.5" /> People
+          <LuChevronLeft className="h-3.5 w-3.5" /> {t("People")}
         </button>
         <span className="ml-auto truncate font-mono text-[11px] text-fg-faint">{person.key}</span>
         <button
           disabled={busy}
-          title="Forget — the next message from them arrives as a stranger again"
+          title={t("Forget — the next message from them arrives as a stranger again")}
           onClick={() =>
             act(async () => {
               await api.forgetPerson(person.key);
@@ -256,12 +255,12 @@ function PersonDetail({
 
       <div className="space-y-3">
         <label className="block">
-          <span className="mb-1 block text-xs text-fg-subtle">Name</span>
+          <span className="mb-1 block text-xs text-fg-subtle">{t("Name")}</span>
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
 
         <div>
-          <span className="mb-1 block text-xs text-fg-subtle">Role</span>
+          <span className="mb-1 block text-xs text-fg-subtle">{t("Role")}</span>
           <div className="grid grid-cols-4 gap-1">
             {ROLES.map((r) => (
               <button
@@ -285,12 +284,12 @@ function PersonDetail({
         </div>
 
         <label className="block">
-          <span className="mb-1 block text-xs text-fg-subtle">What the agent should know</span>
+          <span className="mb-1 block text-xs text-fg-subtle">{t("What the agent should know")}</span>
           <textarea
             className={inputCls}
             rows={2}
             value={notes}
-            placeholder="Their role, what they work on — repeated to the agent every time they write."
+            placeholder={t("Their role, what they work on — repeated to the agent every time they write.")}
             onChange={(e) => setNotes(e.target.value)}
           />
         </label>
@@ -312,20 +311,18 @@ function PersonDetail({
             ) : saved ? (
               <LuCheck className="h-4 w-4" />
             ) : null}
-            Save
+            {t("Save")}
           </button>
         )}
       </div>
 
       <section className="mt-6">
         <div className="mb-1.5 flex items-baseline gap-2">
-          <h3 className="text-sm font-medium text-fg">Allowed anyway</h3>
+          <h3 className="text-sm font-medium text-fg">{t("Allowed anyway")}</h3>
           <span className="text-xs text-fg-faint">{rules.length}</span>
         </div>
         <p className="mb-2 text-[11px] text-fg-faint">
-          What {person.name} may do despite their role — written by <em>Always allow</em>, revoked
-          by deleting. <span className="font-mono">*</span> covers the parts that vary; a shell rule
-          matches one command, never a pipeline.
+          {t("What")} {person.name} {t("may do despite their role — written by")} <em>{t("Always allow")}</em>{t(", revoked by deleting.")} <span className="font-mono">*</span> {t("covers the parts that vary; a shell rule matches one command, never a pipeline.")}
         </p>
 
         {rules.length > 0 && (
@@ -340,13 +337,13 @@ function PersonDetail({
           <input
             value={tool}
             onChange={(e) => setTool(e.target.value)}
-            placeholder="bash"
+            placeholder={t("bash")}
             className="w-20 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-[11px] outline-none focus:border-accent/60"
           />
           <input
             value={pattern}
             onChange={(e) => setPattern(e.target.value)}
-            placeholder="himalaya envelope list*"
+            placeholder={t("himalaya envelope list*")}
             className="min-w-0 flex-1 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-[11px] outline-none placeholder:text-fg-faint focus:border-accent/60"
           />
           <button
@@ -359,7 +356,7 @@ function PersonDetail({
             }
             className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2.5 py-1.5 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
           >
-            <LuPlus className="h-3 w-3" /> Allow
+            <LuPlus className="h-3 w-3" /> {t("Allow")}
           </button>
         </div>
       </section>

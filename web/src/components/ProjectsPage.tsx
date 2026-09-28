@@ -9,6 +9,7 @@ import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import { isEnter } from "../shortcuts";
+import { t } from "../i18n";
 
 /**
  * The folders chats work in.
@@ -114,11 +115,10 @@ export function ProjectsPage({
         <div className="mx-auto w-full max-w-3xl">
           <PageHeader
             icon={<LuFolderKanban />}
-            title="Projects"
+            title={t("Projects")}
             description={
               <>
-                New chats start in Home. A project is a folder of its own with instructions for the
-                agent — saved as its AGENTS.md — for work that should stay together.
+                {t("New chats start in Home. A project is a folder of its own with instructions for the agent — saved as its AGENTS.md — for work that should stay together.")}
               </>
             }
             action={
@@ -126,7 +126,7 @@ export function ProjectsPage({
                 onClick={() => setCreating(true)}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
               >
-                <LuPlus className="h-4 w-4" /> New project
+                <LuPlus className="h-4 w-4" /> {t("New project")}
               </button>
             }
           />
@@ -139,7 +139,7 @@ export function ProjectsPage({
             <ul className="stagger-in mt-4 space-y-1">
               {projects.length === 0 && (
                 <li className="py-12 text-center text-sm text-fg-subtle">
-                  No projects yet. New chats start in Home; make a project for work that should stay together.
+                  {t("No projects yet. New chats start in Home; make a project for work that should stay together.")}
                 </li>
               )}
               {projects.map((p) => (
@@ -155,14 +155,14 @@ export function ProjectsPage({
                     <div className="flex items-baseline gap-2">
                       <p className="truncate text-sm text-fg">{p.name}</p>
                       {p.hasInstructions && (
-                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">instructions</span>
+                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">{t("instructions")}</span>
                       )}
                     </div>
                     <p className="truncate font-mono text-[11px] text-fg-faint" title={p.path}>
                       {p.path}
                     </p>
                     <p className="truncate text-[11px] text-fg-faint">
-                      {p.sessions} chat{p.sessions === 1 ? "" : "s"}
+                      {p.sessions} {t("chat")}{p.sessions === 1 ? "" : "s"}
                       {lastActive(p) ? ` · last ${when(lastActive(p)!)}` : ""}
                     </p>
                   </div>
@@ -173,7 +173,7 @@ export function ProjectsPage({
                         attempt(() => onNewChat(p.path));
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-accent"
-                      title="New chat here"
+                      title={t("New chat here")}
                       aria-label={`New chat in ${p.name}`}
                     >
                       <LuPlus className="h-3.5 w-3.5" />
@@ -184,7 +184,7 @@ export function ProjectsPage({
                         setEditing(p);
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-accent"
-                      title="Instructions (AGENTS.md)"
+                      title={t("Instructions (AGENTS.md)")}
                       aria-label={`Instructions for ${p.name}`}
                     >
                       <LuFileText className="h-3.5 w-3.5" />
@@ -195,7 +195,7 @@ export function ProjectsPage({
                         remove(p);
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-danger"
-                      title="Delete project"
+                      title={t("Delete project")}
                       aria-label={`Delete ${p.name}`}
                     >
                       <LuTrash2 className="h-3.5 w-3.5" />
@@ -274,48 +274,48 @@ function NewProject({
 
   return (
     <Modal
-      title="New project"
-      subtitle="A folder of its own, with instructions the agent follows in it"
+      title={t("New project")}
+      subtitle={t("A folder of its own, with instructions the agent follows in it")}
       onClose={onClose}
       footer={
         <div className="flex items-center justify-end gap-2">
           {error && <p className="mr-auto text-xs text-danger">{error}</p>}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             onClick={submit}
             disabled={!slug || busy}
             className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
           >
-            {busy ? "Creating…" : "Create and open"}
+            {busy ? t("Creating…") : t("Create and open")}
           </button>
         </div>
       }
     >
       <label className="block text-xs text-fg-muted">
-        Name
+        {t("Name")}
         <input
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => isEnter(e) && submit()}
-          placeholder="Cool Project"
+          placeholder={t("Cool Project")}
           className={`${FIELD} mt-1`}
         />
       </label>
       {name.trim() && (
         <p className="mt-1 truncate font-mono text-[11px] text-fg-subtle">
-          {slug ? `→ ${root ? `${root}/` : ""}${slug}` : "needs at least one letter or digit"}
+          {slug ? `→ ${root ? `${root}/` : ""}${slug}` : t("needs at least one letter or digit")}
         </p>
       )}
       <label className="mt-4 block text-xs text-fg-muted">
-        Instructions <span className="text-fg-faint">(optional — saved as AGENTS.md)</span>
+        {t("Instructions")} <span className="text-fg-faint">{t("(optional — saved as AGENTS.md)")}</span>
         <textarea
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
           rows={8}
-          placeholder="What this project is, and how the agent should work in it."
+          placeholder={t("What this project is, and how the agent should work in it.")}
           className={`${FIELD} mt-1 resize-y font-mono text-xs`}
         />
       </label>
@@ -363,40 +363,39 @@ function Instructions({
   return (
     <Modal
       title={`Instructions · ${project.name}`}
-      subtitle="Saved as AGENTS.md in the folder — edit it there too if you like"
+      subtitle={t("Saved as AGENTS.md in the folder — edit it there too if you like")}
       onClose={onClose}
       footer={
         <div className="flex items-center justify-end gap-2">
           {error && <p className="mr-auto text-xs text-danger">{error}</p>}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             onClick={save}
             disabled={text === null || text === saved || busy}
             className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
           >
-            {busy ? "Saving…" : "Save"}
+            {busy ? t("Saving…") : t("Save")}
           </button>
         </div>
       }
     >
       {text === null ? (
-        <p className="py-8 text-center text-sm text-fg-subtle">{error ? "" : "Loading…"}</p>
+        <p className="py-8 text-center text-sm text-fg-subtle">{error ? "" : t("Loading…")}</p>
       ) : (
         <>
           <textarea
             autoFocus
-            aria-label="Project instructions"
+            aria-label={t("Project instructions")}
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={14}
-            placeholder="What this project is, and how the agent should work in it."
+            placeholder={t("What this project is, and how the agent should work in it.")}
             className={`${FIELD} resize-y font-mono text-xs`}
           />
           <p className="mt-2 text-[11px] text-fg-subtle">
-            Chats started after saving pick this up. One already open does after <code>/reload</code>.
-            Leave it empty to remove the file.
+            {t("Chats started after saving pick this up. One already open does after")} <code>/reload</code>{t(". Leave it empty to remove the file.")}
           </p>
         </>
       )}

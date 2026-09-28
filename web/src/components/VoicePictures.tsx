@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LuChevronLeft, LuChevronRight, LuExternalLink } from "react-icons/lu";
 import { api, type PortalEvent } from "../api";
 import { shownPicture, type ShownPicture } from "../transcript";
+import { t } from "../i18n";
 
 /** A picture the agent showed, and the event it was shown at: the same file shown again is a new picture. */
 export type Shown = ShownPicture & { seq: number };
@@ -28,13 +29,13 @@ export function VoicePictures({ sessionId, pictures, index, onIndex }: { session
   const [failed, setFailed] = useState(false);
   useEffect(() => { setZoomed(false); setFailed(false); }, [index, pictures[index]?.seq]);
   const picture = pictures[index];
-  if (!picture) return <p className="voice-pictures-empty">No pictures yet. Ask the agent to show you one.</p>;
+  if (!picture) return <p className="voice-pictures-empty">{t("No pictures yet. Ask the agent to show you one.")}</p>;
   const url = api.pictureUrl(sessionId, picture.path, picture.seq);
   return <div className="voice-pictures">
     <div className={`voice-pictures-view ${zoomed ? "is-zoomed" : ""}`}>
       {failed
-        ? <p className="voice-pictures-empty">This picture is no longer in the folder.</p>
-        : <button type="button" onClick={() => setZoomed(z => !z)} aria-label={zoomed ? "Fit the picture" : "Show the picture at full size"}>
+        ? <p className="voice-pictures-empty">{t("This picture is no longer in the folder.")}</p>
+        : <button type="button" onClick={() => setZoomed(z => !z)} aria-label={zoomed ? t("Fit the picture") : t("Show the picture at full size")}>
             <img src={url} alt={picture.title ?? picture.path} onError={() => setFailed(true)} />
           </button>}
     </div>
@@ -42,11 +43,11 @@ export function VoicePictures({ sessionId, pictures, index, onIndex }: { session
       <span className="voice-pictures-caption" title={picture.path}>{picture.title ?? picture.path}</span>
       <div>
         {pictures.length > 1 && <>
-          <button type="button" aria-label="Previous picture" disabled={index === 0} onClick={() => onIndex(index - 1)}><LuChevronLeft /></button>
+          <button type="button" aria-label={t("Previous picture")} disabled={index === 0} onClick={() => onIndex(index - 1)}><LuChevronLeft /></button>
           <span className="voice-pictures-count">{index + 1} / {pictures.length}</span>
-          <button type="button" aria-label="Next picture" disabled={index === pictures.length - 1} onClick={() => onIndex(index + 1)}><LuChevronRight /></button>
+          <button type="button" aria-label={t("Next picture")} disabled={index === pictures.length - 1} onClick={() => onIndex(index + 1)}><LuChevronRight /></button>
         </>}
-        <a href={url} target="_blank" rel="noreferrer" aria-label="Open the picture in a new tab" title="Open in a new tab"><LuExternalLink /></a>
+        <a href={url} target="_blank" rel="noreferrer" aria-label={t("Open the picture in a new tab")} title={t("Open in a new tab")}><LuExternalLink /></a>
       </div>
     </footer>
   </div>;

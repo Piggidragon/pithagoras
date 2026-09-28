@@ -27,12 +27,15 @@ import { APP_NAME, finishedRuns, tabTitle } from "./attention";
 import { notifyIfAway, notifyState } from "./notify";
 import { guardStrayDrops } from "./drop-guard";
 import { usePlaces } from "./use-session-folders";
+import { t, useLanguage } from "./i18n";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 type Tab = "general" | "extensions" | "advanced";
 const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general" };
 
 export default function App() {
+  // Everything under here is drawn again in a language chosen (see i18n.ts).
+  useLanguage();
   const [authed, setAuthed] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -50,7 +53,7 @@ export default function App() {
 
   if (authed === null) {
     return (
-      <div className="flex h-screen items-center justify-center text-sm text-fg-subtle">Loading…</div>
+      <div className="flex h-screen items-center justify-center text-sm text-fg-subtle">{t("Loading…")}</div>
     );
   }
   if (!authed) {
@@ -425,12 +428,13 @@ function Shell({
   // What the tab says while you are looking at something else, and — if you
   // asked for them — a notification when a chat you left running is done.
   const waiting = Boolean(active && uiQueue[0]);
+  const lang = useLanguage();
   useEffect(() => {
     document.title = tabTitle(active ? { title: active.title, status: active.status } : null, waiting);
     return () => {
       document.title = APP_NAME;
     };
-  }, [active?.title, active?.status, waiting]);
+  }, [active?.title, active?.status, waiting, lang]);
 
   // The list stops being polled while the page is hidden, but a chat left
   // running there can only be seen finishing through it — the open one has its
@@ -448,7 +452,7 @@ function Shell({
   const lastStatus = useRef(new Map<string, SessionStatus>());
   useEffect(() => {
     for (const s of finishedRuns(lastStatus.current, sessions)) {
-      notifyIfAway(s.title, s.status === "error" ? "Stopped with an error" : "Finished", s.id, () =>
+      notifyIfAway(s.title, s.status === "error" ? t("Stopped with an error") : t("Finished"), s.id, () =>
         navigate(`/s/${s.id}`),
       );
     }
@@ -458,14 +462,14 @@ function Shell({
   const askedId = active ? uiQueue[0]?.id : undefined;
   useEffect(() => {
     if (!active || !askedId) return;
-    notifyIfAway(active.title, "Waiting for your answer", `ask-${active.id}`, () => navigate(`/s/${active.id}`));
+    notifyIfAway(active.title, t("Waiting for your answer"), `ask-${active.id}`, () => navigate(`/s/${active.id}`));
   }, [askedId]);
 
   return (
     <div data-fits-keyboard className="flex h-[calc(100dvh-var(--keyboard,0px))] min-h-0 overflow-hidden bg-canvas">
-      {mobileNav && <button aria-label="Dismiss navigation" onClick={() => setMobileNav(false)} className="ui-backdrop fixed inset-0 z-40 bg-black/50 md:hidden" />}
+      {mobileNav && <button aria-label={t("Dismiss navigation")} onClick={() => setMobileNav(false)} className="ui-backdrop fixed inset-0 z-40 bg-black/50 md:hidden" />}
       <div id="mobile-navigation" className={`${mobileNav ? "mobile-drawer fixed inset-y-0 left-0 z-50 flex" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
-      {mobileNav && <button type="button" aria-label="Close navigation" onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-20 rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
+      {mobileNav && <button type="button" aria-label={t("Close navigation")} onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-20 rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
       <Sidebar
         forceExpanded={mobileNav}
         sessions={sessions}
@@ -502,7 +506,7 @@ function Shell({
         {/* In a chat the chat's own header has the menu button, and this bar
             would only repeat its title; in voice mode that header is gone. */}
         <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
-          <button type="button" aria-label="Open navigation" aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
+          <button type="button" aria-label={t("Open navigation")} aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
           <span className="truncate text-sm text-fg">{active?.title || "Pithagoras"}</span>
         </header>
         {error && <div className="bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>}
@@ -510,7 +514,7 @@ function Shell({
             is back before it can be read. Two in a row is an outage. */}
         {sessionId && failures >= 2 && (
           <div role="status" className="bg-warn/10 px-4 py-2 text-sm text-warn">
-            Lost the connection to the portal — trying again. What is shown may be out of date.
+            {t("Lost the connection to the portal — trying again. What is shown may be out of date.")}
           </div>
         )}
         {/* One page failing to draw takes down that page, not the portal. */}
@@ -666,11 +670,10 @@ function EmptyState({ hasSessions }: { hasSessions: boolean }) {
       <img src="/icon-192.png" alt="" draggable={false} className="chat-empty-mark mb-2 h-12 w-12 object-contain" />
       <p className="text-sm text-fg-muted">
         {/* On a phone the list is behind the menu, not on the left. */}
-        {hasSessions ? "Pick a session from the list." : "Start a session to get going."}
+        {hasSessions ? t("Pick a session from the list.") : t("Start a session to get going.")}
       </p>
       <p className="max-w-xs text-xs text-fg-faint">
-        Give it a task and close the tab — it keeps working, and picks up where it left off when you
-        come back.
+        {t("Give it a task and close the tab — it keeps working, and picks up where it left off when you come back.")}
       </p>
     </div>
   );

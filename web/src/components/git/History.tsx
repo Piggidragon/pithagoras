@@ -4,6 +4,7 @@ import { copyText } from "../../clipboard";
 import { gitApi, type Branch, type Commit, type CommitDetail, type Comparison, type FileChange } from "../../git-api";
 import { ago, Counts, ErrorNote, IconButton, Letter, LETTER_NAME, Quiet, RefBadge, SectionHead, splitPath } from "./bits";
 import { useGit } from "./context";
+import { t } from "../../i18n";
 
 const PAGE = 100;
 
@@ -43,7 +44,7 @@ export function History() {
   };
 
   if (error && !commits) return <ErrorNote>{error}</ErrorNote>;
-  if (!commits) return <Quiet>Loading…</Quiet>;
+  if (!commits) return <Quiet>{t("Loading…")}</Quiet>;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
@@ -54,14 +55,14 @@ export function History() {
           className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
         >
           <LuGitCompareArrows aria-hidden className="h-3.5 w-3.5" />
-          Compare this branch with its base — what a pull request would show
+          {t("Compare this branch with its base — what a pull request would show")}
         </button>
       )}
-      {!commits.length && <Quiet>No commits yet.</Quiet>}
+      {!commits.length && <Quiet>{t("No commits yet.")}</Quiet>}
       <CommitList commits={commits} />
       {more && (
         <button type="button" onClick={() => void loadMore()} className="w-full px-3 py-2 text-left text-xs text-fg-subtle hover:text-fg hover:underline">
-          Older commits…
+          {t("Older commits…")}
         </button>
       )}
     </div>
@@ -81,7 +82,7 @@ export function CommitList({ commits }: { commits: Commit[] }) {
             className="flex w-full flex-col gap-0.5 border-b border-line/50 px-3 py-1.5 text-left transition hover:bg-fg/5"
           >
             <span className="flex min-w-0 items-center gap-1">
-              {c.parents.length > 1 && <span className="shrink-0 text-[10px] text-fg-faint">merge</span>}
+              {c.parents.length > 1 && <span className="shrink-0 text-[10px] text-fg-faint">{t("merge")}</span>}
               <span className="min-w-0 flex-1 truncate text-xs text-fg">{c.subject}</span>
             </span>
             <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] text-fg-faint">
@@ -138,7 +139,7 @@ export function CommitView({ sha }: { sha: string }) {
     gitApi.commitDetail(id, sha).then(setDetail, (e) => setError((e as Error).message));
   }, [id, sha]);
   if (error) return <ErrorNote>{error}</ErrorNote>;
-  if (!detail) return <Quiet>Loading…</Quiet>;
+  if (!detail) return <Quiet>{t("Loading…")}</Quiet>;
   const [subject, ...body] = detail.message.split("\n");
   const added = detail.files.reduce((n, f) => n + f.added, 0);
   const removed = detail.files.reduce((n, f) => n + f.removed, 0);
@@ -149,20 +150,20 @@ export function CommitView({ sha }: { sha: string }) {
         {body.join("\n").trim() && <p className="mt-1 whitespace-pre-wrap text-xs text-fg-muted">{body.join("\n").trim()}</p>}
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-fg-faint">
           <span className="font-mono">{detail.sha.slice(0, 12)}</span>
-          <IconButton label="Copy the commit's hash" onClick={() => void copyText(detail.sha)}>
+          <IconButton label={t("Copy the commit's hash")} onClick={() => void copyText(detail.sha)}>
             <LuCopy aria-hidden className="h-3 w-3" />
           </IconButton>
           <span>
             {detail.author} &lt;{detail.email}&gt;
           </span>
           <span>{new Date(detail.date * 1000).toLocaleString()}</span>
-          {detail.parents.length > 1 && <span>merge — shown against its first parent</span>}
+          {detail.parents.length > 1 && <span>{t("merge — shown against its first parent")}</span>}
           {detail.refs.map((r) => (
             <RefBadge key={r} name={r} />
           ))}
         </div>
       </div>
-      <SectionHead title="Files" count={detail.files.length}>
+      <SectionHead title={t("Files")} count={detail.files.length}>
         <Counts added={added} removed={removed} />
       </SectionHead>
       <ChangeList files={detail.files} open={(f) => show({ kind: "diff", title: f.path, path: f.path, what: { of: "commit", sha: detail.sha, path: f.path, from: f.from } })} />
@@ -205,12 +206,12 @@ export function CompareView({ base: asked }: { base?: string }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="flex items-center gap-2 border-b border-line px-3 py-1.5 text-xs text-fg-subtle">
-        <span className="shrink-0 font-mono text-fg">{repo.branch ?? "HEAD"}</span>
-        <span className="shrink-0">compared with</span>
+        <span className="shrink-0 font-mono text-fg">{repo.branch ?? t("HEAD")}</span>
+        <span className="shrink-0">{t("compared with")}</span>
         <select
           value={base}
           onChange={(e) => setChosen(e.target.value)}
-          aria-label="Compare with"
+          aria-label={t("Compare with")}
           className="min-w-0 flex-1 rounded border border-line bg-canvas px-1 py-0.5 font-mono text-[11px] text-fg"
         >
           {!choices.includes(base) && base && <option value={base}>{base}</option>}
@@ -223,14 +224,14 @@ export function CompareView({ base: asked }: { base?: string }) {
         </select>
       </div>
       {error && <ErrorNote>{error}</ErrorNote>}
-      {result === undefined && !error && <Quiet>Loading…</Quiet>}
-      {result === null && <Quiet>There is nothing to compare with — no main or master branch here. Pick one above.</Quiet>}
+      {result === undefined && !error && <Quiet>{t("Loading…")}</Quiet>}
+      {result === null && <Quiet>{t("There is nothing to compare with — no main or master branch here. Pick one above.")}</Quiet>}
       {result && (
         <>
-          <SectionHead title="Commits" count={result.commits.length} />
-          {!result.commits.length && <Quiet>Nothing on this branch that {result.base} does not have.</Quiet>}
+          <SectionHead title={t("Commits")} count={result.commits.length} />
+          {!result.commits.length && <Quiet>{t("Nothing on this branch that")} {result.base} {t("does not have.")}</Quiet>}
           <CommitList commits={result.commits} />
-          <SectionHead title="Files" count={result.files.length}>
+          <SectionHead title={t("Files")} count={result.files.length}>
             <Counts added={result.files.reduce((n, f) => n + f.added, 0)} removed={result.files.reduce((n, f) => n + f.removed, 0)} />
           </SectionHead>
           <ChangeList files={result.files} open={(f) => show({ kind: "diff", title: f.path, path: f.path, what: { of: "range", base: result.base, path: f.path, from: f.from } })} />

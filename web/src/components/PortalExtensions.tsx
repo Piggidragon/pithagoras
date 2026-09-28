@@ -3,6 +3,7 @@ import { MemoryAddon, SubagentAddon } from "./FeatureAddons";
 import { useEffect, useId, useState } from "react";
 import { LuBot, LuBrain, LuCheck, LuGlobe, LuMic, LuRefreshCw, LuTrash2 } from "react-icons/lu";
 import { api, type BrowserStatus } from "../api";
+import { t } from "../i18n";
 
 /**
  * Optional pieces of the portal itself, as opposed to pi's packages.
@@ -29,8 +30,8 @@ export function PortalExtensions({ onError }: { onError: (e: string) => void }) 
     setVisited(previous => previous.includes(addon) ? previous : [...previous, addon]);
   };
   return <div>
-    <p className="mb-4 text-xs text-fg-muted">Install and manage the add-ons for your sessions.</p>
-    <div role="tablist" aria-label="Add-ons" className="flex gap-1 rounded-xl border border-line bg-raised/40 p-1">
+    <p className="mb-4 text-xs text-fg-muted">{t("Install and manage the add-ons for your sessions.")}</p>
+    <div role="tablist" aria-label={t("Add-ons")} className="flex gap-1 rounded-xl border border-line bg-raised/40 p-1">
       {addons.map(({ id: addon, label, Icon }, index) => <button
         key={addon} id={`${id}-${addon}-tab`} type="button" role="tab"
         aria-selected={selected === addon} aria-controls={`${id}-${addon}-panel`}
@@ -86,7 +87,7 @@ function BrowserAddon({ onError }: { onError: (e: string) => void }) {
   if (!status) {
     return (
       <p className="flex items-center gap-2 text-sm text-fg-subtle">
-        <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading…
+        <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}
       </p>
     );
   }
@@ -105,23 +106,21 @@ function BrowserAddon({ onError }: { onError: (e: string) => void }) {
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <p className="text-sm text-fg">Browser</p>
+              <p className="text-sm text-fg">{t("Browser")}</p>
               {installed && (
                 <span className="inline-flex items-center gap-1 text-[11px] text-ok">
                   <LuCheck className="h-3 w-3" />
-                  {i.container === "running" ? "running" : "installed"}
+                  {i.container === "running" ? t("running") : t("installed")}
                 </span>
               )}
             </div>
             <p className="mt-0.5 text-[11px] text-fg-faint">
-              A real browser with a profile that stays logged in. Sign into it once; the agent
-              drives the same one afterwards and never handles a password.
+              {t("A real browser with a profile that stays logged in. Sign into it once; the agent drives the same one afterwards and never handles a password.")}
             </p>
 
             {!i.available && (
               <p className="mt-2 text-[11px] text-warn">
-                Not possible here — the portal cannot reach Docker and there is no Chrome on the
-                machine.
+                {t("Not possible here — the portal cannot reach Docker and there is no Chrome on the machine.")}
               </p>
             )}
 
@@ -129,8 +128,8 @@ function BrowserAddon({ onError }: { onError: (e: string) => void }) {
               <p className="mt-2 text-[11px] text-fg-faint">
                 {dockerMode
                   ? i.image
-                    ? "Runs as its own container. The image is already downloaded."
-                    : "Runs as its own container. Installing downloads a 4.6GB image."
+                    ? t("Runs as its own container. The image is already downloaded.")
+                    : t("Runs as its own container. Installing downloads a 4.6GB image.")
                   : `Uses the Chrome on this machine (${i.binary}).`}
               </p>
             )}
@@ -142,14 +141,14 @@ function BrowserAddon({ onError }: { onError: (e: string) => void }) {
             <input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="a password for its web UI"
+              placeholder={t("a password for its web UI")}
               className="min-w-[12rem] flex-1 rounded-lg border border-line bg-raised/60 px-2 py-1.5 text-xs outline-none focus:border-accent/60"
             />
             <button
               onClick={async () => setPassword((await api.suggestBrowserPassword()).password)}
               className="rounded-lg bg-fg/5 px-2.5 py-1.5 text-[11px] text-fg-muted transition hover:bg-fg/10"
             >
-              Suggest one
+              {t("Suggest one")}
             </button>
           </div>
         )}
@@ -169,7 +168,7 @@ function BrowserAddon({ onError }: { onError: (e: string) => void }) {
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
               >
                 {busy && <LuRefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                Install
+                {t("Install")}
               </button>
             )}
             {installed && (
@@ -181,7 +180,7 @@ function BrowserAddon({ onError }: { onError: (e: string) => void }) {
                   }
                   className="rounded-lg bg-fg/5 px-3 py-1.5 text-xs text-fg-muted transition hover:bg-fg/10"
                 >
-                  {i.container === "running" ? "Stop" : "Start"}
+                  {i.container === "running" ? t("Stop") : t("Start")}
                 </button>
                 <button
                   disabled={busy}
@@ -193,7 +192,7 @@ function BrowserAddon({ onError }: { onError: (e: string) => void }) {
                   }
                   className="inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-3 py-1.5 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger"
                 >
-                  <LuTrash2 className="h-3.5 w-3.5" /> Remove
+                  <LuTrash2 className="h-3.5 w-3.5" /> {t("Remove")}
                 </button>
               </>
             )}
@@ -205,7 +204,7 @@ function BrowserAddon({ onError }: { onError: (e: string) => void }) {
         )}
         {installed && (
           <p className="mt-2 text-[11px] text-fg-faint">
-            Removing keeps the profile, so its logins are still there if you install it again.
+            {t("Removing keeps the profile, so its logins are still there if you install it again.")}
           </p>
         )}
       </div>

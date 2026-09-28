@@ -5,6 +5,7 @@ import { isEnter } from "../../shortcuts";
 import { confirmDialog } from "../ConfirmDialog";
 import { ago, Counts, IconButton, Letter, LETTER_NAME, Quiet, SectionHead, splitPath, TextButton } from "./bits";
 import { useGit } from "./context";
+import { t } from "../../i18n";
 
 type Side = "staged" | "unstaged" | "conflict";
 
@@ -49,27 +50,27 @@ export function Changes() {
             }
           }}
           rows={Math.min(6, Math.max(2, message.split("\n").length))}
-          placeholder={amend ? "New message — leave empty to keep the last one" : "Commit message (Ctrl+Enter to commit)"}
-          aria-label="Commit message"
+          placeholder={amend ? t("New message — leave empty to keep the last one") : t("Commit message (Ctrl+Enter to commit)")}
+          aria-label={t("Commit message")}
           className="w-full resize-none rounded-lg border border-line bg-canvas px-2 py-1.5 text-xs text-fg outline-none placeholder:text-fg-faint focus:border-accent/60"
         />
         <div className="mt-1.5 flex items-center gap-2">
-          <label className="flex cursor-pointer items-center gap-1 text-[11px] text-fg-subtle" title="Change the last commit instead of making a new one">
+          <label className="flex cursor-pointer items-center gap-1 text-[11px] text-fg-subtle" title={t("Change the last commit instead of making a new one")}>
             <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} className="h-3 w-3 accent-accent" disabled={!repo.head} />
-            Amend
+            {t("Amend")}
           </label>
           <span className="ml-auto" />
-          <TextButton primary disabled={!canCommit} onClick={() => void commit()} title={conflicts.length ? "Resolve the conflicts first" : undefined}>
-            {amend ? (staged.length ? `Amend with ${staged.length} staged` : "Amend") : all ? (nothing ? "Commit" : `Commit all ${unstaged.length}`) : `Commit ${staged.length} staged`}
+          <TextButton primary disabled={!canCommit} onClick={() => void commit()} title={conflicts.length ? t("Resolve the conflicts first") : undefined}>
+            {amend ? (staged.length ? `Amend with ${staged.length} staged` : t("Amend")) : all ? (nothing ? t("Commit") : `Commit all ${unstaged.length}`) : `Commit ${staged.length} staged`}
           </TextButton>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {nothing && <Quiet>Nothing has changed since the last commit.</Quiet>}
+        {nothing && <Quiet>{t("Nothing has changed since the last commit.")}</Quiet>}
         {conflicts.length > 0 && (
           <>
-            <SectionHead title="Conflicts" count={conflicts.length} />
+            <SectionHead title={t("Conflicts")} count={conflicts.length} />
             {conflicts.map((f) => (
               <FileRow key={`c:${f.path}`} file={f} side="conflict" />
             ))}
@@ -77,8 +78,8 @@ export function Changes() {
         )}
         {staged.length > 0 && (
           <>
-            <SectionHead title="Staged" count={staged.length}>
-              <IconButton label="Unstage everything" disabled={!!busy} onClick={() => void act("Unstaging", () => gitApi.unstage(id, "all"))}>
+            <SectionHead title={t("Staged")} count={staged.length}>
+              <IconButton label={t("Unstage everything")} disabled={!!busy} onClick={() => void act("Unstaging", () => gitApi.unstage(id, "all"))}>
                 <LuMinus aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
             </SectionHead>
@@ -89,12 +90,12 @@ export function Changes() {
         )}
         {unstaged.length > 0 && (
           <>
-            <SectionHead title="Changes" count={unstaged.length}>
-              <IconButton label="Stash everything — put it away for later" disabled={!!busy} onClick={() => void act("Stashing", () => gitApi.stash(id))}>
+            <SectionHead title={t("Changes")} count={unstaged.length}>
+              <IconButton label={t("Stash everything — put it away for later")} disabled={!!busy} onClick={() => void act("Stashing", () => gitApi.stash(id))}>
                 <LuArchive aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
               <IconButton
-                label="Discard every change not staged"
+                label={t("Discard every change not staged")}
                 danger
                 disabled={!!busy}
                 onClick={async () => {
@@ -109,7 +110,7 @@ export function Changes() {
               >
                 <LuUndo2 aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
-              <IconButton label="Stage everything" disabled={!!busy} onClick={() => void act("Staging", () => gitApi.stage(id, "all"))}>
+              <IconButton label={t("Stage everything")} disabled={!!busy} onClick={() => void act("Staging", () => gitApi.stage(id, "all"))}>
                 <LuPlus aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
             </SectionHead>
@@ -118,7 +119,7 @@ export function Changes() {
             ))}
           </>
         )}
-        {repo.truncated && <Quiet>More files changed than are listed here.</Quiet>}
+        {repo.truncated && <Quiet>{t("More files changed than are listed here.")}</Quiet>}
         {repo.stashes > 0 && <Stashes count={repo.stashes} />}
       </div>
     </div>
@@ -223,8 +224,8 @@ function Stashes({ count }: { count: number }) {
     <div className="mt-2 border-t border-line">
       <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1 px-3 py-1.5 text-left text-[11px] text-fg-subtle hover:text-fg">
         <LuArchiveRestore aria-hidden className="h-3.5 w-3.5" />
-        {count} {count === 1 ? "stash" : "stashes"}
-        <span className="ml-auto text-fg-faint">{open ? "hide" : "show"}</span>
+        {count} {count === 1 ? t("stash") : t("stashes")}
+        <span className="ml-auto text-fg-faint">{open ? t("hide") : t("show")}</span>
       </button>
       {open &&
         (list ?? []).map((s) => (
@@ -233,14 +234,14 @@ function Stashes({ count }: { count: number }) {
               <span className="min-w-0 flex-1 truncate text-xs text-fg">{s.message}</span>
               <span className="shrink-0 text-[10px] text-fg-faint">{ago(s.date)}</span>
             </button>
-            <TextButton disabled={!!busy} onClick={() => void act("Applying the stash", () => gitApi.stashDo(id, "apply", s.ref, s.sha))} title="Bring it back and keep the stash">
-              Apply
+            <TextButton disabled={!!busy} onClick={() => void act("Applying the stash", () => gitApi.stashDo(id, "apply", s.ref, s.sha))} title={t("Bring it back and keep the stash")}>
+              {t("Apply")}
             </TextButton>
-            <TextButton disabled={!!busy} onClick={() => void act("Popping the stash", () => gitApi.stashDo(id, "pop", s.ref, s.sha))} title="Bring it back and drop the stash">
-              Pop
+            <TextButton disabled={!!busy} onClick={() => void act("Popping the stash", () => gitApi.stashDo(id, "pop", s.ref, s.sha))} title={t("Bring it back and drop the stash")}>
+              {t("Pop")}
             </TextButton>
             <IconButton
-              label="Drop this stash"
+              label={t("Drop this stash")}
               danger
               disabled={!!busy}
               onClick={async () => {

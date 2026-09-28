@@ -5,6 +5,7 @@ import { ago, compactCount, webLink } from "../package-names";
 import { confirmDialog } from "./ConfirmDialog";
 import { load, peek } from "../settings-cache";
 import { inputCls } from "./SettingsUi";
+import { t } from "../i18n";
 
 /**
  * pi packages published on npm, to install with a click rather than a spec
@@ -84,8 +85,8 @@ export function PackageCatalog({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={topic === "provider" ? "Search provider packages — litellm, cohere, gateway…" : "Search pi packages — web search, subagents, themes…"}
-            aria-label="Search packages"
+            placeholder={topic === "provider" ? t("Search provider packages — litellm, cohere, gateway…") : t("Search pi packages — web search, subagents, themes…")}
+            aria-label={t("Search packages")}
             className={`${inputCls} pl-8`}
           />
         </div>
@@ -94,15 +95,15 @@ export function PackageCatalog({
       {failed ? (
         <div className="mt-2 flex items-center gap-2 rounded-xl border border-dashed border-line px-3 py-4 text-xs text-fg-subtle">
           <span className="flex-1">{failed}</span>
-          <button type="button" onClick={() => fetchList(asked)} className="text-accent hover:underline">Try again</button>
+          <button type="button" onClick={() => fetchList(asked)} className="text-accent hover:underline">{t("Try again")}</button>
         </div>
       ) : !found ? (
-        <div className="skeleton-group mt-2 space-y-1.5" aria-label="Loading packages">
+        <div className="skeleton-group mt-2 space-y-1.5" aria-label={t("Loading packages")}>
           {[0, 1, 2].map((i) => <div key={i} className="skeleton h-16 w-full" />)}
         </div>
       ) : found.length === 0 ? (
         <p className="mt-2 rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-fg-subtle">
-          Nothing published matches{asked ? ` “${asked}”` : ""}.
+          {t("Nothing published matches")}{asked ? ` “${asked}”` : ""}.
         </p>
       ) : (
         <ul key={asked} className="stagger-in mt-2 space-y-1.5">
@@ -125,18 +126,18 @@ export function PackageCatalog({
                           <LuTrendingUp className="h-3 w-3" /> {compactCount(p.weekly)}/week
                         </span>
                       )}
-                      {p.date && <span>updated {ago(p.date)}</span>}
-                      {p.author && <span>by {p.author}</span>}
+                      {p.date && <span>{t("updated")} {ago(p.date)}</span>}
+                      {p.author && <span>{t("by")} {p.author}</span>}
                       {link && (
                         <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 hover:text-fg-muted">
-                          more <LuExternalLink className="h-2.5 w-2.5" />
+                          {t("more")} <LuExternalLink className="h-2.5 w-2.5" />
                         </a>
                       )}
                     </p>
                   </div>
                   {has ? (
                     <span className="pop-in inline-flex shrink-0 items-center gap-1 rounded-lg bg-ok/10 px-2 py-1 text-[11px] text-ok">
-                      <LuCheck className="h-3.5 w-3.5" /> Installed
+                      <LuCheck className="h-3.5 w-3.5" /> {t("Installed")}
                     </span>
                   ) : (
                     <button
@@ -147,7 +148,7 @@ export function PackageCatalog({
                       className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2 py-1 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
                     >
                       {busy === p.name ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuDownload className="h-3.5 w-3.5" />}
-                      {busy === p.name ? "Installing…" : "Install"}
+                      {busy === p.name ? t("Installing…") : t("Install")}
                     </button>
                   )}
                 </div>
@@ -159,12 +160,12 @@ export function PackageCatalog({
 
       {found && found.length > limit && (
         <button type="button" onClick={() => setMore(!more)} className="mt-2 text-[11px] text-accent hover:underline">
-          {more ? "Fewer" : `${found.length - limit} more`}
+          {more ? t("Fewer") : `${found.length - limit} more`}
         </button>
       )}
       {done.size > 0 && (
         <p role="status" className="mt-2 text-xs text-fg-muted">
-          Chats started from now on have it. Open ones pick it up with /reload.
+          {t("Chats started from now on have it. Open ones pick it up with /reload.")}
         </p>
       )}
     </div>

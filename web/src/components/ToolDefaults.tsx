@@ -4,6 +4,7 @@ import { api } from "../api";
 import { displayName, groupSummary, groupTools, nextOff } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 import { isEnter, isEscape } from "../shortcuts";
+import { t } from "../i18n";
 
 /**
  * Which tools every conversation starts with.
@@ -95,17 +96,13 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
     <>
       <section className="mb-6 rounded-xl border border-line bg-raised/40 p-3">
         <p className="text-xs text-fg-subtle">
-          What a conversation starts with. A tool switched off here is not offered to the model
-          in any chat — the extension stays installed and its slash commands still work. One
-          chat can switch any of them the other way for itself, from the blocks icon beside the
-          composer, and a change here reaches every chat that has not.
+          {t("What a conversation starts with. A tool switched off here is not offered to the model in any chat — the extension stays installed and its slash commands still work. One chat can switch any of them the other way for itself, from the blocks icon beside the composer, and a change here reaches every chat that has not.")}
         </p>
       </section>
 
       {!tools.length ? (
         <p className="rounded-xl border border-line bg-raised/40 px-3 py-2 text-xs text-fg-subtle">
-          Nothing listed yet. Tools appear once a conversation has run — that is when pi builds
-          the list of what its extensions registered.
+          {t("Nothing listed yet. Tools appear once a conversation has run — that is when pi builds the list of what its extensions registered.")}
         </p>
       ) : (
         <div className="overflow-hidden rounded-xl border border-line">
@@ -134,7 +131,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                     <button
                       type="button"
                       onClick={() => rename(group.source, renaming.value)}
-                      title="Save"
+                      title={t("Save")}
                       className="shrink-0 rounded p-1 text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
                     >
                       <LuCheck className="h-3 w-3" />
@@ -142,7 +139,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                     <button
                       type="button"
                       onClick={() => setRenaming(null)}
-                      title="Cancel"
+                      title={t("Cancel")}
                       className="shrink-0 rounded p-1 text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
                     >
                       <LuX className="h-3 w-3" />
@@ -190,7 +187,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                       onClick={() => flip(group.tools.map((t) => t.name), group.allOff)}
                       className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
                     >
-                      {group.allOff ? "all on" : "all off"}
+                      {group.allOff ? t("all on") : t("all off")}
                     </button>
                   </>
                 )}
