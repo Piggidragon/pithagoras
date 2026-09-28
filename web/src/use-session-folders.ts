@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "./api";
 import { local } from "./safe-storage";
 import { moveFolder, readFolderOrder, readFolderSort, readOpenFolders, type FolderSort, type Places } from "./session-folders";
@@ -55,10 +55,20 @@ export function useFolderPrefs() {
  * Which folders are open in one place (`key` in storage). Those never opened
  * or shut by hand are as `byDefault` says: the sidebar has room for one or
  * two, the Sessions page for all of them.
+ *
+ * While `searching`, every folder with a match is open, and one shut then is
+ * shut only until the search ends: what is kept is how the folders were left
+ * without one, which a click on a folder the search had opened would
+ * otherwise change unseen.
  */
-export function useOpenFolders(key: string, byDefault: (folder: string) => boolean) {
+export function useOpenFolders(key: string, byDefault: (folder: string) => boolean, searching = false) {
   const [chosen, setChosen] = useState(() => readOpenFolders(local.get(key)));
-  const isOpen = (folder: string) => chosen[folder] ?? byDefault(folder);
+  const [shutWhileSearching, setShut] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (!searching) setShut((prev) => (prev.size ? new Set() : prev));
+  }, [searching]);
+  const kept = (folder: string) => chosen[folder] ?? byDefault(folder);
+  const isOpen = (folder: string) => (searching ? !shutWhileSearching.has(folder) : kept(folder));
   const set = (folder: string, open: boolean) =>
     setChosen((prev) => {
       if (prev[folder] === open) return prev;
@@ -66,23 +76,53 @@ export function useOpenFolders(key: string, byDefault: (folder: string) => boole
       local.set(key, JSON.stringify(next));
       return next;
     });
-  return { isOpen, set, toggle: (folder: string) => set(folder, !isOpen(folder)) };
+  const toggle = (folder: string) => {
+    if (!searching) return set(folder, !kept(folder));
+    setShut((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(folder)) next.add(folder);
+      return next;
+    });
+  };
+  return { isOpen, set, toggle };
+}
+
+/** Places as they were last known, so that the chats are gathered from the start rather than once they are asked for. */
+function knownPlaces(): Places | undefined {
+  try {
+    const p = JSON.parse(local.get("knownPlaces") ?? "") as Places;
+    return typeof p?.home === "string" && Array.isArray(p.projects) ? p : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * Where Home is and what projects there are, for gathering the chats:
- * undefined until they are known, null if they could not be. Asked again
- * whenever which chats there are, or where, changes — a project is mostly
- * made with its first chat — and when `reload` is called.
+ * undefined until they are known, null if they could not be. What was known
+ * last time is used until they are asked. Asked again whenever which chats
+ * there are, or where, changes — a project is mostly made with its first
+ * chat — and when `reload` is called; only the latest answer is taken, since
+ * an earlier one can arrive after it and be from before a project was made.
  */
 export function usePlaces(sessions: readonly { id: string; workspace: string }[]) {
-  const [places, setPlaces] = useState<Places | null | undefined>(undefined);
+  const [places, setPlaces] = useState<Places | null | undefined>(knownPlaces);
+  const asked = useRef(0);
   const load = useCallback(() => {
+    const n = ++asked.current;
     api.projects().then(
-      // Read as little as it says: an older server does not say where Home is.
-      (r) => setPlaces({ home: typeof r.home === "string" ? r.home : "", projects: Array.isArray(r.projects) ? r.projects : [] }),
+      (r) => {
+        if (n !== asked.current) return;
+        // Read as little as it says: an older server does not say where Home is.
+        const now: Places = {
+          home: typeof r.home === "string" ? r.home : "",
+          projects: (Array.isArray(r.projects) ? r.projects : []).map((p) => ({ name: p.name, path: p.path })),
+        };
+        local.set("knownPlaces", JSON.stringify(now));
+        setPlaces(now);
+      },
       // What was known stays: a list that failed to load once has not changed.
-      () => setPlaces((known) => known ?? null),
+      () => n === asked.current && setPlaces((known) => known ?? null),
     );
   }, []);
   const chats = sessions.map((s) => `${s.id}:${s.workspace}`).join("|");

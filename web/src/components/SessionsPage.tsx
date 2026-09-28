@@ -93,12 +93,20 @@ export function SessionsPage({
     });
   const searching = query.trim() !== "";
   const byFolder = !only && grouping === "folders" && hasProjects;
-  const openFolders = useOpenFolders("sessionsFoldersOpen", () => true);
+  const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching);
   const shown = useMemo(() => (only ? filterSessions(only.sessions, query) : matches), [only, query, matches]);
   const [startError, setStartError] = useState<string | null>(null);
+  /** A chat on its way: a second press of + would start another. */
+  const starting = useRef(false);
   const start = (workspace?: string) => {
+    if (!onNewChat || starting.current) return;
+    starting.current = true;
     setStartError(null);
-    onNewChat?.(workspace).catch((e) => setStartError((e as Error).message));
+    onNewChat(workspace)
+      .catch((e) => setStartError((e as Error).message))
+      .finally(() => {
+        starting.current = false;
+      });
   };
 
   const row = (s: Session) => (
@@ -274,7 +282,7 @@ export function SessionsPage({
               <FolderTree
                 size="md"
                 folders={searching ? folders.filter((f) => f.sessions.length > 0) : folders}
-                isOpen={searching ? () => true : openFolders.isOpen}
+                isOpen={openFolders.isOpen}
                 onToggle={openFolders.toggle}
                 onMove={searching ? undefined : move}
                 onNewChat={onNewChat ? (f) => start(f.kind === "home" ? undefined : f.path!) : undefined}

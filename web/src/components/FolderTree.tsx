@@ -40,11 +40,26 @@ export function FolderTree<S extends { status: SessionStatus }>({
   extra?: (folder: Folder<S>) => ReactNode;
 }) {
   const id = useId();
-  const keys = folders.map((f) => f.key);
   const heads = useRef(new Map<string, HTMLElement>());
   const toggles = useRef(new Map<string, HTMLButtonElement>());
-  /** The folder being carried, and where among the others it would go. */
-  const [drag, setDrag] = useState<{ key: string; to: number } | null>(null);
+  /**
+   * The folder being carried, the order the folders were in when it was
+   * picked up, and where among the others it would go once it has moved
+   * (`to`, null before). They are drawn in that order until it is let go:
+   * one that changed meanwhile — a chat moving under "Latest first" — would
+   * have the line mark one place and the drop go to another.
+   */
+  const [drag, setDrag] = useState<{ key: string; keys: string[]; to: number | null } | null>(null);
+  const listed = drag
+    ? [
+        ...drag.keys.flatMap((k) => folders.filter((f) => f.key === k)),
+        ...folders.filter((f) => !drag.keys.includes(f.key)),
+      ]
+    : folders;
+  const keys = listed.map((f) => f.key);
+  /** The folders there are now, for a drop: one that went while it was carried is not put back. */
+  const present = useRef(keys);
+  present.current = folders.map((f) => f.key);
   /** A folder moved with the keys, whose name is to keep the focus once it is drawn where it went. */
   const refocus = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -57,7 +72,8 @@ export function FolderTree<S extends { status: SessionStatus }>({
   const carry = (folder: Folder<S>, e: PointerEvent<HTMLElement>) => {
     if (!onMove || e.button !== 0) return;
     e.preventDefault();
-    const others = keys.filter((k) => k !== folder.key);
+    const picked = keys;
+    const others = picked.filter((k) => k !== folder.key);
     // Among the others, how many have their line's middle above the pointer.
     const at = (y: number) =>
       others.filter((k) => {
@@ -65,19 +81,22 @@ export function FolderTree<S extends { status: SessionStatus }>({
         return r !== undefined && r.top + r.height / 2 < y;
       }).length;
     const from = e.clientY;
-    let to = keys.indexOf(folder.key);
+    let to = picked.indexOf(folder.key);
     let moved = false;
+    setDrag({ key: folder.key, keys: picked, to: null });
     followPointer(
       e,
       (ev) => {
         if (!moved && Math.abs(ev.clientY - from) < DRAG_SLOP) return;
         moved = true;
         to = at(ev.clientY);
-        setDrag({ key: folder.key, to });
+        setDrag({ key: folder.key, keys: picked, to });
       },
       (cancelled) => {
         setDrag(null);
-        if (moved && !cancelled) onMove(keys, folder.key, to);
+        if (moved && !cancelled && present.current.includes(folder.key)) {
+          onMove(picked.filter((k) => present.current.includes(k)), folder.key, to);
+        }
       },
     );
   };
@@ -98,10 +117,11 @@ export function FolderTree<S extends { status: SessionStatus }>({
 
   return (
     <div className={md ? "space-y-1" : undefined}>
-      {folders.map((f) => {
+      {listed.map((f, i) => {
         const open = isOpen(f.key);
-        const body = `${id}-${f.key}`;
-        const carried = drag?.key === f.key;
+        // Not by its key, which is a folder's name, and a name can have a space: aria-controls is a list of ids.
+        const body = `${id}-${i}`;
+        const carried = drag?.key === f.key && drag.to !== null;
         // Where the line shows: before the folder that would come after the one carried.
         const before = drag && !carried && drag.to === other;
         if (!carried) other++;
@@ -169,7 +189,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
           </div>
         );
       })}
-      {drag && drag.to === other && mark}
+      {drag && drag.to !== null && drag.to === other && mark}
     </div>
   );
 }

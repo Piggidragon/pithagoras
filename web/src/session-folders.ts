@@ -30,7 +30,8 @@ export const projectKey = (name: string) => `project:${name}`;
 /** What the chats are gathered into: where Home is, and the projects. */
 export type Places = { home: string; projects: readonly { name: string; path: string }[] };
 
-const within = (dir: string, where: string) => where === dir || where.startsWith(dir.endsWith("/") ? dir : dir + "/");
+/** `where` is the folder `dir` or inside it, by the text of the path. */
+export const within = (dir: string, where: string) => where === dir || where.startsWith(dir.endsWith("/") ? dir : dir + "/");
 
 export function groupByFolder<S extends { workspace: string; updated_at: string }>(sessions: readonly S[], places: Places): Folder<S>[] {
   const home: Folder<S> = { key: HOME, kind: "home", name: "Home", path: places.home, sessions: [], lastActive: "" };

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
@@ -101,7 +101,7 @@ export function Sidebar({
   // The field goes away when the list shrinks below the limit; what was typed
   // in it must not go on hiding chats from a list that has no box to clear it.
   const searching = searchable && query.trim() !== "";
-  const found = filterSessions(sessions, searching ? query : "");
+  const found = useMemo(() => filterSessions(sessions, searching ? query : ""), [sessions, searching, query]);
   const pinned = found.filter((s) => s.pinned);
   const recents = found.filter((s) => !s.pinned);
   // A search looks through all of them, not only the dozen that are listed.
@@ -110,14 +110,23 @@ export function Sidebar({
   // Gathered by folder only where there is more than Home to gather them in.
   const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
   const hasProjects = !!places && places.projects.length > 0;
-  const byFolder = grouping === "folders" && places !== null && (places === undefined || hasProjects);
-  // Pinned chats stay at the top, and each folder has the rest of its own.
-  const folders = places ? sortFolders(groupByFolder(recents, places), sort, order) : [];
+  // Until the places are known, the chats are listed as they were: not held back for them.
+  const byFolder = grouping === "folders" && hasProjects;
+  // Pinned chats stay at the top, and each folder has the rest of its own. The
+  // folders are ordered by all their chats, pinned ones too, as the Sessions
+  // page orders them: the order is the same one in both.
+  const folders = useMemo(
+    () =>
+      byFolder && places
+        ? sortFolders(groupByFolder(found, places), sort, order).map((f) => ({ ...f, sessions: f.sessions.filter((s) => !s.pinned) }))
+        : [],
+    [byFolder, found, places, sort, order],
+  );
   // Searching, the folders with a match, open: the match is what was looked for.
   const shownFolders = searching ? folders.filter((f) => f.sessions.length > 0) : folders;
-  const openFolders = useOpenFolders("sidebarFoldersOpen", (key) => key === HOME);
+  const openFolders = useOpenFolders("sidebarFoldersOpen", (key) => key === HOME, searching);
   // The chat opened is in a folder that is open, however it was opened.
-  const activeFolder = folders.find((f) => f.sessions.some((s) => s.id === activeId))?.key;
+  const activeFolder = useMemo(() => folders.find((f) => f.sessions.some((s) => s.id === activeId))?.key, [folders, activeId]);
   useEffect(() => {
     if (activeFolder) openFolders.set(activeFolder, true);
   }, [activeId, activeFolder]);
@@ -226,7 +235,7 @@ export function Sidebar({
           </>
         )}
 
-        {byFolder && places && shownFolders.length > 0 && (
+        {byFolder && shownFolders.length > 0 && (
           <>
             <Divider />
             <div className="flex items-center gap-1 pr-1">
@@ -235,13 +244,16 @@ export function Sidebar({
             </div>
             <FolderTree
               folders={shownFolders}
-              isOpen={searching ? () => true : openFolders.isOpen}
+              isOpen={openFolders.isOpen}
               onToggle={openFolders.toggle}
               onMove={searching ? undefined : move}
               onNewChat={(f) => newChat(f.kind === "home" ? undefined : f.path!)}
             >
               {(f) => {
-                const shown = searching ? f.sessions : f.sessions.slice(0, FOLDER_LIMIT);
+                const first = searching ? f.sessions : f.sessions.slice(0, FOLDER_LIMIT);
+                // The chat that is open is listed, however far down its folder it is.
+                const open = first.some((s) => s.id === activeId) ? null : f.sessions.find((s) => s.id === activeId);
+                const shown = open ? [...first, open] : first;
                 return (
                   <>
                     {f.sessions.length === 0 && <p className="px-2.5 py-1 text-xs text-fg-faint">No chats yet.</p>}

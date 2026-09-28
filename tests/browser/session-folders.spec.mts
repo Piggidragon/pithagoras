@@ -13,7 +13,7 @@ async function portal(page: Page, sessions = [
   chat('s2', 'Site docs chat', '/w/site/docs', 50),
   chat('n1', 'Notes chat', '/w/notes', 10),
   chat('p1', 'Pinned chat', '/w/notes', 60, { pinned: true }),
-]) {
+], opts: { projects?: string[]; projectsHeld?: Promise<void> } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
@@ -25,10 +25,13 @@ async function portal(page: Page, sessions = [
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
     else if (p === '/api/sessions' && method === 'GET') reply = { sessions, executor: 'host' };
     else if (p === '/api/sessions' && method === 'POST') reply = chat('new', 'New chat', body?.workspace ?? HOME, 0);
-    else if (p === '/api/projects') reply = {
+    else if (p === '/api/projects') {
+      await opts.projectsHeld;
+      reply = {
       root: '/w', home: HOME,
-      projects: ['site', 'notes', 'empty'].map((name) => ({ name, path: `/w/${name}`, isGit: false, hasInstructions: false, sessions: 0, lastActive: null })),
-    };
+      projects: (opts.projects ?? ['site', 'notes', 'empty']).map((name) => ({ name, path: `/w/${name}`, isGit: false, hasInstructions: false, sessions: 0, lastActive: null })),
+      };
+    }
     else if (p === '/api/models') reply = { models: [{ provider: 'x', id: 'm', name: 'M', reasoning: false }], providers: {} };
     await route.fulfill({ json: reply });
   });
@@ -36,7 +39,7 @@ async function portal(page: Page, sessions = [
     (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
     localStorage.setItem('pithagoras.setup', 'done');
   });
-  return sent;
+  return Object.assign(sent, { sessions });
 }
 
 const sidebar = (page: Page) => page.getByRole('complementary', { name: 'Sidebar' });
@@ -211,4 +214,130 @@ test('without projects the sidebar lists the chats as before', async ({ page }) 
   await expect(side.getByText('Recents', { exact: true })).toBeVisible();
   await expect(side.locator('[data-folder]')).toHaveCount(0);
   await expect(side.getByRole('button', { name: 'Group the chats by folder' })).toHaveCount(0);
+});
+
+test('a folder shut while searching is shut only for the search', async ({ page }) => {
+  const many = Array.from({ length: 12 }, (_, i) => chat(`h${i}`, `Home chat ${i}`, HOME, i + 1));
+  await portal(page, [...many, chat('s1', 'Home and site', '/w/site', 40)]);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await side.getByLabel('Search chats').fill('home');
+  await expect(folder(side, 'Home')).toHaveAttribute('aria-expanded', 'true');
+  await expect(folder(side, 'site')).toHaveAttribute('aria-expanded', 'true');
+  await folder(side, 'Home').click();
+  await folder(side, 'site').click();
+  await expect(folder(side, 'Home')).toHaveAttribute('aria-expanded', 'false');
+  await expect(folder(side, 'site')).toHaveAttribute('aria-expanded', 'false');
+  await side.getByLabel('Search chats').fill('');
+  // As they were before the search: Home open, site shut, and kept so.
+  await expect(folder(side, 'Home')).toHaveAttribute('aria-expanded', 'true');
+  await expect(folder(side, 'site')).toHaveAttribute('aria-expanded', 'false');
+  expect(await page.evaluate(() => localStorage.getItem('sidebarFoldersOpen'))).toBeNull();
+  await side.getByLabel('Search chats').fill('home');
+  await expect(folder(side, 'Home')).toHaveAttribute('aria-expanded', 'true');
+
+  // The same on the Sessions page.
+  const main = page.getByRole('main');
+  await main.getByPlaceholder('Search by name or workspace…').fill('site');
+  await folder(main, 'site').click();
+  await expect(folder(main, 'site')).toHaveAttribute('aria-expanded', 'false');
+  await main.getByPlaceholder('Search by name or workspace…').fill('');
+  await expect(folder(main, 'site')).toHaveAttribute('aria-expanded', 'true');
+  expect(await page.evaluate(() => localStorage.getItem('sessionsFoldersOpen'))).toBeNull();
+});
+
+test('folders reordered by a chat while one is carried stay put until it is let go, and it goes where the line was', async ({ page }) => {
+  const sent = await portal(page);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect.poll(() => folderNames(side)).toEqual(['site', 'notes', 'Home', 'empty']);
+  const grip = side.locator('[data-folder="project:empty"] .folder-grip');
+  await folder(side, 'empty').hover();
+  const from = await grip.boundingBox();
+  const to = await folder(side, 'notes').boundingBox();
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from!.x + 4, from!.y - 10, { steps: 3 });
+  // Between site and notes.
+  await page.mouse.move(to!.x + 10, to!.y + 2, { steps: 5 });
+  await expect(side.locator('.folder-drop')).toHaveCount(1);
+  // Home's chat moves: latest first, Home would be at the top.
+  sent.sessions[0].updated_at = new Date().toISOString();
+  await page.waitForTimeout(5600);
+  await expect.poll(() => folderNames(page.getByRole('main'))).toEqual(['Home', 'site', 'notes', 'empty']);
+  expect(await folderNames(side)).toEqual(['site', 'notes', 'Home', 'empty']);
+  await page.mouse.up();
+  await expect.poll(() => folderNames(side)).toEqual(['site', 'empty', 'notes', 'Home']);
+});
+
+test('the chats are listed before the projects are known, and by folder once they have been', async ({ page }) => {
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await portal(page, undefined, { projectsHeld: held });
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect(side.getByText('Site chat')).toBeVisible();
+  await expect(side.getByText('Recents', { exact: true })).toBeVisible();
+  release();
+  await expect(folder(side, 'site')).toBeVisible();
+  await expect(side.getByText('Recents', { exact: true })).toHaveCount(0);
+
+  // Next time the folders are there from the start, while the projects are still being asked.
+  await page.route('**/api/projects', () => {});
+  await page.reload();
+  await expect(folder(side, 'site')).toBeVisible();
+  await expect(side.getByText('Recents', { exact: true })).toHaveCount(0);
+});
+
+test('a pinned chat orders its folder the same in the sidebar and on the Sessions page', async ({ page }) => {
+  await portal(page, [
+    chat('s1', 'Site chat', '/w/site', 20),
+    chat('n1', 'Notes chat', '/w/notes', 30),
+    chat('p1', 'Pinned chat', '/w/notes', 1, { pinned: true }),
+  ]);
+  await page.goto('/sessions');
+  await expect.poll(() => folderNames(page.getByRole('main'))).toEqual(['notes', 'site', 'Home', 'empty']);
+  await expect.poll(() => folderNames(sidebar(page))).toEqual(['notes', 'site', 'Home', 'empty']);
+});
+
+test('the chat opened is listed in its folder, however far down it is', async ({ page }) => {
+  const many = Array.from({ length: 11 }, (_, i) => chat(`s${i}`, `Site chat ${i}`, '/w/site', i + 1));
+  await portal(page, many);
+  await page.goto('/s/s10');
+  const site = sidebar(page).getByRole('group', { name: 'site' });
+  await expect(site.getByText('Site chat 10')).toBeVisible();
+  await expect(site.locator('[aria-current="page"]')).toHaveText(/Site chat 10/);
+  await expect(site.getByText(/^Site chat \d+$/)).toHaveCount(9);
+  await expect(sidebar(page).getByRole('button', { name: '2 more in site…' })).toBeVisible();
+});
+
+test("a folder's line controls its chats, whatever its name", async ({ page }) => {
+  await portal(page, [chat('m1', 'Repo chat', '/w/My Repo', 5)], { projects: ['My Repo'] });
+  await page.goto('/sessions');
+  const main = page.getByRole('main');
+  const line = folder(main, 'My Repo');
+  const controls = await line.getAttribute('aria-controls');
+  expect(controls).not.toContain(' ');
+  await expect(page.locator(`[id="${controls}"]`)).toContainText('Repo chat');
+});
+
+test('pressing + twice on the Sessions page starts one chat', async ({ page }) => {
+  const sent = await portal(page);
+  let answer = () => {};
+  const answered = new Promise<void>((r) => (answer = r));
+  await page.route('**/api/sessions', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    sent.push({ method: 'POST', path: '/api/sessions', body: route.request().postDataJSON() });
+    await answered;
+    await route.fulfill({ json: chat('new', 'New chat', '/w/empty', 0) });
+  });
+  await page.goto('/sessions');
+  const main = page.getByRole('main');
+  await folder(main, 'empty').hover();
+  const plus = main.getByRole('button', { name: 'New chat in empty' });
+  await plus.click();
+  await plus.click();
+  answer();
+  await expect(page).toHaveURL(/\/s\/new$/);
+  expect(sent.filter((s) => s.method === 'POST' && s.path === '/api/sessions')).toHaveLength(1);
 });

@@ -153,7 +153,7 @@ its name, and the order is yours from then on. The list button next to the order
 puts the chats back into one list, Pinned then Recents, as before. The order,
 the grouping and which folders are open are kept per browser, and the sidebar
 and the Sessions page share the first two. Searching shows only the folders with
-a match, open.
+a match, open; one shut during a search is shut only until the search ends.
 
 The chat's name at the top of the conversation renames it too: click it.
 A name is at most 120 characters, wherever it is given — `/name` included.
