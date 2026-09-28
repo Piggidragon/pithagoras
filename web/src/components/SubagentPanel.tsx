@@ -180,14 +180,14 @@ function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }
   };
   return (
     <div className="sub-input">
-      {sent.length > 0 && <div className="sub-input-sent">{t("Sent: “")}{sent[sent.length - 1]}”</div>}
+      {sent.length > 0 && <div className="sub-input-sent">{t("Sent: “{text}”", { text: sent[sent.length - 1] })}</div>}
       {error && <p className="bg-jobs-error">{error}</p>}
       <div className="sub-input-box">
         <textarea
           value={text}
           rows={2}
-          placeholder={`Tell ${agent.label} something…`}
-          aria-label={`Message for ${agent.label}`}
+          placeholder={t("Tell {name} something…", { name: agent.label })}
+          aria-label={t("Message for {name}", { name: agent.label })}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (isEnter(e) && !e.shiftKey) {

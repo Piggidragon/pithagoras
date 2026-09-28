@@ -16,7 +16,7 @@ import {
 import { api, type FoundSkill, type Skill, type SkillDiagnostic } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { isEnter } from "../shortcuts";
-import { t } from "../i18n";
+import { t, tp, tx } from "../i18n";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -176,7 +176,7 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
       {theirs.length > 0 && (
         <section className="mb-6">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            {t("Built in and from packages (")}{theirs.length})
+            {t("Built in and from packages ({n})", { n: theirs.length })}
           </h3>
           <ul className="mt-2 space-y-1">
             {theirs.map((s) => (
@@ -415,14 +415,14 @@ function SkillDetail({
             className="w-full resize-y rounded-lg border border-line bg-raised/60 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-accent/60"
           />
           <p className="mt-1 text-[11px] text-fg-faint">
-            {t("The frontmatter at the top is what pi reads — changing")} <code>name</code> {t("renames the skill, and")} <code>description</code> {t("is what the model matches against.")}
+            {tx("The frontmatter at the top is what pi reads — changing {name} renames the skill, and {description} is what the model matches against.", { name: <code>name</code>, description: <code>description</code> })}
           </p>
 
           {s.source && (
             <div className="mt-2 flex items-center gap-2 rounded-lg border border-line bg-raised/40 px-3 py-2 text-[11px] text-fg-subtle">
               <LuGithub className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
               <span className="min-w-0 flex-1 truncate">
-                {t("Imported from")} <span className="font-mono">{s.source.spec}</span>
+                {tx("Imported from {source}", { source: <span className="font-mono">{s.source.spec}</span> })}
               </span>
               <button
                 onClick={() => act(() => api.updateSkill(s.name))}
@@ -563,17 +563,16 @@ function ImportSkills({
         </button>
       </div>
       <p className="text-[11px] text-fg-faint">
-        <code>user/repo</code>, <code>user/repo#branch</code>{t(", a subdirectory like")}{" "}
-        <code>user/repo/skills/pdf</code>{t(", or a GitHub URL pasted from the address bar.")}
+        {tx("{repo}, {branch}, a subdirectory like {folder}, or a GitHub URL pasted from the address bar.", { repo: <code>user/repo</code>, branch: <code>user/repo#branch</code>, folder: <code>user/repo/skills/pdf</code> })}
       </p>
 
       {found && (
         <>
           <div className="flex items-baseline justify-between">
             <p className="text-xs text-fg-muted">
-              {found.length} {t("skill")}{found.length === 1 ? "" : "s"} {t("found")}
+              {tp(found.length, "{n} skill found", "{n} skills found")}
               {found.some((f) => f.installed) &&
-                ` · ${found.filter((f) => f.installed).length} already installed`}
+                ` · ${t("{n} already installed", { n: found.filter((f) => f.installed).length })}`}
             </p>
             <button
               onClick={() =>

@@ -2,7 +2,7 @@ import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type Poin
 import { LuChevronRight, LuFolder, LuFolderOpen, LuFolderSearch, LuFolderTree, LuGripVertical, LuHouse, LuList, LuPlus } from "react-icons/lu";
 import type { SessionStatus } from "../api";
 import { followPointer } from "../pointer-drag";
-import type { Folder, FolderSort } from "../session-folders";
+import { folderName, type Folder, type FolderSort } from "../session-folders";
 import type { Grouping } from "../use-session-folders";
 import { Select } from "./Select";
 import { StatusDot } from "./StatusDot";
@@ -183,7 +183,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
               >
                 <LuChevronRight aria-hidden className={`h-3 w-3 shrink-0 text-fg-faint transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`} />
                 <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-                <span className="truncate font-medium">{f.name}</span>
+                <span className="truncate font-medium">{folderName(f)}</span>
               </button>
               {running && <StatusDot status="running" bare />}
               <span className="shrink-0 px-1 text-[11px] tabular-nums text-fg-faint" aria-label={tp(f.sessions.length, "{n} chat", "{n} chats")}>
@@ -194,8 +194,8 @@ export function FolderTree<S extends { status: SessionStatus }>({
                 <button
                   type="button"
                   onClick={() => onNewChat(f)}
-                  aria-label={t("New chat in {name}", { name: f.name })}
-                  title={t("New chat in {name}", { name: f.name })}
+                  aria-label={t("New chat in {name}", { name: folderName(f) })}
+                  title={t("New chat in {name}", { name: folderName(f) })}
                   className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-opacity hover:text-accent focus-visible:opacity-100 group-hover/folder:opacity-100 [@media(hover:none)]:opacity-100"
                 >
                   <LuPlus className="h-3 w-3" />
@@ -203,7 +203,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
               )}
             </div>
             {open && (
-              <div id={body} role="group" aria-label={f.name} className={md ? "mt-1 space-y-1 pl-4" : "pl-3"}>
+              <div id={body} role="group" aria-label={folderName(f)} className={md ? "mt-1 space-y-1 pl-4" : "pl-3"}>
                 {children(f)}
               </div>
             )}

@@ -14,7 +14,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { formatTokens } from "../transcript";
 import { Select } from "./Select";
 import { Empty, Field, Section, btnCls, ghostCls, inputCls, primaryCls } from "./SettingsUi";
-import { t } from "../i18n";
+import { t, tp } from "../i18n";
 
 const KIND_ICONS: Record<ProviderKind, IconType> = {
   "llama-cpp": LuCpu, "llama-swap": LuShuffle, ollama: LuHardDrive, openrouter: LuRoute, hosted: LuCloud, custom: LuServer,
@@ -55,11 +55,11 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
 
   const remove = async (p: ProviderInfo) => {
     const ok = await confirmDialog({
-      title: `Remove ${p.label}?`,
+      title: t("Remove {name}?", { name: p.label }),
       message: p.endpoint
-        ? `Its ${p.models.length === 1 ? "model goes" : `${p.models.length} models go`} from every model menu. Chats that use one keep their history but need another model to go on.`
-        : "Its key is deleted from pi's auth.json. A key in the environment is not touched.",
-      confirmLabel: "Remove",
+        ? tp(p.models.length, "Its model goes from every model menu. Chats that use it keep their history but need another model to go on.", "Its {n} models go from every model menu. Chats that use one keep their history but need another model to go on.")
+        : t("Its key is deleted from pi's auth.json. A key in the environment is not touched."),
+      confirmLabel: t("Remove"),
       danger: true,
       deletes: true,
     });
@@ -181,7 +181,7 @@ function ProvidersSkeleton() {
 }
 
 const presetLabel = (kind: ProviderKind) =>
-  ({ "llama-cpp": "llama.cpp", "llama-swap": "llama-swap", ollama: "Ollama", openrouter: "OpenRouter", hosted: "Hosted", custom: "Custom" })[kind];
+  ({ "llama-cpp": "llama.cpp", "llama-swap": "llama-swap", ollama: "Ollama", openrouter: "OpenRouter", hosted: t("Hosted"), custom: t("Custom") })[kind];
 
 function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provider: ProviderInfo; status?: ProviderStatus; busy: boolean; onEdit?: () => void; onRemove?: () => void }) {
   const [open, setOpen] = useState(false);
@@ -214,19 +214,21 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
           {status?.state === "down" && status.message && <p className="float-in mt-1 text-[11px] text-danger/90">{status.message}</p>}
           {status?.state === "up" && !!status.missing?.length && (
             <p className="float-in mt-1 text-[11px] text-warn">
-              {status.missing.length === 1 ? `${status.missing[0]} is` : `${status.missing.length} chosen models are`} {t("not listed by the server any more.")}
+              {status.missing.length === 1
+                ? t("{model} is not listed by the server any more.", { model: status.missing[0] })
+                : t("{n} chosen models are not listed by the server any more.", { n: status.missing.length })}
             </p>
           )}
           {!p.endpoint && <p className="mt-0.5 text-[11px] text-fg-faint">{t("Every model pi knows of from this service is in the model menu.")}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition group-hover:opacity-100">
           {onEdit && (
-            <button type="button" onClick={onEdit} title={t("Edit")} aria-label={`Edit ${p.label}`} className="rounded-lg p-1.5 text-fg-subtle transition hover:bg-fg/10 hover:text-fg">
+            <button type="button" onClick={onEdit} title={t("Edit")} aria-label={t("Edit {name}", { name: p.label })} className="rounded-lg p-1.5 text-fg-subtle transition hover:bg-fg/10 hover:text-fg">
               <LuPencil className="h-3.5 w-3.5" />
             </button>
           )}
           {onRemove && (
-            <button type="button" onClick={onRemove} disabled={busy} title={t("Remove")} aria-label={`Remove ${p.label}`} className="rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40">
+            <button type="button" onClick={onRemove} disabled={busy} title={t("Remove")} aria-label={t("Remove {name}", { name: p.label })} className="rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40">
               {busy ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuTrash2 className="h-3.5 w-3.5" />}
             </button>
           )}
@@ -238,7 +240,7 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
           {shown.map((m) => <ModelChip key={m.id} model={m} loaded={status?.loaded?.includes(m.id)} missing={status?.missing?.includes(m.id)} />)}
           {p.models.length > 6 && (
             <button type="button" onClick={() => setOpen(!open)} className="rounded-md px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/10">
-              {open ? t("Fewer") : `${p.models.length - 6} more`}
+              {open ? t("Fewer") : t("{n} more", { n: p.models.length - 6 })}
             </button>
           )}
         </div>
@@ -253,11 +255,11 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
  */
 export function StatusBadge({ status }: { status?: ProviderStatus }) {
   const state = status?.state ?? "checking";
-  const text = state === "up" ? `Online${status?.ms !== undefined ? ` · ${status.ms} ms` : ""}` : state === "down" ? "Offline" : "Checking…";
+  const text = state === "up" ? (status?.ms !== undefined ? t("Online · {ms} ms", { ms: status.ms }) : t("Online")) : state === "down" ? t("Offline") : t("Checking…");
   return (
     <span
       className={`provider-status is-${state} inline-flex shrink-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px]`}
-      title={state === "down" ? status?.message : state === "up" ? `Answered in ${status?.ms} ms, listing ${status?.listed ?? 0} models` : t("Asking the server")}
+      title={state === "down" ? status?.message : state === "up" ? tp(status?.listed ?? 0, "Answered in {ms} ms, listing {n} model", "Answered in {ms} ms, listing {n} models", { ms: status?.ms ?? 0 }) : t("Asking the server")}
     >
       <i aria-hidden="true" />
       {text}
@@ -269,7 +271,7 @@ function ModelChip({ model: m, loaded, missing }: { model: ProviderModel; loaded
   return (
     <span
       className={`inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] ${loaded ? "bg-ok/10 text-ok" : missing ? "bg-warn/10 text-warn line-through decoration-warn/50" : "bg-fg/5 text-fg-muted"}`}
-      title={loaded ? `${m.id} — loaded now` : missing ? `${m.id} — the server does not list it now` : m.id}
+      title={loaded ? t("{model} — loaded now", { model: m.id }) : missing ? t("{model} — the server does not list it now", { model: m.id }) : m.id}
     >
       {loaded && <i className="provider-loaded-dot" aria-hidden="true" />}
       <span className="truncate">{m.name ?? m.id}</span>
@@ -365,7 +367,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         // not listed; one only found at an address asked before goes with it.
         return [...merged, ...[...known.values()].filter((row) => row.own).map((row) => ({ ...row, found: false }))];
       });
-      setProbe({ state: "ok", message: r.models.length ? `${r.models.length} model${r.models.length === 1 ? "" : "s"} found` : "It answered, but lists no models — add them by name below." });
+      setProbe({ state: "ok", message: r.models.length ? tp(r.models.length, "{n} model found", "{n} models found") : t("It answered, but lists no models — add them by name below.") });
       if (r.baseUrl !== url.trim()) setBaseUrl(r.baseUrl);
     } catch (e) {
       if (seq !== probeSeq.current) return;
@@ -430,8 +432,8 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
     {
       value: "package",
       label: <span className="inline-flex items-center gap-2"><LuPackage className="h-3.5 w-3.5 text-accent" />{t("From a package")}</span>,
-      text: "From a package",
-      hint: "A service pi does not know of, added by a pi package from npm — LiteLLM, Cohere, gateways.",
+      text: t("From a package"),
+      hint: t("A service pi does not know of, added by a pi package from npm — LiteLLM, Cohere, gateways."),
     },
   ];
 
@@ -439,7 +441,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
     <div className={embedded ? "" : "float-in mb-2 rounded-xl border border-accent/30 bg-raised/50 p-4 shadow-lg shadow-black/10"}>
       {!embedded && (
         <div className="mb-3 flex items-center gap-2">
-          <h4 className="text-sm font-medium text-fg">{editing ? `Edit ${provider!.label}` : t("Add a provider")}</h4>
+          <h4 className="text-sm font-medium text-fg">{editing ? t("Edit {name}", { name: provider!.label }) : t("Add a provider")}</h4>
           <button type="button" onClick={onCancel} aria-label={t("Cancel")} className="ml-auto rounded-lg p-1 text-fg-subtle transition hover:bg-fg/10 hover:text-fg">
             <LuX className="h-4 w-4" />
           </button>
@@ -472,7 +474,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
               value={id}
               placeholder={t("Choose a service…")}
               disabled={editing}
-              options={hostedChoices.map((h) => ({ value: h.id, label: h.name, hint: taken.has(h.id) && !editing ? "Already set up" : undefined, disabled: taken.has(h.id) && !editing }))}
+              options={hostedChoices.map((h) => ({ value: h.id, label: h.name, hint: taken.has(h.id) && !editing ? t("Already set up") : undefined, disabled: taken.has(h.id) && !editing }))}
               onChange={setId}
             />
           </Field>
@@ -507,10 +509,10 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         {preset.key !== "none" && (
           <Field
             label={preset.key === "required" ? t("API key") : t("API key (if the server wants one)")}
-            hint={provider?.key.set ? `Leave empty to keep the one stored (${provider.key.hint ?? "set"}).` : t("Stored in pi's auth files, readable by the portal's user only. $NAME reads it from the environment.")}
+            hint={provider?.key.set ? t("Leave empty to keep the one stored ({hint}).", { hint: provider.key.hint ?? t("set") }) : t("Stored in pi's auth files, readable by the portal's user only. $NAME reads it from the environment.")}
             className={preset.endpoint ? "" : "sm:col-span-2"}
           >
-            <input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={provider?.key.set ? "••••••••" : preset.key === "required" ? t("sk-…") : t("none")} className={`${inputCls} font-mono`} aria-label={t("API key")} />
+            <input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={provider?.key.set ? "••••••••" : preset.key === "required" ? "sk-…" : t("none")} className={`${inputCls} font-mono`} aria-label={t("API key")} />
           </Field>
         )}
       </div>
@@ -554,7 +556,11 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         )}
         {!embedded && <button type="button" onClick={onCancel} className={ghostCls}>{choice === "package" ? t("Done") : t("Cancel")}</button>}
         <span className="ml-auto text-[11px] text-fg-faint">
-          {clash ? `${kind === "openrouter" ? "OpenRouter" : `“${id.trim()}”`} is set up already — edit it in the list${kind === "openrouter" || kind === "hosted" ? "" : ", or pick another name"}.` : badCtx ? `${badCtx.id}: the window is a whole number of tokens.` : needsKey ? t("It needs a key.") : preset.endpoint && kept.length === 0 && rows.length > 0 ? t("Tick at least one model.") : ""}
+          {clash
+            ? kind === "openrouter" || kind === "hosted"
+              ? t("{name} is set up already — edit it in the list.", { name: kind === "openrouter" ? "OpenRouter" : `“${id.trim()}”` })
+              : t("{name} is set up already — edit it in the list, or pick another name.", { name: `“${id.trim()}”` })
+            : badCtx ? t("{model}: the window is a whole number of tokens.", { model: badCtx.id }) : needsKey ? t("It needs a key.") : preset.endpoint && kept.length === 0 && rows.length > 0 ? t("Tick at least one model.") : ""}
         </span>
       </div>
     </div>
@@ -591,16 +597,16 @@ function ModelRows({ rows, onChange, onAll }: { rows: Row[]; onChange: (id: stri
         {rows.length > 8 ? (
           <div className="relative flex-1">
             <LuSearch className="pointer-events-none absolute left-0 top-1/2 h-3 w-3 -translate-y-1/2 text-fg-faint" />
-            <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={`Filter ${rows.length} models`} className="w-full bg-transparent pl-4 text-xs outline-none placeholder:text-fg-faint" aria-label={t("Filter models")} />
+            <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filter {n} models", { n: rows.length })} className="w-full bg-transparent pl-4 text-xs outline-none placeholder:text-fg-faint" aria-label={t("Filter models")} />
           </div>
-        ) : <span className="flex-1 text-[11px] text-fg-faint">{rows.filter((r) => r.keep).length} {t("of")} {rows.length} {t("chosen")}</span>}
+        ) : <span className="flex-1 text-[11px] text-fg-faint">{t("{n} of {all} chosen", { n: rows.filter((r) => r.keep).length, all: rows.length })}</span>}
         <span className="w-20 text-right text-[10px] uppercase tracking-wider text-fg-faint">{t("Window")}</span>
         <span className="w-14 text-center text-[10px] uppercase tracking-wider text-fg-faint">{t("Can")}</span>
       </div>
       <ul className="max-h-72 divide-y divide-line/60 overflow-y-auto">
         {shown.map((r) => (
           <li key={r.id} className={`flex items-center gap-2 px-2.5 py-1.5 transition-colors ${r.keep ? "" : "opacity-55"}`}>
-            <input type="checkbox" checked={r.keep} onChange={() => onChange(r.id, { keep: !r.keep })} className="h-3.5 w-3.5 accent-accent" aria-label={`Use ${r.id}`} />
+            <input type="checkbox" checked={r.keep} onChange={() => onChange(r.id, { keep: !r.keep })} className="h-3.5 w-3.5 accent-accent" aria-label={t("Use {model}", { model: r.id })} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs text-fg" title={r.id}>{r.name ?? r.id}</p>
               {r.name && <p className="truncate font-mono text-[10px] text-fg-faint">{r.id}</p>}
@@ -612,7 +618,7 @@ function ModelRows({ rows, onChange, onAll }: { rows: Row[]; onChange: (id: stri
               placeholder={t("default")}
               inputMode="numeric"
               title={t("How many tokens it may hold. Empty: pi's default of 128k.")}
-              aria-label={`Context window of ${r.id}`}
+              aria-label={t("Context window of {model}", { model: r.id })}
               className={`w-20 rounded-md border bg-transparent px-1.5 py-0.5 text-right font-mono text-[11px] outline-none focus:border-accent/60 ${parseWindow(r.ctxText).kind === "bad" ? "border-danger/60" : "border-line"}`}
             />
             <div className="flex w-14 justify-center gap-0.5">

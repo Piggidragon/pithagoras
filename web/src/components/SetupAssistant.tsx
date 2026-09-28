@@ -8,7 +8,7 @@ import { PackageCatalog } from "./PackageCatalog";
 import { KindIcon, ProviderEditor, StatusBadge, useInstalledPackages, useProviderStatus } from "./ProvidersPanel";
 import { Select } from "./Select";
 import { EffortPicker, ghostCls, primaryCls } from "./SettingsUi";
-import { t } from "../i18n";
+import { msg, t, tp } from "../i18n";
 
 const DONE_KEY = "pithagoras.setup";
 
@@ -30,9 +30,9 @@ function dismiss(how: "done" | "skipped") {
 }
 
 const STEPS = [
-  { title: "Provider", lead: "Where the models come from" },
-  { title: "Model", lead: "What new chats start with" },
-  { title: "Agent", lead: "What it can do besides" },
+  { title: msg("Provider"), lead: msg("Where the models come from") },
+  { title: msg("Model"), lead: msg("What new chats start with") },
+  { title: msg("Agent"), lead: msg("What it can do besides") },
 ];
 
 /**
@@ -151,7 +151,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
           <li key={s.title} className={`setup-step ${i < step ? "is-done" : i === step ? "is-current" : ""}`} aria-current={i === step ? "step" : undefined}>
             <span className="flex items-center gap-1">
               {i < step && <LuCheck className="h-3 w-3 text-ok" />}
-              <span className="font-medium">{i + 1}. {s.title}</span>
+              <span className="font-medium">{i + 1}. {t(s.title)}</span>
             </span>
           </li>
         ))}
@@ -162,7 +162,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
       {/* One height for every step: the dialog is centred, and a step of
           another height moved the whole of it up or down as it came in. */}
       <div key={step} className={`setup-pane min-h-[min(30rem,58vh)] ${back ? "is-back" : ""}`}>
-        <h3 className="text-base font-medium text-fg">{STEPS[step].lead}</h3>
+        <h3 className="text-base font-medium text-fg">{t(STEPS[step].lead)}</h3>
 
         {step === 0 && (
           <div className="mt-1">
@@ -180,7 +180,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm text-fg">{p.label}</p>
                         <p className="truncate text-[11px] text-fg-faint">
-                          {p.endpoint ? `${p.models.length} model${p.models.length === 1 ? "" : "s"} · ${p.baseUrl}` : t("Hosted — every model pi knows of from it")}
+                          {p.endpoint ? `${tp(p.models.length, "{n} model", "{n} models")} · ${p.baseUrl}` : t("Hosted — every model pi knows of from it")}
                         </p>
                       </div>
                       {p.endpoint && <StatusBadge status={status.of[p.id]} />}

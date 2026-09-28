@@ -3,7 +3,7 @@ import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { api, type PortalTool } from "../api";
 import { displayName, groupSummary, groupTools, nextOff } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
-import { t } from "../i18n";
+import { t, tp } from "../i18n";
 
 /**
  * Which tools this conversation may use.
@@ -85,7 +85,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
         {live
           ? t("No tools registered.")
           : off.length
-            ? `${off.length} switched off. The rest are listed once a conversation has run.`
+            ? tp(off.length, "{n} switched off. The rest are listed once a conversation has run.", "{n} switched off. The rest are listed once a conversation has run.")
             : t("No tools seen yet — they are listed once a conversation has run.")}
       </p>
     );
@@ -159,7 +159,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
                       setting is findable from the place it is being overruled. */}
                   {tool.defaultOn !== undefined && tool.defaultOn !== tool.enabled && (
                     <span className="shrink-0 text-[10px] text-fg-faint">
-                      {t("default")} {tool.defaultOn ? t("on") : t("off")}
+                      {tool.defaultOn ? t("default on") : t("default off")}
                     </span>
                   )}
                 </label>

@@ -10,7 +10,7 @@ import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { ChatsHeading, FolderTree } from "./FolderTree";
 import { RowsSkeleton } from "./Skeleton";
-import { folderFrom, folderKeys, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { folderFrom, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t } from "../i18n";
 
@@ -67,7 +67,7 @@ export function SessionsPage({
     const n = ++renames.current;
     setPending({ id: s.id, title, n });
     onRename(s.id, title)
-      .catch((e) => setError(`Could not rename "${s.title}": ${(e as Error).message}`))
+      .catch((e) => setError(t("Could not rename \"{name}\": {error}", { name: s.title, error: (e as Error).message })))
       // Only its own: a later rename's name stays until that one is done.
       .finally(() => setPending((p) => (p?.n === n ? null : p)));
   };
@@ -190,7 +190,7 @@ export function SessionsPage({
             }}
             className="rounded p-1.5 text-fg-subtle hover:text-accent"
             title={t("Rename")}
-            aria-label={`Rename ${s.title}`}
+            aria-label={t("Rename {name}", { name: s.title })}
           >
             <LuPencil className="h-3.5 w-3.5" />
           </button>
@@ -248,7 +248,7 @@ export function SessionsPage({
             />
             {query && (
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-fg-faint">
-                {shown.length} {t("of")} {only ? only.sessions.length : sessions.length}
+                {t("{n} of {all}", { n: shown.length, all: only ? only.sessions.length : sessions.length })}
               </span>
             )}
           </div>
@@ -267,7 +267,7 @@ export function SessionsPage({
               <span className={`inline-flex min-w-0 items-center gap-1.5 rounded-lg py-1 pl-2.5 pr-1 text-xs ring-1 ring-inset ${gone ? "bg-warn/10 text-warn ring-warn/25" : "bg-accent/12 text-accent ring-accent/25"}`}>
                 <LuFilter aria-hidden className="h-3 w-3 shrink-0" />
                 <span className="truncate">
-                  {only ? `Only ${only.name}` : gone ? `There is no folder “${asked.replace(/^project:/, "")}” any more` : t("Only one folder")}
+                  {only ? t("Only {name}", { name: folderName(only) }) : gone ? t("There is no folder “{name}” any more", { name: asked.replace(/^project:/, "") }) : t("Only one folder")}
                 </span>
                 <button type="button" onClick={() => showOnly(null)} aria-label={t("Show every folder")} title={t("Show every folder")} className="rounded p-0.5 hover:bg-fg/10">
                   <LuX className="h-3 w-3" />
@@ -286,7 +286,7 @@ export function SessionsPage({
             <RowsSkeleton />
           ) : gone ? null : shown.length === 0 && !byFolder ? (
             <p className="py-12 text-center text-sm text-fg-subtle">
-              {sessions.length === 0 ? t("No sessions yet.") : only && !searching ? `No chats in ${only.name} yet.` : t("Nothing matches that.")}
+              {sessions.length === 0 ? t("No sessions yet.") : only && !searching ? t("No chats in {name} yet.", { name: folderName(only) }) : t("Nothing matches that.")}
             </p>
           ) : byFolder ? (
             <div className="mt-2">
@@ -304,8 +304,8 @@ export function SessionsPage({
                   <button
                     type="button"
                     onClick={() => showOnly(f.key)}
-                    aria-label={`Only ${f.name}`}
-                    title={`Only ${f.name}`}
+                    aria-label={t("Only {name}", { name: folderName(f) })}
+                    title={t("Only {name}", { name: folderName(f) })}
                     className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-opacity hover:text-accent focus-visible:opacity-100 group-hover/folder:opacity-100 [@media(hover:none)]:opacity-100"
                   >
                     <LuFilter className="h-3 w-3" />

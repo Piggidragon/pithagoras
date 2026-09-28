@@ -10,7 +10,7 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type Person, type Role, type ToolRule } from "../api";
-import { t } from "../i18n";
+import { msg, t, tp, tx } from "../i18n";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -18,15 +18,20 @@ const primaryCls =
   "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";
 
 const ROLES: { id: Role; label: string; hint: string }[] = [
-  { id: "primary", label: "Primary", hint: "You. Everything." },
+  { id: "primary", label: msg("Primary"), hint: msg("You. Everything.") },
   {
     id: "colleague",
-    label: "Colleague",
-    hint: "Reads, searches, explains. Anything else needs your say-so.",
+    label: msg("Colleague"),
+    hint: msg("Reads, searches, explains. Anything else needs your say-so."),
   },
-  { id: "guest", label: "Guest", hint: "Answers what they ask and volunteers nothing." },
-  { id: "unknown", label: "Blocked", hint: "Turned away before reaching the agent." },
+  { id: "guest", label: msg("Guest"), hint: msg("Answers what they ask and volunteers nothing.") },
+  { id: "unknown", label: msg("Blocked"), hint: msg("Turned away before reaching the agent.") },
 ];
+
+const roleLabel = (id: string) => {
+  const role = ROLES.find((r) => r.id === id);
+  return role ? t(role.label) : id;
+};
 
 const ROLE_STYLE: Record<string, string> = {
   primary: "text-accent",
@@ -97,7 +102,7 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
         <section className="mb-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 p-3">
           <LuTriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
           <p className="text-xs text-fg-muted">
-            {waiting.length === 1 ? t("Someone has") : `${waiting.length} people have`} {t("messaged the agent and been turned away. Open them to let them through.")}
+            {tp(waiting.length, "Someone has messaged the agent and been turned away. Open them to let them through.", "{n} people have messaged the agent and been turned away. Open them to let them through.")}
           </p>
         </section>
       )}
@@ -121,7 +126,7 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
                 <LuCircleUser className="h-4 w-4 shrink-0 text-fg-faint" />
                 <span className="min-w-0 flex-1 truncate text-sm text-fg">{p.name}</span>
                 <span className={`shrink-0 text-xs ${ROLE_STYLE[p.role] ?? "text-fg-subtle"}`}>
-                  {ROLES.find((r) => r.id === p.role)?.label ?? p.role}
+                  {roleLabel(p.role)}
                 </span>
                 <LuChevronRight className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
               </button>
@@ -140,7 +145,7 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
               <RuleRow
                 key={r.id}
                 rule={r}
-                scope={`all ${r.role}s`}
+                scope={t("every {role}", { role: roleLabel(r.role) })}
                 onDelete={async () => {
                   try {
                     setRules((await api.deleteToolRule(r.id)).rules);
@@ -272,14 +277,14 @@ function PersonDetail({
                     : "bg-fg/5 text-fg-muted hover:bg-fg/10"
                 }`}
               >
-                {r.label}
+                {t(r.label)}
               </button>
             ))}
           </div>
           {/* One line for the choice in front of you, rather than four
               descriptions competing for the same attention. */}
           <p className="mt-1 text-[11px] text-fg-faint">
-            {ROLES.find((r) => r.id === role)?.hint}
+            {t(ROLES.find((r) => r.id === role)?.hint ?? "")}
           </p>
         </div>
 
@@ -322,7 +327,7 @@ function PersonDetail({
           <span className="text-xs text-fg-faint">{rules.length}</span>
         </div>
         <p className="mb-2 text-[11px] text-fg-faint">
-          {t("What")} {person.name} {t("may do despite their role — written by")} <em>{t("Always allow")}</em>{t(", revoked by deleting.")} <span className="font-mono">*</span> {t("covers the parts that vary; a shell rule matches one command, never a pipeline.")}
+          {tx("What {name} may do despite their role — written by {allow}, revoked by deleting. {star} covers the parts that vary; a shell rule matches one command, never a pipeline.", { name: person.name, allow: <em>{t("Always allow")}</em>, star: <span className="font-mono">*</span> })}
         </p>
 
         {rules.length > 0 && (

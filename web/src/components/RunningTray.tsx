@@ -82,7 +82,7 @@ export function RunningTray({
         if (named.length === 1) {
           const busy = runningCommand === named[0];
           return (
-            <button key={s.key} type="button" className="running-chip is-status is-action" disabled={runningCommand !== null} onClick={() => void run(named[0])} title={`${s.key} — click to run /${named[0]}`}>
+            <button key={s.key} type="button" className="running-chip is-status is-action" disabled={runningCommand !== null} onClick={() => void run(named[0])} title={t("{name} — click to run /{command}", { name: s.key, command: named[0] })}>
               <span className="running-chip-label">{text}</span>
               {busy ? <LuRefreshCw className="running-chip-kind animate-spin" aria-hidden /> : <LuPlay className="running-chip-kind" aria-hidden />}
             </button>
@@ -92,7 +92,7 @@ export function RunningTray({
           <span key={s.key} className="running-chip is-status" title={`${s.key}: ${s.text}`}>
             <span className="running-chip-label">
               {parts.map((p, i) => ("command" in p ? (
-                <button key={i} type="button" className="running-chip-command" disabled={runningCommand !== null} onClick={() => void run(p.command)} title={`Run /${p.command}`}>/{p.command}</button>
+                <button key={i} type="button" className="running-chip-command" disabled={runningCommand !== null} onClick={() => void run(p.command)} title={t("Run /{command}", { command: p.command })}>/{p.command}</button>
               ) : <span key={i}>{p.text}</span>))}
             </span>
           </span>

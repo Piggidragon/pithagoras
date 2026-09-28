@@ -3,7 +3,7 @@ import { MemoryAddon, SubagentAddon } from "./FeatureAddons";
 import { useEffect, useId, useState } from "react";
 import { LuBot, LuBrain, LuCheck, LuGlobe, LuMic, LuRefreshCw, LuTrash2 } from "react-icons/lu";
 import { api, type BrowserStatus } from "../api";
-import { t } from "../i18n";
+import { msg, t } from "../i18n";
 
 /**
  * Optional pieces of the portal itself, as opposed to pi's packages.
@@ -14,10 +14,10 @@ import { t } from "../i18n";
  * running, so there was nowhere to press install.
  */
 const addons = [
-  { id: 'browser', label: 'Browser', Icon: LuGlobe },
-  { id: 'voice', label: 'Voice', Icon: LuMic },
-  { id: 'subagents', label: 'Subagents', Icon: LuBot },
-  { id: 'memory', label: 'Memory', Icon: LuBrain },
+  { id: 'browser', label: msg('Browser'), Icon: LuGlobe },
+  { id: 'voice', label: msg('Voice'), Icon: LuMic },
+  { id: 'subagents', label: msg('Subagents'), Icon: LuBot },
+  { id: 'memory', label: msg('Memory'), Icon: LuBrain },
 ] as const;
 type Addon = typeof addons[number]['id'];
 
@@ -45,7 +45,7 @@ export function PortalExtensions({ onError }: { onError: (e: string) => void }) 
           document.getElementById(`${id}-${addons[next].id}-tab`)?.focus();
         }}
         className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 sm:gap-2 sm:px-4 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${selected === addon ? 'bg-accent/12 text-accent shadow-sm ring-1 ring-inset ring-accent/25' : 'text-fg-muted hover:bg-fg/5 hover:text-fg'}`}
-      ><Icon className="hidden h-4 w-4 shrink-0 sm:block" />{label}</button>)}
+      ><Icon className="hidden h-4 w-4 shrink-0 sm:block" />{t(label)}</button>)}
     </div>
     {addons.map(({ id: addon }) => <div key={addon} role="tabpanel" id={`${id}-${addon}-panel`}
       aria-labelledby={`${id}-${addon}-tab`} hidden={selected !== addon}>
@@ -130,7 +130,7 @@ function BrowserAddon({ onError }: { onError: (e: string) => void }) {
                   ? i.image
                     ? t("Runs as its own container. The image is already downloaded.")
                     : t("Runs as its own container. Installing downloads a 4.6GB image.")
-                  : `Uses the Chrome on this machine (${i.binary}).`}
+                  : t("Uses the Chrome on this machine ({binary}).", { binary: i.binary ?? "" })}
               </p>
             )}
           </div>

@@ -18,7 +18,7 @@ import { RowsSkeleton } from "./Skeleton";
 import { api, type ReportTarget, type ReportTo, type Routine, type Workspace } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
-import { t } from "../i18n";
+import { formatDateTime, msg, t, tx } from "../i18n";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -33,24 +33,31 @@ const STATUS_STYLE: Record<string, string> = {
   running: "text-accent",
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  ok: msg("ok"),
+  error: msg("error"),
+  running: msg("running"),
+};
+const statusLabel = (status: string) => (STATUS_LABEL[status] ? t(STATUS_LABEL[status]) : status);
+
 const PRESETS = [
-  { label: "Every 15 min", cron: "*/15 * * * *" },
-  { label: "Hourly", cron: "@hourly" },
-  { label: "Daily 9am", cron: "0 9 * * *" },
-  { label: "Weekdays 8am", cron: "0 8 * * 1-5" },
-  { label: "Weekly", cron: "@weekly" },
+  { label: msg("Every 15 min"), cron: "*/15 * * * *" },
+  { label: msg("Hourly"), cron: "@hourly" },
+  { label: msg("Daily 9am"), cron: "0 9 * * *" },
+  { label: msg("Weekdays 8am"), cron: "0 8 * * 1-5" },
+  { label: msg("Weekly"), cron: "@weekly" },
 ];
 
 const when = (iso: string | null) => {
-  if (!iso) return "never";
+  if (!iso) return t("never");
   const then = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z").getTime();
   const mins = Math.round((Date.now() - then) / 60000);
   if (!Number.isFinite(mins)) return iso;
-  if (mins < 0) return "soon";
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
-  return `${Math.round(mins / 1440)}d ago`;
+  if (mins < 0) return t("soon");
+  if (mins < 1) return t("just now");
+  if (mins < 60) return t("{n}m ago", { n: mins });
+  if (mins < 1440) return t("{n}h ago", { n: Math.round(mins / 60) });
+  return t("{n}d ago", { n: Math.round(mins / 1440) });
 };
 
 /** datetime-local wants "YYYY-MM-DDTHH:mm" in local time, not an ISO string. */
@@ -61,13 +68,13 @@ const toLocalInput = (iso: string | null) => {
 };
 
 const until = (iso: string | null) => {
-  if (!iso) return "not scheduled";
+  if (!iso) return t("not scheduled");
   const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
-  if (!Number.isFinite(mins) || mins < 0) return "due";
-  if (mins < 1) return "in under a minute";
-  if (mins < 60) return `in ${mins}m`;
-  if (mins < 1440) return `in ${Math.round(mins / 60)}h`;
-  return `in ${Math.round(mins / 1440)}d`;
+  if (!Number.isFinite(mins) || mins < 0) return t("due");
+  if (mins < 1) return t("in under a minute");
+  if (mins < 60) return t("in {n}m", { n: mins });
+  if (mins < 1440) return t("in {n}h", { n: Math.round(mins / 60) });
+  return t("in {n}d", { n: Math.round(mins / 1440) });
 };
 
 /**
@@ -276,7 +283,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
                     <p className="truncate text-[11px] text-fg-faint">
                       <span className="font-mono">
                         {r.mode === "once"
-                          ? `once · ${r.runAt ? new Date(r.runAt).toLocaleString() : "no time set"}`
+                          ? `${t("once")} · ${r.runAt ? formatDateTime(r.runAt) : t("no time set")}`
                           : r.schedule}
                       </span>
                       {" · "}
@@ -285,13 +292,14 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
                         title={r.workspaceProblem ? `${r.workspace}: ${r.workspaceProblem}` : (r.workspace ?? t("Home — the agent's own directory"))}
                       >
                         {placeName(r.workspace, places.root)}
-                        {r.workspaceProblem ? t(" (gone)") : ""}
+                        {r.workspaceProblem ? ` (${t("gone")})` : ""}
                       </span>
-                      {r.done ? t(" · done") : r.enabled ? ` · ${until(r.nextRun)}` : t(" · disabled")}
+                      {" · "}
+                      {r.done ? t("done") : r.enabled ? until(r.nextRun) : t("disabled")}
                       {r.lastStatus && (
                         <>
                           {" · "}
-                          <span className={STATUS_STYLE[r.lastStatus] ?? ""}>{r.lastStatus}</span>
+                          <span className={STATUS_STYLE[r.lastStatus] ?? ""}>{statusLabel(r.lastStatus)}</span>
                           {" "}
                           {when(r.lastRun)}
                         </>
@@ -306,8 +314,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
         )}
 
         <p className="mt-6 text-[11px] leading-relaxed text-fg-faint">
-          {t("Repeating schedules use the server's clock and five-field cron, or a shorthand like")}{" "}
-          <code>@daily</code>{t("; a one-off uses the time you pick in your own timezone. A routine still running when its next slot comes round is skipped rather than stacked.")}
+          {tx("Repeating schedules use the server's clock and five-field cron, or a shorthand like {example}; a one-off uses the time you pick in your own timezone. A routine still running when its next slot comes round is skipped rather than stacked.", { example: <code>@daily</code> })}
         </p>
       </div>
     </div>
@@ -335,7 +342,7 @@ function usePlaces(): Places {
 
 /** Home, or where under the projects' root it runs: "site", or "site/docs" for a folder in one. */
 const placeName = (workspace: string | null, root: string | null) => {
-  if (!workspace) return "Home";
+  if (!workspace) return t("Home");
   if (root && workspace.startsWith(root + "/")) return workspace.slice(root.length + 1);
   return workspace.split("/").filter(Boolean).pop() ?? workspace;
 };
@@ -375,8 +382,8 @@ function WorkspacePicker({
           {
             value: "",
             label: <span className="inline-flex items-center gap-2"><LuHouse className="h-3.5 w-3.5 text-accent" />{t("Home")}</span>,
-            text: "Home",
-            hint: "The agent's own directory, with its notes and memory",
+            text: t("Home"),
+            hint: t("The agent's own directory, with its notes and memory"),
           },
           ...(list ?? []).map((w) => ({
             value: w.path,
@@ -386,17 +393,17 @@ function WorkspacePicker({
           })),
           // Shown for what it is, rather than as nothing.
           ...(value && list && !known
-            ? [{ value, label: placeName(value, root), text: placeName(value, root), hint: problem ? "Not there any more — runs fail until another is chosen" : value }]
+            ? [{ value, label: placeName(value, root), text: placeName(value, root), hint: problem ? t("Not there any more — runs fail until another is chosen") : value }]
             : []),
         ]}
       />
       <p className="mt-1 text-[11px] text-fg-faint">
         {t("Its runs work in this directory. Each place keeps its own session, so moving it back picks up where it left off.")}
-        {error && ` The projects could not be listed (${error}), so only Home is offered.`}
+        {error && ` ${t("The projects could not be listed ({error}), so only Home is offered.", { error })}`}
       </p>
       {problem && value && (
         <p className="mt-1 text-[11px] text-danger">
-          {value} {t("is not there any more (")}{problem}{t("). Its runs fail until another place is chosen.")}
+          {t("{place} is not there any more ({problem}). Its runs fail until another place is chosen.", { place: value, problem })}
         </p>
       )}
     </div>
@@ -444,14 +451,14 @@ function SchedulePicker({
             onClick={() => onChange(p.cron)}
             className="rounded-lg bg-fg/5 px-2 py-0.5 text-[11px] text-fg-muted transition hover:bg-fg/10 hover:text-fg"
           >
-            {p.label}
+            {t(p.label)}
           </button>
         ))}
       </div>
       {preview.error && <p className="mt-1.5 text-[11px] text-danger">{preview.error}</p>}
       {preview.runs && preview.runs.length > 0 && (
         <p className="mt-1.5 text-[11px] text-fg-subtle">
-          Next: {preview.runs.slice(0, 3).map((r) => new Date(r).toLocaleString()).join(" · ")}
+          {t("Next: {when}", { when: preview.runs.slice(0, 3).map((r) => formatDateTime(r)).join(" · ") })}
         </p>
       )}
     </div>
@@ -784,16 +791,16 @@ function RoutineDetail({
             options={[
               {
                 value: "",
-                label: fallback ? `Default — ${labelFor(targets, fallback) ?? fallback.channel}` : "Default — none set",
+                label: fallback ? t("Default — {target}", { target: labelFor(targets, fallback) ?? fallback.channel }) : t("Default — none set"),
               },
-              { value: "off", label: "Never report" },
-              ...targets.map((t) => ({ value: `${t.channel}\u0000${t.target}`, label: `${t.channel} — ${t.label}` })),
+              { value: "off", label: t("Never report") },
+              ...targets.map((x) => ({ value: `${x.channel}\u0000${x.target}`, label: `${x.channel} — ${x.label}` })),
             ]}
           />
           <p className="mt-1 text-[11px] text-fg-faint">
             {t("The agent decides whether a run is worth reporting and writes the message itself. It only has somewhere to send it if this points at a conversation.")}
             {targets.length === 0 &&
-              t(" Nothing to pick yet — message a channel that can start a conversation, and it appears here.")}
+              ` ${t("Nothing to pick yet — message a channel that can start a conversation, and it appears here.")}`}
           </p>
         </div>
       </section>
@@ -803,18 +810,18 @@ function RoutineDetail({
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Last run")}</h3>
           <div className="mt-2 rounded-xl border border-line bg-raised/40 p-3">
             <p className="text-xs">
-              <span className={STATUS_STYLE[r.lastStatus] ?? "text-fg-muted"}>{r.lastStatus}</span>
+              <span className={STATUS_STYLE[r.lastStatus] ?? "text-fg-muted"}>{statusLabel(r.lastStatus)}</span>
               <span className="text-fg-faint">
                 {" "}
                 · {when(r.lastRun)}
-                {r.lastMs ? ` · took ${Math.round(r.lastMs / 1000)}s` : ""}
+                {r.lastMs ? ` · ${t("took {n}s", { n: Math.round(r.lastMs / 1000) })}` : ""}
               </span>
               {/* Writing the account out and never sending it looks identical to
                   having nothing to say, unless this says which happened. */}
               {reported(r) ? (
-                <span className="text-ok"> {t("· reported")}</span>
+                <span className="text-ok"> · {t("reported")}</span>
               ) : (
-                <span className="text-fg-faint"> {t("· nothing sent")}</span>
+                <span className="text-fg-faint"> · {t("nothing sent")}</span>
               )}
             </p>
             {r.lastOutput && (
@@ -829,7 +836,7 @@ function RoutineDetail({
       {runs.length > 0 && (
         <section className="mb-6">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            {t("Sessions (")}{runs.length})
+            {t("Sessions ({n})", { n: runs.length })}
           </h3>
           <ul className="mt-2 space-y-1">
             {runs.slice(0, 8).map((s) => (

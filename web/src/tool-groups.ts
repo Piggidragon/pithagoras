@@ -1,4 +1,5 @@
 import type { PortalTool } from "./api";
+import { msg, t } from "./i18n";
 
 /**
  * Tools as somebody thinks about them: by what they came from.
@@ -18,7 +19,7 @@ export interface ToolGroup {
 }
 
 /** What the portal registers itself, which is not an extension anyone installed. */
-const BUILT_IN = "built in";
+const BUILT_IN = msg("built in");
 
 export function groupTools(tools: PortalTool[]): ToolGroup[] {
   const groups = new Map<string, PortalTool[]>();
@@ -72,9 +73,9 @@ export function nextOff(off: string[], names: string[], enabled: boolean): strin
  */
 export function groupSummary(group: ToolGroup): string {
   const total = group.tools.length;
-  if (group.allOff) return `${total} off`;
-  const off = group.tools.filter((t) => !t.enabled).length;
-  return off ? `${off} of ${total} off` : `${total} on`;
+  if (group.allOff) return t("{n} off", { n: total });
+  const off = group.tools.filter((tool) => !tool.enabled).length;
+  return off ? t("{off} of {n} off", { off, n: total }) : t("{n} on", { n: total });
 }
 
 /** Opening one group, or shutting it. */
@@ -94,5 +95,6 @@ export function toggleOpen(open: string[], source: string): string[] {
 export function displayName(source: string, names: Record<string, string> = {}): string {
   const given = names[source]?.trim();
   if (given) return given;
+  if (source === BUILT_IN) return t(BUILT_IN);
   return source.replace(/^@[^/]+\//, "") || source;
 }

@@ -26,7 +26,7 @@ import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
-import { HOME, folderKeys, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { HOME, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t } from "../i18n";
 
@@ -160,16 +160,16 @@ export function Sidebar({
   );
 
   const destinations: { to: Destination; icon: ReactNode; label: string }[] = [
-    { to: "sessions", icon: <LuMessagesSquare />, label: "Sessions" },
-    { to: "projects", icon: <LuFolderKanban />, label: "Projects" },
-    { to: "agent", icon: <LuBot />, label: "Agent" },
-    { to: "routines", icon: <LuClock />, label: "Routines" },
+    { to: "sessions", icon: <LuMessagesSquare />, label: t("Sessions") },
+    { to: "projects", icon: <LuFolderKanban />, label: t("Projects") },
+    { to: "agent", icon: <LuBot />, label: t("Agent") },
+    { to: "routines", icon: <LuClock />, label: t("Routines") },
     // Hidden unless there is one. The browser is an optional service, and
     // a dead link to a feature you did not install is just clutter.
-    ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: "Browser" }] : []),
+    ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: t("Browser") }] : []),
     // Likewise: only while Understory holds the agent's memory.
-    ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: "Memory" }] : []),
-    { to: "audit", icon: <LuShield />, label: "Audit" },
+    ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: t("Memory") }] : []),
+    { to: "audit", icon: <LuShield />, label: t("Audit") },
   ];
   const anyRunning = sessions.some((s) => s.status === "running");
 
@@ -243,7 +243,7 @@ export function Sidebar({
           <p className="px-2 py-4 text-xs text-fg-subtle">{t("No sessions yet.")}</p>
         )}
         {sessions.length > 0 && found.length === 0 && (
-          <p className="px-2 py-4 text-xs text-fg-subtle">{t("Nothing matches “")}{query.trim()}”.</p>
+          <p className="px-2 py-4 text-xs text-fg-subtle">{t("Nothing matches “{query}”.", { query: query.trim() })}</p>
         )}
 
         {pinned.length > 0 && (
@@ -282,7 +282,7 @@ export function Sidebar({
                         onClick={() => onOpenFolder(f.key)}
                         className="mb-1 w-full rounded-lg px-2.5 py-1 text-left text-xs text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
                       >
-                        {chats.length - shown.length} {t("more in")} {f.name}…
+                        {t("{n} more in {name}…", { n: chats.length - shown.length, name: folderName(f) })}
                       </button>
                     )}
                   </>
@@ -302,7 +302,7 @@ export function Sidebar({
                 onClick={() => onNavigate("sessions")}
                 className="mt-1 w-full rounded-lg px-2 py-1.5 text-left text-xs text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
               >
-                {recents.length - shownRecents.length} {t("more…")}
+                {t("{n} more…", { n: recents.length - shownRecents.length })}
               </button>
             )}
           </>

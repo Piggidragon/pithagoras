@@ -74,7 +74,7 @@ export function useSubagentChoice(sessionId: string, onError?: (e: string) => vo
 export function SubagentModelPicker({ subagents, models }: { subagents: SubagentChoice; models: PiModel[] }) {
   const { on, choice, set } = subagents;
   if (!on || !choice) return null;
-  const named = (value: string) => (value === "auto" ? "this chat's model" : value);
+  const named = (value: string) => (value === "auto" ? t("this chat's model") : value);
   const value = choice.model ?? "";
   return (
     <div className="px-3 py-1.5">
@@ -86,8 +86,8 @@ export function SubagentModelPicker({ subagents, models }: { subagents: Subagent
         value={value}
         onChange={(v) => set(v === "" ? null : v)}
         options={[
-          { value: "", label: `Default — ${named(choice.default)}` },
-          { value: "auto", label: "This chat's model", hint: "The one it is on when it starts one" },
+          { value: "", label: t("Default — {model}", { model: named(choice.default) }) },
+          { value: "auto", label: t("This chat's model"), hint: t("The one it is on when it starts one") },
           ...(value && value !== "auto" && !models.some((m) => `${m.provider}/${m.id}` === value) ? [{ value, label: value }] : []),
           ...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
         ]}

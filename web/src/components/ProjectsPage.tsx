@@ -9,7 +9,7 @@ import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import { isEnter } from "../shortcuts";
-import { t } from "../i18n";
+import { t, tp, tx } from "../i18n";
 
 /**
  * The folders chats work in.
@@ -82,9 +82,11 @@ export function ProjectsPage({
     attempt(async () => {
       const contents = await api.projectContents(p.name);
       const parts = [
-        contents.sessions ? `${contents.sessions} chat${contents.sessions === 1 ? "" : "s"}` : "",
+        contents.sessions ? tp(contents.sessions, "{n} chat", "{n} chats") : "",
         contents.files
-          ? `${contents.complete ? "" : "over "}${contents.files.toLocaleString()} file${contents.files === 1 ? "" : "s"} (${bytesLabel(contents.bytes)}) in its folder`
+          ? contents.complete
+            ? tp(contents.files, "{n} file ({size}) in its folder", "{n} files ({size}) in its folder", { size: bytesLabel(contents.bytes) })
+            : tp(contents.files, "over {n} file ({size}) in its folder", "over {n} files ({size}) in its folder", { size: bytesLabel(contents.bytes) })
           : "",
       ].filter(Boolean);
       const routines = contents.routines ?? [];
@@ -94,12 +96,17 @@ export function ProjectsPage({
         routines.length === 0
           ? ""
           : routines.length === 1
-            ? ` The routine ${names} runs here: it is switched off until it is given another place, and keeps its history.`
-            : ` The routines ${names} run here: they are switched off until they are given another place, and keep their history.`;
+            ? ` ${t("The routine {names} runs here: it is switched off until it is given another place, and keeps its history.", { names })}`
+            : ` ${t("The routines {names} run here: they are switched off until they are given another place, and keep their history.", { names })}`;
+      const going = parts.length === 2
+        ? t("{first} and {second} go with it.", { first: parts[0], second: parts[1] })
+        : parts.length === 1
+          ? t("{what} goes with it.", { what: parts[0] })
+          : t("It is empty.");
       const ok = await confirmDialog({
-        title: `Delete the project "${p.name}"?`,
-        message: `${parts.length ? parts.join(" and ") + " go with it. " : "It is empty. "}This cannot be undone.${stranded}`,
-        confirmLabel: "Delete project",
+        title: t("Delete the project \"{name}\"?", { name: p.name }),
+        message: `${going} ${t("This cannot be undone.")}${stranded}`,
+        confirmLabel: t("Delete project"),
         danger: true,
         deletes: true,
       });
@@ -162,8 +169,8 @@ export function ProjectsPage({
                       {p.path}
                     </p>
                     <p className="truncate text-[11px] text-fg-faint">
-                      {p.sessions} {t("chat")}{p.sessions === 1 ? "" : "s"}
-                      {lastActive(p) ? ` · last ${when(lastActive(p)!)}` : ""}
+                      {tp(p.sessions, "{n} chat", "{n} chats")}
+                      {lastActive(p) ? ` · ${t("last {when}", { when: when(lastActive(p)!) })}` : ""}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
@@ -174,7 +181,7 @@ export function ProjectsPage({
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-accent"
                       title={t("New chat here")}
-                      aria-label={`New chat in ${p.name}`}
+                      aria-label={t("New chat in {name}", { name: p.name })}
                     >
                       <LuPlus className="h-3.5 w-3.5" />
                     </button>
@@ -185,7 +192,7 @@ export function ProjectsPage({
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-accent"
                       title={t("Instructions (AGENTS.md)")}
-                      aria-label={`Instructions for ${p.name}`}
+                      aria-label={t("Instructions for {name}", { name: p.name })}
                     >
                       <LuFileText className="h-3.5 w-3.5" />
                     </button>
@@ -196,7 +203,7 @@ export function ProjectsPage({
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-danger"
                       title={t("Delete project")}
-                      aria-label={`Delete ${p.name}`}
+                      aria-label={t("Delete {name}", { name: p.name })}
                     >
                       <LuTrash2 className="h-3.5 w-3.5" />
                     </button>
@@ -362,7 +369,7 @@ function Instructions({
 
   return (
     <Modal
-      title={`Instructions · ${project.name}`}
+      title={t("Instructions · {name}", { name: project.name })}
       subtitle={t("Saved as AGENTS.md in the folder — edit it there too if you like")}
       onClose={onClose}
       footer={
@@ -395,7 +402,7 @@ function Instructions({
             className={`${FIELD} resize-y font-mono text-xs`}
           />
           <p className="mt-2 text-[11px] text-fg-subtle">
-            {t("Chats started after saving pick this up. One already open does after")} <code>/reload</code>{t(". Leave it empty to remove the file.")}
+            {tx("Chats started after saving pick this up. One already open does after {command}. Leave it empty to remove the file.", { command: <code>/reload</code> })}
           </p>
         </>
       )}

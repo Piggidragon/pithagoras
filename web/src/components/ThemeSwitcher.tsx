@@ -1,11 +1,11 @@
 import { LuMonitor, LuMoon, LuSun } from "react-icons/lu";
 import { useTheme, type Theme } from "../theme";
-import { t } from "../i18n";
+import { msg, t } from "../i18n";
 
 const OPTIONS: { value: Theme; icon: typeof LuSun; label: string }[] = [
-  { value: "light", icon: LuSun, label: "Light" },
-  { value: "dark", icon: LuMoon, label: "Dark" },
-  { value: "system", icon: LuMonitor, label: "Match system" },
+  { value: "light", icon: LuSun, label: msg("Light") },
+  { value: "dark", icon: LuMoon, label: msg("Dark") },
+  { value: "system", icon: LuMonitor, label: msg("Match system") },
 ];
 
 /**
@@ -28,7 +28,8 @@ export function ThemeSwitcher() {
           role="radio"
           aria-checked={theme === value}
           onClick={() => setTheme(value)}
-          title={label}
+          title={t(label)}
+          aria-label={t(label)}
           className={`grid h-6 w-6 place-items-center rounded-md transition ${
             theme === value
               ? "bg-surface text-fg shadow-sm"
