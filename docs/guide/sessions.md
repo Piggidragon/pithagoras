@@ -141,7 +141,8 @@ as the project's. Each folder opens to show its chats — the sidebar up to eigh
 then *N more in …*, which opens the Sessions page at that folder — and remembers
 whether it was left open. The folder of the chat you open is opened for you. A
 project without chats is there all the same, and the **+** on a folder's line
-starts a chat in it.
+starts a chat in it. A project folder made or removed outside the portal — by
+the agent, say — shows up or goes within half a minute.
 
 The Sessions page lists them the same way, every folder open to begin with, and
 the funnel on a folder's line shows that folder on its own (`/sessions?folder=…`,

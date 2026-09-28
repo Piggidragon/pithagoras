@@ -57,9 +57,24 @@ export function FolderTree<S extends { status: SessionStatus }>({
       ]
     : folders;
   const keys = listed.map((f) => f.key);
-  /** The folders there are now, for a drop: one that went while it was carried is not put back. */
-  const present = useRef(keys);
-  present.current = folders.map((f) => f.key);
+  /**
+   * The folders as they are drawn now. A drag measures against these, not
+   * those there were when it began: a project removed or made while one is
+   * carried is gone from the list, or added at its end, and the line shows
+   * where the carried one would go among what is there.
+   */
+  const drawn = useRef(keys);
+  drawn.current = keys;
+  /** Where the carried folder would go now, measured from the pointer: set while one is carried. */
+  const aim = useRef<(() => number) | null>(null);
+  // Folders gone or come while one is carried move the others under the
+  // pointer: the line goes where the drop would.
+  const drawnKeys = keys.join("\n");
+  useLayoutEffect(() => {
+    if (!aim.current) return;
+    const to = aim.current();
+    setDrag((d) => (d && d.to !== null && d.to !== to ? { ...d, to } : d));
+  }, [drawnKeys]);
   /** A folder moved with the keys, whose name is to keep the focus once it is drawn where it went. */
   const refocus = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -73,30 +88,35 @@ export function FolderTree<S extends { status: SessionStatus }>({
     if (!onMove || e.button !== 0) return;
     e.preventDefault();
     const picked = keys;
-    const others = picked.filter((k) => k !== folder.key);
-    // Among the others, how many have their line's middle above the pointer.
+    // Among the others drawn, how many have their line's middle above the pointer.
     const at = (y: number) =>
-      others.filter((k) => {
+      drawn.current.filter((k) => {
+        if (k === folder.key) return false;
         const r = heads.current.get(k)?.getBoundingClientRect();
         return r !== undefined && r.top + r.height / 2 < y;
       }).length;
     const from = e.clientY;
-    let to = picked.indexOf(folder.key);
+    let y = from;
     let moved = false;
     setDrag({ key: folder.key, keys: picked, to: null });
+    aim.current = () => at(y);
     followPointer(
       e,
       (ev) => {
         if (!moved && Math.abs(ev.clientY - from) < DRAG_SLOP) return;
         moved = true;
-        to = at(ev.clientY);
-        setDrag({ key: folder.key, keys: picked, to });
+        y = ev.clientY;
+        setDrag({ key: folder.key, keys: picked, to: at(y) });
       },
       (cancelled) => {
+        const shown = drawn.current;
+        aim.current = null;
         setDrag(null);
-        if (moved && !cancelled && present.current.includes(folder.key)) {
-          onMove(picked.filter((k) => present.current.includes(k)), folder.key, to);
-        }
+        if (!moved || cancelled || !shown.includes(folder.key)) return;
+        const to = at(y);
+        // Let go where it was: nothing moved, and the order it is sorted by stays.
+        if (to === shown.indexOf(folder.key)) return;
+        onMove(shown, folder.key, to);
       },
     );
   };

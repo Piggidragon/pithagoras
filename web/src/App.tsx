@@ -150,7 +150,9 @@ function Shell({
   /** Connection attempts to the open conversation that have failed in a row. */
   const [failures, setFailures] = useState(0);
 
-  const { places, reload: reloadPlaces } = usePlaces(sessions);
+  /** Whether the chats have come yet: the projects are asked for once they have, not before and again then. */
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const { places, reload: reloadPlaces } = usePlaces(sessions, sessionsLoaded);
 
   /** A chat started in `workspace`, or in Home without one, and opened. */
   const startChat = async (workspace?: string) => {
@@ -163,6 +165,7 @@ function Shell({
   const refreshSessions = useCallback(async () => {
     const r = await api.sessions();
     setSessions(r.sessions);
+    setSessionsLoaded(true);
     setExecutor(r.executor);
     return r.sessions;
   }, []);

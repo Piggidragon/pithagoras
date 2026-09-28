@@ -9,7 +9,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { FolderControls, FolderTree } from "./FolderTree";
-import { folderFrom, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { ELSEWHERE, folderFrom, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 
 /**
@@ -80,10 +80,8 @@ export function SessionsPage({
   const folders = useMemo(() => (places ? sortFolders(groupByFolder(matches, places), sort, order) : []), [matches, places, sort, order]);
   const [params, setParams] = useSearchParams();
   /** The one folder shown, with all its chats, when a link or its filter asked for it. */
-  const only = useMemo(
-    () => (places ? folderFrom(groupByFolder(sessions, places), params.get("folder")) : null),
-    [sessions, places, params],
-  );
+  const asked = params.get("folder");
+  const only = useMemo(() => (places && asked ? folderFrom(groupByFolder(sessions, places), asked) : null), [sessions, places, asked]);
   const showOnly = (key: string | null) =>
     setParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -93,7 +91,9 @@ export function SessionsPage({
     });
   const searching = query.trim() !== "";
   const byFolder = !only && grouping === "folders" && hasProjects;
-  const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching);
+  // Every folder, not only those a search shows: what is kept for one hidden by it must not be let go.
+  const folderKeys = useMemo(() => (places ? [...groupByFolder([], places).map((f) => f.key), ELSEWHERE] : undefined), [places]);
+  const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching, folderKeys);
   const shown = useMemo(() => (only ? filterSessions(only.sessions, query) : matches), [only, query, matches]);
   const [startError, setStartError] = useState<string | null>(null);
   /** A chat on its way: a second press of + would start another. */

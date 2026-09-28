@@ -341,3 +341,144 @@ test('pressing + twice on the Sessions page starts one chat', async ({ page }) =
   await expect(page).toHaveURL(/\/s\/new$/);
   expect(sent.filter((s) => s.method === 'POST' && s.path === '/api/sessions')).toHaveLength(1);
 });
+
+/** The folders and the drop line, top to bottom, as they are drawn. */
+const drawnWithLine = (scope: ReturnType<Page['locator']>) =>
+  // The line is drawn inside the folder it comes before, and after it in the document.
+  scope.locator('[data-folder], .folder-drop').evaluateAll((els) => {
+    const out: string[] = [];
+    for (const el of els as HTMLElement[]) {
+      const owner = el.classList.contains('folder-drop') ? el.parentElement?.dataset.folder : undefined;
+      if (owner) out.splice(out.lastIndexOf(owner), 0, '|');
+      else out.push(el.classList.contains('folder-drop') ? '|' : el.dataset.folder!);
+    }
+    return out;
+  });
+
+test('a folder let go where it was picked up leaves the order as it is sorted', async ({ page }) => {
+  await portal(page);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  const grip = side.locator('[data-folder="project:notes"] .folder-grip');
+  await folder(side, 'notes').hover();
+  const from = await grip.boundingBox();
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2 + 6, { steps: 3 });
+  await page.mouse.up();
+  await expect(side.getByRole('combobox', { name: 'Order of the folders' })).toContainText('Latest first');
+  expect(await page.evaluate(() => localStorage.getItem('folderSort'))).toBeNull();
+});
+
+test('a folder shut while its chat is open stays shut', async ({ page }) => {
+  const many = Array.from({ length: 12 }, (_, i) => chat(`h${i}`, `Home chat ${i}`, HOME, i + 1));
+  await portal(page, [...many, chat('s1', 'Site chat', '/w/site', 40)]);
+  await page.goto('/s/s1');
+  const side = sidebar(page);
+  await expect(folder(side, 'site')).toHaveAttribute('aria-expanded', 'true');
+  await folder(side, 'site').click();
+  await expect(folder(side, 'site')).toHaveAttribute('aria-expanded', 'false');
+  // A search that hides the open chat, then none.
+  await side.getByLabel('Search chats').fill('Home chat 3');
+  await side.getByLabel('Search chats').fill('');
+  await expect(folder(side, 'site')).toHaveAttribute('aria-expanded', 'false');
+  // As one list and back.
+  await side.getByRole('button', { name: 'List the chats together' }).click();
+  await side.getByRole('button', { name: 'Group the chats by folder' }).click();
+  await expect(folder(side, 'site')).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('a folder whose chats are all pinned says so, and Elsewhere only holds what it shows', async ({ page }) => {
+  await portal(page, [
+    chat('s1', 'Site one', '/w/site', 5, { pinned: true }),
+    chat('s2', 'Site two', '/w/site', 6, { pinned: true }),
+    chat('r1', 'Root chat', '/w', 7, { pinned: true }),
+  ]);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await folder(side, 'site').click();
+  await expect(side.getByRole('group', { name: 'site' })).toHaveText('Only pinned chats, above.');
+  await expect(folder(side, 'Elsewhere')).toHaveCount(0);
+  await expect(folder(page.getByRole('main'), 'Elsewhere')).toBeVisible();
+});
+
+test('with projects and no chats, each folder says so and nothing more', async ({ page }) => {
+  await portal(page, []);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect(folder(side, 'Home')).toBeVisible();
+  await expect(side.getByText('No sessions yet.')).toHaveCount(0);
+  await expect(side.getByRole('group', { name: 'Home' })).toHaveText('No chats yet.');
+});
+
+test('a folder that goes while another is carried: the line and the drop agree', async ({ page }) => {
+  const projects = ['site', 'notes', 'empty'];
+  const sent = await portal(page, undefined, { projects });
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect.poll(() => folderNames(side)).toEqual(['site', 'notes', 'Home', 'empty']);
+  const grip = side.locator('[data-folder="project:empty"] .folder-grip');
+  await folder(side, 'empty').hover();
+  const from = await grip.boundingBox();
+  const to = await folder(side, 'Home').boundingBox();
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from!.x + 4, from!.y - 10, { steps: 3 });
+  await page.mouse.move(to!.x + 10, to!.y + 2, { steps: 5 });
+  await expect.poll(() => drawnWithLine(side)).toEqual(['project:site', 'project:notes', '|', 'home', 'project:empty']);
+  // site is removed, its chats with it: the list is asked for again.
+  projects.splice(0, 1);
+  sent.sessions.splice(1, 2);
+  await expect.poll(() => drawnWithLine(side), { timeout: 8000 }).not.toContain('project:site');
+  const line = await drawnWithLine(side);
+  await page.mouse.up();
+  const expected = line.filter((k) => k !== 'project:empty').map((k) => (k === '|' ? 'project:empty' : k));
+  const names = expected.map((k) => (k === 'home' ? 'Home' : k.replace('project:', '')));
+  await expect.poll(() => folderNames(side)).toEqual(names);
+});
+
+test('stored places that are not whole do not take the page down', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('knownPlaces', JSON.stringify({ home: '/h', projects: [{ name: 'x' }, null, { name: 'site', path: '/w/site' }] })));
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await portal(page, undefined, { projectsHeld: held });
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  // From what was whole in them: site.
+  await expect(folder(side, 'site')).toBeVisible();
+  await expect(folder(side, 'x')).toHaveCount(0);
+  release();
+  await expect(folder(side, 'notes')).toBeVisible();
+});
+
+test('a project made elsewhere shows up within half a minute', async ({ page }) => {
+  await page.clock.install();
+  const projects = ['site'];
+  await portal(page, undefined, { projects });
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect(folder(side, 'site')).toBeVisible();
+  projects.push('made-by-the-agent');
+  await page.clock.runFor(31_000);
+  await expect(folder(side, 'made-by-the-agent')).toBeVisible();
+});
+
+test('what is kept about folders lets go of projects that are gone', async ({ page }) => {
+  const projects = ['site', 'notes', 'empty'];
+  await portal(page, undefined, { projects });
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await folder(side, 'empty').click();
+  await folder(side, 'empty').focus();
+  await page.keyboard.press('Alt+ArrowUp');
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem('folderOrder')))!)).toContain('project:empty');
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem('sidebarFoldersOpen')))!)).toHaveProperty('project:empty');
+  projects.splice(2, 1);
+  await page.reload();
+  await expect(folder(side, 'empty')).toHaveCount(0);
+  await folder(side, 'notes').click();
+  await folder(side, 'notes').focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem('folderOrder')))!)).not.toContain('project:empty');
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem('sidebarFoldersOpen')))!)).not.toHaveProperty('project:empty');
+});

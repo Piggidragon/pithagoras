@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "./api";
+import { pollWhileVisible } from "./poll";
 import { local } from "./safe-storage";
 import { moveFolder, readFolderOrder, readFolderSort, readOpenFolders, type FolderSort, type Places } from "./session-folders";
 
@@ -43,11 +44,13 @@ export function useFolderPrefs() {
     setGrouping: (grouping: Grouping) => change({ grouping }),
     setSort: (sort: FolderSort) => change({ sort }),
     /**
-     * Puts `key` at `to` among the folders `shown`, and orders them so from
-     * now on: moving one is choosing the order by hand.
+     * Puts `key` at `to` among the folders `shown` — all there are: folders
+     * are moved only while none is hidden — and orders them so from now on:
+     * moving one is choosing the order by hand. Folders that are gone, such
+     * as a project deleted, are not kept in it.
      */
     move: (shown: readonly string[], key: string, to: number) =>
-      change({ sort: "manual", order: moveFolder(shown, key, to, prefs.order) }),
+      change({ sort: "manual", order: moveFolder(shown, key, to) }),
   };
 }
 
@@ -61,7 +64,7 @@ export function useFolderPrefs() {
  * without one, which a click on a folder the search had opened would
  * otherwise change unseen.
  */
-export function useOpenFolders(key: string, byDefault: (folder: string) => boolean, searching = false) {
+export function useOpenFolders(key: string, byDefault: (folder: string) => boolean, searching = false, present?: readonly string[]) {
   const [chosen, setChosen] = useState(() => readOpenFolders(local.get(key)));
   const [shutWhileSearching, setShut] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => {
@@ -72,7 +75,9 @@ export function useOpenFolders(key: string, byDefault: (folder: string) => boole
   const set = (folder: string, open: boolean) =>
     setChosen((prev) => {
       if (prev[folder] === open) return prev;
-      const next = { ...prev, [folder]: open };
+      // What is kept is about the folders there are: a project deleted is let go.
+      const kept = present?.length ? Object.fromEntries(Object.entries(prev).filter(([k]) => present.includes(k))) : prev;
+      const next = { ...kept, [folder]: open };
       local.set(key, JSON.stringify(next));
       return next;
     });
@@ -90,8 +95,13 @@ export function useOpenFolders(key: string, byDefault: (folder: string) => boole
 /** Places as they were last known, so that the chats are gathered from the start rather than once they are asked for. */
 function knownPlaces(): Places | undefined {
   try {
-    const p = JSON.parse(local.get("knownPlaces") ?? "") as Places;
-    return typeof p?.home === "string" && Array.isArray(p.projects) ? p : undefined;
+    const p = JSON.parse(local.get("knownPlaces") ?? "") as { home?: unknown; projects?: unknown };
+    if (typeof p?.home !== "string" || !Array.isArray(p.projects)) return undefined;
+    // Only projects that are whole: one without its path would take the page down.
+    const projects = p.projects.filter(
+      (x): x is { name: string; path: string } => typeof x?.name === "string" && typeof x?.path === "string" && x.path !== "",
+    );
+    return { home: p.home, projects };
   } catch {
     return undefined;
   }
@@ -100,12 +110,14 @@ function knownPlaces(): Places | undefined {
 /**
  * Where Home is and what projects there are, for gathering the chats:
  * undefined until they are known, null if they could not be. What was known
- * last time is used until they are asked. Asked again whenever which chats
- * there are, or where, changes — a project is mostly made with its first
- * chat — and when `reload` is called; only the latest answer is taken, since
- * an earlier one can arrive after it and be from before a project was made.
+ * last time is used until they are asked, which is once the chats have come
+ * (`ready`). Asked again whenever which chats there are, or where, changes —
+ * a project is mostly made with its first chat — when `reload` is called,
+ * and every half minute while the page is seen, for a folder made or removed
+ * elsewhere, by the agent say. Only the latest answer is taken, since an
+ * earlier one can arrive after it and be from before a project was made.
  */
-export function usePlaces(sessions: readonly { id: string; workspace: string }[]) {
+export function usePlaces(sessions: readonly { id: string; workspace: string }[], ready = true) {
   const [places, setPlaces] = useState<Places | null | undefined>(knownPlaces);
   const asked = useRef(0);
   const load = useCallback(() => {
@@ -125,7 +137,10 @@ export function usePlaces(sessions: readonly { id: string; workspace: string }[]
       () => n === asked.current && setPlaces((known) => known ?? null),
     );
   }, []);
-  const chats = sessions.map((s) => `${s.id}:${s.workspace}`).join("|");
-  useEffect(load, [load, chats]);
+  const chats = useMemo(() => sessions.map((s) => `${s.id}:${s.workspace}`).join("|"), [sessions]);
+  useEffect(() => {
+    if (ready) load();
+  }, [load, chats, ready]);
+  useEffect(() => (ready ? pollWhileVisible(load, 30_000) : undefined), [load, ready]);
   return { places, reload: load };
 }

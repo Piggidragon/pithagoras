@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
@@ -25,7 +25,7 @@ import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
-import { HOME, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { ELSEWHERE, HOME, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
@@ -115,20 +115,29 @@ export function Sidebar({
   // Pinned chats stay at the top, and each folder has the rest of its own. The
   // folders are ordered by all their chats, pinned ones too, as the Sessions
   // page orders them: the order is the same one in both.
-  const folders = useMemo(
-    () =>
-      byFolder && places
-        ? sortFolders(groupByFolder(found, places), sort, order).map((f) => ({ ...f, sessions: f.sessions.filter((s) => !s.pinned) }))
-        : [],
-    [byFolder, found, places, sort, order],
-  );
+  const { folders, pinnedIn } = useMemo(() => {
+    const all = byFolder && places ? sortFolders(groupByFolder(found, places), sort, order) : [];
+    return {
+      folders: all
+        .map((f) => ({ ...f, sessions: f.sessions.filter((s) => !s.pinned) }))
+        // Elsewhere is only there for chats to show in it.
+        .filter((f) => f.kind !== "elsewhere" || f.sessions.length > 0),
+      /** How many of a folder's chats are among the pinned ones, by key. */
+      pinnedIn: new Map(all.map((f) => [f.key, f.sessions.filter((s) => s.pinned).length])),
+    };
+  }, [byFolder, found, places, sort, order]);
   // Searching, the folders with a match, open: the match is what was looked for.
   const shownFolders = searching ? folders.filter((f) => f.sessions.length > 0) : folders;
-  const openFolders = useOpenFolders("sidebarFoldersOpen", (key) => key === HOME, searching);
-  // The chat opened is in a folder that is open, however it was opened.
+  const folderKeys = useMemo(() => [...folders.map((f) => f.key), ELSEWHERE], [folders]);
+  const openFolders = useOpenFolders("sidebarFoldersOpen", (key) => key === HOME, searching, folderKeys);
+  // The chat opened is in a folder that is open, however it was opened — once
+  // for each chat opened: a folder shut while its chat is open stays shut.
   const activeFolder = useMemo(() => folders.find((f) => f.sessions.some((s) => s.id === activeId))?.key, [folders, activeId]);
+  const openedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (activeFolder) openFolders.set(activeFolder, true);
+    if (!activeFolder || openedFor.current === activeId) return;
+    openedFor.current = activeId;
+    openFolders.set(activeFolder, true);
   }, [activeId, activeFolder]);
 
   const item = (s: Session) => (
@@ -220,7 +229,8 @@ export function Sidebar({
       )}
 
       <div className="flex-1 overflow-y-auto px-2 pb-2">
-        {sessions.length === 0 && (
+        {/* By folder, each says so itself, and a chat can be started in it. */}
+        {sessions.length === 0 && !byFolder && (
           <p className="px-2 py-4 text-xs text-fg-subtle">No sessions yet.</p>
         )}
         {sessions.length > 0 && found.length === 0 && (
@@ -256,7 +266,9 @@ export function Sidebar({
                 const shown = open ? [...first, open] : first;
                 return (
                   <>
-                    {f.sessions.length === 0 && <p className="px-2.5 py-1 text-xs text-fg-faint">No chats yet.</p>}
+                    {f.sessions.length === 0 && (
+                      <p className="px-2.5 py-1 text-xs text-fg-faint">{pinnedIn.get(f.key) ? "Only pinned chats, above." : "No chats yet."}</p>
+                    )}
                     {shown.map(item)}
                     {f.sessions.length > shown.length && (
                       <button
