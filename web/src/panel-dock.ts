@@ -134,7 +134,7 @@ export type Size = { width: number; height: number };
  */
 export type PlaceSizes = { left?: number; right?: number; bottom?: number };
 
-/** Place sizes read back from storage: only those at least as large as docked panels are drawn. */
+/** Place sizes read back from storage: a height no smaller than docked panels are drawn, a width of anything. */
 export function readPlaceSizes(raw: string | null | undefined): PlaceSizes {
   if (!raw) return {};
   try {
@@ -143,7 +143,9 @@ export function readPlaceSizes(raw: string | null | undefined): PlaceSizes {
     const sizes: PlaceSizes = {};
     for (const place of ["left", "right", "bottom"] as const) {
       const n = stored[place];
-      if (typeof n === "number" && Number.isFinite(n) && n >= (place === "bottom" ? DOCKED_MIN.h : DOCKED_MIN.w)) sizes[place] = n;
+      // A side may have been made narrower than of use where both sides gave
+      // way to each other (see fitSides): kept so, it is drawn as it was left.
+      if (typeof n === "number" && Number.isFinite(n) && (place === "bottom" ? n >= DOCKED_MIN.h : n > 0)) sizes[place] = n;
     }
     return sizes;
   } catch {
@@ -157,18 +159,22 @@ export function groupPanels<K extends string>(kinds: readonly K[], placeOf: (kin
 }
 const DOCKS_IN_ORDER: Dock[] = ["left", "right", "bottom", "float"];
 
+/** The edge between docked panels and the conversation, which sizes them. */
+export const EDGE = 4;
+
 /**
  * The widths panels at the left and at the right are drawn at in a chat `w`
- * wide: each as it was made, unless together they would leave the
- * conversation less than its 320px — then both give way, each in proportion
- * to its width. 0 for a side with nothing there. A chat not measured yet
- * (`w` 0) has them as they were made.
+ * wide: each as it was made, unless together — with their edges — they
+ * would leave the conversation less than its 320px; then both give way, each
+ * in proportion to its width. 0 for a side with nothing there. It is what the
+ * page does itself (a flex-shrink with the width as its basis, and the
+ * conversation's least width), worked out here for what a drop would show.
  */
 export function fitSides(left: number, right: number, w: number): { left: number; right: number } {
-  const room = Math.max(0, w - KEEP.w);
-  if (!w || left + right <= room) return { left, right };
+  const room = Math.max(0, w - KEEP.w - (left ? EDGE : 0) - (right ? EDGE : 0));
+  if (left + right <= room) return { left, right };
   const scale = room / (left + right);
-  return { left: Math.floor(left * scale), right: Math.floor(right * scale) };
+  return { left: left * scale, right: right * scale };
 }
 
 /**
@@ -186,10 +192,55 @@ export function dockedFrameAmong(
 ): Frame {
   if (dock === "bottom") {
     const sides = fitSides(others.left, others.right, area.w);
+    const x = sides.left + (sides.left ? EDGE : 0), end = area.w - sides.right - (sides.right ? EDGE : 0);
     const h = Math.max(0, Math.min(size.height, area.h - KEEP.h));
-    return { x: sides.left, y: area.h - h, w: Math.max(0, area.w - sides.left - sides.right), h };
+    return { x, y: area.h - h, w: Math.max(0, end - x), h };
   }
   const sides = dock === "left" ? fitSides(size.width, others.right, area.w) : fitSides(others.left, size.width, area.w);
   const w = sides[dock];
   return { x: dock === "left" ? 0 : area.w - w, y: 0, w, h: area.h };
+}
+
+/** Where each floating panel was put, by panel: each floats in a window of its own. */
+export type Frames = Partial<Record<string, Frame>>;
+
+/** Frames read back from storage: only those that are frames. */
+export function readFrames(raw: string | null | undefined): Frames {
+  if (!raw) return {};
+  try {
+    const stored = JSON.parse(raw) as unknown;
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+    const frames: Frames = {};
+    for (const [kind, frame] of Object.entries(stored)) {
+      const f = readFrame(JSON.stringify(frame));
+      if (f) frames[kind] = f;
+    }
+    return frames;
+  } catch {
+    return {};
+  }
+}
+
+/** How far a window put where another already is goes aside, down and to the left. */
+const SPREAD = 32;
+
+/**
+ * Windows that would lie exactly on one another — two panels that floated
+ * together before each had a window, both where that one was — are put
+ * aside, each after the first a step down and to the left, so that both
+ * are seen. The rest are where they were put.
+ */
+export function spreadFrames(frames: readonly Frame[], area: { w: number; h: number }): Frame[] {
+  const out: Frame[] = [];
+  for (const f of frames) {
+    let g = f;
+    const covers = () => out.some((o) => Math.abs(o.x - g.x) < 1 && Math.abs(o.y - g.y) < 1);
+    for (let step = 1; covers() && step <= frames.length + 1; step++) {
+      g = fitFrame({ ...f, x: f.x - SPREAD * step, y: f.y + SPREAD * step }, area);
+      // Held at a corner of the chat: the other way.
+      if (covers()) g = fitFrame({ ...f, x: f.x + SPREAD * step, y: f.y - SPREAD * step }, area);
+    }
+    out.push(g);
+  }
+  return out;
 }

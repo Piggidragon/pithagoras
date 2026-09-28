@@ -66,11 +66,12 @@ page, asks first while there is an edit. The browser, the terminal, Files and
 [canvases](/guide/canvases) all count.
 
 Each panel is moved by its header. Let go at the left, the right or the bottom
-edge of the chat, it docks there; let go anywhere else, it floats in a window
-that you can move and size. Every panel remembers where you put it, so the
-terminal can sit at the left while Files is at the right. Two panels in the same
-place share it: one above the other at a side, side by side at the bottom, and
-one window when both float. At the bottom they sit under the conversation,
-between the panels at the sides. Each place keeps the size you gave it, whichever
-panels are in it. A panel you have never moved goes where all of them went
+edge of the chat, it docks there; let go anywhere else, it floats in a window of
+its own that you can move and size. Every panel remembers where you put it, so
+the terminal can sit at the left while Files is at the right. Two panels docked
+in the same place share it: one above the other at a side, side by side at the
+bottom. At the bottom they sit under the conversation, between the panels at the
+sides. Each place keeps the size you gave it, whichever panels are in it, and
+with panels at both sides they both give way when the conversation would get
+narrower than 320px. A panel you have never moved goes where all of them went
 before.
