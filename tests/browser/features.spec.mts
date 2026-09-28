@@ -4,7 +4,7 @@ import { test, expect, type Page } from '@playwright/test';
 async function portal(page: Page, { reachable = true, available = true } = {}) {
   const sent: { path: string; body: any }[] = [];
   const state = {
-    subagent: { available, installed: false, enabled: false, source: null as string | null, mode: 'interrupt' },
+    subagent: { available, installed: false, enabled: false, source: null as string | null, mode: 'interrupt', maxParallel: 1 },
     understory: { enabled: false, url: 'http://localhost:3800/mcp', tokenSet: false, adapterInstalled: false, reachable },
   };
   await page.route('**/api/**', async (route) => {
@@ -29,6 +29,7 @@ async function portal(page: Page, { reachable = true, available = true } = {}) {
       const patch = route.request().postDataJSON();
       sent.push({ path: p, body: patch });
       if (patch.mode) state.subagent.mode = patch.mode;
+      if (patch.maxParallel) state.subagent.maxParallel = patch.maxParallel;
       if (patch.enabled !== undefined) Object.assign(state.subagent, { enabled: patch.enabled, installed: patch.enabled, source: patch.enabled ? '/app/extensions/subagent' : null });
       body = { subagent: state.subagent, reloaded: 1, waiting: 1 };
     } else if (p === '/api/features/understory' && method === 'PUT') {
@@ -60,12 +61,27 @@ test('a fresh install has no subagent tool; switching it on installs it, and the
   await tool.click();
   await expect(tool).toHaveAttribute('aria-checked', 'true');
   await expect(addons(page).getByText('Installed as a pi package (/app/extensions/subagent).')).toBeVisible();
-  await expect(addons(page).getByRole('status')).toContainText('one busy chat picks it up');
+  await expect(addons(page).getByText(/one busy chat picks it up/)).toBeVisible();
 
   await addons(page).getByRole('radio', { name: /^Background/ }).check();
   await expect(addons(page).getByRole('radio', { name: /^Background/ })).toBeChecked();
   expect(sent.map((s) => s.body)).toEqual([{ enabled: true }, { mode: 'background' }]);
   await expect(addons(page).getByText(/two model calls at the same time/)).toBeVisible();
+});
+
+test('one subagent at a time unless more are allowed, up and down by one', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Subagents' }).click();
+  const at = addons(page).getByRole('group', { name: 'Subagents at once' });
+  await expect(at.locator('output')).toHaveText('1');
+  await expect(at.getByRole('button', { name: 'Fewer at once' })).toBeDisabled();
+  await at.getByRole('button', { name: 'More at once' }).click();
+  await expect(at.locator('output')).toHaveText('2');
+  await expect(at.getByRole('button', { name: 'Fewer at once' })).toBeEnabled();
+  await at.getByRole('button', { name: 'Fewer at once' }).click();
+  await expect(at.locator('output')).toHaveText('1');
+  expect(sent.map((s) => s.body)).toEqual([{ maxParallel: 2 }, { maxParallel: 1 }]);
 });
 
 test('an install without the subagent tool cannot switch it on', async ({ page }) => {
@@ -90,7 +106,7 @@ test('Understory is off until switched on, then points the agent at the address 
   await expect(memory).toHaveAttribute('aria-checked', 'true');
   expect(sent).toEqual([{ path: '/api/features/understory', body: { enabled: true, url: 'http://understory:3800/mcp' } }]);
   await expect(addons(page).getByText(/On: MEMORY\.md is not read while it is/)).toBeVisible();
-  await expect(addons(page).getByRole('link', { name: 'Browse the memory' })).toHaveAttribute('href', 'http://understory:3800');
+  await expect(addons(page).getByRole('link', { name: 'Read the memory on the Agent page' })).toHaveAttribute('href', '/agent?tab=memory');
 
   await memory.click();
   await expect(memory).toHaveAttribute('aria-checked', 'false');

@@ -45,6 +45,7 @@ import { gitRouter } from "./api/git.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { featuresRouter } from "./api/features.js";
+import { memoryRouter } from "./api/memory.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
@@ -1170,6 +1171,7 @@ app.get("/api/sessions/:id/commands", async (req, res) => {
 app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
 app.use("/api", featuresRouter());
+app.use("/api", memoryRouter());
 app.use("/api", channelsRouter());
 app.use("/api", routinesRouter());
 app.use("/api", skillsRouter());

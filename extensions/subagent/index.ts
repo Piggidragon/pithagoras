@@ -11,12 +11,17 @@
  *
  * Two ways to run, set by `subagentMode` in pi's settings.json:
  *
- * - "interrupt" (the default): the tool call waits for the child's answer, and
- *   children run one at a time. Only one agent works at once, which is what a
- *   single GPU wants.
+ * - "interrupt" (the default): the tool call waits for the child's answer, so
+ *   the parent does nothing meanwhile. With one subagent at a time, only one
+ *   agent works at once, which is what a single GPU wants.
  * - "background": the tool call returns at once and the parent goes on; the
  *   child's answer arrives later as a message, and starts a turn if the parent
  *   is idle. Two agents run at the same time.
+ *
+ * `subagentMaxParallel` (default 1) is how many children run at once, across
+ * every conversation in the process — the portal runs them all in one. One
+ * asked for beyond it waits for a free slot: in interrupt mode its tool call
+ * waits, in the background it starts once one of the others has finished.
  *
  * PI_SUBAGENT_BIN picks the pi to run (default: `pi` on PATH).
  */
@@ -36,16 +41,65 @@ const STOP = "subagent:v1:stop";
 
 export type Mode = "interrupt" | "background";
 
-/** How a subagent runs against its parent: pi's settings say, read each time so a change needs no restart. */
-export function subagentMode(): Mode {
+/** pi's settings, read each time so a change needs no restart. */
+function settings(): Record<string, unknown> {
   const dir = process.env.PI_CODING_AGENT_DIR?.trim() || path.join(homedir(), ".pi", "agent");
   try {
-    const settings = JSON.parse(readFileSync(path.join(dir, "settings.json"), "utf8"));
-    return settings?.subagentMode === "background" ? "background" : "interrupt";
+    const parsed = JSON.parse(readFileSync(path.join(dir, "settings.json"), "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
-    return "interrupt";
+    return {};
   }
 }
+
+/** How a subagent runs against its parent. */
+export const subagentMode = (): Mode => (settings().subagentMode === "background" ? "background" : "interrupt");
+
+export const MAX_PARALLEL = 16;
+
+/** How many subagents may run at once: 1 unless the settings say more. */
+export function subagentLimit(): number {
+  const n = Number(settings().subagentMaxParallel);
+  return Number.isInteger(n) && n >= 1 ? Math.min(n, MAX_PARALLEL) : 1;
+}
+
+/**
+ * The slots, shared by every copy of this extension in the process: pi loads
+ * it once per conversation, and the limit is on how many models run, not on
+ * how many run in one chat.
+ */
+const slots: { running: number; waiting: (() => void)[] } = ((globalThis as any)[Symbol.for("pithagoras-subagent:slots")] ??= {
+  running: 0,
+  waiting: [],
+});
+
+/**
+ * A slot, once one is free; its release hands it on. Undefined when `given
+ * up` said so first — the parent stopped, the session ended.
+ */
+async function takeSlot(givenUp: () => boolean, onGiveUp: (wake: () => void) => void): Promise<(() => void) | undefined> {
+  while (slots.running >= subagentLimit()) {
+    if (givenUp()) return undefined;
+    await new Promise<void>((wake) => {
+      slots.waiting.push(wake);
+      onGiveUp(wake);
+    });
+  }
+  if (givenUp()) return undefined;
+  slots.running++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    slots.running--;
+    // All of them look again, in the order they came: the limit may have
+    // been raised meanwhile, and one woken for nothing waits again.
+    slots.waiting.splice(0).forEach((wake) => wake());
+  };
+}
+
+/** Everyone waiting looks again: one of them has given up. */
+const wakeAll = () => slots.waiting.splice(0).forEach((wake) => wake());
 
 type Status = "done" | "error" | "stopped";
 interface Run {
@@ -63,14 +117,15 @@ const DESCRIPTIONS: Record<Mode, string> = {
 };
 
 export default function (pi: any) {
-  // Interrupt runs its children one after the other, even when the model asks
-  // for two in one turn: two at once is two models at once.
-  let queue: Promise<unknown> = Promise.resolve();
   // Background children still running, stopped with the session that started them.
   const detached = new Set<Run>();
+  // Set once the session is over: what still waits for a slot does not start.
+  let shutDown = false;
 
   pi.on?.("session_shutdown", () => {
+    shutDown = true;
     for (const run of detached) run.stop();
+    wakeAll();
   });
 
   /** Starts a child for the task and hands over what watching it needs. */
@@ -165,9 +220,15 @@ export default function (pi: any) {
       const label = params.label?.trim() || "Subagent";
 
       if (subagentMode() === "background") {
-        const run = start(params.task, label, toolCallId, ctx.cwd, true);
-        detached.add(run);
-        void run.finished.then(({ status, answer, failure }) => {
+        // Whether it starts now or waits for one of the others: said now, since the call does not wait.
+        const waiting = slots.running >= subagentLimit() ? slots.running : 0;
+        void (async () => {
+          const release = await takeSlot(() => shutDown, () => {});
+          if (!release) return;
+          const run = start(params.task, label, toolCallId, ctx.cwd, true);
+          detached.add(run);
+          const { status, answer, failure } = await run.finished;
+          release();
           detached.delete(run);
           const said =
             status === "done"
@@ -186,21 +247,28 @@ export default function (pi: any) {
           } catch {
             // The session it belonged to is gone: nobody is left to tell.
           }
-        });
+        })();
         return {
-          content: [{ type: "text", text: `Started subagent "${label}" in the background. Its answer will arrive as a message when it is done; go on with other work meanwhile.` }],
-          details: { phase: "background", id: run.id },
+          content: [{
+            type: "text",
+            text: waiting
+              ? `Queued subagent "${label}" in the background: ${waiting} ${waiting === 1 ? "subagent is" : "subagents are"} already running, the most allowed at once, and it starts when one finishes. Its answer will arrive as a message when it is done; go on with other work meanwhile.`
+              : `Started subagent "${label}" in the background. Its answer will arrive as a message when it is done; go on with other work meanwhile.`,
+          }],
+          details: { phase: waiting ? "queued" : "background" },
         };
       }
 
-      // One at a time: wait for the one before, unless the parent is stopped meanwhile.
-      const before = queue;
-      let release!: () => void;
-      queue = new Promise<void>((r) => (release = r));
+      // At most as many at once as allowed, even when the model asks for more
+      // in one turn: each is a model running. Waits for a slot, unless the
+      // parent is stopped meanwhile.
+      if (slots.running >= subagentLimit()) onUpdate?.({ content: [{ type: "text", text: "" }], details: { phase: "waiting for another subagent to finish" } });
+      const release = await takeSlot(
+        () => signal?.aborted === true || shutDown,
+        (wake) => signal?.addEventListener("abort", wake, { once: true }),
+      );
+      if (!release) return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
       try {
-        await Promise.race([before, new Promise((r) => signal?.addEventListener("abort", r, { once: true }))]);
-        if (signal?.aborted) return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
-
         const run = start(params.task, label, toolCallId, ctx.cwd, false, onUpdate);
         const stopped = () => run.stop();
         signal?.addEventListener("abort", stopped, { once: true });

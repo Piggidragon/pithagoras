@@ -82,6 +82,14 @@ export function findSubagent(
 export const subagentModeOf = (settings: Record<string, unknown>): SubagentMode =>
   settings.subagentMode === "background" ? "background" : "interrupt";
 
+export const SUBAGENT_MAX_PARALLEL = 16;
+
+/** How many subagents may run at once, as the tool reads it: 1 unless the settings say more. */
+export function subagentLimitOf(settings: Record<string, unknown>): number {
+  const n = Number(settings.subagentMaxParallel);
+  return Number.isInteger(n) && n >= 1 ? Math.min(n, SUBAGENT_MAX_PARALLEL) : 1;
+}
+
 export function subagentState() {
   const settings = readPiSettings();
   const bundled = bundledSubagentDir();
@@ -92,6 +100,7 @@ export function subagentState() {
     enabled: found?.enabled === true,
     source: found?.source ?? null,
     mode: subagentModeOf(settings),
+    maxParallel: subagentLimitOf(settings),
   };
 }
 

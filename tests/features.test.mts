@@ -18,6 +18,7 @@ const {
   bundledSubagentDir,
   findSubagent,
   subagentModeOf,
+  subagentLimitOf,
   understoryDefaultUrl,
   understoryEntry,
   understoryIn,
@@ -54,6 +55,13 @@ test("a subagent interrupts unless pi's settings say background", () => {
   assert.equal(subagentModeOf({ subagentMode: "background" }), "background");
 });
 
+test("one subagent at a time unless pi's settings allow more, as the tool reads it", () => {
+  assert.equal(subagentLimitOf({}), 1);
+  assert.equal(subagentLimitOf({ subagentMaxParallel: 4 }), 4);
+  assert.equal(subagentLimitOf({ subagentMaxParallel: 2.5 }), 1);
+  assert.equal(subagentLimitOf({ subagentMaxParallel: 40 }), 16);
+});
+
 test("Understory's entry puts its tools in front of the agent, and names its token rather than holding it", () => {
   assert.equal(understoryDefaultUrl(), "http://localhost:3800/mcp");
   assert.deepEqual(understoryEntry("http://understory:3800/mcp", false), { url: "http://understory:3800/mcp", lifecycle: "lazy", directTools: true });
@@ -86,4 +94,49 @@ test("while Understory is the memory, MEMORY.md is not read; switched off, it is
   // A file that cannot be read says nothing about Understory: the file memory stays.
   writeFileSync(path.join(agentDir, "mcp.json"), "{ nope");
   assert.equal(understoryOn(), false);
+});
+
+test("the memory is read through the portal: only Understory's read API, with its token, and only while it is on", async () => {
+  const { createServer } = await import("node:http");
+  const express = (await import("express")).default;
+  const { memoryRouter } = await import("../server/src/api/memory.ts");
+  const asked: { url: string; auth?: string }[] = [];
+  const understory = createServer((req, res) => {
+    asked.push({ url: req.url!, auth: req.headers.authorization });
+    res.setHeader("content-type", "application/json");
+    if (req.url!.startsWith("/api/concept?path=%2Fgone.md")) return res.writeHead(404).end(JSON.stringify({ error: "Concept not found: /gone.md" }));
+    if (req.url === "/api/log") return res.writeHead(500).end("<html>broken</html>");
+    res.end(JSON.stringify(req.url === "/api/tree" ? { name: "/", path: "/", kind: "directory", children: [] } : [{ path: "/a.md" }]));
+  });
+  await new Promise<void>((r) => understory.listen(0, "127.0.0.1", r));
+  const port = (understory.address() as { port: number }).port;
+  const app = express().use("/api", memoryRouter());
+  const portal = app.listen(0, "127.0.0.1");
+  await new Promise((r) => portal.once("listening", r));
+  const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/api/memory`;
+  const get = async (p: string) => {
+    const r = await fetch(`${at}${p}`);
+    return { status: r.status, body: await r.json() };
+  };
+  try {
+    writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {} }));
+    assert.equal((await get("/tree")).status, 409, "not while it is off");
+
+    writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { understory: understoryEntry(`http://127.0.0.1:${port}/mcp`, true) } }));
+    process.env.MEMORY_UNDERSTORY_AUTH_TOKEN = "s3cret";
+    assert.deepEqual(await get("/tree"), { status: 200, body: { name: "/", path: "/", kind: "directory", children: [] } });
+    assert.deepEqual(asked.at(-1), { url: "/api/tree", auth: "Bearer s3cret" });
+    assert.equal((await get("/search?q=deploy%20script")).status, 200);
+    assert.equal(asked.at(-1)!.url, "/api/search?q=deploy+script");
+    assert.equal((await get("/search")).status, 400, "a search needs something to look for");
+    assert.deepEqual(await get("/concept?path=/gone.md"), { status: 404, body: { error: "Concept not found: /gone.md" } });
+    assert.equal((await get("/log")).status, 502, "what is not JSON is Understory failing");
+    assert.equal((await fetch(`${at}/graph`)).status, 404, "nothing past the four reads");
+    delete process.env.MEMORY_UNDERSTORY_AUTH_TOKEN;
+    await get("/tree");
+    assert.equal(asked.at(-1)!.auth, undefined);
+  } finally {
+    understory.close();
+    portal.close();
+  }
 });

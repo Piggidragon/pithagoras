@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {chmodSync, mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import subagent from '../extensions/subagent/index.ts';
+import subagent, {subagentLimit} from '../extensions/subagent/index.ts';
 // A child pi in RPC mode, as far as the extension can tell. `retry`: its first run fails and is retried. `hang`: it works until stopped.
 const dir=mkdtempSync(path.join(tmpdir(),'subagent-'));
 const bin=path.join(dir,'pi');
@@ -30,7 +30,7 @@ process.env.PI_SUBAGENT_BIN=bin;
 const agentDir=path.join(dir,'agent');
 mkdirSync(agentDir);
 process.env.PI_CODING_AGENT_DIR=agentDir;
-const mode=(m?:string)=>writeFileSync(path.join(agentDir,'settings.json'),JSON.stringify(m?{subagentMode:m}:{}));
+const mode=(m?:string,more:Record<string,unknown>={})=>writeFileSync(path.join(agentDir,'settings.json'),JSON.stringify({...(m?{subagentMode:m}:{}),...more}));
 mode();
 function load(){
  const h=new Map<string,((d:any)=>void)[]>();
@@ -141,4 +141,68 @@ test('background subagents end with the session that started them',{timeout:5000
  await until(()=>ends.length===1);
  assert.equal(ends[0].status,'stopped');
  mode();
+});
+test('how many subagents may run at once: 1 unless the settings say more, and never past 16',()=>{
+ mode();assert.equal(subagentLimit(),1);
+ mode(undefined,{subagentMaxParallel:3});assert.equal(subagentLimit(),3);
+ mode(undefined,{subagentMaxParallel:0});assert.equal(subagentLimit(),1);
+ mode(undefined,{subagentMaxParallel:'lots'});assert.equal(subagentLimit(),1);
+ mode(undefined,{subagentMaxParallel:99});assert.equal(subagentLimit(),16);
+ mode();
+});
+test('with two allowed at once, two subagents asked for together run side by side',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode(undefined,{subagentMaxParallel:2});
+ const {tool,seen}=load();
+ await Promise.all([tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir}),tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir})]);
+ assert.deepEqual(seen,['start a','start b','end','end']);
+ mode();
+});
+test('in the background, one past the limit is queued and starts when the running one has finished',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode('background');
+ const {tool,seen,sent}=load();
+ const first=await tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ const second=await tool.execute('b',{task:'two',label:'Second'},undefined,undefined,{cwd:dir});
+ assert.equal(first.details.phase,'background');
+ assert.equal(second.details.phase,'queued');
+ assert.match(second.content[0].text,/Queued subagent "Second" in the background: 1 subagent is already running/);
+ await until(()=>sent.length===2);
+ assert.deepEqual(seen,['start a','end','start b','end']);
+ mode();
+});
+test('a subagent still waiting for a slot does not start once its session has ended',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode('background');
+ const {tool,seen,hooks,ends}=load();
+ await tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ await tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir});
+ await new Promise(r=>setTimeout(r,150));
+ hooks.get('session_shutdown')!();
+ await until(()=>ends.length===1);
+ await new Promise(r=>setTimeout(r,200));
+ assert.deepEqual(seen,['start a','end']);
+ mode();
+});
+test('an interrupt subagent waiting for a slot gives up when its parent is stopped',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode();
+ const {tool,events,seen}=load();
+ let id='';events.on('subagent:v1:start',d=>id=d.id);
+ const first=tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ const stop=new AbortController();
+ const phases:string[]=[];
+ const second=tool.execute('b',{task:'two'},stop.signal,(u:any)=>phases.push(u.details.phase),{cwd:dir});
+ await new Promise(r=>setTimeout(r,150));
+ stop.abort();
+ assert.deepEqual((await second).details,{phase:'stopped'});
+ assert.deepEqual(phases,['waiting for another subagent to finish']);
+ events.emit('subagent:v1:stop',{id});
+ await first;
+ assert.deepEqual(seen,['start a','end']);
+});
+test('the limit holds across conversations: two chats share it',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode();
+ const one=load(),two=load();
+ const order:string[]=[];
+ one.events.on('subagent:v1:start',()=>order.push('start one'));one.events.on('subagent:v1:end',()=>order.push('end one'));
+ two.events.on('subagent:v1:start',()=>order.push('start two'));two.events.on('subagent:v1:end',()=>order.push('end two'));
+ await Promise.all([one.tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir}),two.tool.execute('b',{task:'y'},undefined,undefined,{cwd:dir})]);
+ assert.deepEqual(order,['start one','end one','start two','end two']);
 });

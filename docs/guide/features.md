@@ -41,8 +41,18 @@ local model that means two model calls at once, which a single GPU may not
 hold. Stopping the chat does not stop a background subagent; stop it from its
 window. Closing or reloading the chat does.
 
-The choice is stored as `subagentMode` in pi's `settings.json` (`"background"`,
-or absent for interrupt), so the tool behaves the same when pi runs outside the
+### Subagents at once
+
+**Subagents at once** (default 1) is how many run at the same time, across
+every chat — each one is a model running. One asked for beyond it waits for a
+free slot: in interrupt mode its tool call waits (and gives up if the chat is
+stopped meanwhile); in the background the call returns saying it is queued,
+and it starts once another has finished. A queued one does not start once its
+chat has been closed or reloaded.
+
+Both choices are stored in pi's `settings.json` — `subagentMode`
+(`"background"`, or absent for interrupt) and `subagentMaxParallel` (absent
+for 1, at most 16) — so the tool behaves the same when pi runs outside the
 portal. `PI_SUBAGENT_BIN` picks the `pi` it starts (default: `pi` on `PATH`).
 
 Subagents need the host executor (`EXECUTOR=host`): only there does the portal
@@ -54,8 +64,24 @@ share pi's event bus with the tool.
 is a memory that grows: plain markdown on disk, cross-linked and maintained,
 which the agent looks things up in and adds to through its tools
 (`understory_memory_query`, `…_add`, `…_update`, `…_status`, `…_maintain`).
-The bundle is human-readable and git-diffable, and Understory's own web UI
-browses it (*Browse the memory* on the Memory tab).
+The bundle is human-readable and git-diffable.
+
+### Reading the memory
+
+While Understory is on, the **Agent** page has a **Memory** tab beside the
+conversations: the memory's folders and notes, a search, and its recent
+changes. A note shows its type, tags and when it last changed, and its links
+to other notes open them there. It is read only — the agent keeps its memory,
+through its tools.
+
+The portal asks Understory for all of it, at the address in `mcp.json` and
+with the token, so the tab works wherever the portal does: over HTTPS, from a
+phone, without Understory's port being reachable from the browser. It reads
+the small JSON API Understory's own web UI uses (`/api/tree`, `/api/concept`,
+`/api/search`, `/api/log`), which is not a documented one: should a new
+Understory change it, the tab says what went wrong instead of showing an empty
+memory. *Open in Understory* goes to its own web UI, with the graph — at the
+portal's address for it, which the browser has to be able to reach.
 
 Switching it on:
 

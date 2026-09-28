@@ -2,6 +2,7 @@ import express, { type Router } from "express";
 import { extensionStash, setExtensionStash } from "../db.js";
 import { isSwitchedOff, sourceOf } from "../extension-switch.js";
 import {
+  SUBAGENT_MAX_PARALLEL,
   UNDERSTORY,
   UNDERSTORY_TOKEN_ENV,
   bundledSubagentDir,
@@ -80,17 +81,22 @@ export function featuresRouter(): Router {
   });
 
   router.put("/features/subagent", async (req, res) => {
-    const { enabled, mode } = req.body ?? {};
+    const { enabled, mode, maxParallel } = req.body ?? {};
     if (enabled !== undefined && typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be true or false" });
     if (mode !== undefined && mode !== "interrupt" && mode !== "background") {
       return res.status(400).json({ error: "mode must be interrupt or background" });
     }
+    if (maxParallel !== undefined && !(Number.isInteger(maxParallel) && maxParallel >= 1 && maxParallel <= SUBAGENT_MAX_PARALLEL)) {
+      return res.status(400).json({ error: `maxParallel must be a whole number from 1 to ${SUBAGENT_MAX_PARALLEL}` });
+    }
     try {
-      if (mode) {
-        // Interrupt is what the tool does without being told: the key is only there for background.
+      if (mode || maxParallel !== undefined) {
+        // What the tool does without being told is left unsaid: interrupt, one at a time.
         await updatePiSettings((all) => {
           if (mode === "background") all.subagentMode = "background";
-          else delete all.subagentMode;
+          else if (mode) delete all.subagentMode;
+          if (maxParallel === 1) delete all.subagentMaxParallel;
+          else if (maxParallel !== undefined) all.subagentMaxParallel = maxParallel;
         });
       }
       const state = subagentState();

@@ -82,8 +82,9 @@ before writing; a broken file stops every future session from starting.
 }
 ```
 
-`subagentMode` (`"background"`, or absent for interrupt) is read by the bundled
-subagent tool; Settings → Add-ons → Subagents writes it. See
+`subagentMode` (`"background"`, or absent for interrupt) and
+`subagentMaxParallel` (how many at once; absent for 1, at most 16) are read by
+the bundled subagent tool; Settings → Add-ons → Subagents writes them. See
 [Opt-in features](/guide/features).
 
 Extension settings live here too, alongside pi's own. That is why the portal

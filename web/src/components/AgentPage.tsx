@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { AgentMemory } from "./AgentMemory";
 import {
   LuBot,
+  LuBrain,
   LuCheck,
   LuFileText,
   LuFolder,
@@ -137,6 +140,15 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
     return [...out.entries()];
   }, [sessions]);
 
+  // Understory's memory, as a tab beside the conversations while it is the agent's memory.
+  const [params, setParams] = useSearchParams();
+  const memoryOn = setup?.memory === "understory";
+  const tab = memoryOn && params.get("tab") === "memory" ? "memory" : "conversations";
+  const showTab = (t: "conversations" | "memory") => setParams(t === "memory" ? { tab: t } : {});
+  // A note opened is a step of its own, so Back closes it; closing it is not.
+  const openNote = (path: string | null) =>
+    setParams(path ? { tab: "memory", note: path } : { tab: "memory" }, { replace: !path });
+
   // Nothing else on this page means much until the agent has a character and
   // knows who it is talking to.
   if (setup && !setup.initialised) {
@@ -192,113 +204,139 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
             </div>
           </PageHeader>
 
-          {setup?.initialised && <AgentFiles setup={setup} onSaved={setSetup} />}
-
-          {loadError && (
-            <div className="mt-4 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">
-              Could not refresh the conversations — what is shown may be out of date. {loadError}
-            </div>
-          )}
-          {error && (
-            <div className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>
-          )}
-
-          {loading ? (
-            <RowsSkeleton />
-          ) : sessions.length === 0 ? (
-            <div className="mt-4 rounded-xl border border-dashed border-line px-4 py-10 text-center">
-              <p className="text-sm text-fg-muted">Nothing has reached the agent yet.</p>
-              <p className="mx-auto mt-2 max-w-md text-xs text-fg-faint">
-                Start one here, or message a channel — a Telegram chat, a webhook — and it
-                appears in this list. They all reach the same agent and share its memory.
-              </p>
-            </div>
-          ) : (
-            <div className="mt-5 space-y-5">
-              {groups.map(([id, group]) => (
-                <section key={id}>
-                  <div className="flex items-center gap-2 px-1">
-                    {id === BROWSER ? (
-                      <LuMonitor className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-                    ) : (
-                      <LuRadio className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-                    )}
-                    <h3 className="truncate text-xs font-medium text-fg-muted">{group.name}</h3>
-                    {group.kind && id !== BROWSER && (
-                      <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">
-                        {group.kind}
-                      </span>
-                    )}
-                    {!group.present && (
-                      <span
-                        className="shrink-0 rounded bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn/90"
-                        title={`Recreate a channel with the slug "${id}" to reconnect these`}
-                      >
-                        no channel
-                      </span>
-                    )}
-                    <span className="ml-auto shrink-0 text-[11px] text-fg-faint">
-                      {group.items.length}
-                    </span>
-                  </div>
-
-                  <ul className="stagger-in mt-1.5 space-y-1">
-                    {group.items.map((s) => (
-                      <li key={s.id} className="group relative">
-                        {renaming === s.id ? (
-                          // Not a button while the name is being typed: an input
-                          // inside one cannot be focused reliably, and a click in
-                          // the field must not open the conversation.
-                          <div className={ROW}>
-                            <RowBody
-                              s={s}
-                              title={
-                                <TitleInput
-                                  value={s.title}
-                                  label="Conversation name"
-                                  className="w-full text-sm"
-                                  onCommit={(next) => rename(s, next)}
-                                  onCancel={() => setRenaming(null)}
-                                />
-                              }
-                            />
-                          </div>
-                        ) : (
-                          <>
-                            <button onClick={() => onSelect(s.id)} className={`${ROW} hover:bg-fg/5`}>
-                              <RowBody
-                                s={s}
-                                title={<p className="truncate text-sm text-fg">{s.title}</p>}
-                              />
-                            </button>
-                            {/* Over the timestamp rather than beside it: the row is
-                                a button, and one button cannot hold another. */}
-                            <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                              <button
-                                onClick={() => setRenaming(s.id)}
-                                title="Rename"
-                                aria-label={`Rename ${s.title}`}
-                                className="rounded p-1.5 text-fg-subtle transition hover:text-accent"
-                              >
-                                <LuPencil className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                onClick={() => remove(s)}
-                                title="Delete conversation"
-                                aria-label={`Delete ${s.title}`}
-                                className="rounded p-1.5 text-fg-subtle transition hover:text-danger"
-                              >
-                                <LuTrash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+          {memoryOn && (
+            <div role="tablist" aria-label="The agent" className="mt-5 flex gap-1 rounded-xl border border-line bg-raised/40 p-1">
+              {(["conversations", "memory"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t}
+                  onClick={() => showTab(t)}
+                  className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                    tab === t ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25" : "text-fg-muted hover:bg-fg/5 hover:text-fg"
+                  }`}
+                >
+                  {t === "memory" ? <LuBrain className="h-3.5 w-3.5" /> : <LuMessageSquare className="h-3.5 w-3.5" />}
+                  {t === "memory" ? "Memory" : "Conversations"}
+                </button>
               ))}
             </div>
+          )}
+
+          {tab === "memory" ? (
+            <AgentMemory note={params.get("note")} onNote={openNote} />
+          ) : (
+            <>
+              {setup?.initialised && <AgentFiles setup={setup} onSaved={setSetup} />}
+
+              {loadError && (
+                <div className="mt-4 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">
+                  Could not refresh the conversations — what is shown may be out of date. {loadError}
+                </div>
+              )}
+              {error && (
+                <div className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>
+              )}
+
+              {loading ? (
+                <RowsSkeleton />
+              ) : sessions.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-dashed border-line px-4 py-10 text-center">
+                  <p className="text-sm text-fg-muted">Nothing has reached the agent yet.</p>
+                  <p className="mx-auto mt-2 max-w-md text-xs text-fg-faint">
+                    Start one here, or message a channel — a Telegram chat, a webhook — and it
+                    appears in this list. They all reach the same agent and share its memory.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-5 space-y-5">
+                  {groups.map(([id, group]) => (
+                    <section key={id}>
+                      <div className="flex items-center gap-2 px-1">
+                        {id === BROWSER ? (
+                          <LuMonitor className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+                        ) : (
+                          <LuRadio className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+                        )}
+                        <h3 className="truncate text-xs font-medium text-fg-muted">{group.name}</h3>
+                        {group.kind && id !== BROWSER && (
+                          <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">
+                            {group.kind}
+                          </span>
+                        )}
+                        {!group.present && (
+                          <span
+                            className="shrink-0 rounded bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn/90"
+                            title={`Recreate a channel with the slug "${id}" to reconnect these`}
+                          >
+                            no channel
+                          </span>
+                        )}
+                        <span className="ml-auto shrink-0 text-[11px] text-fg-faint">
+                          {group.items.length}
+                        </span>
+                      </div>
+
+                      <ul className="stagger-in mt-1.5 space-y-1">
+                        {group.items.map((s) => (
+                          <li key={s.id} className="group relative">
+                            {renaming === s.id ? (
+                              // Not a button while the name is being typed: an input
+                              // inside one cannot be focused reliably, and a click in
+                              // the field must not open the conversation.
+                              <div className={ROW}>
+                                <RowBody
+                                  s={s}
+                                  title={
+                                    <TitleInput
+                                      value={s.title}
+                                      label="Conversation name"
+                                      className="w-full text-sm"
+                                      onCommit={(next) => rename(s, next)}
+                                      onCancel={() => setRenaming(null)}
+                                    />
+                                  }
+                                />
+                              </div>
+                            ) : (
+                              <>
+                                <button onClick={() => onSelect(s.id)} className={`${ROW} hover:bg-fg/5`}>
+                                  <RowBody
+                                    s={s}
+                                    title={<p className="truncate text-sm text-fg">{s.title}</p>}
+                                  />
+                                </button>
+                                {/* Over the timestamp rather than beside it: the row is
+                                    a button, and one button cannot hold another. */}
+                                <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                                  <button
+                                    onClick={() => setRenaming(s.id)}
+                                    title="Rename"
+                                    aria-label={`Rename ${s.title}`}
+                                    className="rounded p-1.5 text-fg-subtle transition hover:text-accent"
+                                  >
+                                    <LuPencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => remove(s)}
+                                    title="Delete conversation"
+                                    aria-label={`Delete ${s.title}`}
+                                    className="rounded p-1.5 text-fg-subtle transition hover:text-danger"
+                                  >
+                                    <LuTrash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

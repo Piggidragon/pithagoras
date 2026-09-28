@@ -208,9 +208,13 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 
 | | |
 | --- | --- |
-| `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode }, understory: { enabled, url, tokenSet, adapterInstalled, reachable } }` |
-| `PUT /api/features/subagent` | `{ enabled?, mode?: "interrupt" \| "background" }` — installs or removes the bundled subagent tool, writes `subagentMode`; reloads idle open sessions |
+| `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode, maxParallel }, understory: { enabled, url, tokenSet, adapterInstalled, reachable } }` |
+| `PUT /api/features/subagent` | `{ enabled?, mode?: "interrupt" \| "background", maxParallel?: 1–16 }` — installs or removes the bundled subagent tool, writes `subagentMode` and `subagentMaxParallel`; reloads idle open sessions |
 | `PUT /api/features/understory` | `{ enabled, url? }` — writes or removes the `understory` MCP server (installing `pi-mcp-adapter` if needed); reloads idle open sessions |
+| `GET /api/memory/tree` | Understory's memory bundle as a tree of folders and notes — read through the portal while Understory is on (409 when it is not) |
+| `GET /api/memory/concept?path=` | One note: `{ path, frontmatter, body }`; 404 when it is not there |
+| `GET /api/memory/search?q=` | Notes matching, best first |
+| `GET /api/memory/log` | What changed, oldest first |
 
 ## Channels
 

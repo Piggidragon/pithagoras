@@ -505,7 +505,11 @@ export const api = {
   suggestBrowserPassword: () =>
     json<{ password: string }>("/api/browser/suggest-password"),
   features: () => json<Features>("/api/features"),
-  setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode }) =>
+  memoryTree: () => json<MemoryNode>("/api/memory/tree"),
+  memoryConcept: (path: string) => json<MemoryConcept>(`/api/memory/concept?${new URLSearchParams({ path })}`),
+  memorySearch: (q: string) => json<MemoryHit[]>(`/api/memory/search?${new URLSearchParams({ q })}`),
+  memoryLog: () => json<MemoryChange[]>("/api/memory/log"),
+  setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number }) =>
     json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
       method: "PUT",
       body: JSON.stringify(patch),
@@ -1040,6 +1044,8 @@ export interface SubagentFeature {
   /** How pi's packages list names it. */
   source: string | null;
   mode: SubagentMode;
+  /** How many may run at once, across every chat. */
+  maxParallel: number;
 }
 
 /** Understory as the agent's memory, over MCP. */
@@ -1052,6 +1058,37 @@ export interface UnderstoryFeature {
   /** Something answers at the address. */
   reachable: boolean;
   configError?: string;
+}
+
+/** A folder or a note in Understory's memory bundle. `reserved` are its own index and log. */
+export interface MemoryNode {
+  name: string;
+  path: string;
+  kind: "directory" | "concept" | "reserved";
+  type?: string;
+  title?: string;
+  description?: string;
+  children?: MemoryNode[];
+}
+
+export interface MemoryConcept {
+  path: string;
+  frontmatter: { type?: string; title?: string; description?: string; tags?: string[]; timestamp?: string; [key: string]: unknown };
+  body: string;
+}
+
+export interface MemoryHit {
+  path: string;
+  type?: string;
+  title?: string;
+  description?: string;
+  snippet?: string;
+}
+
+export interface MemoryChange {
+  date: string;
+  action: string;
+  summary: string;
 }
 
 export interface Features {

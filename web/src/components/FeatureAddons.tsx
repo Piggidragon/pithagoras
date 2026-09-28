@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { LuBot, LuBrain, LuCheck, LuExternalLink, LuRefreshCw, LuTriangleAlert } from "react-icons/lu";
+import { Link } from "react-router-dom";
+import { LuBot, LuBrain, LuCheck, LuMinus, LuPlus, LuRefreshCw, LuTriangleAlert } from "react-icons/lu";
 import { api, type Features, type SubagentMode } from "../api";
 import { SwitchRow, inputCls } from "./SettingsUi";
 
@@ -46,7 +47,7 @@ const MODES: { value: SubagentMode; label: string; detail: string }[] = [
   {
     value: "background",
     label: "Background",
-    detail: "The agent goes on working while the subagent runs, and its answer arrives as a message when it is done. Two agents run at once: on local hosting that is two model calls at the same time.",
+    detail: "The agent goes on working while the subagent runs, and its answer arrives as a message when it is done. The agent and its subagent run at once: on local hosting that is two model calls at the same time.",
   },
 ];
 
@@ -59,11 +60,11 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
   if (!features) return <Loading />;
   const s = features.subagent;
 
-  const change = async (patch: { enabled?: boolean; mode?: SubagentMode }) => {
+  const change = async (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number }) => {
     setBusy(true);
     setNote(null);
     // The choice shows at once; what the server says after is what stays.
-    if (patch.mode) setFeatures({ ...features, subagent: { ...s, mode: patch.mode } });
+    if (patch.mode || patch.maxParallel) setFeatures({ ...features, subagent: { ...s, ...patch } });
     try {
       const { subagent, waiting } = await api.setSubagentFeature(patch);
       setFeatures({ ...features, subagent });
@@ -113,6 +114,36 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
           ))}
         </div>
       </fieldset>
+      <div className="flex items-start gap-3 rounded-xl border border-line bg-raised/40 p-3">
+        <div className="min-w-0 flex-1 text-sm text-fg">
+          Subagents at once
+          <span className="mt-0.5 block text-xs text-fg-faint">
+            Across every chat. One asked for beyond it waits for a free slot — its call waits in interrupt mode, and in the background it
+            starts once another has finished. Each one is a model running.
+          </span>
+        </div>
+        <div role="group" aria-label="Subagents at once" className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-label="Fewer at once"
+            disabled={busy || s.maxParallel <= 1}
+            onClick={() => void change({ maxParallel: s.maxParallel - 1 })}
+            className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
+          >
+            <LuMinus className="h-3.5 w-3.5" />
+          </button>
+          <output aria-live="polite" className="w-6 text-center text-sm tabular-nums text-fg">{s.maxParallel}</output>
+          <button
+            type="button"
+            aria-label="More at once"
+            disabled={busy || s.maxParallel >= MAX_PARALLEL}
+            onClick={() => void change({ maxParallel: s.maxParallel + 1 })}
+            className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
+          >
+            <LuPlus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
       {busy && (
         <p className="flex items-center gap-2 text-xs text-fg-subtle">
           <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> Applying…
@@ -122,6 +153,9 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
     </div>
   );
 }
+
+/** As many as the tool allows at once. */
+const MAX_PARALLEL = 16;
 
 const COMPOSE = `services:
   understory:
@@ -202,10 +236,10 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
         <span className="text-fg-faint">
           {u.tokenSet ? "MEMORY_UNDERSTORY_AUTH_TOKEN is set and sent as its token." : "No token (MEMORY_UNDERSTORY_AUTH_TOKEN) — only needed when Understory has an AUTH_TOKEN."}
         </span>
-        {origin && u.enabled && (
-          <a href={origin} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-accent hover:underline">
-            Browse the memory <LuExternalLink className="h-2.5 w-2.5" />
-          </a>
+        {u.enabled && (
+          <Link to="/agent?tab=memory" className="text-accent hover:underline">
+            Read the memory on the Agent page
+          </Link>
         )}
       </p>
 
