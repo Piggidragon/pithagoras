@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LuBan, LuCircleCheck, LuKeyRound, LuRefreshCw, LuShield, LuUserX } from "react-icons/lu";
+import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuUserX } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
@@ -20,6 +20,7 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   },
   stranger: { label: msg("Turned away"), icon: <LuUserX className="h-3.5 w-3.5" />, tone: "text-warn" },
   answered: { label: msg("You answered"), icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-accent" },
+  browsed: { label: msg("Page opened"), icon: <LuGlobe className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
 };
 
 const FILTERS = [

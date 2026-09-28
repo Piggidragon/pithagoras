@@ -104,7 +104,7 @@ export function EffortPicker({ value, inherited, onChange, label }: { value: str
             role="radio"
             aria-checked={on}
             onClick={() => onChange(on ? "" : lvl)}
-            className={`rounded-lg px-2.5 py-1 text-xs capitalize transition ${
+            className={`rounded-lg px-2.5 py-1 text-xs transition first-letter:uppercase ${
               on
                 ? "bg-warn/12 text-warn ring-1 ring-inset ring-warn/30"
                 : fallback

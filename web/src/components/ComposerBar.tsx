@@ -490,7 +490,7 @@ export function ComposerBar({
           // On/off models flip right here; there is no scale to open a panel for.
           onClick={() => (onOff ? flipThinking() : setOpen(open === "effort" ? null : "effort"))}
           aria-pressed={onOff ? thinkingOn : undefined}
-          className={`rounded-lg px-2 py-1 capitalize transition disabled:opacity-50 ${
+          className={`rounded-lg px-2 py-1 transition first-letter:uppercase disabled:opacity-50 ${
             open === "effort"
               ? "bg-fg/10 text-fg"
               : onOff && thinkingOn
@@ -653,7 +653,7 @@ export function ComposerBar({
           ) : (
             <>
               <p className="text-sm text-fg-muted">
-                {t("Effort")} <span className="capitalize text-fg">{effortLabel(levels[effortIndex] ?? cfg.state.thinkingLevel)}</span>
+                {t("Effort")} <span className="inline-block text-fg first-letter:uppercase">{effortLabel(levels[effortIndex] ?? cfg.state.thinkingLevel)}</span>
               </p>
               <div className="mt-3 flex justify-between text-[11px] text-fg-subtle">
                 <span>{t("Faster")}</span>
