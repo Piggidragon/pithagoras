@@ -44,7 +44,7 @@ export function PortalExtensions({ onError }: { onError: (e: string) => void }) 
           document.getElementById(`${id}-${addons[next].id}-tab`)?.focus();
         }}
         className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 sm:gap-2 sm:px-4 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${selected === addon ? 'bg-accent/12 text-accent shadow-sm ring-1 ring-inset ring-accent/25' : 'text-fg-muted hover:bg-fg/5 hover:text-fg'}`}
-      ><Icon className="h-4 w-4" />{label}</button>)}
+      ><Icon className="hidden h-4 w-4 shrink-0 sm:block" />{label}</button>)}
     </div>
     {addons.map(({ id: addon }) => <div key={addon} role="tabpanel" id={`${id}-${addon}-panel`}
       aria-labelledby={`${id}-${addon}-tab`} hidden={selected !== addon}>
