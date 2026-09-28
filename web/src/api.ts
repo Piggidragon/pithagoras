@@ -516,6 +516,13 @@ export const api = {
   memoryGraph: () => json<MemoryGraph>("/api/memory/graph"),
   memoryTraces: () => json<MemoryTrace[]>("/api/memory/traces"),
   memoryValidate: () => json<MemoryValidation>("/api/memory/validate"),
+  /** Whether notes can be changed here: only in the Understory the portal runs. */
+  memoryHealth: () => json<{ writable: boolean; health?: MemoryHealth }>("/api/memory/health"),
+  saveMemoryNote: (path: string, frontmatter: Record<string, unknown>, body: string) =>
+    json<{ concept: MemoryConcept; health: MemoryHealth }>("/api/memory/concept", { method: "PUT", body: JSON.stringify({ path, frontmatter, body }) }),
+  deleteMemoryNote: (path: string) =>
+    json<{ health: MemoryHealth }>(`/api/memory/concept?${new URLSearchParams({ path })}`, { method: "DELETE" }),
+  reindexMemory: () => json<{ pruned: string[]; reindexed: number; health: MemoryHealth }>("/api/memory/reindex", { method: "POST" }),
   setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) =>
     json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
       method: "PUT",
@@ -1161,6 +1168,14 @@ export interface MemoryTrace {
   durationMs?: number;
   notation?: string;
   usage?: { inputTokens?: number; outputTokens?: number };
+}
+
+/** What a change may have left behind in the memory: links to nowhere, notes nothing links to, what the format says. */
+export interface MemoryHealth {
+  healthy: boolean;
+  orphans: { path: string; title?: string }[];
+  brokenLinks: { path: string; target: string }[];
+  issues: { path: string; severity: string; message: string }[];
 }
 
 export interface MemoryValidation {

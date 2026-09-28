@@ -12,9 +12,11 @@ import {
   LuHistory,
   LuLocateFixed,
   LuMinus,
+  LuPencil,
   LuPlus,
   LuRefreshCw,
   LuSearch,
+  LuTrash2,
   LuTriangleAlert,
   LuWaypoints,
   LuX,
@@ -24,6 +26,7 @@ import {
   type MemoryChange,
   type MemoryConcept,
   type MemoryGraph,
+  type MemoryHealth,
   type MemoryHit,
   type MemoryNode,
   type MemoryTrace,
@@ -31,6 +34,9 @@ import {
 } from "../api";
 import { bounds, colours, layout } from "../memory-graph";
 import { NOTE_LINK, linkNotes } from "../memory-links";
+import { confirmDialog } from "./ConfirmDialog";
+import { Modal } from "./Modal";
+import { inputCls } from "./SettingsUi";
 
 /**
  * The agent's memory in Understory, laid out as Understory's own page lays it
@@ -79,6 +85,27 @@ export function MemoryPage() {
   const [query, setQuery] = useState("");
   const [asked, setAsked] = useState("");
   const [hits, setHits] = useState<MemoryHit[] | null>(null);
+
+  // Whether notes can be changed here, and what the last change left behind.
+  const [writable, setWritable] = useState(false);
+  const [after, setAfter] = useState<{ what: "saved" | "deleted"; health: MemoryHealth } | null>(null);
+  useEffect(() => {
+    api.memoryHealth().then((r) => setWritable(r.writable), () => {});
+  }, []);
+
+  /** Reads what a change moved — the tree, the counts — without leaving what is open. */
+  const refresh = () => {
+    Promise.all([api.memoryTree(), api.memoryValidate().catch(() => null)]).then(([t, v]) => {
+      setTree(t);
+      setValidation(v);
+    }, () => {});
+  };
+  const changed = (what: "saved" | "deleted", health: MemoryHealth) => {
+    // A deleted note is not there to show any more.
+    if (what === "deleted") close();
+    refresh();
+    setAfter({ what, health });
+  };
 
   const load = () => {
     setLoading(true);
@@ -224,7 +251,7 @@ export function MemoryPage() {
 
         <main className={`${open ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
           {note ? (
-            <Note key={`${note}#${round}`} path={note} onOpen={openNote} onBack={close} />
+            <Note key={`${note}#${round}`} path={note} writable={writable} onOpen={openNote} onBack={close} onChanged={changed} />
           ) : view === "log" ? (
             <LogView key={round} onOpen={openNote} onBack={close} />
           ) : view === "graph" ? (
@@ -246,6 +273,7 @@ export function MemoryPage() {
           )}
         </main>
       </div>
+      {after && <AfterChange what={after.what} health={after.health} onOpen={openNote} onClose={() => setAfter(null)} onRefresh={refresh} />}
     </Colours.Provider>
   );
 }
@@ -373,9 +401,37 @@ function MemoryMarkdown({ text, from, onOpen }: { text: string; from: string; on
   return <Streamdown components={components}>{linked}</Streamdown>;
 }
 
-function Note({ path, onOpen, onBack }: { path: string; onOpen: (path: string) => void; onBack: () => void }) {
+/** Understory's own index and log: written by it, never by hand. */
+const reservedNote = (path: string) => /(^|\/)(index|log)\.md$/.test(path);
+
+/** What a note's form holds while it is edited. */
+interface NoteDraft {
+  title: string;
+  type: string;
+  description: string;
+  tags: string;
+  body: string;
+}
+
+function Note({
+  path,
+  writable,
+  onOpen,
+  onBack,
+  onChanged,
+}: {
+  path: string;
+  writable: boolean;
+  onOpen: (path: string) => void;
+  onBack: () => void;
+  /** After it was saved or deleted, with what Understory said of the memory then. */
+  onChanged: (what: "saved" | "deleted", health: MemoryHealth) => void;
+}) {
   const [concept, setConcept] = useState<MemoryConcept | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [draft, setDraft] = useState<NoteDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let current = true;
     api.memoryConcept(path).then(
@@ -389,11 +445,76 @@ function Note({ path, onOpen, onBack }: { path: string; onOpen: (path: string) =
   const f = concept?.frontmatter;
   const when = typeof f?.timestamp === "string" ? new Date(f.timestamp) : null;
   const title = f?.title || path.split("/").pop();
+  const canChange = writable && !reservedNote(path) && !!concept;
+
+  const edit = () =>
+    concept &&
+    setDraft({
+      title: String(f?.title ?? ""),
+      type: String(f?.type ?? ""),
+      description: String(f?.description ?? ""),
+      tags: (Array.isArray(f?.tags) ? f.tags : []).map(String).join(", "),
+      body: concept.body,
+    });
+
+  const save = async () => {
+    if (!draft || !concept) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const tags = draft.tags.split(",").map((t) => t.trim()).filter(Boolean);
+      // Whatever else its frontmatter says is kept as it was; Understory sets the time.
+      const { timestamp: _t, ...rest } = concept.frontmatter;
+      const frontmatter = { ...rest, title: draft.title.trim(), type: draft.type.trim(), description: draft.description.trim(), ...(tags.length ? { tags } : {}) };
+      if (!tags.length) delete (frontmatter as Record<string, unknown>).tags;
+      const r = await api.saveMemoryNote(path, frontmatter, draft.body);
+      setConcept(r.concept);
+      setDraft(null);
+      onChanged("saved", r.health);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    const ok = await confirmDialog({
+      title: `Delete “${title}”?`,
+      message: "It is gone from the memory, and the agent no longer knows it. Links to it from other notes then lead nowhere.",
+      confirmLabel: "Delete",
+      danger: true,
+      deletes: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.deleteMemoryNote(path);
+      onChanged("deleted", r.health);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
   return (
     <>
-      <Bar title={title} onBack={onBack} />
+      <Bar title={title} onBack={onBack}>
+        {canChange && !draft && (
+          <>
+            <button type="button" onClick={edit} disabled={busy} aria-label="Edit the note" title="Edit" className="rounded p-1.5 text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40">
+              <LuPencil className="h-3.5 w-3.5" />
+            </button>
+            <button type="button" onClick={() => void remove()} disabled={busy} aria-label="Delete the note" title="Delete" className="rounded p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40">
+              <LuTrash2 className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
+      </Bar>
       <article aria-label={title} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
         <div className="mx-auto max-w-3xl">
+          {error && <p role="alert" className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
           {failed ? (
             <p className="text-sm text-warn">{failed}</p>
           ) : !concept ? (
@@ -401,6 +522,58 @@ function Note({ path, onOpen, onBack }: { path: string; onOpen: (path: string) =
               <div className="skeleton h-24 w-full" />
               <div className="skeleton h-40 w-full" />
             </div>
+          ) : draft ? (
+            <form
+              aria-label="Edit the note"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void save();
+              }}
+              className="space-y-3"
+            >
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs text-fg-muted">
+                  Title
+                  <input required value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} className={`${inputCls} mt-1`} />
+                </label>
+                <label className="block text-xs text-fg-muted">
+                  Type
+                  <input required value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })} className={`${inputCls} mt-1`} />
+                </label>
+              </div>
+              <label className="block text-xs text-fg-muted">
+                Description
+                <input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} className={`${inputCls} mt-1`} />
+              </label>
+              <label className="block text-xs text-fg-muted">
+                Tags, separated by commas
+                <input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} className={`${inputCls} mt-1`} />
+              </label>
+              <label className="block text-xs text-fg-muted">
+                Text, in markdown
+                <textarea
+                  value={draft.body}
+                  onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+                  rows={16}
+                  spellCheck={false}
+                  className="mt-1 w-full resize-y rounded-lg border border-line bg-raised/60 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-accent/60"
+                />
+              </label>
+              <p className="font-mono text-[10px] text-fg-faint">{path}</p>
+              <div className="flex items-center justify-end gap-2">
+                <button type="button" onClick={() => setDraft(null)} disabled={busy} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={busy || !draft.title.trim() || !draft.type.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
+                >
+                  {busy && <LuRefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                  Save
+                </button>
+              </div>
+            </form>
           ) : (
             <>
               <header className="rounded-xl border border-line bg-raised/40 p-4">
@@ -427,6 +600,161 @@ function Note({ path, onOpen, onBack }: { path: string; onOpen: (path: string) =
         </div>
       </article>
     </>
+  );
+}
+
+/**
+ * After a note was changed or deleted by hand: what Understory says the
+ * memory looks like now, and the two ways to put it right — its indexes
+ * written anew (no model), or its own pass over the whole memory with the
+ * model, which also mends links and wires in what nothing links to.
+ */
+function AfterChange({
+  what,
+  health: first,
+  onOpen,
+  onClose,
+  onRefresh,
+}: {
+  what: "saved" | "deleted";
+  health: MemoryHealth;
+  onOpen: (path: string) => void;
+  onClose: () => void;
+  /** The memory changed again: the page reads it anew. */
+  onRefresh: () => void;
+}) {
+  const [health, setHealth] = useState(first);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const act = async (what: string, run: () => Promise<string>) => {
+    setBusy(what);
+    setError(null);
+    setSaid(null);
+    try {
+      setSaid(await run());
+      onRefresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const reindex = () =>
+    act("Writing the indexes anew…", async () => {
+      const r = await api.reindexMemory();
+      setHealth(r.health);
+      return `${r.reindexed} ${r.reindexed === 1 ? "index" : "indexes"} written anew${r.pruned.length ? `, ${r.pruned.length} empty ${r.pruned.length === 1 ? "folder" : "folders"} removed` : ""}.`;
+    });
+  const repair = () =>
+    act("Tidying up with the model — this takes as long as the model needs…", async () => {
+      await api.dreamUnderstory();
+      const r = await api.memoryHealth();
+      if (r.health) setHealth(r.health);
+      const last = (await api.features()).understory.managed.lastDream;
+      return last ? `The model's pass: ${last.said}` : "The model's pass is done.";
+    });
+
+  const open = (path: string) => {
+    onOpen(path);
+    onClose();
+  };
+  const problems = health.brokenLinks.length + health.orphans.length + health.issues.length;
+  return (
+    <Modal
+      title={what === "deleted" ? "The note is deleted" : "The note is saved"}
+      subtitle="Understory has updated its index and log. Check what the change left behind."
+      onClose={onClose}
+      footer={
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={busy !== null} className="mr-auto rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={() => void reindex()}
+            disabled={busy !== null}
+            className="rounded-lg bg-fg/5 px-3 py-1.5 text-sm text-fg transition hover:bg-fg/10 disabled:opacity-40"
+          >
+            Rebuild the index
+          </button>
+          <button
+            type="button"
+            onClick={() => void repair()}
+            disabled={busy !== null}
+            className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
+          >
+            Repair with the model
+          </button>
+        </div>
+      }
+    >
+      <div role="status" className="space-y-3 text-sm">
+        {problems === 0 ? (
+          <p className="flex items-center gap-2 text-ok">
+            <LuCircleCheck className="h-4 w-4 shrink-0" /> Every link leads somewhere and every note is linked in.
+          </p>
+        ) : (
+          <p className="flex items-center gap-2 text-warn">
+            <LuTriangleAlert className="h-4 w-4 shrink-0" /> The memory has {problems} {problems === 1 ? "thing" : "things"} to put right.
+          </p>
+        )}
+        {health.brokenLinks.length > 0 && (
+          <section>
+            <h4 className="text-xs font-medium text-fg-muted">Links to nothing</h4>
+            <ul className="mt-1 space-y-1 text-xs">
+              {health.brokenLinks.map((b, i) => (
+                <li key={i}>
+                  <button type="button" onClick={() => open(b.path)} className="font-mono text-accent hover:underline">
+                    {b.path}
+                  </button>{" "}
+                  → <span className="font-mono text-fg-subtle">{b.target}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {health.orphans.length > 0 && (
+          <section>
+            <h4 className="text-xs font-medium text-fg-muted">Notes nothing links to</h4>
+            <ul className="mt-1 space-y-1 text-xs">
+              {health.orphans.map((o) => (
+                <li key={o.path}>
+                  <button type="button" onClick={() => open(o.path)} className="text-accent hover:underline">
+                    {o.title || o.path}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {health.issues.length > 0 && (
+          <section>
+            <h4 className="text-xs font-medium text-fg-muted">Against the format</h4>
+            <ul className="mt-1 space-y-1 text-xs">
+              {health.issues.map((issue, i) => (
+                <li key={i}>
+                  <span className="font-mono text-fg-subtle">{issue.path}</span> — {issue.message}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        <p className="text-xs text-fg-faint">
+          <strong className="font-medium text-fg-muted">Rebuild the index</strong> writes every folder's index.md anew and removes empty
+          folders, without the model. <strong className="font-medium text-fg-muted">Repair with the model</strong> runs Understory's own pass
+          over the memory: it mends links, wires in notes nothing links to, and merges what is doubled — it takes a while and costs tokens.
+        </p>
+        {busy && (
+          <p className="flex items-center gap-2 text-xs text-fg-subtle">
+            <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {busy}
+          </p>
+        )}
+        {said && !busy && <p className="text-xs text-fg-muted">{said}</p>}
+        {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+      </div>
+    </Modal>
   );
 }
 

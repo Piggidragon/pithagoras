@@ -268,22 +268,45 @@ export function lastDream(): DreamRun | null {
 }
 
 /**
- * One pass, run inside Understory's container with its own library, its own
- * model settings and its own bundle — the same pass its timer runs. Understory
- * has no way to be asked for one, so it is started beside it; at night, with
- * nobody writing, that is the pass alone. Prints its report as the last line.
+ * Code run inside Understory's container, with its own library, settings and
+ * bundle — Understory has no API that writes, and none that tidies up on
+ * demand, but its library does both, keeping index.md and log.md right as it
+ * goes. Its input is handed over base64'd in the environment; it prints what
+ * it came to, as JSON, as its last line.
  */
-const DREAM_SCRIPT = `import("@understory/core").then(async (m) => {
+function script(body: string): string {
+  return `(async () => {
+  const m = await import("@understory/core");
   const kb = new m.KnowledgeBase(process.env.BUNDLE_ROOT, { gitAutocommit: process.env.GIT_AUTOCOMMIT === "true" });
-  const report = await m.runDream(kb);
-  console.log(JSON.stringify(report));
-}).catch((e) => { console.log(JSON.stringify({ error: String(e?.message ?? e) })); process.exit(1); });`;
+  const input = process.env.PORTAL_INPUT ? JSON.parse(Buffer.from(process.env.PORTAL_INPUT, "base64").toString("utf8")) : {};
+  const health = async () => {
+    const lint = await kb.lint();
+    const valid = await kb.validate();
+    return { healthy: lint.healthy && valid.conformant, orphans: lint.orphans, brokenLinks: lint.brokenLinks, issues: valid.issues };
+  };
+  ${body}
+})().catch((e) => { console.log(JSON.stringify({ error: String(e?.message ?? e) })); process.exit(1); });`;
+}
 
-let dreaming = false;
-export const isDreaming = () => dreaming;
+const SCRIPTS = {
+  dream: script(`console.log(JSON.stringify(await m.runDream(kb)));`),
+  health: script(`console.log(JSON.stringify({ health: await health() }));`),
+  save: script(`const concept = await kb.writeConcept(input.path, input.frontmatter, input.body, input.summary);
+  console.log(JSON.stringify({ concept, health: await health() }));`),
+  delete: script(`await kb.deleteConcept(input.path, input.summary);
+  console.log(JSON.stringify({ health: await health() }));`),
+  // Every folder's index.md written anew, deepest first, after the empty ones
+  // are gone: what Understory does for one folder after each change, for all.
+  reindex: script(`const pruned = await m.pruneEmptyDirs(kb.bundle);
+  const dirs = [];
+  const walk = (n) => { if (n.kind === "directory") { dirs.push(n.path); (n.children ?? []).forEach(walk); } };
+  walk(await kb.listTree());
+  for (const dir of dirs.sort((a, b) => b.length - a.length)) await m.regenerateIndex(kb.bundle, dir === "/" ? undefined : dir);
+  console.log(JSON.stringify({ pruned, reindexed: dirs.length, health: await health() }));`),
+} as const;
 
-/** The report a pass printed last, from all it printed. */
-export function readReport(output: string): { ran?: boolean; reason?: string; summary?: string; filesChanged?: string[]; error?: string } | null {
+/** The report a run printed last, from all it printed. */
+export function readReport(output: string): Record<string, any> | null {
   const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i].startsWith("{")) continue;
@@ -296,41 +319,91 @@ export function readReport(output: string): { ran?: boolean; reason?: string; su
   return null;
 }
 
-/** Tidies the memory up now, and keeps what came of it. */
-export async function dreamNow(): Promise<DreamRun> {
-  if (dreaming) throw new Error("It is tidying up already");
-  if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
-  dreaming = true;
-  let run: DreamRun;
-  try {
+// One at a time: two writers in the bundle at once would each rewrite the index the other just wrote.
+let queue: Promise<unknown> = Promise.resolve();
+
+/** Runs one of the scripts in the container, after whatever runs there now. */
+function run(name: keyof typeof SCRIPTS, input?: unknown): Promise<Record<string, any>> {
+  const next = queue.then(async () => {
+    if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
     const exec = await request<{ Id?: string; message?: string }>("POST", `/containers/${CONTAINER}/exec`, {
-      Cmd: ["node", "-e", DREAM_SCRIPT],
+      Cmd: ["node", "-e", SCRIPTS[name]],
       WorkingDir: "/app/server",
+      Env: input === undefined ? [] : [`PORTAL_INPUT=${Buffer.from(JSON.stringify(input)).toString("base64")}`],
       AttachStdout: true,
       AttachStderr: true,
       // A terminal: its output comes back as it was printed, not in Docker's framed stream.
       Tty: true,
     });
-    if (exec.status >= 400 || !exec.body?.Id) throw new Error(exec.body?.message || `Could not start the pass (${exec.status})`);
+    if (exec.status >= 400 || !exec.body?.Id) throw new Error(exec.body?.message || `Could not reach Understory (${exec.status})`);
     const out = await request<unknown>("POST", `/exec/${exec.body.Id}/start`, { Detach: false, Tty: true });
     const report = readReport(typeof out.body === "string" ? out.body : JSON.stringify(out.body ?? ""));
-    if (!report) throw new Error("The pass ended without saying what it did");
+    if (!report) throw new Error("Understory ended without saying what it did");
     if (report.error) throw new Error(report.error);
-    run = {
+    return report;
+  });
+  queue = next.catch(() => {});
+  return next;
+}
+
+/** What `lint` and `validate` say about the bundle: what a change may have left behind. */
+export interface Health {
+  healthy: boolean;
+  orphans: { path: string; title?: string }[];
+  brokenLinks: { path: string; target: string }[];
+  issues: { path: string; severity: string; message: string }[];
+}
+
+/** The largest note the portal will write: it travels in the environment. */
+export const NOTE_MAX = 100_000;
+
+export async function noteHealth(): Promise<Health> {
+  return (await run("health")).health;
+}
+
+/** A note written by hand, through Understory's own write path: its index and log follow. */
+export async function saveNote(path: string, frontmatter: Record<string, unknown>, body: string): Promise<{ concept: unknown; health: Health }> {
+  const r = await run("save", { path, frontmatter, body, summary: `Edited [${frontmatter.title ?? path}](${path}) by hand in the portal.` });
+  return { concept: r.concept, health: r.health };
+}
+
+export async function deleteNote(path: string): Promise<{ health: Health }> {
+  const r = await run("delete", { path, summary: `Deleted ${path} by hand in the portal.` });
+  return { health: r.health };
+}
+
+/** Every index.md written anew, and folders left empty removed. No model involved. */
+export async function reindex(): Promise<{ pruned: string[]; reindexed: number; health: Health }> {
+  const r = await run("reindex");
+  return { pruned: r.pruned ?? [], reindexed: r.reindexed ?? 0, health: r.health };
+}
+
+let dreaming = false;
+export const isDreaming = () => dreaming;
+
+/** Tidies the memory up now, and keeps what came of it. */
+export async function dreamNow(): Promise<DreamRun> {
+  if (dreaming) throw new Error("It is tidying up already");
+  if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
+  dreaming = true;
+  let result: DreamRun;
+  try {
+    const report = await run("dream");
+    result = {
       at: new Date().toISOString(),
       ok: true,
       ran: report.ran === true,
       said: report.ran
-        ? `${report.filesChanged?.length ?? 0} ${report.filesChanged?.length === 1 ? "file" : "files"} changed${report.summary ? ` — ${report.summary.slice(0, 300)}` : ""}`
+        ? `${report.filesChanged?.length ?? 0} ${report.filesChanged?.length === 1 ? "file" : "files"} changed${report.summary ? ` — ${String(report.summary).slice(0, 300)}` : ""}`
         : report.reason || "Nothing to do",
     };
   } catch (e) {
-    run = { at: new Date().toISOString(), ok: false, said: (e as Error).message };
+    result = { at: new Date().toISOString(), ok: false, said: (e as Error).message };
   } finally {
     dreaming = false;
   }
-  put(LAST_DREAM, JSON.stringify(run));
-  return run;
+  put(LAST_DREAM, JSON.stringify(result));
+  return result;
 }
 
 /** The next time `at` ("HH:MM") comes round after `from`, in the portal's time zone. */
