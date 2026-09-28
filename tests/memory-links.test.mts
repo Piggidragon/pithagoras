@@ -19,3 +19,9 @@ test("links to notes are made links to the Memory page; others are left as they 
     'See [the owner](/memory?note=%2Fpeople%2Fowner.md "who") and [docs](https://x.org) and [deployment](/memory?note=%2Fdeployment%2Fdeployment%2Findex.md).',
   );
 });
+
+test("a link with a % that is not an escape is taken as written, and breaks nothing", () => {
+  assert.equal(insidePath("stats/100%.md", "/"), "/stats/100%.md");
+  assert.equal(insidePath("a%zz.md", "/x/y.md"), "/x/a%zz.md");
+  assert.match(linkNotes("[growth](stats/100%.md)", "/"), /\(\/memory\?note=/);
+});

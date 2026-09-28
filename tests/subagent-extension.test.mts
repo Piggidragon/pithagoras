@@ -12,7 +12,8 @@ const out=e=>process.stdout.write(JSON.stringify(e)+'\\n');
 const say=t=>out({type:'message_end',message:{role:'assistant',content:[{type:'text',text:t}]}});
 if(process.env.FAKE==='die')process.exit(1);
 // What it was started with, as its answer.
-if(process.env.FAKE==='argv'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say(process.argv.slice(2).join(' '));out({type:'agent_end'});out({type:'agent_settled'});}});}
+if(process.env.FAKE==='childenv'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say('child='+process.env.PI_SUBAGENT_CHILD);out({type:'agent_end'});out({type:'agent_settled'});}});}
+else if(process.env.FAKE==='argv'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say(process.argv.slice(2).join(' '));out({type:'agent_end'});out({type:'agent_settled'});}});}
 else
 // Its input closed, still running: what the portal sends it next finds no reader.
 if(process.env.FAKE==='deaf'){require('node:fs').closeSync(0);setTimeout(()=>process.exit(1),800);}
@@ -269,4 +270,24 @@ test('what a chat says auto for is the parent\'s model, and a choice with no mod
  mode();
  assert.deepEqual(childModel('auto',{provider:'p',id:'m'}),{provider:'p',id:'m'});
  assert.equal(childModel('nonsense',{provider:'p',id:'m'}),undefined);
+});
+test('a subagent gets no subagent tool of its own: the limit could not reach its children',{timeout:5000},async()=>{
+ process.env.FAKE='childenv';mode();
+ const {tool}=load();
+ assert.equal((await tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir})).content[0].text,'child=1');
+ process.env.PI_SUBAGENT_CHILD='1';
+ try{
+  let registered=false;
+  subagent({registerTool:()=>registered=true,events:{on:()=>()=>{},emit:()=>{}},on:()=>{}});
+  assert.equal(registered,false);
+ }finally{delete process.env.PI_SUBAGENT_CHILD;}
+});
+test('a background subagent\'s answer names the id it was announced under',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode('background');
+ const {tool,events,sent}=load();
+ let started='';events.on('subagent:v1:start',(d:any)=>started=d.id);
+ await tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir});
+ await until(()=>sent.length===1);
+ assert.equal(sent[0].message.details.id,started);
+ mode();
 });

@@ -4,7 +4,14 @@
 export function insidePath(href: string | undefined, from: string): string | undefined {
   if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#")) return undefined;
   const dir = from.slice(0, from.lastIndexOf("/") + 1) || "/";
-  const path = decodeURIComponent(new URL(href, `http://memory${dir}`).pathname);
+  const raw = new URL(href, `http://memory${dir}`).pathname;
+  // A "%" that is not an escape — "100%.md" — is taken as it is written.
+  let path = raw;
+  try {
+    path = decodeURIComponent(raw);
+  } catch {
+    // Left as written.
+  }
   // A folder's link is to its index.
   return path.endsWith("/") ? `${path}index.md` : path;
 }

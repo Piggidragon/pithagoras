@@ -267,12 +267,22 @@ export function featuresRouter(): Router {
     if (!service.validInterval(dreamInterval)) return res.status(400).json({ error: "Tidying up takes an interval like 30m, 6h or 1d, of at least 5 minutes" });
     const dreamAt = typeof req.body?.dreamAt === "string" ? req.body.dreamAt.trim() : "";
     if (!service.validTime(dreamAt)) return res.status(400).json({ error: "Tidying up at a time takes one like 03:00" });
+    // What Understory would be started with, worked out first: a choice it
+    // could not be started with is refused, not saved.
+    try {
+      service.spec({ ...service.config(), llm: service.withSavedKey(llm), dreamInterval, dreamAt }, "check");
+    } catch (e) {
+      return res.status(400).json({ error: (e as Error).message });
+    }
+    const before = service.config();
     try {
       service.saveConfig({ llm, dreamInterval, dreamAt });
       if (await service.installed()) await service.install();
       res.json({ understory: await understoryState() });
     } catch (e) {
-      res.status(500).json({ error: (e as Error).message });
+      // Not made anew with it: what it runs with is still what was saved before.
+      service.restoreConfig(before);
+      res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
     }
   });
 
@@ -280,7 +290,8 @@ export function featuresRouter(): Router {
   router.post("/features/understory/dream", async (_req, res) => {
     try {
       const run = await service.dreamNow();
-      res.status(run.ok ? 200 : 502).json({ run, understory: await understoryState() });
+      // A pass that failed says why, where the page looks for it.
+      res.status(run.ok ? 200 : 502).json({ ...(run.ok ? {} : { error: run.said }), run, understory: await understoryState() });
     } catch (e) {
       res.status(409).json({ error: (e as Error).message });
     }

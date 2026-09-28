@@ -141,7 +141,15 @@ const DESCRIPTIONS: Record<Mode, string> = {
     "Hand a self-contained task to a separate agent with its own context. It runs in the background: this call returns at once, you can go on working, and its final answer arrives later as a message. Use for research or investigation that would otherwise fill this conversation. The person can watch it and give it instructions while it works.",
 };
 
+/**
+ * Set for the pi a subagent runs in. It gets no subagent tool of its own: its
+ * children would have slots of their own, in their own process, and the
+ * limit on models running at once would not reach them.
+ */
+export const CHILD_ENV = "PI_SUBAGENT_CHILD";
+
 export default function (pi: any) {
+  if (process.env[CHILD_ENV] === "1") return;
   // Background children still running, stopped with the session that started them.
   const detached = new Set<Run>();
   // Set once the session is over: what still waits for a slot does not start.
@@ -169,6 +177,7 @@ export default function (pi: any) {
     // blocks on its next warning for good.
     const child = spawn(process.env.PI_SUBAGENT_BIN || "pi", ["--mode", "rpc", "--no-session", ...(model ? ["--provider", model.provider, "--model", model.id] : [])], {
       cwd: ctx.cwd,
+      env: { ...process.env, [CHILD_ENV]: "1" },
       stdio: ["pipe", "pipe", "ignore"],
     });
     // A child that died, or never started, closes the pipe under the next
@@ -298,7 +307,7 @@ export default function (pi: any) {
               if (cancelled && !shutDown) tell("stopped", `Subagent "${label}" was stopped before it started.`);
               return;
             }
-            run = start(params.task, label, toolCallId, ctx, true, undefined, waiting ? id : undefined);
+            run = start(params.task, label, toolCallId, ctx, true, undefined, id);
             detached.add(run);
             const { status, answer, failure } = await run.finished;
             tell(

@@ -60,3 +60,15 @@ test('a subagent in the background says so on every event, and is counted as run
  assert.equal(out.find(e=>e.id==='q').detached,undefined);
  assert.equal(bridge.running(),1);
 });
+test('a process going ends every subagent it still ran, each once',()=>{
+ const b=bus();const out:any[]=[];const bridge=bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'r',label:'R',toolCallId:'c',detached:true});
+ b.emit('subagent:v1:start',{id:'q',label:'Q'});
+ bridge.endAll("Its chat's pi was stopped");
+ const ends=out.filter(e=>e.op==='end');
+ assert.deepEqual(ends.map(e=>[e.id,e.status,e.error,e.detached]),[['r','stopped',"Its chat's pi was stopped",true],['q','stopped',"Its chat's pi was stopped",undefined]]);
+ assert.equal(bridge.running(),0);
+ // What the extension says after is of subagents already ended: nothing more.
+ b.emit('subagent:v1:end',{id:'r',status:'stopped'});
+ assert.equal(out.filter(e=>e.op==='end').length,2);
+});

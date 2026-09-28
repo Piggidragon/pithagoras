@@ -68,8 +68,14 @@ type Bus = { on(channel: string, handler: (data: unknown) => void): () => void }
  * Unsubscribes when called. `takes`: whether a subagent is running here that
  * said it takes messages, or a stop — anything else would go to nobody.
  * `running`: how many have started and not ended.
+ * `endAll`: the process that runs them is going; each is said to have stopped.
  */
-export type Bridge = (() => void) & { takes(id: string, what: "input" | "stop"): boolean; running(): number };
+export type Bridge = (() => void) & {
+  takes(id: string, what: "input" | "stop"): boolean;
+  running(): number;
+  /** Ends every one still running, as the process that runs them goes: nothing else would say so. */
+  endAll(error: string): void;
+};
 type Emit = (event: Record<string, unknown>) => void;
 
 const str = (v: unknown, max: number): string | undefined =>
@@ -183,5 +189,13 @@ export function bridgeSubagents(bus: Bus, emit: Emit, config: () => { model?: st
   return Object.assign(() => off.forEach((f) => f()), {
     takes: (id: string, what: "input" | "stop") => known.get(id)?.[what] === true,
     running: () => known.size,
+    endAll: (error: string) => {
+      for (const id of [...known.keys()]) {
+        const tied = whose(id);
+        known.delete(id);
+        thinking.delete(id);
+        emit({ type: "portal_subagent", op: "end", id, ...tied, status: "stopped", error });
+      }
+    },
   });
 }

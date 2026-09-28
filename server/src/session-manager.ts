@@ -44,6 +44,7 @@ import {
   chatModel,
   getSettings,
   markOrphanedSessionsInterrupted,
+  openDetachedSubagents,
   browserAllowed,
   sessionTools,
   setSessionTools,
@@ -314,6 +315,14 @@ class SessionManager extends EventEmitter {
     // there for good, and not taken up again as running by the next run.
     for (const id of orphaned) this.record(id, "portal_status", { status: "interrupted", restarted: true });
     this.settleOrphanedMessages();
+    // A subagent in the background ran in the last server's process, in a chat
+    // that may well have been idle: nothing above ends it, and it would show
+    // as running for good.
+    for (const open of openDetachedSubagents()) {
+      this.record(open.sessionId, "portal_subagent", {
+        type: "portal_subagent", op: "end", id: open.id, detached: true, status: "stopped", error: "The portal restarted while it ran",
+      });
+    }
     // A command's end is written when pi answers it. One the last server was
     // holding never will be: it failed, with what it threw if it did. The page
     // cannot tell one still waiting on a dialog from one that never will.
@@ -1474,6 +1483,10 @@ class SessionManager extends EventEmitter {
     if (this.isBusy(sessionId) || this.compacting.has(sessionId)) {
       throw new SessionEditError("busy", "Stop the run first — the agent is still working.");
     }
+    // Editing restarts the chat's pi, which a subagent in the background goes with.
+    if (this.backgroundWork(sessionId)) {
+      throw new SessionEditError("busy", "A subagent is still working in the background here. Wait for its answer, or stop it, first.");
+    }
 
     const sent = sentMessages(sessionId);
     const ordinal = sent.findIndex((m) => m.seq === seq);
@@ -1526,6 +1539,9 @@ class SessionManager extends EventEmitter {
       throw e;
     }
     const undo = async () => {
+      if (this.backgroundWork(sessionId)) {
+        throw new SessionEditError("busy", "A subagent is still working in the background here. Wait for its answer, or stop it, first.");
+      }
       // A client started since would hold the edited conversation in memory.
       await this.stop(sessionId);
       // The transcript first, in one go, and the file last: a disk that
@@ -2044,6 +2060,11 @@ class SessionManager extends EventEmitter {
     return this.speaker.get(sessionId);
   }
 
+  /** Whether a subagent is working in the background here: its chat looks idle, and stopping it would end the subagent. */
+  backgroundWork(sessionId: string): boolean {
+    return (this.live.get(sessionId)?.client.subagentsRunning?.() ?? 0) > 0;
+  }
+
   isBusy(sessionId: string): boolean {
     if (this.asking.has(sessionId)) return true;
     return getSession(sessionId)?.status === "running";
@@ -2200,7 +2221,7 @@ class SessionManager extends EventEmitter {
       [...this.live.entries()].map(async ([sessionId, { client }]) => {
         // A subagent in the background would be stopped by the reload: its
         // chat is idle, and still working.
-        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId) || (client.subagentsRunning?.() ?? 0) > 0) {
+        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId) || this.backgroundWork(sessionId)) {
           waiting++;
           return false;
         }
@@ -2299,6 +2320,9 @@ class SessionManager extends EventEmitter {
   async stop(sessionId: string): Promise<void> {
     const live = this.live.get(sessionId);
     if (!live) return;
+    // Said while its events are still heard: a background subagent goes with
+    // its pi, and nothing else would say it ended.
+    live.client.endSubagents?.("Its chat's pi was stopped");
     this.stopping.add(live.client);
     live.client.dispose();
     this.live.delete(sessionId);

@@ -413,7 +413,7 @@ app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     const chats = workingIn(project.path, listSessions());
-    if (chats.some((s) => sessions.isBusy(s.id))) {
+    if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
     }
     const routines = routinesIn(project.path);

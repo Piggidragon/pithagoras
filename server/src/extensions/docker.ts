@@ -40,9 +40,12 @@ export function request<T = unknown>(
           : {},
       },
       (res) => {
-        let raw = "";
-        res.on("data", (c) => (raw += c));
+        // Bytes, put together once they are all there: a letter split across
+        // two chunks is two halves of one, not two broken ones.
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
           let parsed: unknown = raw;
           try {
             parsed = raw ? JSON.parse(raw) : null;

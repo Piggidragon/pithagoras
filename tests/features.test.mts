@@ -341,3 +341,25 @@ test("what is handed to Understory is measured as it travels: UTF-8, base64, in 
   assert.equal(service.fitsInEnv(note("記".repeat(30_000))), true);
   assert.equal(service.fitsInEnv(note("記".repeat(34_000))), false, "three bytes a letter");
 });
+
+test("background subagents the last server left running are found by their start without an end", async () => {
+  const { appendEvent, openDetachedSubagents } = await import("../server/src/db.ts");
+  const { createSession } = await import("../server/src/db.ts");
+  createSession({ id: "bg-chat", title: "t", workspace: "/w", executor: "host", kind: "task" });
+  appendEvent("bg-chat", "portal_subagent", { type: "portal_subagent", op: "start", id: "done-one", detached: true });
+  appendEvent("bg-chat", "portal_subagent", { type: "portal_subagent", op: "end", id: "done-one", detached: true, status: "done" });
+  appendEvent("bg-chat", "portal_subagent", { type: "portal_subagent", op: "start", id: "left-one", detached: true });
+  appendEvent("bg-chat", "portal_subagent", { type: "portal_subagent", op: "start", id: "foreground", toolCallId: "c" });
+  assert.deepEqual(openDetachedSubagents(), [{ sessionId: "bg-chat", id: "left-one" }]);
+});
+
+test("a saved key goes with the same address only, and what was saved before can be put back as it was", async () => {
+  const service = await import("../server/src/extensions/understory-service.ts");
+  service.saveConfig({ llm: { source: "custom", baseUrl: "https://a/v1", model: "m", format: "openai", apiKey: "sk-a" }, dreamInterval: "", dreamAt: "" });
+  assert.equal((service.withSavedKey({ source: "custom", baseUrl: "https://a/v1", model: "n", format: "openai" }) as any).apiKey, "sk-a");
+  assert.equal((service.withSavedKey({ source: "custom", baseUrl: "https://b/v1", model: "n", format: "openai" }) as any).apiKey, undefined);
+  const before = service.config();
+  service.saveConfig({ llm: { source: "auto" }, dreamInterval: "6h", dreamAt: "" });
+  service.restoreConfig(before);
+  assert.deepEqual(service.config(), before);
+});

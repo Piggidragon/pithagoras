@@ -1779,3 +1779,28 @@ export function sessionSubagentModel(sessionId: string): string | null {
 export function setSessionSubagentModel(sessionId: string, model: string | null): void {
   putSetting(`subagent_model:${sessionId}`, model ?? "");
 }
+
+/**
+ * Background subagents a chat started and whose end was never written: the
+ * process that ran them went with the last server. Found by the one flag
+ * their start and end both carry.
+ */
+export function openDetachedSubagents(): { sessionId: string; id: string }[] {
+  const rows = getDb()
+    .prepare(`SELECT session_id, payload FROM events WHERE type = 'portal_subagent' AND payload LIKE '%"detached":true%' ORDER BY seq`)
+    .all() as { session_id: string; payload: string }[];
+  const open = new Map<string, { sessionId: string; id: string }>();
+  for (const row of rows) {
+    let p: { op?: string; id?: unknown };
+    try {
+      p = JSON.parse(row.payload);
+    } catch {
+      continue;
+    }
+    if (typeof p.id !== "string") continue;
+    const key = `${row.session_id}\u0000${p.id}`;
+    if (p.op === "start") open.set(key, { sessionId: row.session_id, id: p.id });
+    else if (p.op === "end") open.delete(key);
+  }
+  return [...open.values()];
+}

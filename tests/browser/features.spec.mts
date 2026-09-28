@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /** The portal with no server: Settings → Add-ons, over canned answers for the opt-in features. */
-async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true } = {}) {
+async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true, dreamFails = false } = {}) {
   const sent: { path: string; body: any }[] = [];
   const state = {
     subagent: { available, installed: false, enabled: false, source: null as string | null, mode: 'interrupt', maxParallel: 1, model: 'auto' },
@@ -59,6 +59,8 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       Object.assign(state.understory.managed, { container: 'absent' });
       Object.assign(state.understory, { enabled: false });
       body = { understory: state.understory, reloaded: 1, waiting: 0 };
+    } else if (p === '/api/features/understory/dream' && method === 'POST' && dreamFails) {
+      return route.fulfill({ status: 502, json: { error: 'fetch failed', run: { ok: false, said: 'fetch failed' }, understory: state.understory } });
     } else if (p === '/api/features/understory/dream' && method === 'POST') {
       sent.push({ path: p, body: null });
       state.understory.managed.lastDream = { at: '2026-09-28T12:00:00.000Z', ok: true, ran: true, said: '2 files changed — merged two notes' };
@@ -278,4 +280,15 @@ test('the four add-on tabs fit a phone', async ({ page }) => {
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
   for (const name of ['Browser', 'Voice', 'Subagents', 'Memory']) await expect(addons(page).getByRole('tab', { name })).toBeVisible();
+});
+
+test("a tidy-up that fails says why, not the status it came with", async ({ page }) => {
+  await portal(page, { docker: true, dreamFails: true });
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Memory' }).click();
+  const here = addons(page).getByRole('region', { name: 'Understory run here' });
+  await here.getByRole('button', { name: "Install and use as the agent's memory" }).click();
+  await here.getByRole('button', { name: 'Tidy up now' }).click();
+  await expect(page.getByText('fetch failed').first()).toBeVisible();
+  await expect(page.getByText('HTTP 502')).toHaveCount(0);
 });

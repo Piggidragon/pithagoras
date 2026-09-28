@@ -311,6 +311,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   subagentsRunning(): number {
     return this.unbridge?.running() ?? 0;
   }
+
+  endSubagents(why: string): void {
+    this.unbridge?.endAll(why);
+  }
   /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
   private appliedModel?: object;
   /** What each model's own definition says its window is, as last seen on a model that was pi's. */

@@ -94,15 +94,26 @@ function put(key: string, value: string) {
  * one it had, while the address is the same: the page never holds it, so it
  * cannot send it back.
  */
-export function saveConfig(next: UnderstoryConfig): UnderstoryConfig {
+/** A choice as it would be saved: a custom address sent without a key keeps the one it had, for the same address only. */
+export function withSavedKey(llm: LlmChoice): LlmChoice {
   const had = config().llm;
-  let llm = next.llm;
   // Only for the same address: a key is the one server's, and must not go to another.
-  if (llm?.source === "custom" && llm.apiKey === undefined && had?.source === "custom" && had.baseUrl === llm.baseUrl) llm = { ...llm, apiKey: had.apiKey };
+  if (llm.source === "custom" && llm.apiKey === undefined && had.source === "custom" && had.baseUrl === llm.baseUrl) return { ...llm, apiKey: had.apiKey };
+  return llm;
+}
+
+export function saveConfig(next: UnderstoryConfig): UnderstoryConfig {
+  const llm = withSavedKey(next.llm);
   // A set time wins, and Understory's own timer is left off: two passes a day would be one too many.
   put(KEY, JSON.stringify({ llm, dreamInterval: next.dreamAt ? "" : next.dreamInterval, dreamAt: next.dreamAt }));
   scheduleDreams();
   return config();
+}
+
+/** Puts back what was saved before, key and all, as it was. */
+export function restoreConfig(before: UnderstoryConfig): void {
+  put(KEY, JSON.stringify(before));
+  scheduleDreams();
 }
 
 function secret(key: string): string {
@@ -202,8 +213,13 @@ export async function installed(): Promise<boolean> {
   return dockerAvailable() && (await containerState(CONTAINER)).exists;
 }
 
-/** Pulls the image if it is not there, and makes the container anew with what is saved. */
-export async function install(): Promise<void> {
+/** Pulls the image if it is not there, and makes the container anew with what is saved — once nothing runs in it. */
+export const install = (): Promise<void> => exclusive(installNow, WAIT_MS);
+export const start = (): Promise<void> => exclusive(startNow, WAIT_MS);
+export const stop = (): Promise<void> => exclusive(stopNow, WAIT_MS);
+export const remove = (): Promise<void> => exclusive(removeNow, WAIT_MS);
+
+async function installNow(): Promise<void> {
   if (!dockerAvailable()) throw new Error("The portal cannot reach Docker here, so it cannot run Understory");
   const cfg = config();
   const made = spec(cfg, token());
@@ -218,32 +234,34 @@ export async function install(): Promise<void> {
     }
   }
   await request("POST", "/volumes/create", { Name: VOLUME });
-  if ((await containerState(CONTAINER)).exists) await remove();
+  if ((await containerState(CONTAINER)).exists) await removeNow();
   const created = await request<{ message?: string }>("POST", `/containers/create?name=${CONTAINER}`, made);
   if (created.status >= 400) throw new Error(created.body?.message || `Create failed (${created.status})`);
-  await start();
+  await startNow();
 }
 
-export async function start(): Promise<void> {
+async function startNow(): Promise<void> {
   const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/start`);
   if (res.status >= 400 && res.status !== 304) throw new Error(res.body?.message || `Start failed (${res.status})`);
 }
 
-export async function stop(): Promise<void> {
+async function stopNow(): Promise<void> {
   const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/stop?t=10`);
   if (res.status >= 400 && res.status !== 304) throw new Error(res.body?.message || `Stop failed (${res.status})`);
 }
 
 /** Removes the container. The memory is in its volume, and stays. */
-export async function remove(): Promise<void> {
+async function removeNow(): Promise<void> {
   await request("POST", `/containers/${CONTAINER}/stop?t=10`).catch(() => {});
   const res = await request<{ message?: string }>("DELETE", `/containers/${CONTAINER}?force=true`);
   if (res.status >= 400 && res.status !== 404) throw new Error(res.body?.message || `Remove failed (${res.status})`);
 }
 
 /** Forgets the memory as well. Separate on purpose, and not undoable. */
-export async function forgetMemory(): Promise<void> {
-  await remove();
+export const forgetMemory = (): Promise<void> => exclusive(forgetNow, WAIT_MS);
+
+async function forgetNow(): Promise<void> {
+  await removeNow();
   const res = await request<{ message?: string }>("DELETE", `/volumes/${VOLUME}`);
   if (res.status >= 400 && res.status !== 404) throw new Error(res.body?.message || `Could not remove the memory (${res.status})`);
 }
@@ -407,32 +425,32 @@ async function exec(name: keyof typeof SCRIPTS, input: unknown, timeoutMs: numbe
 }
 
 // Changes one at a time: two writers in the bundle at once would each rewrite
-// the index the other just wrote. Reading what the memory looks like is not
-// one, and goes beside them.
+// the index the other just wrote, and the container made again or removed
+// under a run leaves it half written. Reading what the memory looks like is
+// not one, and goes beside them.
 let tail: Promise<unknown> = Promise.resolve();
 
-/** Runs one of the scripts in the container, after the change before it. */
-function run(name: keyof typeof SCRIPTS, input?: unknown): Promise<Record<string, any>> {
-  if (input !== undefined && !fitsInEnv(input)) return Promise.reject(refused("Too much to hand Understory at once", 400));
-  const model = MODEL_RUNS.has(name);
-  const limit = model ? MODEL_RUN_MS : RUN_MS;
-  if (name === "health") return exec(name, input, limit);
+/**
+ * `fn` once whatever runs in or on Understory before it is done. `waitMs`:
+ * given up on, saying Understory is busy, when its turn has not come by then
+ * — for what someone is waiting on; a pass of the model waits as long as it takes.
+ */
+function exclusive<T>(fn: () => Promise<T>, waitMs?: number): Promise<T> {
   let started = false;
   let gaveUp = false;
   const mine = tail.then(() => {
-    if (gaveUp) return {};
+    if (gaveUp) return undefined as T;
     started = true;
-    return exec(name, input, limit);
+    return fn();
   });
   tail = mine.catch(() => {});
-  // A pass of the model waits its turn; a change says so when it cannot have one soon.
-  if (model) return mine;
-  return new Promise((resolve, reject) => {
+  if (waitMs === undefined) return mine;
+  return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => {
       if (started) return;
       gaveUp = true;
       reject(refused("Understory is busy with a pass of the model; try again once it is done", 409));
-    }, WAIT_MS);
+    }, waitMs);
     mine.then(
       (v) => {
         clearTimeout(t);
@@ -444,6 +462,15 @@ function run(name: keyof typeof SCRIPTS, input?: unknown): Promise<Record<string
       },
     );
   });
+}
+
+/** Runs one of the scripts in the container, after the change before it. */
+function run(name: keyof typeof SCRIPTS, input?: unknown): Promise<Record<string, any>> {
+  if (input !== undefined && !fitsInEnv(input)) return Promise.reject(refused("Too much to hand Understory at once", 400));
+  const model = MODEL_RUNS.has(name);
+  const limit = model ? MODEL_RUN_MS : RUN_MS;
+  if (name === "health") return exec(name, input, limit);
+  return exclusive(() => exec(name, input, limit), model ? undefined : WAIT_MS);
 }
 
 /** What `lint` and `validate` say about the bundle: what a change may have left behind. */
@@ -480,11 +507,30 @@ export async function repair(): Promise<{ ran: boolean; reason?: string; summary
  * own process — the notes it recalls, its answers kept, the overview it gives
  * a new session — is of the memory that is gone.
  */
-export async function wipe(): Promise<{ health: Health }> {
-  const r = await run("wipe");
-  const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/restart?t=5`);
-  if (res.status >= 400) throw new Error(res.body?.message || `Understory could not be started again (${res.status})`);
-  return { health: r.health };
+export function wipe(): Promise<{ health: Health }> {
+  return exclusive(async () => {
+    const r = await exec("wipe", undefined, RUN_MS);
+    const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/restart?t=5`);
+    if (res.status >= 400) throw new Error(res.body?.message || `Understory could not be started again (${res.status})`);
+    // Answered once it answers again: the page reads the memory straight after.
+    await untilAnswering();
+    return { health: r.health };
+  }, WAIT_MS);
+}
+
+/** Waits, a little at a time, until Understory answers after a start; half a minute at most. */
+async function untilAnswering(): Promise<void> {
+  const origin = new URL(managedUrl()).origin;
+  const until = Date.now() + 30_000;
+  while (Date.now() < until) {
+    try {
+      const r = await fetch(`${origin}/api/validate`, { headers: { authorization: `Bearer ${token()}` }, signal: AbortSignal.timeout(2000) });
+      if (r.ok) return;
+    } catch {
+      // Not up yet.
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
 }
 
 /** Empties the log and the query paths; the notes stay. */
