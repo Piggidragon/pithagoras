@@ -52,7 +52,7 @@ async function writable(): Promise<boolean> {
 }
 
 /** A note's path as Understory takes one: absolute, markdown, and not its own index or log. */
-function notePath(value: unknown): string | undefined {
+export function notePath(value: unknown): string | undefined {
   if (typeof value !== "string" || !/^\/[^\0]*\.md$/.test(value) || value.split("/").includes("..")) return undefined;
   const name = value.split("/").pop();
   return name === "index.md" || name === "log.md" ? undefined : value;

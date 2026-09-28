@@ -669,7 +669,7 @@ function AfterChange({
       footer={
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button type="button" onClick={onClose} disabled={busy !== null} className="mr-auto rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
-            Close
+            Leave it
           </button>
           <button
             type="button"
@@ -764,8 +764,8 @@ function LogView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack: (
   useEffect(() => {
     api.memoryLog().then(setLog, (e: Error) => setFailed(e.message));
   }, []);
-  // Newest first: the log is kept oldest first, as it was written.
-  const recent = useMemo(() => [...(log ?? [])].reverse(), [log]);
+  // Newest first, as Understory keeps it: each change is written at the top.
+  const recent = log ?? [];
   return (
     <>
       <Bar title="Log" onBack={onBack} />

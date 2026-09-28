@@ -145,9 +145,30 @@ as Understory's own:
   its links as lines, unlinked notes ringed in red, the paths Understory's own
   queries took, and zoom, drag and click to open.
 
-It is read only: the agent keeps its memory, through its tools, and
-Understory's chat, which can write to it, is not there. What is open is in the
-address (`/memory?note=…`, `?view=log`, `?view=graph`), so it can be linked to.
+What is open is in the address (`/memory?note=…`, `?view=log`,
+`?view=graph`), so it can be linked to. Understory's chat is not there.
+
+### Changing a note by hand
+
+In the Understory the portal runs, a note can be **edited** — its title, type,
+description, tags and text — or **deleted** (asked first), from the pencil and
+bin over it. Understory's own index.md and log.md are its to write, and are
+not offered. The change goes through Understory's own write path, run in its
+container like the tidy-up, so its index and log follow it; Understory has no
+API that writes. One run elsewhere is read only here.
+
+A change by hand can leave something behind: a link to a deleted note, a note
+nothing links to any more, an index that misses something. So after each one a
+window says what Understory's checks find now, and offers the two ways to put
+it right:
+
+- **Rebuild the index** writes every folder's index.md anew and removes empty
+  folders — no model, a moment.
+- **Repair with the model** runs Understory's own pass over the memory (the
+  tidy-up): it mends links, wires in notes nothing links to and merges what is
+  doubled. It takes as long as the model needs, and costs tokens.
+
+Or leave it; the nightly tidy-up, if set, gets to it as well.
 
 The portal asks Understory for all of it, at the address in `mcp.json` and
 with its token, so the page works wherever the portal does: over HTTPS, from a

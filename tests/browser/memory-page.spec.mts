@@ -25,8 +25,12 @@ const concepts: Record<string, unknown> = {
 };
 
 /** The portal with Understory as the memory, or not, over canned answers. */
-async function portal(page: Page, { enabled = true, broken = false, conformant = true } = {}) {
+const healthy = { healthy: true, orphans: [], brokenLinks: [], issues: [] };
+const broken1 = { healthy: false, orphans: [], brokenLinks: [{ path: '/deployment/branches.md', target: '/people/owner.md' }], issues: [] };
+
+async function portal(page: Page, { enabled = true, broken = false, conformant = true, writable = true, afterDelete = broken1 as any } = {}) {
   const asked: string[] = [];
+  const changes: { method: string; path: string; body?: any }[] = [];
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -34,16 +38,33 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
     if (p === '/api/auth/status') body = { authed: true, authRequired: false };
     else if (p === '/api/sessions') body = { sessions: [], executor: 'host' };
     else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
-    else if (p === '/api/features') body = { subagent: {}, understory: { enabled, url: 'http://127.0.0.1:3800/mcp', managed: { available: true, container: 'running', config: { llm: null, dreamInterval: '' }, providers: [], pulling: { active: false } } } };
+    else if (p === '/api/features') body = { subagent: {}, understory: { enabled, url: 'http://127.0.0.1:3800/mcp', managed: { available: true, container: 'running', config: { llm: { source: 'auto' }, dreamInterval: '' }, providers: [], pulling: { active: false }, lastDream: { at: '2026-09-28T14:00:00Z', ok: true, ran: true, said: '1 file changed — mended the link' } } } };
     else if (p === '/api/browser') body = { running: false, configured: false, routines: [] };
-    else if (p.startsWith('/api/memory/')) {
+    else if (p === '/api/memory/health') body = writable ? { writable: true, health: healthy } : { writable: false };
+    else if (p === '/api/memory/concept' && route.request().method() === 'PUT') {
+      const sent = route.request().postDataJSON();
+      changes.push({ method: 'PUT', path: sent.path, body: sent });
+      concepts[sent.path] = { path: sent.path, frontmatter: { ...sent.frontmatter, timestamp: '2026-09-28T14:00:00.000Z' }, body: sent.body };
+      body = { concept: concepts[sent.path], health: healthy };
+    } else if (p === '/api/memory/concept' && route.request().method() === 'DELETE') {
+      changes.push({ method: 'DELETE', path: url.searchParams.get('path')! });
+      body = { health: afterDelete };
+    } else if (p === '/api/memory/reindex') {
+      changes.push({ method: 'POST', path: p });
+      body = { pruned: ['/empty'], reindexed: 3, health: { ...broken1 } };
+    } else if (p === '/api/features/understory/dream') {
+      changes.push({ method: 'POST', path: p });
+      afterDelete = healthy;
+      body = { understory: {} };
+    } else if (p.startsWith('/api/memory/')) {
       asked.push(`${p}${url.search}`);
       if (broken) return route.fulfill({ status: 502, json: { error: 'Could not reach Understory at http://127.0.0.1:3800: it did not answer in time.' } });
       if (p === '/api/memory/tree') body = tree;
       else if (p === '/api/memory/validate') body = conformant ? { conformant: true, conceptCount: 2, directoryCount: 2, issues: [] } : { conformant: false, conceptCount: 2, directoryCount: 2, issues: [{ path: '/people/owner.md', severity: 'warning', message: 'No description in its frontmatter' }] };
+      // Newest first, as Understory keeps it.
       else if (p === '/api/memory/log') body = [
-        { date: '2026-09-27', action: 'Creation', summary: 'Added [The owner](/people/owner.md).' },
         { date: '2026-09-28', action: 'Update', summary: 'Linked [Branch Deployment on Test Host](/deployment/branches.md) to its owner.' },
+        { date: '2026-09-27', action: 'Creation', summary: 'Added [The owner](/people/owner.md).' },
       ];
       else if (p === '/api/memory/graph') body = {
         nodes: [
@@ -67,7 +88,7 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
     localStorage.setItem('pithagoras.setup', 'done');
     (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
   });
-  return { asked };
+  return { asked, changes };
 }
 
 const notes = (page: Page) => page.getByRole('navigation', { name: 'Notes' });
@@ -187,4 +208,60 @@ test('on a phone the notes and what is open take turns', async ({ page }) => {
   await page.getByRole('button', { name: 'Graph', exact: true }).click();
   await expect(page.getByRole('img', { name: /3 notes/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('a note is edited in place: its title, type, tags and text, and saving says the memory is in order', async ({ page }) => {
+  const { changes } = await portal(page);
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  const form = page.getByRole('form', { name: 'Edit the note' });
+  await expect(form.getByLabel('Title')).toHaveValue('The owner');
+  await form.getByLabel('Title').fill('The owner of the host');
+  await form.getByLabel('Tags, separated by commas').fill('people, host');
+  await form.getByLabel('Text, in markdown').fill('Runs the test host, and pays for it.');
+  await form.getByRole('button', { name: 'Save' }).click();
+  expect(changes).toEqual([{ method: 'PUT', path: '/people/owner.md', body: { path: '/people/owner.md', frontmatter: { title: 'The owner of the host', type: 'Person', description: '', tags: ['people', 'host'] }, body: 'Runs the test host, and pays for it.' } }]);
+  const after = page.getByRole('dialog', { name: 'The note is saved' });
+  await expect(after.getByText('Every link leads somewhere and every note is linked in.')).toBeVisible();
+  await after.getByRole('button', { name: 'Leave it' }).click();
+  await expect(page.getByRole('article', { name: 'The owner of the host' })).toContainText('and pays for it');
+  await expect(page.getByText('#host')).toBeVisible();
+});
+
+test('deleting a note asks first, then shows what it broke and offers to put it right', async ({ page }) => {
+  const { changes } = await portal(page);
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.getByRole('button', { name: 'Delete the note' }).click();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  expect(changes).toEqual([]);
+  await page.getByRole('button', { name: 'Delete the note' }).click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page).toHaveURL(/\/memory$/);
+  const after = page.getByRole('dialog', { name: 'The note is deleted' });
+  await expect(after.getByText('The memory has 1 thing to put right.')).toBeVisible();
+  await expect(after.getByText('/people/owner.md', { exact: true })).toBeVisible();
+
+  await after.getByRole('button', { name: 'Rebuild the index' }).click();
+  await expect(after.getByText('3 indexes written anew, 1 empty folder removed.')).toBeVisible();
+  await after.getByRole('button', { name: 'Repair with the model' }).click();
+  await expect(after.getByText("The model's pass: 1 file changed — mended the link")).toBeVisible();
+  await expect(after.getByText('Every link leads somewhere and every note is linked in.')).toBeVisible();
+  expect(changes.map((c) => `${c.method} ${c.path}`)).toEqual(['DELETE /people/owner.md', 'POST /api/memory/reindex', 'POST /api/features/understory/dream']);
+});
+
+test("Understory's own index is not edited by hand, nor any note of one run elsewhere", async ({ page }) => {
+  await portal(page);
+  await page.goto('/memory?note=%2Findex.md');
+  await expect(page.getByRole('article', { name: 'index.md' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit the note' })).toHaveCount(0);
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await expect(page.getByRole('button', { name: 'Edit the note' })).toBeVisible();
+});
+
+test('one run elsewhere is read only', async ({ page }) => {
+  await portal(page, { writable: false });
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit the note' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete the note' })).toHaveCount(0);
 });

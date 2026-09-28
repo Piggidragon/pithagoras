@@ -221,10 +221,14 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `GET /api/memory/tree` | Understory's memory bundle as a tree of folders and notes — read through the portal while Understory is on (409 when it is not) |
 | `GET /api/memory/concept?path=` | One note: `{ path, frontmatter, body }`; 404 when it is not there |
 | `GET /api/memory/search?q=` | Notes matching, best first |
-| `GET /api/memory/log` | What changed, oldest first |
+| `GET /api/memory/log` | What changed, newest first |
 | `GET /api/memory/graph` | `{ nodes: [{ path, title, type, links }], edges: [{ source, target }] }` |
 | `GET /api/memory/traces` | The paths Understory's own queries and changes took |
 | `GET /api/memory/validate` | `{ conformant, conceptCount, directoryCount, issues }` |
+| `GET /api/memory/health` | `{ writable, health? }` — whether notes can be changed here (the portal's own Understory, running), and what its checks find: `{ healthy, orphans, brokenLinks, issues }` |
+| `PUT /api/memory/concept` | `{ path, frontmatter, body }` — write a note through Understory's own write path (its index and log follow); `frontmatter` needs `type` and `title`. Answers `{ concept, health }`; 409 unless writable |
+| `DELETE /api/memory/concept?path=` | Delete a note the same way; answers `{ health }` |
+| `POST /api/memory/reindex` | Every folder's index.md written anew and empty folders removed, no model; answers `{ pruned, reindexed, health }` |
 
 ## Channels
 

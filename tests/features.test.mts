@@ -112,7 +112,7 @@ test("the memory is read through the portal: only Understory's read API, with it
   });
   await new Promise<void>((r) => understory.listen(0, "127.0.0.1", r));
   const port = (understory.address() as { port: number }).port;
-  const app = express().use("/api", memoryRouter());
+  const app = express().use(express.json()).use("/api", memoryRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));
   const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/api/memory`;
@@ -136,6 +136,10 @@ test("the memory is read through the portal: only Understory's read API, with it
     assert.equal((await get("/graph")).status, 200);
     assert.equal(asked.at(-1)!.url, "/api/graph");
     assert.equal((await fetch(`${at}/chat`)).status, 404, "nothing past the reads: its chat writes");
+    // A note is changed only in the Understory the portal runs; this one it does not.
+    const put = await fetch(`${at}/concept`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "/a.md", frontmatter: { type: "T", title: "A" }, body: "" }) });
+    assert.equal(put.status, 409);
+    assert.match((await put.json()).error, /only in the Understory the portal runs/);
     delete process.env.MEMORY_UNDERSTORY_AUTH_TOKEN;
     await get("/tree");
     assert.equal(asked.at(-1)!.auth, undefined);
@@ -282,4 +286,15 @@ test("Understory thinking with the chat's model: the chat whose memory tool runs
   // Understory is pointed at it, with its own key, in "the chat's" mode — the default.
   service.saveConfig({ llm: { source: "auto" }, dreamInterval: "", dreamAt: "" });
   assert.deepEqual(service.llmEnv(service.config().llm), { baseUrl: "http://127.0.0.1:4100/understory-llm/v1", apiKey: service.llmToken(), model: "auto", format: "openai" });
+});
+
+test("a note changed by hand is one of its own: absolute, markdown, not Understory's index or log, and not outside the bundle", async () => {
+  const { notePath } = await import("../server/src/api/memory.ts");
+  assert.equal(notePath("/people/owner.md"), "/people/owner.md");
+  assert.equal(notePath("people/owner.md"), undefined);
+  assert.equal(notePath("/people/owner.txt"), undefined);
+  assert.equal(notePath("/index.md"), undefined);
+  assert.equal(notePath("/people/log.md"), undefined);
+  assert.equal(notePath("/people/../../etc/passwd.md"), undefined);
+  assert.equal(notePath(42), undefined);
 });
