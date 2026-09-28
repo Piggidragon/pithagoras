@@ -298,3 +298,11 @@ test("a note changed by hand is one of its own: absolute, markdown, not Understo
   assert.equal(notePath("/people/../../etc/passwd.md"), undefined);
   assert.equal(notePath(42), undefined);
 });
+
+test("what a model says it did is kept to one plain line: its first sentence, without the markdown", async () => {
+  const { firstLine } = await import("../server/src/extensions/understory-service.ts");
+  assert.equal(firstLine("The orphan is resolved — the graph is now healthy (4 concepts).\n\n## What changed\n\n- a"), "The orphan is resolved — the graph is now healthy (4 concepts).");
+  assert.equal(firstLine("**Fixed** the link from [branches](/deployment/branches.md). More."), "Fixed the link from branches.");
+  assert.equal(firstLine("x".repeat(300)).length, 160);
+  assert.equal(firstLine(undefined), "");
+});

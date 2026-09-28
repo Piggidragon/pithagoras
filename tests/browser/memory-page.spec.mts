@@ -31,6 +31,8 @@ const broken1 = { healthy: false, orphans: [], brokenLinks: [{ path: '/deploymen
 async function portal(page: Page, { enabled = true, broken = false, conformant = true, writable = true, afterDelete = broken1 as any } = {}) {
   const asked: string[] = [];
   const changes: { method: string; path: string; body?: any }[] = [];
+  let logCleared = false;
+  let wiped = false;
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -52,17 +54,25 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
     } else if (p === '/api/memory/reindex') {
       changes.push({ method: 'POST', path: p });
       body = { pruned: ['/empty'], reindexed: 3, health: { ...broken1 } };
-    } else if (p === '/api/features/understory/dream') {
+    } else if (p === '/api/memory/repair') {
       changes.push({ method: 'POST', path: p });
-      afterDelete = healthy;
-      body = { understory: {} };
+      body = { ran: true, summary: '**Fixed** the link from [branches](/deployment/branches.md).\n\n## What changed\n\n- removed the dangling link', filesChanged: ['/deployment/branches.md'], health: healthy };
+    } else if (p === '/api/memory/wipe') {
+      changes.push({ method: 'POST', path: p });
+      wiped = true;
+      logCleared = true;
+      body = { health: healthy };
+    } else if (p === '/api/memory/clear-log') {
+      changes.push({ method: 'POST', path: p });
+      logCleared = true;
+      body = { health: healthy };
     } else if (p.startsWith('/api/memory/')) {
       asked.push(`${p}${url.search}`);
       if (broken) return route.fulfill({ status: 502, json: { error: 'Could not reach Understory at http://127.0.0.1:3800: it did not answer in time.' } });
-      if (p === '/api/memory/tree') body = tree;
+      if (p === '/api/memory/tree') body = wiped ? { name: '/', path: '/', kind: 'directory', children: [{ name: 'index.md', path: '/index.md', kind: 'reserved' }, { name: 'log.md', path: '/log.md', kind: 'reserved' }] } : tree;
       else if (p === '/api/memory/validate') body = conformant ? { conformant: true, conceptCount: 2, directoryCount: 2, issues: [] } : { conformant: false, conceptCount: 2, directoryCount: 2, issues: [{ path: '/people/owner.md', severity: 'warning', message: 'No description in its frontmatter' }] };
       // Newest first, as Understory keeps it.
-      else if (p === '/api/memory/log') body = [
+      else if (p === '/api/memory/log') body = logCleared ? [] : [
         { date: '2026-09-28', action: 'Update', summary: 'Linked [Branch Deployment on Test Host](/deployment/branches.md) to its owner.' },
         { date: '2026-09-27', action: 'Creation', summary: 'Added [The owner](/people/owner.md).' },
       ];
@@ -223,6 +233,7 @@ test('a note is edited in place: its title, type, tags and text, and saving says
   expect(changes).toEqual([{ method: 'PUT', path: '/people/owner.md', body: { path: '/people/owner.md', frontmatter: { title: 'The owner of the host', type: 'Person', description: '', tags: ['people', 'host'] }, body: 'Runs the test host, and pays for it.' } }]);
   const after = page.getByRole('dialog', { name: 'The note is saved' });
   await expect(after.getByText('Every link leads somewhere and every note is linked in.')).toBeVisible();
+  await expect(after.getByRole('button', { name: 'Repair with the model' })).toBeDisabled();
   await after.getByRole('button', { name: 'Leave it' }).click();
   await expect(page.getByRole('article', { name: 'The owner of the host' })).toContainText('and pays for it');
   await expect(page.getByText('#host')).toBeVisible();
@@ -244,9 +255,13 @@ test('deleting a note asks first, then shows what it broke and offers to put it 
   await after.getByRole('button', { name: 'Rebuild the index' }).click();
   await expect(after.getByText('3 indexes written anew, 1 empty folder removed.')).toBeVisible();
   await after.getByRole('button', { name: 'Repair with the model' }).click();
-  await expect(after.getByText("The model's pass: 1 file changed — mended the link")).toBeVisible();
+  await expect(after.getByText('The model changed 1 file.')).toBeVisible();
+  await after.getByText('What the model said').click();
+  await expect(after.getByRole('heading', { name: 'What changed' })).toBeVisible();
   await expect(after.getByText('Every link leads somewhere and every note is linked in.')).toBeVisible();
-  expect(changes.map((c) => `${c.method} ${c.path}`)).toEqual(['DELETE /people/owner.md', 'POST /api/memory/reindex', 'POST /api/features/understory/dream']);
+  // Nothing left for it: the model is not asked again.
+  await expect(after.getByRole('button', { name: 'Repair with the model' })).toBeDisabled();
+  expect(changes.map((c) => `${c.method} ${c.path}`)).toEqual(['DELETE /people/owner.md', 'POST /api/memory/reindex', 'POST /api/memory/repair']);
 });
 
 test("Understory's own index is not edited by hand, nor any note of one run elsewhere", async ({ page }) => {
@@ -264,4 +279,48 @@ test('one run elsewhere is read only', async ({ page }) => {
   await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Edit the note' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Delete the note' })).toHaveCount(0);
+});
+
+test('the log can be cleared, after asking; the notes stay', async ({ page }) => {
+  const { changes } = await portal(page);
+  await page.goto('/memory?view=log');
+  const log = page.getByRole('region', { name: 'Changes to the memory' });
+  await expect(log.locator('li')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Clear the log' }).click();
+  await expect(page.getByText(/The notes stay as they are/)).toBeVisible();
+  await page.getByRole('button', { name: 'Clear it' }).click();
+  await expect(log.getByText('Nothing has changed yet.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Clear the log' })).toHaveCount(0);
+  expect(changes.map((c) => c.path)).toEqual(['/api/memory/clear-log']);
+  await expect(page.getByRole('navigation', { name: 'Notes' }).getByRole('button', { name: /The owner/ })).toBeVisible();
+});
+
+test('one run elsewhere has no clearing of its log', async ({ page }) => {
+  await portal(page, { writable: false });
+  await page.goto('/memory?view=log');
+  await expect(page.getByRole('region', { name: 'Changes to the memory' }).locator('li')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Clear the log' })).toHaveCount(0);
+});
+
+test('the whole memory can be cleared, after asking: no notes, an empty index and log', async ({ page }) => {
+  const { changes } = await portal(page);
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.getByRole('button', { name: 'Clear the memory' }).click();
+  await expect(page.getByText(/The agent forgets everything it kept here/)).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  expect(changes).toEqual([]);
+  await page.getByRole('button', { name: 'Clear the memory' }).click();
+  await page.getByRole('alertdialog', { name: 'Clear the whole memory?' }).getByRole('button', { name: 'Clear the memory' }).click();
+  await expect(page).toHaveURL(/\/memory$/);
+  const notes = page.getByRole('navigation', { name: 'Notes' });
+  await expect(notes.getByRole('button', { name: /The owner/ })).toHaveCount(0);
+  await expect(notes.getByRole('button', { name: 'log.md' })).toBeVisible();
+  expect(changes.map((c) => c.path)).toEqual(['/api/memory/wipe']);
+});
+
+test('one run elsewhere cannot be cleared from here', async ({ page }) => {
+  await portal(page, { writable: false });
+  await page.goto('/memory');
+  await expect(page.getByRole('navigation', { name: 'Notes' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Clear the memory' })).toHaveCount(0);
 });

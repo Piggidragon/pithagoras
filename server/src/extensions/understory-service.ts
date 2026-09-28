@@ -289,11 +289,52 @@ function script(body: string): string {
 }
 
 const SCRIPTS = {
-  dream: script(`console.log(JSON.stringify(await m.runDream(kb)));`),
+  // Understory's own pass — but not over an empty memory, where it would still
+  // reflect on the log of what was deleted, at the model's cost.
+  dream: script(`const lint = await kb.lint();
+  if (lint.conceptCount === 0) { console.log(JSON.stringify({ ran: false, reason: "The memory is empty: nothing to tidy up" })); return; }
+  console.log(JSON.stringify(await m.runDream(kb)));`),
+  // What memory_maintain does: the model mends links to nothing and wires in
+  // notes nothing links to — and is not asked at all when there are none.
+  repair: script(`const lint = await kb.lint();
+  if (lint.healthy) { console.log(JSON.stringify({ ran: false, reason: "Nothing to repair", health: await health() })); return; }
+  const orphans = lint.orphans.map((o) => "- " + o.path + (o.title ? " (" + o.title + ")" : "")).join("\\n") || "(none)";
+  const broken = lint.brokenLinks.map((b) => "- " + b.path + " → " + b.target + " (missing)").join("\\n") || "(none)";
+  const instruction = "Repair the knowledge graph. This is a maintenance task — use the write tools.\\n\\n" +
+    "ORPHANED CONCEPTS (no other concept links to them). For each, read it and the concepts it relates to, then wire it in: " +
+    "patch a genuinely related concept to reference it, and/or add outbound links from it to related concepts. Do NOT invent " +
+    "relationships that don't exist — if an orphan genuinely relates to nothing, leave it.\\n" + orphans + "\\n\\n" +
+    "BROKEN LINKS (target does not exist). Fix the path if the target was renamed/moved, or remove the link if the target is gone.\\n" +
+    broken + "\\n\\nFollow the enrich / link-both-ways rules. Read concepts before editing.";
+  const outcome = await m.runMutation(kb, instruction);
+  if (outcome && outcome.ok === false) throw new Error(String(outcome.error ?? "the repair failed"));
+  const result = outcome?.result ?? outcome;
+  console.log(JSON.stringify({ ran: true, summary: result.summary ?? "", filesChanged: result.filesChanged ?? [], health: await health() }));`),
   health: script(`console.log(JSON.stringify({ health: await health() }));`),
   save: script(`const concept = await kb.writeConcept(input.path, input.frontmatter, input.body, input.summary);
   console.log(JSON.stringify({ concept, health: await health() }));`),
   delete: script(`await kb.deleteConcept(input.path, input.summary);
+  console.log(JSON.stringify({ health: await health() }));`),
+  // The record of what changed, and the paths Understory's queries took,
+  // started over: the notes stay. log.md keeps its heading, as Understory
+  // writes a new one; it only ever appends to it.
+  clearLog: script(`const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  await fs.writeFile(path.join(process.env.BUNDLE_ROOT, "log.md"), "# Directory Update Log\\n");
+  await fs.rm(path.join(process.env.BUNDLE_ROOT, ".traces"), { recursive: true, force: true });
+  console.log(JSON.stringify({ health: await health() }));`),
+  // The memory from nothing: every note and folder gone, with the query
+  // paths; the root index and the log as a new bundle has them. Its git
+  // history, if it keeps one, stays.
+  wipe: script(`const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const root = process.env.BUNDLE_ROOT;
+  for (const name of await fs.readdir(root)) {
+    if (name === "index.md" || name === "log.md" || name === ".git") continue;
+    await fs.rm(path.join(root, name), { recursive: true, force: true });
+  }
+  await fs.writeFile(path.join(root, "log.md"), "# Directory Update Log\\n");
+  await m.regenerateIndex(kb.bundle);
   console.log(JSON.stringify({ health: await health() }));`),
   // Every folder's index.md written anew, deepest first, after the empty ones
   // are gone: what Understory does for one folder after each change, for all.
@@ -372,6 +413,42 @@ export async function deleteNote(path: string): Promise<{ health: Health }> {
   return { health: r.health };
 }
 
+/** Links to nothing mended and orphans wired in, by the model — only when there are any. */
+export async function repair(): Promise<{ ran: boolean; reason?: string; summary?: string; filesChanged?: string[]; health: Health }> {
+  const r = await run("repair");
+  return { ran: r.ran === true, reason: r.reason, summary: r.summary, filesChanged: r.filesChanged, health: r.health };
+}
+
+/**
+ * Clears the whole memory, and starts Understory again: what it holds in its
+ * own process — the notes it recalls, its answers kept, the overview it gives
+ * a new session — is of the memory that is gone.
+ */
+export async function wipe(): Promise<{ health: Health }> {
+  const r = await run("wipe");
+  const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/restart?t=5`);
+  if (res.status >= 400) throw new Error(res.body?.message || `Understory could not be started again (${res.status})`);
+  return { health: r.health };
+}
+
+/** Empties the log and the query paths; the notes stay. */
+export async function clearLog(): Promise<{ health: Health }> {
+  const r = await run("clearLog");
+  return { health: r.health };
+}
+
+/** A model's summary as one plain line: its first sentence, without the markdown. */
+export function firstLine(summary: string | undefined, most = 160): string {
+  const plain = String(summary ?? "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[#*_`>]+/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  const sentence = plain.match(/^.*?[.!?](\s|$)/)?.[0].trim() ?? plain;
+  return sentence.length > most ? `${sentence.slice(0, most - 1)}…` : sentence;
+}
+
 /** Every index.md written anew, and folders left empty removed. No model involved. */
 export async function reindex(): Promise<{ pruned: string[]; reindexed: number; health: Health }> {
   const r = await run("reindex");
@@ -394,7 +471,7 @@ export async function dreamNow(): Promise<DreamRun> {
       ok: true,
       ran: report.ran === true,
       said: report.ran
-        ? `${report.filesChanged?.length ?? 0} ${report.filesChanged?.length === 1 ? "file" : "files"} changed${report.summary ? ` — ${String(report.summary).slice(0, 300)}` : ""}`
+        ? `${report.filesChanged?.length ?? 0} ${report.filesChanged?.length === 1 ? "file" : "files"} changed${report.summary ? ` — ${firstLine(report.summary)}` : ""}`
         : report.reason || "Nothing to do",
     };
   } catch (e) {

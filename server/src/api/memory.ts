@@ -114,6 +114,15 @@ export function memoryRouter(): Router {
   /** Every index.md written anew and empty folders removed; no model involved. */
   router.post("/memory/reindex", changing(() => service.reindex()));
 
+  /** The model mends links to nothing and wires in orphans — only when there are any. */
+  router.post("/memory/repair", changing(() => service.repair()));
+
+  /** The log of changes and the paths of Understory's queries started over; the notes stay. */
+  router.post("/memory/clear-log", changing(() => service.clearLog()));
+
+  /** Everything gone: an empty index and log, as a new memory has. */
+  router.post("/memory/wipe", changing(() => service.wipe()));
+
   for (const [name, read] of Object.entries(READS)) {
     router.get(`/memory/${name}`, async (req, res) => {
       const at = understoryAt();

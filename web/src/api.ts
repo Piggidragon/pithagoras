@@ -523,6 +523,12 @@ export const api = {
   deleteMemoryNote: (path: string) =>
     json<{ health: MemoryHealth }>(`/api/memory/concept?${new URLSearchParams({ path })}`, { method: "DELETE" }),
   reindexMemory: () => json<{ pruned: string[]; reindexed: number; health: MemoryHealth }>("/api/memory/reindex", { method: "POST" }),
+  /** The model mends links to nothing and wires in orphans; `ran` is false when there were none. */
+  repairMemory: () =>
+    json<{ ran: boolean; reason?: string; summary?: string; filesChanged?: string[]; health: MemoryHealth }>("/api/memory/repair", { method: "POST" }),
+  clearMemoryLog: () => json<{ health: MemoryHealth }>("/api/memory/clear-log", { method: "POST" }),
+  /** Every note gone, the index and log empty: the memory from nothing. */
+  wipeMemory: () => json<{ health: MemoryHealth }>("/api/memory/wipe", { method: "POST" }),
   setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) =>
     json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
       method: "PUT",

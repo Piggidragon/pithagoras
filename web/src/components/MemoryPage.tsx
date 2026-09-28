@@ -100,6 +100,30 @@ export function MemoryPage() {
       setValidation(v);
     }, () => {});
   };
+  const [wiping, setWiping] = useState(false);
+  /** The memory from nothing, after asking. */
+  const wipe = async () => {
+    const ok = await confirmDialog({
+      title: "Clear the whole memory?",
+      message:
+        "Every note and folder is deleted, and the index and log start empty, as in a new memory. The agent forgets everything it kept here. This cannot be undone.",
+      confirmLabel: "Clear the memory",
+      danger: true,
+      deletes: true,
+    });
+    if (!ok) return;
+    setWiping(true);
+    try {
+      await api.wipeMemory();
+      close();
+      load();
+    } catch (e) {
+      setFailed((e as Error).message);
+    } finally {
+      setWiping(false);
+    }
+  };
+
   const changed = (what: "saved" | "deleted", health: MemoryHealth) => {
     // A deleted note is not there to show any more.
     if (what === "deleted") close();
@@ -182,13 +206,25 @@ export function MemoryPage() {
                 {validation.conformant ? "conformant" : `${validation.issues.length} issues`}
               </button>
             )}
+            {writable && (
+              <button
+                type="button"
+                onClick={() => void wipe()}
+                disabled={loading || wiping}
+                aria-label="Clear the memory"
+                title="Clear the memory: every note, and an empty index and log"
+                className="ml-auto rounded p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+              >
+                {wiping ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuTrash2 className="h-3.5 w-3.5" />}
+              </button>
+            )}
             <button
               type="button"
               onClick={load}
               disabled={loading}
               aria-label="Read the memory again"
               title="Read the memory again"
-              className="ml-auto rounded p-1.5 text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40"
+              className={`${writable ? "" : "ml-auto "}rounded p-1.5 text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40`}
             >
               <LuRefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             </button>
@@ -253,7 +289,7 @@ export function MemoryPage() {
           {note ? (
             <Note key={`${note}#${round}`} path={note} writable={writable} onOpen={openNote} onBack={close} onChanged={changed} />
           ) : view === "log" ? (
-            <LogView key={round} onOpen={openNote} onBack={close} />
+            <LogView key={round} writable={writable} onOpen={openNote} onBack={close} onCleared={refresh} />
           ) : view === "graph" ? (
             <GraphView key={round} onOpen={openNote} onBack={close} />
           ) : view === "issues" ? (
@@ -647,14 +683,19 @@ function AfterChange({
       setHealth(r.health);
       return `${r.reindexed} ${r.reindexed === 1 ? "index" : "indexes"} written anew${r.pruned.length ? `, ${r.pruned.length} empty ${r.pruned.length === 1 ? "folder" : "folders"} removed` : ""}.`;
     });
+  // What the model said it did, whole, beside the one line.
+  const [told, setTold] = useState<string | null>(null);
   const repair = () =>
-    act("Tidying up with the model — this takes as long as the model needs…", async () => {
-      await api.dreamUnderstory();
-      const r = await api.memoryHealth();
-      if (r.health) setHealth(r.health);
-      const last = (await api.features()).understory.managed.lastDream;
-      return last ? `The model's pass: ${last.said}` : "The model's pass is done.";
+    act("Repairing with the model — this takes as long as the model needs…", async () => {
+      setTold(null);
+      const r = await api.repairMemory();
+      setHealth(r.health);
+      if (!r.ran) return "Nothing for the model to repair.";
+      if (r.summary) setTold(r.summary);
+      const n = r.filesChanged?.length ?? 0;
+      return `The model changed ${n} ${n === 1 ? "file" : "files"}.`;
     });
+  const nothingToRepair = health.brokenLinks.length === 0 && health.orphans.length === 0;
 
   const open = (path: string) => {
     onOpen(path);
@@ -682,7 +723,8 @@ function AfterChange({
           <button
             type="button"
             onClick={() => void repair()}
-            disabled={busy !== null}
+            disabled={busy !== null || nothingToRepair}
+            title={nothingToRepair ? "No links to nothing and no notes nothing links to: nothing for the model to do" : undefined}
             className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
           >
             Repair with the model
@@ -743,8 +785,8 @@ function AfterChange({
         )}
         <p className="text-xs text-fg-faint">
           <strong className="font-medium text-fg-muted">Rebuild the index</strong> writes every folder's index.md anew and removes empty
-          folders, without the model. <strong className="font-medium text-fg-muted">Repair with the model</strong> runs Understory's own pass
-          over the memory: it mends links, wires in notes nothing links to, and merges what is doubled — it takes a while and costs tokens.
+          folders, without the model. <strong className="font-medium text-fg-muted">Repair with the model</strong> has the model mend the
+          links to nothing and wire in the notes nothing links to — only when there are any; it takes a while and costs tokens.
         </p>
         {busy && (
           <p className="flex items-center gap-2 text-xs text-fg-subtle">
@@ -752,23 +794,67 @@ function AfterChange({
           </p>
         )}
         {said && !busy && <p className="text-xs text-fg-muted">{said}</p>}
+        {told && !busy && (
+          <details className="rounded-lg border border-line px-3 py-2 text-xs">
+            <summary className="cursor-pointer text-fg-muted">What the model said</summary>
+            <div className="md mt-2 max-h-60 overflow-y-auto text-fg">
+              <Streamdown>{told}</Streamdown>
+            </div>
+          </details>
+        )}
         {error && <p role="alert" className="text-xs text-danger">{error}</p>}
       </div>
     </Modal>
   );
 }
 
-function LogView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack: () => void }) {
+function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; onOpen: (path: string) => void; onBack: () => void; onCleared: () => void }) {
   const [log, setLog] = useState<MemoryChange[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     api.memoryLog().then(setLog, (e: Error) => setFailed(e.message));
   }, []);
+
+  /** The record starts over; what it records stays. */
+  const clear = async () => {
+    const ok = await confirmDialog({
+      title: "Clear the log?",
+      message:
+        "The record of what changed in the memory is emptied, and so are the paths Understory's queries took (the graph's Query paths). The notes stay as they are.",
+      confirmLabel: "Clear it",
+      danger: true,
+      deletes: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setFailed(null);
+    try {
+      await api.clearMemoryLog();
+      setLog(await api.memoryLog());
+      onCleared();
+    } catch (e) {
+      setFailed((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   // Newest first, as Understory keeps it: each change is written at the top.
   const recent = log ?? [];
   return (
     <>
-      <Bar title="Log" onBack={onBack} />
+      <Bar title="Log" onBack={onBack}>
+        {writable && log && log.length > 0 && (
+          <button
+            type="button"
+            onClick={() => void clear()}
+            disabled={busy}
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+          >
+            <LuTrash2 className="h-3.5 w-3.5" /> Clear the log
+          </button>
+        )}
+      </Bar>
       <section aria-label="Changes to the memory" className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
         <div className="mx-auto max-w-3xl">
           {failed ? (

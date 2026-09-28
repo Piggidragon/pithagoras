@@ -168,7 +168,17 @@ it right:
   tidy-up): it mends links, wires in notes nothing links to and merges what is
   doubled. It takes as long as the model needs, and costs tokens.
 
-Or leave it; the nightly tidy-up, if set, gets to it as well.
+Or leave it; the nightly tidy-up, if set, gets to it as well. **Repair with
+the model** is offered only when there is something to repair, and the model is
+not asked otherwise; the tidy-up the portal starts skips an empty memory too.
+
+**Clear the log** (in the Log) empties the record of what changed and the
+paths Understory's queries took; the notes stay. **Clear the memory** (the bin
+beside the heading) starts the memory from nothing: every note and folder
+deleted, the index and log as a new memory has them, and Understory started
+again so it holds nothing of what was there. Both ask first, and cannot be
+undone. (**Remove and forget the memory** in the add-on removes Understory as
+well.)
 
 The portal asks Understory for all of it, at the address in `mcp.json` and
 with its token, so the page works wherever the portal does: over HTTPS, from a

@@ -229,6 +229,9 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `PUT /api/memory/concept` | `{ path, frontmatter, body }` — write a note through Understory's own write path (its index and log follow); `frontmatter` needs `type` and `title`. Answers `{ concept, health }`; 409 unless writable |
 | `DELETE /api/memory/concept?path=` | Delete a note the same way; answers `{ health }` |
 | `POST /api/memory/reindex` | Every folder's index.md written anew and empty folders removed, no model; answers `{ pruned, reindexed, health }` |
+| `POST /api/memory/repair` | The model mends links to nothing and wires in orphans, only when there are any; answers `{ ran, reason?, summary?, filesChanged?, health }` |
+| `POST /api/memory/clear-log` | log.md back to its heading and the query paths removed; the notes stay |
+| `POST /api/memory/wipe` | Every note and folder deleted, the root index and log as new, Understory started again |
 
 ## Channels
 
