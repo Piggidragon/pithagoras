@@ -91,12 +91,14 @@ function put(key: string, value: string) {
 
 /**
  * Saved as given, except that a custom address sent without a key keeps the
- * one it had: the page never holds it, so it cannot send it back.
+ * one it had, while the address is the same: the page never holds it, so it
+ * cannot send it back.
  */
 export function saveConfig(next: UnderstoryConfig): UnderstoryConfig {
   const had = config().llm;
   let llm = next.llm;
-  if (llm?.source === "custom" && llm.apiKey === undefined && had?.source === "custom") llm = { ...llm, apiKey: had.apiKey };
+  // Only for the same address: a key is the one server's, and must not go to another.
+  if (llm?.source === "custom" && llm.apiKey === undefined && had?.source === "custom" && had.baseUrl === llm.baseUrl) llm = { ...llm, apiKey: had.apiKey };
   // A set time wins, and Understory's own timer is left off: two passes a day would be one too many.
   put(KEY, JSON.stringify({ llm, dreamInterval: next.dreamAt ? "" : next.dreamInterval, dreamAt: next.dreamAt }));
   scheduleDreams();
@@ -360,31 +362,88 @@ export function readReport(output: string): Record<string, any> | null {
   return null;
 }
 
-// One at a time: two writers in the bundle at once would each rewrite the index the other just wrote.
-let queue: Promise<unknown> = Promise.resolve();
+/**
+ * The runs Understory's model is part of — minutes, as long as the model
+ * needs — and how long any run may take before it is given up on. A run given
+ * up on may still be going in the container; the ones after it go ahead.
+ */
+const MODEL_RUNS = new Set<keyof typeof SCRIPTS>(["dream", "repair"]);
+const RUN_MS = 60_000;
+const MODEL_RUN_MS = 30 * 60_000;
+/** How long a change waits for the run before it, before it says Understory is busy. */
+export const WAIT_MS = 15_000;
 
-/** Runs one of the scripts in the container, after whatever runs there now. */
-function run(name: keyof typeof SCRIPTS, input?: unknown): Promise<Record<string, any>> {
-  const next = queue.then(async () => {
-    if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
-    const exec = await request<{ Id?: string; message?: string }>("POST", `/containers/${CONTAINER}/exec`, {
-      Cmd: ["node", "-e", SCRIPTS[name]],
-      WorkingDir: "/app/server",
-      Env: input === undefined ? [] : [`PORTAL_INPUT=${Buffer.from(JSON.stringify(input)).toString("base64")}`],
-      AttachStdout: true,
-      AttachStderr: true,
-      // A terminal: its output comes back as it was printed, not in Docker's framed stream.
-      Tty: true,
-    });
-    if (exec.status >= 400 || !exec.body?.Id) throw new Error(exec.body?.message || `Could not reach Understory (${exec.status})`);
-    const out = await request<unknown>("POST", `/exec/${exec.body.Id}/start`, { Detach: false, Tty: true });
-    const report = readReport(typeof out.body === "string" ? out.body : JSON.stringify(out.body ?? ""));
-    if (!report) throw new Error("Understory ended without saying what it did");
-    if (report.error) throw new Error(report.error);
-    return report;
+/**
+ * The largest input a run can be given: it travels as one variable of the
+ * environment, and Linux takes at most 128 KiB for one (MAX_ARG_STRLEN), its
+ * name and its end included — measured as it goes, UTF-8 and base64.
+ */
+const ENV_MAX = 131_072;
+const envOf = (input: unknown) => `PORTAL_INPUT=${Buffer.from(JSON.stringify(input), "utf8").toString("base64")}`;
+export const fitsInEnv = (input: unknown): boolean => Buffer.byteLength(envOf(input)) + 1 <= ENV_MAX;
+
+const refused = (message: string, status: number) => Object.assign(new Error(message), { status });
+
+/** Runs one of the scripts in the container and reads what it said. */
+async function exec(name: keyof typeof SCRIPTS, input: unknown, timeoutMs: number): Promise<Record<string, any>> {
+  if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
+  const made = await request<{ Id?: string; message?: string }>("POST", `/containers/${CONTAINER}/exec`, {
+    Cmd: ["node", "-e", SCRIPTS[name]],
+    WorkingDir: "/app/server",
+    Env: input === undefined ? [] : [envOf(input)],
+    AttachStdout: true,
+    AttachStderr: true,
+    // A terminal: its output comes back as it was printed, not in Docker's framed stream.
+    Tty: true,
   });
-  queue = next.catch(() => {});
-  return next;
+  if (made.status >= 400 || !made.body?.Id) throw new Error(made.body?.message || `Could not reach Understory (${made.status})`);
+  const out = await request<unknown>("POST", `/exec/${made.body.Id}/start`, { Detach: false, Tty: true }, timeoutMs).catch((e) => {
+    throw (e as { code?: string }).code === "ETIMEDOUT" ? new Error("Understory did not finish in time") : e;
+  });
+  const report = readReport(typeof out.body === "string" ? out.body : JSON.stringify(out.body ?? ""));
+  if (!report) throw new Error("Understory ended without saying what it did");
+  if (report.error) throw new Error(report.error);
+  return report;
+}
+
+// Changes one at a time: two writers in the bundle at once would each rewrite
+// the index the other just wrote. Reading what the memory looks like is not
+// one, and goes beside them.
+let tail: Promise<unknown> = Promise.resolve();
+
+/** Runs one of the scripts in the container, after the change before it. */
+function run(name: keyof typeof SCRIPTS, input?: unknown): Promise<Record<string, any>> {
+  if (input !== undefined && !fitsInEnv(input)) return Promise.reject(refused("Too much to hand Understory at once", 400));
+  const model = MODEL_RUNS.has(name);
+  const limit = model ? MODEL_RUN_MS : RUN_MS;
+  if (name === "health") return exec(name, input, limit);
+  let started = false;
+  let gaveUp = false;
+  const mine = tail.then(() => {
+    if (gaveUp) return {};
+    started = true;
+    return exec(name, input, limit);
+  });
+  tail = mine.catch(() => {});
+  // A pass of the model waits its turn; a change says so when it cannot have one soon.
+  if (model) return mine;
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => {
+      if (started) return;
+      gaveUp = true;
+      reject(refused("Understory is busy with a pass of the model; try again once it is done", 409));
+    }, WAIT_MS);
+    mine.then(
+      (v) => {
+        clearTimeout(t);
+        if (!gaveUp) resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        if (!gaveUp) reject(e);
+      },
+    );
+  });
 }
 
 /** What `lint` and `validate` say about the bundle: what a change may have left behind. */
@@ -394,9 +453,6 @@ export interface Health {
   brokenLinks: { path: string; target: string }[];
   issues: { path: string; severity: string; message: string }[];
 }
-
-/** The largest note the portal will write: it travels in the environment. */
-export const NOTE_MAX = 100_000;
 
 export async function noteHealth(): Promise<Health> {
   return (await run("health")).health;
@@ -461,10 +517,11 @@ export const isDreaming = () => dreaming;
 /** Tidies the memory up now, and keeps what came of it. */
 export async function dreamNow(): Promise<DreamRun> {
   if (dreaming) throw new Error("It is tidying up already");
-  if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
+  // Taken before anything is waited for: a second ask in the same moment finds it taken.
   dreaming = true;
   let result: DreamRun;
   try {
+    if (!(await containerState(CONTAINER)).running) throw new Error("Understory is not running");
     const report = await run("dream");
     result = {
       at: new Date().toISOString(),

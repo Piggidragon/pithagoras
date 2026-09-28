@@ -169,7 +169,8 @@ test('in the background, one past the limit is queued and starts when the runnin
  assert.equal(second.details.phase,'queued');
  assert.match(second.content[0].text,/Queued subagent "Second" in the background: 1 subagent is already running/);
  await until(()=>sent.length===2);
- assert.deepEqual(seen,['start a','end','start b','end']);
+ // B is announced while it waits, and again when it starts: a slot is not taken before A's end.
+ assert.deepEqual(seen,['start a','start b','end','start b','end']);
  mode();
 });
 test('a subagent still waiting for a slot does not start once its session has ended',{timeout:5000},async()=>{
@@ -179,9 +180,44 @@ test('a subagent still waiting for a slot does not start once its session has en
  await tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir});
  await new Promise(r=>setTimeout(r,150));
  hooks.get('session_shutdown')!();
- await until(()=>ends.length===1);
+ await until(()=>ends.length===2);
  await new Promise(r=>setTimeout(r,200));
- assert.deepEqual(seen,['start a','end']);
+ assert.deepEqual(seen,['start a','start b','end','end'],'announced while waiting, ended without starting');
+ assert.deepEqual(ends.map((e:any)=>e.status).sort(),['stopped','stopped']);
+ mode();
+});
+test('a waiting subagent counts as running, and stopping it before it starts tells the parent without a turn',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode('background');
+ const {tool,events,sent,ends}=load();
+ const running=new Set<string>();
+ events.on('subagent:v1:start',(d:any)=>running.add(d.id));
+ events.on('subagent:v1:end',(d:any)=>running.delete(d.id));
+ let first='';events.on('subagent:v1:start',(d:any)=>first||=d.id);
+ await tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir});
+ let waiting:any;events.on('subagent:v1:start',(d:any)=>{if(d.id!==first)waiting=d;});
+ await tool.execute('b',{task:'two',label:'Later'},undefined,undefined,{cwd:dir});
+ assert.equal(waiting.detail,'Waiting for a free slot');
+ assert.equal(running.size,2,'both counted: the chat is not reloaded from under the one waiting');
+ events.emit('subagent:v1:stop',{id:waiting.id});
+ await until(()=>sent.length===1);
+ assert.match(sent[0].message.content,/Subagent "Later" was stopped before it started\./);
+ assert.deepEqual(sent[0].options,{deliverAs:'nextTurn'});
+ events.emit('subagent:v1:stop',{id:first});
+ await until(()=>ends.length===2);
+ mode();
+});
+test('a background subagent that cannot start gives its slot back and says so',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode('background');
+ const {tool,sent}=load();
+ // A context that cannot be read: starting it throws.
+ const broken={get cwd(){throw new Error('the session is gone');}};
+ await tool.execute('a',{task:'one'},undefined,undefined,broken);
+ await until(()=>sent.length===1);
+ assert.match(sent[0].message.content,/failed: the session is gone/);
+ // The slot is free again: the next one starts at once.
+ const next=await tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir});
+ assert.equal(next.details.phase,'background');
+ await until(()=>sent.length===2);
  mode();
 });
 test('an interrupt subagent waiting for a slot gives up when its parent is stopped',{timeout:5000},async()=>{

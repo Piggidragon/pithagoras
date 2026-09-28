@@ -65,7 +65,8 @@ export function memoryRouter(): Router {
   router.get("/memory/health", async (_req, res) => {
     try {
       if (!(await writable())) return res.json({ writable: false });
-      res.json({ writable: true, health: await service.noteHealth() });
+      // Writable whatever the checks say, or whether they answered at all.
+      res.json({ writable: true, health: await service.noteHealth().catch(() => undefined) });
     } catch (e) {
       res.status(502).json({ error: (e as Error).message });
     }
@@ -97,7 +98,10 @@ export function memoryRouter(): Router {
       if (typeof fm.type !== "string" || !fm.type.trim() || typeof fm.title !== "string" || !fm.title.trim()) throw refuse("A note needs a type and a title");
       const body = req.body?.body;
       if (typeof body !== "string") throw refuse("body must be text");
-      if (JSON.stringify({ fm, body }).length > service.NOTE_MAX) throw refuse(`A note is at most ${service.NOTE_MAX / 1000} kB here`);
+      // As it will travel: its words, what it says of itself, and the line for the log.
+      if (!service.fitsInEnv({ path, frontmatter: fm, body, summary: `Edited [${fm.title}](${path}) by hand in the portal.` })) {
+        throw refuse("This note is too long to write from here: at most about 95 kB, less in scripts that take more bytes a letter");
+      }
       return service.saveNote(path, fm, body);
     }),
   );

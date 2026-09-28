@@ -32,6 +32,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     else if (p === '/api/voice') body = { enabled: false };
     else if (p === '/api/workspaces') body = { root: '/w', workspaces: [] };
     else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
+    else if (p === '/api/features/flags') body = { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled } };
     else if (p === '/api/features') body = state;
     else if (p === '/api/features/subagent' && method === 'PUT') {
       const patch = route.request().postDataJSON();

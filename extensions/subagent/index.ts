@@ -161,8 +161,9 @@ export default function (pi: any) {
   }
 
   /** Starts a child for the task and hands over what watching it needs. */
-  function start(task: string, label: string, toolCallId: string, ctx: any, background: boolean, onUpdate?: any): Run {
-    const id = randomUUID();
+  /** `announced`: the id it was announced under while it waited for a slot. */
+  function start(task: string, label: string, toolCallId: string, ctx: any, background: boolean, onUpdate?: any, announced?: string): Run {
+    const id = announced ?? randomUUID();
     const model = childModel(chatChoice(), ctx?.model);
     // Its stderr goes nowhere: a pipe nobody reads fills, and the child
     // blocks on its next warning for good.
@@ -263,30 +264,60 @@ export default function (pi: any) {
       if (subagentMode() === "background") {
         // Whether it starts now or waits for one of the others: said now, since the call does not wait.
         const waiting = slots.running >= subagentLimit() ? slots.running : 0;
-        void (async () => {
-          const release = await takeSlot(() => shutDown, () => {});
-          if (!release) return;
-          const run = start(params.task, label, toolCallId, ctx, true);
-          detached.add(run);
-          const { status, answer, failure } = await run.finished;
-          release();
-          detached.delete(run);
-          const said =
-            status === "done"
-              ? `Subagent "${label}" finished:\n\n${answer || "(it gave no answer)"}`
-              : status === "stopped"
-                ? `Subagent "${label}" was stopped before it finished.${answer ? ` What it had so far:\n\n${answer}` : ""}`
-                : `Subagent "${label}" failed: ${failure ?? (answer ? "it ended early" : "it could not run — is `pi` on PATH? (PI_SUBAGENT_BIN)")}${answer ? `\n\nWhat it had so far:\n\n${answer}` : ""}`;
+        // One that waits is announced at once: counted as running, so its chat
+        // is not reloaded from under it, and it can be stopped before it starts.
+        const id = randomUUID();
+        let cancelled = false;
+        const offWait = waiting
+          ? pi.events.on(STOP, (d: any) => {
+              if (d?.id !== id) return;
+              cancelled = true;
+              wakeAll();
+            })
+          : () => {};
+        if (waiting) pi.events.emit(START, { id, label, toolCallId, input: true, stop: true, detail: "Waiting for a free slot", detached: true });
+        /** What the parent is told when it is over: its answer starts a turn; a stop waits for the person. */
+        const tell = (status: Status, said: string) => {
           try {
-            // Its answer is what the parent was waiting for: a turn of its own
-            // once the parent is free. A stop was the person's doing, and waits
-            // for whatever they say next.
             pi.sendMessage(
-              { customType: "subagent", content: said, display: true, details: { id: run.id, status } },
+              { customType: "subagent", content: said, display: true, details: { id, status } },
               status === "stopped" ? { deliverAs: "nextTurn" } : { deliverAs: "followUp", triggerTurn: true },
             );
           } catch {
             // The session it belonged to is gone: nobody is left to tell.
+          }
+        };
+        void (async () => {
+          let release: (() => void) | undefined;
+          let run: Run | undefined;
+          try {
+            release = await takeSlot(() => shutDown || cancelled, () => {});
+            offWait();
+            if (!release) {
+              if (waiting) pi.events.emit(END, { id, status: "stopped" });
+              if (cancelled && !shutDown) tell("stopped", `Subagent "${label}" was stopped before it started.`);
+              return;
+            }
+            run = start(params.task, label, toolCallId, ctx, true, undefined, waiting ? id : undefined);
+            detached.add(run);
+            const { status, answer, failure } = await run.finished;
+            tell(
+              status,
+              status === "done"
+                ? `Subagent "${label}" finished:\n\n${answer || "(it gave no answer)"}`
+                : status === "stopped"
+                  ? `Subagent "${label}" was stopped before it finished.${answer ? ` What it had so far:\n\n${answer}` : ""}`
+                  : `Subagent "${label}" failed: ${failure ?? (answer ? "it ended early" : "it could not run — is `pi` on PATH? (PI_SUBAGENT_BIN)")}${answer ? `\n\nWhat it had so far:\n\n${answer}` : ""}`,
+            );
+          } catch (e) {
+            // Whatever went wrong, the slot is given back below and the parent is told.
+            const why = (e as Error)?.message ?? String(e);
+            if (waiting && !run) pi.events.emit(END, { id, status: "error", error: why });
+            tell("error", `Subagent "${label}" failed: ${why}`);
+          } finally {
+            offWait();
+            release?.();
+            if (run) detached.delete(run);
           }
         })();
         return {

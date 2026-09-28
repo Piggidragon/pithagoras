@@ -79,6 +79,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
     if (!id) continue;
     let sub = byId.get(id);
     if (p.op === "start") {
+      const had = sub;
       sub = {
         id,
         kind: "protocol",
@@ -92,6 +93,12 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
         ...(p.detached === true ? { detached: true } : {}),
         events: [],
       };
+      // Said again — one that waited for a slot, now starting: the same
+      // subagent, told anew what it is doing, and where it began.
+      if (had) {
+        Object.assign(had, { ...sub, events: had.events, since: had.since ?? sub.since });
+        continue;
+      }
       byId.set(id, sub);
       order.push(sub);
       continue;

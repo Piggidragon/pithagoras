@@ -505,6 +505,8 @@ export const api = {
   suggestBrowserPassword: () =>
     json<{ password: string }>("/api/browser/suggest-password"),
   features: () => json<Features>("/api/features"),
+  /** Only whether each is on — cheap, for the sidebar and the chat's menus. */
+  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
   subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
   setSubagentModel: (id: string, model: string | null) =>

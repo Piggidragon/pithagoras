@@ -12,6 +12,7 @@ import {
   understoryDefaultUrl,
   understoryEntry,
   understoryIn,
+  understoryOn,
   understoryTokenOf,
 } from "../features.js";
 import { readPiSettings, updatePiSettings } from "../pi-settings.js";
@@ -155,6 +156,18 @@ const httpUrl = (value: unknown): string | undefined => {
  */
 export function featuresRouter(): Router {
   const router = express.Router();
+
+  /**
+   * Only whether each is on: for the sidebar and every chat's menus, which
+   * need no more. Reads two small files; nothing is asked of Understory or Docker.
+   */
+  router.get("/features/flags", (_req, res) => {
+    try {
+      res.json({ subagent: { enabled: subagentState().enabled }, understory: { enabled: understoryOn() } });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
 
   router.get("/features", async (_req, res) => {
     try {

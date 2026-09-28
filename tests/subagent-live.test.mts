@@ -86,3 +86,12 @@ test('a subagent in the background goes on after the tool call that started it h
  assert.deepEqual(found.filter(s=>s.kind==='protocol').map(s=>[s.id,s.status]),[['bg','running'],['far','running']]);
  assert.deepEqual(subagents(events,buildTranscript(events),true).filter(s=>s.kind==='protocol').map(s=>s.status),['stopped','stopped'],'not once the process that ran it is gone');
 });
+test('a subagent announced while it waited, and again as it starts, is one subagent with its new line',()=>{
+ const events:any[]=[
+  {seq:1,type:'portal_subagent',at:10,payload:{op:'start',id:'q',label:'Later',detail:'Waiting for a free slot',detached:true,input:true,stop:true}},
+  {seq:2,type:'portal_subagent',at:20,payload:{op:'start',id:'q',label:'Later',detail:'Starting on llama-swap/qwen',detached:true,input:true,stop:true}},
+  {seq:3,type:'portal_subagent',at:21,payload:{op:'event',id:'q',detached:true,event:{type:'message_end',message:{role:'assistant',content:[{type:'text',text:'hi'}]}}}},
+ ];
+ const found=subagents(events,[]);
+ assert.deepEqual(found.map(s=>[s.id,s.detail,s.since,s.events.length,s.status]),[['q','Starting on llama-swap/qwen',10,1,'running']]);
+});

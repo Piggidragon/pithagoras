@@ -176,6 +176,9 @@ test("the Understory the portal runs: its model from a provider or an address of
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d" });
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai" }, dreamInterval: "1d" });
   assert.deepEqual(service.config(), { llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d", dreamAt: "" });
+  // Another address does not get the key the last one had.
+  service.saveConfig({ llm: { source: "custom", baseUrl: "http://other:8080/v1", model: "m", format: "openai" }, dreamInterval: "1d" });
+  assert.equal((service.config().llm as { apiKey?: string }).apiKey, undefined, "a key is its server's");
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "" }, dreamInterval: "" });
   assert.equal((service.config().llm as { apiKey?: string }).apiKey, "", "an empty one clears it");
 });
@@ -268,11 +271,34 @@ test("Understory thinking with the chat's model: the chat whose memory tool runs
     });
   try {
     assert.equal((await ask("wrong")).status, 401);
+    // Turned away before its body is read: what is not JSON is not even looked at.
+    const unread = await fetch(`${at}/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: "{ not json" });
+    assert.equal(unread.status, 401);
     const answer = await ask();
     assert.equal(answer.status, 200, answer.status === 200 ? "" : await answer.clone().text());
     assert.match(answer.headers.get("content-type") ?? "", /event-stream/);
     assert.match(await answer.text(), /"he"[\s\S]*"llo"[\s\S]*\[DONE\]/);
     assert.deepEqual(seen[0], { body: { model: "qwen3.8", stream: true, messages: [{ role: "user", content: "hi" }] }, auth: "Bearer sk-fake" });
+
+    // Understory hanging up mid-answer ends the stream here, and nothing else.
+    const hangUp = new AbortController();
+    const cut = await fetch(`${at}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${service.llmToken()}` },
+      body: JSON.stringify({ model: "auto", stream: true, messages: [] }),
+      signal: hangUp.signal,
+    });
+    await cut.body!.getReader().read();
+    hangUp.abort();
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal((await ask()).status, 200, "still answering after one hung up");
+
+    // A chat whose pi is gone asks nothing any more.
+    llm.noteToolCall("chat-gone", "understory_memory_add", "start");
+    assert.equal(llm.askingChat(), "chat-gone");
+    llm.forgetChat("chat-gone");
+    assert.equal(llm.askingChat(), undefined, "nobody asking: the model new chats start on");
+    llm.noteToolCall("chat-a", "understory_memory_add", "start");
 
     chatModel = { provider: "claude", id: "sonnet" };
     const refused = await ask();
@@ -305,4 +331,13 @@ test("what a model says it did is kept to one plain line: its first sentence, wi
   assert.equal(firstLine("**Fixed** the link from [branches](/deployment/branches.md). More."), "Fixed the link from branches.");
   assert.equal(firstLine("x".repeat(300)).length, 160);
   assert.equal(firstLine(undefined), "");
+});
+
+test("what is handed to Understory is measured as it travels: UTF-8, base64, in one variable of at most 128 KiB", async () => {
+  const service = await import("../server/src/extensions/understory-service.ts");
+  const note = (body: string) => ({ path: "/a.md", frontmatter: { type: "T", title: "A" }, body, summary: "x" });
+  assert.equal(service.fitsInEnv(note("a".repeat(90_000))), true);
+  assert.equal(service.fitsInEnv(note("a".repeat(99_000))), false, "under 100 000 characters, over the limit once base64'd");
+  assert.equal(service.fitsInEnv(note("記".repeat(30_000))), true);
+  assert.equal(service.fitsInEnv(note("記".repeat(34_000))), false, "three bytes a letter");
 });

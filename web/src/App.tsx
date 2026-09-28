@@ -135,7 +135,7 @@ function Shell({
   // Whether Understory is the agent's memory, which is when its page is in the sidebar.
   const [hasMemory, setHasMemory] = useState(false);
   useEffect(() => {
-    const ask = () => api.features().then((f) => setHasMemory(f.understory?.enabled === true)).catch(() => {});
+    const ask = () => api.featureFlags().then((f) => setHasMemory(f.understory?.enabled === true)).catch(() => {});
     ask();
     // Said by Settings → Add-ons when it switches Understory, so the sidebar follows at once.
     window.addEventListener("features-changed", ask);

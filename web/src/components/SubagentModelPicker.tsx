@@ -18,7 +18,7 @@ export interface SubagentChoice {
  * to one draws it at once, and asked again quietly.
  */
 export function useSubagentChoice(sessionId: string, onError?: (e: string) => void): SubagentChoice {
-  const features = useCached("features", api.features, { freshMs: 30_000 });
+  const features = useCached("feature-flags", api.featureFlags, { freshMs: 30_000 });
   const stored = useCached(`subagent-model:${sessionId}`, () => api.subagentModel(sessionId), { freshMs: 30_000 });
   // What was just chosen here, until the server has said it back.
   const [picked, setPicked] = useState<{ model: string | null } | null>(null);

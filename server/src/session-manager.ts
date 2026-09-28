@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { LiveEvents } from "./live-events.js";
-import { noteToolCall } from "./memory-llm.js";
+import { forgetChat, noteToolCall } from "./memory-llm.js";
 import { ModelErrors } from "./model-errors.js";
 import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
@@ -2310,6 +2310,8 @@ class SessionManager extends EventEmitter {
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
     this.dropCommands(sessionId);
+    // No memory tool of its is running any more, whatever it last said.
+    forgetChat(sessionId);
     // What the extensions showed went with the process that ran them: stopped
     // for a restart or a delete as much as crashed. Left, a status naming a
     // command had the page list the commands, starting pi.

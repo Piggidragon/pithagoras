@@ -40,6 +40,7 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
     if (p === '/api/auth/status') body = { authed: true, authRequired: false };
     else if (p === '/api/sessions') body = { sessions: [], executor: 'host' };
     else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
+    else if (p === '/api/features/flags') body = { subagent: { enabled: false }, understory: { enabled } };
     else if (p === '/api/features') body = { subagent: {}, understory: { enabled, url: 'http://127.0.0.1:3800/mcp', managed: { available: true, container: 'running', config: { llm: { source: 'auto' }, dreamInterval: '' }, providers: [], pulling: { active: false }, lastDream: { at: '2026-09-28T14:00:00Z', ok: true, ran: true, said: '1 file changed — mended the link' } } } };
     else if (p === '/api/browser') body = { running: false, configured: false, routines: [] };
     else if (p === '/api/memory/health') body = writable ? { writable: true, health: healthy } : { writable: false };

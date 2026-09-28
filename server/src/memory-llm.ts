@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import express, { type Router } from "express";
 import { chatModel, getSession } from "./db.js";
 import { modelRuntime } from "./api/providers.js";
@@ -46,6 +47,16 @@ export function askingChat(): string | undefined {
   let newest: [string, number] | undefined;
   for (const [id, { since }] of asking) if (!newest || since > newest[1]) newest = [id, since];
   return newest?.[0] ?? lastAsked;
+}
+
+/**
+ * A chat whose pi is gone — stopped, crashed, deleted — asks nothing any
+ * more: a memory tool it was running never says it ended, and left there it
+ * would stay "the chat asking" for good.
+ */
+export function forgetChat(sessionId: string): void {
+  asking.delete(sessionId);
+  if (lastAsked === sessionId) lastAsked = undefined;
 }
 
 /** For the tests: nobody has asked. */
@@ -112,8 +123,12 @@ export function memoryLlmRouter(modelOf: ModelOf): Router {
     res.json({ object: "list", data: [{ id: "auto", object: "model", owned_by: "pithagoras" }] });
   });
 
-  router.post("/understory-llm/v1/chat/completions", express.json({ limit: "50mb" }), async (req, res) => {
-    if (!signedIn(req)) return res.status(401).json({ error: { message: "Not signed in" } });
+  // Signed in first: a conversation-sized body is read only for Understory,
+  // never for whoever can reach the port.
+  const onlyUnderstory: express.RequestHandler = (req, res, next) =>
+    signedIn(req) ? next() : res.status(401).json({ error: { message: "Not signed in" } });
+
+  router.post("/understory-llm/v1/chat/completions", onlyUnderstory, express.json({ limit: "50mb" }), async (req, res) => {
     try {
       const { provider, id, chat } = await chosenModel(modelOf);
       const { url, headers } = await endpointOf(provider, id);
@@ -126,7 +141,9 @@ export function memoryLlmRouter(modelOf: ModelOf): Router {
       const type = answer.headers.get("content-type");
       if (type) res.setHeader("content-type", type);
       if (!answer.body) return res.end();
-      Readable.fromWeb(answer.body as any).pipe(res);
+      // Through pipeline, which hears the error either side raises: Understory
+      // hanging up aborts the model's answer, and that must end here, quietly.
+      await pipeline(Readable.fromWeb(answer.body as any), res).catch(() => {});
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       const status = e instanceof Refused ? e.status : 502;
