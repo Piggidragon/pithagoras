@@ -84,7 +84,8 @@ test('a subagent in the background goes on after the tool call that started it h
  ];
  const found=subagents(events,buildTranscript(events));
  assert.deepEqual(found.filter(s=>s.kind==='protocol').map(s=>[s.id,s.status]),[['bg','running'],['far','running']]);
- assert.deepEqual(subagents(events,buildTranscript(events),true).filter(s=>s.kind==='protocol').map(s=>s.status),['stopped','stopped'],'not once the process that ran it is gone');
+ // A turn of the chat failing is not its pi gone: the portal writes the end of one when that pi goes.
+ assert.deepEqual(subagents(events,buildTranscript(events),true).filter(s=>s.kind==='protocol').map(s=>s.status),['running','running']);
 });
 test('a subagent announced while it waited, and again as it starts, is one subagent with its new line',()=>{
  const events:any[]=[

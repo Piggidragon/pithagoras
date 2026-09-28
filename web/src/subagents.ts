@@ -134,12 +134,14 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
   }
 
   // One whose end never came is over once its process is, or once the tool
-  // call that ran it has ended: nothing is left to run it. Unless it said it
-  // runs on in the background, where that call returns at once.
+  // call that ran it has ended: nothing is left to run it. Not one that runs
+  // on in the background: its call returns at once, and the chat going into
+  // error is a turn that failed, not its pi gone — the portal writes its end
+  // when that pi goes.
   const tools = new Map(items.flatMap((i) => (i.kind === "tool" && i.callId ? [[i.callId, i] as const] : [])));
   for (const sub of order) {
-    if (sub.status !== "running") continue;
-    const tool = sub.toolCallId && !sub.detached ? tools.get(sub.toolCallId) : undefined;
+    if (sub.status !== "running" || sub.detached) continue;
+    const tool = sub.toolCallId ? tools.get(sub.toolCallId) : undefined;
     if (ended || (tool && tool.status !== "running")) {
       sub.status = "stopped";
       sub.until ??= tool?.until;

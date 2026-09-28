@@ -1105,6 +1105,16 @@ export function getStoredSettings(): Partial<GlobalSettings> {
   ) as Partial<GlobalSettings>;
 }
 
+/**
+ * The stored defaults the page may see: the three it edits. The table holds
+ * much else — passwords, tokens, keys the portal keeps for its add-ons — and
+ * none of that is the page's to have.
+ */
+export function shownStoredSettings(): Partial<GlobalSettings> {
+  const { provider, model, thinkingLevel } = getStoredSettings();
+  return { ...(provider ? { provider } : {}), ...(model ? { model } : {}), ...(thinkingLevel ? { thinkingLevel } : {}) };
+}
+
 /** What pi is actually launched with: stored, else env, else pi's file. */
 export function getSettings(): GlobalSettings {
   const stored = getStoredSettings();
@@ -1787,7 +1797,11 @@ export function setSessionSubagentModel(sessionId: string, model: string | null)
  */
 export function openDetachedSubagents(): { sessionId: string; id: string }[] {
   const rows = getDb()
-    .prepare(`SELECT session_id, payload FROM events WHERE type = 'portal_subagent' AND payload LIKE '%"detached":true%' ORDER BY seq`)
+    // Their starts and ends only: each streamed step of theirs carries the flag too, and there are many.
+    .prepare(
+      `SELECT session_id, payload FROM events WHERE type = 'portal_subagent' AND payload LIKE '%"detached":true%'
+       AND (payload LIKE '%"op":"start"%' OR payload LIKE '%"op":"end"%') ORDER BY seq`,
+    )
     .all() as { session_id: string; payload: string }[];
   const open = new Map<string, { sessionId: string; id: string }>();
   for (const row of rows) {

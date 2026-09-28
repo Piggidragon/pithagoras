@@ -86,6 +86,12 @@ test("while Understory is the memory, MEMORY.md is not read; switched off, it is
 
   assert.deepEqual(names(), ["SOUL.md", "PrimaryUser.md", "MEMORY.md"]);
   writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { understory: understoryEntry("http://u/mcp") } }));
+  // Its tools come through the adapter: without it, MEMORY.md stays.
+  assert.equal(understoryOn(), false, "no adapter installed");
+  writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ packages: [{ source: "npm:pi-mcp-adapter", extensions: [], skills: [], prompts: [], themes: [] }] }));
+  assert.equal(understoryOn(), false, "the adapter switched off");
+  assert.deepEqual(names(), ["SOUL.md", "PrimaryUser.md", "MEMORY.md"]);
+  writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:pi-mcp-adapter"] }));
   assert.equal(understoryOn(), true);
   assert.deepEqual(names(), ["SOUL.md", "PrimaryUser.md"]);
   assert.deepEqual(names("primary"), ["SOUL.md", "PrimaryUser.md"]);
@@ -362,4 +368,33 @@ test("a saved key goes with the same address only, and what was saved before can
   service.saveConfig({ llm: { source: "auto" }, dreamInterval: "6h", dreamAt: "" });
   service.restoreConfig(before);
   assert.deepEqual(service.config(), before);
+});
+
+test("the page is shown the three defaults it edits, and nothing else the settings table keeps", async () => {
+  const { setSettings, shownStoredSettings } = await import("../server/src/db.ts");
+  const service = await import("../server/src/extensions/understory-service.ts");
+  service.token();
+  service.llmToken();
+  service.saveConfig({ llm: { source: "custom", baseUrl: "https://a/v1", model: "m", format: "openai", apiKey: "sk-secret" }, dreamInterval: "", dreamAt: "" });
+  setSettings({ provider: "llama-swap", model: "Ornith" });
+  const shown = shownStoredSettings();
+  assert.deepEqual(shown, { provider: "llama-swap", model: "Ornith" });
+  assert.doesNotMatch(JSON.stringify(shown), /sk-secret|understory/);
+});
+
+test("the chat's model for the memory is off only when the portal really serves its own TLS: both files named, and there", async () => {
+  const service = await import("../server/src/extensions/understory-service.ts");
+  const cert = path.join(temp, "cert.pem");
+  const key = path.join(temp, "key.pem");
+  process.env.PORTAL_TLS_CERT = cert;
+  process.env.PORTAL_TLS_KEY = key;
+  try {
+    assert.ok(service.portalLlmBase(), "named but missing: the portal serves plain HTTP");
+    writeFileSync(cert, "x");
+    writeFileSync(key, "x");
+    assert.equal(service.portalLlmBase(), undefined);
+  } finally {
+    delete process.env.PORTAL_TLS_CERT;
+    delete process.env.PORTAL_TLS_KEY;
+  }
 });

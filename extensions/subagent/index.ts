@@ -132,7 +132,12 @@ interface Run {
   /** Settles once the child has, with what it said last. */
   finished: Promise<{ status: Status; answer: string; failure?: string }>;
   stop(): void;
+  /** Stopped, and killed if it has not ended a little later: for when nobody is left to wait on it. */
+  end(): void;
 }
+
+/** How long a child told to stop is given before it is killed. */
+const GRACE_MS = () => Number(process.env.PI_SUBAGENT_GRACE_MS) || 5000;
 
 const DESCRIPTIONS: Record<Mode, string> = {
   interrupt:
@@ -150,6 +155,9 @@ export const CHILD_ENV = "PI_SUBAGENT_CHILD";
 
 export default function (pi: any) {
   if (process.env[CHILD_ENV] === "1") return;
+  // Read once, as it is loaded: what the tool tells the model and what it
+  // does must agree. A change reaches a chat when it is reloaded.
+  const mode = subagentMode();
   // Background children still running, stopped with the session that started them.
   const detached = new Set<Run>();
   // Set once the session is over: what still waits for a slot does not start.
@@ -157,7 +165,8 @@ export default function (pi: any) {
 
   pi.on?.("session_shutdown", () => {
     shutDown = true;
-    for (const run of detached) run.stop();
+    // Ended for sure: a child that does not stop keeps its slot, which is every chat's.
+    for (const run of detached) run.end();
     wakeAll();
   });
 
@@ -255,13 +264,19 @@ export default function (pi: any) {
       pi.events.emit(END, { id, status, ...(failure ? { error: failure } : {}) });
       return { status, answer, ...(failure ? { failure } : {}) };
     });
-    return { id, finished, stop };
+    const end = () => {
+      stop();
+      const kill = setTimeout(() => child.kill("SIGKILL"), GRACE_MS());
+      kill.unref?.();
+      void finished.finally(() => clearTimeout(kill));
+    };
+    return { id, finished, stop, end };
   }
 
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
-    description: DESCRIPTIONS[subagentMode()],
+    description: DESCRIPTIONS[mode],
     parameters: Type.Object({
       task: Type.String({ description: "The whole task, with everything the subagent needs to know — it sees nothing of this conversation" }),
       label: Type.Optional(Type.String({ description: "A short name for it, e.g. 'Research: vector DBs'" })),
@@ -270,7 +285,7 @@ export default function (pi: any) {
     async execute(toolCallId: string, params: { task: string; label?: string }, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {
       const label = params.label?.trim() || "Subagent";
 
-      if (subagentMode() === "background") {
+      if (mode === "background") {
         // Whether it starts now or waits for one of the others: said now, since the call does not wait.
         const waiting = slots.running >= subagentLimit() ? slots.running : 0;
         // One that waits is announced at once: counted as running, so its chat

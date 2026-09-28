@@ -90,6 +90,7 @@ import {
   chatModel,
   getSettings,
   getStoredSettings,
+  shownStoredSettings,
   knownTools,
   toolGroupNames,
   setToolGroupNames,
@@ -170,7 +171,7 @@ app.get("/api/settings", (_req, res) => {
   // turning the next Save into a permanent pin.
   res.json({
     settings: getSettings(),
-    stored: getStoredSettings(),
+    stored: shownStoredSettings(),
     defaults: getSettingDefaults(),
     piSettingsPath: piSettingsPath(),
     // pi's own, not the portal's — kept separate in the response so the UI can

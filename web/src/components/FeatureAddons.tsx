@@ -270,10 +270,25 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
 
   // While it is installed, and its image pulled, what the daemon says.
   const watching = Boolean(features?.understory.managed.pulling.active) || busy === INSTALLING;
+  // One after the other, never on top of each other: an answer can take a
+  // while — it asks whether Understory answers — and older ones must not land last.
   useEffect(() => {
     if (!watching) return;
-    const t = setInterval(() => api.features().then((f) => setFeatures(f)).catch(() => {}), 1500);
-    return () => clearInterval(t);
+    let on = true;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const next = () => {
+      t = setTimeout(async () => {
+        const f = await api.features().catch(() => null);
+        if (!on) return;
+        if (f) setFeatures(f);
+        next();
+      }, 1500);
+    };
+    next();
+    return () => {
+      on = false;
+      clearTimeout(t);
+    };
   }, [watching]);
 
   if (!features) return <Loading />;

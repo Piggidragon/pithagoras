@@ -1,12 +1,12 @@
 import express, { type Router } from "express";
 import { extensionStash, getSession, sessionSubagentModel, setExtensionStash, setSessionSubagentModel } from "../db.js";
-import { isSwitchedOff, sourceOf } from "../extension-switch.js";
 import {
   SUBAGENT_MAX_PARALLEL,
   UNDERSTORY,
   UNDERSTORY_TOKEN_ENV,
   bundledSubagentDir,
   isModelChoice,
+  mcpAdapter,
   subagentModelOf,
   subagentState,
   understoryDefaultUrl,
@@ -25,15 +25,7 @@ import { pi } from "./packages.js";
 
 const ADAPTER = "pi-mcp-adapter";
 
-/** pi-mcp-adapter as pi's settings list it, if they do. */
-function adapterEntry(): { source: string; enabled: boolean } | undefined {
-  const packages = readPiSettings().packages;
-  for (const entry of Array.isArray(packages) ? packages : []) {
-    const source = sourceOf(entry);
-    if (source && new RegExp(`(^|[:/])${ADAPTER}(@[^/]*)?$`).test(source)) return { source, enabled: !isSwitchedOff(entry) };
-  }
-  return undefined;
-}
+const adapterEntry = () => mcpAdapter();
 
 /** Whether anything answers at the server's address: its web UI lives at the root. */
 async function reachable(url: string): Promise<boolean> {
@@ -68,7 +60,8 @@ async function understoryState() {
   const adapter = adapterEntry();
   const [reached, runtime] = await Promise.all([reachable(url), service.status()]);
   return {
-    enabled: !error && understoryIn(config),
+    // As the chats see it: on only with the adapter its tools come through.
+    enabled: !error && understoryIn(config) && adapter?.enabled === true,
     url,
     tokenSet: Boolean(understoryTokenOf(entry) ?? process.env[UNDERSTORY_TOKEN_ENV]),
     adapterInstalled: adapter?.enabled === true,
@@ -275,13 +268,18 @@ export function featuresRouter(): Router {
       return res.status(400).json({ error: (e as Error).message });
     }
     const before = service.config();
+    const wasInstalled = await service.installed();
     try {
       service.saveConfig({ llm, dreamInterval, dreamAt });
-      if (await service.installed()) await service.install();
+      if (wasInstalled) await service.install();
       res.json({ understory: await understoryState() });
     } catch (e) {
-      // Not made anew with it: what it runs with is still what was saved before.
       service.restoreConfig(before);
+      // Made anew is removed first: one that could not be made with the new
+      // settings is made again with the old, rather than left gone.
+      if (wasInstalled && !(await service.installed().catch(() => true))) {
+        await service.install().catch((again) => console.error(`[portal] Understory could not be made again: ${(again as Error).message}`));
+      }
       res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
     }
   });
@@ -327,10 +325,12 @@ export function featuresRouter(): Router {
    */
   router.delete("/features/understory/install", async (req, res) => {
     try {
+      // Removed first: switched off as the memory only once it is gone, so a
+      // removal that fails — busy with a pass, Docker refusing — leaves both as they were.
+      await (req.query.memory === "forget" ? service.forgetMemory() : service.remove());
       const { config } = readMcpFile();
       const entry = config.mcpServers?.[UNDERSTORY] as { url?: unknown } | undefined;
       if (entry?.url === service.managedUrl()) await switchUnderstory(false);
-      await (req.query.memory === "forget" ? service.forgetMemory() : service.remove());
       const { reloaded, waiting } = await sessions.reloadIdle();
       res.json({ understory: await understoryState(), reloaded, waiting });
     } catch (e) {

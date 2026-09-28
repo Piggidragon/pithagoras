@@ -11,6 +11,9 @@ writeFileSync(bin,`#!/usr/bin/env node
 const out=e=>process.stdout.write(JSON.stringify(e)+'\\n');
 const say=t=>out({type:'message_end',message:{role:'assistant',content:[{type:'text',text:t}]}});
 if(process.env.FAKE==='die')process.exit(1);
+// Deaf to abort: it only ever ends when killed.
+if(process.env.FAKE==='stubborn'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say('thinking forever');}});setInterval(()=>{},1000);}
+else
 // What it was started with, as its answer.
 if(process.env.FAKE==='childenv'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say('child='+process.env.PI_SUBAGENT_CHILD);out({type:'agent_end'});out({type:'agent_settled'});}});}
 else if(process.env.FAKE==='argv'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say(process.argv.slice(2).join(' '));out({type:'agent_end'});out({type:'agent_settled'});}});}
@@ -289,5 +292,30 @@ test('a background subagent\'s answer names the id it was announced under',{time
  await tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir});
  await until(()=>sent.length===1);
  assert.equal(sent[0].message.details.id,started);
+ mode();
+});
+test('a background subagent that will not stop is killed when its session ends, and its slot freed',{timeout:10000},async()=>{
+ process.env.FAKE='stubborn';process.env.PI_SUBAGENT_GRACE_MS='300';mode('background');
+ try{
+  const {tool,hooks,ends}=load();
+  await tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir});
+  await new Promise(r=>setTimeout(r,200));
+  hooks.get('session_shutdown')!();
+  await until(()=>ends.length===1);
+  assert.equal(ends[0].status,'stopped');
+  // Its slot is every chat's: the next one starts at once.
+  delete process.env.FAKE;
+  const next=load();
+  const r=await next.tool.execute('b',{task:'y'},undefined,undefined,{cwd:dir});
+  assert.equal(r.details.phase,'background');
+ }finally{delete process.env.PI_SUBAGENT_GRACE_MS;mode();}
+});
+test('the mode a chat was loaded with is the one it runs in, as its tool says',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode();
+ const {tool}=load();
+ assert.match(tool.description,/get its final answer back/);
+ mode('background');
+ const r=await tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir});
+ assert.equal(r.content[0].text,'the whole answer','interrupt, as it was told: the change reaches it when it is reloaded');
  mode();
 });

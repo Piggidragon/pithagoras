@@ -145,6 +145,15 @@ export function understoryTokenOf(entry: Record<string, unknown> | undefined): s
   return undefined;
 }
 
+/** pi-mcp-adapter as pi's settings list it, if they do: without it, no MCP server is a tool. */
+export function mcpAdapter(packages: unknown = readPiSettings().packages): { source: string; enabled: boolean } | undefined {
+  for (const entry of Array.isArray(packages) ? packages : []) {
+    const source = sourceOf(entry);
+    if (source && /(^|[:/])pi-mcp-adapter(@[^/]*)?$/.test(source)) return { source, enabled: !isSwitchedOff(entry) };
+  }
+  return undefined;
+}
+
 /** Whether a config has Understory as the agent's memory: there, and not switched off. */
 export function understoryIn(config: McpFile): boolean {
   const entry = config.mcpServers?.[UNDERSTORY];
@@ -154,12 +163,15 @@ export function understoryIn(config: McpFile): boolean {
 /**
  * Whether Understory is the agent's memory now. Read from mcp.json each time
  * it is asked — when a chat starts — so the file is the one place it is said,
- * and switching the server off in Settings → MCP brings MEMORY.md back too.
+ * and switching the server off in Settings → MCP brings MEMORY.md back too;
+ * so does switching off pi-mcp-adapter, which its tools come through.
  */
 export function understoryOn(): boolean {
   try {
     const { config, error } = readMcpFile();
-    return !error && understoryIn(config);
+    // Its tools are there only through the adapter: without it, MEMORY.md
+    // would be taken away and nothing given in its place.
+    return !error && understoryIn(config) && mcpAdapter()?.enabled === true;
   } catch {
     return false;
   }

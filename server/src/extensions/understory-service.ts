@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { getDb, getStoredSettings } from "../db.js";
 import { readModelsJson, storedKey } from "../providers.js";
 import { containerState, dockerAvailable, imagePresent, pullImage, request } from "./docker.js";
@@ -137,7 +138,10 @@ export const llmToken = (): string => secret(LLM_TOKEN);
  * chat's", and a model of its own is needed.
  */
 export function portalLlmBase(): string | undefined {
-  if (process.env.PORTAL_TLS_CERT && process.env.PORTAL_TLS_KEY) return undefined;
+  // The portal's own decision (server.ts): both named, and both there.
+  const cert = process.env.PORTAL_TLS_CERT;
+  const key = process.env.PORTAL_TLS_KEY;
+  if (cert && key && existsSync(cert) && existsSync(key)) return undefined;
   return `http://127.0.0.1:${Number(process.env.PORT || 4100)}/understory-llm/v1`;
 }
 
