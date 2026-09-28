@@ -1,4 +1,4 @@
-import { formatNumber, t } from "./i18n";
+import { language, t } from "./i18n";
 /** What a context window may be; the server refuses anything else, so the field can say so first. */
 export const WINDOW_MIN = 1_024;
 export const WINDOW_MAX = 10_000_000;
@@ -19,6 +19,14 @@ export type ParsedWindow =
  */
 const WINDOW_TEXT = /^(?:\d+|\d{1,3}(?:([ ,._])\d{3}(?:\1\d{3})*))$/;
 
+/**
+ * A number as the field takes it back: "1,024" in English, grouped by spaces
+ * in any other language — which the field reads everywhere, where the "." a
+ * German reader would write, or the "'" of Switzerland, it does not.
+ */
+const typeable = (n: number) =>
+  language() === "en" ? n.toLocaleString("en-US") : String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+
 export function parseWindow(text: string): ParsedWindow {
   const trimmed = text.trim();
   if (!trimmed) return { kind: "empty" };
@@ -26,7 +34,7 @@ export function parseWindow(text: string): ParsedWindow {
   if (!Number.isInteger(n) || n < WINDOW_MIN || n > WINDOW_MAX) {
     return {
       kind: "bad",
-      message: t("Enter the window as a whole number of tokens, from {min} to {max}", { min: formatNumber(WINDOW_MIN), max: formatNumber(WINDOW_MAX) }),
+      message: t("Enter the window as a whole number of tokens, from {min} to {max}", { min: typeable(WINDOW_MIN), max: typeable(WINDOW_MAX) }),
     };
   }
   return { kind: "ok", tokens: n };

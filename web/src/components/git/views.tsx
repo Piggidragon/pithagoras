@@ -9,7 +9,7 @@ import { useGit, type View } from "./context";
 import { DiffView } from "./DiffView";
 import { CommitView, CompareView } from "./History";
 import { PullView } from "./Pulls";
-import { t } from "../../i18n";
+import { msg, t } from "../../i18n";
 
 /** Whatever was opened over the tab. `onDone` goes back, for a view whose work is finished. */
 export function ViewHost({ view, onDone }: { view: View; onDone: () => void }) {
@@ -88,18 +88,18 @@ function LoadedDiff({ title, path, what, onDone }: { title: string; path: string
                 confirmLabel: what.of === "untracked" ? t("Delete") : t("Discard"),
                 danger: true,
               });
-              if (ok && (await act(t("Discarding"), () => gitApi.discard(id, [path])))) onDone();
+              if (ok && (await act(msg("Discarding"), () => gitApi.discard(id, [path])))) onDone();
             }}
           >
             <LuUndo2 aria-hidden className="h-3 w-3" /> {what.of === "untracked" ? t("Delete") : t("Discard")}
           </TextButton>
-          <TextButton primary disabled={!!busy} onClick={async () => (await act(t("Staging"), () => gitApi.stage(id, [path]))) && onDone()}>
+          <TextButton primary disabled={!!busy} onClick={async () => (await act(msg("Staging"), () => gitApi.stage(id, [path]))) && onDone()}>
             <LuPlus aria-hidden className="h-3 w-3" /> {t("Stage")}
           </TextButton>
         </>
       )}
       {what.of === "staged" && (
-        <TextButton disabled={!!busy} onClick={async () => (await act(t("Unstaging"), () => gitApi.unstage(id, unstagePaths({ path, from: what.from })))) && onDone()}>
+        <TextButton disabled={!!busy} onClick={async () => (await act(msg("Unstaging"), () => gitApi.unstage(id, unstagePaths({ path, from: what.from })))) && onDone()}>
           <LuMinus aria-hidden className="h-3 w-3" /> {t("Unstage")}
         </TextButton>
       )}

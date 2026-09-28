@@ -3,7 +3,8 @@ import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuUse
 import { PageHeader, Stat } from "./PageHeader";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
-import { formatDate, msg, t, tp } from "../i18n";
+import { labelOf, msg, t, tp } from "../i18n";
+import { serverTime, sinceThen } from "../time";
 
 /** What each kind means at a glance, without reading the reason. */
 const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> = {
@@ -23,6 +24,8 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   browsed: { label: msg("Page opened"), icon: <LuGlobe className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
 };
 
+const KIND_LABEL = Object.fromEntries(Object.entries(KIND).map(([kind, k]) => [kind, k.label]));
+
 const FILTERS = [
   { id: "all", label: msg("Everything") },
   { id: "refused", label: msg("Refused") },
@@ -30,15 +33,7 @@ const FILTERS = [
   { id: "stranger", label: msg("Strangers") },
 ];
 
-const when = (iso: string) => {
-  // Stored as UTC without a zone marker, which Date reads as local time.
-  const then = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
-  const mins = Math.round((Date.now() - then.getTime()) / 60000);
-  if (mins < 1) return t("just now");
-  if (mins < 60) return t("{n}m ago", { n: mins });
-  if (mins < 60 * 24) return t("{n}h ago", { n: Math.round(mins / 60) });
-  return formatDate(then, { month: "short", day: "numeric" });
-};
+const when = (iso: string) => sinceThen(serverTime(iso), { dateAfterDays: 1, dateFormat: { month: "short", day: "numeric" } });
 
 /**
  * What the agent was stopped from doing, and what it was let through on.
@@ -155,7 +150,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
               <li key={e.id} className="rounded-xl border border-line bg-raised/40 px-3 py-2">
                 <div className="flex items-center gap-2">
                   <span className={`shrink-0 ${k.tone}`}>{k.icon}</span>
-                  <span className={`shrink-0 text-xs ${k.tone}`}>{KIND[e.kind] ? t(k.label) : k.label}</span>
+                  <span className={`shrink-0 text-xs ${k.tone}`}>{labelOf(KIND_LABEL, e.kind)}</span>
                   {e.person_name && (
                     <span className="truncate text-xs text-fg-muted">{e.person_name}</span>
                   )}

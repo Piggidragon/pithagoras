@@ -7,7 +7,7 @@ import { confirmDialog } from "../ConfirmDialog";
 import { Counts, ErrorNote, Letter, Quiet, SectionHead, splitPath, TextButton } from "./bits";
 import { useGit } from "./context";
 import { when } from "../../time";
-import { msg, t, tp, tx } from "../../i18n";
+import { labelOf, msg, t, tp, tx } from "../../i18n";
 
 
 /** Where a pull request is: open, draft, merged or closed. */
@@ -34,7 +34,7 @@ const DECISION: Record<string, string> = {
   CHANGES_REQUESTED: msg("changes requested"),
   REVIEW_REQUIRED: msg("review required"),
 };
-const decision = (d: string) => (DECISION[d] ? t(DECISION[d]) : d.toLowerCase().replace(/_/g, " "));
+const decision = (d: string) => labelOf(DECISION, d, (other) => other.toLowerCase().replace(/_/g, " "));
 
 export function Pulls() {
   const { id, repo, show } = useGit();
@@ -189,7 +189,7 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     let url = "";
-    const ok = await act(repo.upstream ? t("Opening the pull request") : t("Pushing, and opening the pull request"), async () => {
+    const ok = await act(repo.upstream ? msg("Opening the pull request") : msg("Pushing, and opening the pull request"), async () => {
       url = (await gitApi.createPull(id, { title, body, base: base || undefined, draft })).url;
     });
     const n = Number(/\/pull\/(\d+)/.exec(url)?.[1]);
@@ -310,11 +310,11 @@ export function PullView({ n }: { n: number }) {
       message: `${method === "squash" ? t("Squashed into one commit on {base}, on GitHub.", { base: pull.baseRefName }) : method === "rebase" ? t("Rebased on {base}, on GitHub.", { base: pull.baseRefName }) : t("With a merge commit on {base}, on GitHub.", { base: pull.baseRefName })}${deleteBranch ? ` ${t("{branch} is deleted afterwards.", { branch: pull.headRefName })}` : ""}`,
       confirmLabel: t("Merge"),
     });
-    if (ok && (await act(t("Merging #{n}", { n: pull.number }), () => gitApi.mergePull(id, pull.number, method, deleteBranch)))) after();
+    if (ok && (await act(msg("Merging #{n}"), () => gitApi.mergePull(id, pull.number, method, deleteBranch), { n: pull.number }))) after();
   };
 
   const review = async (action: "approve" | "request-changes" | "comment") => {
-    const label = action === "approve" ? t("Approving") : action === "request-changes" ? t("Asking for changes") : t("Commenting");
+    const label = action === "approve" ? msg("Approving") : action === "request-changes" ? msg("Asking for changes") : msg("Commenting");
     if (await act(label, () => (action === "comment" ? gitApi.commentPull(id, pull.number, reply) : gitApi.reviewPull(id, pull.number, action, reply)))) {
       setReply("");
       after();
@@ -346,7 +346,7 @@ export function PullView({ n }: { n: number }) {
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {!here && open && (
-            <TextButton disabled={!!busy} onClick={() => void act(t("Checking out #{n}", { n: pull.number }), () => gitApi.checkoutPull(id, pull.number))} title={t("Check its branch out here, to try it or work on it")}>
+            <TextButton disabled={!!busy} onClick={() => void act(msg("Checking out #{n}"), () => gitApi.checkoutPull(id, pull.number), { n: pull.number })} title={t("Check its branch out here, to try it or work on it")}>
               {t("Check out")}
             </TextButton>
           )}

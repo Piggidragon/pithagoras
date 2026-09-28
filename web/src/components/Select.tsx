@@ -195,7 +195,7 @@ export function Select<T extends string | number = string>({
         onKeyDown={onKey}
         className={`ui-select ui-select-${size} ${open ? "is-open" : ""} ${className}`}
       >
-        <span className={`ui-select-value ${selected ? "" : "is-placeholder"}`}>{selected ? selected.label : placeholder}</span>
+        <span className={`ui-select-value ${selected ? "" : "is-placeholder"}`}>{selected ? selected.label : (placeholder ?? t("Choose…"))}</span>
         <LuChevronDown className="ui-select-chevron" aria-hidden />
       </button>
       {open &&

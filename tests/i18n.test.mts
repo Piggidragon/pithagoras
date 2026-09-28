@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { addLocale, ENGLISH, languages, resolve, setLanguage, t, tp, tx, type Locale, type Plural } from "../web/src/i18n.ts";
+import { addLocale, ENGLISH, formatDate, formatDateTime, formatTime, labelOf, languages, resolve, setLanguage, t, tp, tx, type Locale, type Plural } from "../web/src/i18n.ts";
 
 const SRC = path.resolve(import.meta.dirname, "../web/src");
 const LOCALES = path.join(SRC, "locales");
@@ -118,4 +118,32 @@ test("the browser's language is used when there is one for it", () => {
   assert.equal(resolve("de", ["en-US"]).code, "de", "what was chosen, over the browser");
   assert.equal(resolve("zz", ["de"]).code, "en", "a language no longer there is English");
   assert.equal(languages()[0].code, ENGLISH.code, "English is offered first");
+});
+
+test("a value's name comes from its table, and one the table does not know is shown as it is", () => {
+  addLocale({ code: "yy", name: "Other", strings: { running: "läuft" } });
+  try {
+    setLanguage("yy");
+    const states = { running: "running" };
+    assert.equal(labelOf(states, "running"), "läuft");
+    assert.equal(labelOf(states, "paused"), "paused");
+    assert.equal(labelOf(states, "PAUSED_NOW", (v) => v.toLowerCase()), "paused_now");
+    assert.equal(labelOf(states, "toString"), "toString", "not a name any object has");
+  } finally {
+    setLanguage("system");
+  }
+});
+
+test("dates are written as toLocaleString would, from formatters made once", () => {
+  setLanguage("en");
+  try {
+    const d = new Date(Date.UTC(2026, 8, 29, 13, 4, 5));
+    const locale = navigator.languages?.find((l) => l.startsWith("en")) ?? "en";
+    assert.equal(formatDateTime(d), d.toLocaleString(locale));
+    assert.equal(formatDate(d), d.toLocaleDateString(locale));
+    assert.equal(formatTime(d), d.toLocaleTimeString(locale));
+    assert.equal(formatDate(d, { month: "short", day: "numeric" }), d.toLocaleDateString(locale, { month: "short", day: "numeric" }));
+  } finally {
+    setLanguage("system");
+  }
 });

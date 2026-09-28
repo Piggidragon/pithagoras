@@ -17,7 +17,7 @@ import { api, type BrokenChannelPackage, type Channel, type ChannelKind } from "
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
 import { isEnter } from "../shortcuts";
-import { formatTime, msg, t, tp, tx } from "../i18n";
+import { formatTime, labelOf, msg, t, tp, tx } from "../i18n";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -35,7 +35,7 @@ const STATE_LABEL: Record<string, string> = {
   error: msg("error"),
   stopped: msg("stopped"),
 };
-const stateLabel = (state: string) => (STATE_LABEL[state] ? t(STATE_LABEL[state]) : state);
+const stateLabel = (state: string) => labelOf(STATE_LABEL, state);
 
 const primaryCls =
   "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";

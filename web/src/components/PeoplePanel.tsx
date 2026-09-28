@@ -10,7 +10,7 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type Person, type Role, type ToolRule } from "../api";
-import { msg, t, tp, tx } from "../i18n";
+import { labelOf, msg, t, tp, tx } from "../i18n";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -28,10 +28,8 @@ const ROLES: { id: Role; label: string; hint: string }[] = [
   { id: "unknown", label: msg("Blocked"), hint: msg("Turned away before reaching the agent.") },
 ];
 
-const roleLabel = (id: string) => {
-  const role = ROLES.find((r) => r.id === id);
-  return role ? t(role.label) : id;
-};
+const ROLE_LABEL = Object.fromEntries(ROLES.map((r) => [r.id, r.label]));
+const roleLabel = (id: string) => labelOf(ROLE_LABEL, id);
 
 const ROLE_STYLE: Record<string, string> = {
   primary: "text-accent",

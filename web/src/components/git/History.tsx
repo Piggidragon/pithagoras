@@ -4,7 +4,7 @@ import { copyText } from "../../clipboard";
 import { gitApi, type Branch, type Commit, type CommitDetail, type Comparison, type FileChange } from "../../git-api";
 import { ago, Counts, ErrorNote, IconButton, Letter, LETTER_NAME, Quiet, RefBadge, SectionHead, splitPath } from "./bits";
 import { useGit } from "./context";
-import { t } from "../../i18n";
+import { formatDateTime, t } from "../../i18n";
 
 const PAGE = 100;
 
@@ -78,7 +78,7 @@ export function CommitList({ commits }: { commits: Commit[] }) {
           <button
             type="button"
             onClick={() => show({ kind: "commit", sha: c.sha })}
-            title={`${c.subject}\n${c.short} · ${c.author} · ${new Date(c.date * 1000).toLocaleString()}`}
+            title={`${c.subject}\n${c.short} · ${c.author} · ${formatDateTime(c.date * 1000)}`}
             className="flex w-full flex-col gap-0.5 border-b border-line/50 px-3 py-1.5 text-left transition hover:bg-fg/5"
           >
             <span className="flex min-w-0 items-center gap-1">
@@ -156,7 +156,7 @@ export function CommitView({ sha }: { sha: string }) {
           <span>
             {detail.author} &lt;{detail.email}&gt;
           </span>
-          <span>{new Date(detail.date * 1000).toLocaleString()}</span>
+          <span>{formatDateTime(detail.date * 1000)}</span>
           {detail.parents.length > 1 && <span>{t("merge — shown against its first parent")}</span>}
           {detail.refs.map((r) => (
             <RefBadge key={r} name={r} />

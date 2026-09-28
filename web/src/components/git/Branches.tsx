@@ -4,7 +4,7 @@ import { gitApi, type Branch } from "../../git-api";
 import { confirmDialog } from "../ConfirmDialog";
 import { ago, ErrorNote, IconButton, Quiet, SectionHead, TextButton } from "./bits";
 import { useGit } from "./context";
-import { t } from "../../i18n";
+import { msg, t } from "../../i18n";
 
 /** The branches here and on the remotes: switched to, made, deleted. */
 export function Branches() {
@@ -31,7 +31,7 @@ export function Branches() {
     e.preventDefault();
     const wanted = name.trim();
     if (!wanted) return;
-    if (await act(t("Making {name}", { name: wanted }), () => gitApi.createBranch(id, wanted))) setName("");
+    if (await act(msg("Making {name}"), () => gitApi.createBranch(id, wanted), { name: wanted })) setName("");
   };
 
   const remove = async (b: Branch) => {
@@ -49,7 +49,7 @@ export function Branches() {
       confirmLabel: t("Delete anyway"),
       danger: true,
     });
-    if (sure) await act(t("Deleting {name}", { name: b.name }), () => gitApi.deleteBranch(id, b.name, true));
+    if (sure) await act(msg("Deleting {name}"), () => gitApi.deleteBranch(id, b.name, true), { name: b.name });
   };
 
   if (error) return <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>;
@@ -86,7 +86,7 @@ export function Branches() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <SectionHead title={t("Here")} count={local.length} />
         {local.map((b) => (
-          <BranchRow key={b.name} branch={b} onSwitch={() => void act(t("Switching to {name}", { name: b.name }), () => gitApi.switch(id, b.name))} onDelete={() => void remove(b)} />
+          <BranchRow key={b.name} branch={b} onSwitch={() => void act(msg("Switching to {name}"), () => gitApi.switch(id, b.name), { name: b.name })} onDelete={() => void remove(b)} />
         ))}
         {remote.length > 0 && (
           <>
@@ -105,7 +105,7 @@ export function Branches() {
                 <BranchRow
                   key={b.name}
                   branch={b}
-                  onSwitch={() => void act(t("Checking out {name}", { name: b.name }), () => gitApi.switch(id, b.name, true))}
+                  onSwitch={() => void act(msg("Checking out {name}"), () => gitApi.switch(id, b.name, true), { name: b.name })}
                 />
               ))}
           </>

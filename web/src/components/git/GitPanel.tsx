@@ -3,7 +3,7 @@ import { LuArrowDown, LuArrowLeft, LuArrowUp, LuCloudDownload, LuGitBranch, LuRe
 import { gitApi, type GhState, type GitState } from "../../git-api";
 import { Branches } from "./Branches";
 import { Changes } from "./Changes";
-import { Ctx, useGit, type GitCtx, type View } from "./context";
+import { Ctx, useGit, type Busy, type GitCtx, type View } from "./context";
 import { ErrorNote, Quiet, TextButton } from "./bits";
 import { History } from "./History";
 import { Pulls } from "./Pulls";
@@ -58,7 +58,7 @@ export function GitPanel({
 }) {
   const [state, setState] = useState<GitState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Busy | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const [stack, setStack] = useState<View[]>([]);
@@ -132,9 +132,9 @@ export function GitPanel({
   useEffect(() => setStack([]), [tab]);
 
   const act = useCallback(
-    async (label: string, step: () => Promise<unknown>) => {
+    async (label: string, step: () => Promise<unknown>, vars?: Record<string, string | number>) => {
       if (busy) return false;
-      setBusy(label);
+      setBusy({ label, vars });
       setError(null);
       setSaid(null);
       try {
@@ -177,7 +177,7 @@ export function GitPanel({
     return (
       <div className="flex flex-col items-start gap-2 p-3 text-xs text-fg-subtle">
         <p>{t("This chat's folder is not in a git repository.")}</p>
-        <TextButton primary disabled={!!busy} onClick={() => void act(t("Making a repository"), () => gitApi.init(sessionId))}>
+        <TextButton primary disabled={!!busy} onClick={() => void act(msg("Making a repository"), () => gitApi.init(sessionId))}>
           {t("Make it one (git init)")}
         </TextButton>
         {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
@@ -189,11 +189,11 @@ export function GitPanel({
   return (
     <Ctx.Provider value={ctx}>
       <div className="flex h-full min-h-0 flex-col text-sm" data-git-tab={tab}>
-        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => void act(t("Refreshing"), () => askGh(true))} />
+        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => void act(msg("Refreshing"), () => askGh(true))} />
         {state.operation && <Operation />}
         {busy && (
           <p role="status" className="shrink-0 border-b border-line bg-accent/5 px-3 py-1 text-[11px] text-accent">
-            {busy}…
+            {t(busy.label, busy.vars)}…
           </p>
         )}
         {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
@@ -257,17 +257,17 @@ function BranchBar({ onBranches, onRefresh }: { onBranches: () => void; onRefres
       <div className="ml-auto flex items-center gap-0.5">
         {hasRemote && (
           <>
-            <BarButton label={t("Fetch — see what is new on the remote")} disabled={!!busy} onClick={() => void act(t("Fetching"), () => gitApi.fetch(id))}>
+            <BarButton label={t("Fetch — see what is new on the remote")} disabled={!!busy} onClick={() => void act(msg("Fetching"), () => gitApi.fetch(id))}>
               <LuCloudDownload aria-hidden className="h-3.5 w-3.5" />
             </BarButton>
-            <BarButton label={repo.behind ? t("Pull {n} — fast-forward only", { n: repo.behind }) : t("Pull — fast-forward only")} disabled={!!busy || !repo.upstream} onClick={() => void act(t("Pulling"), () => gitApi.pull(id))}>
+            <BarButton label={repo.behind ? t("Pull {n} — fast-forward only", { n: repo.behind }) : t("Pull — fast-forward only")} disabled={!!busy || !repo.upstream} onClick={() => void act(msg("Pulling"), () => gitApi.pull(id))}>
               <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
               {repo.behind > 0 && <span className="text-[10px]">{repo.behind}</span>}
             </BarButton>
             <BarButton
               label={repo.upstream ? (repo.ahead ? t("Push {n}", { n: repo.ahead }) : t("Push")) : t("Publish this branch to the remote")}
               disabled={!!busy || !repo.branch || (!!repo.upstream && !repo.ahead)}
-              onClick={() => void act(repo.upstream ? t("Pushing") : t("Publishing"), () => gitApi.push(id))}
+              onClick={() => void act(repo.upstream ? msg("Pushing") : msg("Publishing"), () => gitApi.push(id))}
             >
               <LuArrowUp aria-hidden className="h-3.5 w-3.5" />
               {repo.upstream ? repo.ahead > 0 && <span className="text-[10px]">{repo.ahead}</span> : <span className="text-[10px]">{t("Publish")}</span>}
@@ -275,7 +275,7 @@ function BranchBar({ onBranches, onRefresh }: { onBranches: () => void; onRefres
           </>
         )}
         <BarButton label={t("Refresh")} disabled={!!busy} onClick={onRefresh}>
-          <LuRefreshCw aria-hidden className={`h-3.5 w-3.5 ${busy === "Refreshing" ? "animate-spin" : ""}`} />
+          <LuRefreshCw aria-hidden className={`h-3.5 w-3.5 ${busy?.label === "Refreshing" ? "animate-spin" : ""}`} />
         </BarButton>
       </div>
     </div>
@@ -309,10 +309,10 @@ function Operation() {
         {name} —{" "}
         {conflicts ? tp(conflicts, "{n} file is in conflict. Resolve and stage it, then continue.", "{n} files are in conflict. Resolve and stage them, then continue.") : t("ready to continue.")}
       </span>
-      <TextButton disabled={!!busy || conflicts > 0} onClick={() => void act(t("Continuing"), () => gitApi.continue(id))}>
+      <TextButton disabled={!!busy || conflicts > 0} onClick={() => void act(msg("Continuing"), () => gitApi.continue(id))}>
         {t("Continue")}
       </TextButton>
-      <TextButton danger disabled={!!busy} onClick={() => void act(t("Giving up"), () => gitApi.abort(id))}>
+      <TextButton danger disabled={!!busy} onClick={() => void act(msg("Giving up the {operation}"), () => gitApi.abort(id), { operation: repo.operation ?? "" })}>
         {t("Abort")}
       </TextButton>
     </div>

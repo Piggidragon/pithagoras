@@ -63,7 +63,8 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
   const features = subagent && { subagent };
   const setFeatures = (f: { subagent: SubagentFeature }) => setSubagent(f.subagent);
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  // Said in the language shown, whenever it is drawn.
+  const [note, setNote] = useState<(() => string) | null>(null);
   const name = useId();
   // Every model there is, to name one for subagents rather than the chat's.
   const [models, setModels] = useState<AvailableModel[]>([]);
@@ -82,7 +83,7 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
     try {
       const { subagent, waiting } = await api.setSubagentFeature(patch);
       setFeatures({ ...features, subagent });
-      setNote(reloadNote(waiting));
+      setNote(() => () => reloadNote(waiting));
       // A chat's model menu has the subagents' model while the tool is on.
       window.dispatchEvent(new Event("features-changed"));
     } catch (e) {
@@ -182,7 +183,7 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
           <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
         </p>
       )}
-      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note}</p>}
+      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
     </div>
   );
 }
@@ -270,7 +271,8 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
   const [url, setUrl] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  // Said in the language shown, whenever it is drawn.
+  const [note, setNote] = useState<(() => string) | null>(null);
 
   // While it is installed, and its image pulled, what the daemon says.
   const watching = Boolean(features?.understory.managed.pulling.active) || busy === INSTALLING;
@@ -319,7 +321,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
     try {
       const { understory, waiting } = await run();
       setFeatures({ ...features, understory });
-      if (waiting !== undefined) setNote(reloadNote(waiting));
+      if (waiting !== undefined) setNote(() => () => reloadNote(waiting));
       // The sidebar has the Memory page while Understory is the agent's memory.
       window.dispatchEvent(new Event("features-changed"));
       return true;
@@ -675,7 +677,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
           <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t(busy)}
         </p>
       )}
-      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note}</p>}
+      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
     </div>
   );
 }

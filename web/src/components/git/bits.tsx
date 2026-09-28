@@ -1,17 +1,10 @@
 import type { ReactNode } from "react";
 import { LuCircleAlert } from "react-icons/lu";
-import { formatDate, msg, t } from "../../i18n";
+import { msg, t } from "../../i18n";
+import { sinceThen } from "../../time";
 
 /** "5m ago", from seconds since the epoch. */
-export function ago(seconds: number): string {
-  const mins = Math.round((Date.now() / 1000 - seconds) / 60);
-  if (!Number.isFinite(mins)) return "";
-  if (mins < 1) return t("just now");
-  if (mins < 60) return t("{n}m ago", { n: mins });
-  if (mins < 1440) return t("{n}h ago", { n: Math.round(mins / 60) });
-  if (mins < 60 * 24 * 60) return t("{n}d ago", { n: Math.round(mins / 1440) });
-  return formatDate(seconds * 1000);
-}
+export const ago = (seconds: number): string => sinceThen(seconds * 1000, { dateAfterDays: 60 });
 
 /** A folder and a name, so a long path still shows the part that tells files apart. */
 export function splitPath(p: string): { dir: string; name: string } {

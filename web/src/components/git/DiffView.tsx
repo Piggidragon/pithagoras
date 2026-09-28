@@ -54,7 +54,7 @@ export function DiffView({ file, truncated }: { file: DiffFile; truncated?: bool
               >
                 {row.mark ?? MARK[row.kind]}
               </span>
-              <span className="whitespace-pre pr-4 text-fg">{row.text || " "}</span>
+              <span className="whitespace-pre pr-4 text-fg">{(row.kind === "note" ? t(row.text) : row.text) || " "}</span>
             </div>
           ),
         )}

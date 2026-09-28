@@ -156,6 +156,14 @@ export function tp(n: number, one: string, other: string, vars?: Record<string, 
 export const msg = <T extends string>(text: T): T => text;
 
 /**
+ * What a value is called, from a table of `msg()` texts: a state, a role, a
+ * level. One the table does not know — something newer than the portal — is
+ * shown as `unknown` makes it, the value itself unless said otherwise.
+ */
+export const labelOf = (labels: Readonly<Record<string, string>>, value: string, unknown: (value: string) => string = (v) => v): string =>
+  Object.hasOwn(labels, value) ? t(labels[value]) : unknown(value);
+
+/**
  * A text with something drawn in it — a link, a key — where `t` takes only
  * words: `tx("Press {key} to send", { key: <kbd>Enter</kbd> })`.
  */
@@ -175,26 +183,57 @@ function formats(): string {
   return browserLanguages().find((code) => code.split("-")[0] === base) ?? current.code;
 }
 
+/**
+ * Formatters are costly to make and shown by the hundred — a count in every
+ * row — so each is made once per language and set of options.
+ */
+const formatters = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat | Intl.DisplayNames>();
+function formatter<F extends Intl.NumberFormat | Intl.DateTimeFormat | Intl.DisplayNames>(kind: string, locale: string, options: object | undefined, make: () => F): F {
+  const key = `${kind}|${locale}|${options ? JSON.stringify(options) : ""}`;
+  let made = formatters.get(key) as F | undefined;
+  if (!made) formatters.set(key, (made = make()));
+  return made;
+}
+
+const DATE: Intl.DateTimeFormatOptions = { year: "numeric", month: "numeric", day: "numeric" };
+const TIME: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "numeric", second: "numeric" };
+const DATE_FIELDS = ["weekday", "year", "month", "day", "dateStyle"] as const;
+const TIME_FIELDS = ["dayPeriod", "hour", "minute", "second", "fractionalSecondDigits", "timeStyle"] as const;
+
+/** What toLocaleString, toLocaleDateString and toLocaleTimeString fill in when nothing is asked for. */
+function withDefaults(options: Intl.DateTimeFormatOptions | undefined, fill: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
+  const asked = options ?? {};
+  const has = (fields: readonly string[]) => fields.some((f) => (asked as Record<string, unknown>)[f] !== undefined);
+  return has(DATE_FIELDS) || has(TIME_FIELDS) ? asked : { ...fill, ...asked };
+}
+
+const dateTime = (d: Date | number | string, kind: string, options: Intl.DateTimeFormatOptions) => {
+  const locale = formats();
+  return formatter(kind, locale, options, () => new Intl.DateTimeFormat(locale, options)).format(new Date(d));
+};
+
 /** A number the language's way. */
-export const formatNumber = (n: number, options?: Intl.NumberFormatOptions): string =>
-  n.toLocaleString(formats(), options);
+export const formatNumber = (n: number, options?: Intl.NumberFormatOptions): string => {
+  const locale = formats();
+  return formatter("number", locale, options, () => new Intl.NumberFormat(locale, options)).format(n);
+};
 
 /** A date and time the language's way. */
 export const formatDateTime = (d: Date | number | string, options?: Intl.DateTimeFormatOptions): string =>
-  new Date(d).toLocaleString(formats(), options);
+  dateTime(d, "datetime", withDefaults(options, { ...DATE, ...TIME }));
 
 /** A date the language's way. */
 export const formatDate = (d: Date | number | string, options?: Intl.DateTimeFormatOptions): string =>
-  new Date(d).toLocaleDateString(formats(), options);
+  dateTime(d, "date", withDefaults(options, DATE));
 
 /** A time of day the language's way. */
 export const formatTime = (d: Date | number | string, options?: Intl.DateTimeFormatOptions): string =>
-  new Date(d).toLocaleTimeString(formats(), options);
+  dateTime(d, "time", withDefaults(options, TIME));
 
 /** A language's name in the language shown: "de" is "German" in English, "Deutsch" in German. */
 export function languageName(code: string, fallback = code): string {
   try {
-    return new Intl.DisplayNames([current.code], { type: "language" }).of(code) ?? fallback;
+    return formatter("language", current.code, undefined, () => new Intl.DisplayNames([current.code], { type: "language" })).of(code) ?? fallback;
   } catch {
     return fallback;
   }

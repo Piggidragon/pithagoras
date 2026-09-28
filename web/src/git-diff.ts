@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { msg } from "./i18n";
 /**
  * A unified diff, as git or gh prints it, read into files and lines to draw.
  *
@@ -116,7 +116,7 @@ export function parseDiff(text: string): DiffFile[] {
         file.status = "renamed";
       } else if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) {
         file.binary = true;
-        file.rows.push({ kind: "note", text: t("A binary file — not shown") });
+        file.rows.push({ kind: "note", text: msg("A binary file — not shown") });
       } else if (line.startsWith("--- ")) {
         if (side(line.slice(4)) === "/dev/null") file.status = "added";
       } else if (line.startsWith("+++ ")) {

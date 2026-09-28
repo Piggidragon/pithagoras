@@ -5,7 +5,7 @@ import { isEnter } from "../../shortcuts";
 import { confirmDialog } from "../ConfirmDialog";
 import { ago, Counts, IconButton, Letter, LETTER_NAME, Quiet, SectionHead, splitPath, TextButton } from "./bits";
 import { useGit } from "./context";
-import { t, tp } from "../../i18n";
+import { msg, t, tp } from "../../i18n";
 
 type Side = "staged" | "unstaged" | "conflict";
 
@@ -27,7 +27,7 @@ export function Changes() {
 
   const commit = async () => {
     if (!canCommit) return;
-    const ok = await act(amend ? t("Amending the last commit") : all ? t("Committing everything") : t("Committing"), async () => {
+    const ok = await act(amend ? msg("Amending the last commit") : all ? msg("Committing everything") : msg("Committing"), async () => {
       if (all && !nothing) await gitApi.stage(id, "all");
       return gitApi.commit(id, message, amend);
     });
@@ -79,7 +79,7 @@ export function Changes() {
         {staged.length > 0 && (
           <>
             <SectionHead title={t("Staged")} count={staged.length}>
-              <IconButton label={t("Unstage everything")} disabled={!!busy} onClick={() => void act(t("Unstaging"), () => gitApi.unstage(id, "all"))}>
+              <IconButton label={t("Unstage everything")} disabled={!!busy} onClick={() => void act(msg("Unstaging"), () => gitApi.unstage(id, "all"))}>
                 <LuMinus aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
             </SectionHead>
@@ -91,7 +91,7 @@ export function Changes() {
         {unstaged.length > 0 && (
           <>
             <SectionHead title={t("Changes")} count={unstaged.length}>
-              <IconButton label={t("Stash everything — put it away for later")} disabled={!!busy} onClick={() => void act(t("Stashing"), () => gitApi.stash(id))}>
+              <IconButton label={t("Stash everything — put it away for later")} disabled={!!busy} onClick={() => void act(msg("Stashing"), () => gitApi.stash(id))}>
                 <LuArchive aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
               <IconButton
@@ -105,12 +105,12 @@ export function Changes() {
                     confirmLabel: t("Discard"),
                     danger: true,
                   });
-                  if (ok) await act(t("Discarding"), () => gitApi.discard(id, unstaged.map((f) => f.path)));
+                  if (ok) await act(msg("Discarding"), () => gitApi.discard(id, unstaged.map((f) => f.path)));
                 }}
               >
                 <LuUndo2 aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
-              <IconButton label={t("Stage everything")} disabled={!!busy} onClick={() => void act(t("Staging"), () => gitApi.stage(id, "all"))}>
+              <IconButton label={t("Stage everything")} disabled={!!busy} onClick={() => void act(msg("Staging"), () => gitApi.stage(id, "all"))}>
                 <LuPlus aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
             </SectionHead>
@@ -179,21 +179,21 @@ function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
                 confirmLabel: file.kind === "untracked" ? t("Delete") : t("Discard"),
                 danger: true,
               });
-              if (ok) await act(t("Discarding"), () => gitApi.discard(id, [file.path]));
+              if (ok) await act(msg("Discarding"), () => gitApi.discard(id, [file.path]));
             }}
           >
             {file.kind === "untracked" ? <LuTrash2 aria-hidden className="h-3.5 w-3.5" /> : <LuUndo2 aria-hidden className="h-3.5 w-3.5" />}
           </IconButton>
         )}
         {side === "staged" ? (
-          <IconButton label={t("Unstage {name}", { name })} disabled={!!busy} onClick={() => void act(t("Unstaging"), () => gitApi.unstage(id, unstagePaths(file)))}>
+          <IconButton label={t("Unstage {name}", { name })} disabled={!!busy} onClick={() => void act(msg("Unstaging"), () => gitApi.unstage(id, unstagePaths(file)))}>
             <LuMinus aria-hidden className="h-3.5 w-3.5" />
           </IconButton>
         ) : (
           <IconButton
             label={side === "conflict" ? t("Mark {name} resolved", { name }) : t("Stage {name}", { name })}
             disabled={!!busy}
-            onClick={() => void act(t("Staging"), () => gitApi.stage(id, [file.path]))}
+            onClick={() => void act(msg("Staging"), () => gitApi.stage(id, [file.path]))}
           >
             <LuPlus aria-hidden className="h-3.5 w-3.5" />
           </IconButton>
@@ -234,10 +234,10 @@ function Stashes({ count }: { count: number }) {
               <span className="min-w-0 flex-1 truncate text-xs text-fg">{s.message}</span>
               <span className="shrink-0 text-[10px] text-fg-faint">{ago(s.date)}</span>
             </button>
-            <TextButton disabled={!!busy} onClick={() => void act(t("Applying the stash"), () => gitApi.stashDo(id, "apply", s.ref, s.sha))} title={t("Bring it back and keep the stash")}>
+            <TextButton disabled={!!busy} onClick={() => void act(msg("Applying the stash"), () => gitApi.stashDo(id, "apply", s.ref, s.sha))} title={t("Bring it back and keep the stash")}>
               {t("Apply")}
             </TextButton>
-            <TextButton disabled={!!busy} onClick={() => void act(t("Popping the stash"), () => gitApi.stashDo(id, "pop", s.ref, s.sha))} title={t("Bring it back and drop the stash")}>
+            <TextButton disabled={!!busy} onClick={() => void act(msg("Popping the stash"), () => gitApi.stashDo(id, "pop", s.ref, s.sha))} title={t("Bring it back and drop the stash")}>
               {t("Pop")}
             </TextButton>
             <IconButton
@@ -245,7 +245,7 @@ function Stashes({ count }: { count: number }) {
               danger
               disabled={!!busy}
               onClick={async () => {
-                if (await confirmDialog({ title: t("Drop this stash?"), message: s.message, confirmLabel: t("Drop"), danger: true })) await act(t("Dropping the stash"), () => gitApi.stashDo(id, "drop", s.ref, s.sha));
+                if (await confirmDialog({ title: t("Drop this stash?"), message: s.message, confirmLabel: t("Drop"), danger: true })) await act(msg("Dropping the stash"), () => gitApi.stashDo(id, "drop", s.ref, s.sha));
               }}
             >
               <LuTrash2 aria-hidden className="h-3.5 w-3.5" />

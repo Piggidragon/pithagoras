@@ -996,7 +996,7 @@ function ExtensionsPanel({
   const [spec, setSpec] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   /** What the last switch did to the conversations that were open. */
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<(() => string) | null>(null);
   // The names given in Settings → Tools. A package is one thing and should be
   // called the same thing wherever it appears; the spec underneath is what it
   // is installed and removed by, and that does not change.
@@ -1027,13 +1027,13 @@ function ExtensionsPanel({
       const on = !ext.enabled;
       const r = await api.setExtensionEnabled(ext.spec, on);
       const name = displayName(ext.name, names);
-      const parts = [on ? t("{name} is on.", { name }) : t("{name} is off.", { name })];
-      if (r.reloaded) parts.push(tp(r.reloaded, "{n} open conversation reloaded.", "{n} open conversations reloaded."));
+      const parts = [() => (on ? t("{name} is on.", { name }) : t("{name} is off.", { name }))];
+      if (r.reloaded) parts.push(() => tp(r.reloaded, "{n} open conversation reloaded.", "{n} open conversations reloaded."));
       if (r.waiting)
-        parts.push(
+        parts.push(() =>
           tp(r.waiting, "{n} still working — it keeps it as it was until /reload, or its next start.", "{n} still working — they keep it as it was until /reload, or their next start."),
         );
-      setNote(parts.join(" "));
+      setNote(() => () => parts.map((part) => part()).join(" "));
     });
 
   const installed = useMemo(() => new Set(extensions.flatMap((e) => [e.name, packageName(e.spec)])), [extensions]);
@@ -1194,7 +1194,7 @@ function ExtensionsPanel({
 
         {note && (
           <p role="status" className="mt-2 text-xs text-fg-muted">
-            {note}
+            {note()}
           </p>
         )}
 

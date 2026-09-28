@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
-import { languageName, msg, t } from "../i18n";
+import { labelOf, languageName, msg, t } from "../i18n";
 
 /** What the voice service is doing, as its badge says it. */
 const INSTALL_STATE: Record<string, string> = {
@@ -72,7 +72,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
       </div>
     </details>
     <details className="group rounded-xl border border-line p-4">
-      <summary className="cursor-pointer text-sm font-medium">{t("Voice service")} <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-normal text-accent">{install?.state === 'absent' ? t("Not installed") : install?.state === 'running' ? t("Ready") : install?.state ? (INSTALL_STATE[install.state] ? t(INSTALL_STATE[install.state]) : install.state) : t("Checking…")}</span><span className="mt-1 block text-xs font-normal text-fg-muted">{t("Installation, GPU memory and service controls")}</span></summary>
+      <summary className="cursor-pointer text-sm font-medium">{t("Voice service")} <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-normal text-accent">{install?.state === 'absent' ? t("Not installed") : install?.state === 'running' ? t("Ready") : install?.state ? labelOf(INSTALL_STATE, install.state) : t("Checking…")}</span><span className="mt-1 block text-xs font-normal text-fg-muted">{t("Installation, GPU memory and service controls")}</span></summary>
     <div className="mt-4 space-y-3">
       <p className="text-xs text-fg-faint">{t("Install once on your NVIDIA Docker host. Setup downloads and quantizes Breeze, and installs Whisper. Allow 30 GB of disk space during setup.")}</p>
       <div className="flex gap-2 flex-wrap">

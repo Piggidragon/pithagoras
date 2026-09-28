@@ -1,4 +1,4 @@
-import { msg, t } from "./i18n";
+import { labelOf, msg } from "./i18n";
 
 /** pi's thinking levels, as they are shown: pi's own word for one it adds later. */
 const LEVELS: Record<string, string> = {
@@ -11,4 +11,4 @@ const LEVELS: Record<string, string> = {
   max: msg("max"),
 };
 
-export const effortLabel = (level: string): string => (LEVELS[level] ? t(LEVELS[level]) : level);
+export const effortLabel = (level: string): string => labelOf(LEVELS, level);

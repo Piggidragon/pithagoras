@@ -18,7 +18,8 @@ import { RowsSkeleton } from "./Skeleton";
 import { api, type ReportTarget, type ReportTo, type Routine, type Workspace } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
-import { formatDateTime, msg, t, tx } from "../i18n";
+import { formatDateTime, labelOf, msg, t, tx } from "../i18n";
+import { serverTime, sinceThen } from "../time";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -38,7 +39,7 @@ const STATUS_LABEL: Record<string, string> = {
   error: msg("error"),
   running: msg("running"),
 };
-const statusLabel = (status: string) => (STATUS_LABEL[status] ? t(STATUS_LABEL[status]) : status);
+const statusLabel = (status: string) => labelOf(STATUS_LABEL, status);
 
 const PRESETS = [
   { label: msg("Every 15 min"), cron: "*/15 * * * *" },
@@ -50,14 +51,10 @@ const PRESETS = [
 
 const when = (iso: string | null) => {
   if (!iso) return t("never");
-  const then = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z").getTime();
-  const mins = Math.round((Date.now() - then) / 60000);
-  if (!Number.isFinite(mins)) return iso;
-  if (mins < 0) return t("soon");
-  if (mins < 1) return t("just now");
-  if (mins < 60) return t("{n}m ago", { n: mins });
-  if (mins < 1440) return t("{n}h ago", { n: Math.round(mins / 60) });
-  return t("{n}d ago", { n: Math.round(mins / 1440) });
+  const then = serverTime(iso);
+  // A run stamped a moment ahead of this clock.
+  if (+then - Date.now() > 30_000) return t("soon");
+  return sinceThen(then) || iso;
 };
 
 /** datetime-local wants "YYYY-MM-DDTHH:mm" in local time, not an ISO string. */

@@ -3,7 +3,7 @@ import type { PortalEvent } from '../api';
 import { useFollowBottom } from '../use-follow-bottom';
 import { SHELL_TOOL, unwrap } from '../tool-activity';
 import { stripAnsi, toolOutputText } from '../transcript';
-import { t } from "../i18n";
+import { t, useLanguage } from "../i18n";
 
 type Run = { id: string; command: string; output: string; running: boolean; error: boolean; interrupted?: boolean };
 
@@ -121,6 +121,8 @@ export function VoiceTerminal({ events, limit, maxOutput, ended, focus, onFocuse
 /** One command. Kept apart so a run whose output has not changed is not cleaned of its codes again. */
 const TerminalRun = memo(function TerminalRun({ id, command, output, running, error, interrupted }: Run) {
   const shown = useMemo(() => stripAnsi(output), [output]);
+  // Memoized, so not drawn again from above when the language changes: it asks itself.
+  useLanguage();
   return <div data-run={id} className="voice-terminal-run">
     <div className="voice-terminal-command"><span aria-hidden>$</span><code>{command}</code>{running && <i aria-label={t("Command running")} />}{interrupted && <small>{t("interrupted")}</small>}</div>
     {shown && <pre className={error ? 'is-error' : ''}>{shown}</pre>}

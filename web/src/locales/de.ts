@@ -1169,6 +1169,8 @@ const de: Locale = {
     "Running beside the conversation": "Läuft neben dem Gespräch",
     "{name} — click to run /{command}": "{name} — klicken, um /{command} auszuführen",
     "Run /{command}": "/{command} ausführen",
+    // components/Select.tsx
+    "Choose…": "Auswählen…",
     // components/SessionsPage.tsx
     "Could not rename \"{name}\": {error}": "„{name}“ konnte nicht umbenannt werden: {error}",
     "Session name": "Name der Sitzung",
@@ -1611,7 +1613,7 @@ const de: Locale = {
     "ready to continue.": "bereit zum Weitermachen.",
     "Continuing": "Es geht weiter",
     "Continue": "Weitermachen",
-    "Giving up": "Wird abgebrochen",
+    "Giving up the {operation}": "{operation} wird abgebrochen",
     "Abort": "Abbrechen",
     // components/git/History.tsx
     "Compare this branch with its base — what a pull request would show": "Diesen Branch mit seiner Basis vergleichen — was ein Pull Request zeigen würde",
