@@ -509,11 +509,25 @@ export const api = {
   memoryConcept: (path: string) => json<MemoryConcept>(`/api/memory/concept?${new URLSearchParams({ path })}`),
   memorySearch: (q: string) => json<MemoryHit[]>(`/api/memory/search?${new URLSearchParams({ q })}`),
   memoryLog: () => json<MemoryChange[]>("/api/memory/log"),
+  memoryGraph: () => json<MemoryGraph>("/api/memory/graph"),
+  memoryTraces: () => json<MemoryTrace[]>("/api/memory/traces"),
+  memoryValidate: () => json<MemoryValidation>("/api/memory/validate"),
   setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number }) =>
     json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
+  setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string }) =>
+    json<{ understory: UnderstoryFeature }>("/api/features/understory/config", { method: "PUT", body: JSON.stringify(config) }),
+  installUnderstory: () =>
+    json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>("/api/features/understory/install", { method: "POST" }),
+  understoryAction: (action: "start" | "stop") =>
+    json<{ understory: UnderstoryFeature }>(`/api/features/understory/${action}`, { method: "POST" }),
+  removeUnderstory: (forgetMemory = false) =>
+    json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>(
+      `/api/features/understory/install${forgetMemory ? "?memory=forget" : ""}`,
+      { method: "DELETE" },
+    ),
   setUnderstoryFeature: (patch: { enabled: boolean; url?: string }) =>
     json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>("/api/features/understory", {
       method: "PUT",
@@ -1048,6 +1062,29 @@ export interface SubagentFeature {
   maxParallel: number;
 }
 
+/** The model that keeps Understory's memory, as the page is told it: never the key. */
+export type UnderstoryLlm =
+  | { source: "provider"; provider: string; model: string }
+  | { source: "custom"; baseUrl: string; model: string; format: "openai" | "anthropic"; hasKey?: boolean };
+
+/** What the page sends for it: a custom key only when it is being changed. */
+export type UnderstoryLlmChoice =
+  | { source: "provider"; provider: string; model: string }
+  | { source: "custom"; baseUrl: string; model: string; format: "openai" | "anthropic"; apiKey?: string };
+
+/** The Understory the portal runs itself, in a container of its own. */
+export interface ManagedUnderstory {
+  /** The portal can reach Docker. */
+  available: boolean;
+  image: boolean;
+  container: "absent" | "stopped" | "running";
+  pulling: { active: boolean; line: string; error?: string };
+  url: string;
+  config: { llm: UnderstoryLlm | null; dreamInterval: string };
+  /** Providers set up here that Understory can be pointed at. */
+  providers: { id: string; models: string[] }[];
+}
+
 /** Understory as the agent's memory, over MCP. */
 export interface UnderstoryFeature {
   enabled: boolean;
@@ -1057,6 +1094,7 @@ export interface UnderstoryFeature {
   adapterInstalled: boolean;
   /** Something answers at the address. */
   reachable: boolean;
+  managed: ManagedUnderstory;
   configError?: string;
 }
 
@@ -1089,6 +1127,29 @@ export interface MemoryChange {
   date: string;
   action: string;
   summary: string;
+}
+
+export interface MemoryGraph {
+  nodes: { path: string; title?: string; type?: string; description?: string; links: number }[];
+  edges: { source: string; target: string }[];
+}
+
+/** A run of Understory's own agent over the memory: a query, or a change. */
+export interface MemoryTrace {
+  id: string;
+  kind: string;
+  input: string;
+  startedAt: string;
+  durationMs?: number;
+  notation?: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+}
+
+export interface MemoryValidation {
+  conformant: boolean;
+  conceptCount?: number;
+  directoryCount?: number;
+  issues: { path: string; severity: "error" | "warning"; message: string }[];
 }
 
 export interface Features {

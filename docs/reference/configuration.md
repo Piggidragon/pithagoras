@@ -57,6 +57,8 @@ an empty field inherits, and clearing one hands the setting back.
 | `PI_SUBAGENT_BIN` | `pi` | The `pi` the bundled subagent tool starts. |
 | `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | Where Settings → Add-ons → Memory looks for Understory first. |
 | `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Understory's bearer token, named in `mcp.json` rather than copied into it. |
+| `UNDERSTORY_PORT` | `3800` | The port the Understory the portal runs listens on (host network). |
+| `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume holding that Understory's memory. |
 
 The host executor inherits the portal environment. The container executor currently forwards `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PI_PROVIDER`, and `PI_MODEL`; it does not forward arbitrary extension variables. Explicit session provider/model choices are passed as CLI arguments.
 

@@ -1,15 +1,16 @@
 import express, { type Router } from "express";
-import { UNDERSTORY, UNDERSTORY_TOKEN_ENV, understoryIn } from "../features.js";
+import { UNDERSTORY, understoryIn, understoryTokenOf } from "../features.js";
 import { readMcpFile } from "./mcp.js";
 
 /**
  * The agent's memory, to look through: Understory's own read API, handed on.
  *
  * Understory's web UI reads a small JSON API at its root — the tree of the
- * bundle, one concept, a search, the log of changes. Asked from here rather
+ * bundle, one concept, a search, the log of changes, the graph of links, the
+ * paths its queries took, whether the bundle is well-formed. Asked from here rather
  * than from the page: the address in mcp.json is where the portal reaches it,
  * which the browser may not (localhost, a Docker network, plain HTTP behind
- * an HTTPS portal), and the token stays on the server. Only these four, and
+ * an HTTPS portal), and the token stays on the server. Only these, and
  * only reading: nothing here changes the memory.
  *
  * It is not a documented API, so a failure says what Understory answered
@@ -20,15 +21,18 @@ const READS = {
   concept: { path: "/api/concept", params: ["path"] },
   search: { path: "/api/search", params: ["q"] },
   log: { path: "/api/log", params: [] },
+  graph: { path: "/api/graph", params: [] },
+  traces: { path: "/api/traces", params: [] },
+  validate: { path: "/api/validate", params: [] },
 } as const;
 
-/** Where Understory answers, while it is the agent's memory. */
-export function understoryOrigin(): string | undefined {
+/** Where Understory answers, and with what token, while it is the agent's memory. */
+export function understoryAt(): { origin: string; token?: string } | undefined {
   const { config, error } = readMcpFile();
   if (error || !understoryIn(config)) return undefined;
-  const url = (config.mcpServers[UNDERSTORY] as { url?: unknown }).url;
+  const entry = config.mcpServers[UNDERSTORY] as Record<string, unknown>;
   try {
-    return typeof url === "string" ? new URL(url).origin : undefined;
+    return typeof entry.url === "string" ? { origin: new URL(entry.url).origin, token: understoryTokenOf(entry) } : undefined;
   } catch {
     return undefined;
   }
@@ -39,15 +43,15 @@ export function memoryRouter(): Router {
 
   for (const [name, read] of Object.entries(READS)) {
     router.get(`/memory/${name}`, async (req, res) => {
-      const origin = understoryOrigin();
-      if (!origin) return res.status(409).json({ error: "Understory is not the agent's memory. Switch it on in Settings → Add-ons → Memory." });
+      const at = understoryAt();
+      if (!at) return res.status(409).json({ error: "Understory is not the agent's memory. Switch it on in Settings → Add-ons → Memory." });
       const query = new URLSearchParams();
       for (const key of read.params) {
         const value = req.query[key];
         if (typeof value !== "string" || !value.trim()) return res.status(400).json({ error: `${key} is required` });
         query.set(key, value.slice(0, 500));
       }
-      const token = process.env[UNDERSTORY_TOKEN_ENV];
+      const { origin, token } = at;
       try {
         const answer = await fetch(`${origin}${read.path}${read.params.length ? `?${query}` : ""}`, {
           headers: { accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },

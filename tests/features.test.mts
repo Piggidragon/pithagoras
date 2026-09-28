@@ -23,6 +23,7 @@ const {
   understoryEntry,
   understoryIn,
   understoryOn,
+  understoryTokenOf,
 } = await import("../server/src/features.ts");
 const { extraContextFiles } = await import("../server/src/pi/sdk-client.ts");
 
@@ -64,8 +65,8 @@ test("one subagent at a time unless pi's settings allow more, as the tool reads 
 
 test("Understory's entry puts its tools in front of the agent, and names its token rather than holding it", () => {
   assert.equal(understoryDefaultUrl(), "http://localhost:3800/mcp");
-  assert.deepEqual(understoryEntry("http://understory:3800/mcp", false), { url: "http://understory:3800/mcp", lifecycle: "lazy", directTools: true });
-  assert.deepEqual(understoryEntry("http://u/mcp", true), {
+  assert.deepEqual(understoryEntry("http://understory:3800/mcp"), { url: "http://understory:3800/mcp", lifecycle: "lazy", directTools: true });
+  assert.deepEqual(understoryEntry("http://u/mcp", { tokenEnv: "MEMORY_UNDERSTORY_AUTH_TOKEN" }), {
     url: "http://u/mcp",
     lifecycle: "lazy",
     directTools: true,
@@ -83,7 +84,7 @@ test("while Understory is the memory, MEMORY.md is not read; switched off, it is
   const names = (role?: string) => extraContextFiles(home, role).map((f) => path.basename(f.path));
 
   assert.deepEqual(names(), ["SOUL.md", "PrimaryUser.md", "MEMORY.md"]);
-  writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { understory: understoryEntry("http://u/mcp", false) } }));
+  writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { understory: understoryEntry("http://u/mcp") } }));
   assert.equal(understoryOn(), true);
   assert.deepEqual(names(), ["SOUL.md", "PrimaryUser.md"]);
   assert.deepEqual(names("primary"), ["SOUL.md", "PrimaryUser.md"]);
@@ -122,7 +123,7 @@ test("the memory is read through the portal: only Understory's read API, with it
     writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {} }));
     assert.equal((await get("/tree")).status, 409, "not while it is off");
 
-    writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { understory: understoryEntry(`http://127.0.0.1:${port}/mcp`, true) } }));
+    writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { understory: understoryEntry(`http://127.0.0.1:${port}/mcp`, { tokenEnv: "MEMORY_UNDERSTORY_AUTH_TOKEN" }) } }));
     process.env.MEMORY_UNDERSTORY_AUTH_TOKEN = "s3cret";
     assert.deepEqual(await get("/tree"), { status: 200, body: { name: "/", path: "/", kind: "directory", children: [] } });
     assert.deepEqual(asked.at(-1), { url: "/api/tree", auth: "Bearer s3cret" });
@@ -131,7 +132,9 @@ test("the memory is read through the portal: only Understory's read API, with it
     assert.equal((await get("/search")).status, 400, "a search needs something to look for");
     assert.deepEqual(await get("/concept?path=/gone.md"), { status: 404, body: { error: "Concept not found: /gone.md" } });
     assert.equal((await get("/log")).status, 502, "what is not JSON is Understory failing");
-    assert.equal((await fetch(`${at}/graph`)).status, 404, "nothing past the four reads");
+    assert.equal((await get("/graph")).status, 200);
+    assert.equal(asked.at(-1)!.url, "/api/graph");
+    assert.equal((await fetch(`${at}/chat`)).status, 404, "nothing past the reads: its chat writes");
     delete process.env.MEMORY_UNDERSTORY_AUTH_TOKEN;
     await get("/tree");
     assert.equal(asked.at(-1)!.auth, undefined);
@@ -139,4 +142,44 @@ test("the memory is read through the portal: only Understory's read API, with it
     understory.close();
     portal.close();
   }
+});
+
+test("the Understory the portal runs: its model from a provider or an address of its own, its tidying up, a token of its own", async () => {
+  const service = await import("../server/src/extensions/understory-service.ts");
+  assert.equal(service.intervalMs("6h"), 6 * 3_600_000);
+  assert.equal(service.intervalMs("sometimes"), null);
+  assert.equal(service.validInterval(""), true, "never is an interval too");
+  assert.equal(service.validInterval("30m"), true);
+  assert.equal(service.validInterval("2m"), false, "Understory's floor is five minutes");
+
+  writeFileSync(
+    path.join(agentDir, "models.json"),
+    JSON.stringify({ providers: { "llama-swap": { baseUrl: "http://gpu:8080/v1", api: "openai-completions", models: [{ id: "Ornith" }] }, claude: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "CLAUDE_KEY", models: [{ id: "sonnet" }] } } }),
+  );
+  process.env.CLAUDE_KEY = "sk-from-env";
+  assert.deepEqual(service.llmEnv({ source: "provider", provider: "llama-swap", model: "Ornith" }), { baseUrl: "http://gpu:8080/v1", apiKey: "none", model: "Ornith", format: "openai" });
+  assert.deepEqual(service.llmEnv({ source: "provider", provider: "claude", model: "sonnet" }), { baseUrl: "https://api.anthropic.com", apiKey: "sk-from-env", model: "sonnet", format: "anthropic" });
+  assert.throws(() => service.llmEnv({ source: "provider", provider: "gone", model: "x" }), /no provider "gone"/);
+
+  const token = service.token();
+  assert.equal(service.token(), token, "made once");
+  const env = service.spec({ llm: { source: "provider", provider: "llama-swap", model: "Ornith" }, dreamInterval: "6h" }, token).Env;
+  for (const line of ["BUNDLE_ROOT=/bundle", `AUTH_TOKEN=${token}`, "LLM_API_BASE_URL=http://gpu:8080/v1", "LLM_MODEL=Ornith", "DREAM_INTERVAL=6h"]) assert.ok(env.includes(line), line);
+  assert.ok(!service.spec({ llm: { source: "provider", provider: "llama-swap", model: "Ornith" }, dreamInterval: "" }, token).Env.some((l) => l.startsWith("DREAM_INTERVAL")), "never is no interval at all");
+  assert.throws(() => service.spec({ llm: null, dreamInterval: "" }, token), /Choose the model/);
+
+  // A key the page never holds is kept when it sends none.
+  service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d" });
+  service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai" }, dreamInterval: "1d" });
+  assert.deepEqual(service.config(), { llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d" });
+  service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-reasoner", format: "openai", apiKey: "" }, dreamInterval: "" });
+  assert.equal((service.config().llm as { apiKey?: string }).apiKey, "", "an empty one clears it");
+});
+
+test("the portal's own Understory is written with its token; one run elsewhere names it from the environment", () => {
+  assert.deepEqual(understoryEntry("http://127.0.0.1:3800/mcp", { token: "t0k" }), { url: "http://127.0.0.1:3800/mcp", lifecycle: "lazy", directTools: true, auth: "bearer", bearerToken: "t0k" });
+  assert.equal(understoryTokenOf({ bearerToken: "t0k" }), "t0k");
+  process.env.SOME_TOKEN = "from-env";
+  assert.equal(understoryTokenOf({ bearerTokenEnv: "SOME_TOKEN" }), "from-env");
+  assert.equal(understoryTokenOf({ url: "x" }), undefined);
 });

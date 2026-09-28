@@ -18,6 +18,7 @@ import { AgentPage } from "./components/AgentPage";
 import { RoutinesPage } from "./components/RoutinesPage";
 import { AuditPage } from "./components/AuditPanel";
 import { BrowserPage } from "./components/BrowserPage";
+import { MemoryPage } from "./components/MemoryPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { pollWhileVisible, reconnectDelay } from "./poll";
@@ -75,6 +76,7 @@ export default function App() {
       <Route path="/agent" element={<Shell view="agent" />} />
       <Route path="/routines" element={<Shell view="routines" />} />
       <Route path="/browser" element={<Shell view="browser" />} />
+      <Route path="/memory" element={<Shell view="memory" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
@@ -95,7 +97,7 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "audit";
+  view?: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "audit";
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
@@ -130,6 +132,15 @@ function Shell({
   // Asked once: the browser is optional, and the answer only changes when
   // somebody starts or stops a container.
   const [hasBrowser, setHasBrowser] = useState(false);
+  // Whether Understory is the agent's memory, which is when its page is in the sidebar.
+  const [hasMemory, setHasMemory] = useState(false);
+  useEffect(() => {
+    const ask = () => api.features().then((f) => setHasMemory(f.understory.enabled)).catch(() => {});
+    ask();
+    // Said by Settings → Add-ons when it switches Understory, so the sidebar follows at once.
+    window.addEventListener("features-changed", ask);
+    return () => window.removeEventListener("features-changed", ask);
+  }, []);
   const [events, setEvents] = useState<PortalEvent[]>([]);
   /** The versions of the chat's messages, as its stream says: see messageVersions on the server. */
   const [versions, setVersions] = useState<Record<number, number[]>>({});
@@ -462,6 +473,7 @@ function Shell({
         activeId={sessionId ?? null}
         view={view}
         hasBrowser={hasBrowser}
+        hasMemory={hasMemory}
         places={places}
         onNavigate={(to) => { setMobileNav(false); navigate(`/${to}`); }}
         onOpenFolder={(key) => { setMobileNav(false); navigate(`/sessions?folder=${encodeURIComponent(key)}`); }}
@@ -545,6 +557,8 @@ function Shell({
           <RoutinesPage onOpenSession={(id) => navigate(`/s/${id}`)} />
         ) : view === "browser" ? (
           <BrowserPage onOpenSession={(id) => navigate(`/s/${id}`)} />
+        ) : view === "memory" ? (
+          <MemoryPage />
         ) : view === "audit" ? (
           <AuditPage />
         ) : active ? (

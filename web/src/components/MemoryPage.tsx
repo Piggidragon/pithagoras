@@ -1,0 +1,668 @@
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Streamdown } from "streamdown";
+import {
+  LuBrain,
+  LuChevronDown,
+  LuChevronLeft,
+  LuChevronRight,
+  LuCircleCheck,
+  LuFileText,
+  LuFolder,
+  LuHistory,
+  LuLocateFixed,
+  LuMinus,
+  LuPlus,
+  LuRefreshCw,
+  LuSearch,
+  LuTriangleAlert,
+  LuWaypoints,
+  LuX,
+} from "react-icons/lu";
+import {
+  api,
+  type MemoryChange,
+  type MemoryConcept,
+  type MemoryGraph,
+  type MemoryHit,
+  type MemoryNode,
+  type MemoryTrace,
+  type MemoryValidation,
+} from "../api";
+import { bounds, colourOf, layout } from "../memory-graph";
+import { NOTE_LINK, linkNotes } from "../memory-links";
+
+/**
+ * The agent's memory in Understory, laid out as Understory's own page lays it
+ * out: its folders and notes with a search down the side, and a note, the log
+ * of changes or the graph of links beside them. Read only — the agent keeps
+ * its memory, through its tools. Everything is asked through the portal (see
+ * server/src/api/memory.ts), so it works wherever the portal does.
+ *
+ * What is open is in the address: `?note=<path>`, or `?view=log|graph|issues`,
+ * so it can be linked to and Back goes back through it.
+ */
+type View = "log" | "graph" | "issues";
+
+export function MemoryPage() {
+  const [params, setParams] = useSearchParams();
+  const note = params.get("note");
+  const asView = params.get("view");
+  const view: View | null = asView === "log" || asView === "graph" || asView === "issues" ? asView : null;
+  const openNote = (path: string) => setParams({ note: path });
+  const openView = (v: View) => setParams({ view: v });
+  const close = () => setParams({});
+
+  const [tree, setTree] = useState<MemoryNode | null>(null);
+  const [validation, setValidation] = useState<MemoryValidation | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  // Bumped by the refresh button: what is open reads itself again.
+  const [round, setRound] = useState(0);
+  const [query, setQuery] = useState("");
+  const [asked, setAsked] = useState("");
+  const [hits, setHits] = useState<MemoryHit[] | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    setFailed(null);
+    setRound((r) => r + 1);
+    Promise.all([api.memoryTree(), api.memoryValidate().catch(() => null)])
+      .then(([t, v]) => {
+        setTree(t);
+        setValidation(v);
+      })
+      .catch((e: Error) => setFailed(e.message))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  // Asked a moment after the last key, not on every one; the latest asked is what shows.
+  useEffect(() => {
+    const t = setTimeout(() => setAsked(query.trim()), query ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [query]);
+  useEffect(() => {
+    if (!asked) {
+      setHits(null);
+      return;
+    }
+    let current = true;
+    api.memorySearch(asked).then(
+      (found) => current && setHits(found),
+      (e: Error) => current && setFailed(e.message),
+    );
+    return () => {
+      current = false;
+    };
+  }, [asked]);
+
+  if (failed && !tree) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="max-w-md rounded-xl border border-dashed border-line px-6 py-8 text-center">
+          <LuBrain className="mx-auto h-6 w-6 text-fg-faint" />
+          <p className="mt-3 text-sm text-fg-muted">The memory could not be read.</p>
+          <p className="mt-2 text-xs text-fg-faint">{failed}</p>
+          <div className="mt-4 flex items-center justify-center gap-4 text-xs">
+            <button type="button" onClick={load} className="text-accent hover:underline">
+              Try again
+            </button>
+            <Link to="/settings/add-ons" className="text-accent hover:underline">
+              Settings → Add-ons → Memory
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const open = Boolean(note || view);
+  return (
+    <div className="flex h-full min-h-0">
+      {/* On a phone, the side or what is open: one at a time. */}
+      <aside aria-label="Memory" className={`${open ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-line md:w-72`}>
+        <div className="flex items-center gap-2 px-3 pb-2 pt-3">
+          <LuBrain className="h-4 w-4 text-accent" />
+          <h1 className="text-sm font-medium text-fg">Memory</h1>
+          {validation && (
+            <button
+              type="button"
+              onClick={() => openView("issues")}
+              title={validation.conformant ? "The bundle is well-formed" : `${validation.issues.length} issues in the bundle`}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${validation.conformant ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"}`}
+            >
+              {validation.conformant ? "conformant" : `${validation.issues.length} issues`}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            aria-label="Read the memory again"
+            title="Read the memory again"
+            className="ml-auto rounded p-1.5 text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40"
+          >
+            <LuRefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+        <div className="relative px-3">
+          <LuSearch className="pointer-events-none absolute left-5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search…"
+            aria-label="Search the memory"
+            className={`w-full rounded-lg border border-line bg-raised/60 py-1.5 pl-8 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60 ${query ? "pr-8" : "pr-3"}`}
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear the search"
+              className="absolute right-4 top-1/2 -translate-y-1/2 rounded p-1 text-fg-faint hover:text-fg"
+            >
+              <LuX className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        {failed && tree && <p className="px-3 pt-2 text-xs text-warn">{failed}</p>}
+        <nav aria-label="Notes" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+          {hits ? (
+            <Hits hits={hits} asked={asked} open={note} onOpen={openNote} />
+          ) : !tree ? (
+            <div className="skeleton-group space-y-1.5 px-1" aria-label="Loading the memory">
+              {[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-6 w-full" />)}
+            </div>
+          ) : !tree.children?.length ? (
+            <p className="px-2 py-6 text-center text-xs text-fg-subtle">Nothing is in the memory yet. The agent adds to it as it learns.</p>
+          ) : (
+            <ul className="space-y-0.5">
+              {tree.children.map((n) => (
+                <TreeNode key={n.path} node={n} depth={0} open={note} onOpen={openNote} />
+              ))}
+            </ul>
+          )}
+        </nav>
+        <div className="grid grid-cols-2 border-t border-line">
+          {(["log", "graph"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => (view === v ? close() : openView(v))}
+              aria-pressed={view === v}
+              className={`flex items-center justify-center gap-1.5 py-2.5 text-xs transition ${
+                view === v ? "bg-accent/10 text-accent" : "text-fg-muted hover:bg-fg/5 hover:text-fg"
+              }`}
+            >
+              {v === "log" ? <LuHistory className="h-3.5 w-3.5" /> : <LuWaypoints className="h-3.5 w-3.5" />}
+              {v === "log" ? "Log" : "Graph"}
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <main className={`${open ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
+        {note ? (
+          <Note key={`${note}#${round}`} path={note} onOpen={openNote} onBack={close} />
+        ) : view === "log" ? (
+          <LogView key={round} onOpen={openNote} onBack={close} />
+        ) : view === "graph" ? (
+          <GraphView key={round} onOpen={openNote} onBack={close} />
+        ) : view === "issues" ? (
+          <Issues validation={validation} onOpen={openNote} onBack={close} />
+        ) : (
+          <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-fg-subtle">
+            <div>
+              <p>Choose a note, or open the log or the graph.</p>
+              {validation?.conceptCount !== undefined && (
+                <p className="mt-1 text-xs text-fg-faint">
+                  {validation.conceptCount} {validation.conceptCount === 1 ? "note" : "notes"} in {validation.directoryCount ?? 0}{" "}
+                  {validation.directoryCount === 1 ? "folder" : "folders"}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+/** A heading over what is open, with the way back on a phone. */
+function Bar({ title, onBack, children }: { title: ReactNode; onBack: () => void; children?: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
+      <button type="button" onClick={onBack} aria-label="Back to the notes" className="-ml-1 rounded p-1 text-fg-subtle hover:text-fg md:hidden">
+        <LuChevronLeft className="h-4 w-4" />
+      </button>
+      <h2 className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+const countNotes = (node: MemoryNode): number =>
+  node.kind === "concept" ? 1 : (node.children ?? []).reduce((n, c) => n + countNotes(c), 0);
+
+function TreeNode({ node, depth, open, onOpen }: { node: MemoryNode; depth: number; open: string | null; onOpen: (path: string) => void }) {
+  const [expanded, setExpanded] = useState(true);
+  const pad = { paddingLeft: `${0.5 + depth * 0.875}rem` };
+  if (node.kind === "directory") {
+    return (
+      <li>
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          style={pad}
+          className="flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-xs text-fg-muted transition hover:bg-fg/5"
+        >
+          {expanded ? <LuChevronDown className="h-3 w-3 shrink-0" /> : <LuChevronRight className="h-3 w-3 shrink-0" />}
+          <LuFolder className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+          <span className="min-w-0 flex-1 truncate">{node.name}/</span>
+          <span className="shrink-0 text-[10px] text-fg-faint">{countNotes(node)}</span>
+        </button>
+        {expanded && (
+          <ul className="space-y-0.5">
+            {(node.children ?? []).map((c) => (
+              <TreeNode key={c.path} node={c} depth={depth + 1} open={open} onOpen={onOpen} />
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  }
+  const here = open === node.path;
+  // Understory's own index and log are files too, set apart as its page sets them.
+  const reserved = node.kind === "reserved";
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen(node.path)}
+        aria-current={here ? "page" : undefined}
+        title={node.description ?? node.path}
+        style={pad}
+        className={`flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-xs transition ${
+          here ? "bg-accent/12 text-accent" : reserved ? "text-fg-faint hover:bg-fg/5" : "text-fg hover:bg-fg/5"
+        }`}
+      >
+        <span className="w-3 shrink-0" />
+        <LuFileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
+        <span className={`min-w-0 flex-1 truncate ${reserved ? "italic" : ""}`}>{node.title || node.name}</span>
+        {node.type && (
+          <span className="max-w-[45%] shrink-0 truncate rounded px-1.5 py-0.5 text-[10px]" style={{ color: colourOf(node.type), background: `${colourOf(node.type)}1f` }}>
+            {node.type}
+          </span>
+        )}
+      </button>
+    </li>
+  );
+}
+
+function Hits({ hits, asked, open, onOpen }: { hits: MemoryHit[]; asked: string; open: string | null; onOpen: (path: string) => void }) {
+  if (!hits.length) return <p className="px-2 py-6 text-center text-xs text-fg-subtle">Nothing in the memory matches “{asked}”.</p>;
+  return (
+    <ul aria-label="Found in the memory" className="space-y-1">
+      {hits.map((h) => (
+        <li key={h.path}>
+          <button
+            type="button"
+            onClick={() => onOpen(h.path)}
+            aria-current={open === h.path ? "page" : undefined}
+            className={`w-full rounded-lg px-2.5 py-2 text-left transition ${open === h.path ? "bg-accent/12" : "hover:bg-fg/5"}`}
+          >
+            <p className={`truncate text-xs ${open === h.path ? "text-accent" : "text-fg"}`}>{h.title || h.path}</p>
+            {(h.description || h.snippet) && <p className="mt-0.5 line-clamp-2 text-[11px] text-fg-faint">{h.description || h.snippet}</p>}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Markdown from the memory. A link to another of its notes opens it here;
+ * one to the web opens in a tab of its own.
+ */
+function MemoryMarkdown({ text, from, onOpen }: { text: string; from: string; onOpen: (path: string) => void }) {
+  const opener = useRef(onOpen);
+  opener.current = onOpen;
+  const components = useMemo(
+    () => ({
+      a: ({ href, children }: { href?: string; children?: ReactNode }) =>
+        href?.startsWith(NOTE_LINK) ? (
+          <a
+            href={href}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              opener.current(decodeURIComponent(href.slice(NOTE_LINK.length)));
+            }}
+            className="text-accent hover:underline"
+          >
+            {children}
+          </a>
+        ) : (
+          <a href={href} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+            {children}
+          </a>
+        ),
+    }),
+    [],
+  );
+  const linked = useMemo(() => linkNotes(text, from), [text, from]);
+  return <Streamdown components={components}>{linked}</Streamdown>;
+}
+
+function Note({ path, onOpen, onBack }: { path: string; onOpen: (path: string) => void; onBack: () => void }) {
+  const [concept, setConcept] = useState<MemoryConcept | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    api.memoryConcept(path).then(
+      (c) => current && setConcept(c),
+      (e: Error) => current && setFailed(e.message),
+    );
+    return () => {
+      current = false;
+    };
+  }, [path]);
+  const f = concept?.frontmatter;
+  const when = typeof f?.timestamp === "string" ? new Date(f.timestamp) : null;
+  const title = f?.title || path.split("/").pop();
+  return (
+    <>
+      <Bar title={title} onBack={onBack} />
+      <article aria-label={title} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
+        <div className="mx-auto max-w-3xl">
+          {failed ? (
+            <p className="text-sm text-warn">{failed}</p>
+          ) : !concept ? (
+            <div className="skeleton-group space-y-2" aria-label="Loading the note">
+              <div className="skeleton h-24 w-full" />
+              <div className="skeleton h-40 w-full" />
+            </div>
+          ) : (
+            <>
+              <header className="rounded-xl border border-line bg-raised/40 p-4">
+                {(f?.type || (Array.isArray(f?.tags) && f.tags.length) || when) && (
+                  <p className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    {f?.type && (
+                      <span className="rounded px-1.5 py-0.5" style={{ color: colourOf(f.type), background: `${colourOf(f.type)}1f` }}>
+                        {f.type}
+                      </span>
+                    )}
+                    {(Array.isArray(f?.tags) ? f.tags : []).map((t) => (
+                      <span key={String(t)} className="rounded bg-fg/5 px-1.5 py-0.5 text-fg-subtle">
+                        #{String(t)}
+                      </span>
+                    ))}
+                    {when && !Number.isNaN(when.getTime()) && <span className="ml-auto text-fg-faint">{when.toLocaleString()}</span>}
+                  </p>
+                )}
+                <h3 className="mt-2 text-lg font-semibold text-fg">{title}</h3>
+                {f?.description && <p className="mt-1 text-sm text-fg-muted">{f.description}</p>}
+                <p className="mt-2 font-mono text-[10px] text-fg-faint">{path}</p>
+              </header>
+              <div className="md prose prose-sm mt-4 max-w-none text-sm text-fg">
+                <MemoryMarkdown text={concept.body} from={path} onOpen={onOpen} />
+              </div>
+            </>
+          )}
+        </div>
+      </article>
+    </>
+  );
+}
+
+function LogView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack: () => void }) {
+  const [log, setLog] = useState<MemoryChange[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    api.memoryLog().then(setLog, (e: Error) => setFailed(e.message));
+  }, []);
+  // Newest first: the log is kept oldest first, as it was written.
+  const recent = useMemo(() => [...(log ?? [])].reverse(), [log]);
+  return (
+    <>
+      <Bar title="Log" onBack={onBack} />
+      <section aria-label="Changes to the memory" className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
+        <div className="mx-auto max-w-3xl">
+          {failed ? (
+            <p className="text-sm text-warn">{failed}</p>
+          ) : !log ? (
+            <div className="skeleton-group space-y-2" aria-label="Loading the log">
+              {[0, 1, 2].map((i) => <div key={i} className="skeleton h-12 w-full" />)}
+            </div>
+          ) : recent.length === 0 ? (
+            <p className="text-sm text-fg-subtle">Nothing has changed yet.</p>
+          ) : (
+            <ol className="space-y-3 border-l border-line pl-4">
+              {recent.map((c, i) => (
+                <li key={i} className="relative text-sm">
+                  <span className="absolute -left-[1.3rem] top-1.5 h-2 w-2 rounded-full bg-accent/60" />
+                  <p className="flex items-center gap-2 text-[11px] text-fg-faint">
+                    {c.date}
+                    <span className="rounded bg-fg/5 px-1.5 py-0.5 text-fg-subtle">{c.action}</span>
+                  </p>
+                  <div className="md mt-0.5 text-fg">
+                    <MemoryMarkdown text={c.summary} from="/" onOpen={onOpen} />
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function Issues({ validation, onOpen, onBack }: { validation: MemoryValidation | null; onOpen: (path: string) => void; onBack: () => void }) {
+  return (
+    <>
+      <Bar title="Is the bundle well-formed?" onBack={onBack} />
+      <section className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
+        <div className="mx-auto max-w-3xl text-sm">
+          {!validation ? (
+            <p className="text-fg-subtle">Understory did not say.</p>
+          ) : validation.conformant && !validation.issues.length ? (
+            <p className="flex items-center gap-2 text-ok">
+              <LuCircleCheck className="h-4 w-4" /> Every note is where and how the format wants it.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {validation.issues.map((issue, i) => (
+                <li key={i} className="flex items-start gap-2 rounded-lg border border-line bg-raised/40 px-3 py-2">
+                  <LuTriangleAlert className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${issue.severity === "error" ? "text-danger" : "text-warn"}`} />
+                  <div className="min-w-0">
+                    <button type="button" onClick={() => onOpen(issue.path)} className="font-mono text-[11px] text-accent hover:underline">
+                      {issue.path}
+                    </button>
+                    <p className="text-xs text-fg-muted">{issue.message}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+/** Tokens, short: 9.7k. */
+const tokens = (n?: number) => (n === undefined ? "?" : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack: () => void }) {
+  const [graph, setGraph] = useState<MemoryGraph | null>(null);
+  const [traces, setTraces] = useState<MemoryTrace[]>([]);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    api.memoryGraph().then(setGraph, (e: Error) => setFailed(e.message));
+    api.memoryTraces().then(setTraces, () => {});
+  }, []);
+
+  const placed = useMemo(() => (graph ? layout(graph.nodes.map((n) => n.path), graph.edges) : []), [graph]);
+  const where = useMemo(() => new Map(placed.map((p) => [p.path, p])), [placed]);
+  const fit = useMemo(() => bounds(placed), [placed]);
+  const [box, setBox] = useState(fit);
+  useEffect(() => setBox(fit), [fit]);
+  const types = useMemo(() => [...new Set((graph?.nodes ?? []).map((n) => n.type).filter((t): t is string => !!t))].sort(), [graph]);
+
+  const svg = useRef<SVGSVGElement>(null);
+  /** Zoom by `factor` around a point in the drawing's own units. */
+  const zoom = (factor: number, cx = box.x + box.width / 2, cy = box.y + box.height / 2) =>
+    setBox((b) => ({ x: cx - (cx - b.x) * factor, y: cy - (cy - b.y) * factor, width: b.width * factor, height: b.height * factor }));
+  // Not passive: a wheel over the graph zooms it rather than scrolling the page.
+  useEffect(() => {
+    const el = svg.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      setBox((b) => {
+        const scale = Math.max(b.width / r.width, b.height / r.height);
+        const cx = b.x + b.width / 2 + (e.clientX - r.left - r.width / 2) * scale;
+        const cy = b.y + b.height / 2 + (e.clientY - r.top - r.height / 2) * scale;
+        const f = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+        return { x: cx - (cx - b.x) * f, y: cy - (cy - b.y) * f, width: b.width * f, height: b.height * f };
+      });
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    return () => el.removeEventListener("wheel", wheel);
+  }, [graph]);
+
+  const drag = useRef<{ x: number; y: number } | null>(null);
+  const down = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if ((e.target as Element).closest("[data-note]")) return;
+    drag.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const move = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if (!drag.current || !svg.current) return;
+    const r = svg.current.getBoundingClientRect();
+    const dx = e.clientX - drag.current.x;
+    const dy = e.clientY - drag.current.y;
+    drag.current = { x: e.clientX, y: e.clientY };
+    setBox((b) => {
+      const scale = Math.max(b.width / r.width, b.height / r.height);
+      return { ...b, x: b.x - dx * scale, y: b.y - dy * scale };
+    });
+  };
+  const up = () => (drag.current = null);
+
+  return (
+    <>
+      <Bar title="Graph" onBack={onBack} />
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {failed ? (
+          <p className="p-4 text-sm text-warn">{failed}</p>
+        ) : !graph ? (
+          <div className="skeleton m-4 h-64" aria-label="Loading the graph" />
+        ) : (
+          <>
+            <svg
+              ref={svg}
+              role="img"
+              aria-label={`The memory's notes and their links: ${graph.nodes.length} notes, ${graph.edges.length} links`}
+              viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
+              className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
+              onPointerDown={down}
+              onPointerMove={move}
+              onPointerUp={up}
+              onPointerCancel={up}
+            >
+              {graph.edges.map((e, i) => {
+                const a = where.get(e.source);
+                const b = where.get(e.target);
+                return a && b ? <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="currentColor" className="text-fg/20" strokeWidth={1.2} /> : null;
+              })}
+              {graph.nodes.map((n) => {
+                const p = where.get(n.path)!;
+                const r = 6 + Math.min(n.links, 10) * 0.8;
+                const title = n.title || n.path;
+                return (
+                  <g
+                    key={n.path}
+                    data-note
+                    role="button"
+                    tabIndex={0}
+                    aria-label={title}
+                    onClick={() => onOpen(n.path)}
+                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen(n.path))}
+                    className="cursor-pointer outline-none [&:focus-visible_circle]:stroke-accent"
+                  >
+                    <title>{n.description ? `${title} — ${n.description}` : title}</title>
+                    {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" stroke="#ef4444" strokeWidth={1.5} />}
+                    <circle cx={p.x} cy={p.y} r={r} fill={colourOf(n.type)} stroke="transparent" strokeWidth={3} />
+                    <text x={p.x} y={p.y + r + 13} textAnchor="middle" className="fill-fg text-[11px]">
+                      {title.length > 32 ? `${title.slice(0, 31)}…` : title}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+
+            {(types.length > 0 || graph.nodes.some((n) => n.links === 0)) && (
+              <ul aria-label="What the colours are" className="absolute left-3 top-3 max-w-[45%] space-y-1 rounded-lg border border-line bg-surface/90 px-3 py-2 text-[11px] text-fg-muted">
+                {types.map((t) => (
+                  <li key={t} className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colourOf(t) }} />
+                    <span className="truncate">{t}</span>
+                  </li>
+                ))}
+                {graph.nodes.some((n) => n.links === 0) && (
+                  <li className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-[#ef4444]" />
+                    orphan (unlinked)
+                  </li>
+                )}
+              </ul>
+            )}
+
+            {traces.length > 0 && (
+              <details className="absolute right-3 top-3 w-72 max-w-[calc(100%-1.5rem)] rounded-lg border border-line bg-surface/90 text-[11px] max-md:hidden">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-fg">Query paths</summary>
+                <ul className="max-h-72 space-y-2 overflow-y-auto px-3 pb-3">
+                  {traces.slice(0, 30).map((t) => (
+                    <li key={t.id} title={t.input}>
+                      <p className="flex items-center gap-1.5 text-fg">
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${t.kind === "mutation" ? "bg-warn" : "bg-accent"}`} />
+                        <span className="truncate">{t.input}</span>
+                      </p>
+                      <p className="mt-0.5 flex gap-2 font-mono text-[10px] text-fg-faint">
+                        <span className="min-w-0 flex-1 truncate">{t.notation}</span>
+                        <span className="shrink-0">
+                          {tokens(t.usage?.inputTokens)}→{tokens(t.usage?.outputTokens)} tok
+                        </span>
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
+            <div className="absolute bottom-10 right-3 flex flex-col overflow-hidden rounded-lg border border-line bg-surface/90">
+              <button type="button" onClick={() => zoom(1 / 1.3)} aria-label="Zoom in" className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
+                <LuPlus className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={() => zoom(1.3)} aria-label="Zoom out" className="border-y border-line p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
+                <LuMinus className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={() => setBox(fit)} aria-label="Show all of it" className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
+                <LuLocateFixed className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <p className="absolute bottom-3 left-3 text-[11px] text-fg-faint">
+              {graph.nodes.length} {graph.nodes.length === 1 ? "note" : "notes"} · {graph.edges.length} {graph.edges.length === 1 ? "link" : "links"} — drag to
+              move · scroll to zoom · click to open
+            </p>
+          </>
+        )}
+      </div>
+    </>
+  );
+}

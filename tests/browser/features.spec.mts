@@ -1,11 +1,18 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /** The portal with no server: Settings → Add-ons, over canned answers for the opt-in features. */
-async function portal(page: Page, { reachable = true, available = true } = {}) {
+async function portal(page: Page, { reachable = true, available = true, docker = false, llm = null as any } = {}) {
   const sent: { path: string; body: any }[] = [];
   const state = {
     subagent: { available, installed: false, enabled: false, source: null as string | null, mode: 'interrupt', maxParallel: 1 },
-    understory: { enabled: false, url: 'http://localhost:3800/mcp', tokenSet: false, adapterInstalled: false, reachable },
+    understory: {
+      enabled: false, url: 'http://localhost:3800/mcp', tokenSet: false, adapterInstalled: false, reachable,
+      managed: {
+        available: docker, image: false, container: 'absent', pulling: { active: false, line: '' }, url: 'http://127.0.0.1:3800/mcp',
+        config: { llm, dreamInterval: '' },
+        providers: [{ id: 'llama-swap', models: ['Ornith', 'Small'] }, { id: 'vllm', models: ['Qwen'] }],
+      },
+    },
   };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
@@ -32,6 +39,26 @@ async function portal(page: Page, { reachable = true, available = true } = {}) {
       if (patch.maxParallel) state.subagent.maxParallel = patch.maxParallel;
       if (patch.enabled !== undefined) Object.assign(state.subagent, { enabled: patch.enabled, installed: patch.enabled, source: patch.enabled ? '/app/extensions/subagent' : null });
       body = { subagent: state.subagent, reloaded: 1, waiting: 1 };
+    } else if (p === '/api/features/understory/config' && method === 'PUT') {
+      const patch = route.request().postDataJSON();
+      sent.push({ path: p, body: patch });
+      const { apiKey, ...llm } = patch.llm;
+      state.understory.managed.config = { llm: llm.source === 'custom' ? { ...llm, hasKey: Boolean(apiKey) || state.understory.managed.config.llm?.hasKey } : llm, dreamInterval: patch.dreamInterval };
+      body = { understory: state.understory };
+    } else if (p === '/api/features/understory/install' && method === 'POST') {
+      sent.push({ path: p, body: null });
+      Object.assign(state.understory.managed, { container: 'running', image: true });
+      Object.assign(state.understory, { enabled: true, adapterInstalled: true, tokenSet: true, url: state.understory.managed.url });
+      body = { understory: state.understory, reloaded: 1, waiting: 0 };
+    } else if (p === '/api/features/understory/install' && method === 'DELETE') {
+      sent.push({ path: `${p}${url.search}`, body: null });
+      Object.assign(state.understory.managed, { container: 'absent' });
+      Object.assign(state.understory, { enabled: false });
+      body = { understory: state.understory, reloaded: 1, waiting: 0 };
+    } else if (p === '/api/features/understory/stop' && method === 'POST') {
+      sent.push({ path: p, body: null });
+      state.understory.managed.container = 'stopped';
+      body = { understory: state.understory };
     } else if (p === '/api/features/understory' && method === 'PUT') {
       const patch = route.request().postDataJSON();
       sent.push({ path: p, body: patch });
@@ -106,7 +133,7 @@ test('Understory is off until switched on, then points the agent at the address 
   await expect(memory).toHaveAttribute('aria-checked', 'true');
   expect(sent).toEqual([{ path: '/api/features/understory', body: { enabled: true, url: 'http://understory:3800/mcp' } }]);
   await expect(addons(page).getByText(/On: MEMORY\.md is not read while it is/)).toBeVisible();
-  await expect(addons(page).getByRole('link', { name: 'Read the memory on the Agent page' })).toHaveAttribute('href', '/agent?tab=memory');
+  await expect(addons(page).getByRole('link', { name: 'Read the memory' })).toHaveAttribute('href', '/memory');
 
   await memory.click();
   await expect(memory).toHaveAttribute('aria-checked', 'false');
@@ -118,6 +145,72 @@ test('Understory that does not answer is said so before it is switched on', asyn
   await page.goto('/settings/add-ons');
   await addons(page).getByRole('tab', { name: 'Memory' }).click();
   await expect(addons(page).getByText('Nothing answers at http://localhost:3800 — start Understory first')).toBeVisible();
+});
+
+test('the portal runs Understory: a provider and model set up here, how often it tidies up, then installed as the memory', async ({ page }) => {
+  const { sent } = await portal(page, { docker: true });
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Memory' }).click();
+  const here = addons(page).getByRole('region', { name: 'Understory run here' });
+  const install = here.getByRole('button', { name: "Install and use as the agent's memory" });
+  await expect(install).toBeDisabled();
+  // One run elsewhere is there, and out of the way.
+  await expect(addons(page).getByText('Or use one you run yourself')).toBeVisible();
+  await expect(addons(page).getByLabel("Understory's MCP address")).toBeHidden();
+
+  await here.getByRole('combobox', { name: 'Model' }).click();
+  await page.getByRole('option', { name: 'Small' }).click();
+  await here.getByRole('combobox', { name: 'Tidying up' }).click();
+  await page.getByRole('option', { name: 'Every 6 hours' }).click();
+  await here.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(install).toBeEnabled();
+  await install.click();
+  await expect(here.getByText('running')).toBeVisible();
+  await expect(addons(page).getByRole('switch', { name: "Use Understory as the agent's memory" })).toHaveAttribute('aria-checked', 'true');
+  expect(sent.map((s) => [s.path, s.body])).toEqual([
+    ['/api/features/understory/config', { llm: { source: 'provider', provider: 'llama-swap', model: 'Small' }, dreamInterval: '6h' }],
+    ['/api/features/understory/install', null],
+  ]);
+
+  // A change now makes it again.
+  await here.getByRole('combobox', { name: 'Tidying up' }).click();
+  await page.getByRole('option', { name: 'Never' }).click();
+  await here.getByRole('button', { name: 'Save and restart Understory' }).click();
+  await expect(here.getByRole('button', { name: 'Save and restart Understory' })).toHaveCount(0);
+  expect(sent.at(-1)!.body.dreamInterval).toBe('');
+
+  await here.getByRole('button', { name: 'Stop' }).click();
+  await expect(here.getByText('stopped')).toBeVisible();
+});
+
+test("a model at an address of its own keeps its saved key unless one is typed", async ({ page }) => {
+  const { sent } = await portal(page, { docker: true, llm: { source: 'custom', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', format: 'openai', hasKey: true } });
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Memory' }).click();
+  const here = addons(page).getByRole('region', { name: 'Understory run here' });
+  await expect(here.getByRole('radio', { name: 'An address of its own' })).toHaveAttribute('aria-checked', 'true');
+  await expect(here.getByPlaceholder('saved — type to replace')).toBeVisible();
+  await here.getByLabel('Model', { exact: true }).fill('deepseek-reasoner');
+  await here.getByRole('button', { name: 'Save', exact: true }).click();
+  expect(sent.at(-1)!.body.llm).toEqual({ source: 'custom', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-reasoner', format: 'openai' });
+  await here.getByLabel('API key', { exact: true }).fill('sk-new');
+  await here.getByRole('button', { name: 'Save', exact: true }).click();
+  expect(sent.at(-1)!.body.llm.apiKey).toBe('sk-new');
+});
+
+test('forgetting the memory asks first', async ({ page }) => {
+  const { sent } = await portal(page, { docker: true, llm: { source: 'provider', provider: 'llama-swap', model: 'Ornith' } });
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Memory' }).click();
+  const here = addons(page).getByRole('region', { name: 'Understory run here' });
+  await here.getByRole('button', { name: "Install and use as the agent's memory" }).click();
+  await here.getByRole('button', { name: 'Remove and forget the memory' }).click();
+  await page.getByRole('button', { name: 'Keep' }).or(page.getByRole('button', { name: 'Cancel' })).first().click();
+  expect(sent.map((s) => s.path)).not.toContain('/api/features/understory/install?memory=forget');
+  await here.getByRole('button', { name: 'Remove and forget the memory' }).click();
+  await page.getByRole('button', { name: 'Forget it' }).click();
+  await expect(here.getByRole('button', { name: "Install and use as the agent's memory" })).toBeVisible();
+  expect(sent.at(-1)!.path).toBe('/api/features/understory/install?memory=forget');
 });
 
 test('the four add-on tabs fit a phone', async ({ page }) => {

@@ -116,16 +116,24 @@ export const understoryDefaultUrl = (): string =>
 /**
  * The entry for mcp.json. Its tools directly in the agent's list rather than
  * behind the adapter's proxy: memory the agent has to go looking for first is
- * memory it does not use. The token stays in the environment, named rather
- * than copied into a file anyone reading the config can see.
+ * memory it does not use. A token from the environment stays there, named
+ * rather than copied into the file; the one the portal made for its own
+ * Understory is written in, beside the keys pi keeps in the same folder.
  */
-export function understoryEntry(url: string, withToken: boolean): Record<string, unknown> {
+export function understoryEntry(url: string, auth: { tokenEnv?: string; token?: string } = {}): Record<string, unknown> {
   return {
     url,
     lifecycle: "lazy",
     directTools: true,
-    ...(withToken ? { auth: "bearer", bearerTokenEnv: UNDERSTORY_TOKEN_ENV } : {}),
+    ...(auth.token ? { auth: "bearer", bearerToken: auth.token } : auth.tokenEnv ? { auth: "bearer", bearerTokenEnv: auth.tokenEnv } : {}),
   };
+}
+
+/** The token an entry calls Understory with: written in it (the portal's own Understory), or named from the environment. */
+export function understoryTokenOf(entry: Record<string, unknown> | undefined): string | undefined {
+  if (typeof entry?.bearerToken === "string" && entry.bearerToken) return entry.bearerToken;
+  if (typeof entry?.bearerTokenEnv === "string") return process.env[entry.bearerTokenEnv] || undefined;
+  return undefined;
 }
 
 /** Whether a config has Understory as the agent's memory: there, and not switched off. */

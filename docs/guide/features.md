@@ -66,32 +66,82 @@ which the agent looks things up in and adds to through its tools
 (`understory_memory_query`, `…_add`, `…_update`, `…_status`, `…_maintain`).
 The bundle is human-readable and git-diffable.
 
+### Running it here
+
+With Docker access (see [Docker add-ons](/guide/add-ons#docker-access)), the
+portal runs Understory itself, in a container of its own (`pithagoras-understory`)
+with its memory in a volume (`pithagoras_understory-memory`). In Settings → Add-ons → Memory:
+
+- **The model that keeps the memory.** Understory uses a model of its own to
+  file, link and tidy notes. Either *a provider set up here* — pick one and one
+  of its models; its address and key are taken from the provider each time
+  Understory starts — or *an address of its own*: the API address, a key
+  (none needed for a local server), a model and the format (OpenAI-compatible
+  or Anthropic). A saved key is never shown again; leave the field empty to
+  keep it.
+- **Tidying up.** How often Understory goes over the whole memory on its own —
+  merging, linking and pruning notes (its "dreaming"): never (the default),
+  hourly, every 6 or 12 hours, daily or weekly. Each pass costs tokens. The
+  first comes one interval after Understory starts.
+- **Install and use as the agent's memory** pulls the image the first time,
+  starts it, and switches it on as the memory. Then **Stop / Start**,
+  **Remove** (the memory stays in its volume) and **Remove and forget the
+  memory** (deletes the volume; asked first).
+
+Understory reads its model and interval only when it starts, so **Save and
+restart Understory** makes its container again with the new ones; the memory
+is untouched. It runs on the host network, like the browser, so a model server
+the portal reaches on `localhost` is reached the same way. It is given a token
+of its own (`AUTH_TOKEN`), which the portal writes into the agent's MCP entry
+and uses for the Memory page; nothing else can read the memory through it.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `UNDERSTORY_PORT` | `3800` | The port the portal's Understory listens on. |
+| `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume that holds its memory. |
+
+Without Docker access, or to keep running your own, see
+[Running your own](#running-your-own).
+
 ### Reading the memory
 
-While Understory is on, the **Agent** page has a **Memory** tab beside the
-conversations: the memory's folders and notes, a search, and its recent
-changes. A note shows its type, tags and when it last changed, and its links
-to other notes open them there. It is read only — the agent keeps its memory,
-through its tools.
+While Understory is on, **Memory** appears in the sidebar. Its page is laid out
+as Understory's own:
+
+- down the side, the memory's folders and notes, each with its type, and
+  Understory's own `index.md` and `log.md` set apart; a search; and whether the
+  bundle is well-formed (*conformant*, or how many issues — which lists them);
+- beside it, the open note — its type, tags, when it last changed, its text,
+  and links to other notes that open them there — or the **Log** of changes,
+  newest first, or the **Graph**: every note as a point coloured by its type,
+  its links as lines, unlinked notes ringed in red, the paths Understory's own
+  queries took, and zoom, drag and click to open.
+
+It is read only: the agent keeps its memory, through its tools, and
+Understory's chat, which can write to it, is not there. What is open is in the
+address (`/memory?note=…`, `?view=log`, `?view=graph`), so it can be linked to.
 
 The portal asks Understory for all of it, at the address in `mcp.json` and
-with the token, so the tab works wherever the portal does: over HTTPS, from a
-phone, without Understory's port being reachable from the browser. It reads
-the small JSON API Understory's own web UI uses (`/api/tree`, `/api/concept`,
-`/api/search`, `/api/log`), which is not a documented one: should a new
-Understory change it, the tab says what went wrong instead of showing an empty
-memory. *Open in Understory* goes to its own web UI, with the graph — at the
-portal's address for it, which the browser has to be able to reach.
+with its token, so the page works wherever the portal does: over HTTPS, from a
+phone, without Understory's port being reachable from the browser. It reads the
+small JSON API Understory's own web UI uses (`/api/tree`, `/concept`,
+`/search`, `/log`, `/graph`, `/traces`, `/validate`), which is not a
+documented one: should a new Understory change it, the page says what went
+wrong instead of showing an empty memory.
+
+### Switching it on and off
 
 Switching it on:
 
 1. installs `pi-mcp-adapter` if it is not installed yet, which makes MCP servers
    into tools;
 2. writes an `understory` server into `mcp.json`, with its tools directly in the
-   agent's tool list;
+   agent's tool list — the portal's own Understory with its token, or the
+   address given;
 3. stops reading `MEMORY.md`.
 
-Switching it off removes the server, and `MEMORY.md` is read again.
+Switching it off removes the server, and `MEMORY.md` is read again. Removing
+the portal's own Understory switches it off too.
 
 ### MEMORY.md while it is on
 
@@ -106,11 +156,12 @@ Only conversations with the primary user ever had `MEMORY.md`; a teammate's
 conversation cannot use the memory tools unless a rule allows it (see
 [Roles](/people/roles)).
 
-### Running Understory
+### Running your own
 
-Understory runs as a container of its own; the portal only points the agent at
-its MCP address. It needs a model to maintain the memory — any
-OpenAI-compatible endpoint, a local one included.
+Understory can also run anywhere the portal reaches, set up by you; the portal
+then only points the agent at its MCP address (*Or use one you run yourself*
+in the Memory add-on). Its model and tidying up are then set in its own
+environment — `LLM_*` and `DREAM_INTERVAL`, which the portal cannot change.
 
 ```yaml
 services:
@@ -124,6 +175,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_API_FORMAT: openai
       LLM_MODEL: ${LLM_MODEL}
+      # DREAM_INTERVAL: 6h
       # AUTH_TOKEN: ${MEMORY_UNDERSTORY_AUTH_TOKEN}
     restart: unless-stopped
 volumes:
@@ -132,9 +184,9 @@ volumes:
 
 The address is what the **portal** reaches: `http://localhost:3800/mcp` with
 the shipped compose file's host networking, or `http://understory:3800/mcp` on
-a shared Docker network. It can be changed on the Memory tab.
+a shared Docker network. It can be changed in the Memory add-on.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | The address the Memory tab starts from. |
+| `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | The address the Memory add-on starts from. |
 | `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Sent as `Authorization: Bearer …` when Understory has an `AUTH_TOKEN`. Named in `mcp.json` (`bearerTokenEnv`), never copied into it. |

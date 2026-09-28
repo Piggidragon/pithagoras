@@ -208,13 +208,20 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 
 | | |
 | --- | --- |
-| `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode, maxParallel }, understory: { enabled, url, tokenSet, adapterInstalled, reachable } }` |
+| `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode, maxParallel }, understory: { enabled, url, tokenSet, adapterInstalled, reachable, managed: { available, image, container, pulling, url, config, providers } } }` — `config` never holds a key |
 | `PUT /api/features/subagent` | `{ enabled?, mode?: "interrupt" \| "background", maxParallel?: 1–16 }` — installs or removes the bundled subagent tool, writes `subagentMode` and `subagentMaxParallel`; reloads idle open sessions |
 | `PUT /api/features/understory` | `{ enabled, url? }` — writes or removes the `understory` MCP server (installing `pi-mcp-adapter` if needed); reloads idle open sessions |
+| `PUT /api/features/understory/config` | `{ llm: { source: "provider", provider, model } \| { source: "custom", baseUrl, model, format, apiKey? }, dreamInterval }` — the model and tidying up of the portal's own Understory; a running one is made again with them. `apiKey` left out keeps the saved one |
+| `POST /api/features/understory/install` | Pull, create and start the portal's own Understory, and make it the agent's memory |
+| `POST /api/features/understory/start` · `/stop` | Its container |
+| `DELETE /api/features/understory/install` | Remove it (the memory stays in its volume; `?memory=forget` deletes it too), and switch it off as the memory |
 | `GET /api/memory/tree` | Understory's memory bundle as a tree of folders and notes — read through the portal while Understory is on (409 when it is not) |
 | `GET /api/memory/concept?path=` | One note: `{ path, frontmatter, body }`; 404 when it is not there |
 | `GET /api/memory/search?q=` | Notes matching, best first |
 | `GET /api/memory/log` | What changed, oldest first |
+| `GET /api/memory/graph` | `{ nodes: [{ path, title, type, links }], edges: [{ source, target }] }` |
+| `GET /api/memory/traces` | The paths Understory's own queries and changes took |
+| `GET /api/memory/validate` | `{ conformant, conceptCount, directoryCount, issues }` |
 
 ## Channels
 
