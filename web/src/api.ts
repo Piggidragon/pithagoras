@@ -318,6 +318,8 @@ export const api = {
       body: JSON.stringify({ workspace, title }),
     }),
   projects: () => json<{ root: string; home: string; projects: Project[] }>("/api/projects"),
+  /** Only where Home is and which projects there are, without their counts: see /api/projects. */
+  places: () => json<{ root: string; home: string; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
   createProject: (name: string, instructions?: string) =>
     json<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name, instructions }) }),
   projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),

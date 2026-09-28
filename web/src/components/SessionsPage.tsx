@@ -8,8 +8,9 @@ import { filterSessions } from "../session-filter";
 import { confirmDialog } from "./ConfirmDialog";
 import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
-import { FolderControls, FolderTree } from "./FolderTree";
-import { ELSEWHERE, folderFrom, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { ChatsHeading, FolderTree } from "./FolderTree";
+import { RowsSkeleton } from "./Skeleton";
+import { folderFrom, folderKeys, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 
 /**
@@ -81,7 +82,14 @@ export function SessionsPage({
   const [params, setParams] = useSearchParams();
   /** The one folder shown, with all its chats, when a link or its filter asked for it. */
   const asked = params.get("folder");
-  const only = useMemo(() => (places && asked ? folderFrom(groupByFolder(sessions, places), asked) : null), [sessions, places, asked]);
+  const only = useMemo(
+    // Elsewhere too while it is empty: a link to it is to a folder that is there, with nothing in it now.
+    () => (places && asked ? folderFrom(groupByFolder(sessions, places, { elsewhere: true }), asked) : null),
+    [sessions, places, asked],
+  );
+  /** A folder asked for by a link that is not there — a project deleted since — or cannot be told yet. */
+  const gone = asked !== null && !only && places !== undefined;
+  const waiting = asked !== null && places === undefined;
   const showOnly = (key: string | null) =>
     setParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -90,11 +98,12 @@ export function SessionsPage({
       return next;
     });
   const searching = query.trim() !== "";
-  const byFolder = !only && grouping === "folders" && hasProjects;
+  const byFolder = asked === null && grouping === "folders" && hasProjects;
   // Every folder, not only those a search shows: what is kept for one hidden by it must not be let go.
-  const folderKeys = useMemo(() => (places ? [...groupByFolder([], places).map((f) => f.key), ELSEWHERE] : undefined), [places]);
-  const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching, folderKeys);
-  const shown = useMemo(() => (only ? filterSessions(only.sessions, query) : matches), [only, query, matches]);
+  const allKeys = useMemo(() => (places ? folderKeys(places) : undefined), [places]);
+  const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching, allKeys);
+  // A folder asked for shows only its chats — none while it cannot be told which they are.
+  const shown = useMemo(() => (only ? filterSessions(only.sessions, query) : asked !== null ? [] : matches), [only, asked, query, matches]);
   const [startError, setStartError] = useState<string | null>(null);
   /** A chat on its way: a second press of + would start another. */
   const starting = useRef(false);
@@ -253,24 +262,29 @@ export function SessionsPage({
           )}
           {startError && <p role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{startError}</p>}
 
-          {(only || hasProjects) && (
+          {asked !== null ? (
             <div className="mt-3 flex items-center gap-1">
-              {only ? (
-                <span className="inline-flex min-w-0 items-center gap-1.5 rounded-lg bg-accent/12 py-1 pl-2.5 pr-1 text-xs text-accent ring-1 ring-inset ring-accent/25">
-                  <LuFilter aria-hidden className="h-3 w-3 shrink-0" />
-                  <span className="truncate">Only {only.name}</span>
-                  <button type="button" onClick={() => showOnly(null)} aria-label="Show every folder" title="Show every folder" className="rounded p-0.5 hover:bg-accent/20">
-                    <LuX className="h-3 w-3" />
-                  </button>
+              <span className={`inline-flex min-w-0 items-center gap-1.5 rounded-lg py-1 pl-2.5 pr-1 text-xs ring-1 ring-inset ${gone ? "bg-warn/10 text-warn ring-warn/25" : "bg-accent/12 text-accent ring-accent/25"}`}>
+                <LuFilter aria-hidden className="h-3 w-3 shrink-0" />
+                <span className="truncate">
+                  {only ? `Only ${only.name}` : gone ? `There is no folder “${asked.replace(/^project:/, "")}” any more` : "Only one folder"}
                 </span>
-              ) : (
-                <span className="mr-auto text-[11px] font-semibold uppercase tracking-wider text-fg-faint">{byFolder ? "Folders" : "All chats"}</span>
-              )}
-              {!only && <FolderControls grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />}
+                <button type="button" onClick={() => showOnly(null)} aria-label="Show every folder" title="Show every folder" className="rounded p-0.5 hover:bg-fg/10">
+                  <LuX className="h-3 w-3" />
+                </button>
+              </span>
             </div>
+          ) : (
+            hasProjects && (
+              <div className="mt-3">
+                <ChatsHeading size="md" label={byFolder ? "Folders" : "All chats"} grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />
+              </div>
+            )
           )}
 
-          {shown.length === 0 && !byFolder ? (
+          {waiting ? (
+            <RowsSkeleton />
+          ) : gone ? null : shown.length === 0 && !byFolder ? (
             <p className="py-12 text-center text-sm text-fg-subtle">
               {sessions.length === 0 ? "No sessions yet." : only && !searching ? `No chats in ${only.name} yet.` : "Nothing matches that."}
             </p>
@@ -284,7 +298,7 @@ export function SessionsPage({
                 folders={searching ? folders.filter((f) => f.sessions.length > 0) : folders}
                 isOpen={openFolders.isOpen}
                 onToggle={openFolders.toggle}
-                onMove={searching ? undefined : move}
+                onMove={searching || !allKeys ? undefined : (keys, key, to) => move(keys, key, to, allKeys)}
                 onNewChat={onNewChat ? (f) => start(f.kind === "home" ? undefined : f.path!) : undefined}
                 extra={(f) => (
                   <button

@@ -257,3 +257,31 @@ export function FolderControls({
     </>
   );
 }
+
+/**
+ * The line above the chats: what they are listed as, and how. `controls` is
+ * false where there is nothing to gather them by.
+ */
+export function ChatsHeading({
+  label,
+  controls = true,
+  size = "sm",
+  ...props
+}: {
+  label: string;
+  controls?: boolean;
+  size?: "sm" | "md";
+  grouping: Grouping;
+  sort: FolderSort;
+  onGrouping: (grouping: Grouping) => void;
+  onSort: (sort: FolderSort) => void;
+}) {
+  return (
+    <div className={`flex items-center gap-1 ${size === "md" ? "" : "pr-1"}`}>
+      <p className={`mr-auto font-semibold uppercase tracking-wider text-fg-faint ${size === "md" ? "text-[11px]" : "px-2.5 pb-1 pt-1 text-[10px]"}`}>
+        {label}
+      </p>
+      {controls && <FolderControls {...props} />}
+    </div>
+  );
+}

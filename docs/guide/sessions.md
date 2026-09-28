@@ -146,7 +146,9 @@ the agent, say — shows up or goes within half a minute.
 
 The Sessions page lists them the same way, every folder open to begin with, and
 the funnel on a folder's line shows that folder on its own (`/sessions?folder=…`,
-so the link keeps it); the ✕ on the chip goes back to all of them.
+so the link keeps it); the ✕ on the chip goes back to all of them. A link to a
+folder that is gone since says so. A folder's count, and the mark that something
+in it is running, take in its pinned chats too, in the sidebar as on the page.
 
 Folders are ordered **Latest first** (by their latest chat), **By name** (Home
 first), or in **Your order**: drag a folder by its grip, or press Alt with ↑/↓ on

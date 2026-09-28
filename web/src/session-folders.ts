@@ -33,10 +33,28 @@ export type Places = { home: string; projects: readonly { name: string; path: st
 /** `where` is the folder `dir` or inside it, by the text of the path. */
 export const within = (dir: string, where: string) => where === dir || where.startsWith(dir.endsWith("/") ? dir : dir + "/");
 
-export function groupByFolder<S extends { workspace: string; updated_at: string }>(sessions: readonly S[], places: Places): Folder<S>[] {
+/**
+ * The projects that are folders of their own: not one that is Home itself,
+ * which a Home made inside the workspace root would be listed as.
+ */
+const projectsOf = (places: Places) => places.projects.filter((p) => p.path !== places.home);
+
+/** The keys of every folder there can be with these places: Home, the projects, and Elsewhere. */
+export const folderKeys = (places: Places) => [HOME, ...projectsOf(places).map((p) => projectKey(p.name)), ELSEWHERE];
+
+/**
+ * The chats in their folders, each in the deepest that holds it — Home
+ * among them, which can be inside the workspace root or hold it. Elsewhere
+ * is left out while it has none, unless `elsewhere` asks for it anyway.
+ */
+export function groupByFolder<S extends { workspace: string; updated_at: string }>(
+  sessions: readonly S[],
+  places: Places,
+  { elsewhere: always = false }: { elsewhere?: boolean } = {},
+): Folder<S>[] {
   const home: Folder<S> = { key: HOME, kind: "home", name: "Home", path: places.home, sessions: [], lastActive: "" };
   const elsewhere: Folder<S> = { key: ELSEWHERE, kind: "elsewhere", name: "Elsewhere", path: null, sessions: [], lastActive: "" };
-  const projects = places.projects.map<Folder<S>>((p) => ({
+  const projects = projectsOf(places).map<Folder<S>>((p) => ({
     key: projectKey(p.name),
     kind: "project",
     name: p.name,
@@ -44,15 +62,14 @@ export function groupByFolder<S extends { workspace: string; updated_at: string 
     sessions: [],
     lastActive: "",
   }));
-  // The deepest that holds it, should one project ever be inside another.
-  const deepest = [...projects].sort((a, b) => b.path!.length - a.path!.length);
+  // Deepest first. A server that did not say where Home is: nothing is taken for it.
+  const deepest = [...(places.home ? [home] : []), ...projects].sort((a, b) => b.path!.length - a.path!.length);
   for (const s of sessions) {
-    // A server that did not say where Home is: nothing is taken for it.
-    const folder = places.home && within(places.home, s.workspace) ? home : (deepest.find((p) => within(p.path!, s.workspace)) ?? elsewhere);
+    const folder = deepest.find((f) => within(f.path!, s.workspace)) ?? elsewhere;
     folder.sessions.push(s);
     if (s.updated_at > folder.lastActive) folder.lastActive = s.updated_at;
   }
-  return [home, ...projects, ...(elsewhere.sessions.length ? [elsewhere] : [])];
+  return [home, ...projects, ...(always || elsewhere.sessions.length ? [elsewhere] : [])];
 }
 
 /** How the folders are ordered: by their latest chat, by name, or as they were put. */
@@ -83,14 +100,18 @@ export function sortFolders<S>(folders: readonly Folder<S>[], sort: FolderSort, 
 /**
  * The order kept once `key` is put at `to` among the folders as they are
  * shown (`shown`, by key): the order they were shown in, since that is what
- * was moved from, whatever they were sorted by. Keys of folders that are
- * not shown now — a search hides some — keep their places after them.
+ * was moved from, whatever they were sorted by. A folder in the order kept
+ * before (`kept`) that is not shown now — Elsewhere, in the sidebar, while
+ * all its chats are pinned — keeps its place among them.
  */
 export function moveFolder(shown: readonly string[], key: string, to: number, kept: readonly string[] = []): string[] {
   const rest = shown.filter((k) => k !== key);
   const at = Math.max(0, Math.min(rest.length, to));
   const next = [...rest.slice(0, at), key, ...rest.slice(at)];
-  return [...next, ...kept.filter((k) => !next.includes(k))];
+  // The places of those shown are taken by them in their new order; the others stay where they were.
+  const queue = [...next];
+  const out = kept.map((k) => (next.includes(k) ? queue.shift()! : k));
+  return [...out, ...queue];
 }
 
 /** An order read back from storage: the keys in it, once each. */

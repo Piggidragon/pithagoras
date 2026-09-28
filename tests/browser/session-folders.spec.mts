@@ -208,7 +208,7 @@ test('searching the sidebar shows the folders with a match, open', async ({ page
 test('without projects the sidebar lists the chats as before', async ({ page }) => {
   await portal(page, [chat('h1', 'Home chat', HOME, 30)]);
   // Asked after the portal's, so heard first.
-  await page.route('**/api/projects', (route) => route.fulfill({ json: { root: '/w', home: HOME, projects: [] } }));
+  await page.route('**/api/projects*', (route) => route.fulfill({ json: { root: '/w', home: HOME, projects: [] } }));
   await page.goto('/sessions');
   const side = sidebar(page);
   await expect(side.getByText('Recents', { exact: true })).toBeVisible();
@@ -283,7 +283,7 @@ test('the chats are listed before the projects are known, and by folder once the
   await expect(side.getByText('Recents', { exact: true })).toHaveCount(0);
 
   // Next time the folders are there from the start, while the projects are still being asked.
-  await page.route('**/api/projects', () => {});
+  await page.route('**/api/projects*', () => {});
   await page.reload();
   await expect(folder(side, 'site')).toBeVisible();
   await expect(side.getByText('Recents', { exact: true })).toHaveCount(0);
@@ -481,4 +481,75 @@ test('what is kept about folders lets go of projects that are gone', async ({ pa
   await page.keyboard.press('Alt+ArrowDown');
   expect(JSON.parse((await page.evaluate(() => localStorage.getItem('folderOrder')))!)).not.toContain('project:empty');
   expect(JSON.parse((await page.evaluate(() => localStorage.getItem('sidebarFoldersOpen')))!)).not.toHaveProperty('project:empty');
+});
+
+test('a chat whose project was not known yet has that project opened once it is', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('knownPlaces', JSON.stringify({ home: '/data/agent', projects: [{ name: 'site', path: '/w/site' }] })));
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await portal(page, [chat('h1', 'Home chat', HOME, 30), chat('x1', 'New project chat', '/w/fresh', 1)], { projects: ['site', 'fresh'], projectsHeld: held });
+  await page.goto('/s/x1');
+  const side = sidebar(page);
+  await expect(folder(side, 'Elsewhere')).toHaveAttribute('aria-expanded', 'true');
+  release();
+  await expect(folder(side, 'fresh')).toHaveAttribute('aria-expanded', 'true');
+  await expect(side.getByRole('group', { name: 'fresh' }).getByText('New project chat')).toBeVisible();
+});
+
+test('a folder hidden in the sidebar keeps its place when others are moved there', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('folderSort', 'manual');
+    localStorage.setItem('folderOrder', JSON.stringify(['elsewhere', 'home', 'project:site', 'project:notes', 'project:empty']));
+  });
+  await portal(page, [chat('s1', 'Site chat', '/w/site', 5), chat('r1', 'Root chat', '/w', 7, { pinned: true })]);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  const main = page.getByRole('main');
+  await expect(folder(side, 'Elsewhere')).toHaveCount(0);
+  await expect.poll(() => folderNames(main)).toEqual(['Elsewhere', 'Home', 'site', 'notes', 'empty']);
+  await folder(side, 'notes').focus();
+  await page.keyboard.press('Alt+ArrowUp');
+  await expect.poll(() => folderNames(side)).toEqual(['Home', 'notes', 'site', 'empty']);
+  await expect.poll(() => folderNames(main)).toEqual(['Elsewhere', 'Home', 'notes', 'site', 'empty']);
+});
+
+test('a folder counts, and shows running, all its chats in the sidebar as on the Sessions page', async ({ page }) => {
+  await portal(page, [
+    chat('n1', 'Notes chat', '/w/notes', 10),
+    chat('p1', 'Pinned chat', '/w/notes', 60, { pinned: true, status: 'running' }),
+  ]);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  const main = page.getByRole('main');
+  const count = (scope: ReturnType<Page['locator']>) => scope.locator('[data-folder="project:notes"] [aria-label$=" chats"], [data-folder="project:notes"] [aria-label$=" chat"]').first();
+  await expect(count(side)).toHaveText('2');
+  await expect(count(main)).toHaveText('2');
+  // Shut, a folder shows that something in it runs.
+  await expect(folder(side, 'notes')).toHaveAttribute('aria-expanded', 'false');
+  await expect(side.locator('[data-folder="project:notes"] > div').first().locator('.status-working')).toHaveCount(1);
+});
+
+test('a link to a folder that is gone says so, and leads back to all of them', async ({ page }) => {
+  await portal(page);
+  await page.goto('/sessions?folder=project%3Agone');
+  const main = page.getByRole('main');
+  await expect(main.getByText('There is no folder “gone” any more')).toBeVisible();
+  await expect(main.getByText('Site chat')).toHaveCount(0);
+  await main.getByRole('button', { name: 'Show every folder' }).click();
+  await expect(page).toHaveURL(/\/sessions$/);
+  await expect(main.getByText('Site chat')).toBeVisible();
+  // Elsewhere with nothing in it is still a folder.
+  await page.goto('/sessions?folder=elsewhere');
+  await expect(main.getByText('Only Elsewhere')).toBeVisible();
+  await expect(main.getByText('No chats in Elsewhere yet.')).toBeVisible();
+});
+
+test('the folders are asked for without their counts, and even when the chats cannot be had', async ({ page }) => {
+  const asked: string[] = [];
+  await portal(page);
+  page.on('request', (r) => { if (r.url().includes('/api/projects')) asked.push(new URL(r.url()).search); });
+  await page.route('**/api/sessions', (route) => route.request().method() === 'GET' ? route.fulfill({ status: 502, json: { error: 'starting' } }) : route.fallback());
+  await page.goto('/sessions');
+  await expect.poll(() => asked).toContain('?bare=1');
+  expect(asked.every((q) => q === '?bare=1')).toBe(true);
 });

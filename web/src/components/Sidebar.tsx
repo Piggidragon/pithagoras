@@ -3,7 +3,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { StatusDot, workingText } from "./StatusDot";
-import { FolderControls, FolderTree } from "./FolderTree";
+import { ChatsHeading, FolderTree } from "./FolderTree";
 import {
   LuBot,
   LuPanelLeftClose,
@@ -25,7 +25,7 @@ import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
-import { ELSEWHERE, HOME, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { HOME, folderKeys, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
@@ -112,33 +112,35 @@ export function Sidebar({
   const hasProjects = !!places && places.projects.length > 0;
   // Until the places are known, the chats are listed as they were: not held back for them.
   const byFolder = grouping === "folders" && hasProjects;
-  // Pinned chats stay at the top, and each folder has the rest of its own. The
-  // folders are ordered by all their chats, pinned ones too, as the Sessions
-  // page orders them: the order is the same one in both.
-  const { folders, pinnedIn } = useMemo(() => {
+  // Each folder is counted, marked running and ordered by all its chats, as
+  // on the Sessions page, so that the two agree; pinned ones are listed at the
+  // top rather than in it (`listed`).
+  const { folders, listed } = useMemo(() => {
     const all = byFolder && places ? sortFolders(groupByFolder(found, places), sort, order) : [];
+    const listed = new Map(all.map((f) => [f.key, f.sessions.filter((s) => !s.pinned)]));
     return {
-      folders: all
-        .map((f) => ({ ...f, sessions: f.sessions.filter((s) => !s.pinned) }))
-        // Elsewhere is only there for chats to show in it.
-        .filter((f) => f.kind !== "elsewhere" || f.sessions.length > 0),
-      /** How many of a folder's chats are among the pinned ones, by key. */
-      pinnedIn: new Map(all.map((f) => [f.key, f.sessions.filter((s) => s.pinned).length])),
+      // Elsewhere is only there for chats to show in it; searching, only the folders with a match are.
+      folders: all.filter((f) => (f.kind !== "elsewhere" && !searching) || listed.get(f.key)!.length > 0),
+      listed,
     };
-  }, [byFolder, found, places, sort, order]);
-  // Searching, the folders with a match, open: the match is what was looked for.
-  const shownFolders = searching ? folders.filter((f) => f.sessions.length > 0) : folders;
-  const folderKeys = useMemo(() => [...folders.map((f) => f.key), ELSEWHERE], [folders]);
-  const openFolders = useOpenFolders("sidebarFoldersOpen", (key) => key === HOME, searching, folderKeys);
+  }, [byFolder, found, places, sort, order, searching]);
+  /** Every folder there can be, for what is kept about them: see folderKeys. */
+  const allKeys = useMemo(() => (places ? folderKeys(places) : undefined), [places]);
+  const openFolders = useOpenFolders("sidebarFoldersOpen", (key) => key === HOME, searching, allKeys);
   // The chat opened is in a folder that is open, however it was opened — once
-  // for each chat opened: a folder shut while its chat is open stays shut.
-  const activeFolder = useMemo(() => folders.find((f) => f.sessions.some((s) => s.id === activeId))?.key, [folders, activeId]);
+  // for each chat opened and the folder it is in: a folder shut while its chat
+  // is open stays shut, and a chat first put in Elsewhere, before its project
+  // was known, still has its project opened once it is.
+  const activeFolder = useMemo(() => folders.find((f) => listed.get(f.key)!.some((s) => s.id === activeId))?.key, [folders, listed, activeId]);
   const openedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeFolder || openedFor.current === activeId) return;
-    openedFor.current = activeId;
+    const opened = `${activeId}\n${activeFolder}`;
+    if (!activeFolder || openedFor.current === opened) return;
+    openedFor.current = opened;
     openFolders.set(activeFolder, true);
   }, [activeId, activeFolder]);
+
+  const headingProps = { grouping, sort, onGrouping: setGrouping, onSort: setSort };
 
   const item = (s: Session) => (
     <SessionItem
@@ -245,37 +247,35 @@ export function Sidebar({
           </>
         )}
 
-        {byFolder && shownFolders.length > 0 && (
+        {byFolder && folders.length > 0 && (
           <>
             <Divider />
-            <div className="flex items-center gap-1 pr-1">
-              <GroupLabel>Folders</GroupLabel>
-              <FolderControls grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />
-            </div>
+            <ChatsHeading label="Folders" {...headingProps} />
             <FolderTree
-              folders={shownFolders}
+              folders={folders}
               isOpen={openFolders.isOpen}
               onToggle={openFolders.toggle}
-              onMove={searching ? undefined : move}
+              onMove={searching || !allKeys ? undefined : (shown, key, to) => move(shown, key, to, allKeys)}
               onNewChat={(f) => newChat(f.kind === "home" ? undefined : f.path!)}
             >
               {(f) => {
-                const first = searching ? f.sessions : f.sessions.slice(0, FOLDER_LIMIT);
+                const chats = listed.get(f.key)!;
+                const first = searching ? chats : chats.slice(0, FOLDER_LIMIT);
                 // The chat that is open is listed, however far down its folder it is.
-                const open = first.some((s) => s.id === activeId) ? null : f.sessions.find((s) => s.id === activeId);
+                const open = first.some((s) => s.id === activeId) ? null : chats.find((s) => s.id === activeId);
                 const shown = open ? [...first, open] : first;
                 return (
                   <>
-                    {f.sessions.length === 0 && (
-                      <p className="px-2.5 py-1 text-xs text-fg-faint">{pinnedIn.get(f.key) ? "Only pinned chats, above." : "No chats yet."}</p>
+                    {chats.length === 0 && (
+                      <p className="px-2.5 py-1 text-xs text-fg-faint">{f.sessions.length ? "Only pinned chats, above." : "No chats yet."}</p>
                     )}
                     {shown.map(item)}
-                    {f.sessions.length > shown.length && (
+                    {chats.length > shown.length && (
                       <button
                         onClick={() => onOpenFolder(f.key)}
                         className="mb-1 w-full rounded-lg px-2.5 py-1 text-left text-xs text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
                       >
-                        {f.sessions.length - shown.length} more in {f.name}…
+                        {chats.length - shown.length} more in {f.name}…
                       </button>
                     )}
                   </>
@@ -288,10 +288,7 @@ export function Sidebar({
         {!byFolder && shownRecents.length > 0 && (
           <>
             <Divider />
-            <div className="flex items-center gap-1 pr-1">
-              <GroupLabel>Recents</GroupLabel>
-              {hasProjects && <FolderControls grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />}
-            </div>
+            <ChatsHeading label="Recents" controls={hasProjects} {...headingProps} />
             {shownRecents.map(item)}
             {recents.length > shownRecents.length && (
               <button
@@ -326,7 +323,7 @@ export function Sidebar({
 const Divider = () => <div className="my-2 h-px bg-line" />;
 
 const GroupLabel = ({ children }: { children: ReactNode }) => (
-  <p className="mr-auto px-2.5 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-fg-faint">
+  <p className="px-2.5 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-fg-faint">
     {children}
   </p>
 );

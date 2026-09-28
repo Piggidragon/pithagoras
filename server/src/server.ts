@@ -320,11 +320,16 @@ function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[]
 /**
  * The projects, each with how many chats it has and when one last moved — and
  * where Home is, so that the chats can be told apart by the folder they are in.
+ * `?bare=1` leaves out the counts, which read every chat: the chat list asks
+ * this every half minute only to know which folders there are.
  */
-app.get("/api/projects", (_req, res) => {
+app.get("/api/projects", (req, res) => {
   const home = agentHomePath();
   try {
     if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, home, projects: [] });
+    if (req.query.bare === "1") {
+      return res.json({ root: WORKSPACE_ROOT, home, projects: listProjects(WORKSPACE_ROOT).map((p) => ({ name: p.name, path: p.path })) });
+    }
     // Read once, not once per project.
     const all = listSessions();
     const projects = listProjects(WORKSPACE_ROOT).map((p) => {

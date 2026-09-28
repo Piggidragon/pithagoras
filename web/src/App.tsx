@@ -150,9 +150,13 @@ function Shell({
   /** Connection attempts to the open conversation that have failed in a row. */
   const [failures, setFailures] = useState(0);
 
-  /** Whether the chats have come yet: the projects are asked for once they have, not before and again then. */
-  const [sessionsLoaded, setSessionsLoaded] = useState(false);
-  const { places, reload: reloadPlaces } = usePlaces(sessions, sessionsLoaded);
+  /**
+   * Whether the chats have been asked for yet, and have come or failed to: the
+   * projects are asked for then, not before and again once the chats are there
+   * — and not never, when the chats cannot be had and the projects can.
+   */
+  const [sessionsAsked, setSessionsAsked] = useState(false);
+  const { places, reload: reloadPlaces } = usePlaces(sessions, sessionsAsked);
 
   /** A chat started in `workspace`, or in Home without one, and opened. */
   const startChat = async (workspace?: string) => {
@@ -165,7 +169,7 @@ function Shell({
   const refreshSessions = useCallback(async () => {
     const r = await api.sessions();
     setSessions(r.sessions);
-    setSessionsLoaded(true);
+    setSessionsAsked(true);
     setExecutor(r.executor);
     return r.sessions;
   }, []);
@@ -180,7 +184,10 @@ function Shell({
           navigate(`/s/${list[0].id}`, { replace: true });
         }
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        setSessionsAsked(true);
+        setError(String(e));
+      });
     api
       .browser()
       // Whether one is wired up, not whether anyone has been given it: the

@@ -44,13 +44,14 @@ export function useFolderPrefs() {
     setGrouping: (grouping: Grouping) => change({ grouping }),
     setSort: (sort: FolderSort) => change({ sort }),
     /**
-     * Puts `key` at `to` among the folders `shown` — all there are: folders
-     * are moved only while none is hidden — and orders them so from now on:
-     * moving one is choosing the order by hand. Folders that are gone, such
-     * as a project deleted, are not kept in it.
+     * Puts `key` at `to` among the folders `shown`, and orders them so from
+     * now on: moving one is choosing the order by hand. Of the order kept
+     * before, the folders there still are (`existing`, see folderKeys) keep
+     * their places, shown or not; those that are gone, such as a project
+     * deleted, are let go.
      */
-    move: (shown: readonly string[], key: string, to: number) =>
-      change({ sort: "manual", order: moveFolder(shown, key, to) }),
+    move: (shown: readonly string[], key: string, to: number, existing: readonly string[]) =>
+      change({ sort: "manual", order: moveFolder(shown, key, to, prefs.order.filter((k) => existing.includes(k))) }),
   };
 }
 
@@ -122,7 +123,7 @@ export function usePlaces(sessions: readonly { id: string; workspace: string }[]
   const asked = useRef(0);
   const load = useCallback(() => {
     const n = ++asked.current;
-    api.projects().then(
+    api.places().then(
       (r) => {
         if (n !== asked.current) return;
         // Read as little as it says: an older server does not say where Home is.
