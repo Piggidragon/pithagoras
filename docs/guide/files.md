@@ -71,7 +71,8 @@ its own that you can move and size. Every panel remembers where you put it, so
 the terminal can sit at the left while Files is at the right. Two panels docked
 in the same place share it: one above the other at a side, side by side at the
 bottom. At the bottom they sit under the conversation, between the panels at the
-sides. Each place keeps the size you gave it, whichever panels are in it, and
-with panels at both sides they both give way when the conversation would get
-narrower than 320px. A panel you have never moved goes where all of them went
-before.
+sides. Each place keeps the size you gave it, whichever panels are in it. When
+panels at both sides would leave the conversation narrower than 320px, the side
+you sized last keeps its width and the other gives way first; it gets its width
+back as soon as there is room again. A panel you have never moved goes where
+all of them went before.

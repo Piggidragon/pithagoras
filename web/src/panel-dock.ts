@@ -56,16 +56,27 @@ export const FRAME_MIN = { w: 320, h: 200 };
 /** Kept clear around a floating window placed for the first time. */
 const MARGIN = 16;
 
-/** A frame read back from storage, or null for anything that is not one. */
-export function readFrame(raw: string | null | undefined): Frame | null {
+/** What storage holds under a key, parsed, when it is an object: null for anything else. */
+function readObject(raw: string | null | undefined): Record<string, unknown> | null {
   if (!raw) return null;
   try {
-    const f = JSON.parse(raw) as Partial<Frame>;
-    return [f.x, f.y, f.w, f.h].every((n) => typeof n === "number" && Number.isFinite(n)) ? (f as Frame) : null;
+    const stored = JSON.parse(raw) as unknown;
+    return stored && typeof stored === "object" && !Array.isArray(stored) ? (stored as Record<string, unknown>) : null;
   } catch {
     return null;
   }
 }
+
+const isNumber = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+
+/** A frame, or null for anything that is not one. */
+function toFrame(value: unknown): Frame | null {
+  const f = value as Partial<Frame> | null;
+  return f && typeof f === "object" && [f.x, f.y, f.w, f.h].every(isNumber) ? { x: f.x!, y: f.y!, w: f.w!, h: f.h! } : null;
+}
+
+/** A frame read back from storage, or null for anything that is not one. */
+export const readFrame = (raw: string | null | undefined): Frame | null => toFrame(readObject(raw));
 
 const clamp = (value: number, least: number, most: number) => Math.min(most, Math.max(least, value));
 
@@ -107,21 +118,14 @@ export function dropTarget(at: { x: number; y: number }, area: { w: number; h: n
  * the right, say. One that was never carried anywhere goes where all of them
  * went before they were placed one by one (`panelDock`), so that nothing moves
  * for someone who kept them on one side. Panels in the same place share it as
- * before: one above the other at a side, side by side at the bottom, and one
- * window when they float.
+ * before: one above the other at a side, side by side at the bottom. Each
+ * one floating has a window of its own (see Frames).
  */
 export type Places = Partial<Record<string, Dock>>;
 
 /** Places read back from storage: only those that are places a panel can go. */
 export function readPlaces(raw: string | null | undefined): Places {
-  if (!raw) return {};
-  try {
-    const stored = JSON.parse(raw) as unknown;
-    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
-    return Object.fromEntries(Object.entries(stored).filter(([, place]) => isDock(place))) as Places;
-  } catch {
-    return {};
-  }
+  return Object.fromEntries(Object.entries(readObject(raw) ?? {}).filter(([, place]) => isDock(place))) as Places;
 }
 
 /** A width at a side, a height at the bottom. */
@@ -132,25 +136,20 @@ export type Size = { width: number; height: number };
  * a side made 400px wide stays so whichever panels are opened there, and a
  * panel carried to it takes that width.
  */
-export type PlaceSizes = { left?: number; right?: number; bottom?: number };
+export type PlaceSizes = { left?: number; right?: number; bottom?: number; lead?: "left" | "right" };
 
 /** Place sizes read back from storage: a height no smaller than docked panels are drawn, a width of anything. */
 export function readPlaceSizes(raw: string | null | undefined): PlaceSizes {
-  if (!raw) return {};
-  try {
-    const stored = JSON.parse(raw) as Record<string, unknown> | null;
-    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
-    const sizes: PlaceSizes = {};
-    for (const place of ["left", "right", "bottom"] as const) {
-      const n = stored[place];
-      // A side may have been made narrower than of use where both sides gave
-      // way to each other (see fitSides): kept so, it is drawn as it was left.
-      if (typeof n === "number" && Number.isFinite(n) && (place === "bottom" ? n >= DOCKED_MIN.h : n > 0)) sizes[place] = n;
-    }
-    return sizes;
-  } catch {
-    return {};
+  const stored = readObject(raw) ?? {};
+  const sizes: PlaceSizes = {};
+  for (const place of ["left", "right", "bottom"] as const) {
+    const n = stored[place];
+    // A side may have been made narrower than of use where both sides gave
+    // way to each other (see fitSides): kept so, it is drawn as it was left.
+    if (isNumber(n) && (place === "bottom" ? n >= DOCKED_MIN.h : n > 0)) sizes[place] = n;
   }
+  if (stored.lead === "left" || stored.lead === "right") sizes.lead = stored.lead;
+  return sizes;
 }
 
 /** The panels open, in their order, gathered by the place each goes: left, right, bottom, then floating. */
@@ -165,14 +164,21 @@ export const EDGE = 4;
 /**
  * The widths panels at the left and at the right are drawn at in a chat `w`
  * wide: each as it was made, unless together — with their edges — they
- * would leave the conversation less than its 320px; then both give way, each
- * in proportion to its width. 0 for a side with nothing there. It is what the
- * page does itself (a flex-shrink with the width as its basis, and the
- * conversation's least width), worked out here for what a drop would show.
+ * would leave the conversation less than its 320px. Then they give way: the
+ * side sized last (`lead`) keeps its width, and the other gives way first,
+ * as far as the least of use (or less, where it was made so, or the room is);
+ * then the one sized last too. Neither sized yet, both in proportion to
+ * their widths. It is what the page does itself (see sideStyle in Chat),
+ * worked out here for what a drop would show.
  */
-export function fitSides(left: number, right: number, w: number): { left: number; right: number } {
+export function fitSides(left: number, right: number, w: number, lead?: "left" | "right"): { left: number; right: number } {
   const room = Math.max(0, w - KEEP.w - (left ? EDGE : 0) - (right ? EDGE : 0));
   if (left + right <= room) return { left, right };
+  if (lead && left && right) {
+    const other = lead === "left" ? right : left;
+    const given = Math.max(Math.min(DOCKED_MIN.w, other, room), room - (lead === "left" ? left : right));
+    return lead === "left" ? { left: room - given, right: given } : { left: given, right: room - given };
+  }
   const scale = room / (left + right);
   return { left: left * scale, right: right * scale };
 }
@@ -189,14 +195,15 @@ export function dockedFrameAmong(
   area: { w: number; h: number },
   size: Size,
   others: { left: number; right: number },
+  lead?: "left" | "right",
 ): Frame {
   if (dock === "bottom") {
-    const sides = fitSides(others.left, others.right, area.w);
+    const sides = fitSides(others.left, others.right, area.w, lead);
     const x = sides.left + (sides.left ? EDGE : 0), end = area.w - sides.right - (sides.right ? EDGE : 0);
     const h = Math.max(0, Math.min(size.height, area.h - KEEP.h));
     return { x, y: area.h - h, w: Math.max(0, end - x), h };
   }
-  const sides = dock === "left" ? fitSides(size.width, others.right, area.w) : fitSides(others.left, size.width, area.w);
+  const sides = dock === "left" ? fitSides(size.width, others.right, area.w, lead) : fitSides(others.left, size.width, area.w, lead);
   const w = sides[dock];
   return { x: dock === "left" ? 0 : area.w - w, y: 0, w, h: area.h };
 }
@@ -206,19 +213,12 @@ export type Frames = Partial<Record<string, Frame>>;
 
 /** Frames read back from storage: only those that are frames. */
 export function readFrames(raw: string | null | undefined): Frames {
-  if (!raw) return {};
-  try {
-    const stored = JSON.parse(raw) as unknown;
-    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
-    const frames: Frames = {};
-    for (const [kind, frame] of Object.entries(stored)) {
-      const f = readFrame(JSON.stringify(frame));
-      if (f) frames[kind] = f;
-    }
-    return frames;
-  } catch {
-    return {};
+  const frames: Frames = {};
+  for (const [kind, value] of Object.entries(readObject(raw) ?? {})) {
+    const f = toFrame(value);
+    if (f) frames[kind] = f;
   }
+  return frames;
 }
 
 /** How far a window put where another already is goes aside, down and to the left. */

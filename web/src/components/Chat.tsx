@@ -91,6 +91,48 @@ const moveInto = (parent: HTMLElement, box: HTMLElement) => {
   parent.appendChild(box);
 };
 
+/*
+ * Each panel is drawn once, into a box of its own that goes into whichever
+ * place it is in: carried elsewhere, it is the same panel — Files keeps an
+ * edit not saved, the terminal its lines — rather than one made anew there.
+ *
+ * A box taken off the page and put back loses what the page held for it: the
+ * browser's page loads again, and a list is scrolled back to its top. So
+ * before the place it is in goes, it steps out into `park`, and on into its
+ * next place, with moveBefore — which moves it without taking it off. A
+ * browser without moveBefore takes it off and puts it back as before. Made
+ * once per chat, holding nothing of it but these.
+ */
+function panelBoxes(park: { readonly current: HTMLElement | null }, pressed: { readonly current: (kind: AsidePanel) => void }) {
+  const boxes: Partial<Record<AsidePanel, HTMLDivElement>> = {};
+  const slots: Partial<Record<AsidePanel, (el: HTMLDivElement | null) => void>> = {};
+  const box = (kind: AsidePanel) => {
+    let el = boxes[kind];
+    if (!el) {
+      el = boxes[kind] = document.createElement("div");
+      el.className = `flex min-h-0 min-w-0 flex-1 flex-col${kind === "browser" ? " bg-black" : ""}`;
+      // On the page, not in React: what is in the box is drawn from elsewhere
+      // in the chat (a portal), and its events never reach the window it is in.
+      el.addEventListener("pointerdown", () => pressed.current(kind), true);
+    }
+    return el;
+  };
+  /** Where the box of `kind` goes in a place. */
+  const slot = (kind: AsidePanel) =>
+    (slots[kind] ??= (el) => {
+      const b = box(kind);
+      if (el) {
+        if (b.parentElement !== el) moveInto(el, b);
+        // Called as the slot goes, while it is still on the page.
+      } else if (park.current && canMove(park.current) && b.isConnected) moveInto(park.current, b);
+    });
+  /** Boxes of panels no longer open taken off the page, where they waited to go somewhere: fullscreen, if one was, with them. */
+  const letGo = (open: readonly AsidePanel[]) => {
+    for (const [kind, b] of Object.entries(boxes)) if (!open.includes(kind as AsidePanel) && b.parentElement === park.current) b.remove();
+  };
+  return { box, slot, letGo };
+}
+
 /** A size kept in storage, or `fallback` for one that is missing or smaller than may be drawn. */
 const storedSize = (key: string, fallback: number, least: number) => {
   const n = Number(local.get(key));
@@ -395,51 +437,53 @@ export function Chat({
       measureRoom.current = () => {};
     };
   }, [measuring]);
-  const windows = spreadFrames(floaters.map((k) => fitFrame(frames[k] ?? before.frame, room)), room);
+  // Put aside from one another where they would lie on one another: those
+  // never put anywhere by hand before those that were.
+  const fitted = floaters.map((k) => fitFrame(frames[k] ?? before.frame, room));
+  const order = floaters.map((_, i) => i).sort((a, b) => Number(!frames[floaters[a]]) - Number(!frames[floaters[b]]));
+  const windows: Frame[] = [];
+  spreadFrames(order.map((i) => fitted[i]), room).forEach((f, j) => (windows[order[j]] = f));
   const placed = (kind: AsidePanel) => windows[floaters.indexOf(kind)];
+  /**
+   * How a side is drawn: as wide as made, giving way where the conversation —
+   * which keeps its 320px — would be squeezed (see fitSides). The side sized
+   * last hardly gives way, and the other, first, as far as the least of use
+   * (or its own width, or what there is room for); neither sized yet, the two
+   * in proportion to their widths.
+   */
+  const sideStyle = (side: "left" | "right", s: PlaceSizes = sizes) => {
+    const w = s[side] ?? before.width;
+    // Given way in proportion to how much each may: the other side's is so
+    // much more that it gives way nearly alone, until it is at the least.
+    // (Not by the side sized last giving way at under 1: then the page gives
+    // way that fraction of what is needed, and the chat ran over its edge.)
+    if (s.lead && s.lead !== side && groupAt(s.lead)) return { flex: `0 10000 ${w}px`, minWidth: `min(${DOCKED_MIN.w}px, ${w}px, max(0px, 100% - ${KEEP.w + 2 * EDGE}px))` };
+    return { flex: `0 1 ${w}px`, minWidth: "0px" };
+  };
   /** The widths wanted at the sides, leaving out `without`, which is being carried. */
   const sidesWanted = (without?: AsidePanel) => {
     const at = (side: "left" | "right") => (groupAt(side)?.kinds.some((k) => k !== without) ? widthAt(side) : 0);
     return { left: at("left"), right: at("right") };
   };
 
-  /*
-   * Each panel is drawn once, into a box of its own that goes into whichever
-   * place it is in (see slotFor): carried elsewhere, it is the same panel —
-   * Files keeps an edit not saved, the terminal its lines — rather than
-   * one made anew there.
-   */
-  const panelBoxes = useRef<Partial<Record<AsidePanel, HTMLDivElement>>>({});
-  const panelBox = (kind: AsidePanel) => {
-    let el = panelBoxes.current[kind];
-    if (!el) {
-      el = panelBoxes.current[kind] = document.createElement("div");
-      el.className = `flex min-h-0 min-w-0 flex-1 flex-col${kind === "browser" ? " bg-black" : ""}`;
-    }
-    return el;
-  };
-  /*
-   * Where a box waits between two places. A box taken off the page and put
-   * back loses what the page held for it: the browser's page loads again, and
-   * a list is scrolled back to its top. So before the place it is in goes, it
-   * steps out here, and on into its next place, with moveBefore — which moves
-   * it without taking it off. A browser without moveBefore takes it off and
-   * puts it back as before.
-   */
+  // Where a panel's box waits while it goes from one place to another, and
+  // what a press anywhere in a floating one does: brings its window up.
   const park = useRef<HTMLDivElement>(null);
-  // The panels open as last drawn: one no longer among them is closed, not
-  // moved, and goes with its place — fullscreen, if it was, with it.
-  const stillOpen = useRef(asidePanels);
-  stillOpen.current = asidePanels;
-  const slots = useRef<Partial<Record<AsidePanel, (el: HTMLDivElement | null) => void>>>({});
-  const slotFor = (kind: AsidePanel) =>
-    (slots.current[kind] ??= (el) => {
-      const box = panelBox(kind);
-      if (el) {
-        if (box.parentElement !== el) moveInto(el, box);
-        // Called as the slot goes, while it is still on the page.
-      } else if (stillOpen.current.includes(kind) && park.current && canMove(park.current) && box.isConnected) moveInto(park.current, box);
-    });
+  const pressed = useRef<(kind: AsidePanel) => void>(() => {});
+  const [boxes] = useState(() => panelBoxes(park, pressed));
+  useLayoutEffect(() => {
+    pressed.current = (kind) => {
+      if (floaters.length > 1 && floaters.includes(kind)) setOnTop(kind);
+    };
+    boxes.letGo(asidePanels);
+  });
+  // A window put aside from another (spreadFrames), kept where it is drawn:
+  // it jumped back onto the other's place when that one closed.
+  useEffect(() => {
+    if (!room.w || moving.current) return;
+    const unplaced = floaters.filter((k, i) => !frames[k] || windows[i] !== fitted[i]);
+    if (unplaced.length) setFrames((f) => ({ ...f, ...Object.fromEntries(unplaced.map((k) => [k, placed(k)])) }));
+  });
 
   /**
    * Dragging, on pointer events rather than mouse ones (see followPointer).
@@ -473,7 +517,6 @@ export function Chat({
   const setBox = (el: HTMLElement | null | undefined, f: Frame) => {
     if (el) Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
   };
-  const raise = (kind: AsidePanel) => setOnTop((k) => (k === kind ? k : kind));
 
   /** The edge between the conversation and the panels in a place: their width, or their height at the bottom. */
   const dragSize = (place: Exclude<Dock, "float">) => (e: React.PointerEvent) => {
@@ -497,38 +540,35 @@ export function Chat({
       );
       return;
     }
-    // From the width drawn — at both sides, what the two gave way to — and no
-    // wider than leaves the conversation its room beside the other side as
-    // it is drawn. No narrower than of use, unless drawn narrower already:
-    // then from there, not with a jump to the least.
+    // From the width drawn — at both sides, what the two gave way to. Made
+    // wider, the other side gives way, as far as it would for the side sized
+    // last (see sideStyle); the conversation keeps its room. No narrower than
+    // of use, unless drawn narrower already: then from there, not with a
+    // jump to the least. Let go, this side is the one sized last.
     const other: "left" | "right" = place === "left" ? "right" : "left";
     const them = asides.current[other];
-    const mine = el.getBoundingClientRect().width, theirs = them?.getBoundingClientRect().width ?? 0;
-    const conversation = area.clientWidth - mine - theirs - (them ? 2 : 1) * EDGE;
+    const mine = el.getBoundingClientRect().width;
+    const room = area.clientWidth - KEEP.w - (them ? 2 : 1) * EDGE;
     const least = Math.min(DOCKED_MIN.w, mine);
-    const most = Math.max(least, mine + conversation - KEEP.w);
-    // Given way to the other side: kept as it is drawn, or when let go the two
-    // gave way to each other again, and it moved as well.
-    const squeezed = !!them && theirs < widthAt(other) - 0.5;
-    let to = mine, moved = false;
-    const settle = (a: number, b: number) => {
-      el.style.flex = `0 1 ${a}px`;
-      if (them) them.style.flex = `0 1 ${b}px`;
+    const most = Math.max(least, room - (them ? Math.min(DOCKED_MIN.w, widthAt(other), room) : 0));
+    const after = (to: number): PlaceSizes => ({ ...sizes, [place]: to, lead: place });
+    const draw = (s: PlaceSizes) => {
+      Object.assign(el.style, sideStyle(place, s));
+      if (them) Object.assign(them.style, sideStyle(other, s));
     };
+    let to = mine, moved = false;
     drag(
       e,
       (dx) => {
-        // Held as drawn while dragged: the page giving way would move the other side under the pointer.
-        if (!moved && them) them.style.flex = `0 0 ${theirs}px`;
         moved = true;
         to = Math.round(Math.min(most, Math.max(least, mine + (place === "left" ? dx : -dx))));
-        el.style.flex = `0 0 ${to}px`;
+        draw(after(to));
       },
       (cancelled) => {
-        // Nothing moved, nothing kept: a press alone kept a side made to give way as its size.
-        if (cancelled || !moved) return settle(widthAt(place), widthAt(other));
-        settle(to, squeezed ? theirs : widthAt(other));
-        setSizes((s) => ({ ...s, [place]: to, ...(squeezed ? { [other]: theirs } : {}) }));
+        // Nothing moved, nothing kept.
+        if (cancelled || !moved) return draw(sizes);
+        draw(after(to));
+        setSizes(after(to));
       },
     );
   };
@@ -569,7 +609,7 @@ export function Chat({
     const from = placed(kind), area = room, el = asides.current[kind];
     let at = from;
     moving.current = true;
-    raise(kind);
+    setOnTop(kind);
     drag(
       e,
       (dx, dy) => {
@@ -614,7 +654,7 @@ export function Chat({
     const sizeOf = (to: Exclude<Dock, "float">): Size => ({ width: to === "bottom" ? 0 : widthAt(to), height: heightAt() });
     let to: Dock | null = null, at = from;
     moving.current = true;
-    if (afloat) raise(kind);
+    if (afloat) setOnTop(kind);
     drag(
       e,
       (dx, dy) => {
@@ -634,7 +674,7 @@ export function Chat({
         const preview = z.querySelector<HTMLElement>(".dock-preview")!;
         // Floating already, the window itself shows where it goes.
         preview.hidden = afloat && to === "float";
-        setBox(preview, to === "float" ? at : dockedFrameAmong(to, size, sizeOf(to), others));
+        setBox(preview, to === "float" ? at : dockedFrameAmong(to, size, sizeOf(to), others, sizes.lead));
       },
       (cancelled) => {
         document.body.classList.remove("is-carrying");
@@ -643,7 +683,7 @@ export function Chat({
         if (to && !cancelled) {
           if (to === "float") {
             setFrames((f) => ({ ...f, [kind]: at }));
-            raise(kind);
+            setOnTop(kind);
           }
           if (to !== place) setPlaces((p) => ({ ...p, [kind]: to! }));
         }
@@ -1258,7 +1298,7 @@ export function Chat({
               // The browser's own box is what goes fullscreen, not the place
               // it shares: the terminal or Files beside it stays where it is,
               // and closed, the box leaves the page, and fullscreen with it.
-              onClick={() => panelBox("browser").requestFullscreen?.()}
+              onClick={() => boxes.box("browser").requestFullscreen?.()}
               className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
             >
               Fullscreen
@@ -1322,7 +1362,7 @@ export function Chat({
   // under the header that opened them, until closed.
   const COVER = "max-md:absolute max-md:inset-0 max-md:z-20 max-md:!h-full max-md:!max-h-none max-md:!w-full max-md:!max-w-none max-md:border-0 max-md:bg-surface";
 
-  /** The panels in one place, where each one's own box goes (see slotFor), with the divider between two. */
+  /** The panels in one place, where each one's own box goes (see panelBoxes), with the divider between two. */
   const slotsIn = (place: Dock, kinds: readonly AsidePanel[]) =>
     kinds.map((kind, i) => (
       <Fragment key={kind}>
@@ -1334,7 +1374,7 @@ export function Chat({
           />
         )}
         <div
-          ref={slotFor(kind)}
+          ref={boxes.slot(kind)}
           className="chat-aside-panel flex min-h-0 min-w-0 flex-col"
           style={{ flex: kinds.length === 1 ? "1 1 0%" : `${i === 0 ? split : 1 - split} 1 0%` }}
         />
@@ -1353,12 +1393,11 @@ export function Chat({
         }}
         data-dock={place}
         aria-label={wide ? "Panels at the bottom" : `Panels on the ${place}`}
-        // At a side, as wide as made, giving way where the conversation — which
-        // keeps its 320px — would be squeezed: at both sides, the two in
-        // proportion (see fitSides). At the bottom, never so tall that the
+        // At a side, as wide as made, giving way where the conversation would
+        // be squeezed (see sideStyle). At the bottom, never so tall that the
         // composer and a few lines above it are squeezed out (260px): a chat
         // made shorter by the keyboard, or a window made smaller, keeps room for it.
-        style={wide ? { height: heightAt() } : { flex: `0 1 ${widthAt(place)}px` }}
+        style={wide ? { height: heightAt() } : sideStyle(place)}
         className={`chat-aside flex overflow-hidden ${wide ? "max-h-[calc(100%-260px)] shrink-0 flex-row" : "min-w-0 flex-col"} ${ASIDE[place]} ${COVER}`}
       >
         {slotsIn(place, kinds)}
@@ -1386,7 +1425,6 @@ export function Chat({
         data-dock="float"
         aria-label={`${PANEL[kind].label}, floating`}
         style={{ left: at.x, top: at.y, width: at.w, height: at.h }}
-        onPointerDownCapture={floaters.length > 1 ? () => raise(kind) : undefined}
         className={`chat-aside flex flex-col overflow-hidden ${ASIDE.float} ${onTop === kind ? "!z-[21]" : ""} ${COVER}`}
       >
         {slotsIn("float", [kind])}
@@ -1494,8 +1532,8 @@ export function Chat({
 
       <div ref={body} className={voiceMode ? "hidden" : "chat-body relative flex min-h-0 flex-1 flex-row"}>
       {placeAside("left")}
-      {/* No narrower than 320px beside panels: they give way instead (see placeAside). */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col md:min-w-[320px]">
+      {/* No narrower than 320px beside panels at a side: they give way instead (see placeAside). */}
+      <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${groupAt("left") || groupAt("right") ? "md:min-w-[320px]" : ""}`}>
       <div
         ref={scroller.attach}
         onScroll={scroller.onScroll}
@@ -2104,8 +2142,8 @@ export function Chat({
           conversation, or floating over it. */}
       {placeAside("right")}
       {floaters.map(floatWindow)}
-      {asidePanels.map((kind) => createPortal(panelContent(kind), panelBox(kind), kind))}
-      {/* Where a panel's box waits while it goes from one place to another (see slotFor). */}
+      {asidePanels.map((kind) => createPortal(panelContent(kind), boxes.box(kind), kind))}
+      {/* Where a panel's box waits while it goes from one place to another (see panelBoxes). */}
       <div ref={park} hidden />
       {/* Shown while a panel is carried (see carryPanel). */}
       {beside && asidePanels.length > 0 && (

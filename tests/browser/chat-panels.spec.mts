@@ -464,16 +464,20 @@ test('at both sides at once the panels give way together, and the conversation k
   await expect.poll(async () => (await placeAt(page, 'left').boundingBox())!.width).toBeCloseTo(560, 0);
   expect((await placeAt(page, 'right').boundingBox())!.width).toBeCloseTo(560, 0);
 
-  // One side made wider: the other does not give way while there is room.
+  // One side made as wide as it goes: the other gives way, as far as the least of use, and the conversation keeps its room.
   const edge = (await placeAt(page, 'right').locator('xpath=preceding-sibling::*[1]').boundingBox())!;
   await page.mouse.move(edge.x + edge.width / 2, edge.y + 200);
   await page.mouse.down();
   await page.mouse.move(0, edge.y + 200, { steps: 6 });
   await page.mouse.up();
+  await frames(page);
   const b = await body(page);
-  expect((await placeAt(page, 'left').boundingBox())!.width).toBeCloseTo(560, 0);
+  expect((await placeAt(page, 'left').boundingBox())!.width).toBeCloseTo(320, 0);
   // Less the conversation's 320px and the two edges.
-  expect((await placeAt(page, 'right').boundingBox())!.width).toBeCloseTo(b.width - 560 - 320 - 8, 0);
+  expect((await placeAt(page, 'right').boundingBox())!.width).toBeCloseTo(b.width - 320 - 320 - 8, 0);
+  // Given way, not made narrower: with room again, the left is as it was made.
+  await page.setViewportSize({ width: 2600, height: 800 });
+  await expect.poll(async () => (await placeAt(page, 'left').boundingBox())!.width).toBeCloseTo(560, 0);
 });
 
 test('a panel carried to a place that has one takes its size; under the conversation it sits between the sides', async ({ page }) => {
@@ -530,26 +534,33 @@ test('a place keeps the size it was made, whichever panels are opened in it', as
   expect((await panels(page).boundingBox())!.width).toBeCloseTo(made, 0);
 });
 
-test('with both sides giving way, one sized is let go at the width it was drawn, and the other stays', async ({ page }) => {
+test('with both sides giving way, one sized is let go as it was drawn, and the other keeps its own width', async ({ page }) => {
   await place(page, 'Left', 'Terminal');
   const left = placeAt(page, 'left'), right = placeAt(page, 'right');
   const pull = async (dx: number, moves = dx) => {
-    const was = { left: (await left.boundingBox())!.width, right: (await right.boundingBox())!.width };
+    const was = (await left.boundingBox())!.width;
     const edge = (await left.locator('xpath=following-sibling::*[1]').boundingBox())!;
     await page.mouse.move(edge.x + edge.width / 2, edge.y + 200);
     await page.mouse.down();
     await page.mouse.move(edge.x + edge.width / 2 + dx, edge.y + 200, { steps: 3 });
     // Moved from where it is drawn: not with a jump to the least a panel is made.
-    const drawn = (await left.boundingBox())!.width;
-    expect(Math.abs(drawn - (was.left + moves))).toBeLessThanOrEqual(1);
+    const drawn = { left: (await left.boundingBox())!.width, right: (await right.boundingBox())!.width };
+    expect(Math.abs(drawn.left - (was + moves))).toBeLessThanOrEqual(1);
     await page.mouse.up();
     await frames(page);
-    expect((await left.boundingBox())!.width).toBeCloseTo(drawn, 0);
-    expect((await right.boundingBox())!.width).toBeCloseTo(was.right, 0);
+    // Let go, nothing moves.
+    expect(Math.abs((await left.boundingBox())!.width - drawn.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs((await right.boundingBox())!.width - drawn.right)).toBeLessThanOrEqual(1);
   };
   await page.setViewportSize({ width: 1000, height: 800 });
   await expect.poll(async () => (await left.boundingBox())!.width).toBeLessThan(400);
+  // Narrower: the right takes back some of its own width while it is dragged.
+  const before = (await right.boundingBox())!.width;
   await pull(-10);
+  expect((await right.boundingBox())!.width).toBeGreaterThan(before + 5);
+  // With room again, the right is as it was made — not kept at what it was given way to.
+  await page.setViewportSize({ width: 2600, height: 800 });
+  await expect.poll(async () => (await right.boundingBox())!.width).toBeCloseTo(560, 0);
   // Narrower than of use already: it stays there, rather than jumping to the
   // least a panel is made and taking the conversation's room.
   await page.setViewportSize({ width: 900, height: 800 });
@@ -585,8 +596,11 @@ test('each floating panel has a window of its own, put where it was let go, carr
   // The one last carried is on top; pressed in, the other comes up.
   const z = (panel: Panel) => floating(page, panel).evaluate((e) => Number(getComputedStyle(e).zIndex));
   expect(await z('Files')).toBeGreaterThan(await z('Terminal'));
-  await head(page, 'Terminal').click({ position: { x: 4, y: 4 } });
+  // Pressed anywhere in it, not only by its header: in what the terminal shows.
+  await floating(page, 'Terminal').locator('.chat-terminal-pane').first().click({ position: { x: 20, y: 20 } });
   expect(await z('Terminal')).toBeGreaterThan(await z('Files'));
+  await floating(page, 'Files').click({ position: { x: 60, y: 120 } });
+  expect(await z('Files')).toBeGreaterThan(await z('Terminal'));
 
   await reopen(page, 'Terminal', 'Files');
   await expect(placeAt(page, 'float')).toHaveCount(2);
@@ -605,6 +619,13 @@ test('panels that floated together before each had a window are put apart, both 
   expect(files.width).toBeCloseTo(420, 0);
   expect(terminal.width).toBeCloseTo(420, 0);
   expect(Math.abs(files.x - terminal.x) + Math.abs(files.y - terminal.y)).toBeGreaterThan(40);
+  // Kept where it was put aside: the other closed, it does not go back onto its place.
+  await head(page, 'Files').click({ position: { x: 4, y: 4 } });
+  await page.getByRole('button', { name: 'Close the files' }).click();
+  await frames(page);
+  expect(await floating(page, 'Terminal').boundingBox()).toEqual(terminal);
+  await reopen(page, 'Terminal');
+  expect(await floating(page, 'Terminal').boundingBox()).toEqual(terminal);
 });
 
 test('a panel carried elsewhere is moved, not taken off the page: the browser in it keeps its page', async ({ page }) => {

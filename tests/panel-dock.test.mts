@@ -101,6 +101,8 @@ test('places and sizes are read back only where they are ones a panel can have',
   assert.deepEqual(readPlaceSizes('{"left":400,"right":100,"bottom":200,"float":500}'), { left: 400, right: 100, bottom: 200 });
   assert.deepEqual(readPlaceSizes('{"left":"400","right":0,"bottom":40}'), {});
   assert.deepEqual(readPlaceSizes('{"left":-5,"right":null}'), {});
+  assert.deepEqual(readPlaceSizes('{"left":400,"lead":"left"}'), { left: 400, lead: 'left' });
+  assert.deepEqual(readPlaceSizes('{"lead":"bottom"}'), {});
   for (const raw of [null, '', 'nope', '[1]', 'null']) assert.deepEqual(readPlaceSizes(raw), {});
 });
 
@@ -129,4 +131,19 @@ test('windows that would lie on one another are put aside, so that each is seen'
   // As large as the chat: nowhere else to go.
   const all = { x: 0, y: 0, w: 1200, h: 700 };
   assert.deepEqual(spreadFrames([all, all], area), [all, all]);
+});
+
+test('the side sized last keeps its width, and the other gives way first, as far as the least of use', () => {
+  // Room for both (1000 less 328 is 672): as they were made.
+  assert.deepEqual(fitSides(300, 300, 1000, 'left'), { left: 300, right: 300 });
+  // Not: the other gives way.
+  assert.deepEqual(fitSides(300, 560, 1000, 'left'), { left: 300, right: 372 });
+  // As far as 320, then the one sized last too.
+  assert.deepEqual(fitSides(500, 560, 1000, 'left'), { left: 352, right: 320 });
+  assert.deepEqual(fitSides(560, 500, 1000, 'right'), { left: 320, right: 352 });
+  // Made narrower than 320, it gives way no further than that; and never beyond the room.
+  assert.deepEqual(fitSides(600, 200, 1000, 'left'), { left: 472, right: 200 });
+  assert.deepEqual(fitSides(600, 560, 500, 'left'), { left: 0, right: 172 });
+  // With nothing at the other side there is nothing to give way.
+  assert.deepEqual(fitSides(900, 0, 1000, 'left'), { left: 676, right: 0 });
 });
