@@ -80,22 +80,40 @@ export function layout(paths: string[], edges: { source: string; target: string 
   return paths.map((path, i) => ({ path, x: x[i], y: y[i] }));
 }
 
-/** The box around the placed notes, with room for their labels. */
-export function bounds(placed: Placed[], pad = 60): { x: number; y: number; width: number; height: number } {
-  if (!placed.length) return { x: -100, y: -100, width: 200, height: 200 };
+/**
+ * The box around the placed notes, with room for their labels — and never
+ * smaller than `least`, so a memory of three notes is not drawn so close that
+ * its labels fill the page.
+ */
+export function bounds(placed: Placed[], pad = 60, least = { width: 720, height: 480 }): { x: number; y: number; width: number; height: number } {
+  if (!placed.length) return { x: -least.width / 2, y: -least.height / 2, ...least };
   const xs = placed.map((p) => p.x);
   const ys = placed.map((p) => p.y);
   const minX = Math.min(...xs) - pad;
   const minY = Math.min(...ys) - pad;
-  return { x: minX, y: minY, width: Math.max(...xs) + pad - minX, height: Math.max(...ys) + pad - minY };
+  const width = Math.max(...xs) + pad - minX;
+  const height = Math.max(...ys) + pad - minY;
+  const w = Math.max(width, least.width);
+  const h = Math.max(height, least.height);
+  return { x: minX - (w - width) / 2, y: minY - (h - height) / 2, width: w, height: h };
 }
 
-const COLOURS = ["#38bdf8", "#a78bfa", "#34d399", "#fbbf24", "#f472b6", "#fb923c", "#60a5fa", "#4ade80", "#e879f9", "#2dd4bf"];
+const COLOURS = ["#0ea5e9", "#8b5cf6", "#10b981", "#f59e0b", "#ec4899", "#f97316", "#6366f1", "#84cc16", "#d946ef", "#14b8a6"];
+const NONE = "#94a3b8";
 
-/** A colour per type of note, the same for the same type every time. */
-export function colourOf(type: string | undefined): string {
-  if (!type) return "#94a3b8";
-  let h = 0;
-  for (const c of type) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return COLOURS[h % COLOURS.length];
+/**
+ * A colour per type of note: in the order of the memory's types, so the first
+ * ten never share one, and by the type's name past them.
+ */
+export function colours(types: Iterable<string | undefined>): (type: string | undefined) => string {
+  const known = [...new Set([...types].filter((t): t is string => !!t))].sort();
+  const at = new Map(known.map((t, i) => [t, i]));
+  return (type) => {
+    if (!type) return NONE;
+    const i = at.get(type);
+    if (i !== undefined && i < COLOURS.length) return COLOURS[i];
+    let h = 0;
+    for (const c of type) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    return COLOURS[h % COLOURS.length];
+  };
 }

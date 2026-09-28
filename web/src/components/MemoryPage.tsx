@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import {
@@ -29,7 +29,7 @@ import {
   type MemoryTrace,
   type MemoryValidation,
 } from "../api";
-import { bounds, colourOf, layout } from "../memory-graph";
+import { bounds, colours, layout } from "../memory-graph";
 import { NOTE_LINK, linkNotes } from "../memory-links";
 
 /**
@@ -43,6 +43,23 @@ import { NOTE_LINK, linkNotes } from "../memory-links";
  * so it can be linked to and Back goes back through it.
  */
 type View = "log" | "graph" | "issues";
+
+/** The colour of each type of note, the same in the list, a note and the graph. */
+const Colours = createContext<(type: string | undefined) => string>(colours([]));
+
+const typesIn = (node: MemoryNode | null): string[] =>
+  !node ? [] : [...(node.type ? [node.type] : []), ...(node.children ?? []).flatMap(typesIn)];
+
+/** A note's type: its colour as a dot, its name in the page's own ink, readable on either theme. */
+function TypeBadge({ type, className = "" }: { type: string; className?: string }) {
+  const colourOf = useContext(Colours);
+  return (
+    <span className={`inline-flex min-w-0 items-center gap-1 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-muted ${className}`}>
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: colourOf(type) }} />
+      <span className="truncate">{type}</span>
+    </span>
+  );
+}
 
 export function MemoryPage() {
   const [params, setParams] = useSearchParams();
@@ -97,6 +114,8 @@ export function MemoryPage() {
     };
   }, [asked]);
 
+  const palette = useMemo(() => colours(typesIn(tree)), [tree]);
+
   if (failed && !tree) {
     return (
       <div className="flex h-full items-center justify-center p-6">
@@ -119,113 +138,115 @@ export function MemoryPage() {
 
   const open = Boolean(note || view);
   return (
-    <div className="flex h-full min-h-0">
-      {/* On a phone, the side or what is open: one at a time. */}
-      <aside aria-label="Memory" className={`${open ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-line md:w-72`}>
-        <div className="flex items-center gap-2 px-3 pb-2 pt-3">
-          <LuBrain className="h-4 w-4 text-accent" />
-          <h1 className="text-sm font-medium text-fg">Memory</h1>
-          {validation && (
+    <Colours.Provider value={palette}>
+      <div className="flex h-full min-h-0">
+        {/* On a phone, the side or what is open: one at a time. */}
+        <aside aria-label="Memory" className={`${open ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-line md:w-72`}>
+          <div className="flex items-center gap-2 px-3 pb-2 pt-3">
+            <LuBrain className="h-4 w-4 text-accent" />
+            <h1 className="text-sm font-medium text-fg">Memory</h1>
+            {validation && (
+              <button
+                type="button"
+                onClick={() => openView("issues")}
+                title={validation.conformant ? "The bundle is well-formed" : `${validation.issues.length} issues in the bundle`}
+                className={`rounded px-1.5 py-0.5 text-[10px] ${validation.conformant ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"}`}
+              >
+                {validation.conformant ? "conformant" : `${validation.issues.length} issues`}
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => openView("issues")}
-              title={validation.conformant ? "The bundle is well-formed" : `${validation.issues.length} issues in the bundle`}
-              className={`rounded px-1.5 py-0.5 text-[10px] ${validation.conformant ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"}`}
+              onClick={load}
+              disabled={loading}
+              aria-label="Read the memory again"
+              title="Read the memory again"
+              className="ml-auto rounded p-1.5 text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40"
             >
-              {validation.conformant ? "conformant" : `${validation.issues.length} issues`}
+              <LuRefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={load}
-            disabled={loading}
-            aria-label="Read the memory again"
-            title="Read the memory again"
-            className="ml-auto rounded p-1.5 text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40"
-          >
-            <LuRefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          </button>
-        </div>
-        <div className="relative px-3">
-          <LuSearch className="pointer-events-none absolute left-5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search…"
-            aria-label="Search the memory"
-            className={`w-full rounded-lg border border-line bg-raised/60 py-1.5 pl-8 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60 ${query ? "pr-8" : "pr-3"}`}
-          />
-          {query && (
-            <button
-              type="button"
-              onClick={() => setQuery("")}
-              aria-label="Clear the search"
-              className="absolute right-4 top-1/2 -translate-y-1/2 rounded p-1 text-fg-faint hover:text-fg"
-            >
-              <LuX className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-        {failed && tree && <p className="px-3 pt-2 text-xs text-warn">{failed}</p>}
-        <nav aria-label="Notes" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-          {hits ? (
-            <Hits hits={hits} asked={asked} open={note} onOpen={openNote} />
-          ) : !tree ? (
-            <div className="skeleton-group space-y-1.5 px-1" aria-label="Loading the memory">
-              {[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-6 w-full" />)}
-            </div>
-          ) : !tree.children?.length ? (
-            <p className="px-2 py-6 text-center text-xs text-fg-subtle">Nothing is in the memory yet. The agent adds to it as it learns.</p>
-          ) : (
-            <ul className="space-y-0.5">
-              {tree.children.map((n) => (
-                <TreeNode key={n.path} node={n} depth={0} open={note} onOpen={openNote} />
-              ))}
-            </ul>
-          )}
-        </nav>
-        <div className="grid grid-cols-2 border-t border-line">
-          {(["log", "graph"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => (view === v ? close() : openView(v))}
-              aria-pressed={view === v}
-              className={`flex items-center justify-center gap-1.5 py-2.5 text-xs transition ${
-                view === v ? "bg-accent/10 text-accent" : "text-fg-muted hover:bg-fg/5 hover:text-fg"
-              }`}
-            >
-              {v === "log" ? <LuHistory className="h-3.5 w-3.5" /> : <LuWaypoints className="h-3.5 w-3.5" />}
-              {v === "log" ? "Log" : "Graph"}
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <main className={`${open ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
-        {note ? (
-          <Note key={`${note}#${round}`} path={note} onOpen={openNote} onBack={close} />
-        ) : view === "log" ? (
-          <LogView key={round} onOpen={openNote} onBack={close} />
-        ) : view === "graph" ? (
-          <GraphView key={round} onOpen={openNote} onBack={close} />
-        ) : view === "issues" ? (
-          <Issues validation={validation} onOpen={openNote} onBack={close} />
-        ) : (
-          <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-fg-subtle">
-            <div>
-              <p>Choose a note, or open the log or the graph.</p>
-              {validation?.conceptCount !== undefined && (
-                <p className="mt-1 text-xs text-fg-faint">
-                  {validation.conceptCount} {validation.conceptCount === 1 ? "note" : "notes"} in {validation.directoryCount ?? 0}{" "}
-                  {validation.directoryCount === 1 ? "folder" : "folders"}
-                </p>
-              )}
-            </div>
           </div>
-        )}
-      </main>
-    </div>
+          <div className="relative px-3">
+            <LuSearch className="pointer-events-none absolute left-5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search…"
+              aria-label="Search the memory"
+              className={`w-full rounded-lg border border-line bg-raised/60 py-1.5 pl-8 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60 ${query ? "pr-8" : "pr-3"}`}
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear the search"
+                className="absolute right-4 top-1/2 -translate-y-1/2 rounded p-1 text-fg-faint hover:text-fg"
+              >
+                <LuX className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {failed && tree && <p className="px-3 pt-2 text-xs text-warn">{failed}</p>}
+          <nav aria-label="Notes" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+            {hits ? (
+              <Hits hits={hits} asked={asked} open={note} onOpen={openNote} />
+            ) : !tree ? (
+              <div className="skeleton-group space-y-1.5 px-1" aria-label="Loading the memory">
+                {[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-6 w-full" />)}
+              </div>
+            ) : !tree.children?.length ? (
+              <p className="px-2 py-6 text-center text-xs text-fg-subtle">Nothing is in the memory yet. The agent adds to it as it learns.</p>
+            ) : (
+              <ul className="space-y-0.5">
+                {tree.children.map((n) => (
+                  <TreeNode key={n.path} node={n} depth={0} open={note} onOpen={openNote} />
+                ))}
+              </ul>
+            )}
+          </nav>
+          <div className="grid grid-cols-2 border-t border-line">
+            {(["log", "graph"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => (view === v ? close() : openView(v))}
+                aria-pressed={view === v}
+                className={`flex items-center justify-center gap-1.5 py-2.5 text-xs transition ${
+                  view === v ? "bg-accent/10 text-accent" : "text-fg-muted hover:bg-fg/5 hover:text-fg"
+                }`}
+              >
+                {v === "log" ? <LuHistory className="h-3.5 w-3.5" /> : <LuWaypoints className="h-3.5 w-3.5" />}
+                {v === "log" ? "Log" : "Graph"}
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <main className={`${open ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
+          {note ? (
+            <Note key={`${note}#${round}`} path={note} onOpen={openNote} onBack={close} />
+          ) : view === "log" ? (
+            <LogView key={round} onOpen={openNote} onBack={close} />
+          ) : view === "graph" ? (
+            <GraphView key={round} onOpen={openNote} onBack={close} />
+          ) : view === "issues" ? (
+            <Issues validation={validation} onOpen={openNote} onBack={close} />
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-fg-subtle">
+              <div>
+                <p>Choose a note, or open the log or the graph.</p>
+                {validation?.conceptCount !== undefined && (
+                  <p className="mt-1 text-xs text-fg-faint">
+                    {validation.conceptCount} {validation.conceptCount === 1 ? "note" : "notes"} in {validation.directoryCount ?? 0}{" "}
+                    {validation.directoryCount === 1 ? "folder" : "folders"}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </Colours.Provider>
   );
 }
 
@@ -291,11 +312,7 @@ function TreeNode({ node, depth, open, onOpen }: { node: MemoryNode; depth: numb
         <span className="w-3 shrink-0" />
         <LuFileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
         <span className={`min-w-0 flex-1 truncate ${reserved ? "italic" : ""}`}>{node.title || node.name}</span>
-        {node.type && (
-          <span className="max-w-[45%] shrink-0 truncate rounded px-1.5 py-0.5 text-[10px]" style={{ color: colourOf(node.type), background: `${colourOf(node.type)}1f` }}>
-            {node.type}
-          </span>
-        )}
+        {node.type && <TypeBadge type={node.type} className="max-w-[45%] shrink-0" />}
       </button>
     </li>
   );
@@ -389,11 +406,7 @@ function Note({ path, onOpen, onBack }: { path: string; onOpen: (path: string) =
               <header className="rounded-xl border border-line bg-raised/40 p-4">
                 {(f?.type || (Array.isArray(f?.tags) && f.tags.length) || when) && (
                   <p className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                    {f?.type && (
-                      <span className="rounded px-1.5 py-0.5" style={{ color: colourOf(f.type), background: `${colourOf(f.type)}1f` }}>
-                        {f.type}
-                      </span>
-                    )}
+                    {f?.type && <TypeBadge type={f.type} className="text-[11px]" />}
                     {(Array.isArray(f?.tags) ? f.tags : []).map((t) => (
                       <span key={String(t)} className="rounded bg-fg/5 px-1.5 py-0.5 text-fg-subtle">
                         #{String(t)}
@@ -497,6 +510,7 @@ function Issues({ validation, onOpen, onBack }: { validation: MemoryValidation |
 const tokens = (n?: number) => (n === undefined ? "?" : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack: () => void }) {
+  const colourOf = useContext(Colours);
   const [graph, setGraph] = useState<MemoryGraph | null>(null);
   const [traces, setTraces] = useState<MemoryTrace[]>([]);
   const [failed, setFailed] = useState<string | null>(null);
