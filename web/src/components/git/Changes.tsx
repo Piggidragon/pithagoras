@@ -5,7 +5,7 @@ import { isEnter } from "../../shortcuts";
 import { confirmDialog } from "../ConfirmDialog";
 import { ago, Counts, IconButton, Letter, LETTER_NAME, Quiet, SectionHead, splitPath, TextButton } from "./bits";
 import { useGit } from "./context";
-import { t } from "../../i18n";
+import { t, tp } from "../../i18n";
 
 type Side = "staged" | "unstaged" | "conflict";
 
@@ -27,7 +27,7 @@ export function Changes() {
 
   const commit = async () => {
     if (!canCommit) return;
-    const ok = await act(amend ? "Amending the last commit" : all ? "Committing everything" : "Committing", async () => {
+    const ok = await act(amend ? t("Amending the last commit") : all ? t("Committing everything") : t("Committing"), async () => {
       if (all && !nothing) await gitApi.stage(id, "all");
       return gitApi.commit(id, message, amend);
     });
@@ -61,7 +61,7 @@ export function Changes() {
           </label>
           <span className="ml-auto" />
           <TextButton primary disabled={!canCommit} onClick={() => void commit()} title={conflicts.length ? t("Resolve the conflicts first") : undefined}>
-            {amend ? (staged.length ? `Amend with ${staged.length} staged` : t("Amend")) : all ? (nothing ? t("Commit") : `Commit all ${unstaged.length}`) : `Commit ${staged.length} staged`}
+            {amend ? (staged.length ? t("Amend with {n} staged", { n: staged.length }) : t("Amend")) : all ? (nothing ? t("Commit") : t("Commit all {n}", { n: unstaged.length })) : t("Commit {n} staged", { n: staged.length })}
           </TextButton>
         </div>
       </div>
@@ -79,7 +79,7 @@ export function Changes() {
         {staged.length > 0 && (
           <>
             <SectionHead title={t("Staged")} count={staged.length}>
-              <IconButton label={t("Unstage everything")} disabled={!!busy} onClick={() => void act("Unstaging", () => gitApi.unstage(id, "all"))}>
+              <IconButton label={t("Unstage everything")} disabled={!!busy} onClick={() => void act(t("Unstaging"), () => gitApi.unstage(id, "all"))}>
                 <LuMinus aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
             </SectionHead>
@@ -91,7 +91,7 @@ export function Changes() {
         {unstaged.length > 0 && (
           <>
             <SectionHead title={t("Changes")} count={unstaged.length}>
-              <IconButton label={t("Stash everything — put it away for later")} disabled={!!busy} onClick={() => void act("Stashing", () => gitApi.stash(id))}>
+              <IconButton label={t("Stash everything — put it away for later")} disabled={!!busy} onClick={() => void act(t("Stashing"), () => gitApi.stash(id))}>
                 <LuArchive aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
               <IconButton
@@ -100,17 +100,17 @@ export function Changes() {
                 disabled={!!busy}
                 onClick={async () => {
                   const ok = await confirmDialog({
-                    title: `Discard ${unstaged.length} ${unstaged.length === 1 ? "change" : "changes"}?`,
-                    message: "Changed files go back to how they were, and new files are deleted. This cannot be undone.",
-                    confirmLabel: "Discard",
+                    title: tp(unstaged.length, "Discard {n} change?", "Discard {n} changes?"),
+                    message: t("Changed files go back to how they were, and new files are deleted. This cannot be undone."),
+                    confirmLabel: t("Discard"),
                     danger: true,
                   });
-                  if (ok) await act("Discarding", () => gitApi.discard(id, unstaged.map((f) => f.path)));
+                  if (ok) await act(t("Discarding"), () => gitApi.discard(id, unstaged.map((f) => f.path)));
                 }}
               >
                 <LuUndo2 aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
-              <IconButton label={t("Stage everything")} disabled={!!busy} onClick={() => void act("Staging", () => gitApi.stage(id, "all"))}>
+              <IconButton label={t("Stage everything")} disabled={!!busy} onClick={() => void act(t("Staging"), () => gitApi.stage(id, "all"))}>
                 <LuPlus aria-hidden className="h-3.5 w-3.5" />
               </IconButton>
             </SectionHead>
@@ -154,7 +154,7 @@ function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
     });
   return (
     <div className="group flex items-center gap-1.5 px-2 transition hover:bg-fg/5 focus-within:bg-fg/5">
-      <button type="button" onClick={open} title={`${file.from ? `${file.from} → ` : ""}${file.path} — show the changes`} className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left">
+      <button type="button" onClick={open} title={t("{file} — show the changes", { file: `${file.from ? `${file.from} → ` : ""}${file.path}` })} className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left">
         <Letter letter={letter} title={LETTER_NAME[letter]} />
         <span className={`min-w-0 truncate text-xs ${deleted ? "text-fg-subtle line-through" : "text-fg"}`}>{name}</span>
         {dir && <span className="min-w-0 flex-1 truncate text-[10.5px] text-fg-faint">{dir}</span>}
@@ -163,37 +163,37 @@ function FileRow({ file, side }: { file: ChangedFile; side: Side }) {
       </button>
       <div className="flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
         {openFile && inFolder(file.path) && !deleted && (
-          <IconButton label={`Open ${name} in Files`} onClick={() => openFile(file.path)}>
+          <IconButton label={t("Open {name} in Files", { name })} onClick={() => openFile(file.path)}>
             <LuExternalLink aria-hidden className="h-3.5 w-3.5" />
           </IconButton>
         )}
         {side === "unstaged" && (
           <IconButton
-            label={file.kind === "untracked" ? `Delete ${name}` : `Discard the changes to ${name}`}
+            label={file.kind === "untracked" ? t("Delete {name}", { name }) : t("Discard the changes to {name}", { name })}
             danger
             disabled={!!busy}
             onClick={async () => {
               const ok = await confirmDialog({
-                title: file.kind === "untracked" ? `Delete ${name}?` : `Discard the changes to ${name}?`,
-                message: file.kind === "untracked" ? "It is new and not in any commit, so nothing brings it back." : "It goes back to how it was staged or last committed. This cannot be undone.",
-                confirmLabel: file.kind === "untracked" ? "Delete" : "Discard",
+                title: file.kind === "untracked" ? t("Delete {name}?", { name }) : t("Discard the changes to {name}?", { name }),
+                message: file.kind === "untracked" ? t("It is new and not in any commit, so nothing brings it back.") : t("It goes back to how it was staged or last committed. This cannot be undone."),
+                confirmLabel: file.kind === "untracked" ? t("Delete") : t("Discard"),
                 danger: true,
               });
-              if (ok) await act("Discarding", () => gitApi.discard(id, [file.path]));
+              if (ok) await act(t("Discarding"), () => gitApi.discard(id, [file.path]));
             }}
           >
             {file.kind === "untracked" ? <LuTrash2 aria-hidden className="h-3.5 w-3.5" /> : <LuUndo2 aria-hidden className="h-3.5 w-3.5" />}
           </IconButton>
         )}
         {side === "staged" ? (
-          <IconButton label={`Unstage ${name}`} disabled={!!busy} onClick={() => void act("Unstaging", () => gitApi.unstage(id, unstagePaths(file)))}>
+          <IconButton label={t("Unstage {name}", { name })} disabled={!!busy} onClick={() => void act(t("Unstaging"), () => gitApi.unstage(id, unstagePaths(file)))}>
             <LuMinus aria-hidden className="h-3.5 w-3.5" />
           </IconButton>
         ) : (
           <IconButton
-            label={side === "conflict" ? `Mark ${name} resolved` : `Stage ${name}`}
+            label={side === "conflict" ? t("Mark {name} resolved", { name }) : t("Stage {name}", { name })}
             disabled={!!busy}
-            onClick={() => void act("Staging", () => gitApi.stage(id, [file.path]))}
+            onClick={() => void act(t("Staging"), () => gitApi.stage(id, [file.path]))}
           >
             <LuPlus aria-hidden className="h-3.5 w-3.5" />
           </IconButton>
@@ -234,10 +234,10 @@ function Stashes({ count }: { count: number }) {
               <span className="min-w-0 flex-1 truncate text-xs text-fg">{s.message}</span>
               <span className="shrink-0 text-[10px] text-fg-faint">{ago(s.date)}</span>
             </button>
-            <TextButton disabled={!!busy} onClick={() => void act("Applying the stash", () => gitApi.stashDo(id, "apply", s.ref, s.sha))} title={t("Bring it back and keep the stash")}>
+            <TextButton disabled={!!busy} onClick={() => void act(t("Applying the stash"), () => gitApi.stashDo(id, "apply", s.ref, s.sha))} title={t("Bring it back and keep the stash")}>
               {t("Apply")}
             </TextButton>
-            <TextButton disabled={!!busy} onClick={() => void act("Popping the stash", () => gitApi.stashDo(id, "pop", s.ref, s.sha))} title={t("Bring it back and drop the stash")}>
+            <TextButton disabled={!!busy} onClick={() => void act(t("Popping the stash"), () => gitApi.stashDo(id, "pop", s.ref, s.sha))} title={t("Bring it back and drop the stash")}>
               {t("Pop")}
             </TextButton>
             <IconButton
@@ -245,7 +245,7 @@ function Stashes({ count }: { count: number }) {
               danger
               disabled={!!busy}
               onClick={async () => {
-                if (await confirmDialog({ title: "Drop this stash?", message: s.message, confirmLabel: "Drop", danger: true })) await act("Dropping the stash", () => gitApi.stashDo(id, "drop", s.ref, s.sha));
+                if (await confirmDialog({ title: t("Drop this stash?"), message: s.message, confirmLabel: t("Drop"), danger: true })) await act(t("Dropping the stash"), () => gitApi.stashDo(id, "drop", s.ref, s.sha));
               }}
             >
               <LuTrash2 aria-hidden className="h-3.5 w-3.5" />

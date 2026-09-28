@@ -1,6 +1,7 @@
 import { SpeechPipeline, type PreparedSpeech } from "./speech-pipeline";
 import type { Item } from "./transcript";
 import { StreamingSpeech } from "./voice";
+import { t } from "./i18n";
 
 export const THINKING_PHRASES = [
   "Let me think about that for a moment.",
@@ -238,7 +239,7 @@ export class HandsFreeVoice {
           if (valid()) { this.text = []; this.stopped = false; }
         } catch (error) {
           this.acceptingReplies = false;
-          throw new Error(`Could not send “${text}”: ${error instanceof Error ? error.message : error}`);
+          throw new Error(t("Could not send “{text}”: {error}", { text, error: error instanceof Error ? error.message : String(error) }));
         } finally { this.sending = false; }
       });
       this.operations = send;

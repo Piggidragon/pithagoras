@@ -230,7 +230,7 @@ export function ProjectsPage({
             try {
               await onNewChat(project.path);
             } catch (e) {
-              setError(`"${project.name}" was created, but its chat did not open: ${(e as Error).message}`);
+              setError(t("\"{name}\" was created, but its chat did not open: {error}", { name: project.name, error: (e as Error).message }));
             }
           }}
         />

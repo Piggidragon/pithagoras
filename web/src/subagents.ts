@@ -2,6 +2,7 @@ import type { PortalEvent } from "./api";
 import type { Item } from "./transcript";
 import { SHELL_TOOL } from "./tool-activity";
 
+import { t } from "./i18n";
 /**
  * The agents working beside the main one, as the chat shows them.
  *
@@ -83,7 +84,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
       sub = {
         id,
         kind: "protocol",
-        label: String(p.label ?? "Subagent"),
+        label: String(p.label ?? t("Subagent")),
         status: "running",
         ...(typeof p.detail === "string" ? { detail: p.detail } : {}),
         ...(ev.at !== undefined ? { since: ev.at } : {}),
@@ -109,7 +110,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
       sub = {
         id,
         kind: "protocol",
-        label: "Subagent",
+        label: t("Subagent"),
         status: "running",
         input: false,
         stop: false,

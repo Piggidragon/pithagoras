@@ -1,11 +1,12 @@
+import { t } from "../i18n";
 /**
  * A list's rows, while the list is fetched: the page keeps its shape, and
  * what arrives lands where the rows stood instead of below a line of text.
  */
-export function RowsSkeleton({ rows = 4, label = "Loading…" }: { rows?: number; label?: string }) {
+export function RowsSkeleton({ rows = 4, label }: { rows?: number; label?: string }) {
   return (
     <div role="status" className="skeleton-group mt-4 space-y-2">
-      <span className="sr-only">{label}</span>
+      <span className="sr-only">{label ?? t("Loading…")}</span>
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="flex items-center gap-3 rounded-xl border border-line px-3 py-3" style={{ opacity: 1 - i * 0.18 }}>
           <div className="skeleton h-8 w-8 shrink-0 rounded-lg" />

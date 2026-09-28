@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
@@ -290,7 +291,7 @@ export const api = {
     });
     if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || `Could not upload ${name} (${res.status})`);
+    if (!res.ok) throw new Error(body.error || t("Could not upload {name} ({status})", { name, status: res.status }));
     return body;
   },
   deleteFile: (sessionId: string, file: string) =>

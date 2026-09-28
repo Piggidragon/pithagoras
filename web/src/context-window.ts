@@ -1,3 +1,4 @@
+import { formatNumber, t } from "./i18n";
 /** What a context window may be; the server refuses anything else, so the field can say so first. */
 export const WINDOW_MIN = 1_024;
 export const WINDOW_MAX = 10_000_000;
@@ -25,7 +26,7 @@ export function parseWindow(text: string): ParsedWindow {
   if (!Number.isInteger(n) || n < WINDOW_MIN || n > WINDOW_MAX) {
     return {
       kind: "bad",
-      message: `Enter the window as a whole number of tokens, from ${WINDOW_MIN.toLocaleString("en-US")} to ${WINDOW_MAX.toLocaleString("en-US")}`,
+      message: t("Enter the window as a whole number of tokens, from {min} to {max}", { min: formatNumber(WINDOW_MIN), max: formatNumber(WINDOW_MAX) }),
     };
   }
   return { kind: "ok", tokens: n };

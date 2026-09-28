@@ -81,7 +81,7 @@ export function KeyboardShortcuts() {
       <p className="mt-0.5 text-xs text-fg-subtle">{t("Part of how the message box works, so they are fixed.")}</p>
       <ul className="mt-2.5 divide-y divide-line rounded-xl border border-line bg-raised/40" aria-label={t("Chat shortcuts")}>
         {FIXED.map(item => <li key={item.label} className="flex items-center gap-2 px-3 py-2">
-          <span className="min-w-0 flex-1 text-sm text-fg">{item.label}</span>
+          <span className="min-w-0 flex-1 text-sm text-fg">{t(item.label)}</span>
           <kbd className={kbdCls}>{item.keys}</kbd>
         </li>)}
       </ul>

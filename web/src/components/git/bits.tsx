@@ -1,16 +1,16 @@
 import type { ReactNode } from "react";
 import { LuCircleAlert } from "react-icons/lu";
-import { t } from "../../i18n";
+import { formatDate, msg, t } from "../../i18n";
 
 /** "5m ago", from seconds since the epoch. */
 export function ago(seconds: number): string {
   const mins = Math.round((Date.now() / 1000 - seconds) / 60);
   if (!Number.isFinite(mins)) return "";
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
-  if (mins < 60 * 24 * 60) return `${Math.round(mins / 1440)}d ago`;
-  return new Date(seconds * 1000).toLocaleDateString();
+  if (mins < 1) return t("just now");
+  if (mins < 60) return t("{n}m ago", { n: mins });
+  if (mins < 1440) return t("{n}h ago", { n: Math.round(mins / 60) });
+  if (mins < 60 * 24 * 60) return t("{n}d ago", { n: Math.round(mins / 1440) });
+  return formatDate(seconds * 1000);
 }
 
 /** A folder and a name, so a long path still shows the part that tells files apart. */
@@ -34,21 +34,21 @@ const LETTER_COLOUR: Record<string, string> = {
 /** The letter git gives a change: A added, M modified, D deleted, R renamed, U new here, ! in conflict. */
 export function Letter({ letter, title }: { letter: string; title?: string }) {
   return (
-    <span title={title} className={`w-3 shrink-0 text-center font-mono text-[11px] font-semibold ${LETTER_COLOUR[letter] ?? "text-fg-subtle"}`}>
+    <span title={title && t(title)} className={`w-3 shrink-0 text-center font-mono text-[11px] font-semibold ${LETTER_COLOUR[letter] ?? "text-fg-subtle"}`}>
       {letter}
     </span>
   );
 }
 
 export const LETTER_NAME: Record<string, string> = {
-  A: "Added",
-  M: "Modified",
-  D: "Deleted",
-  R: "Renamed",
-  C: "Copied",
-  T: "Type changed",
-  U: "New, not tracked yet",
-  "!": "In conflict",
+  A: msg("Added"),
+  M: msg("Modified"),
+  D: msg("Deleted"),
+  R: msg("Renamed"),
+  C: msg("Copied"),
+  T: msg("Type changed"),
+  U: msg("New, not tracked yet"),
+  "!": msg("In conflict"),
 };
 
 export function Counts({ added, removed, binary }: { added: number; removed: number; binary?: boolean }) {

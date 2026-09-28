@@ -199,9 +199,9 @@ export function SessionsPage({
               e.stopPropagation();
               if (
                 await confirmDialog({
-                  title: `Delete "${s.title}"?`,
-                  message: "It is stopped if it is running, and its transcript is removed.",
-                  confirmLabel: "Delete",
+                  title: t("Delete \"{name}\"?", { name: s.title }),
+                  message: t("It is stopped if it is running, and its transcript is removed."),
+                  confirmLabel: t("Delete"),
                   danger: true,
                   deletes: true,
                 })

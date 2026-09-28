@@ -1,4 +1,5 @@
 import { insideFolder } from "./file-activity";
+import { t, tp } from "./i18n";
 
 /**
  * What a tool call is, in words, for the cards that fly out of the orb in voice mode.
@@ -31,7 +32,6 @@ const flat = (s: string, n = 90) => {
   return one.length > n ? one.slice(0, n - 1) + "…" : one;
 };
 const base = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
-const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;
 const hostOf = (url: string) => {
   try {
     return new URL(url).host || url;
@@ -71,13 +71,13 @@ export const toolName = (name: string, args: unknown): string => unwrapCall(name
 
 function browser(action: string, input: Record<string, any>): ToolCall {
   const url = text(input.url);
-  if (/navigate|open|goto/.test(action)) return { label: "Opening a page", detail: url ? hostOf(url) : "", target: "browser" };
-  if (/screenshot/.test(action)) return { label: "Taking a screenshot", detail: "", target: "browser" };
-  if (/click|hover|drag/.test(action)) return { label: "Clicking in the browser", detail: text(input.element), target: "browser" };
-  if (/type|fill|press|select/.test(action)) return { label: "Typing in the browser", detail: text(input.element), target: "browser" };
-  if (/snapshot|evaluate|console|network/.test(action)) return { label: "Reading the page", detail: "", target: "browser" };
-  if (/tab|close|back|forward|resize|wait/.test(action)) return { label: "Using the browser", detail: "", target: "browser" };
-  return { label: "Using the browser", detail: url ? hostOf(url) : "", target: "browser" };
+  if (/navigate|open|goto/.test(action)) return { label: t("Opening a page"), detail: url ? hostOf(url) : "", target: "browser" };
+  if (/screenshot/.test(action)) return { label: t("Taking a screenshot"), detail: "", target: "browser" };
+  if (/click|hover|drag/.test(action)) return { label: t("Clicking in the browser"), detail: text(input.element), target: "browser" };
+  if (/type|fill|press|select/.test(action)) return { label: t("Typing in the browser"), detail: text(input.element), target: "browser" };
+  if (/snapshot|evaluate|console|network/.test(action)) return { label: t("Reading the page"), detail: "", target: "browser" };
+  if (/tab|close|back|forward|resize|wait/.test(action)) return { label: t("Using the browser"), detail: "", target: "browser" };
+  return { label: t("Using the browser"), detail: url ? hostOf(url) : "", target: "browser" };
 }
 
 /** A call as it starts. `folder` is the chat's, for which paths can be opened in Files. */
@@ -85,38 +85,38 @@ export function describeCall(payload: any, folder: string): ToolCall {
   const { name, input } = unwrap(payload);
   const path = text(input.path ?? input.file_path);
   const inside = path ? insideFolder(folder, path) : undefined;
-  const file = (label: string): ToolCall => ({
-    label: `${label} ${path ? base(path) : "a file"}`,
+  const file = (label: (file: string) => string): ToolCall => ({
+    label: label(path ? base(path) : t("a file")),
     detail: inside && inside !== base(path) ? inside : "",
     ...(inside ? { target: "files" as const, path: inside } : {}),
   });
 
   if (SHELL_TOOL.test(name)) {
-    return { label: "Running a command", detail: flat(text(input.description) || text(input.command) || text(input.cmd)), target: "terminal" };
+    return { label: t("Running a command"), detail: flat(text(input.description) || text(input.command) || text(input.cmd)), target: "terminal" };
   }
   if (name === "read") {
-    const call = file("Reading");
+    const call = file((f) => t("Reading {file}", { file: f }));
     const from = Number(input.offset), count = Number(input.limit);
-    if (Number.isInteger(from) && from > 0) call.detail = [call.detail, count > 0 ? `lines ${from}–${from + count - 1}` : `from line ${from}`].filter(Boolean).join(" · ");
+    if (Number.isInteger(from) && from > 0) call.detail = [call.detail, count > 0 ? t("lines {from}–{to}", { from, to: from + count - 1 }) : t("from line {from}", { from })].filter(Boolean).join(" · ");
     return call;
   }
-  if (name === "write") return file("Writing");
-  if (name === "edit") return file("Editing");
-  if (name === "grep") return { label: `Searching for “${flat(text(input.pattern), 40)}”`, detail: flat([text(input.path), text(input.glob)].filter(Boolean).join(" · ")) };
-  if (name === "find") return { label: `Looking for “${flat(text(input.pattern), 40)}”`, detail: flat(text(input.path)) };
-  if (name === "ls") return { label: `Listing ${path ? base(path) : "the folder"}`, detail: "" };
-  if (name === "show_image") return { label: "Showing a picture", detail: flat(text(input.title) || text(input.path)), target: "pictures" };
+  if (name === "write") return file((f) => t("Writing {file}", { file: f }));
+  if (name === "edit") return file((f) => t("Editing {file}", { file: f }));
+  if (name === "grep") return { label: t("Searching for “{pattern}”", { pattern: flat(text(input.pattern), 40) }), detail: flat([text(input.path), text(input.glob)].filter(Boolean).join(" · ")) };
+  if (name === "find") return { label: t("Looking for “{pattern}”", { pattern: flat(text(input.pattern), 40) }), detail: flat(text(input.path)) };
+  if (name === "ls") return { label: t("Listing {folder}", { folder: path ? base(path) : t("the folder") }), detail: "" };
+  if (name === "show_image") return { label: t("Showing a picture"), detail: flat(text(input.title) || text(input.path)), target: "pictures" };
   if (name.startsWith("canvas_")) {
-    const verb: Record<string, string> = { canvas_create: "Starting a document", canvas_write: "Writing in a document", canvas_read: "Reading a document", canvas_list: "Looking at the documents", canvas_delete: "Deleting a document" };
-    return { label: verb[name] ?? "Using a document", detail: flat(text(input.title)), target: "canvas" };
+    const verb: Record<string, string> = { canvas_create: t("Starting a document"), canvas_write: t("Writing in a document"), canvas_read: t("Reading a document"), canvas_list: t("Looking at the documents"), canvas_delete: t("Deleting a document") };
+    return { label: verb[name] ?? t("Using a document"), detail: flat(text(input.title)), target: "canvas" };
   }
   if (/^browser[_.]/.test(name)) return browser(name.replace(/^browser[_.]/, ""), input);
   if (typeof input.tool === "string" && /browser/.test(input.tool)) return browser(input.tool, input);
-  if (/web_?search|search_web/.test(name)) return { label: "Searching the web", detail: flat(text(input.query)) };
-  if (/fetch|scrape|read_url|web_read/.test(name) && text(input.url)) return { label: "Opening a page", detail: hostOf(text(input.url)) };
-  if (/search/.test(name)) return { label: "Searching", detail: flat(text(input.query) || text(input.pattern)) };
+  if (/web_?search|search_web/.test(name)) return { label: t("Searching the web"), detail: flat(text(input.query)) };
+  if (/fetch|scrape|read_url|web_read/.test(name) && text(input.url)) return { label: t("Opening a page"), detail: hostOf(text(input.url)) };
+  if (/search/.test(name)) return { label: t("Searching"), detail: flat(text(input.query) || text(input.pattern)) };
   const detail = [input.description, input.query, input.url, input.path, input.command].find((v) => typeof v === "string") as string | undefined;
-  return { label: `Using ${name.replace(/[_.]+/g, " ")}`, detail: flat(detail ?? "") };
+  return { label: t("Using {tool}", { tool: name.replace(/[_.]+/g, " ") }), detail: flat(detail ?? "") };
 }
 
 /** What a tool said back, as text. */
@@ -146,21 +146,21 @@ export function describeOutcome(start: any, end: any): string {
   }
   if (name === "write") {
     const content = text(input.content);
-    return content ? plural(content.split("\n").length - (content.endsWith("\n") ? 1 : 0), "line") : "";
+    return content ? tp(content.split("\n").length - (content.endsWith("\n") ? 1 : 0), "{n} line", "{n} lines") : "";
   }
   if (name === "grep") {
-    if (/^no matches/i.test(said.trim())) return "No matches";
+    if (/^no matches/i.test(said.trim())) return t("No matches");
     const n = lines(said).length;
-    return n ? `${plural(n, "match", "matches")}${end?.result?.details?.matchLimitReached ? "+" : ""}` : "";
+    return n ? `${tp(n, "{n} match", "{n} matches")}${end?.result?.details?.matchLimitReached ? "+" : ""}` : "";
   }
   if (name === "find") {
-    if (/^no files/i.test(said.trim())) return "Nothing found";
+    if (/^no files/i.test(said.trim())) return t("Nothing found");
     const n = lines(said).length;
-    return n ? `${plural(n, "file")}${end?.result?.details?.resultLimitReached ? "+" : ""}` : "";
+    return n ? `${tp(n, "{n} file", "{n} files")}${end?.result?.details?.resultLimitReached ? "+" : ""}` : "";
   }
   if (name === "ls") {
     const n = lines(said).length;
-    return n ? plural(n, "entry", "entries") : "";
+    return n ? tp(n, "{n} entry", "{n} entries") : "";
   }
   return "";
 }

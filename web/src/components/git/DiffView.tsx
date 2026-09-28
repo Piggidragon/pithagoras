@@ -33,7 +33,7 @@ export function DiffView({ file, truncated }: { file: DiffFile; truncated?: bool
     );
   }
   return (
-    <div className="git-diff min-h-0 flex-1 overflow-auto font-mono text-[11.5px] leading-[1.55]" role="table" aria-label={`Changes to ${file.path}`}>
+    <div className="git-diff min-h-0 flex-1 overflow-auto font-mono text-[11.5px] leading-[1.55]" role="table" aria-label={t("Changes to {path}", { path: file.path })}>
       <div className="min-w-max">
         {file.rows.map((row, i) =>
           row.kind === "hunk" ? (

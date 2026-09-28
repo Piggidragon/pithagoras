@@ -66,7 +66,7 @@ function LoadedDiff({ title, path, what, onDone }: { title: string; path: string
   if (error) return <ErrorNote>{error}</ErrorNote>;
   if (!files) return <Quiet>{t("Loading…")}</Quiet>;
   if (live && !version) return <Quiet>{t("No longer changed — it was committed, discarded, or put back as it was.")}</Quiet>;
-  if (!files.length) return <Quiet>{t("Nothing to show:")} {what.of === "staged" ? t("nothing of it is staged") : t("no changes in its text")}.</Quiet>;
+  if (!files.length) return <Quiet>{what.of === "staged" ? t("Nothing to show: nothing of it is staged.") : t("Nothing to show: no changes in its text.")}</Quiet>;
 
   const name = path.split("/").pop() ?? path;
   const actions = (
@@ -83,23 +83,23 @@ function LoadedDiff({ title, path, what, onDone }: { title: string; path: string
             disabled={!!busy}
             onClick={async () => {
               const ok = await confirmDialog({
-                title: what.of === "untracked" ? `Delete ${name}?` : `Discard the changes to ${name}?`,
-                message: "This cannot be undone.",
-                confirmLabel: what.of === "untracked" ? "Delete" : "Discard",
+                title: what.of === "untracked" ? t("Delete {name}?", { name }) : t("Discard the changes to {name}?", { name }),
+                message: t("This cannot be undone."),
+                confirmLabel: what.of === "untracked" ? t("Delete") : t("Discard"),
                 danger: true,
               });
-              if (ok && (await act("Discarding", () => gitApi.discard(id, [path])))) onDone();
+              if (ok && (await act(t("Discarding"), () => gitApi.discard(id, [path])))) onDone();
             }}
           >
             <LuUndo2 aria-hidden className="h-3 w-3" /> {what.of === "untracked" ? t("Delete") : t("Discard")}
           </TextButton>
-          <TextButton primary disabled={!!busy} onClick={async () => (await act("Staging", () => gitApi.stage(id, [path]))) && onDone()}>
+          <TextButton primary disabled={!!busy} onClick={async () => (await act(t("Staging"), () => gitApi.stage(id, [path]))) && onDone()}>
             <LuPlus aria-hidden className="h-3 w-3" /> {t("Stage")}
           </TextButton>
         </>
       )}
       {what.of === "staged" && (
-        <TextButton disabled={!!busy} onClick={async () => (await act("Unstaging", () => gitApi.unstage(id, unstagePaths({ path, from: what.from })))) && onDone()}>
+        <TextButton disabled={!!busy} onClick={async () => (await act(t("Unstaging"), () => gitApi.unstage(id, unstagePaths({ path, from: what.from })))) && onDone()}>
           <LuMinus aria-hidden className="h-3 w-3" /> {t("Unstage")}
         </TextButton>
       )}

@@ -904,9 +904,9 @@ function RoutineDetail({
           onClick={async () => {
             if (
               await confirmDialog({
-                title: `Delete "${r.name}"?`,
-                message: "Its sessions are kept.",
-                confirmLabel: "Delete",
+                title: t("Delete \"{name}\"?", { name: r.name }),
+                message: t("Its sessions are kept."),
+                confirmLabel: t("Delete"),
                 danger: true,
                 deletes: true,
               })

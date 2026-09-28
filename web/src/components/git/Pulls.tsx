@@ -7,7 +7,7 @@ import { confirmDialog } from "../ConfirmDialog";
 import { Counts, ErrorNote, Letter, Quiet, SectionHead, splitPath, TextButton } from "./bits";
 import { useGit } from "./context";
 import { when } from "../../time";
-import { t } from "../../i18n";
+import { msg, t, tp, tx } from "../../i18n";
 
 
 /** Where a pull request is: open, draft, merged or closed. */
@@ -28,6 +28,14 @@ function StateBadge({ pull }: { pull: Pick<PullSummary, "state" | "isDraft"> }) 
  * and the branch can still be compared with its base, which is most of what a
  * pull request is for before anybody else looks at it.
  */
+/** What reviewers decided, as GitHub names it, in words. */
+const DECISION: Record<string, string> = {
+  APPROVED: msg("approved"),
+  CHANGES_REQUESTED: msg("changes requested"),
+  REVIEW_REQUIRED: msg("review required"),
+};
+const decision = (d: string) => (DECISION[d] ? t(DECISION[d]) : d.toLowerCase().replace(/_/g, " "));
+
 export function Pulls() {
   const { id, repo, show } = useGit();
   const gh = repo.gh;
@@ -76,7 +84,7 @@ export function Pulls() {
         className="flex w-full items-center gap-1.5 border-b border-line px-3 py-1.5 text-left text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
       >
         <LuGitCompareArrows aria-hidden className="h-3.5 w-3.5" />
-        {t("Compare")} {repo.branch ?? t("HEAD")} {t("with its base")}
+        {t("Compare {branch} with its base", { branch: repo.branch ?? "HEAD" })}
       </button>
       {!gh ? (
         <Quiet>{t("Asking GitHub…")}</Quiet>
@@ -97,7 +105,7 @@ export function Pulls() {
           ) : current ? (
             <PullRow pull={current} />
           ) : onDefault ? (
-            <Quiet>{t("On")} {repo.branch ?? t("no branch")} {t("— switch to a branch of your own to open a pull request from it.")}</Quiet>
+            <Quiet>{t("On {branch} — switch to a branch of your own to open a pull request from it.", { branch: repo.branch ?? t("no branch") })}</Quiet>
           ) : (
             <OpenPull
               onOpened={(n) => {
@@ -139,7 +147,7 @@ function PullRow({ pull: p }: { pull: PullSummary }) {
           {p.headRefName} → {p.baseRefName}
         </span>
         {p.author && <span className="shrink-0">{p.author.login}</span>}
-        {p.reviewDecision && <span className="shrink-0">{p.reviewDecision.toLowerCase().replace(/_/g, " ")}</span>}
+        {p.reviewDecision && <span className="shrink-0">{decision(p.reviewDecision)}</span>}
         <span className="ml-auto shrink-0">{when(p.updatedAt)}</span>
       </span>
     </button>
@@ -170,18 +178,18 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
       (r) => {
         const c = r.comparison;
         setComparison(c);
-        if (!c) return setUnfilled("Nothing to compare the branch with, so nothing is filled in.");
+        if (!c) return setUnfilled(t("Nothing to compare the branch with, so nothing is filled in."));
         setTitle((t) => t || (c.commits.length === 1 ? c.commits[0].subject : (repo.branch ?? "").replace(/^[^/]+\//, "").replace(/[-_]/g, " ")));
         setBody((b) => b || (c.commits.length > 1 ? c.commits.map((x) => `- ${x.subject}`).reverse().join("\n") : ""));
       },
-      (e) => setUnfilled(`Not filled in: ${(e as Error).message}`),
+      (e) => setUnfilled(t("Not filled in: {error}", { error: (e as Error).message })),
     );
   }, [open, id, baseRef, repo.branch]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     let url = "";
-    const ok = await act(repo.upstream ? "Opening the pull request" : "Pushing, and opening the pull request", async () => {
+    const ok = await act(repo.upstream ? t("Opening the pull request") : t("Pushing, and opening the pull request"), async () => {
       url = (await gitApi.createPull(id, { title, body, base: base || undefined, draft })).url;
     });
     const n = Number(/\/pull\/(\d+)/.exec(url)?.[1]);
@@ -192,7 +200,7 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
     return (
       <div className="px-3 py-2">
         <TextButton primary onClick={() => setOpen(true)}>
-          <LuGitPullRequest aria-hidden className="h-3.5 w-3.5" /> {t("Open a pull request for")} {repo.branch}
+          <LuGitPullRequest aria-hidden className="h-3.5 w-3.5" /> {t("Open a pull request for {branch}", { branch: repo.branch ?? "" })}
         </TextButton>
       </div>
     );
@@ -225,7 +233,7 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
         </label>
         {comparison && (
           <span className="text-fg-faint">
-            {comparison.commits.length} {comparison.commits.length === 1 ? t("commit") : t("commits")}, {comparison.files.length} {comparison.files.length === 1 ? t("file") : t("files")}
+            {tp(comparison.commits.length, "{n} commit", "{n} commits")}, {tp(comparison.files.length, "{n} file", "{n} files")}
           </span>
         )}
         <span className="ml-auto" />
@@ -235,7 +243,7 @@ function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
         </TextButton>
       </div>
       {unfilled && <p className="text-[10.5px] text-fg-faint">{unfilled}</p>}
-      {repo.files.length > 0 && <p className="text-[10.5px] text-warn">{repo.files.length} {t("changed files are not committed — they are not part of it.")}</p>}
+      {repo.files.length > 0 && <p className="text-[10.5px] text-warn">{tp(repo.files.length, "{n} changed file is not committed — it is not part of it.", "{n} changed files are not committed — they are not part of it.")}</p>}
     </form>
   );
 }
@@ -298,15 +306,15 @@ export function PullView({ n }: { n: number }) {
 
   const merge = async () => {
     const ok = await confirmDialog({
-      title: `Merge #${pull.number}?`,
-      message: `${method === "squash" ? "Squashed into one commit" : method === "rebase" ? "Rebased" : "With a merge commit"} on ${pull.baseRefName}, on GitHub.${deleteBranch ? ` ${pull.headRefName} is deleted afterwards.` : ""}`,
-      confirmLabel: "Merge",
+      title: t("Merge #{n}?", { n: pull.number }),
+      message: `${method === "squash" ? t("Squashed into one commit on {base}, on GitHub.", { base: pull.baseRefName }) : method === "rebase" ? t("Rebased on {base}, on GitHub.", { base: pull.baseRefName }) : t("With a merge commit on {base}, on GitHub.", { base: pull.baseRefName })}${deleteBranch ? ` ${t("{branch} is deleted afterwards.", { branch: pull.headRefName })}` : ""}`,
+      confirmLabel: t("Merge"),
     });
-    if (ok && (await act(`Merging #${pull.number}`, () => gitApi.mergePull(id, pull.number, method, deleteBranch)))) after();
+    if (ok && (await act(t("Merging #{n}", { n: pull.number }), () => gitApi.mergePull(id, pull.number, method, deleteBranch)))) after();
   };
 
   const review = async (action: "approve" | "request-changes" | "comment") => {
-    const label = action === "approve" ? "Approving" : action === "request-changes" ? "Asking for changes" : "Commenting";
+    const label = action === "approve" ? t("Approving") : action === "request-changes" ? t("Asking for changes") : t("Commenting");
     if (await act(label, () => (action === "comment" ? gitApi.commentPull(id, pull.number, reply) : gitApi.reviewPull(id, pull.number, action, reply)))) {
       setReply("");
       after();
@@ -326,19 +334,19 @@ export function PullView({ n }: { n: number }) {
           </a>
         </div>
         <p className="mt-1 text-[10.5px] text-fg-faint">
-          {pull.author?.login} {t("wants")} <span className="font-mono">{pull.headRefName}</span> {t("in")} <span className="font-mono">{pull.baseRefName}</span>
+          {tx("{author} wants {head} in {base}", { author: pull.author?.login ?? "", head: <span className="font-mono">{pull.headRefName}</span>, base: <span className="font-mono">{pull.baseRefName}</span> })}
           {pull.additions !== undefined && (
             <>
               {" · "}
               <Counts added={pull.additions} removed={pull.deletions ?? 0} />
             </>
           )}
-          {pull.reviewDecision && ` · ${pull.reviewDecision.toLowerCase().replace(/_/g, " ")}`}
-          {pull.mergeable === "CONFLICTING" && <span className="text-danger"> {t("· has conflicts")}</span>}
+          {pull.reviewDecision && ` · ${decision(pull.reviewDecision)}`}
+          {pull.mergeable === "CONFLICTING" && <span className="text-danger"> · {t("has conflicts")}</span>}
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {!here && open && (
-            <TextButton disabled={!!busy} onClick={() => void act(`Checking out #${pull.number}`, () => gitApi.checkoutPull(id, pull.number))} title={t("Check its branch out here, to try it or work on it")}>
+            <TextButton disabled={!!busy} onClick={() => void act(t("Checking out #{n}", { n: pull.number }), () => gitApi.checkoutPull(id, pull.number))} title={t("Check its branch out here, to try it or work on it")}>
               {t("Check out")}
             </TextButton>
           )}

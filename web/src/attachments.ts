@@ -1,5 +1,6 @@
 import type { PromptImage } from "./api";
 
+import { t } from "./i18n";
 /**
  * Pictures and files that go with a message from the box.
  *
@@ -69,7 +70,7 @@ const readAsDataUrl = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read the picture"));
+    reader.onerror = () => reject(reader.error ?? new Error(t("Could not read the picture")));
     reader.readAsDataURL(blob);
   });
 
@@ -82,14 +83,14 @@ let counter = 0;
  * size.
  */
 export async function prepareImage(file: Blob, name = "image"): Promise<Attachment> {
-  if (!isImage(file.type)) throw new Error(`${name} is not a PNG, JPEG, GIF or WebP picture`);
+  if (!isImage(file.type)) throw new Error(t("{name} is not a PNG, JPEG, GIF or WebP picture", { name }));
   const id = `att${++counter}`;
   const bitmap = await createImageBitmap(file).catch(() => {
-    throw new Error(`${name} could not be read as a picture`);
+    throw new Error(t("{name} could not be read as a picture", { name }));
   });
   try {
     if (!needsShrinking(file.type, file.size, bitmap.width, bitmap.height)) {
-      if (file.size > MAX_IMAGE_BYTES) throw new Error(`${name} is over 5 MB`);
+      if (file.size > MAX_IMAGE_BYTES) throw new Error(t("{name} is over 5 MB", { name }));
       return { id, name, mimeType: file.type, data: await readAsDataUrl(file) };
     }
     const size = fitWithin(bitmap.width, bitmap.height);
@@ -97,7 +98,7 @@ export async function prepareImage(file: Blob, name = "image"): Promise<Attachme
     canvas.width = size.width;
     canvas.height = size.height;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error(`${name} could not be made smaller`);
+    if (!context) throw new Error(t("{name} could not be made smaller", { name }));
     context.fillStyle = "#fff";
     context.fillRect(0, 0, size.width, size.height);
     context.drawImage(bitmap, 0, 0, size.width, size.height);
@@ -105,7 +106,7 @@ export async function prepareImage(file: Blob, name = "image"): Promise<Attachme
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
       if (blob && blob.size <= MAX_IMAGE_BYTES) return { id, name, mimeType: "image/jpeg", data: await readAsDataUrl(blob) };
     }
-    throw new Error(`${name} is too large, even made smaller`);
+    throw new Error(t("{name} is too large, even made smaller", { name }));
   } finally {
     bitmap.close();
   }
@@ -114,7 +115,7 @@ export async function prepareImage(file: Blob, name = "image"): Promise<Attachme
 /** A picture already sent, fetched back to go with a message again. */
 export async function refetchImage(url: string, name: string): Promise<Attachment> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`${name} is no longer there`);
+  if (!res.ok) throw new Error(t("{name} is no longer there", { name }));
   return prepareImage(await res.blob(), name);
 }
 
@@ -152,11 +153,11 @@ export function createPending() {
      * for. Room is taken as it is counted, so two quick pastes cannot both
      * take the last places. What went wrong is returned, to be shown.
      */
-    async add(id: string, files: File[], prepare: (file: File) => Promise<Attachment> = (file) => prepareImage(file, file.name || "Pasted picture")): Promise<string[]> {
+    async add(id: string, files: File[], prepare: (file: File) => Promise<Attachment> = (file) => prepareImage(file, file.name || t("Pasted picture"))): Promise<string[]> {
       const problems: string[] = [];
       const room = Math.max(0, MAX_IMAGES - get(id).length - (preparing.get(id) ?? 0));
       const taking = Math.min(files.length, room);
-      if (files.length > room) problems.push(`At most ${MAX_IMAGES} pictures can go with one message.`);
+      if (files.length > room) problems.push(t("At most {n} pictures can go with one message.", { n: MAX_IMAGES }));
       preparing.set(id, (preparing.get(id) ?? 0) + taking);
       try {
         const ready: Attachment[] = [];

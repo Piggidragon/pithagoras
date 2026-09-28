@@ -458,8 +458,8 @@ function SkillDetail({
               onClick={async () => {
                 if (
                   await confirmDialog({
-                    title: `Delete the skill "${s.name}"?`,
-                    confirmLabel: "Delete",
+                    title: t("Delete the skill \"{name}\"?", { name: s.name }),
+                    confirmLabel: t("Delete"),
                     danger: true,
                     deletes: true,
                   })

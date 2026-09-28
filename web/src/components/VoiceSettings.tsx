@@ -55,24 +55,24 @@ export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, o
     <div className="voice-setting" role="group" aria-label={t("Talking while the agent works")}>
       <span aria-hidden="true">{t("Talking while the agent works")}</span>
       <div className="voice-segments">
-        {choice(false, steer, "Stops it", onSteer)}
-        {choice(true, steer, "Adds to the task", onSteer)}
+        {choice(false, steer, t("Stops it"), onSteer)}
+        {choice(true, steer, t("Adds to the task"), onSteer)}
       </div>
       <p>{steer ? t("What you say goes into the running task after its current step. The stop button still stops it.") : t("What you say stops the task and starts a new turn.")}</p>
     </div>
     <div className="voice-setting" role="group" aria-label={t("Push to talk")}>
       <span aria-hidden="true">{t("Push to talk")}</span>
       <div className="voice-segments">
-        {choice(false, ptt, "Off", onPtt)}
-        {choice(true, ptt, "On", onPtt)}
+        {choice(false, ptt, t("Off"), onPtt)}
+        {choice(true, ptt, t("On"), onPtt)}
       </div>
       <p>{ptt ? t("Only heard while you hold the push-to-talk key (Space unless changed) or the microphone button.") : t("Heard whenever you speak.")}</p>
     </div>
     <div className="voice-setting" role="group" aria-label={t("Sound effects")}>
       <span aria-hidden="true">{t("Sound effects")}</span>
       <div className="voice-segments">
-        {choice(false, sounds, "Off", () => sounds && onSounds())}
-        {choice(true, sounds, "On", () => !sounds && onSounds())}
+        {choice(false, sounds, t("Off"), () => sounds && onSounds())}
+        {choice(true, sounds, t("On"), () => !sounds && onSounds())}
       </div>
     </div>
   </div>, document.body);

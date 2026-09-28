@@ -190,3 +190,12 @@ export const formatDate = (d: Date | number | string, options?: Intl.DateTimeFor
 /** A time of day the language's way. */
 export const formatTime = (d: Date | number | string, options?: Intl.DateTimeFormatOptions): string =>
   new Date(d).toLocaleTimeString(formats(), options);
+
+/** A language's name in the language shown: "de" is "German" in English, "Deutsch" in German. */
+export function languageName(code: string, fallback = code): string {
+  try {
+    return new Intl.DisplayNames([current.code], { type: "language" }).of(code) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}

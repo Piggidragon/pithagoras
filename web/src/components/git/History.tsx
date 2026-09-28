@@ -229,7 +229,7 @@ export function CompareView({ base: asked }: { base?: string }) {
       {result && (
         <>
           <SectionHead title={t("Commits")} count={result.commits.length} />
-          {!result.commits.length && <Quiet>{t("Nothing on this branch that")} {result.base} {t("does not have.")}</Quiet>}
+          {!result.commits.length && <Quiet>{t("Nothing on this branch that {base} does not have.", { base: result.base })}</Quiet>}
           <CommitList commits={result.commits} />
           <SectionHead title={t("Files")} count={result.files.length}>
             <Counts added={result.files.reduce((n, f) => n + f.added, 0)} removed={result.files.reduce((n, f) => n + f.removed, 0)} />

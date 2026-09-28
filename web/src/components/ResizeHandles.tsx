@@ -2,6 +2,7 @@ import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { GAP, MIN, dockBox, dockSize, type Box } from "../voice-windows";
 import { followPointer } from "../pointer-drag";
 
+import { t } from "../i18n";
 export type Edge = "e" | "w" | "s" | "se" | "sw";
 
 /**
@@ -177,7 +178,7 @@ function begin(e: ReactPointerEvent, el: HTMLElement, edge: Edge, mode: ResizeMo
 
 /** Grips on a window's edges and bottom corners. Hidden on phones, where windows take the width. */
 export function ResizeHandles({ target, mode = "pin", edges = ["e", "w", "s", "se", "sw"] }: { target: RefObject<HTMLElement>; mode?: ResizeMode; edges?: Edge[] }) {
-  const name: Record<Edge, string> = { e: "right edge", w: "left edge", s: "bottom edge", se: "bottom right corner", sw: "bottom left corner" };
-  return <>{edges.map(edge => <div key={edge} className={`resize-handle resize-${edge}`} aria-hidden="true" title={`Drag the ${name[edge]} to resize`}
+  const name: Record<Edge, string> = { e: t("Drag the right edge to resize"), w: t("Drag the left edge to resize"), s: t("Drag the bottom edge to resize"), se: t("Drag the bottom right corner to resize"), sw: t("Drag the bottom left corner to resize") };
+  return <>{edges.map(edge => <div key={edge} className={`resize-handle resize-${edge}`} aria-hidden="true" title={name[edge]}
     onPointerDown={e => { if (target.current) begin(e, target.current, edge, mode); }} />)}</>;
 }

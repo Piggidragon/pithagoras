@@ -71,7 +71,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   useEffect(() => pending.subscribe(id => { if (id === sessionId) setAttachments(pending.get(id)); }), [sessionId]);
   const addPictures = async (files: File[]) => {
     const pictures = files.filter(file => isImage(file.type));
-    const problems = pictures.length < files.length ? ["Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode. Put other files in Files."] : [];
+    const problems = pictures.length < files.length ? [t("Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode. Put other files in Files.")] : [];
     problems.push(...await pending.add(sessionId, pictures));
     if (problems.length && mounted.current) setError(problems.join(" "));
   };
@@ -169,7 +169,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const heartbeat = useRef<ReturnType<typeof setInterval>>();
   const connectVoice = async(client:string,active:boolean)=>{
     const response=await fetch(`/api/sessions/${sessionId}/voice/connection`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client,active}),keepalive:!active});
-    if(!response.ok)throw new Error((await response.json()).error||'Could not connect voice service');
+    if(!response.ok)throw new Error((await response.json()).error||t('Could not connect voice service'));
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
 
@@ -389,7 +389,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       // also permits updating the UI without restarting an active session.
       const busy = response.status === 409 && failure.error === "Breeze is finishing another request"
         || response.status === 502 && /^Breeze returned HTTP 409/.test(failure.error || "");
-      if (!busy || Date.now() >= deadline) throw new Error(failure.error || "Speech generation failed");
+      if (!busy || Date.now() >= deadline) throw new Error(failure.error || t("Speech generation failed"));
       await new Promise<void>((resolve, reject) => {
         const cancel = () => { clearTimeout(timer); reject(signal.reason); };
         const timer = setTimeout(() => { signal.removeEventListener("abort", cancel); resolve(); }, 500);
@@ -397,7 +397,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         if (signal.aborted) cancel();
       });
     } while (true);
-    if (!response.ok) throw new Error((await response.json()).error || "Speech generation failed");
+    if (!response.ok) throw new Error((await response.json()).error || t("Speech generation failed"));
     mark('tts_headers',{serverTiming:response.headers.get('server-timing')??''});
     let body=response.body;
     if(body&&trace){let first=true;body=body.pipeThrough(new TransformStream<Uint8Array<ArrayBuffer>,Uint8Array<ArrayBuffer>>({transform(chunk,controller){if(first&&chunk.length){first=false;mark('first_bytes');}controller.enqueue(chunk);}}));}
@@ -407,7 +407,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     const phrase = { samples: [] as Float32Array[], sampleRate: 24000 };
     const options = { rate: speed.current, ...(kind === 'reply' ? { record: (samples: Float32Array) => { phrase.samples.push(samples); } } : {}) };
     if (response.headers.get("content-type")?.startsWith("audio/pcm")) {
-      if (response.headers.get("x-sample-rate") !== "24000" || !body) throw new Error("Unsupported speech stream");
+      if (response.headers.get("x-sample-rate") !== "24000" || !body) throw new Error(t("Unsupported speech stream"));
       if (!sequential.current && response.headers.get("x-voice-streaming") === "true") stream = await preparePcmSpeech(body!, audio, signal, options);
       else buffer = await readPcmStream(body!, audio, signal, options);
     } else {
@@ -416,7 +416,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       const samples = decoded.getChannelData(0).slice();
       phrase.sampleRate = decoded.sampleRate; options.record?.(samples);
       buffer = options.rate === 1 ? decoded : bufferOf(audio, stretch(samples, options.rate), decoded.sampleRate);
-      if (!buffer) throw new Error("Speech generation returned no audio");
+      if (!buffer) throw new Error(t("Speech generation returned no audio"));
     }
     mark('audio_ready');
     const play = async (playbackSignal: AbortSignal) => {
@@ -449,7 +449,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     void claim(version, resuming).then(ok => { if (!ok && epoch.current === version) stop(); });
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
-        throw new Error("Microphone access requires HTTPS or localhost.");
+        throw new Error(t("Microphone access requires HTTPS or localhost."));
       const sound = new AudioContext(); soundContext.current = sound;
       // Started by a click, audio is allowed and only slow to start — a
       // Bluetooth headset can take a while — so it gets longer to do it.
@@ -505,7 +505,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         });
         const result = await response.json();
         if(trace)profiler.current!.mark('stt_result',{requestMs:performance.now()-started,serverTiming:response.headers.get('server-timing')??'',ok:response.ok},trace);
-        if (!response.ok) throw new Error(result.error || "Transcription failed");
+        if (!response.ok) throw new Error(result.error || t("Transcription failed"));
         return result.text;
       }, text => { if (current()) { setTranscript(text); voice.current?.heard(text); } }, !sequential.current);
       transcription.current = live;
@@ -598,7 +598,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (!current()) { await detector.destroy(); return; }
       vad.current = detector;
       for (const track of mic.getTracks()) track.onended = () => {
-        if (current()) { setError("Microphone disconnected. Reconnect it and turn the mic on again."); stop(); }
+        if (current()) { setError(t("Microphone disconnected. Reconnect it and turn the mic on again.")); stop(); }
       };
       await detector.start();
       if (!current()) return;
@@ -634,7 +634,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     {profileOpen&&createPortal(<VoiceProfile profiler={profiler.current!} onClose={()=>{setProfileOpen(false);profiler.current!.close('disabled');}}/>,document.body)}
 
     {(starting || enabled) && stageTarget && createPortal(
-      <VoiceStage sessionId={sessionId} folder={folder} workPhase={running ? activity(toolEvents) : null} canvasOpen={canvasOpen} onCanvasMinimize={onCanvasMinimize} onCanvasToggle={onCanvasToggle} title={sequentialMode ? `${title} · ${sentenceMode ? (prefetchMode ? "Sentence pipeline · buffered audio" : "Sentence chunks · buffered audio") : "Sequential baseline"}` : comparison ? `${title} · Streaming pipeline` : title} phase={phase} starting={starting} muted={muted} speaking={speaking}
+      <VoiceStage sessionId={sessionId} folder={folder} workPhase={running ? activity(toolEvents) : null} canvasOpen={canvasOpen} onCanvasMinimize={onCanvasMinimize} onCanvasToggle={onCanvasToggle} title={sequentialMode ? `${title} · ${sentenceMode ? (prefetchMode ? t("Sentence pipeline · buffered audio") : t("Sentence chunks · buffered audio")) : t("Sequential baseline")}` : comparison ? `${title} · ${t("Streaming pipeline")}` : title} phase={phase} starting={starting} muted={muted} speaking={speaking}
         browserAvailable={browserAvailable} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={toolEvents} sounds={sounds} onSounds={toggleSounds} onCue={cue}
         levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode} waitingForTap={waitingForTap}
         items={items} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}
@@ -647,7 +647,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     <div className="relative flex items-center gap-1">
       <button type="button" className="prompt-action" aria-label={t("Profile voice latency")} title={t("Profile voice latency")} aria-pressed={profileOpen} onClick={()=>{setProfileOpen(v=>!v);if(profileOpen)profiler.current!.close('disabled');}}><LuGauge/></button>
       {error && !enabled && !starting && <p role="alert" className="absolute bottom-full right-0 mb-3 w-64 rounded-xl border border-line bg-surface p-3 text-xs text-danger shadow-pop">{error}</p>}
-      <button ref={startButton} type="button" onClick={() => { void start(); }} aria-label={t("Turn on hands-free voice")} title={`Start voice conversation${bindings["voice.toggle"] ? ` (${describe(bindings["voice.toggle"], layout)})` : ""}`} className="prompt-action">
+      <button ref={startButton} type="button" onClick={() => { void start(); }} aria-label={t("Turn on hands-free voice")} title={bindings["voice.toggle"] ? t("Start voice conversation ({keys})", { keys: describe(bindings["voice.toggle"], layout) }) : t("Start voice conversation")} className="prompt-action">
         {starting ? <LuLoaderCircle aria-hidden className="animate-spin" /> : <LuAudioLines aria-hidden />}
       </button>
     </div>
