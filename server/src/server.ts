@@ -23,6 +23,7 @@ import {
   updateSession,
 } from "./db.js";
 import { checkWorkspace, isWithin, workspaceRoot } from "./workspaces.js";
+import { agentHomePath } from "./agent-home.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import {
   agentFileStatus,
@@ -316,10 +317,14 @@ function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[]
   });
 }
 
-/** The projects, each with how many chats it has and when one last moved. */
+/**
+ * The projects, each with how many chats it has and when one last moved — and
+ * where Home is, so that the chats can be told apart by the folder they are in.
+ */
 app.get("/api/projects", (_req, res) => {
+  const home = agentHomePath();
   try {
-    if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, projects: [] });
+    if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, home, projects: [] });
     // Read once, not once per project.
     const all = listSessions();
     const projects = listProjects(WORKSPACE_ROOT).map((p) => {
@@ -330,7 +335,7 @@ app.get("/api/projects", (_req, res) => {
         lastActive: chats.reduce((latest, s) => (s.updated_at > latest ? s.updated_at : latest), "") || null,
       };
     });
-    res.json({ root: WORKSPACE_ROOT, projects });
+    res.json({ root: WORKSPACE_ROOT, home, projects });
   } catch (e) {
     projectFailure(res, e);
   }

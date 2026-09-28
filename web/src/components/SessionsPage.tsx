@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LuCircleAlert, LuMessagesSquare, LuPencil, LuPin, LuPinOff, LuSearch, LuTrash2 } from "react-icons/lu";
+import { useSearchParams } from "react-router-dom";
+import { LuCircleAlert, LuFilter, LuMessagesSquare, LuPencil, LuPin, LuPinOff, LuSearch, LuTrash2, LuX } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
 import type { Session } from "../api";
 import { when } from "../time";
@@ -7,6 +8,9 @@ import { filterSessions } from "../session-filter";
 import { confirmDialog } from "./ConfirmDialog";
 import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
+import { FolderControls, FolderTree } from "./FolderTree";
+import { folderFrom, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 
 /**
  * How long a click on a name waits for a second one. The chat opens on a click
@@ -17,17 +21,24 @@ const DOUBLE_CLICK_MS = 300;
 /**
  * Every session, not just the dozen the sidebar has room for — with search,
  * since the sidebar list is capped and old sessions otherwise become
- * unreachable once they fall off the end.
+ * unreachable once they fall off the end. Gathered by folder as the sidebar
+ * has them, or as one list; `?folder=` shows only one folder's.
  */
 export function SessionsPage({
   sessions,
+  places,
   onSelect,
+  onNewChat,
   onDelete,
   onPin,
   onRename,
 }: {
   sessions: Session[];
+  /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
+  places?: Places | null;
   onSelect: (id: string) => void;
+  /** A chat in `workspace`, or in Home without one, opened. */
+  onNewChat?: (workspace?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
@@ -64,6 +75,131 @@ export function SessionsPage({
 
   const matches = useMemo(() => filterSessions(sessions, query), [sessions, query]);
 
+  const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
+  const hasProjects = !!places && places.projects.length > 0;
+  const folders = useMemo(() => (places ? sortFolders(groupByFolder(matches, places), sort, order) : []), [matches, places, sort, order]);
+  const [params, setParams] = useSearchParams();
+  /** The one folder shown, with all its chats, when a link or its filter asked for it. */
+  const only = useMemo(
+    () => (places ? folderFrom(groupByFolder(sessions, places), params.get("folder")) : null),
+    [sessions, places, params],
+  );
+  const showOnly = (key: string | null) =>
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (key) next.set("folder", key);
+      else next.delete("folder");
+      return next;
+    });
+  const searching = query.trim() !== "";
+  const byFolder = !only && grouping === "folders" && hasProjects;
+  const openFolders = useOpenFolders("sessionsFoldersOpen", () => true);
+  const shown = useMemo(() => (only ? filterSessions(only.sessions, query) : matches), [only, query, matches]);
+  const [startError, setStartError] = useState<string | null>(null);
+  const start = (workspace?: string) => {
+    setStartError(null);
+    onNewChat?.(workspace).catch((e) => setStartError((e as Error).message));
+  };
+
+  const row = (s: Session) => (
+      <li
+        key={s.id}
+        onMouseDown={() => {
+          endingRename.current = renaming === s.id;
+        }}
+        onClick={() => {
+          // A click on a name that is waiting for a second one is overtaken by this one.
+          window.clearTimeout(opening.current);
+          if (endingRename.current || renaming === s.id) {
+            endingRename.current = false;
+            return;
+          }
+          onSelect(s.id);
+        }}
+        className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:bg-fg/5"
+      >
+        <StatusDot status={s.status} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            {renaming === s.id ? (
+              <TitleInput
+                value={s.title}
+                label="Session name"
+                className="flex-1 text-sm"
+                onCommit={(next) => rename(s, next)}
+                onCancel={() => setRenaming(null)}
+              />
+            ) : (
+              <p
+                className={`truncate text-sm text-fg ${workingText(s.status)}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.clearTimeout(opening.current);
+                  if (e.detail > 1) return;
+                  opening.current = window.setTimeout(() => onSelect(s.id), DOUBLE_CLICK_MS);
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  window.clearTimeout(opening.current);
+                  setRenaming(s.id);
+                }}
+              >
+                {pending?.id === s.id ? pending.title : s.title}
+              </p>
+            )}
+            {s.pinned && (
+              <LuPin className="h-3 w-3 shrink-0 text-accent/70" title="Pinned" />
+            )}
+          </div>
+          <p className="truncate font-mono text-[11px] text-fg-faint">{s.workspace}</p>
+        </div>
+        <span className="shrink-0 text-[11px] text-fg-faint">{when(s.updated_at)}</span>
+        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onPin(s.id, !s.pinned);
+            }}
+            className="rounded p-1.5 text-fg-subtle hover:text-accent"
+            title={s.pinned ? "Unpin" : "Pin"}
+          >
+            {s.pinned ? <LuPinOff className="h-3.5 w-3.5" /> : <LuPin className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setRenaming(s.id);
+            }}
+            className="rounded p-1.5 text-fg-subtle hover:text-accent"
+            title="Rename"
+            aria-label={`Rename ${s.title}`}
+          >
+            <LuPencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (
+                await confirmDialog({
+                  title: `Delete "${s.title}"?`,
+                  message: "It is stopped if it is running, and its transcript is removed.",
+                  confirmLabel: "Delete",
+                  danger: true,
+                  deletes: true,
+                })
+              ) {
+                onDelete(s.id);
+              }
+            }}
+            className="rounded p-1.5 text-fg-subtle hover:text-danger"
+            title="Delete session"
+          >
+            <LuTrash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </li>
+  );
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-4 py-6">
@@ -95,7 +231,7 @@ export function SessionsPage({
             />
             {query && (
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-fg-faint">
-                {matches.length} of {sessions.length}
+                {shown.length} of {only ? only.sessions.length : sessions.length}
               </span>
             )}
           </div>
@@ -107,112 +243,64 @@ export function SessionsPage({
               <button onClick={() => setError(null)} aria-label="Dismiss">✕</button>
             </div>
           )}
+          {startError && <p role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{startError}</p>}
 
-          {matches.length === 0 ? (
+          {(only || hasProjects) && (
+            <div className="mt-3 flex items-center gap-1">
+              {only ? (
+                <span className="inline-flex min-w-0 items-center gap-1.5 rounded-lg bg-accent/12 py-1 pl-2.5 pr-1 text-xs text-accent ring-1 ring-inset ring-accent/25">
+                  <LuFilter aria-hidden className="h-3 w-3 shrink-0" />
+                  <span className="truncate">Only {only.name}</span>
+                  <button type="button" onClick={() => showOnly(null)} aria-label="Show every folder" title="Show every folder" className="rounded p-0.5 hover:bg-accent/20">
+                    <LuX className="h-3 w-3" />
+                  </button>
+                </span>
+              ) : (
+                <span className="mr-auto text-[11px] font-semibold uppercase tracking-wider text-fg-faint">{byFolder ? "Folders" : "All chats"}</span>
+              )}
+              {!only && <FolderControls grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />}
+            </div>
+          )}
+
+          {shown.length === 0 && !byFolder ? (
             <p className="py-12 text-center text-sm text-fg-subtle">
-              {sessions.length === 0 ? "No sessions yet." : "Nothing matches that."}
+              {sessions.length === 0 ? "No sessions yet." : only && !searching ? `No chats in ${only.name} yet.` : "Nothing matches that."}
             </p>
+          ) : byFolder ? (
+            <div className="mt-2">
+              {searching && folders.every((f) => f.sessions.length === 0) && (
+                <p className="py-12 text-center text-sm text-fg-subtle">Nothing matches that.</p>
+              )}
+              <FolderTree
+                size="md"
+                folders={searching ? folders.filter((f) => f.sessions.length > 0) : folders}
+                isOpen={searching ? () => true : openFolders.isOpen}
+                onToggle={openFolders.toggle}
+                onMove={searching ? undefined : move}
+                onNewChat={onNewChat ? (f) => start(f.kind === "home" ? undefined : f.path!) : undefined}
+                extra={(f) => (
+                  <button
+                    type="button"
+                    onClick={() => showOnly(f.key)}
+                    aria-label={`Only ${f.name}`}
+                    title={`Only ${f.name}`}
+                    className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-opacity hover:text-accent focus-visible:opacity-100 group-hover/folder:opacity-100 [@media(hover:none)]:opacity-100"
+                  >
+                    <LuFilter className="h-3 w-3" />
+                  </button>
+                )}
+              >
+                {(f) =>
+                  f.sessions.length === 0 ? (
+                    <p className="px-3 py-1 text-xs text-fg-faint">No chats yet.</p>
+                  ) : (
+                    <ul className="space-y-1">{f.sessions.map(row)}</ul>
+                  )
+                }
+              </FolderTree>
+            </div>
           ) : (
-            <ul className="stagger-in mt-3 space-y-1">
-              {matches.map((s) => (
-                <li
-                  key={s.id}
-                  onMouseDown={() => {
-                    endingRename.current = renaming === s.id;
-                  }}
-                  onClick={() => {
-                    // A click on a name that is waiting for a second one is overtaken by this one.
-                    window.clearTimeout(opening.current);
-                    if (endingRename.current || renaming === s.id) {
-                      endingRename.current = false;
-                      return;
-                    }
-                    onSelect(s.id);
-                  }}
-                  className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:bg-fg/5"
-                >
-                  <StatusDot status={s.status} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-2">
-                      {renaming === s.id ? (
-                        <TitleInput
-                          value={s.title}
-                          label="Session name"
-                          className="flex-1 text-sm"
-                          onCommit={(next) => rename(s, next)}
-                          onCancel={() => setRenaming(null)}
-                        />
-                      ) : (
-                        <p
-                          className={`truncate text-sm text-fg ${workingText(s.status)}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            window.clearTimeout(opening.current);
-                            if (e.detail > 1) return;
-                            opening.current = window.setTimeout(() => onSelect(s.id), DOUBLE_CLICK_MS);
-                          }}
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            window.clearTimeout(opening.current);
-                            setRenaming(s.id);
-                          }}
-                        >
-                          {pending?.id === s.id ? pending.title : s.title}
-                        </p>
-                      )}
-                      {s.pinned && (
-                        <LuPin className="h-3 w-3 shrink-0 text-accent/70" title="Pinned" />
-                      )}
-                    </div>
-                    <p className="truncate font-mono text-[11px] text-fg-faint">{s.workspace}</p>
-                  </div>
-                  <span className="shrink-0 text-[11px] text-fg-faint">{when(s.updated_at)}</span>
-                  <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onPin(s.id, !s.pinned);
-                      }}
-                      className="rounded p-1.5 text-fg-subtle hover:text-accent"
-                      title={s.pinned ? "Unpin" : "Pin"}
-                    >
-                      {s.pinned ? <LuPinOff className="h-3.5 w-3.5" /> : <LuPin className="h-3.5 w-3.5" />}
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRenaming(s.id);
-                      }}
-                      className="rounded p-1.5 text-fg-subtle hover:text-accent"
-                      title="Rename"
-                      aria-label={`Rename ${s.title}`}
-                    >
-                      <LuPencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        if (
-                          await confirmDialog({
-                            title: `Delete "${s.title}"?`,
-                            message: "It is stopped if it is running, and its transcript is removed.",
-                            confirmLabel: "Delete",
-                            danger: true,
-                            deletes: true,
-                          })
-                        ) {
-                          onDelete(s.id);
-                        }
-                      }}
-                      className="rounded p-1.5 text-fg-subtle hover:text-danger"
-                      title="Delete session"
-                    >
-                      <LuTrash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <ul className="stagger-in mt-3 space-y-1">{shown.map(row)}</ul>
           )}
         </div>
       </div>

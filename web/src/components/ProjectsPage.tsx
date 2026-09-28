@@ -215,6 +215,8 @@ export function ProjectsPage({
             const project = await api.createProject(name, instructions);
             setCreating(false);
             load();
+            // The chats' folders have one more, even if its chat does not open.
+            onChanged();
             // The dialog is gone by now, so a failure here is shown on the page:
             // the project exists, only its first chat did not open.
             try {

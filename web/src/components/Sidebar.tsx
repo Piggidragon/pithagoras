@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { StatusDot, workingText } from "./StatusDot";
+import { FolderControls, FolderTree } from "./FolderTree";
 import {
   LuBot,
   LuPanelLeftClose,
@@ -24,9 +25,13 @@ import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
+import { HOME, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
 const RECENTS_LIMIT = 12;
+/** How many of a folder's chats the sidebar shows before deferring to Sessions, opened at that folder. */
+const FOLDER_LIMIT = 8;
 
 export function Sidebar({
   forceExpanded = false,
@@ -35,6 +40,7 @@ export function Sidebar({
   activeId,
   view,
   hasBrowser,
+  places,
   onSelect,
   onNewChat,
   onDelete,
@@ -42,6 +48,7 @@ export function Sidebar({
   onPin,
   onOpenSettings,
   onNavigate,
+  onOpenFolder,
 }: {
   forceExpanded?: boolean;
   sessions: Session[];
@@ -51,14 +58,18 @@ export function Sidebar({
   view: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "audit";
   /** Whether the optional browser service is there at all. */
   hasBrowser: boolean;
+  /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
+  places?: Places | null;
   onSelect: (id: string) => void;
-  /** A chat in Home, opened. */
-  onNewChat: () => Promise<void>;
+  /** A chat in `workspace`, or in Home without one, opened. */
+  onNewChat: (workspace?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
   onOpenSettings: () => void;
   onNavigate: (to: Destination) => void;
+  /** The Sessions page, showing only the chats in the folder `key` (see session-folders). */
+  onOpenFolder: (key: string) => void;
 }) {
   const [storedCollapsed, setCollapsed] = useState(() => local.get("sidebarCollapsed") === "true");
   const collapsed = forceExpanded ? false : storedCollapsed;
@@ -70,12 +81,12 @@ export function Sidebar({
   };
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const newChat = async () => {
+  const newChat = async (workspace?: string) => {
     if (starting) return;
     setStarting(true);
     setStartError(null);
     try {
-      await onNewChat();
+      await onNewChat(workspace);
     } catch (e) {
       setStartError((e as Error).message);
     } finally {
@@ -95,6 +106,21 @@ export function Sidebar({
   const recents = found.filter((s) => !s.pinned);
   // A search looks through all of them, not only the dozen that are listed.
   const shownRecents = searching ? recents : recents.slice(0, RECENTS_LIMIT);
+
+  // Gathered by folder only where there is more than Home to gather them in.
+  const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
+  const hasProjects = !!places && places.projects.length > 0;
+  const byFolder = grouping === "folders" && places !== null && (places === undefined || hasProjects);
+  // Pinned chats stay at the top, and each folder has the rest of its own.
+  const folders = places ? sortFolders(groupByFolder(recents, places), sort, order) : [];
+  // Searching, the folders with a match, open: the match is what was looked for.
+  const shownFolders = searching ? folders.filter((f) => f.sessions.length > 0) : folders;
+  const openFolders = useOpenFolders("sidebarFoldersOpen", (key) => key === HOME);
+  // The chat opened is in a folder that is open, however it was opened.
+  const activeFolder = folders.find((f) => f.sessions.some((s) => s.id === activeId))?.key;
+  useEffect(() => {
+    if (activeFolder) openFolders.set(activeFolder, true);
+  }, [activeId, activeFolder]);
 
   const item = (s: Session) => (
     <SessionItem
@@ -130,7 +156,7 @@ export function Sidebar({
       {/* Folded, the places are still one click away: a rail of their icons. */}
       {collapsed && (
         <nav className="sidebar-rail max-md:hidden" aria-label="Destinations">
-          <RailButton icon={<LuPlus />} label="New chat" onClick={newChat} />
+          <RailButton icon={<LuPlus />} label="New chat" onClick={() => newChat()} />
           <hr />
           {destinations.map((d) => (
             <RailButton key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} current={view === d.to}>
@@ -161,7 +187,7 @@ export function Sidebar({
 
       {/* Destinations, above the session lists. */}
       <nav className="px-2 pb-2">
-        <NavItem icon={<LuPlus />} label="New" onClick={newChat} active={starting} />
+        <NavItem icon={<LuPlus />} label="New" onClick={() => newChat()} active={starting} />
         {destinations.map((d) => (
           <NavItem key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} active={view === d.to} />
         ))}
@@ -200,10 +226,48 @@ export function Sidebar({
           </>
         )}
 
-        {shownRecents.length > 0 && (
+        {byFolder && places && shownFolders.length > 0 && (
           <>
             <Divider />
-            <GroupLabel>Recents</GroupLabel>
+            <div className="flex items-center gap-1 pr-1">
+              <GroupLabel>Folders</GroupLabel>
+              <FolderControls grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />
+            </div>
+            <FolderTree
+              folders={shownFolders}
+              isOpen={searching ? () => true : openFolders.isOpen}
+              onToggle={openFolders.toggle}
+              onMove={searching ? undefined : move}
+              onNewChat={(f) => newChat(f.kind === "home" ? undefined : f.path!)}
+            >
+              {(f) => {
+                const shown = searching ? f.sessions : f.sessions.slice(0, FOLDER_LIMIT);
+                return (
+                  <>
+                    {f.sessions.length === 0 && <p className="px-2.5 py-1 text-xs text-fg-faint">No chats yet.</p>}
+                    {shown.map(item)}
+                    {f.sessions.length > shown.length && (
+                      <button
+                        onClick={() => onOpenFolder(f.key)}
+                        className="mb-1 w-full rounded-lg px-2.5 py-1 text-left text-xs text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
+                      >
+                        {f.sessions.length - shown.length} more in {f.name}…
+                      </button>
+                    )}
+                  </>
+                );
+              }}
+            </FolderTree>
+          </>
+        )}
+
+        {!byFolder && shownRecents.length > 0 && (
+          <>
+            <Divider />
+            <div className="flex items-center gap-1 pr-1">
+              <GroupLabel>Recents</GroupLabel>
+              {hasProjects && <FolderControls grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />}
+            </div>
             {shownRecents.map(item)}
             {recents.length > shownRecents.length && (
               <button
@@ -238,7 +302,7 @@ export function Sidebar({
 const Divider = () => <div className="my-2 h-px bg-line" />;
 
 const GroupLabel = ({ children }: { children: ReactNode }) => (
-  <p className="px-2.5 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-fg-faint">
+  <p className="mr-auto px-2.5 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-fg-faint">
     {children}
   </p>
 );

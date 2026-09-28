@@ -317,7 +317,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ workspace, title }),
     }),
-  projects: () => json<{ root: string; projects: Project[] }>("/api/projects"),
+  projects: () => json<{ root: string; home: string; projects: Project[] }>("/api/projects"),
   createProject: (name: string, instructions?: string) =>
     json<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name, instructions }) }),
   projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),

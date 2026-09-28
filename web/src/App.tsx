@@ -25,6 +25,7 @@ import { canvasConnection, canvasMessage } from "./canvas-feed";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
 import { notifyIfAway, notifyState } from "./notify";
 import { guardStrayDrops } from "./drop-guard";
+import { usePlaces } from "./use-session-folders";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 type Tab = "general" | "extensions" | "advanced";
@@ -148,6 +149,16 @@ function Shell({
   const esRef = useRef<EventSource | null>(null);
   /** Connection attempts to the open conversation that have failed in a row. */
   const [failures, setFailures] = useState(0);
+
+  const { places, reload: reloadPlaces } = usePlaces(sessions);
+
+  /** A chat started in `workspace`, or in Home without one, and opened. */
+  const startChat = async (workspace?: string) => {
+    const s = await api.createSession(workspace);
+    await refreshSessions();
+    setMobileNav(false);
+    navigate(`/s/${s.id}`);
+  };
 
   const refreshSessions = useCallback(async () => {
     const r = await api.sessions();
@@ -441,14 +452,11 @@ function Shell({
         activeId={sessionId ?? null}
         view={view}
         hasBrowser={hasBrowser}
+        places={places}
         onNavigate={(to) => { setMobileNav(false); navigate(`/${to}`); }}
+        onOpenFolder={(key) => { setMobileNav(false); navigate(`/sessions?folder=${encodeURIComponent(key)}`); }}
         onSelect={(id) => { setMobileNav(false); navigate(`/s/${id}`); }}
-        onNewChat={async () => {
-          const s = await api.createSession();
-          await refreshSessions();
-          setMobileNav(false);
-          navigate(`/s/${s.id}`);
-        }}
+        onNewChat={startChat}
         onDelete={async (id) => {
           await api.deleteSession(id);
           const list = await refreshSessions();
@@ -488,7 +496,9 @@ function Shell({
         {view === "sessions" ? (
           <SessionsPage
             sessions={sessions}
+            places={places}
             onSelect={(id) => navigate(`/s/${id}`)}
+            onNewChat={startChat}
             onDelete={async (id) => {
               await api.deleteSession(id);
               await refreshSessions();
@@ -514,7 +524,10 @@ function Shell({
               await refreshSessions();
               navigate(`/s/${s.id}`);
             }}
-            onChanged={() => refreshSessions()}
+            onChanged={() => {
+              refreshSessions();
+              reloadPlaces();
+            }}
           />
         ) : view === "agent" ? (
           <AgentPage onSelect={(id) => navigate(`/s/${id}`)} />
