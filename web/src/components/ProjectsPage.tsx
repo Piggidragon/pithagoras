@@ -4,6 +4,7 @@ import { PageHeader } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
 import { api, type Project, type Session } from "../api";
 import { bytesLabel, slugify } from "../projects";
+import { within } from "../session-folders";
 import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
@@ -64,7 +65,7 @@ export function ProjectsPage({
   /** The project's newest chat, counting ones started in a subfolder. */
   const latestChat = (p: Project) =>
     sessions
-      .filter((s) => s.workspace === p.path || s.workspace.startsWith(p.path + "/"))
+      .filter((s) => within(p.path, s.workspace))
       .reduce<Session | null>((best, s) => (!best || s.updated_at > best.updated_at ? s : best), null);
 
   const lastActive = (p: Project) => latestChat(p)?.updated_at ?? p.lastActive;
@@ -215,6 +216,8 @@ export function ProjectsPage({
             const project = await api.createProject(name, instructions);
             setCreating(false);
             load();
+            // The chats' folders have one more, even if its chat does not open.
+            onChanged();
             // The dialog is gone by now, so a failure here is shown on the page:
             // the project exists, only its first chat did not open.
             try {

@@ -133,6 +133,31 @@ With more chats than the sidebar lists, it has a search field above them. It loo
 through every chat by name and folder, not only the ones shown, and Escape clears
 it. The Sessions page has the same search with more room.
 
+### By folder
+
+Once there is a project, the chats below **Pinned** are gathered by the folder
+they work in: **Home** and each project, a chat in a project's subfolder counting
+as the project's. Each folder opens to show its chats — the sidebar up to eight,
+then *N more in …*, which opens the Sessions page at that folder — and remembers
+whether it was left open. The folder of the chat you open is opened for you. A
+project without chats is there all the same, and the **+** on a folder's line
+starts a chat in it. A project folder made or removed outside the portal — by
+the agent, say — shows up or goes within half a minute.
+
+The Sessions page lists them the same way, every folder open to begin with, and
+the funnel on a folder's line shows that folder on its own (`/sessions?folder=…`,
+so the link keeps it); the ✕ on the chip goes back to all of them. A link to a
+folder that is gone since says so. A folder's count, and the mark that something
+in it is running, take in its pinned chats too, in the sidebar as on the page.
+
+Folders are ordered **Latest first** (by their latest chat), **By name** (Home
+first), or in **Your order**: drag a folder by its grip, or press Alt with ↑/↓ on
+its name, and the order is yours from then on. The list button next to the order
+puts the chats back into one list, Pinned then Recents, as before. The order,
+the grouping and which folders are open are kept per browser, and the sidebar
+and the Sessions page share the first two. Searching shows only the folders with
+a match, open; one shut during a search is shut only until the search ends.
+
 The chat's name at the top of the conversation renames it too: click it.
 A name is at most 120 characters, wherever it is given — `/name` included.
 

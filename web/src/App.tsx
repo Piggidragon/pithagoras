@@ -25,6 +25,7 @@ import { canvasConnection, canvasMessage } from "./canvas-feed";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
 import { notifyIfAway, notifyState } from "./notify";
 import { guardStrayDrops } from "./drop-guard";
+import { usePlaces } from "./use-session-folders";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 type Tab = "general" | "extensions" | "advanced";
@@ -149,9 +150,26 @@ function Shell({
   /** Connection attempts to the open conversation that have failed in a row. */
   const [failures, setFailures] = useState(0);
 
+  /**
+   * Whether the chats have been asked for yet, and have come or failed to: the
+   * projects are asked for then, not before and again once the chats are there
+   * — and not never, when the chats cannot be had and the projects can.
+   */
+  const [sessionsAsked, setSessionsAsked] = useState(false);
+  const { places, reload: reloadPlaces } = usePlaces(sessions, sessionsAsked);
+
+  /** A chat started in `workspace`, or in Home without one, and opened. */
+  const startChat = async (workspace?: string) => {
+    const s = await api.createSession(workspace);
+    await refreshSessions();
+    setMobileNav(false);
+    navigate(`/s/${s.id}`);
+  };
+
   const refreshSessions = useCallback(async () => {
     const r = await api.sessions();
     setSessions(r.sessions);
+    setSessionsAsked(true);
     setExecutor(r.executor);
     return r.sessions;
   }, []);
@@ -166,7 +184,10 @@ function Shell({
           navigate(`/s/${list[0].id}`, { replace: true });
         }
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        setSessionsAsked(true);
+        setError(String(e));
+      });
     api
       .browser()
       // Whether one is wired up, not whether anyone has been given it: the
@@ -441,14 +462,11 @@ function Shell({
         activeId={sessionId ?? null}
         view={view}
         hasBrowser={hasBrowser}
+        places={places}
         onNavigate={(to) => { setMobileNav(false); navigate(`/${to}`); }}
+        onOpenFolder={(key) => { setMobileNav(false); navigate(`/sessions?folder=${encodeURIComponent(key)}`); }}
         onSelect={(id) => { setMobileNav(false); navigate(`/s/${id}`); }}
-        onNewChat={async () => {
-          const s = await api.createSession();
-          await refreshSessions();
-          setMobileNav(false);
-          navigate(`/s/${s.id}`);
-        }}
+        onNewChat={startChat}
         onDelete={async (id) => {
           await api.deleteSession(id);
           const list = await refreshSessions();
@@ -488,7 +506,9 @@ function Shell({
         {view === "sessions" ? (
           <SessionsPage
             sessions={sessions}
+            places={places}
             onSelect={(id) => navigate(`/s/${id}`)}
+            onNewChat={startChat}
             onDelete={async (id) => {
               await api.deleteSession(id);
               await refreshSessions();
@@ -514,7 +534,10 @@ function Shell({
               await refreshSessions();
               navigate(`/s/${s.id}`);
             }}
-            onChanged={() => refreshSessions()}
+            onChanged={() => {
+              refreshSessions();
+              reloadPlaces();
+            }}
           />
         ) : view === "agent" ? (
           <AgentPage onSelect={(id) => navigate(`/s/${id}`)} />
