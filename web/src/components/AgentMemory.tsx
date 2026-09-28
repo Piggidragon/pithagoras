@@ -152,7 +152,8 @@ export function AgentMemory({ note, onNote }: { note: string | null; onNote: (pa
           )}
         </nav>
 
-        <div className={`${note ? "" : "hidden md:block"} min-w-0`}>
+        {/* Without a note, the changes: beside the list, or under it on a phone. */}
+        <div className={`${note ? "" : "mt-4 md:mt-0"} min-w-0`}>
           {note ? <Note path={note} onOpen={onNote} onClose={() => onNote(null)} /> : <Changes log={log} onOpen={onNote} />}
         </div>
       </div>
