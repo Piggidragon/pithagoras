@@ -180,13 +180,13 @@ export const formatNumber = (n: number, options?: Intl.NumberFormatOptions): str
   n.toLocaleString(formats(), options);
 
 /** A date and time the language's way. */
-export const formatDateTime = (d: Date | number, options?: Intl.DateTimeFormatOptions): string =>
+export const formatDateTime = (d: Date | number | string, options?: Intl.DateTimeFormatOptions): string =>
   new Date(d).toLocaleString(formats(), options);
 
 /** A date the language's way. */
-export const formatDate = (d: Date | number, options?: Intl.DateTimeFormatOptions): string =>
+export const formatDate = (d: Date | number | string, options?: Intl.DateTimeFormatOptions): string =>
   new Date(d).toLocaleDateString(formats(), options);
 
 /** A time of day the language's way. */
-export const formatTime = (d: Date | number, options?: Intl.DateTimeFormatOptions): string =>
+export const formatTime = (d: Date | number | string, options?: Intl.DateTimeFormatOptions): string =>
   new Date(d).toLocaleTimeString(formats(), options);

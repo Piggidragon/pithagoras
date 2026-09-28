@@ -55,8 +55,8 @@ export function KeepRecent({
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-xs text-fg-subtle">{t("Keep recent")}</span>
         <span className="tabular-nums text-xs text-fg">
-          {formatTokens(clamped)} {t("tokens")}
-          {share !== null && <span className="ml-1 text-fg-faint">· {share.toFixed(0)}{t("% of window")}</span>}
+          {t("{n} tokens", { n: formatTokens(clamped) })}
+          {share !== null && <span className="ml-1 text-fg-faint">· {t("{n}% of window", { n: share.toFixed(0) })}</span>}
         </span>
       </div>
       <input

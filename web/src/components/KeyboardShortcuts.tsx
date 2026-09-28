@@ -29,7 +29,7 @@ export function KeyboardShortcuts() {
       if (!binding) return;
       const took = setBinding(recording, binding);
       const label = ACTIONS.find(a => a.id === took)?.label;
-      setNote(label ? `${describe(binding, layout)} was used for “${label}”, which now has no shortcut.` : "");
+      setNote(label ? t("{keys} was used for “{action}”, which now has no shortcut.", { keys: describe(binding, layout), action: t(label) }) : "");
       setRecording(null);
     };
     const swallow = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation(); };
@@ -56,8 +56,8 @@ export function KeyboardShortcuts() {
           const binding = bindings[action.id];
           const isDefault = describe(binding, null, false) === describe(action.default, null, false);
           const listening = recording === action.id;
-          return <li key={action.id} className="flex flex-wrap items-center gap-2 px-3 py-2" aria-label={action.label}>
-            <span className="min-w-0 flex-1 text-sm text-fg">{action.label}</span>
+          return <li key={action.id} className="flex flex-wrap items-center gap-2 px-3 py-2" aria-label={t(action.label)}>
+            <span className="min-w-0 flex-1 text-sm text-fg">{t(action.label)}</span>
             {listening
               ? <span className="text-xs text-accent" role="status">{t("Press the new keys…")}</span>
               : binding ? <kbd className={kbdCls}>{describe(binding, layout)}</kbd> : <span className="text-xs text-fg-faint">{t("None")}</span>}
@@ -66,10 +66,10 @@ export function KeyboardShortcuts() {
                 ? <button className={btnCls} onClick={() => setRecording(null)}>{t("Cancel")}</button>
                 : <button className={btnCls} onClick={() => { setNote(""); setRecording(action.id); }}>{t("Change")}</button>}
               <button className={btnCls} disabled={listening || !binding} onClick={() => { setBinding(action.id, null); setNote(""); }}>{t("Clear")}</button>
-              <button className={btnCls} disabled={listening || isDefault} title={`Back to ${describe(action.default, layout) || "none"}`} onClick={() => {
+              <button className={btnCls} disabled={listening || isDefault} title={t("Back to {keys}", { keys: describe(action.default, layout) || t("none") })} onClick={() => {
                 const took = resetBinding(action.id);
                 const label = ACTIONS.find(a => a.id === took)?.label;
-                setNote(label ? `That was used for “${label}”, which now has no shortcut.` : "");
+                setNote(label ? t("That was used for “{action}”, which now has no shortcut.", { action: t(label) }) : "");
               }}>{t("Reset")}</button>
             </div>
           </li>;

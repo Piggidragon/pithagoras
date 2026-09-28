@@ -6,7 +6,7 @@ import type { Folder, FolderSort } from "../session-folders";
 import type { Grouping } from "../use-session-folders";
 import { Select } from "./Select";
 import { StatusDot } from "./StatusDot";
-import { t } from "../i18n";
+import { msg, t, tp } from "../i18n";
 
 /** How far a grip is pulled before it is a drag rather than a press. */
 const DRAG_SLOP = 4;
@@ -186,7 +186,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
                 <span className="truncate font-medium">{f.name}</span>
               </button>
               {running && <StatusDot status="running" bare />}
-              <span className="shrink-0 px-1 text-[11px] tabular-nums text-fg-faint" aria-label={`${f.sessions.length} chat${f.sessions.length === 1 ? "" : "s"}`}>
+              <span className="shrink-0 px-1 text-[11px] tabular-nums text-fg-faint" aria-label={tp(f.sessions.length, "{n} chat", "{n} chats")}>
                 {f.sessions.length}
               </span>
               {extra?.(f)}
@@ -194,8 +194,8 @@ export function FolderTree<S extends { status: SessionStatus }>({
                 <button
                   type="button"
                   onClick={() => onNewChat(f)}
-                  aria-label={`New chat in ${f.name}`}
-                  title={`New chat in ${f.name}`}
+                  aria-label={t("New chat in {name}", { name: f.name })}
+                  title={t("New chat in {name}", { name: f.name })}
                   className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-opacity hover:text-accent focus-visible:opacity-100 group-hover/folder:opacity-100 [@media(hover:none)]:opacity-100"
                 >
                   <LuPlus className="h-3 w-3" />
@@ -216,9 +216,9 @@ export function FolderTree<S extends { status: SessionStatus }>({
 }
 
 const SORTS: { value: FolderSort; label: string }[] = [
-  { value: "recent", label: "Latest first" },
-  { value: "name", label: "By name" },
-  { value: "manual", label: "Your order" },
+  { value: "recent", label: msg("Latest first") },
+  { value: "name", label: msg("By name") },
+  { value: "manual", label: msg("Your order") },
 ];
 
 /** How the chats are listed: by folder or as one list, and the folders in which order. */
@@ -242,7 +242,7 @@ export function FolderControls({
           aria-label={t("Order of the folders")}
           value={sort}
           onChange={onSort}
-          options={SORTS}
+          options={SORTS.map((s) => ({ ...s, label: t(s.label) }))}
           className="folder-sort !gap-1 !border-transparent !bg-transparent !py-0.5 !pl-1.5 !pr-1 !text-[11px] text-fg-subtle"
         />
       )}

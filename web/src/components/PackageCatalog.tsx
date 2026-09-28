@@ -5,7 +5,7 @@ import { ago, compactCount, webLink } from "../package-names";
 import { confirmDialog } from "./ConfirmDialog";
 import { load, peek } from "../settings-cache";
 import { inputCls } from "./SettingsUi";
-import { t } from "../i18n";
+import { formatNumber, t } from "../i18n";
 
 /**
  * pi packages published on npm, to install with a click rather than a spec
@@ -58,9 +58,9 @@ export function PackageCatalog({
 
   const install = async (p: CatalogPackage) => {
     const ok = await confirmDialog({
-      title: `Install ${p.name}?`,
-      message: `It is installed from npm and runs inside pi with the same rights as the agent — reading files, running commands. Install packages you trust.${p.author ? ` Published by ${p.author}.` : ""}`,
-      confirmLabel: "Install",
+      title: t("Install {name}?", { name: p.name }),
+      message: `${t("It is installed from npm and runs inside pi with the same rights as the agent — reading files, running commands. Install packages you trust.")}${p.author ? ` ${t("Published by {author}.", { author: p.author })}` : ""}`,
+      confirmLabel: t("Install"),
     });
     if (!ok) return;
     setBusy(p.name);
@@ -103,7 +103,7 @@ export function PackageCatalog({
         </div>
       ) : found.length === 0 ? (
         <p className="mt-2 rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-fg-subtle">
-          {t("Nothing published matches")}{asked ? ` “${asked}”` : ""}.
+          {asked ? t("Nothing published matches “{query}”.", { query: asked }) : t("Nothing published matches.")}
         </p>
       ) : (
         <ul key={asked} className="stagger-in mt-2 space-y-1.5">
@@ -122,12 +122,12 @@ export function PackageCatalog({
                     {p.description && <p className="mt-0.5 line-clamp-2 text-xs text-fg-subtle">{p.description}</p>}
                     <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] text-fg-faint">
                       {p.weekly !== undefined && (
-                        <span className="inline-flex items-center gap-1" title={`${p.weekly.toLocaleString()} downloads last week`}>
-                          <LuTrendingUp className="h-3 w-3" /> {compactCount(p.weekly)}/week
+                        <span className="inline-flex items-center gap-1" title={t("{n} downloads last week", { n: formatNumber(p.weekly) })}>
+                          <LuTrendingUp className="h-3 w-3" /> {t("{n}/week", { n: compactCount(p.weekly) })}
                         </span>
                       )}
-                      {p.date && <span>{t("updated")} {ago(p.date)}</span>}
-                      {p.author && <span>{t("by")} {p.author}</span>}
+                      {p.date && <span>{t("updated {when}", { when: ago(p.date) })}</span>}
+                      {p.author && <span>{t("by {author}", { author: p.author })}</span>}
                       {link && (
                         <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 hover:text-fg-muted">
                           {t("more")} <LuExternalLink className="h-2.5 w-2.5" />
@@ -144,7 +144,7 @@ export function PackageCatalog({
                       type="button"
                       onClick={() => void install(p)}
                       disabled={busy !== null}
-                      aria-label={`Install ${p.name}`}
+                      aria-label={t("Install {name}", { name: p.name })}
                       className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent/12 px-2 py-1 text-[11px] text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
                     >
                       {busy === p.name ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuDownload className="h-3.5 w-3.5" />}
@@ -160,7 +160,7 @@ export function PackageCatalog({
 
       {found && found.length > limit && (
         <button type="button" onClick={() => setMore(!more)} className="mt-2 text-[11px] text-accent hover:underline">
-          {more ? t("Fewer") : `${found.length - limit} more`}
+          {more ? t("Fewer") : t("{n} more", { n: found.length - limit })}
         </button>
       )}
       {done.size > 0 && (

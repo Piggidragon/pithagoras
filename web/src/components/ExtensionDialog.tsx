@@ -39,7 +39,7 @@ export function ExtensionDialog({
     setError("");
     try {
       const result = await api.respondUi(sessionId, request.id, payload);
-      if (!result.ok) { setError(result.note || "This question has expired. Your answer was not delivered."); return; }
+      if (!result.ok) { setError(result.note || t("This question has expired. Your answer was not delivered.")); return; }
       onDone();
     } catch (e) {
       setError((e as Error).message);

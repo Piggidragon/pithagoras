@@ -1,6 +1,6 @@
 import { LuLoaderCircle, LuMic } from "react-icons/lu";
 import type { Dictation, DictationMode } from "../use-dictation";
-import { t } from "../i18n";
+import { msg, t } from "../i18n";
 
 /** Turns dictation on and off. Hidden until voice is set up, since that is what transcribes. */
 export function DictationButton({ dictation }: { dictation: Dictation }) {
@@ -26,9 +26,15 @@ export function DictationButton({ dictation }: { dictation: Dictation }) {
   );
 }
 
+const PHASE: Record<Dictation["phase"], string> = {
+  Listening: msg("Listening"),
+  "Hearing you": msg("Hearing you"),
+  Transcribing: msg("Transcribing"),
+};
+
 const MODES: { id: DictationMode; label: string; hint: string }[] = [
-  { id: "review", label: "Edit first", hint: "Words are typed into the box, so you can change them before sending" },
-  { id: "send", label: "Send at once", hint: "A message is sent as soon as you pause" },
+  { id: "review", label: msg("Edit first"), hint: msg("Words are typed into the box, so you can change them before sending") },
+  { id: "send", label: msg("Send at once"), hint: msg("A message is sent as soon as you pause") },
 ];
 
 /**
@@ -57,7 +63,7 @@ export function DictationStrip({ dictation }: { dictation: Dictation }) {
             hearing ? "animate-pulse bg-accent" : dictation.phase === "Transcribing" ? "bg-fg-subtle" : "bg-fg-faint"
           }`}
         />
-        {dictation.starting ? t("Starting the microphone…") : dictation.active ? dictation.phase : t("Finishing…")}
+        {dictation.starting ? t("Starting the microphone…") : dictation.active ? t(PHASE[dictation.phase]) : t("Finishing…")}
       </span>
       <span className="min-w-0 flex-1 basis-40 truncate italic text-fg-subtle" aria-live="off">
         {words}
@@ -67,14 +73,14 @@ export function DictationStrip({ dictation }: { dictation: Dictation }) {
           <button
             key={m.id}
             type="button"
-            title={m.hint}
+            title={t(m.hint)}
             aria-pressed={dictation.mode === m.id}
             onClick={() => dictation.setMode(m.id)}
             className={`rounded-md px-2 py-0.5 transition ${
               dictation.mode === m.id ? "bg-surface text-fg shadow-sm" : "text-fg-subtle hover:text-fg"
             }`}
           >
-            {m.label}
+            {t(m.label)}
           </button>
         ))}
       </div>

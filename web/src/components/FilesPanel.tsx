@@ -22,7 +22,7 @@ import { api, type FileEntry } from "../api";
 import type { FileActivity } from "../file-activity";
 import { confirmDialog } from "./ConfirmDialog";
 import { isEnter, isEscape } from "../shortcuts";
-import { t } from "../i18n";
+import { t, tp } from "../i18n";
 
 /** What the server says when a save would put older text over newer. */
 const CHANGED = "The file changed after you opened it";
@@ -201,7 +201,7 @@ export function FilesPanel({
   /** True to go on: nothing is lost, or the person said it may be. */
   const mayLeave = async () =>
     !dirtyRef.current ||
-    confirmDialog({ title: "Discard your changes?", message: "The file has changes that are not saved.", confirmLabel: "Discard", danger: true });
+    confirmDialog({ title: t("Discard your changes?"), message: t("The file has changes that are not saved."), confirmLabel: t("Discard"), danger: true });
 
   // The agent read or changed a file: show it, unless somebody is in the middle of editing.
   useEffect(() => {
@@ -323,12 +323,14 @@ export function FilesPanel({
     const path = join(dir, entry.name);
     // A link to a folder is listed as a folder, but only the link goes.
     const message = entry.link
-      ? "This removes the link only. What it points to is not touched."
-      : `This removes the ${entry.type === "dir" ? "folder and everything in it" : "file"}. It cannot be undone.`;
+      ? t("This removes the link only. What it points to is not touched.")
+      : entry.type === "dir"
+        ? t("This removes the folder and everything in it. It cannot be undone.")
+        : t("This removes the file. It cannot be undone.");
     const ok = await confirmDialog({
-      title: `Delete "${entry.name}"?`,
+      title: t("Delete \"{name}\"?", { name: entry.name }),
       message,
-      confirmLabel: "Delete",
+      confirmLabel: t("Delete"),
       danger: true,
       deletes: true,
     });
@@ -552,7 +554,7 @@ export function FilesPanel({
                 }
               }}
               spellCheck={false}
-              aria-label={`Contents of ${file.path}`}
+              aria-label={t("Contents of {path}", { path: file.path })}
               className="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-xs leading-relaxed text-fg outline-none"
             />
           )}
@@ -578,7 +580,7 @@ export function FilesPanel({
         >
           {uploading > 0 && (
             <p role="status" className="px-2 py-1.5 text-xs text-fg-subtle">
-              {t("Uploading")} {uploading} {uploading === 1 ? t("file") : t("files")}…
+              {tp(uploading, "Uploading {n} file…", "Uploading {n} files…")}
             </p>
           )}
           {creating && (
@@ -637,7 +639,7 @@ export function FilesPanel({
                       else if (isEscape(e)) setRenaming(null);
                     }}
                     onBlur={() => setRenaming(null)}
-                    aria-label={`New name for ${entry.name}`}
+                    aria-label={t("New name for {name}", { name: entry.name })}
                     spellCheck={false}
                     className="min-w-0 flex-1 rounded border border-accent/40 bg-transparent px-1.5 py-0.5 text-sm text-fg outline-none"
                   />
@@ -666,8 +668,8 @@ export function FilesPanel({
                     {entry.type !== "link" && (
                       <a
                         href={entry.type === "dir" ? api.archiveDownloadUrl(sessionId, join(dir, entry.name)) : api.fileDownloadUrl(sessionId, join(dir, entry.name))}
-                        title={entry.type === "dir" ? `Download ${entry.name} as a .tar.gz` : `Download ${entry.name}`}
-                        aria-label={`Download ${entry.name}`}
+                        title={entry.type === "dir" ? t("Download {name} as a .tar.gz", { name: entry.name }) : t("Download {name}", { name: entry.name })}
+                        aria-label={t("Download {name}", { name: entry.name })}
                         className="rounded p-1 text-fg-faint transition hover:bg-fg/10 hover:text-fg"
                       >
                         <LuDownload aria-hidden className="h-3.5 w-3.5" />
@@ -675,16 +677,16 @@ export function FilesPanel({
                     )}
                     <button
                       onClick={() => startRename(entry)}
-                      title={`Rename ${entry.name}`}
-                      aria-label={`Rename ${entry.name}`}
+                      title={t("Rename {name}", { name: entry.name })}
+                      aria-label={t("Rename {name}", { name: entry.name })}
                       className="rounded p-1 text-fg-faint transition hover:bg-fg/10 hover:text-fg"
                     >
                       <LuPencil aria-hidden className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={() => void remove(entry)}
-                      title={`Delete ${entry.name}`}
-                      aria-label={`Delete ${entry.name}`}
+                      title={t("Delete {name}", { name: entry.name })}
+                      aria-label={t("Delete {name}", { name: entry.name })}
                       className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger"
                     >
                       <LuTrash2 aria-hidden className="h-3.5 w-3.5" />
@@ -696,7 +698,7 @@ export function FilesPanel({
           ))}
           {!showHidden && entries.length > shown.length && (
             <button onClick={toggleHidden} className="px-2 py-2 text-left text-xs text-fg-subtle underline-offset-2 hover:text-fg hover:underline">
-              {entries.length - shown.length} {t("hidden")} {entries.length - shown.length === 1 ? t("file") : t("files")} {t("— show")}
+              {tp(entries.length - shown.length, "{n} hidden file — show", "{n} hidden files — show")}
             </button>
           )}
           {truncated && <p className="px-2 py-2 text-xs text-fg-subtle">{t("This folder has more than is listed here.")}</p>}

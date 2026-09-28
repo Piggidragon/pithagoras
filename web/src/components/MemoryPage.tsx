@@ -37,7 +37,7 @@ import { NOTE_LINK, linkNotes } from "../memory-links";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import { inputCls } from "./SettingsUi";
-import { t } from "../i18n";
+import { formatDateTime, msg, t, tp, tx } from "../i18n";
 
 /**
  * The agent's memory in Understory, laid out as Understory's own page lays it
@@ -106,10 +106,9 @@ export function MemoryPage() {
   /** The memory from nothing, after asking. */
   const wipe = async () => {
     const ok = await confirmDialog({
-      title: "Clear the whole memory?",
-      message:
-        "Every note and folder is deleted, and the index and log start empty, as in a new memory. The agent forgets everything it kept here. This cannot be undone.",
-      confirmLabel: "Clear the memory",
+      title: t("Clear the whole memory?"),
+      message: t("Every note and folder is deleted, and the index and log start empty, as in a new memory. The agent forgets everything it kept here. This cannot be undone."),
+      confirmLabel: t("Clear the memory"),
       danger: true,
       deletes: true,
     });
@@ -204,10 +203,10 @@ export function MemoryPage() {
               <button
                 type="button"
                 onClick={() => openView("issues")}
-                title={validation.conformant ? t("The bundle is well-formed") : `${validation.issues.length} issues in the bundle`}
+                title={validation.conformant ? t("The bundle is well-formed") : tp(validation.issues.length, "{n} issue in the bundle", "{n} issues in the bundle")}
                 className={`rounded px-1.5 py-0.5 text-[10px] ${validation.conformant ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"}`}
               >
-                {validation.conformant ? t("conformant") : `${validation.issues.length} issues`}
+                {validation.conformant ? t("conformant") : tp(validation.issues.length, "{n} issue", "{n} issues")}
               </button>
             )}
             {writable && (
@@ -304,8 +303,7 @@ export function MemoryPage() {
                 <p>{t("Choose a note, or open the log or the graph.")}</p>
                 {validation?.conceptCount !== undefined && (
                   <p className="mt-1 text-xs text-fg-faint">
-                    {validation.conceptCount} {validation.conceptCount === 1 ? t("note") : t("notes")} {t("in")} {validation.directoryCount ?? 0}{" "}
-                    {validation.directoryCount === 1 ? t("folder") : t("folders")}
+                    {tp(validation.conceptCount, "{n} note", "{n} notes")} · {tp(validation.directoryCount ?? 0, "{n} folder", "{n} folders")}
                   </p>
                 )}
               </div>
@@ -387,7 +385,7 @@ function TreeNode({ node, depth, open, onOpen }: { node: MemoryNode; depth: numb
 }
 
 function Hits({ hits, asked, open, onOpen }: { hits: MemoryHit[]; asked: string; open: string | null; onOpen: (path: string) => void }) {
-  if (!hits.length) return <p className="px-2 py-6 text-center text-xs text-fg-subtle">{t("Nothing in the memory matches “")}{asked}”.</p>;
+  if (!hits.length) return <p className="px-2 py-6 text-center text-xs text-fg-subtle">{t("Nothing in the memory matches “{query}”.", { query: asked })}</p>;
   return (
     <ul aria-label={t("Found in the memory")} className="space-y-1">
       {hits.map((h) => (
@@ -520,9 +518,9 @@ function Note({
 
   const remove = async () => {
     const ok = await confirmDialog({
-      title: `Delete “${title}”?`,
-      message: "It is gone from the memory, and the agent no longer knows it. Links to it from other notes then lead nowhere.",
-      confirmLabel: "Delete",
+      title: t("Delete “{name}”?", { name: title ?? "" }),
+      message: t("It is gone from the memory, and the agent no longer knows it. Links to it from other notes then lead nowhere."),
+      confirmLabel: t("Delete"),
       danger: true,
       deletes: true,
     });
@@ -625,7 +623,7 @@ function Note({
                         #{String(t)}
                       </span>
                     ))}
-                    {when && !Number.isNaN(when.getTime()) && <span className="ml-auto text-fg-faint">{when.toLocaleString()}</span>}
+                    {when && !Number.isNaN(when.getTime()) && <span className="ml-auto text-fg-faint">{formatDateTime(when)}</span>}
                   </p>
                 )}
                 <h3 className="mt-2 text-lg font-semibold text-fg">{title}</h3>
@@ -682,22 +680,24 @@ function AfterChange({
     }
   };
   const reindex = () =>
-    act("Writing the indexes anew…", async () => {
+    act(msg("Writing the indexes anew…"), async () => {
       const r = await api.reindexMemory();
       setHealth(r.health);
-      return `${r.reindexed} ${r.reindexed === 1 ? "index" : "indexes"} written anew${r.pruned.length ? `, ${r.pruned.length} empty ${r.pruned.length === 1 ? "folder" : "folders"} removed` : ""}.`;
+      const written = tp(r.reindexed, "{n} index written anew", "{n} indexes written anew");
+      return r.pruned.length
+        ? `${written}, ${tp(r.pruned.length, "{n} empty folder removed", "{n} empty folders removed")}.`
+        : `${written}.`;
     });
   // What the model said it did, whole, beside the one line.
   const [told, setTold] = useState<string | null>(null);
   const repair = () =>
-    act("Repairing with the model — this takes as long as the model needs…", async () => {
+    act(msg("Repairing with the model — this takes as long as the model needs…"), async () => {
       setTold(null);
       const r = await api.repairMemory();
       setHealth(r.health);
-      if (!r.ran) return "Nothing for the model to repair.";
+      if (!r.ran) return t("Nothing for the model to repair.");
       if (r.summary) setTold(r.summary);
-      const n = r.filesChanged?.length ?? 0;
-      return `The model changed ${n} ${n === 1 ? "file" : "files"}.`;
+      return tp(r.filesChanged?.length ?? 0, "The model changed {n} file.", "The model changed {n} files.");
     });
   const nothingToRepair = health.brokenLinks.length === 0 && health.orphans.length === 0;
 
@@ -743,7 +743,7 @@ function AfterChange({
           </p>
         ) : (
           <p className="flex items-center gap-2 text-warn">
-            <LuTriangleAlert className="h-4 w-4 shrink-0" /> {t("The memory has")} {problems} {problems === 1 ? t("thing") : t("things")} {t("to put right.")}
+            <LuTriangleAlert className="h-4 w-4 shrink-0" /> {tp(problems, "The memory has {n} thing to put right.", "The memory has {n} things to put right.")}
           </p>
         )}
         {health.brokenLinks.length > 0 && (
@@ -788,11 +788,12 @@ function AfterChange({
           </section>
         )}
         <p className="text-xs text-fg-faint">
-          <strong className="font-medium text-fg-muted">{t("Rebuild the index")}</strong> {t("writes every folder's index.md anew and removes empty folders, without the model.")} <strong className="font-medium text-fg-muted">{t("Repair with the model")}</strong> {t("has the model mend the links to nothing and wire in the notes nothing links to — only when there are any; it takes a while and costs tokens.")}
+          {tx("{rebuild} writes every folder's index.md anew and removes empty folders, without the model.", { rebuild: <strong className="font-medium text-fg-muted">{t("Rebuild the index")}</strong> })}{" "}
+          {tx("{repair} has the model mend the links to nothing and wire in the notes nothing links to — only when there are any; it takes a while and costs tokens.", { repair: <strong className="font-medium text-fg-muted">{t("Repair with the model")}</strong> })}
         </p>
         {busy && (
           <p className="flex items-center gap-2 text-xs text-fg-subtle">
-            <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {busy}
+            <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t(busy)}
           </p>
         )}
         {said && !busy && <p className="text-xs text-fg-muted">{said}</p>}
@@ -821,10 +822,9 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
   /** The record starts over; what it records stays. */
   const clear = async () => {
     const ok = await confirmDialog({
-      title: "Clear the log?",
-      message:
-        "The record of what changed in the memory is emptied, and so are the paths Understory's queries took (the graph's Query paths). The notes stay as they are.",
-      confirmLabel: "Clear it",
+      title: t("Clear the log?"),
+      message: t("The record of what changed in the memory is emptied, and so are the paths Understory's queries took (the graph's Query paths). The notes stay as they are."),
+      confirmLabel: t("Clear it"),
       danger: true,
       deletes: true,
     });
@@ -997,7 +997,7 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
             <svg
               ref={svg}
               role="img"
-              aria-label={`The memory's notes and their links: ${graph.nodes.length} notes, ${graph.edges.length} links`}
+              aria-label={t("The memory's notes and their links: {notes}, {links}", { notes: tp(graph.nodes.length, "{n} note", "{n} notes"), links: tp(graph.edges.length, "{n} link", "{n} links") })}
               viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
               className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
               onPointerDown={down}
@@ -1087,7 +1087,7 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
               </button>
             </div>
             <p className="absolute bottom-3 left-3 text-[11px] text-fg-faint">
-              {graph.nodes.length} {graph.nodes.length === 1 ? t("note") : t("notes")} · {graph.edges.length} {graph.edges.length === 1 ? t("link") : t("links")} {t("— drag to move · scroll to zoom · click to open")}
+              {tp(graph.nodes.length, "{n} note", "{n} notes")} · {tp(graph.edges.length, "{n} link", "{n} links")} {t("— drag to move · scroll to zoom · click to open")}
             </p>
           </>
         )}

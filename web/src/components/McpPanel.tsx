@@ -16,7 +16,7 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type McpConfigView, type McpServerEntry, type McpServerView } from "../api";
-import { t } from "../i18n";
+import { t, tx } from "../i18n";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -123,8 +123,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
             <div className="min-w-0 flex-1">
               <p className="text-sm text-fg">{t("The MCP adapter is not installed")}</p>
               <p className="mt-1 text-xs text-fg-muted">
-                {t("MCP support comes from the")} <span className="font-mono">{t("pi-mcp-adapter")}</span>{" "}
-                {t("extension. Until it is installed, servers configured here are read by nothing.")}
+                {tx("MCP support comes from the {name} extension. Until it is installed, servers configured here are read by nothing.", { name: <span className="font-mono">pi-mcp-adapter</span> })}
               </p>
               <button
                 className={`${primaryCls} mt-3`}
@@ -269,7 +268,7 @@ function ServerRow({
         ? e.url
         : server.transport === "socket"
           ? e.socket
-          : "No transport configured";
+          : t("No transport configured");
 
   return (
     <li className="group flex items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5">
@@ -324,24 +323,24 @@ function ImportBox({
   return (
     <div className="mb-3 rounded-xl border border-line bg-raised/40 p-3">
       <p className="mb-2 text-xs text-fg-muted">
-        {t("Accepts a whole config, a bare")} <span className="font-mono">{t("mcpServers")}</span> {t("map, or a single server object.")}
+        {tx("Accepts a whole config, a bare {key} map, or a single server object.", { key: <span className="font-mono">mcpServers</span> })}
       </p>
       <textarea
         className={monoCls}
         rows={7}
         spellCheck={false}
-        placeholder={t("{\n  \"mcpServers\": {\n    \"filesystem\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/data\"]\n    }\n  }\n}")}
+        placeholder={"{\n  \"mcpServers\": {\n    \"filesystem\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/data\"]\n    }\n  }\n}"}
         value={text}
         onChange={(ev) => setText(ev.target.value)}
       />
       {result && (
         <div className="mt-2 text-xs">
           {result.added.length > 0 && (
-            <p className="text-ok">{t("Added")} {result.added.join(", ")}</p>
+            <p className="text-ok">{t("Added {names}", { names: result.added.join(", ") })}</p>
           )}
           {result.skipped.map((s) => (
             <p key={s.name} className="text-warn">
-              {t("Skipped")} {s.name}: {s.reason}
+              {t("Skipped {name}: {reason}", { name: s.name, reason: s.reason })}
             </p>
           ))}
         </div>
@@ -411,7 +410,7 @@ function ServerForm({
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    if (!name.trim()) return onError("Give the server a name");
+    if (!name.trim()) return onError(t("Give the server a name"));
     // Start from the stored entry so fields this form does not show — oauth
     // blocks, tracing, timeouts set by hand — survive an edit here.
     const next: McpServerEntry = { ...e };
@@ -471,7 +470,7 @@ function ServerForm({
           <input
             className={inputCls}
             value={name}
-            placeholder={t("filesystem")}
+            placeholder="filesystem"
             onChange={(ev) => setName(ev.target.value)}
           />
         </Field>
@@ -500,7 +499,7 @@ function ServerForm({
               <input
                 className={inputCls}
                 value={command}
-                placeholder={t("npx")}
+                placeholder="npx"
                 onChange={(ev) => setCommand(ev.target.value)}
               />
             </Field>
@@ -510,7 +509,7 @@ function ServerForm({
                 rows={3}
                 spellCheck={false}
                 value={args}
-                placeholder={t("-y\n@modelcontextprotocol/server-filesystem\n/data")}
+                placeholder={"-y\n@modelcontextprotocol/server-filesystem\n/data"}
                 onChange={(ev) => setArgs(ev.target.value)}
               />
             </Field>
@@ -555,10 +554,10 @@ function ServerForm({
                 value={auth}
                 onChange={setAuth}
                 options={[
-                  { value: "auto", label: "Detect", hint: "OAuth if the server offers it" },
+                  { value: "auto", label: t("Detect"), hint: t("OAuth if the server offers it") },
                   { value: "oauth", label: "OAuth" },
-                  { value: "bearer", label: "Bearer token" },
-                  { value: "none", label: "None" },
+                  { value: "bearer", label: t("Bearer token") },
+                  { value: "none", label: t("None") },
                 ]}
               />
             </Field>
@@ -595,10 +594,10 @@ function ServerForm({
             value={lifecycle}
             onChange={(v) => setLifecycle(v as McpServerEntry["lifecycle"] & string)}
             options={[
-              { value: "lazy", label: "Lazy" },
-              { value: "lazy-keep-alive", label: "Lazy, then keep alive" },
-              { value: "eager", label: "Eager" },
-              { value: "keep-alive", label: "Keep alive" },
+              { value: "lazy", label: t("Lazy") },
+              { value: "lazy-keep-alive", label: t("Lazy, then keep alive") },
+              { value: "eager", label: t("Eager") },
+              { value: "keep-alive", label: t("Keep alive") },
             ]}
           />
         </Field>

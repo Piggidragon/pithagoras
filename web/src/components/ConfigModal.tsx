@@ -53,7 +53,8 @@ import { serialSaver } from "../serial-saver";
 import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
 import { useTheme, type Theme } from "../theme";
 import { humanKey, typed } from "../setting-values";
-import { t } from "../i18n";
+import { effortLabel } from "../effort";
+import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
 
 export type Tab =
   | "models"
@@ -82,36 +83,36 @@ type TabDef = { id: Tab; label: string; icon: ReactNode; hint: string };
  */
 const GROUPS: { label: string; tabs: TabDef[] }[] = [
   {
-    label: "Models",
+    label: msg("Models"),
     tabs: [
-      { id: "models", label: "Providers", icon: <LuServer />, hint: "Where the models come from" },
-      { id: "general", label: "Defaults", icon: <LuSlidersHorizontal />, hint: "Model, effort and context for new chats" },
+      { id: "models", label: msg("Providers"), icon: <LuServer />, hint: msg("Where the models come from") },
+      { id: "general", label: msg("Defaults"), icon: <LuSlidersHorizontal />, hint: msg("Model, effort and context for new chats") },
     ],
   },
   {
-    label: "Agent",
+    label: msg("Agent"),
     tabs: [
-      { id: "tools", label: "Tools", icon: <LuHammer />, hint: "What the agent may reach for, by default" },
-      { id: "skills", label: "Skills", icon: <LuWrench />, hint: "Procedures the agent can reach for" },
-      { id: "mcp", label: "MCP", icon: <LuPlug />, hint: "Servers the agent can pull tools from" },
-      { id: "extensions", label: "Extensions", icon: <LuBlocks />, hint: "Install and manage packages" },
+      { id: "tools", label: msg("Tools"), icon: <LuHammer />, hint: msg("What the agent may reach for, by default") },
+      { id: "skills", label: msg("Skills"), icon: <LuWrench />, hint: msg("Procedures the agent can reach for") },
+      { id: "mcp", label: msg("MCP"), icon: <LuPlug />, hint: msg("Servers the agent can pull tools from") },
+      { id: "extensions", label: msg("Extensions"), icon: <LuBlocks />, hint: msg("Install and manage packages") },
     ],
   },
   {
-    label: "Reach",
+    label: msg("Reach"),
     tabs: [
-      { id: "channels", label: "Channels", icon: <LuRadio />, hint: "Two-way links into the agent" },
-      { id: "people", label: "People", icon: <LuUsers />, hint: "Who the agent will talk to" },
+      { id: "channels", label: msg("Channels"), icon: <LuRadio />, hint: msg("Two-way links into the agent") },
+      { id: "people", label: msg("People"), icon: <LuUsers />, hint: msg("Who the agent will talk to") },
     ],
   },
   {
-    label: "Portal",
+    label: msg("Portal"),
     tabs: [
-      { id: "browser", label: "This browser", icon: <LuMonitor />, hint: "Theme, notifications, confirmations" },
-      { id: "add-ons", label: "Add-ons", icon: <LuPuzzle />, hint: "Optional parts of the portal itself" },
-      { id: "shortcuts", label: "Shortcuts", icon: <LuKeyboard />, hint: "Keyboard shortcuts, and changing them" },
-      { id: "about", label: "About", icon: <LuInfo />, hint: "Where this portal keeps things" },
-      { id: "advanced", label: "Advanced", icon: <LuFileJson />, hint: "pi's raw settings file" },
+      { id: "browser", label: msg("This browser"), icon: <LuMonitor />, hint: msg("Theme, notifications, confirmations") },
+      { id: "add-ons", label: msg("Add-ons"), icon: <LuPuzzle />, hint: msg("Optional parts of the portal itself") },
+      { id: "shortcuts", label: msg("Shortcuts"), icon: <LuKeyboard />, hint: msg("Keyboard shortcuts, and changing them") },
+      { id: "about", label: msg("About"), icon: <LuInfo />, hint: msg("Where this portal keeps things") },
+      { id: "advanced", label: msg("Advanced"), icon: <LuFileJson />, hint: msg("pi's raw settings file") },
     ],
   },
 ];
@@ -188,16 +189,27 @@ export function ConfigModal({
     return () => clearTimeout(t);
   }, [exts.value]);
 
-  // Every setting there is, the extensions' own among them, to search.
+  // Every setting there is, the extensions' own among them, to search — by
+  // what it is called here and, in another language, by its English name too.
+  const lang = useLanguage();
   const index = useMemo(() => {
-    const label = (id: string) => TABS.find((t) => t.id === id)?.label ?? id;
-    const fixed = SETTINGS_INDEX.map((e) => ({ ...e, where: label(e.tab) }));
+    const label = (id: string) => {
+      const tab = TABS.find((x) => x.id === id);
+      return tab ? t(tab.label) : id;
+    };
+    const fixed = SETTINGS_INDEX.map((e) => ({
+      ...e,
+      title: t(e.title),
+      section: e.section && t(e.section),
+      words: `${e.words ?? ""} ${e.title} ${e.section ?? ""}`,
+      where: label(e.tab),
+    }));
     const own = extensions.flatMap((x) => [
-      { tab: "extensions", ext: x.spec, title: x.name, words: `${x.description ?? ""} extension settings`, where: "Extension settings" },
-      ...x.settings.map((st) => ({ tab: "extensions", ext: x.spec, section: "Settings", title: humanKey(st.key), words: `${st.key} ${x.name}`, where: x.name })),
+      { tab: "extensions", ext: x.spec, title: x.name, words: `${x.description ?? ""} extension settings`, where: t("Extension settings") },
+      ...x.settings.map((st) => ({ tab: "extensions", ext: x.spec, section: t("Settings"), title: humanKey(st.key), words: `${st.key} ${x.name}`, where: x.name })),
     ]);
     return [...fixed, ...own];
-  }, [extensions]);
+  }, [extensions, lang]);
 
   const go = (entry: SettingEntry) => {
     setNav(entry.ext ? { kind: "ext", spec: entry.ext } : { kind: "tab", id: entry.tab as Tab });
@@ -232,20 +244,20 @@ export function ConfigModal({
       subtitle={t("Applies to the whole portal")}
       onClose={onClose}
       startInRail={initialTab === "general"}
-      section={nav.kind === "tab" ? TABS.find((t) => t.id === nav.id)?.label : activeExt?.name}
+      section={nav.kind === "tab" ? t(TABS.find((x) => x.id === nav.id)?.label ?? "") : activeExt?.name}
       rail={
         <SettingsSearch index={index} onPick={go}>
         <div className="space-y-4">
           {GROUPS.map((g) => (
-            <RailGroup key={g.label} label={g.label}>
-              {g.tabs.map((t) => (
+            <RailGroup key={g.label} label={t(g.label)}>
+              {g.tabs.map((tab) => (
                 <RailItem
-                  key={t.id}
-                  icon={t.icon}
-                  label={t.label}
-                  hint={t.hint}
-                  active={nav.kind === "tab" && nav.id === t.id}
-                  onClick={() => setNav({ kind: "tab", id: t.id })}
+                  key={tab.id}
+                  icon={tab.icon}
+                  label={t(tab.label)}
+                  hint={t(tab.hint)}
+                  active={nav.kind === "tab" && nav.id === tab.id}
+                  onClick={() => setNav({ kind: "tab", id: tab.id })}
                 />
               ))}
             </RailGroup>
@@ -480,7 +492,7 @@ function ReportDefault({ onError }: { onError: (e: string) => void }) {
         className="w-full"
         value={value}
         options={[
-          { value: "", label: "Nowhere — routines stay silent" },
+          { value: "", label: t("Nowhere — routines stay silent") },
           ...targets.map((t) => ({ value: `${t.channel}\u0000${t.target}`, label: `${t.channel} — ${t.label}` })),
         ]}
         onChange={async (next) => {
@@ -540,9 +552,8 @@ function SignOut({ onError }: { onError: (e: string) => void }) {
 function Notifications() {
   const [state, setOn] = useNotifyState();
   const note: Record<string, string> = {
-    unsupported:
-      "This browser does not offer them here — they need a secure connection (HTTPS, or localhost).",
-    denied: "The browser has blocked them for this site. Allow them in its site settings, then come back.",
+    unsupported: t("This browser does not offer them here — they need a secure connection (HTTPS, or localhost)."),
+    denied: t("The browser has blocked them for this site. Allow them in its site settings, then come back."),
   };
   return (
     <SwitchRow
@@ -557,9 +568,9 @@ function Notifications() {
 }
 
 const THEMES: { value: Theme; label: string; icon: ReactNode }[] = [
-  { value: "light", label: "Light", icon: <LuSun /> },
-  { value: "dark", label: "Dark", icon: <LuMoon /> },
-  { value: "system", label: "Match the system", icon: <LuMonitor /> },
+  { value: "light", label: msg("Light"), icon: <LuSun /> },
+  { value: "dark", label: msg("Dark"), icon: <LuMoon /> },
+  { value: "system", label: msg("Match the system"), icon: <LuMonitor /> },
 ];
 
 /** Light, dark, or whichever the system is — as three cards, each a glimpse of itself. */
@@ -567,24 +578,49 @@ function Appearance() {
   const { theme, setTheme } = useTheme();
   return (
     <div role="radiogroup" aria-label={t("Theme")} className="grid grid-cols-3 gap-2">
-      {THEMES.map((t) => (
+      {THEMES.map((th) => (
         <button
-          key={t.value}
+          key={th.value}
           type="button"
           role="radio"
-          aria-checked={theme === t.value}
-          onClick={() => setTheme(t.value)}
+          aria-checked={theme === th.value}
+          onClick={() => setTheme(th.value)}
           className={`group rounded-xl border p-2 text-left transition ${
-            theme === t.value ? "border-accent/50 bg-accent/5 ring-1 ring-inset ring-accent/30" : "border-line hover:border-fg/20 hover:bg-fg/[.03]"
+            theme === th.value ? "border-accent/50 bg-accent/5 ring-1 ring-inset ring-accent/30" : "border-line hover:border-fg/20 hover:bg-fg/[.03]"
           }`}
         >
-          <span className={`theme-swatch theme-swatch-${t.value}`} aria-hidden="true"><i /><i /><i /></span>
+          <span className={`theme-swatch theme-swatch-${th.value}`} aria-hidden="true"><i /><i /><i /></span>
           <span className="mt-2 flex items-center gap-1.5 text-xs text-fg [&>svg]:h-3.5 [&>svg]:w-3.5">
-            {t.icon} {t.label}
+            {th.icon} {t(th.label)}
           </span>
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * The portal's language: one of those there are, or the browser's — which is
+ * what it follows until one is picked.
+ */
+function LanguagePicker() {
+  const lang = useLanguage();
+  const [choice, setChoice] = useState<LanguageChoice>(languageChoice);
+  const system = languages().find((l) => l.code === lang)?.name ?? lang;
+  return (
+    <Select
+      className="w-full sm:w-72"
+      aria-label={t("Language")}
+      value={choice}
+      options={[
+        { value: "system", label: t("Match the browser"), hint: choice === "system" ? system : undefined },
+        ...languages().map((l) => ({ value: l.code, label: l.name })),
+      ]}
+      onChange={(next) => {
+        setChoice(next);
+        setLanguage(next);
+      }}
+    />
   );
 }
 
@@ -597,6 +633,9 @@ function BrowserPanel({ onError }: { onError: (e: string) => void }) {
       </p>
       <Section title={t("Appearance")}>
         <Appearance />
+      </Section>
+      <Section title={t("Language")} hint={t("The portal's own words. What the agent writes is up to the agent.")}>
+        <LanguagePicker />
       </Section>
       <Section title={t("Notifications")}>
         <Notifications />
@@ -618,12 +657,12 @@ function AboutPanel({ onError }: { onError: (e: string) => void }) {
   const rows: { icon: ReactNode; label: string; value: string; detail: string }[] = [
     {
       icon: <LuServer />,
-      label: "Where the agent runs",
-      value: meta.executor === "container" ? "In a container" : "On this host",
-      detail: meta.executor === "container" ? "Each chat's pi runs in its own container." : "pi runs inside the portal's own process.",
+      label: t("Where the agent runs"),
+      value: meta.executor === "container" ? t("In a container") : t("On this host"),
+      detail: meta.executor === "container" ? t("Each chat's pi runs in its own container.") : t("pi runs inside the portal's own process."),
     },
-    { icon: <LuFolder />, label: "Workspaces", value: meta.workspaceRoot, detail: "Where each chat's folder is made." },
-    { icon: <LuFileJson />, label: "pi's files", value: agentDir, detail: "settings.json, models.json, auth.json, and installed packages." },
+    { icon: <LuFolder />, label: t("Workspaces"), value: meta.workspaceRoot, detail: t("Where each chat's folder is made.") },
+    { icon: <LuFileJson />, label: t("pi's files"), value: agentDir, detail: t("settings.json, models.json, auth.json, and installed packages.") },
   ];
   return (
     <>
@@ -648,9 +687,9 @@ function AboutPanel({ onError }: { onError: (e: string) => void }) {
 /** What a model can do, said in a few words under its name. */
 function modelHint(m: AvailableModel): string {
   const parts = [m.name !== m.id ? m.id : ""];
-  if (m.contextWindow) parts.push(`${formatTokens(m.contextWindow)} window`);
-  if (m.input?.includes("image")) parts.push("sees images");
-  if (m.reasoning) parts.push("thinks");
+  if (m.contextWindow) parts.push(t("{n} window", { n: formatTokens(m.contextWindow) }));
+  if (m.input?.includes("image")) parts.push(t("sees images"));
+  if (m.reasoning) parts.push(t("thinks"));
   return parts.filter(Boolean).join(" · ");
 }
 
@@ -691,7 +730,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
           await api.saveSettings({ provider: next.provider ?? "", model: next.model ?? "", thinkingLevel: next.thinkingLevel ?? "" });
         },
         async () => {
-          setSaved("Saved");
+          setSaved(t("Saved"));
           setTimeout(() => setSaved(null), 2000);
           await settings.reload();
         },
@@ -708,7 +747,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
     if (!saver.busy) setStored(r.stored);
     setKeepRecent(r.compaction.keepRecentTokens);
     setCtxSaved(r.contextDefault);
-    if (document.activeElement?.getAttribute("aria-label") !== "Default context window in tokens") {
+    if (document.activeElement?.getAttribute("aria-label") !== t("Default context window in tokens")) {
       setCtxText(r.contextDefault ? String(r.contextDefault) : "");
     }
   }, [r]);
@@ -726,7 +765,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
     (compaction, refreshed) => {
       setKeepRecent(compaction.keepRecentTokens);
       setApplied(
-        refreshed > 0 ? `Applied to ${refreshed} open session${refreshed === 1 ? "" : "s"}` : "Saved",
+        refreshed > 0 ? tp(refreshed, "Applied to {n} open session", "Applied to {n} open sessions") : t("Saved"),
       );
       void load();
       setTimeout(() => setApplied(null), 3000);
@@ -742,7 +781,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
     const parsed = parseWindow(ctxText);
     const n = parsed.kind === "ok" ? parsed.tokens : null;
     if (parsed.kind === "bad") {
-      onError(`${parsed.message} — or leave it empty for none`);
+      onError(t("{problem} — or leave it empty for none", { problem: parsed.message }));
       return setCtxText(ctxSaved ? String(ctxSaved) : "");
     }
     if (n === ctxSaved) return setCtxText(ctxSaved ? String(ctxSaved) : "");
@@ -750,7 +789,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
       const r = await api.setContextDefault(n);
       setCtxSaved(r.contextDefault);
       setCtxText(r.contextDefault ? String(r.contextDefault) : "");
-      setCtxNote(n === null ? "Removed" : "Saved");
+      setCtxNote(n === null ? t("Removed") : t("Saved"));
       void load();
       setTimeout(() => setCtxNote(null), 3000);
     } catch (e) {
@@ -794,18 +833,18 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
   const provider = stored.provider || defaults.provider;
   const providerName = (id: string) => models?.providers[id] ?? id;
   const providerOptions = [
-    { value: "", label: defaults.provider ? `pi's default — ${providerName(defaults.provider)}` : "pi's default", hint: "From pi's own settings.json" },
-    ...[...byProvider.entries()].map(([id, list]) => ({ value: id, label: providerName(id), hint: `${list.length} model${list.length === 1 ? "" : "s"}` })),
+    { value: "", label: defaults.provider ? t("pi's default — {name}", { name: providerName(defaults.provider) }) : t("pi's default"), hint: t("From pi's own settings.json") },
+    ...[...byProvider.entries()].map(([id, list]) => ({ value: id, label: providerName(id), hint: tp(list.length, "{n} model", "{n} models") })),
     ...(stored.provider && !byProvider.has(stored.provider)
-      ? [{ value: stored.provider, label: stored.provider, hint: "Not available now — no key, or not set up" }]
+      ? [{ value: stored.provider, label: stored.provider, hint: t("Not available now — no key, or not set up") }]
       : []),
   ];
   const offered = byProvider.get(provider ?? "") ?? [];
   const modelOptions = [
-    { value: "", label: defaults.model && (!stored.provider || stored.provider === defaults.provider) ? `pi's default — ${offered.find((m) => m.id === defaults.model)?.name ?? defaults.model}` : "pi's default", hint: "Whatever pi picks for the provider" },
+    { value: "", label: defaults.model && (!stored.provider || stored.provider === defaults.provider) ? t("pi's default — {name}", { name: offered.find((m) => m.id === defaults.model)?.name ?? defaults.model }) : t("pi's default"), hint: t("Whatever pi picks for the provider") },
     ...offered.map((m) => ({ value: m.id, label: m.name, text: `${m.name} ${m.id}`, hint: modelHint(m) || undefined })),
     ...(stored.model && !offered.some((m) => m.id === stored.model)
-      ? [{ value: stored.model, label: stored.model, hint: "Not offered by this provider now" }]
+      ? [{ value: stored.model, label: stored.model, hint: t("Not offered by this provider now") }]
       : []),
   ];
 
@@ -865,7 +904,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
             <div className="flex items-baseline gap-2">
               <span className="text-xs text-fg-muted">{t("Effort")}</span>
               <span className="text-[10px] text-fg-faint">
-                {stored.thinkingLevel ? t("click again to go back to pi's default") : defaults.thinkingLevel ? `pi's default: ${defaults.thinkingLevel}` : ""}
+                {stored.thinkingLevel ? t("click again to go back to pi's default") : defaults.thinkingLevel ? t("pi's default: {level}", { level: effortLabel(defaults.thinkingLevel) }) : ""}
               </span>
             </div>
             <div className="mt-1">
@@ -905,7 +944,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
               className={`${inputCls} mt-1 font-mono`}
             />
             <p className="mt-1.5 text-xs text-fg-faint">
-              {t("How many tokens a chat may hold before it is compacted, in every chat, open ones included. A model that says it has less keeps its own number, and one set for a model in its context pill wins over this. For a server that gives each chat less than the model declares — llama.cpp with")} <code>--parallel 2</code> {t("gives each chat half of")} <code>ctx-size</code>{t(". Saved when you leave the field.")}
+              {tx("How many tokens a chat may hold before it is compacted, in every chat, open ones included. A model that says it has less keeps its own number, and one set for a model in its context pill wins over this. For a server that gives each chat less than the model declares — llama.cpp with {flag} gives each chat half of {size}. Saved when you leave the field.", { flag: <code>--parallel 2</code>, size: <code>ctx-size</code> })}
             </p>
             {executor === "container" && (
               <p className="mt-1 text-xs text-warn">
@@ -920,8 +959,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
               <KeepRecent value={keepRecent} onChange={setKeepRecent} onCommit={saveKeepRecent} />
             )}
             <p className="mt-2 text-xs text-fg-faint">
-              {t("The most recent stretch is kept word for word; only what is older becomes a summary. pi's default of")}{" "}
-              {formatTokens(20000)} {t("is a third of a 64k window, which is why compacting can look as though it did nothing. Saved as you let go, and it reaches open chats too.")}
+              {t("The most recent stretch is kept word for word; only what is older becomes a summary. pi's default of {n} is a third of a 64k window, which is why compacting can look as though it did nothing. Saved as you let go, and it reaches open chats too.", { n: formatTokens(20000) })}
             </p>
             {applied && <p className="mt-1 text-xs text-ok">{applied}</p>}
           </div>
@@ -936,10 +974,10 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
 // --- extensions ---
 
 const SOURCES = [
-  { label: "npm", placeholder: "npm:@scope/package", hint: "published on npm" },
-  { label: "git", placeholder: "git:github.com/user/repo@v1", hint: "a git repository" },
-  { label: "url", placeholder: "https://github.com/user/repo", hint: "a URL" },
-  { label: "path", placeholder: "/absolute/path/to/package", hint: "a local directory" },
+  { label: "npm", placeholder: "npm:@scope/package", hint: msg("Install from npm") },
+  { label: "git", placeholder: "git:github.com/user/repo@v1", hint: msg("Install from a git repository") },
+  { label: "url", placeholder: "https://github.com/user/repo", hint: msg("Install from a URL") },
+  { label: "path", placeholder: "/absolute/path/to/package", hint: msg("Install from a folder on the server") },
 ];
 
 function ExtensionsPanel({
@@ -988,11 +1026,12 @@ function ExtensionsPanel({
     act(ext.spec, async () => {
       const on = !ext.enabled;
       const r = await api.setExtensionEnabled(ext.spec, on);
-      const parts = [`${displayName(ext.name, names)} is ${on ? "on" : "off"}.`];
-      if (r.reloaded) parts.push(`${r.reloaded} open ${r.reloaded === 1 ? "conversation" : "conversations"} reloaded.`);
+      const name = displayName(ext.name, names);
+      const parts = [on ? t("{name} is on.", { name }) : t("{name} is off.", { name })];
+      if (r.reloaded) parts.push(tp(r.reloaded, "{n} open conversation reloaded.", "{n} open conversations reloaded."));
       if (r.waiting)
         parts.push(
-          `${r.waiting} still working — they keep it as it was until /reload, or their next start.`,
+          tp(r.waiting, "{n} still working — it keeps it as it was until /reload, or its next start.", "{n} still working — they keep it as it was until /reload, or their next start."),
         );
       setNote(parts.join(" "));
     });
@@ -1038,7 +1077,7 @@ function ExtensionsPanel({
             <button
               key={s.label}
               onClick={() => setSpec(s.placeholder)}
-              title={`Install from ${s.hint}`}
+              title={t(s.hint)}
               className="rounded-lg bg-fg/5 px-2 py-0.5 font-mono text-[11px] text-fg-muted transition hover:bg-fg/10 hover:text-fg"
             >
               {s.label}
@@ -1047,7 +1086,7 @@ function ExtensionsPanel({
         </div>
       </Section>
 
-      <Section title={`Installed${extensions.length ? ` (${extensions.length})` : ""}`}>
+      <Section title={`${t("Installed")}${extensions.length ? ` (${extensions.length})` : ""}`}>
         {loading ? (
           <p className="text-sm text-fg-subtle">{t("Reading installed packages…")}</p>
         ) : extensions.length === 0 ? (
@@ -1098,7 +1137,7 @@ function ExtensionsPanel({
                       type="button"
                       role="switch"
                       aria-checked={ext.enabled}
-                      aria-label={`${ext.enabled ? "Switch off" : "Switch on"} ${displayName(ext.name, names)}`}
+                      aria-label={ext.enabled ? t("Switch off {name}", { name: displayName(ext.name, names) }) : t("Switch on {name}", { name: displayName(ext.name, names) })}
                       title={
                         ext.enabled
                           ? t("On — click to switch it off without uninstalling it")
@@ -1144,7 +1183,7 @@ function ExtensionsPanel({
                       onClick={() => onConfigure(ext.spec)}
                       className="ml-auto shrink-0 text-[11px] text-accent hover:text-accent"
                     >
-                      {t("Configure (")}{ext.settings.length}) ›
+                      {t("Configure ({n})", { n: ext.settings.length })} ›
                     </button>
                   )}
                 </div>
@@ -1259,7 +1298,7 @@ function ExtensionPanel({
                     <p className="text-sm text-fg">{humanKey(s.key)}</p>
                     <p className="font-mono text-[10px] text-fg-faint">
                       {s.key}
-                      {!s.configured && t(" · not set, so the extension's own default")}
+                      {!s.configured && ` · ${t("not set, so the extension's own default")}`}
                     </p>
                   </div>
                   {flag && (

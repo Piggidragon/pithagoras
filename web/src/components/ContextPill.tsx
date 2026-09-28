@@ -6,7 +6,7 @@ import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { isEnter } from "../shortcuts";
 import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { useDismiss } from "../use-dismiss";
-import { t } from "../i18n";
+import { formatNumber, t } from "../i18n";
 
 /**
  * Context fill is the number that decides whether a long session keeps working,
@@ -55,11 +55,11 @@ function ContextWindow({
   const measured = cfg.stats?.contextUsage.contextWindow;
   const shown = measured && measured > 0 ? measured : (limit ?? byDefault);
   const source = limit
-    ? "set for this model"
+    ? t("set for this model")
     : fallback && (!declared || fallback < declared)
-      ? "default from Settings"
+      ? t("default from Settings")
       : declared
-        ? "from the model"
+        ? t("from the model")
         : "";
   const [text, setText] = useState(shown ? String(shown) : "");
   /** Whether the field has been typed in, as opposed to showing what is set. */
@@ -133,7 +133,9 @@ function ContextWindow({
             onMouseDown={(e) => e.preventDefault()}
             title={
               byDefault
-                ? `Back to ${byDefault.toLocaleString()}, ${fallback && byDefault === fallback ? "the default from Settings" : "what the model says"}`
+                ? fallback && byDefault === fallback
+                  ? t("Back to {n}, the default from Settings", { n: formatNumber(byDefault) })
+                  : t("Back to {n}, what the model says", { n: formatNumber(byDefault) })
                 : t("Back to what the model says")
             }
             onClick={() => {
@@ -217,7 +219,7 @@ export function ContextPill({
     try {
       await api.compact(sessionId);
       await onChanged();
-      setNote({ text: "Compacted.", error: false });
+      setNote({ text: t("Compacted."), error: false });
     } catch (e) {
       setNote({ text: (e as Error).message, error: true });
     } finally {
@@ -248,11 +250,11 @@ export function ContextPill({
   };
 
   const rows: [string, string][] = [
-    ["Input", cfg.stats.tokens.input.toLocaleString()],
-    ["Output", cfg.stats.tokens.output.toLocaleString()],
-    ["Messages", String(cfg.stats.totalMessages ?? 0)],
-    ["Tool calls", String(cfg.stats.toolCalls ?? 0)],
-    ["Cost", `$${cfg.stats.cost.toFixed(4)}`],
+    [t("Input"), formatNumber(cfg.stats.tokens.input)],
+    [t("Output"), formatNumber(cfg.stats.tokens.output)],
+    [t("Messages"), formatNumber(cfg.stats.totalMessages ?? 0)],
+    [t("Tool calls"), formatNumber(cfg.stats.toolCalls ?? 0)],
+    [t("Cost"), `$${formatNumber(cfg.stats.cost, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`],
   ];
 
   return (
@@ -263,7 +265,7 @@ export function ContextPill({
         ref={pill}
         type="button"
         onClick={() => setOpen(!open)}
-        title={known ? `Context ${pct.toFixed(1)}% full` : t("Context: counted again at the next reply")}
+        title={known ? t("Context {n}% full", { n: formatNumber(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) : t("Context: counted again at the next reply")}
         className={`flex items-center gap-1.5 rounded px-2 py-1 ${
           open ? "bg-raised" : "hover:bg-raised"
         }`}
@@ -276,7 +278,7 @@ export function ContextPill({
         <div style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           <div className="flex items-baseline justify-between">
             <p className="text-sm text-fg-muted">{t("Context")}</p>
-            <p className={`text-sm tabular-nums ${known ? look.text : "text-fg-subtle"}`}>{known ? `${pct.toFixed(1)}% full` : t("just compacted")}</p>
+            <p className={`text-sm tabular-nums ${known ? look.text : "text-fg-subtle"}`}>{known ? t("{n}% full", { n: formatNumber(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) : t("just compacted")}</p>
           </div>
 
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
@@ -288,11 +290,10 @@ export function ContextPill({
           <p className="mt-1.5 text-[11px] tabular-nums text-fg-subtle">
             {usage.tokens !== null ? (
               <>
-                {usage.tokens.toLocaleString()} {t("of")} {usage.contextWindow.toLocaleString()} {t("tokens ·")}{" "}
-                {Math.max(0, usage.contextWindow - usage.tokens).toLocaleString()} {t("left")}
+                {t("{used} of {all} tokens · {left} left", { used: formatNumber(usage.tokens), all: formatNumber(usage.contextWindow), left: formatNumber(Math.max(0, usage.contextWindow - usage.tokens)) })}
               </>
             ) : (
-              <>{t("Counted again with the next reply ·")} {usage.contextWindow.toLocaleString()} {t("tokens in all")}</>
+              <>{t("Counted again with the next reply · {n} tokens in all", { n: formatNumber(usage.contextWindow) })}</>
             )}
           </p>
 
