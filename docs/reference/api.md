@@ -204,6 +204,14 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `GET /api/pi-settings` | Raw `settings.json` |
 | `PUT /api/pi-settings` | `{ content }` — refused unless it parses as JSON |
 
+## Opt-in features
+
+| | |
+| --- | --- |
+| `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode }, understory: { enabled, url, tokenSet, adapterInstalled, reachable } }` |
+| `PUT /api/features/subagent` | `{ enabled?, mode?: "interrupt" \| "background" }` — installs or removes the bundled subagent tool, writes `subagentMode`; reloads idle open sessions |
+| `PUT /api/features/understory` | `{ enabled, url? }` — writes or removes the `understory` MCP server (installing `pi-mcp-adapter` if needed); reloads idle open sessions |
+
 ## Channels
 
 | | |

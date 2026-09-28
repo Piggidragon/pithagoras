@@ -36,6 +36,7 @@ export default defineConfig({
           { text: "MCP servers", link: "/guide/mcp" },
           { text: "The agent's browser", link: "/guide/browser" },
           { text: "Docker add-ons", link: "/guide/add-ons" },
+          { text: "Opt-in features", link: "/guide/features" },
           { text: "Voice control", link: "/guide/voice" },
           { text: "Session canvases", link: "/guide/canvases" },
           { text: "Files", link: "/guide/files" },

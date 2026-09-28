@@ -103,6 +103,8 @@ export interface AgentSetup {
   home: string;
   initialised: boolean;
   files: { name: string; exists: boolean; content: string }[];
+  /** Where the agent's memory is kept: while it is Understory, MEMORY.md is not read. */
+  memory?: "file" | "understory";
 }
 
 /** A conversation that reached the agent through a channel. */
@@ -502,6 +504,17 @@ export const api = {
     }),
   suggestBrowserPassword: () =>
     json<{ password: string }>("/api/browser/suggest-password"),
+  features: () => json<Features>("/api/features"),
+  setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode }) =>
+    json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  setUnderstoryFeature: (patch: { enabled: boolean; url?: string }) =>
+    json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>("/api/features/understory", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
   connectBrowser: () =>
     json<{ connectedAs: string | null }>("/api/browser/connect", { method: "POST" }),
   disconnectBrowser: () =>
@@ -1016,6 +1029,36 @@ export interface AuditEntry {
 }
 
 /** The agent's browser, and who may drive it. */
+export type SubagentMode = "interrupt" | "background";
+
+/** The subagent tool the portal ships, off until switched on. */
+export interface SubagentFeature {
+  /** This install carries it. */
+  available: boolean;
+  installed: boolean;
+  enabled: boolean;
+  /** How pi's packages list names it. */
+  source: string | null;
+  mode: SubagentMode;
+}
+
+/** Understory as the agent's memory, over MCP. */
+export interface UnderstoryFeature {
+  enabled: boolean;
+  url: string;
+  /** MEMORY_UNDERSTORY_AUTH_TOKEN is set for the portal. */
+  tokenSet: boolean;
+  adapterInstalled: boolean;
+  /** Something answers at the address. */
+  reachable: boolean;
+  configError?: string;
+}
+
+export interface Features {
+  subagent: SubagentFeature;
+  understory: UnderstoryFeature;
+}
+
 export interface BrowserStatus {
   running: boolean;
   /** Running with no password on its web UI. */

@@ -2183,7 +2183,9 @@ class SessionManager extends EventEmitter {
     let waiting = 0;
     const done = await Promise.all(
       [...this.live.entries()].map(async ([sessionId, { client }]) => {
-        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId)) {
+        // A subagent in the background would be stopped by the reload: its
+        // chat is idle, and still working.
+        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId) || (client.subagentsRunning?.() ?? 0) > 0) {
           waiting++;
           return false;
         }

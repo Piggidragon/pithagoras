@@ -8,7 +8,7 @@
  *
  * Extension → portal:
  *
- *   subagent:v1:start  { id, label, toolCallId?, input?: boolean, stop?: boolean, detail? }
+ *   subagent:v1:start  { id, label, toolCallId?, input?: boolean, stop?: boolean, detail?, detached?: boolean }
  *   subagent:v1:event  { id, event }       one of the child's pi events, as
  *                                          `pi --mode json` or `--mode rpc` print them
  *   subagent:v1:end    { id, status: "done" | "error" | "stopped", error? }
@@ -17,6 +17,9 @@
  *
  *   subagent:v1:input  { id, text }        a message for the subagent (e.g. an RPC `steer`)
  *   subagent:v1:stop   { id }
+ *
+ * `detached`: it runs on after the tool call that started it has returned (a
+ * subagent in the background), so the end of that call is not its end.
  *
  * The child's events are drawn exactly like the main conversation's: text,
  * thinking, tool calls and their output.
@@ -58,8 +61,9 @@ type Bus = { on(channel: string, handler: (data: unknown) => void): () => void }
 /**
  * Unsubscribes when called. `takes`: whether a subagent is running here that
  * said it takes messages, or a stop — anything else would go to nobody.
+ * `running`: how many have started and not ended.
  */
-export type Bridge = (() => void) & { takes(id: string, what: "input" | "stop"): boolean };
+export type Bridge = (() => void) & { takes(id: string, what: "input" | "stop"): boolean; running(): number };
 type Emit = (event: Record<string, unknown>) => void;
 
 const str = (v: unknown, max: number): string | undefined =>
@@ -112,9 +116,14 @@ export function slimEvent(event: any): Record<string, unknown> | undefined {
  * `portal_subagent_live` (streamed, not stored). Returns the unsubscribe.
  */
 export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
-  // With the tool call that runs each: carried on all its events, so a page
-  // that has not loaded the start still knows whose they are.
-  const known = new Map<string, { input: boolean; stop: boolean; toolCallId?: string }>();
+  // With the tool call that runs each, and whether it outlives that call:
+  // carried on all its events, so a page that has not loaded the start still
+  // knows whose they are.
+  const known = new Map<string, { input: boolean; stop: boolean; toolCallId?: string; detached: boolean }>();
+  const whose = (id: string) => {
+    const k = known.get(id);
+    return { ...(k?.toolCallId ? { toolCallId: k.toolCallId } : {}), ...(k?.detached ? { detached: true } : {}) };
+  };
   // When each child's current message began and stopped thinking, epoch ms:
   // its tokens are never stored, so the times ride on its message_end.
   const thinking = new Map<string, { thinkingSince: number; thinkingUntil: number }>();
@@ -122,7 +131,7 @@ export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
     bus.on(SUBAGENT_START, (data: any) => {
       const id = str(data?.id, 120);
       if (!id) return;
-      known.set(id, { input: data.input === true, stop: data.stop === true, toolCallId: str(data.toolCallId, 200) });
+      known.set(id, { input: data.input === true, stop: data.stop === true, toolCallId: str(data.toolCallId, 200), detached: data.detached === true });
       emit({
         type: "portal_subagent",
         op: "start",
@@ -132,6 +141,7 @@ export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
         ...(str(data.detail, 500) ? { detail: str(data.detail, 500) } : {}),
         input: data.input === true,
         stop: data.stop === true,
+        ...(data.detached === true ? { detached: true } : {}),
       });
     }),
     bus.on(SUBAGENT_EVENT, (data: any) => {
@@ -148,20 +158,20 @@ export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
         Object.assign(event, thinking.get(id));
         thinking.delete(id);
       }
-      const toolCallId = known.get(id)?.toolCallId;
-      emit({ type: LIVE.has(String(event.type)) ? "portal_subagent_live" : "portal_subagent", op: "event", id, ...(toolCallId ? { toolCallId } : {}), event });
+      emit({ type: LIVE.has(String(event.type)) ? "portal_subagent_live" : "portal_subagent", op: "event", id, ...whose(id), event });
     }),
     bus.on(SUBAGENT_END, (data: any) => {
       const id = str(data?.id, 120);
       if (!id || !known.has(id)) return;
-      const toolCallId = known.get(id)?.toolCallId;
+      const tied = whose(id);
       known.delete(id);
       thinking.delete(id);
       const status = ["done", "error", "stopped"].includes(data.status) ? data.status : "done";
-      emit({ type: "portal_subagent", op: "end", id, ...(toolCallId ? { toolCallId } : {}), status, ...(str(data.error, 2000) ? { error: str(data.error, 2000) } : {}) });
+      emit({ type: "portal_subagent", op: "end", id, ...tied, status, ...(str(data.error, 2000) ? { error: str(data.error, 2000) } : {}) });
     }),
   ];
   return Object.assign(() => off.forEach((f) => f()), {
     takes: (id: string, what: "input" | "stop") => known.get(id)?.[what] === true,
+    running: () => known.size,
   });
 }

@@ -19,6 +19,7 @@ import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../
 import { contextWindowFor } from "../db.js";
 import { configStamp } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
+import { UNDERSTORY_RULE, understoryOn } from "../features.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -55,7 +56,13 @@ function asArray(v: any): any[] {
 const CONTEXT_FILES = ["SOUL.md", "PrimaryUser.md", "MEMORY.md"];
 const SHARED_FILES = ["SOUL.md", "TEAM.md"];
 
-const filesFor = (role?: string) => (!role || role === "primary" ? CONTEXT_FILES : SHARED_FILES);
+/**
+ * While Understory holds the agent's memory, MEMORY.md is not read: two
+ * memories would drift apart, and the file would be the stale one. It stays
+ * where it is, and is read again once Understory is switched off.
+ */
+const filesFor = (role?: string) =>
+  !role || role === "primary" ? (understoryOn() ? CONTEXT_FILES.filter((f) => f !== "MEMORY.md") : CONTEXT_FILES) : SHARED_FILES;
 
 /**
  * pi's own theme, for extensions that style text with it even when nothing
@@ -134,7 +141,7 @@ function framing(cwd: string, role?: string): string[] {
 }
 
 /** pi's resource loader with the rule for spoken replies: see portalLoader. */
-let PortalLoader: (new (options: unknown, rule: AudioRule) => any) | undefined;
+let PortalLoader: (new (options: unknown, rule: AudioRule, said?: () => string[]) => any) | undefined;
 
 /**
  * pi's resource loader, adding the rule for spoken replies to what pi appends
@@ -144,19 +151,22 @@ let PortalLoader: (new (options: unknown, rule: AudioRule) => any) | undefined;
  * and stays through every rebuild. Made once, the first time pi is loaded:
  * pi is imported lazily, so the class cannot exist before.
  */
-function portalLoader(pi: any): new (options: unknown, rule: AudioRule) => any {
+function portalLoader(pi: any): new (options: unknown, rule: AudioRule, said?: () => string[]) => any {
   return (PortalLoader ??= class extends pi.DefaultResourceLoader {
     private readonly rule: AudioRule;
-    constructor(options: unknown, rule: AudioRule) {
+    /** Lines that depend on how the portal is set up now, asked each time like the rule. */
+    private readonly said: () => string[];
+    constructor(options: unknown, rule: AudioRule, said: () => string[] = () => []) {
       super(options);
       this.rule = rule;
+      this.said = said;
     }
     getAppendSystemPrompt(): string[] {
-      return [...super.getAppendSystemPrompt(), ...(this.rule?.lines() ?? [])];
+      return [...super.getAppendSystemPrompt(), ...this.said(), ...(this.rule?.lines() ?? [])];
     }
-    /** What pi appends without the rule: where the rule goes after. */
+    /** What is appended without the rule: where the rule goes after. */
     appendedByPi(): string {
-      return super.getAppendSystemPrompt().join("\n\n");
+      return [...super.getAppendSystemPrompt(), ...this.said()].join("\n\n");
     }
   });
 }
@@ -297,6 +307,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     this.bus.emit(SUBAGENT_STOP, { id });
     return true;
   }
+
+  subagentsRunning(): number {
+    return this.unbridge?.running() ?? 0;
+  }
   /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
   private appliedModel?: object;
   /** What each model's own definition says its window is, as last seen on a model that was pi's. */
@@ -419,7 +433,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // MEMORY.md correctly while insisting it was Pi, made by Baidu. This
         // says what the files are for.
         appendSystemPrompt: framing(opts.cwd, opts.role),
-      }, audioRule);
+        // Where MEMORY.md would have been, while Understory holds the memory:
+        // asked each time the prompt is built, so a switch reaches a reloaded chat.
+        // A conversation with anyone else had no memory to replace.
+      }, audioRule, () => ((!opts.role || opts.role === "primary") && understoryOn() ? [UNDERSTORY_RULE] : []));
       await resourceLoader.reload();
     } catch (e) {
       console.error(`[portal] resource loader unavailable: ${(e as Error).message}`);

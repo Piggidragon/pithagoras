@@ -74,3 +74,15 @@ test('what extensions say after the portal answered is taken from their events',
  assert.deepEqual(shown.widgets,[{key:'jobs',lines:['npm run dev']}]);
  assert.equal(withLiveUi(state as any,before as any,since),state,'nothing since: its answer as it was');
 });
+test('a subagent in the background goes on after the tool call that started it has returned',()=>{
+ const events:any[]=[
+  {seq:10,type:'tool_execution_start',at:0,payload:{toolCallId:'call-8',toolName:'subagent',args:{task:'x'}}},
+  {seq:11,type:'portal_subagent',at:0,payload:{op:'start',id:'bg',label:'BG',toolCallId:'call-8',detached:true}},
+  {seq:12,type:'tool_execution_end',at:0,payload:{toolCallId:'call-8',toolName:'subagent',result:{content:[{type:'text',text:'started'}]}}},
+  // Loaded without its start: its events still say so.
+  {seq:13,type:'portal_subagent',at:0,payload:{op:'event',id:'far',toolCallId:'call-8',detached:true,event:{type:'message_end',message:{role:'assistant',content:[]}}}},
+ ];
+ const found=subagents(events,buildTranscript(events));
+ assert.deepEqual(found.filter(s=>s.kind==='protocol').map(s=>[s.id,s.status]),[['bg','running'],['far','running']]);
+ assert.deepEqual(subagents(events,buildTranscript(events),true).filter(s=>s.kind==='protocol').map(s=>s.status),['stopped','stopped'],'not once the process that ran it is gone');
+});

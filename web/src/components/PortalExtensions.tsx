@@ -1,6 +1,7 @@
 import { VoiceAddon } from "./VoiceAddon";
+import { MemoryAddon, SubagentAddon } from "./FeatureAddons";
 import { useEffect, useId, useState } from "react";
-import { LuCheck, LuGlobe, LuMic, LuRefreshCw, LuTrash2 } from "react-icons/lu";
+import { LuBot, LuBrain, LuCheck, LuGlobe, LuMic, LuRefreshCw, LuTrash2 } from "react-icons/lu";
 import { api, type BrowserStatus } from "../api";
 
 /**
@@ -11,7 +12,12 @@ import { api, type BrowserStatus } from "../api";
  * place to be discovered from — nothing was visible until it was already
  * running, so there was nowhere to press install.
  */
-const addons = [{ id: 'browser', label: 'Browser', Icon: LuGlobe }, { id: 'voice', label: 'Voice', Icon: LuMic }] as const;
+const addons = [
+  { id: 'browser', label: 'Browser', Icon: LuGlobe },
+  { id: 'voice', label: 'Voice', Icon: LuMic },
+  { id: 'subagents', label: 'Subagents', Icon: LuBot },
+  { id: 'memory', label: 'Memory', Icon: LuBrain },
+] as const;
 type Addon = typeof addons[number]['id'];
 
 export function PortalExtensions({ onError }: { onError: (e: string) => void }) {
@@ -37,12 +43,15 @@ export function PortalExtensions({ onError }: { onError: (e: string) => void }) 
           event.preventDefault(); select(addons[next].id);
           document.getElementById(`${id}-${addons[next].id}-tab`)?.focus();
         }}
-        className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${selected === addon ? 'bg-accent/12 text-accent shadow-sm ring-1 ring-inset ring-accent/25' : 'text-fg-muted hover:bg-fg/5 hover:text-fg'}`}
+        className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 sm:gap-2 sm:px-4 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${selected === addon ? 'bg-accent/12 text-accent shadow-sm ring-1 ring-inset ring-accent/25' : 'text-fg-muted hover:bg-fg/5 hover:text-fg'}`}
       ><Icon className="h-4 w-4" />{label}</button>)}
     </div>
     {addons.map(({ id: addon }) => <div key={addon} role="tabpanel" id={`${id}-${addon}-panel`}
       aria-labelledby={`${id}-${addon}-tab`} hidden={selected !== addon}>
-      {visited.includes(addon) && (addon === 'browser' ? <BrowserAddon onError={onError} /> : <VoiceAddon onError={onError} />)}
+      {visited.includes(addon) && (addon === 'browser' ? <BrowserAddon onError={onError} />
+        : addon === 'voice' ? <VoiceAddon onError={onError} />
+        : addon === 'subagents' ? <SubagentAddon onError={onError} />
+        : <MemoryAddon onError={onError} />)}
     </div>)}
   </div>;
 }

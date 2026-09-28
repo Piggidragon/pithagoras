@@ -44,6 +44,7 @@ import { filesRouter } from "./api/files.js";
 import { gitRouter } from "./api/git.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
+import { featuresRouter } from "./api/features.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
@@ -1168,6 +1169,7 @@ app.get("/api/sessions/:id/commands", async (req, res) => {
 // --- pi packages (extensions, skills, prompts, themes) ---
 app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
+app.use("/api", featuresRouter());
 app.use("/api", channelsRouter());
 app.use("/api", routinesRouter());
 app.use("/api", skillsRouter());

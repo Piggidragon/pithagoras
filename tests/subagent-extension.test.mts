@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {chmodSync, mkdtempSync, writeFileSync} from 'node:fs';
+import {chmodSync, mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import subagent from '../extensions/subagent/index.ts';
@@ -26,13 +26,25 @@ require('node:readline').createInterface({input:process.stdin}).on('line',l=>{co
 `);
 chmodSync(bin,0o755);
 process.env.PI_SUBAGENT_BIN=bin;
+// pi's settings, as the extension reads them: interrupt unless they say otherwise.
+const agentDir=path.join(dir,'agent');
+mkdirSync(agentDir);
+process.env.PI_CODING_AGENT_DIR=agentDir;
+const mode=(m?:string)=>writeFileSync(path.join(agentDir,'settings.json'),JSON.stringify(m?{subagentMode:m}:{}));
+mode();
 function load(){
  const h=new Map<string,((d:any)=>void)[]>();
  const events={emit:(c:string,d:any)=>h.get(c)?.forEach(f=>f(d)),on:(c:string,f:(d:any)=>void)=>{h.set(c,[...(h.get(c)??[]),f]);return()=>h.set(c,(h.get(c)??[]).filter(x=>x!==f));}};
- let tool:any;subagent({registerTool:(t:any)=>tool=t,events});
+ const hooks=new Map<string,()=>void>();
+ const sent:{message:any,options:any}[]=[];
+ let tool:any;subagent({registerTool:(t:any)=>tool=t,events,on:(e:string,f:()=>void)=>hooks.set(e,f),sendMessage:(message:any,options:any)=>sent.push({message,options})});
  const ends:any[]=[];events.on('subagent:v1:end',d=>ends.push(d));
- return {tool,events,ends};
+ const seen:string[]=[];
+ events.on('subagent:v1:start',d=>seen.push(`start ${d.toolCallId}`));
+ events.on('subagent:v1:end',()=>seen.push('end'));
+ return {tool,events,ends,sent,seen,hooks};
 }
+const until=async(ok:()=>boolean)=>{for(let i=0;i<200&&!ok();i++)await new Promise(r=>setTimeout(r,20));assert.ok(ok());};
 test('a subagent whose run is retried answers with what it said at the end, not before the retry',async()=>{
  delete process.env.FAKE;
  const {tool,ends}=load();
@@ -83,4 +95,50 @@ test('a message for a child that no longer reads cannot bring down the portal',{
  events.emit('subagent:v1:stop',{id});
  await done;
  assert.equal(ends[0].status,'stopped');
+});
+test('in interrupt mode two subagents asked for at once run one after the other',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode();
+ const {tool,seen}=load();
+ assert.match(tool.description,/get its final answer back/);
+ const both=await Promise.all([tool.execute('a',{task:'one'},undefined,undefined,{cwd:dir}),tool.execute('b',{task:'two'},undefined,undefined,{cwd:dir})]);
+ assert.deepEqual(both.map(r=>r.content[0].text),['the whole answer','the whole answer']);
+ assert.deepEqual(seen,['start a','end','start b','end']);
+});
+test('in background mode the call returns at once, and the answer arrives later as a message that starts a turn',{timeout:5000},async()=>{
+ delete process.env.FAKE;mode('background');
+ const {tool,ends,sent}=load();
+ assert.match(tool.description,/runs in the background/);
+ const result=await tool.execute('c7',{task:'Look into it',label:'Research'},undefined,undefined,{cwd:dir});
+ assert.match(result.content[0].text,/in the background/);
+ assert.equal(result.details.phase,'background');
+ assert.equal(ends.length,0);
+ await until(()=>sent.length===1);
+ assert.equal(ends[0].status,'done');
+ assert.match(sent[0].message.content,/Subagent "Research" finished:\n\nthe whole answer/);
+ assert.equal(sent[0].message.display,true);
+ assert.deepEqual(sent[0].options,{deliverAs:'followUp',triggerTurn:true});
+ mode();
+});
+test('a background subagent says it is detached, and stopping it waits for the person rather than starting a turn',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode('background');
+ const {tool,events,sent}=load();
+ let start:any;events.on('subagent:v1:start',d=>start=d);
+ await tool.execute('c8',{task:'Look into it'},undefined,undefined,{cwd:dir});
+ assert.equal(start.detached,true);
+ await new Promise(r=>setTimeout(r,200));
+ events.emit('subagent:v1:stop',{id:start.id});
+ await until(()=>sent.length===1);
+ assert.match(sent[0].message.content,/was stopped before it finished\. What it had so far:\n\nhalf of it/);
+ assert.deepEqual(sent[0].options,{deliverAs:'nextTurn'});
+ mode();
+});
+test('background subagents end with the session that started them',{timeout:5000},async()=>{
+ process.env.FAKE='hang';mode('background');
+ const {tool,ends,hooks}=load();
+ await tool.execute('c9',{task:'Look into it'},undefined,undefined,{cwd:dir});
+ await new Promise(r=>setTimeout(r,200));
+ hooks.get('session_shutdown')!();
+ await until(()=>ends.length===1);
+ assert.equal(ends[0].status,'stopped');
+ mode();
 });

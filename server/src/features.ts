@@ -1,0 +1,146 @@
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { isSwitchedOff, sourceOf } from "./extension-switch.js";
+import { piAgentDir, readPiSettings } from "./pi-settings.js";
+import { readMcpFile, type McpFile } from "./api/mcp.js";
+
+/**
+ * Optional capabilities the portal ships and leaves off: a subagent tool, and
+ * Understory as the agent's memory.
+ *
+ * Each is a reference implementation behind a seam the portal already has —
+ * the subagent protocol, an MCP server — so switching one on is only writing
+ * it into pi's own configuration, and a third-party equivalent can take its
+ * place without the portal knowing the difference.
+ */
+
+// --- the subagent tool ---
+
+/** The package name of the bundled subagent tool, which also finds a copy installed from elsewhere. */
+export const SUBAGENT_PACKAGE = "pithagoras-subagent";
+
+export type SubagentMode = "interrupt" | "background";
+
+/**
+ * The subagent tool shipped with the portal, resolved relative to the
+ * compiled file so it is found from dist and from source alike.
+ */
+export function bundledSubagentDir(): string | undefined {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [
+    path.resolve(here, "../../extensions/subagent"),
+    path.resolve(here, "../extensions/subagent"),
+    path.resolve(process.cwd(), "extensions/subagent"),
+    path.resolve(process.cwd(), "../extensions/subagent"),
+  ]) {
+    if (existsSync(path.join(candidate, "package.json"))) return candidate;
+  }
+  return undefined;
+}
+
+const real = (p: string) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+
+function packageName(dir: string): string | undefined {
+  try {
+    return JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")).name;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Where pi's packages list has the subagent tool: the bundled folder, or any
+ * folder holding a package of that name — one installed by hand from a clone
+ * is the same tool. A local path in that list is relative to the settings
+ * file's folder, as pi reads it.
+ */
+export function findSubagent(
+  packages: unknown[],
+  agentDir: string,
+  bundled: string | undefined,
+  nameOf: (dir: string) => string | undefined = packageName,
+): { source: string; enabled: boolean } | undefined {
+  for (const entry of packages) {
+    const source = sourceOf(entry);
+    if (!source || /^(npm|git|https?):/.test(source)) continue;
+    const dir = path.resolve(agentDir, source.replace(/^~(?=\/)/, process.env.HOME ?? "~"));
+    if ((bundled && real(dir) === real(bundled)) || nameOf(dir) === SUBAGENT_PACKAGE) {
+      return { source, enabled: !isSwitchedOff(entry) };
+    }
+  }
+  return undefined;
+}
+
+/** The mode pi's settings hold, as the tool reads it: interrupt unless they say background. */
+export const subagentModeOf = (settings: Record<string, unknown>): SubagentMode =>
+  settings.subagentMode === "background" ? "background" : "interrupt";
+
+export function subagentState() {
+  const settings = readPiSettings();
+  const bundled = bundledSubagentDir();
+  const found = findSubagent(Array.isArray(settings.packages) ? settings.packages : [], piAgentDir(), bundled);
+  return {
+    available: bundled !== undefined,
+    installed: found !== undefined,
+    enabled: found?.enabled === true,
+    source: found?.source ?? null,
+    mode: subagentModeOf(settings),
+  };
+}
+
+// --- Understory ---
+
+/** The MCP server the portal writes for Understory; its tools arrive as `understory_memory_*`. */
+export const UNDERSTORY = "understory";
+export const UNDERSTORY_TOKEN_ENV = "MEMORY_UNDERSTORY_AUTH_TOKEN";
+
+export const understoryDefaultUrl = (): string =>
+  process.env.MEMORY_UNDERSTORY_URL?.trim() || "http://localhost:3800/mcp";
+
+/**
+ * The entry for mcp.json. Its tools directly in the agent's list rather than
+ * behind the adapter's proxy: memory the agent has to go looking for first is
+ * memory it does not use. The token stays in the environment, named rather
+ * than copied into a file anyone reading the config can see.
+ */
+export function understoryEntry(url: string, withToken: boolean): Record<string, unknown> {
+  return {
+    url,
+    lifecycle: "lazy",
+    directTools: true,
+    ...(withToken ? { auth: "bearer", bearerTokenEnv: UNDERSTORY_TOKEN_ENV } : {}),
+  };
+}
+
+/** Whether a config has Understory as the agent's memory: there, and not switched off. */
+export function understoryIn(config: McpFile): boolean {
+  const entry = config.mcpServers?.[UNDERSTORY];
+  return !!entry && typeof entry === "object" && entry.disabled !== true;
+}
+
+/**
+ * Whether Understory is the agent's memory now. Read from mcp.json each time
+ * it is asked — when a chat starts — so the file is the one place it is said,
+ * and switching the server off in Settings → MCP brings MEMORY.md back too.
+ */
+export function understoryOn(): boolean {
+  try {
+    const { config, error } = readMcpFile();
+    return !error && understoryIn(config);
+  } catch {
+    return false;
+  }
+}
+
+/** Said to the agent in place of MEMORY.md, while Understory holds its memory. */
+export const UNDERSTORY_RULE =
+  "Your long-term memory is Understory, reached through the understory_memory_* tools, not a MEMORY.md file. " +
+  "Before relying on what you think you know about the person, their work or earlier decisions, look it up with understory_memory_query. " +
+  "When you learn something worth having next week — a decision and why, a preference you were corrected on, how something is set up — record it with understory_memory_add, or understory_memory_update where it is already there.";

@@ -334,6 +334,8 @@ function AgentFiles({ setup, onSaved }: { setup: Setup; onSaved: (s: Setup) => v
   const [saved, setSaved] = useState(false);
 
   const file = setup.files.find((f) => f.name === open);
+  // Understory holds the memory: the file stays, and is not read.
+  const unread = (name: string) => name === "MEMORY.md" && setup.memory === "understory";
 
   const save = async () => {
     if (!file) return;
@@ -364,7 +366,7 @@ function AgentFiles({ setup, onSaved }: { setup: Setup; onSaved: (s: Setup) => v
             }`}
           >
             <LuFileText className="h-3.5 w-3.5" />
-            {f.name}
+            <span className={unread(f.name) ? "line-through decoration-fg-faint" : ""}>{f.name}</span>
           </button>
         ))}
         <span className="ml-auto text-[11px] text-fg-faint">
@@ -374,6 +376,11 @@ function AgentFiles({ setup, onSaved }: { setup: Setup; onSaved: (s: Setup) => v
 
       {file && (
         <div className="mt-2">
+          {unread(file.name) && (
+            <p role="note" className="mb-2 text-xs text-fg-muted">
+              Not read while Understory is the agent's memory (Settings → Add-ons → Memory). It is kept, and read again once Understory is switched off.
+            </p>
+          )}
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

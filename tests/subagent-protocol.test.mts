@@ -49,3 +49,14 @@ test('every event of a subagent says which tool call runs it',()=>{
  b.emit('subagent:v1:end',{id:'r',status:'done'});
  assert.deepEqual(out.map(e=>e.toolCallId),['call-7','call-7','call-7','call-7']);
 });
+test('a subagent in the background says so on every event, and is counted as running until it ends',()=>{
+ const b=bus();const out:any[]=[];const bridge=bridgeSubagents(b,e=>out.push(e));
+ b.emit('subagent:v1:start',{id:'r',label:'R',toolCallId:'call-7',detached:true});
+ b.emit('subagent:v1:start',{id:'q',label:'Q'});
+ assert.equal(bridge.running(),2);
+ b.emit('subagent:v1:event',{id:'r',event:{type:'message_end',message:{role:'assistant',content:[]}}});
+ b.emit('subagent:v1:end',{id:'r',status:'done'});
+ assert.deepEqual(out.filter(e=>e.id==='r').map(e=>e.detached),[true,true,true]);
+ assert.equal(out.find(e=>e.id==='q').detached,undefined);
+ assert.equal(bridge.running(),1);
+});

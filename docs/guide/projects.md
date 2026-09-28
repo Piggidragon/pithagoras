@@ -23,7 +23,7 @@ chats start without them.
 
 | Chat in | The agent has |
 | --- | --- |
-| Home | SOUL.md, PrimaryUser.md and MEMORY.md |
+| Home | SOUL.md, PrimaryUser.md and MEMORY.md (MEMORY.md not while [Understory](/guide/features#memory-understory) is the memory) |
 | A project | The project's AGENTS.md, and nothing of the agent's own |
 
 ## The Projects tab

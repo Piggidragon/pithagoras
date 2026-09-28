@@ -26,6 +26,8 @@ export interface Subagent {
   input: boolean;
   stop: boolean;
   toolCallId?: string;
+  /** Runs on after its tool call has returned: a subagent in the background. */
+  detached?: boolean;
   error?: string;
   /** Protocol subagents: the child's events, in the shape the main transcript reads. */
   events: PortalEvent[];
@@ -87,6 +89,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
         input: p.input === true,
         stop: p.stop === true,
         ...(typeof p.toolCallId === "string" ? { toolCallId: p.toolCallId } : {}),
+        ...(p.detached === true ? { detached: true } : {}),
         events: [],
       };
       byId.set(id, sub);
@@ -105,6 +108,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
         stop: false,
         // Tied to its tool call all the same: listed once, and over when it is.
         ...(typeof p.toolCallId === "string" ? { toolCallId: p.toolCallId } : {}),
+        ...(p.detached === true ? { detached: true } : {}),
         events: [],
       };
       byId.set(id, sub);
@@ -123,11 +127,12 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
   }
 
   // One whose end never came is over once its process is, or once the tool
-  // call that ran it has ended: nothing is left to run it.
+  // call that ran it has ended: nothing is left to run it. Unless it said it
+  // runs on in the background, where that call returns at once.
   const tools = new Map(items.flatMap((i) => (i.kind === "tool" && i.callId ? [[i.callId, i] as const] : [])));
   for (const sub of order) {
     if (sub.status !== "running") continue;
-    const tool = sub.toolCallId ? tools.get(sub.toolCallId) : undefined;
+    const tool = sub.toolCallId && !sub.detached ? tools.get(sub.toolCallId) : undefined;
     if (ended || (tool && tool.status !== "running")) {
       sub.status = "stopped";
       sub.until ??= tool?.until;
