@@ -206,7 +206,7 @@ export function CompareView({ base: asked }: { base?: string }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="flex items-center gap-2 border-b border-line px-3 py-1.5 text-xs text-fg-subtle">
-        <span className="shrink-0 font-mono text-fg">{repo.branch ?? t("HEAD")}</span>
+        <span className="shrink-0 font-mono text-fg">{repo.branch ?? "HEAD"}</span>
         <span className="shrink-0">{t("compared with")}</span>
         <select
           value={base}

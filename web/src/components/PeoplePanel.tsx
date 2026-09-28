@@ -342,13 +342,13 @@ function PersonDetail({
           <input
             value={tool}
             onChange={(e) => setTool(e.target.value)}
-            placeholder={t("bash")}
+            placeholder="bash"
             className="w-20 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-[11px] outline-none focus:border-accent/60"
           />
           <input
             value={pattern}
             onChange={(e) => setPattern(e.target.value)}
-            placeholder={t("himalaya envelope list*")}
+            placeholder="himalaya envelope list*"
             className="min-w-0 flex-1 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-[11px] outline-none placeholder:text-fg-faint focus:border-accent/60"
           />
           <button

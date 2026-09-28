@@ -203,7 +203,7 @@ export function Sidebar({
           className="h-6 w-6 shrink-0 object-contain p-[5px]"
           draggable={false}
         />
-        <h1 className="text-sm font-semibold tracking-tight text-fg">{t("Pithagoras")}</h1>
+        <h1 className="text-sm font-semibold tracking-tight text-fg">Pithagoras</h1>
         <span
           className="ml-auto text-[10px] uppercase tracking-wider text-fg-faint"
           title={t("How sessions are executed")}
