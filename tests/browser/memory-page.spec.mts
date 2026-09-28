@@ -162,7 +162,7 @@ test('the log lists the changes newest first, and its links open the notes', asy
 test('the graph draws the notes and their links, says what the colours are, and a note opens from it', async ({ page }) => {
   await portal(page);
   await page.goto('/memory?view=graph');
-  const graph = page.getByRole('img', { name: /3 notes, 1 links/ });
+  const graph = page.getByRole('img', { name: /3 notes, 1 link/ });
   await expect(graph).toBeVisible();
   await expect(graph.locator('line')).toHaveCount(1);
   const legend = page.getByRole('list', { name: 'What the colours are' });
@@ -193,7 +193,7 @@ test('the search lists what matches, and says when nothing does', async ({ page 
 test('a bundle with issues says how many, and lists them', async ({ page }) => {
   await portal(page, { conformant: false });
   await page.goto('/memory');
-  await page.getByRole('button', { name: '1 issues' }).click();
+  await page.getByRole('button', { name: '1 issue' }).click();
   await expect(page.getByText('No description in its frontmatter')).toBeVisible();
   await page.getByRole('button', { name: '/people/owner.md' }).click();
   await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();

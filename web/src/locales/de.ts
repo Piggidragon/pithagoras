@@ -869,6 +869,7 @@ const de: Locale = {
     "Log": "Log",
     "Graph": "Graph",
     "Choose a note, or open the log or the graph.": "Wähle eine Notiz oder öffne das Log oder den Graphen.",
+    "{notes} in {folders}": "{notes} in {folders}",
     "{n} folders": { one: "{n} Ordner", other: "{n} Ordner" },
     "Back to the notes": "Zurück zu den Notizen",
     "Nothing in the memory matches “{query}”.": "Nichts im Gedächtnis passt zu „{query}“.",

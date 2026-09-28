@@ -303,7 +303,7 @@ export function MemoryPage() {
                 <p>{t("Choose a note, or open the log or the graph.")}</p>
                 {validation?.conceptCount !== undefined && (
                   <p className="mt-1 text-xs text-fg-faint">
-                    {tp(validation.conceptCount, "{n} note", "{n} notes")} · {tp(validation.directoryCount ?? 0, "{n} folder", "{n} folders")}
+                    {t("{notes} in {folders}", { notes: tp(validation.conceptCount, "{n} note", "{n} notes"), folders: tp(validation.directoryCount ?? 0, "{n} folder", "{n} folders") })}
                   </p>
                 )}
               </div>

@@ -35,6 +35,18 @@ copy of its cookie was taken. A login that runs out — after thirty days, or wh
 the portal restarts without `PORTAL_SECRET` — brings the password screen back
 rather than failing every request with *Unauthorized*.
 
+### Language
+
+The portal speaks English and German. **This browser → Language** picks one,
+and is kept in this browser like the theme; until one is picked it follows the
+browser's own language, and English where there is none of its own. Dates and
+numbers are written the language's way. It changes the portal's words only:
+what the agent writes is up to the agent, and messages that come from the
+server — an error it reports, a channel's own description — stay as they are.
+
+A language is one file in `web/src/locales/`, mapping each English text to its
+own; adding one means adding that file, and the tests list what it lacks.
+
 ### Where a model comes from
 
 Resolved in order, first match wins:
