@@ -41,6 +41,19 @@ local model that means two model calls at once, which a single GPU may not
 hold. Stopping the chat does not stop a background subagent; stop it from its
 window. Closing or reloading the chat does.
 
+### Which model a subagent runs on
+
+By default a subagent runs on **the model its chat is on** when it starts one —
+the one already loaded, so a local server does not have to load a second one.
+**Model** on the Subagents tab names another for every chat instead, and each
+chat can say its own in its model menu (*Subagents in this chat run on*):
+the default, this chat's model, or any model there is. A choice is read when a
+subagent starts, so it needs no restart.
+
+Stored as `subagentModel` in pi's `settings.json` (`"provider/model"`, or
+absent for the chat's own); a chat's own is the portal's, and reaches the tool
+over the protocol's `subagent:v1:config`.
+
 ### Subagents at once
 
 **Subagents at once** (default 1) is how many run at the same time, across
@@ -72,13 +85,20 @@ With Docker access (see [Docker add-ons](/guide/add-ons#docker-access)), the
 portal runs Understory itself, in a container of its own (`pithagoras-understory`)
 with its memory in a volume (`pithagoras_understory-memory`). In Settings → Add-ons → Memory:
 
-- **The model that keeps the memory.** Understory uses a model of its own to
-  file, link and tidy notes. Either *a provider set up here* — pick one and one
-  of its models; its address and key are taken from the provider each time
-  Understory starts — or *an address of its own*: the API address, a key
-  (none needed for a local server), a model and the format (OpenAI-compatible
-  or Anthropic). A saved key is never shown again; leave the field empty to
-  keep it.
+- **The model that keeps the memory.** Understory uses a model to file, link
+  and tidy notes. By default **the chat's model**: the one the chat calling its
+  tool is on, already loaded, so writing with one model does not load another
+  for the memory. Understory is pointed at the portal as its model server, with
+  a key of its own, and the portal passes each request on to that chat's model,
+  with its address and key. With no chat asking — tidying up at night — the one
+  that asked last, and before any has, the default model for new chats. It
+  takes a model with an OpenAI-compatible API (local servers, OpenRouter); for
+  another, and when the portal serves its own TLS, give Understory one of its
+  own: *a provider set up here* — one and one of its models, its address and
+  key taken from the provider each time Understory starts — or *an address of
+  its own*: the API address, a key (none needed for a local server), a model
+  and the format (OpenAI-compatible or Anthropic). A saved key is never shown
+  again; leave the field empty to keep it.
 - **Tidying up.** How often Understory goes over the whole memory on its own —
   merging duplicates, linking orphans, splitting notes grown too long (its
   "dreaming"). One of three: **never** (the default); **at a time of day** —

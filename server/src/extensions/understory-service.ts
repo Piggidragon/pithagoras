@@ -26,13 +26,18 @@ export const managedUrl = (): string => `http://127.0.0.1:${port()}/mcp`;
 
 export type LlmFormat = "openai" | "anthropic";
 
-/** Where the model that keeps the memory comes from: a provider set up here, or an address of its own. */
+/**
+ * Where the model that keeps the memory comes from: the chat's (the one the
+ * chat asking is on — see memory-llm.ts), a provider set up here, or an
+ * address of its own.
+ */
 export type LlmChoice =
+  | { source: "auto" }
   | { source: "provider"; provider: string; model: string }
   | { source: "custom"; baseUrl: string; model: string; format: LlmFormat; apiKey?: string };
 
 export interface UnderstoryConfig {
-  llm: LlmChoice | null;
+  llm: LlmChoice;
   /** How often it tidies the memory up — Understory's "dreaming" — as it reads it: "6h", "1d". Empty for never. */
   dreamInterval: string;
   /**
@@ -45,6 +50,7 @@ export interface UnderstoryConfig {
 
 const KEY = "understory_config";
 const TOKEN = "understory_token";
+const LLM_TOKEN = "understory_llm_token";
 const LAST_DREAM = "understory_last_dream";
 
 /** Understory's own reading of an interval, and its floor: five minutes. */
@@ -67,12 +73,13 @@ export function config(): UnderstoryConfig {
   try {
     const raw = JSON.parse((getStoredSettings() as Record<string, string>)[KEY] || "{}");
     return {
-      llm: raw.llm && typeof raw.llm === "object" ? (raw.llm as LlmChoice) : null,
+      // Nothing chosen is the chat's: the model already loaded, which asks nothing of anyone.
+      llm: raw.llm && typeof raw.llm === "object" ? (raw.llm as LlmChoice) : { source: "auto" },
       dreamInterval: typeof raw.dreamInterval === "string" && validInterval(raw.dreamInterval) ? raw.dreamInterval : "",
       dreamAt: typeof raw.dreamAt === "string" && validTime(raw.dreamAt) ? raw.dreamAt : "",
     };
   } catch {
-    return { llm: null, dreamInterval: "", dreamAt: "" };
+    return { llm: { source: "auto" }, dreamInterval: "", dreamAt: "" };
   }
 }
 
@@ -96,13 +103,29 @@ export function saveConfig(next: UnderstoryConfig): UnderstoryConfig {
   return config();
 }
 
-/** The token the container is given and the portal calls it with; made once. */
-export function token(): string {
-  const had = (getStoredSettings() as Record<string, string>)[TOKEN];
+function secret(key: string): string {
+  const had = (getStoredSettings() as Record<string, string>)[key];
   if (had) return had;
   const made = randomBytes(24).toString("hex");
-  put(TOKEN, made);
+  put(key, made);
   return made;
+}
+
+/** The token the container is given and the portal calls it with; made once. */
+export const token = (): string => secret(TOKEN);
+
+/** The key Understory calls the portal's model server with, in "the chat's" mode; made once. */
+export const llmToken = (): string => secret(LLM_TOKEN);
+
+/**
+ * Where Understory reaches the portal's model server: on the host network,
+ * the portal's own port on loopback. Not over the portal's own TLS, whose
+ * certificate Understory has no reason to trust — then there is no "the
+ * chat's", and a model of its own is needed.
+ */
+export function portalLlmBase(): string | undefined {
+  if (process.env.PORTAL_TLS_CERT && process.env.PORTAL_TLS_KEY) return undefined;
+  return `http://127.0.0.1:${Number(process.env.PORT || 4100)}/understory-llm/v1`;
 }
 
 /**
@@ -118,6 +141,11 @@ function resolveKey(key: string | undefined): string | undefined {
 
 /** What Understory is told about its model: the provider's address and key, looked up when the container is made. */
 export function llmEnv(llm: LlmChoice): { baseUrl: string; apiKey: string; model: string; format: LlmFormat } {
+  if (llm.source === "auto") {
+    const baseUrl = portalLlmBase();
+    if (!baseUrl) throw new Error("The portal serves its own TLS, which Understory cannot reach it through; give Understory a model of its own");
+    return { baseUrl, apiKey: llmToken(), model: "auto", format: "openai" };
+  }
   if (llm.source === "custom") return { baseUrl: llm.baseUrl, apiKey: llm.apiKey || "none", model: llm.model, format: llm.format };
   const raw = readModelsJson().providers?.[llm.provider];
   if (!raw || typeof raw.baseUrl !== "string") throw new Error(`There is no provider "${llm.provider}" with an address any more`);
@@ -131,7 +159,6 @@ export function llmEnv(llm: LlmChoice): { baseUrl: string; apiKey: string; model
 }
 
 export function spec(cfg: UnderstoryConfig, auth: string) {
-  if (!cfg.llm) throw new Error("Choose the model that keeps the memory first");
   const llm = llmEnv(cfg.llm);
   return {
     Image: IMAGE,

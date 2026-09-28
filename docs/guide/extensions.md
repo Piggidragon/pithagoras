@@ -228,6 +228,7 @@ listening and nothing changes.
 | `subagent:v1:end` | extension → portal | `{ id, status: "done" \| "error" \| "stopped", error? }` |
 | `subagent:v1:input` | portal → extension | `{ id, text }` — only if `start` said `input: true` |
 | `subagent:v1:stop` | portal → extension | `{ id }` — only if `start` said `stop: true` |
+| `subagent:v1:config` | extension asks, portal answers at once | `{ reply(config) }` — `config.model`: what the chat says its subagents run on, `"provider/model"` or `"auto"`; nothing said when the chat has no choice of its own |
 
 Passing the child's events on unchanged is the whole integration: the portal
 draws them the way it draws the main conversation. A child started with

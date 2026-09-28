@@ -209,9 +209,11 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | | |
 | --- | --- |
 | `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode, maxParallel }, understory: { enabled, url, tokenSet, adapterInstalled, reachable, managed: { available, image, container, pulling, url, config, providers } } }` — `config` never holds a key |
-| `PUT /api/features/subagent` | `{ enabled?, mode?: "interrupt" \| "background", maxParallel?: 1–16 }` — installs or removes the bundled subagent tool, writes `subagentMode` and `subagentMaxParallel`; reloads idle open sessions |
+| `PUT /api/features/subagent` | `{ enabled?, mode?: "interrupt" \| "background", maxParallel?: 1–16, model?: "auto" \| "provider/model" }` — installs or removes the bundled subagent tool, writes `subagentMode`, `subagentMaxParallel` and `subagentModel`; reloads idle open sessions |
+| `GET /api/sessions/:id/subagent-model` | `{ model, default }` — what this chat's subagents run on: its own choice (`null` follows `default`) |
+| `PUT /api/sessions/:id/subagent-model` | `{ model: null \| "auto" \| "provider/model" }` |
 | `PUT /api/features/understory` | `{ enabled, url? }` — writes or removes the `understory` MCP server (installing `pi-mcp-adapter` if needed); reloads idle open sessions |
-| `PUT /api/features/understory/config` | `{ llm: { source: "provider", provider, model } \| { source: "custom", baseUrl, model, format, apiKey? }, dreamInterval, dreamAt }` — `dreamAt` ("03:00") tidies up once a day at that time and wins over `dreamInterval` — the model and tidying up of the portal's own Understory; a running one is made again with them. `apiKey` left out keeps the saved one |
+| `PUT /api/features/understory/config` | `{ llm: { source: "auto" } \| { source: "provider", provider, model } \| { source: "custom", baseUrl, model, format, apiKey? }, dreamInterval, dreamAt }` — `auto` (the default) thinks with the model of the chat asking — `dreamAt` ("03:00") tidies up once a day at that time and wins over `dreamInterval` — the model and tidying up of the portal's own Understory; a running one is made again with them. `apiKey` left out keeps the saved one |
 | `POST /api/features/understory/install` | Pull, create and start the portal's own Understory, and make it the agent's memory |
 | `POST /api/features/understory/start` · `/stop` | Its container |
 | `POST /api/features/understory/dream` | Tidy the memory up now; answers when the pass is done, with what it did |

@@ -1,11 +1,13 @@
 import express, { type Router } from "express";
-import { extensionStash, setExtensionStash } from "../db.js";
+import { extensionStash, getSession, sessionSubagentModel, setExtensionStash, setSessionSubagentModel } from "../db.js";
 import { isSwitchedOff, sourceOf } from "../extension-switch.js";
 import {
   SUBAGENT_MAX_PARALLEL,
   UNDERSTORY,
   UNDERSTORY_TOKEN_ENV,
   bundledSubagentDir,
+  isModelChoice,
+  subagentModelOf,
   subagentState,
   understoryDefaultUrl,
   understoryEntry,
@@ -75,6 +77,8 @@ async function understoryState() {
       ...runtime,
       url: service.managedUrl(),
       config: shownConfig(),
+      // Whether "the chat's" can be offered: not over the portal's own TLS.
+      autoPossible: service.portalLlmBase() !== undefined,
       providers: providersForUnderstory(),
       dreaming: service.isDreaming(),
       lastDream: service.lastDream(),
@@ -116,8 +120,8 @@ async function switchUnderstory(enabled: boolean, url?: string): Promise<void> {
 }
 
 /** The model a request names, checked; undefined when it names none that can be used. */
-function llmFrom(body: any): service.LlmChoice | null | undefined {
-  if (body === null) return null;
+function llmFrom(body: any): service.LlmChoice | undefined {
+  if (body?.source === "auto") return { source: "auto" };
   const model = typeof body?.model === "string" ? body.model.trim() : "";
   if (!model) return undefined;
   if (body.source === "provider") {
@@ -161,7 +165,8 @@ export function featuresRouter(): Router {
   });
 
   router.put("/features/subagent", async (req, res) => {
-    const { enabled, mode, maxParallel } = req.body ?? {};
+    const { enabled, mode, maxParallel, model } = req.body ?? {};
+    if (model !== undefined && !isModelChoice(model)) return res.status(400).json({ error: 'model must be "auto" or provider/model' });
     if (enabled !== undefined && typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be true or false" });
     if (mode !== undefined && mode !== "interrupt" && mode !== "background") {
       return res.status(400).json({ error: "mode must be interrupt or background" });
@@ -170,9 +175,11 @@ export function featuresRouter(): Router {
       return res.status(400).json({ error: `maxParallel must be a whole number from 1 to ${SUBAGENT_MAX_PARALLEL}` });
     }
     try {
-      if (mode || maxParallel !== undefined) {
-        // What the tool does without being told is left unsaid: interrupt, one at a time.
+      if (mode || maxParallel !== undefined || model !== undefined) {
+        // What the tool does without being told is left unsaid: interrupt, one at a time, the chat's model.
         await updatePiSettings((all) => {
+          if (model === "auto") delete all.subagentModel;
+          else if (model !== undefined) all.subagentModel = model;
           if (mode === "background") all.subagentMode = "background";
           else if (mode) delete all.subagentMode;
           if (maxParallel === 1) delete all.subagentMaxParallel;
@@ -205,6 +212,21 @@ export function featuresRouter(): Router {
     }
   });
 
+  /** What one chat's subagents run on: its own choice, or null for the portal's default. */
+  router.get("/sessions/:id/subagent-model", (req, res) => {
+    if (!getSession(req.params.id)) return res.status(404).json({ error: "Not found" });
+    res.json({ model: sessionSubagentModel(req.params.id), default: subagentModelOf(readPiSettings()) });
+  });
+
+  router.put("/sessions/:id/subagent-model", (req, res) => {
+    if (!getSession(req.params.id)) return res.status(404).json({ error: "Not found" });
+    const model = req.body?.model ?? null;
+    if (model !== null && !isModelChoice(model)) return res.status(400).json({ error: 'model must be null, "auto" or provider/model' });
+    // Asked when a subagent starts: nothing to reload.
+    setSessionSubagentModel(req.params.id, model);
+    res.json({ model, default: subagentModelOf(readPiSettings()) });
+  });
+
   router.put("/features/understory", async (req, res) => {
     const { enabled } = req.body ?? {};
     if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be true or false" });
@@ -227,7 +249,7 @@ export function featuresRouter(): Router {
    */
   router.put("/features/understory/config", async (req, res) => {
     const llm = llmFrom(req.body?.llm);
-    if (llm === undefined) return res.status(400).json({ error: "Choose a provider and model, or an http(s) address, a model and a format" });
+    if (llm === undefined) return res.status(400).json({ error: "Choose the chat's model, a provider and model, or an http(s) address, a model and a format" });
     const dreamInterval = typeof req.body?.dreamInterval === "string" ? req.body.dreamInterval.trim() : "";
     if (!service.validInterval(dreamInterval)) return res.status(400).json({ error: "Tidying up takes an interval like 30m, 6h or 1d, of at least 5 minutes" });
     const dreamAt = typeof req.body?.dreamAt === "string" ? req.body.dreamAt.trim() : "";

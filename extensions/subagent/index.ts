@@ -18,6 +18,12 @@
  *   child's answer arrives later as a message, and starts a turn if the parent
  *   is idle. Two agents run at the same time.
  *
+ * The model a child runs on: the one its parent is on now, unless the chat
+ * says otherwise (the portal answers `subagent:v1:config` with the chat's
+ * choice) or `subagentModel` in pi's settings names one ("provider/model";
+ * "auto" or absent is the parent's). The model already loaded is the one to
+ * use: a second one is a second model in memory.
+ *
  * `subagentMaxParallel` (default 1) is how many children run at once, across
  * every conversation in the process — the portal runs them all in one. One
  * asked for beyond it waits for a free slot: in interrupt mode its tool call
@@ -38,6 +44,8 @@ const EVENT = "subagent:v1:event";
 const END = "subagent:v1:end";
 const INPUT = "subagent:v1:input";
 const STOP = "subagent:v1:stop";
+/** Asked by the extension, answered at once by whoever runs it: `{ reply({ model? }) }`. */
+const CONFIG = "subagent:v1:config";
 
 export type Mode = "interrupt" | "background";
 
@@ -54,6 +62,23 @@ function settings(): Record<string, unknown> {
 
 /** How a subagent runs against its parent. */
 export const subagentMode = (): Mode => (settings().subagentMode === "background" ? "background" : "interrupt");
+
+/** "provider/model" as a model to hand the child, or undefined for pi's own default. */
+export function parseModel(choice: unknown): { provider: string; id: string } | undefined {
+  if (typeof choice !== "string") return undefined;
+  const at = choice.indexOf("/");
+  return at > 0 && at < choice.length - 1 ? { provider: choice.slice(0, at), id: choice.slice(at + 1) } : undefined;
+}
+
+/**
+ * The model a child runs on: the chat's choice, else the settings', else —
+ * "auto" — the one the parent is on now.
+ */
+export function childModel(chat: string | undefined, parent: { provider?: string; id?: string } | undefined): { provider: string; id: string } | undefined {
+  const choice = chat ?? (typeof settings().subagentModel === "string" ? (settings().subagentModel as string) : "auto");
+  if (choice !== "auto") return parseModel(choice);
+  return parent?.provider && parent.id ? { provider: parent.provider, id: parent.id } : undefined;
+}
 
 export const MAX_PARALLEL = 16;
 
@@ -128,13 +153,21 @@ export default function (pi: any) {
     wakeAll();
   });
 
+  /** What the chat says its subagents run on, when something answers for it. */
+  function chatChoice(): string | undefined {
+    let said: string | undefined;
+    pi.events.emit(CONFIG, { reply: (config: any) => typeof config?.model === "string" && (said = config.model) });
+    return said;
+  }
+
   /** Starts a child for the task and hands over what watching it needs. */
-  function start(task: string, label: string, toolCallId: string, cwd: string, background: boolean, onUpdate?: any): Run {
+  function start(task: string, label: string, toolCallId: string, ctx: any, background: boolean, onUpdate?: any): Run {
     const id = randomUUID();
+    const model = childModel(chatChoice(), ctx?.model);
     // Its stderr goes nowhere: a pipe nobody reads fills, and the child
     // blocks on its next warning for good.
-    const child = spawn(process.env.PI_SUBAGENT_BIN || "pi", ["--mode", "rpc", "--no-session"], {
-      cwd,
+    const child = spawn(process.env.PI_SUBAGENT_BIN || "pi", ["--mode", "rpc", "--no-session", ...(model ? ["--provider", model.provider, "--model", model.id] : [])], {
+      cwd: ctx.cwd,
       stdio: ["pipe", "pipe", "ignore"],
     });
     // A child that died, or never started, closes the pipe under the next
@@ -159,7 +192,15 @@ export default function (pi: any) {
       pi.events.on(INPUT, (d: any) => d?.id === id && typeof d.text === "string" && send({ type: "steer", message: d.text })),
       pi.events.on(STOP, (d: any) => d?.id === id && stop()),
     ];
-    pi.events.emit(START, { id, label, toolCallId, input: true, stop: true, detail: "Starting", ...(background ? { detached: true } : {}) });
+    pi.events.emit(START, {
+      id,
+      label,
+      toolCallId,
+      input: true,
+      stop: true,
+      detail: model ? `Starting on ${model.provider}/${model.id}` : "Starting",
+      ...(background ? { detached: true } : {}),
+    });
 
     const status = new Promise<Status>((resolve) => {
       const lines = createInterface({ input: child.stdout });
@@ -225,7 +266,7 @@ export default function (pi: any) {
         void (async () => {
           const release = await takeSlot(() => shutDown, () => {});
           if (!release) return;
-          const run = start(params.task, label, toolCallId, ctx.cwd, true);
+          const run = start(params.task, label, toolCallId, ctx, true);
           detached.add(run);
           const { status, answer, failure } = await run.finished;
           release();
@@ -269,7 +310,7 @@ export default function (pi: any) {
       );
       if (!release) return { content: [{ type: "text", text: "(stopped before the subagent started)" }], details: { phase: "stopped" } };
       try {
-        const run = start(params.task, label, toolCallId, ctx.cwd, false, onUpdate);
+        const run = start(params.task, label, toolCallId, ctx, false, onUpdate);
         const stopped = () => run.stop();
         signal?.addEventListener("abort", stopped, { once: true });
         const { status, answer, failure } = await run.finished;

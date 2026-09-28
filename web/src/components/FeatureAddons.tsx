@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { LuBot, LuBrain, LuCheck, LuDownload, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert } from "react-icons/lu";
-import { api, type Features, type ManagedUnderstory, type SubagentMode, type UnderstoryLlmChoice } from "../api";
+import { api, type AvailableModel, type Features, type ManagedUnderstory, type SubagentMode, type UnderstoryLlmChoice } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { SwitchRow, inputCls } from "./SettingsUi";
@@ -58,15 +58,20 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const name = useId();
+  // Every model there is, to name one for subagents rather than the chat's.
+  const [models, setModels] = useState<AvailableModel[]>([]);
+  useEffect(() => {
+    api.allModels().then((r) => setModels(r.models)).catch(() => {});
+  }, []);
 
   if (!features) return <Loading />;
   const s = features.subagent;
 
-  const change = async (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number }) => {
+  const change = async (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) => {
     setBusy(true);
     setNote(null);
     // The choice shows at once; what the server says after is what stays.
-    if (patch.mode || patch.maxParallel) setFeatures({ ...features, subagent: { ...s, ...patch } });
+    if (patch.mode || patch.maxParallel || patch.model) setFeatures({ ...features, subagent: { ...s, ...patch } });
     try {
       const { subagent, waiting } = await api.setSubagentFeature(patch);
       setFeatures({ ...features, subagent });
@@ -116,6 +121,26 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
           ))}
         </div>
       </fieldset>
+      <div className="rounded-xl border border-line bg-raised/40 p-3 text-sm text-fg">
+        Model
+        <span className="mt-0.5 block text-xs text-fg-faint">
+          What a subagent runs on unless its chat says otherwise (in the chat's model menu). The chat's own is the one already
+          loaded, so no second model is started.
+        </span>
+        <Select
+          aria-label="Subagent model"
+          size="sm"
+          className="mt-2 w-full"
+          value={s.model}
+          disabled={busy}
+          onChange={(model) => void change({ model })}
+          options={[
+            { value: "auto", label: "Same as the chat", hint: "The model the chat is on when it starts one" },
+            ...(models.some((m) => `${m.provider}/${m.id}` === s.model) || s.model === "auto" ? [] : [{ value: s.model, label: s.model }]),
+            ...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
+          ]}
+        />
+      </div>
       <div className="flex items-start gap-3 rounded-xl border border-line bg-raised/40 p-3">
         <div className="min-w-0 flex-1 text-sm text-fg">
           Subagents at once
@@ -194,7 +219,7 @@ const DREAM_MODES: { value: DreamMode; label: string }[] = [
 
 /** The form's copy of the settings, before they are saved. */
 interface Draft {
-  source: "provider" | "custom";
+  source: "auto" | "provider" | "custom";
   provider: string;
   providerModel: string;
   baseUrl: string;
@@ -212,7 +237,7 @@ function draftOf(m: ManagedUnderstory): Draft {
   const llm = m.config.llm;
   const first = m.providers[0];
   return {
-    source: llm?.source ?? (first ? "provider" : "custom"),
+    source: llm.source,
     provider: llm?.source === "provider" ? llm.provider : (first?.id ?? ""),
     providerModel: llm?.source === "provider" ? llm.model : (first?.models[0] ?? ""),
     baseUrl: llm?.source === "custom" ? llm.baseUrl : "",
@@ -226,6 +251,7 @@ function draftOf(m: ManagedUnderstory): Draft {
 }
 
 function choiceOf(d: Draft): UnderstoryLlmChoice | null {
+  if (d.source === "auto") return { source: "auto" };
   if (d.source === "provider") return d.provider && d.providerModel ? { source: "provider", provider: d.provider, model: d.providerModel } : null;
   if (!d.baseUrl.trim() || !d.model.trim()) return null;
   return { source: "custom", baseUrl: d.baseUrl.trim(), model: d.model.trim(), format: d.format, ...(d.apiKey ? { apiKey: d.apiKey } : {}) };
@@ -323,21 +349,28 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
           <fieldset disabled={busy !== null} className="space-y-3">
             <legend className="text-xs text-fg-muted">The model that keeps the memory</legend>
             <div role="radiogroup" aria-label="Where the model comes from" className="flex gap-1 rounded-lg bg-fg/5 p-0.5 text-xs">
-              {(["provider", "custom"] as const).map((src) => (
+              {(["auto", "provider", "custom"] as const).map((src) => (
                 <button
                   key={src}
                   type="button"
                   role="radio"
                   aria-checked={form.source === src}
-                  disabled={src === "provider" && !m.providers.length}
+                  disabled={(src === "provider" && !m.providers.length) || (src === "auto" && !m.autoPossible)}
                   onClick={() => edit({ source: src })}
                   className={`flex-1 rounded-md px-2 py-1 transition disabled:opacity-40 ${form.source === src ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"}`}
                 >
-                  {src === "provider" ? "A provider set up here" : "An address of its own"}
+                  {src === "auto" ? "The chat's model" : src === "provider" ? "A provider set up here" : "An address of its own"}
                 </button>
               ))}
             </div>
-            {form.source === "provider" ? (
+            {form.source === "auto" ? (
+              <p className="text-[11px] text-fg-faint">
+                The model the chat asking is on — the one already loaded, so no second model is started for the memory. When no chat
+                is asking, as when it tidies up, the one that asked last; before any has, the default model for new chats. It needs
+                a model with an OpenAI-compatible API, as local servers and OpenRouter have.
+                {!m.autoPossible && " Not while the portal serves its own TLS: Understory cannot reach it through that."}
+              </p>
+            ) : form.source === "provider" ? (
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="text-xs text-fg-muted">
                   Provider
@@ -483,7 +516,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
               )}
             </div>
 
-            {(!saved || !m.config.llm) && (
+            {!saved && (
               <button
                 type="button"
                 disabled={!choice}
@@ -499,8 +532,8 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
             {!runsHere ? (
               <button
                 type="button"
-                disabled={busy !== null || !m.config.llm || !saved}
-                title={!m.config.llm ? "Choose and save the model first" : undefined}
+                disabled={busy !== null || !saved}
+                title={!saved ? "Save the settings first" : undefined}
                 onClick={() => void act(INSTALLING, () => api.installUnderstory())}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
               >

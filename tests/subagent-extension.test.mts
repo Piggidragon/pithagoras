@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {chmodSync, mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import subagent, {subagentLimit} from '../extensions/subagent/index.ts';
+import subagent, {childModel, subagentLimit} from '../extensions/subagent/index.ts';
 // A child pi in RPC mode, as far as the extension can tell. `retry`: its first run fails and is retried. `hang`: it works until stopped.
 const dir=mkdtempSync(path.join(tmpdir(),'subagent-'));
 const bin=path.join(dir,'pi');
@@ -11,6 +11,9 @@ writeFileSync(bin,`#!/usr/bin/env node
 const out=e=>process.stdout.write(JSON.stringify(e)+'\\n');
 const say=t=>out({type:'message_end',message:{role:'assistant',content:[{type:'text',text:t}]}});
 if(process.env.FAKE==='die')process.exit(1);
+// What it was started with, as its answer.
+if(process.env.FAKE==='argv'){require('node:readline').createInterface({input:process.stdin}).on('line',l=>{if(JSON.parse(l).type==='prompt'){out({type:'agent_start'});say(process.argv.slice(2).join(' '));out({type:'agent_end'});out({type:'agent_settled'});}});}
+else
 // Its input closed, still running: what the portal sends it next finds no reader.
 if(process.env.FAKE==='deaf'){require('node:fs').closeSync(0);setTimeout(()=>process.exit(1),800);}
 else
@@ -205,4 +208,29 @@ test('the limit holds across conversations: two chats share it',{timeout:5000},a
  two.events.on('subagent:v1:start',()=>order.push('start two'));two.events.on('subagent:v1:end',()=>order.push('end two'));
  await Promise.all([one.tool.execute('a',{task:'x'},undefined,undefined,{cwd:dir}),two.tool.execute('b',{task:'y'},undefined,undefined,{cwd:dir})]);
  assert.deepEqual(order,['start one','end one','start two','end two']);
+});
+test('a child runs on the model its parent is on, unless the chat or the settings say another',{timeout:5000},async()=>{
+ process.env.FAKE='argv';mode();
+ const {tool,events}=load();
+ const parent={cwd:dir,model:{provider:'llama-swap',id:'qwen3.8'}};
+ let started:any;events.on('subagent:v1:start',d=>started=d);
+ assert.equal((await tool.execute('a',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider llama-swap --model qwen3.8');
+ assert.equal(started.detail,'Starting on llama-swap/qwen3.8');
+ // The chat's own choice, answered on the bus.
+ const off=events.on('subagent:v1:config',(d:any)=>d.reply({model:'vllm/Qwen-Coder'}));
+ assert.equal((await tool.execute('b',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider vllm --model Qwen-Coder');
+ off();
+ // The settings' choice, and auto there is the parent's again.
+ mode(undefined,{subagentModel:'openrouter/deepseek/deepseek-chat'});
+ assert.equal((await tool.execute('c',{task:'x'},undefined,undefined,parent)).content[0].text,'--mode rpc --no-session --provider openrouter --model deepseek/deepseek-chat');
+ mode(undefined,{subagentModel:'auto'});
+ assert.match((await tool.execute('d',{task:'x'},undefined,undefined,parent)).content[0].text,/--model qwen3\.8$/);
+ // No model known at all: pi's own default.
+ assert.equal((await tool.execute('e',{task:'x'},undefined,undefined,{cwd:dir})).content[0].text,'--mode rpc --no-session');
+ mode();
+});
+test('what a chat says auto for is the parent\'s model, and a choice with no model in it is none',()=>{
+ mode();
+ assert.deepEqual(childModel('auto',{provider:'p',id:'m'}),{provider:'p',id:'m'});
+ assert.equal(childModel('nonsense',{provider:'p',id:'m'}),undefined);
 });

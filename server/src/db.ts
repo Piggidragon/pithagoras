@@ -619,6 +619,7 @@ export function deleteSession(id: string): void {
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+  d.prepare("DELETE FROM settings WHERE key = ?").run(`subagent_model:${id}`);
 }
 
 /**
@@ -1765,4 +1766,16 @@ export function setBrowserAllowlist(domains: string): void {
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
   );
   upsert.run("browser_allowlist", domains.trim());
+}
+
+/**
+ * The model a chat's subagents run on, where the chat says one: "provider/model",
+ * or "auto" for the one the chat is on. Null follows the portal's default.
+ */
+export function sessionSubagentModel(sessionId: string): string | null {
+  return (getStoredSettings() as Record<string, string>)[`subagent_model:${sessionId}`] || null;
+}
+
+export function setSessionSubagentModel(sessionId: string, model: string | null): void {
+  putSetting(`subagent_model:${sessionId}`, model ?? "");
 }

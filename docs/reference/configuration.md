@@ -84,8 +84,9 @@ before writing; a broken file stops every future session from starting.
 }
 ```
 
-`subagentMode` (`"background"`, or absent for interrupt) and
-`subagentMaxParallel` (how many at once; absent for 1, at most 16) are read by
+`subagentMode` (`"background"`, or absent for interrupt),
+`subagentMaxParallel` (how many at once; absent for 1, at most 16) and
+`subagentModel` (`"provider/model"`, or absent for the chat's own) are read by
 the bundled subagent tool; Settings → Add-ons → Subagents writes them. See
 [Opt-in features](/guide/features).
 

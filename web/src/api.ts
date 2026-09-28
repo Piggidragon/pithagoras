@@ -505,6 +505,10 @@ export const api = {
   suggestBrowserPassword: () =>
     json<{ password: string }>("/api/browser/suggest-password"),
   features: () => json<Features>("/api/features"),
+  /** What a chat's subagents run on: its own choice (null follows `default`). */
+  subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
+  setSubagentModel: (id: string, model: string | null) =>
+    json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`, { method: "PUT", body: JSON.stringify({ model }) }),
   memoryTree: () => json<MemoryNode>("/api/memory/tree"),
   memoryConcept: (path: string) => json<MemoryConcept>(`/api/memory/concept?${new URLSearchParams({ path })}`),
   memorySearch: (q: string) => json<MemoryHit[]>(`/api/memory/search?${new URLSearchParams({ q })}`),
@@ -512,7 +516,7 @@ export const api = {
   memoryGraph: () => json<MemoryGraph>("/api/memory/graph"),
   memoryTraces: () => json<MemoryTrace[]>("/api/memory/traces"),
   memoryValidate: () => json<MemoryValidation>("/api/memory/validate"),
-  setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number }) =>
+  setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) =>
     json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
       method: "PUT",
       body: JSON.stringify(patch),
@@ -1061,15 +1065,19 @@ export interface SubagentFeature {
   mode: SubagentMode;
   /** How many may run at once, across every chat. */
   maxParallel: number;
+  /** What they run on unless a chat says: "auto", the model the chat is on, or "provider/model". */
+  model: string;
 }
 
 /** The model that keeps Understory's memory, as the page is told it: never the key. */
 export type UnderstoryLlm =
+  | { source: "auto" }
   | { source: "provider"; provider: string; model: string }
   | { source: "custom"; baseUrl: string; model: string; format: "openai" | "anthropic"; hasKey?: boolean };
 
 /** What the page sends for it: a custom key only when it is being changed. */
 export type UnderstoryLlmChoice =
+  | { source: "auto" }
   | { source: "provider"; provider: string; model: string }
   | { source: "custom"; baseUrl: string; model: string; format: "openai" | "anthropic"; apiKey?: string };
 
@@ -1082,7 +1090,9 @@ export interface ManagedUnderstory {
   pulling: { active: boolean; line: string; error?: string };
   url: string;
   /** `dreamAt`: once a day at this time ("03:00"), started by the portal; wins over the interval. */
-  config: { llm: UnderstoryLlm | null; dreamInterval: string; dreamAt: string };
+  config: { llm: UnderstoryLlm; dreamInterval: string; dreamAt: string };
+  /** "The chat's model" can be offered: not while the portal serves its own TLS. */
+  autoPossible: boolean;
   /** Providers set up here that Understory can be pointed at. */
   providers: { id: string; models: string[] }[];
   /** A pass the portal started is running now. */

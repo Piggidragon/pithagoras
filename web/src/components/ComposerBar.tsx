@@ -1,6 +1,7 @@
 import { LuBlocks } from "react-icons/lu";
 import { StatusDot } from "./StatusDot";
 import { ToolSwitches } from "./ToolSwitches";
+import { SubagentModelPicker } from "./SubagentModelPicker";
 import { useDismiss } from "../use-dismiss";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -611,6 +612,7 @@ export function ComposerBar({
               </div>
             </>
           )}
+          <SubagentModelPicker sessionId={sessionId} models={models} />
           <div className="my-1 border-t border-line" />
           <button
             type="button"

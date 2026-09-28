@@ -10,6 +10,7 @@ process.env.SESSION_DIR = path.join(temp, "sessions");
 const agentDir = path.join(temp, "agent");
 mkdirSync(agentDir);
 process.env.PI_CODING_AGENT_DIR = agentDir;
+process.env.AGENT_HOME = path.join(temp, "agent-home");
 delete process.env.MEMORY_UNDERSTORY_URL;
 
 const {
@@ -166,7 +167,6 @@ test("the Understory the portal runs: its model from a provider or an address of
   const env = service.spec({ llm: { source: "provider", provider: "llama-swap", model: "Ornith" }, dreamInterval: "6h" }, token).Env;
   for (const line of ["BUNDLE_ROOT=/bundle", `AUTH_TOKEN=${token}`, "LLM_API_BASE_URL=http://gpu:8080/v1", "LLM_MODEL=Ornith", "DREAM_INTERVAL=6h"]) assert.ok(env.includes(line), line);
   assert.ok(!service.spec({ llm: { source: "provider", provider: "llama-swap", model: "Ornith" }, dreamInterval: "" }, token).Env.some((l) => l.startsWith("DREAM_INTERVAL")), "never is no interval at all");
-  assert.throws(() => service.spec({ llm: null, dreamInterval: "" }, token), /Choose the model/);
 
   // A key the page never holds is kept when it sends none.
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", format: "openai", apiKey: "sk-1" }, dreamInterval: "1d" });
@@ -208,4 +208,78 @@ test("tidying up at a set time: the next time it comes round, Understory's own t
   assert.deepEqual(service.readReport('\u001b[0mloading\r\n{"ran":false,"reason":"memory healthy"}\r\n'), { ran: false, reason: "memory healthy" });
   assert.deepEqual(service.readReport('{"ran":true,"summary":"merged two","filesChanged":["/a.md"]}\nbye'), { ran: true, summary: "merged two", filesChanged: ["/a.md"] });
   assert.equal(service.readReport("Error: boom"), null);
+});
+
+test("Understory thinking with the chat's model: the chat whose memory tool runs, its model, its key, the answer streamed back", async () => {
+  const { createServer } = await import("node:http");
+  const express = (await import("express")).default;
+  const llm = await import("../server/src/memory-llm.ts");
+  const service = await import("../server/src/extensions/understory-service.ts");
+
+  llm.forgetAsking();
+  llm.noteToolCall("chat-a", "read", "start");
+  assert.equal(llm.askingChat(), undefined, "only the memory's tools count");
+  llm.noteToolCall("chat-a", "understory_memory_add", "start");
+  llm.noteToolCall("chat-b", "understory_memory_query", "start");
+  assert.equal(llm.askingChat(), "chat-b", "the newest asking");
+  llm.noteToolCall("chat-b", "understory_memory_query", "end");
+  assert.equal(llm.askingChat(), "chat-a");
+  llm.noteToolCall("chat-a", "understory_memory_add", "end");
+  assert.equal(llm.askingChat(), "chat-b", "none asking now: the last that started asking");
+  llm.noteToolCall("chat-a", "understory_memory_add", "start");
+  llm.noteToolCall("chat-a", "understory_memory_add", "end");
+
+  const seen: { body: any; auth?: string }[] = [];
+  const upstream = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      seen.push({ body: JSON.parse(raw), auth: req.headers.authorization });
+      res.setHeader("content-type", "text/event-stream");
+      res.write('data: {"choices":[{"delta":{"content":"he"}}]}\n\n');
+      setTimeout(() => res.end('data: {"choices":[{"delta":{"content":"llo"}}]}\n\ndata: [DONE]\n\n'), 30);
+    });
+  });
+  await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
+  const up = (upstream.address() as { port: number }).port;
+  writeFileSync(
+    path.join(agentDir, "models.json"),
+    JSON.stringify({
+      providers: {
+        fake: { baseUrl: `http://127.0.0.1:${up}/v1`, api: "openai-completions", apiKey: "sk-fake", models: [{ id: "qwen3.8" }] },
+        claude: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "x", models: [{ id: "sonnet" }] },
+      },
+    }),
+  );
+  let chatModel = { provider: "fake", id: "qwen3.8" };
+  const app = express().use(llm.memoryLlmRouter(async (id) => (id === "chat-a" ? chatModel : undefined)));
+  const portal = app.listen(0, "127.0.0.1");
+  await new Promise((r) => portal.once("listening", r));
+  const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/understory-llm/v1`;
+  const ask = (auth = service.llmToken()) =>
+    fetch(`${at}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${auth}` },
+      body: JSON.stringify({ model: "auto", stream: true, messages: [{ role: "user", content: "hi" }] }),
+    });
+  try {
+    assert.equal((await ask("wrong")).status, 401);
+    const answer = await ask();
+    assert.equal(answer.status, 200, answer.status === 200 ? "" : await answer.clone().text());
+    assert.match(answer.headers.get("content-type") ?? "", /event-stream/);
+    assert.match(await answer.text(), /"he"[\s\S]*"llo"[\s\S]*\[DONE\]/);
+    assert.deepEqual(seen[0], { body: { model: "qwen3.8", stream: true, messages: [{ role: "user", content: "hi" }] }, auth: "Bearer sk-fake" });
+
+    chatModel = { provider: "claude", id: "sonnet" };
+    const refused = await ask();
+    assert.equal(refused.status, 502);
+    assert.match((await refused.json()).error.message, /speaks anthropic-messages, not OpenAI chat completions/);
+  } finally {
+    upstream.close();
+    portal.close();
+  }
+
+  // Understory is pointed at it, with its own key, in "the chat's" mode — the default.
+  service.saveConfig({ llm: { source: "auto" }, dreamInterval: "", dreamAt: "" });
+  assert.deepEqual(service.llmEnv(service.config().llm), { baseUrl: "http://127.0.0.1:4100/understory-llm/v1", apiKey: service.llmToken(), model: "auto", format: "openai" });
 });

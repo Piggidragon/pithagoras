@@ -46,6 +46,7 @@ import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { featuresRouter } from "./api/features.js";
 import { memoryRouter } from "./api/memory.js";
+import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
@@ -131,7 +132,8 @@ const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BY
 const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
 const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => {
-  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path)) return next();
+  // Understory's requests for a model carry whole conversations: its route reads its own.
+  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path.startsWith("/understory-llm/")) return next();
   smallJson(req, res, next);
 });
 app.use(cookieParser());
@@ -156,6 +158,8 @@ app.post("/api/auth/logout", (req, res) => {
   res.json({ ok: true });
 });
 
+// Understory's model server, in "the chat's" mode: its own token, not a portal login.
+app.use(memoryLlmRouter((id) => sessions.currentModel(id)));
 app.use("/api", requireAuth);
 
 // --- global settings (defaults for every new session) ---

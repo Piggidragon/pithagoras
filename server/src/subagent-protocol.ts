@@ -18,6 +18,11 @@
  *   subagent:v1:input  { id, text }        a message for the subagent (e.g. an RPC `steer`)
  *   subagent:v1:stop   { id }
  *
+ * Asked by the extension, answered at once (the bus is synchronous):
+ *
+ *   subagent:v1:config { reply(config) }   config: { model?: "provider/model" | "auto" },
+ *                                          what the chat says its subagents run on
+ *
  * `detached`: it runs on after the tool call that started it has returned (a
  * subagent in the background), so the end of that call is not its end.
  *
@@ -29,6 +34,7 @@ export const SUBAGENT_EVENT = "subagent:v1:event";
 export const SUBAGENT_END = "subagent:v1:end";
 export const SUBAGENT_INPUT = "subagent:v1:input";
 export const SUBAGENT_STOP = "subagent:v1:stop";
+export const SUBAGENT_CONFIG = "subagent:v1:config";
 
 /** The events of a child worth drawing; anything else is not the portal's business. */
 const KNOWN = new Set([
@@ -115,7 +121,7 @@ export function slimEvent(event: any): Record<string, unknown> | undefined {
  * subagents, as session events: `portal_subagent` (stored) and
  * `portal_subagent_live` (streamed, not stored). Returns the unsubscribe.
  */
-export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
+export function bridgeSubagents(bus: Bus, emit: Emit, config: () => { model?: string } = () => ({})): Bridge {
   // With the tool call that runs each, and whether it outlives that call:
   // carried on all its events, so a page that has not loaded the start still
   // knows whose they are.
@@ -128,6 +134,10 @@ export function bridgeSubagents(bus: Bus, emit: Emit): Bridge {
   // its tokens are never stored, so the times ride on its message_end.
   const thinking = new Map<string, { thinkingSince: number; thinkingUntil: number }>();
   const off = [
+    // Answered only with what the chat says: nothing said leaves the extension to its own default.
+    bus.on(SUBAGENT_CONFIG, (data: any) => {
+      if (typeof data?.reply === "function") data.reply(config());
+    }),
     bus.on(SUBAGENT_START, (data: any) => {
       const id = str(data?.id, 120);
       if (!id) return;

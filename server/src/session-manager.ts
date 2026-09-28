@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { LiveEvents } from "./live-events.js";
+import { noteToolCall } from "./memory-llm.js";
 import { ModelErrors } from "./model-errors.js";
 import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
@@ -53,6 +54,7 @@ import {
   routineGuards,
   updateSession,
   type EventRow,
+  sessionSubagentModel,
 } from "./db.js";
 
 /**
@@ -780,6 +782,10 @@ class SessionManager extends EventEmitter {
   private noteCall(sessionId: string, msg: any): void {
     const sub = msg.type === "portal_subagent" && msg.op === "event" ? msg.event ?? {} : undefined;
     const event = sub ?? msg;
+    // Which chat Understory is thinking for, when its model is the chat's.
+    if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+      noteToolCall(sessionId, event.toolName, event.type === "tool_execution_start" ? "start" : "end");
+    }
     const id = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
     let calls = this.calls.get(sessionId);
     if (event.type === "tool_execution_start") {
@@ -790,6 +796,14 @@ class SessionManager extends EventEmitter {
     // A subagent that ended took whatever it was running with it.
     if (msg.type === "portal_subagent" && msg.op === "end") for (const c of [...(calls ?? [])]) if (c.startsWith(`${msg.id}:`)) calls!.delete(c);
     if (calls && !calls.size) this.calls.delete(sessionId);
+  }
+
+  /** The model a running chat is on now; undefined when it is not running here. */
+  async currentModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
+    const client = this.live.get(sessionId)?.client;
+    if (!client) return undefined;
+    const { model } = await client.getState();
+    return model?.provider && model.id ? { provider: model.provider, id: model.id } : undefined;
   }
 
   /** Whether a tool call is running in the chat: see calls. */
@@ -898,6 +912,7 @@ class SessionManager extends EventEmitter {
       // each tool call, so a group conversation follows whoever is speaking.
       role: session.role,
       toolsOff: this.offFor(sessionId),
+      subagentModel: () => sessionSubagentModel(sessionId) ?? undefined,
       whoNow: () => ({ role: this.speakerRole(sessionId), key: this.speakerKey(sessionId) }),
     });
 

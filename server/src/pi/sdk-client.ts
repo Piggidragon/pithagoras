@@ -356,6 +356,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     enforceTaint?: boolean;
     /** Read at each tool call, so a change takes effect without a restart. */
     browserNow?: () => { allowed: boolean; allowlist: string[] };
+    /** What this chat's subagents run on, asked when one starts: see subagent-protocol.ts. */
+    subagentModel?: () => string | undefined;
   }): Promise<SdkPiClient> {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
@@ -487,7 +489,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     client.canvases = canvases;
     if (eventBus && resourceLoader) {
       client.bus = eventBus;
-      client.unbridge = bridgeSubagents(eventBus, (event) => client.emit("event", event));
+      client.unbridge = bridgeSubagents(
+        eventBus,
+        (event) => client.emit("event", event),
+        () => {
+          const model = opts.subagentModel?.();
+          return model ? { model } : {};
+        },
+      );
     }
     if (resourceLoader) {
       client.voiceFirst = voiceFirst;

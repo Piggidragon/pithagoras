@@ -90,6 +90,14 @@ export function subagentLimitOf(settings: Record<string, unknown>): number {
   return Number.isInteger(n) && n >= 1 ? Math.min(n, SUBAGENT_MAX_PARALLEL) : 1;
 }
 
+/** What subagents run on unless a chat says: "auto", the model the chat is on, or "provider/model". */
+export const subagentModelOf = (settings: Record<string, unknown>): string =>
+  isModelChoice(settings.subagentModel) ? (settings.subagentModel as string) : "auto";
+
+/** "auto", or "provider/model". */
+export const isModelChoice = (value: unknown): value is string =>
+  typeof value === "string" && (value === "auto" || /^[^/\s]+\/\S+$/.test(value));
+
 export function subagentState() {
   const settings = readPiSettings();
   const bundled = bundledSubagentDir();
@@ -101,6 +109,7 @@ export function subagentState() {
     source: found?.source ?? null,
     mode: subagentModeOf(settings),
     maxParallel: subagentLimitOf(settings),
+    model: subagentModelOf(settings),
   };
 }
 

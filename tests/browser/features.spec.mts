@@ -1,15 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /** The portal with no server: Settings → Add-ons, over canned answers for the opt-in features. */
-async function portal(page: Page, { reachable = true, available = true, docker = false, llm = null as any } = {}) {
+async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true } = {}) {
   const sent: { path: string; body: any }[] = [];
   const state = {
-    subagent: { available, installed: false, enabled: false, source: null as string | null, mode: 'interrupt', maxParallel: 1 },
+    subagent: { available, installed: false, enabled: false, source: null as string | null, mode: 'interrupt', maxParallel: 1, model: 'auto' },
     understory: {
       enabled: false, url: 'http://localhost:3800/mcp', tokenSet: false, adapterInstalled: false, reachable,
       managed: {
         available: docker, image: false, container: 'absent', pulling: { active: false, line: '' }, url: 'http://127.0.0.1:3800/mcp',
-        config: { llm, dreamInterval: '', dreamAt: '' },
+        config: { llm, dreamInterval: '', dreamAt: '' }, autoPossible,
         providers: [{ id: 'llama-swap', models: ['Ornith', 'Small'] }, { id: 'vllm', models: ['Qwen'] }],
         dreaming: false, lastDream: null as any, nextDream: null as string | null, timeZone: 'Europe/Berlin',
       },
@@ -26,7 +26,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       settings: { provider: 'p', model: 'm', thinkingLevel: 'medium' }, stored: {}, defaults: { provider: 'p', model: 'm', thinkingLevel: 'medium' },
       piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w',
     };
-    else if (p === '/api/models') body = { models: [{ provider: 'p', id: 'm', name: 'M', contextWindow: 65536 }], providers: { p: 'p' } };
+    else if (p === '/api/models') body = { models: [{ provider: 'p', id: 'm', name: 'M', contextWindow: 65536 }, { provider: 'llama-swap', id: 'qwen3.8', name: 'Qwen 3.8' }], providers: { p: 'p' } };
     else if (p === '/api/extensions') body = { settingsPath: '/a/settings.json', extensions: [] };
     else if (p === '/api/browser') body = { running: false, sessions: [], routines: [], install: { available: false, mode: 'docker', container: 'absent', pulling: { active: false } }, config: {} };
     else if (p === '/api/voice') body = { enabled: false };
@@ -38,6 +38,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       sent.push({ path: p, body: patch });
       if (patch.mode) state.subagent.mode = patch.mode;
       if (patch.maxParallel) state.subagent.maxParallel = patch.maxParallel;
+      if (patch.model) state.subagent.model = patch.model;
       if (patch.enabled !== undefined) Object.assign(state.subagent, { enabled: patch.enabled, installed: patch.enabled, source: patch.enabled ? '/app/extensions/subagent' : null });
       body = { subagent: state.subagent, reloaded: 1, waiting: 1 };
     } else if (p === '/api/features/understory/config' && method === 'PUT') {
@@ -159,6 +160,10 @@ test('the portal runs Understory: a provider and model set up here, how often it
   await addons(page).getByRole('tab', { name: 'Memory' }).click();
   const here = addons(page).getByRole('region', { name: 'Understory run here' });
   const install = here.getByRole('button', { name: "Install and use as the agent's memory" });
+  // The chat's own model unless told otherwise: nothing to choose before it can be installed.
+  await expect(here.getByRole('radio', { name: "The chat's model" })).toHaveAttribute('aria-checked', 'true');
+  await expect(install).toBeEnabled();
+  await here.getByRole('radio', { name: 'A provider set up here' }).click();
   await expect(install).toBeDisabled();
   // One run elsewhere is there, and out of the way.
   await expect(addons(page).getByText('Or use one you run yourself')).toBeVisible();
@@ -201,6 +206,36 @@ test('the portal runs Understory: a provider and model set up here, how often it
   await here.getByRole('button', { name: 'Stop' }).click();
   await expect(here.getByText('stopped')).toBeVisible();
   await expect(here.getByRole('button', { name: 'Tidy up now' })).toHaveCount(0);
+});
+
+test("the chat's model for the memory, unless the portal serves its own TLS", async ({ page }) => {
+  const { sent } = await portal(page, { docker: true, llm: { source: 'provider', provider: 'llama-swap', model: 'Ornith' } });
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Memory' }).click();
+  const here = addons(page).getByRole('region', { name: 'Understory run here' });
+  await here.getByRole('radio', { name: "The chat's model" }).click();
+  await expect(here.getByText(/The model the chat asking is on — the one already loaded/)).toBeVisible();
+  await here.getByRole('button', { name: 'Save', exact: true }).click();
+  expect(sent.at(-1)!.body.llm).toEqual({ source: 'auto' });
+});
+
+test("over the portal's own TLS the memory cannot use the chat's model", async ({ page }) => {
+  await portal(page, { docker: true, llm: { source: 'provider', provider: 'llama-swap', model: 'Ornith' }, autoPossible: false });
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Memory' }).click();
+  await expect(addons(page).getByRole('radio', { name: "The chat's model" })).toBeDisabled();
+});
+
+test('subagents run on the chat\'s model unless one is named', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Subagents' }).click();
+  const model = addons(page).getByRole('combobox', { name: 'Subagent model' });
+  await expect(model).toContainText('Same as the chat');
+  await model.click();
+  await page.getByRole('option', { name: /Qwen 3\.8/ }).click();
+  await expect(model).toContainText('Qwen 3.8');
+  expect(sent.at(-1)!.body).toEqual({ model: 'llama-swap/qwen3.8' });
 });
 
 test("a model at an address of its own keeps its saved key unless one is typed", async ({ page }) => {
