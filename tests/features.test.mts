@@ -248,17 +248,17 @@ test("Understory thinking with the chat's model: the chat whose memory tool runs
   const service = await import("../server/src/extensions/understory-service.ts");
 
   llm.forgetAsking();
-  llm.noteToolCall("chat-a", "read", "start");
+  llm.noteToolCall("chat-a", "r1", "read", "start");
   assert.equal(llm.askingChat(), undefined, "only the memory's tools count");
-  llm.noteToolCall("chat-a", "understory_memory_add", "start");
-  llm.noteToolCall("chat-b", "understory_memory_query", "start");
+  llm.noteToolCall("chat-a", "a1", "understory_memory_add", "start");
+  llm.noteToolCall("chat-b", "b1", "understory_memory_query", "start");
   assert.equal(llm.askingChat(), "chat-b", "the newest asking");
-  llm.noteToolCall("chat-b", "understory_memory_query", "end");
+  llm.noteToolCall("chat-b", "b1", "understory_memory_query", "end");
   assert.equal(llm.askingChat(), "chat-a");
-  llm.noteToolCall("chat-a", "understory_memory_add", "end");
+  llm.noteToolCall("chat-a", "a1", "understory_memory_add", "end");
   assert.equal(llm.askingChat(), "chat-b", "none asking now: the last that started asking");
-  llm.noteToolCall("chat-a", "understory_memory_add", "start");
-  llm.noteToolCall("chat-a", "understory_memory_add", "end");
+  llm.noteToolCall("chat-a", "a1", "understory_memory_add", "start");
+  llm.noteToolCall("chat-a", "a1", "understory_memory_add", "end");
 
   const seen: { body: any; auth?: string }[] = [];
   const upstream = createServer((req, res) => {
@@ -318,11 +318,20 @@ test("Understory thinking with the chat's model: the chat whose memory tool runs
     assert.equal((await ask()).status, 200, "still answering after one hung up");
 
     // A chat whose pi is gone asks nothing any more.
-    llm.noteToolCall("chat-gone", "understory_memory_add", "start");
+    llm.noteToolCall("chat-gone", "g1", "understory_memory_add", "start");
     assert.equal(llm.askingChat(), "chat-gone");
     llm.forgetChat("chat-gone");
     assert.equal(llm.askingChat(), undefined, "nobody asking: the model new chats start on");
-    llm.noteToolCall("chat-a", "understory_memory_add", "start");
+    // A subagent killed mid-call asks no more.
+    llm.noteToolCall("chat-s", "sub-1:c1", "understory_memory_query", "start");
+    assert.equal(llm.askingChat(), "chat-s");
+    llm.subagentGone("chat-s", "sub-1");
+    llm.noteToolCall("chat-t", "t1", "understory_memory_query", "start");
+    llm.noteToolCall("chat-t", "t1", "understory_memory_query", "end");
+    assert.equal(llm.askingChat(), "chat-t", "chat-s is not held asking by a call that never ended");
+    llm.forgetChat("chat-s");
+    llm.forgetChat("chat-t");
+    llm.noteToolCall("chat-a", "a1", "understory_memory_add", "start");
 
     chatModel = { provider: "claude", id: "sonnet" };
     const refused = await ask();
@@ -422,4 +431,29 @@ test("the portal's Understory shares the portal's network and says it is the por
   const made = service.spec({ llm: { source: "custom", baseUrl: "http://gpu/v1", model: "m", format: "openai" }, dreamInterval: "", dreamAt: "" }, "t", "container:abc");
   assert.equal(made.HostConfig.NetworkMode, "container:abc");
   assert.deepEqual(made.Labels, { [service.LABEL]: "understory" });
+});
+
+test("a package pi lists by its folder is found as a full path, ~ for home included", async () => {
+  const { localPackagePath } = await import("../server/src/features.ts");
+  const home = process.env.HOME;
+  process.env.HOME = "/home/someone";
+  try {
+    assert.equal(localPackagePath("~/src/pithagoras/extensions/subagent", "/home/someone/.pi/agent"), "/home/someone/src/pithagoras/extensions/subagent");
+    assert.equal(localPackagePath("../../src/x", "/home/someone/.pi/agent"), "/home/someone/src/x");
+    assert.equal(localPackagePath("/abs/x", "/home/someone/.pi/agent"), "/abs/x");
+  } finally {
+    process.env.HOME = home;
+  }
+});
+
+test("background subagents open in a chat are kept in step with their starts and ends, and dropped with the chat", async () => {
+  const { appendEvent, openSubagentsIn, createSession, deleteSession } = await import("../server/src/db.ts");
+  createSession({ id: "open-chat", title: "t", workspace: "/w", executor: "host", kind: "task" });
+  appendEvent("open-chat", "portal_subagent", { type: "portal_subagent", op: "start", id: "a", detached: true });
+  appendEvent("open-chat", "portal_subagent", { type: "portal_subagent", op: "start", id: "b", detached: true });
+  appendEvent("open-chat", "portal_subagent", { type: "portal_subagent", op: "event", id: "a", detached: true, event: { type: "agent_start" } });
+  appendEvent("open-chat", "portal_subagent", { type: "portal_subagent", op: "end", id: "a", detached: true, status: "done" });
+  assert.deepEqual(openSubagentsIn("open-chat"), ["b"]);
+  deleteSession("open-chat");
+  assert.deepEqual(openSubagentsIn("open-chat"), []);
 });

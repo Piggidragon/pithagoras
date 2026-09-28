@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
 import { getSetting, putSetting } from "../db.js";
+import { tlsFiles } from "../http-security.js";
 import { readModelsJson, storedKey } from "../providers.js";
 import { dockerAvailable, imagePresent, pullImage, request } from "./docker.js";
 import { voiceNetworkMode as sharedNetworkMode } from "./voice-service.js";
@@ -138,10 +138,8 @@ export const existingLlmToken = (): string | undefined => getSetting(LLM_TOKEN);
  * chat's", and a model of its own is needed.
  */
 export function portalLlmBase(): string | undefined {
-  // The portal's own decision (server.ts): both named, and both there.
-  const cert = process.env.PORTAL_TLS_CERT;
-  const key = process.env.PORTAL_TLS_KEY;
-  if (cert && key && existsSync(cert) && existsSync(key)) return undefined;
+  // The portal's own decision, the one the server serves by.
+  if (tlsFiles()) return undefined;
   return `http://127.0.0.1:${Number(process.env.PORT || 4100)}/understory-llm/v1`;
 }
 
@@ -229,7 +227,13 @@ export async function runningHere(): Promise<boolean> {
 
 export async function status() {
   if (!dockerAvailable()) return { available: false, image: false, container: "absent" as const, pulling };
-  const [image, c] = await Promise.all([imagePresent(IMAGE), inspect()]);
+  // A socket there but not usable — no permission, no daemon — is no Docker, not a failure of the page.
+  const [image, c] = await Promise.all([imagePresent(IMAGE), inspect()]).catch(
+    () => [false, { exists: false, running: false, ours: false }] as const,
+  );
+  if (!c.exists && !image && !(await request("GET", "/_ping").then((r) => r.status === 200, () => false))) {
+    return { available: false, image: false, container: "absent" as const, pulling };
+  }
   return {
     available: true,
     image,
@@ -255,13 +259,17 @@ async function onlyOurs(): Promise<{ exists: boolean; running: boolean }> {
   return c;
 }
 
-/** Pulls the image if it is not there, and makes the container anew with what is saved — once nothing runs in it. */
-export const install = (): Promise<void> => exclusive(installNow, WAIT_MS);
+/**
+ * Pulls the image if it is not there, and makes the container anew with what
+ * is saved — once nothing runs in it. `start: false` leaves it made and
+ * stopped, as a stopped one was.
+ */
+export const install = ({ start = true }: { start?: boolean } = {}): Promise<void> => exclusive(() => installNow(start), WAIT_MS);
 export const start = (): Promise<void> => exclusive(startNow, WAIT_MS);
 export const stop = (): Promise<void> => exclusive(stopNow, WAIT_MS);
 export const remove = (): Promise<void> => exclusive(removeNow, WAIT_MS);
 
-async function installNow(): Promise<void> {
+async function installNow(start = true): Promise<void> {
   if (!dockerAvailable()) throw new Error("The portal cannot reach Docker here, so it cannot run Understory");
   const cfg = config();
   const made = spec(cfg, token(), await sharedNetworkMode());
@@ -279,7 +287,7 @@ async function installNow(): Promise<void> {
   if ((await onlyOurs()).exists) await removeNow();
   const created = await request<{ message?: string }>("POST", `/containers/create?name=${CONTAINER}`, made);
   if (created.status >= 400) throw new Error(created.body?.message || `Create failed (${created.status})`);
-  await startNow();
+  if (start) await startNow();
 }
 
 async function startNow(): Promise<void> {

@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { LuBot, LuBrain, LuCheck, LuDownload, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert } from "react-icons/lu";
-import { api, type AvailableModel, type Features, type ManagedUnderstory, type SubagentMode, type UnderstoryLlmChoice } from "../api";
+import { api, type AvailableModel, type Features, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { SwitchRow, inputCls } from "./SettingsUi";
@@ -54,7 +54,13 @@ const MODES: { value: SubagentMode; label: string; detail: string }[] = [
 ];
 
 export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
-  const [features, setFeatures] = useFeatures(onError);
+  // Its own, not with Understory's: a Docker that cannot be reached is not this tab's to wait on.
+  const [subagent, setSubagent] = useState<SubagentFeature | null>(null);
+  useEffect(() => {
+    api.subagentFeature().then((r) => setSubagent(r.subagent), (e: Error) => onError(e.message));
+  }, []);
+  const features = subagent && { subagent };
+  const setFeatures = (f: { subagent: SubagentFeature }) => setSubagent(f.subagent);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const name = useId();
@@ -165,7 +171,7 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
           <button
             type="button"
             aria-label="More at once"
-            disabled={busy || s.maxParallel >= MAX_PARALLEL}
+            disabled={busy || s.maxParallel >= (s.maxParallelLimit ?? MAX_PARALLEL)}
             onClick={() => void change({ maxParallel: s.maxParallel + 1 })}
             className="grid h-7 w-7 place-items-center rounded-lg bg-fg/5 text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
           >
@@ -183,7 +189,7 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
   );
 }
 
-/** As many as the tool allows at once. */
+/** As many as the tool allows at once, where the server does not say. */
 const MAX_PARALLEL = 16;
 
 const COMPOSE = `services:

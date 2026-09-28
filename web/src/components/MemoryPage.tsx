@@ -93,12 +93,13 @@ export function MemoryPage() {
     api.memoryHealth().then((r) => setWritable(r.writable), () => {});
   }, []);
 
-  /** Reads what a change moved — the tree, the counts — without leaving what is open. */
+  /** Reads what a change moved — the tree, the counts, what a search finds — without leaving what is open. */
   const refresh = () => {
     Promise.all([api.memoryTree(), api.memoryValidate().catch(() => null)]).then(([t, v]) => {
       setTree(t);
       setValidation(v);
     }, () => {});
+    if (asked) api.memorySearch(asked).then(setHits, () => {});
   };
   const [wiping, setWiping] = useState(false);
   /** The memory from nothing, after asking. */
@@ -116,6 +117,8 @@ export function MemoryPage() {
     try {
       await api.wipeMemory();
       close();
+      // Nothing found is left to show: what it found is gone.
+      setQuery("");
       load();
     } catch (e) {
       setFailed((e as Error).message);

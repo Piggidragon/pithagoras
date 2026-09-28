@@ -505,6 +505,8 @@ export const api = {
   suggestBrowserPassword: () =>
     json<{ password: string }>("/api/browser/suggest-password"),
   features: () => json<Features>("/api/features"),
+  /** The subagent tool alone: nothing of Understory or Docker asked for. */
+  subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
   /** Only whether each is on — cheap, for the sidebar and the chat's menus. */
   featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
@@ -1080,6 +1082,8 @@ export interface SubagentFeature {
   mode: SubagentMode;
   /** How many may run at once, across every chat. */
   maxParallel: number;
+  /** The most that may be set. */
+  maxParallelLimit?: number;
   /** What they run on unless a chat says: "auto", the model the chat is on, or "provider/model". */
   model: string;
 }

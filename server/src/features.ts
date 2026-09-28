@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
-import { piAgentDir, readPiSettings } from "./pi-settings.js";
-import { readMcpFile, type McpFile } from "./api/mcp.js";
+import { piAgentDir, piSettingsPath, readPiSettings } from "./pi-settings.js";
+import { mcpConfigPath, readMcpFile, type McpFile } from "./api/mcp.js";
 
 /**
  * Optional capabilities the portal ships and leaves off: a subagent tool, and
@@ -55,6 +55,11 @@ function packageName(dir: string): string | undefined {
   }
 }
 
+/** A package pi lists by its folder, as a full path: relative to pi's own folder, `~` for home. */
+export function localPackagePath(source: string, agentDir = piAgentDir()): string {
+  return path.resolve(agentDir, source.replace(/^~(?=\/)/, process.env.HOME ?? "~"));
+}
+
 /**
  * Where pi's packages list has the subagent tool: the bundled folder, or any
  * folder holding a package of that name — one installed by hand from a clone
@@ -70,7 +75,7 @@ export function findSubagent(
   for (const entry of packages) {
     const source = sourceOf(entry);
     if (!source || /^(npm|git|https?):/.test(source)) continue;
-    const dir = path.resolve(agentDir, source.replace(/^~(?=\/)/, process.env.HOME ?? "~"));
+    const dir = localPackagePath(source, agentDir);
     if ((bundled && real(dir) === real(bundled)) || nameOf(dir) === SUBAGENT_PACKAGE) {
       return { source, enabled: !isSwitchedOff(entry) };
     }
@@ -109,6 +114,8 @@ export function subagentState() {
     source: found?.source ?? null,
     mode: subagentModeOf(settings),
     maxParallel: subagentLimitOf(settings),
+    // The most there may be, for the page to count up to: said here, not repeated there.
+    maxParallelLimit: SUBAGENT_MAX_PARALLEL,
     model: subagentModelOf(settings),
   };
 }
@@ -166,15 +173,36 @@ export function understoryIn(config: McpFile): boolean {
  * and switching the server off in Settings → MCP brings MEMORY.md back too;
  * so does switching off pi-mcp-adapter, which its tools come through.
  */
+let known: { stamp: string; on: boolean } | undefined;
+
+/** When the two files it is read from last changed: asked each time a prompt is built, read only when they did. */
+function filesStamp(): string {
+  return [mcpConfigPath(), piSettingsPath()]
+    .map((f) => {
+      try {
+        const st = statSync(f);
+        return `${st.mtimeMs}:${st.size}`;
+      } catch {
+        return "-";
+      }
+    })
+    .join("|");
+}
+
 export function understoryOn(): boolean {
+  const stamp = filesStamp();
+  if (known?.stamp === stamp) return known.on;
+  let on = false;
   try {
     const { config, error } = readMcpFile();
     // Its tools are there only through the adapter: without it, MEMORY.md
     // would be taken away and nothing given in its place.
-    return !error && understoryIn(config) && mcpAdapter()?.enabled === true;
+    on = !error && understoryIn(config) && mcpAdapter()?.enabled === true;
   } catch {
-    return false;
+    on = false;
   }
+  known = { stamp, on };
+  return on;
 }
 
 /** Said to the agent in place of MEMORY.md, while Understory holds its memory. */

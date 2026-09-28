@@ -22,25 +22,38 @@ import { existingLlmToken } from "./extensions/understory-service.js";
  * speaks to its server, and nothing here translates.
  */
 
-/** Chats with a memory tool running, and in which order they started one: the newest is the one asking. */
-const asking = new Map<string, { calls: number; since: number }>();
+/** Chats with a memory tool running — by call — and in which order they started one: the newest is the one asking. */
+const asking = new Map<string, { calls: Set<string>; since: number }>();
 let lastAsked: string | undefined;
 // A count, not a clock: two calls in the same millisecond are still one after the other.
 let order = 0;
 
 const isMemoryTool = (name: unknown) => typeof name === "string" && name.startsWith(`${UNDERSTORY}_`);
 
-/** A tool call in a chat, starting or ending — its subagents' included, which are on its behalf. */
-export function noteToolCall(sessionId: string, toolName: unknown, phase: "start" | "end"): void {
+/**
+ * A tool call in a chat, starting or ending — its subagents' included, which
+ * are on its behalf, their calls named `<subagent>:<call>`.
+ */
+export function noteToolCall(sessionId: string, call: string, toolName: unknown, phase: "start" | "end"): void {
   if (!isMemoryTool(toolName)) return;
   const had = asking.get(sessionId);
   if (phase === "start") {
-    asking.set(sessionId, { calls: (had?.calls ?? 0) + 1, since: ++order });
+    const calls = had?.calls ?? new Set<string>();
+    calls.add(call);
+    asking.set(sessionId, { calls, since: ++order });
     lastAsked = sessionId;
   } else if (had) {
-    if (had.calls <= 1) asking.delete(sessionId);
-    else had.calls--;
+    had.calls.delete(call);
+    if (!had.calls.size) asking.delete(sessionId);
   }
+}
+
+/** A subagent ended — perhaps killed mid-call: whatever it was asking, it asks no more. */
+export function subagentGone(sessionId: string, subagent: string): void {
+  const had = asking.get(sessionId);
+  if (!had) return;
+  for (const call of [...had.calls]) if (call.startsWith(`${subagent}:`)) had.calls.delete(call);
+  if (!had.calls.size) asking.delete(sessionId);
 }
 
 /** The chat a request from Understory is for. */

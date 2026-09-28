@@ -6,6 +6,7 @@ import {
   UNDERSTORY_TOKEN_ENV,
   bundledSubagentDir,
   isModelChoice,
+  localPackagePath,
   mcpAdapter,
   subagentModelOf,
   subagentState,
@@ -15,8 +16,7 @@ import {
   understoryOn,
   understoryTokenOf,
 } from "../features.js";
-import path from "node:path";
-import { piAgentDir, readPiSettings, updatePiSettings } from "../pi-settings.js";
+import { readPiSettings, updatePiSettings } from "../pi-settings.js";
 import { sessions } from "../session-manager.js";
 import { switchPackage } from "./extensions.js";
 import { readMcpFile, writeMcpFile } from "./mcp.js";
@@ -164,6 +164,15 @@ export function featuresRouter(): Router {
     }
   });
 
+  /** The subagent tool alone: its tab needs nothing of Understory or Docker. */
+  router.get("/features/subagent", (_req, res) => {
+    try {
+      res.json({ subagent: subagentState() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
   router.get("/features", async (_req, res) => {
     try {
       res.json({ subagent: subagentState(), understory: await understoryState() });
@@ -207,13 +216,20 @@ export function featuresRouter(): Router {
         // A folder as pi's settings name it is relative to its folder; handed
         // to `pi remove` as it is, pi reads it from where the portal runs.
         const local = !/^(npm|git|https?):/.test(state.source);
-        await pi(["remove", local ? path.resolve(piAgentDir(), state.source) : state.source]);
-        // What was kept aside for switching it back on has nothing left to go to.
-        const stash = extensionStash();
-        if (state.source in stash) {
-          delete stash[state.source];
-          setExtensionStash(stash);
-        }
+        await pi(["remove", local ? localPackagePath(state.source) : state.source]);
+        // What was kept aside for switching it back on has nothing left to go
+        // to — dropped in turn with the other switches, which read and write it too.
+        const source = state.source;
+        await updatePiSettings(
+          () => {},
+          () => {
+            const stash = extensionStash();
+            if (source in stash) {
+              delete stash[source];
+              setExtensionStash(stash);
+            }
+          },
+        );
       }
       // The mode changes what the tool tells the model, which it reads when it is loaded.
       const { reloaded, waiting } = await sessions.reloadIdle();
@@ -274,16 +290,18 @@ export function featuresRouter(): Router {
     }
     const before = service.config();
     const wasInstalled = await service.installed();
+    // Made anew as it was: one stopped stays stopped, and runs no pass meanwhile.
+    const wasRunning = wasInstalled && (await service.status()).container === "running";
     try {
       service.saveConfig({ llm, dreamInterval, dreamAt });
-      if (wasInstalled) await service.install();
+      if (wasInstalled) await service.install({ start: wasRunning });
       res.json({ understory: await understoryState() });
     } catch (e) {
       service.restoreConfig(before);
       // Made anew is removed first: one that could not be made with the new
       // settings is made again with the old, rather than left gone.
       if (wasInstalled && !(await service.installed().catch(() => true))) {
-        await service.install().catch((again) => console.error(`[portal] Understory could not be made again: ${(again as Error).message}`));
+        await service.install({ start: wasRunning }).catch((again) => console.error(`[portal] Understory could not be made again: ${(again as Error).message}`));
       }
       res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
     }

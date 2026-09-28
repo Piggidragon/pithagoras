@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type PiModel } from "../api";
-import { useCached } from "../settings-cache";
+import { load, peek, useCached } from "../settings-cache";
 import { Select } from "./Select";
 
 export interface SubagentChoice {
@@ -19,7 +19,21 @@ export interface SubagentChoice {
  */
 export function useSubagentChoice(sessionId: string, onError?: (e: string) => void): SubagentChoice {
   const features = useCached("feature-flags", api.featureFlags, { freshMs: 30_000 });
-  const stored = useCached(`subagent-model:${sessionId}`, () => api.subagentModel(sessionId), { freshMs: 30_000 });
+  const on = features.value?.subagent?.enabled === true;
+  // Asked only while the tool is on: otherwise there is nothing to show, and a chat not yet saved has no answer.
+  const key = `subagent-model:${sessionId}`;
+  const [value, setValue] = useState<{ model: string | null; default: string } | undefined>(() => peek(key));
+  const reloadStored = () => load(key, () => api.subagentModel(sessionId), 0, true).then(setValue, () => {});
+  useEffect(() => {
+    setValue(peek(key));
+    if (!on) return;
+    let current = true;
+    load(key, () => api.subagentModel(sessionId), 30_000).then((v) => current && setValue(v), () => {});
+    return () => {
+      current = false;
+    };
+  }, [key, on]);
+  const stored = { value, reload: reloadStored };
   // What was just chosen here, until the server has said it back.
   const [picked, setPicked] = useState<{ model: string | null } | null>(null);
   useEffect(() => setPicked(null), [sessionId]);
@@ -36,7 +50,7 @@ export function useSubagentChoice(sessionId: string, onError?: (e: string) => vo
   const known = typeof stored.value?.default === "string" ? stored.value : undefined;
   const choice = known && (picked ? { ...known, ...picked } : known);
   return {
-    on: features.value?.subagent?.enabled === true,
+    on,
     choice,
     set: (model) => {
       setPicked({ model });

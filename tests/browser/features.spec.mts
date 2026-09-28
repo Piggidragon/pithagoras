@@ -32,6 +32,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     else if (p === '/api/voice') body = { enabled: false };
     else if (p === '/api/workspaces') body = { root: '/w', workspaces: [] };
     else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
+    else if (p === '/api/features/subagent' && method === 'GET') body = { subagent: state.subagent };
     else if (p === '/api/features/flags') body = { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled } };
     else if (p === '/api/features') body = state;
     else if (p === '/api/features/subagent' && method === 'PUT') {
@@ -301,4 +302,12 @@ test("a container by Understory's name that the portal did not make is left alon
   await expect(here.getByRole('alert')).toContainText('the portal did not make');
   await expect(here.getByRole('button', { name: "Install and use as the agent's memory" })).toBeDisabled();
   await expect(here.getByRole('button', { name: 'Remove' })).toHaveCount(0);
+});
+
+test("the Subagents tab opens whatever Docker's state: it asks nothing of it", async ({ page }) => {
+  await portal(page);
+  await page.route('**/api/features', (route) => route.fulfill({ status: 500, json: { error: 'connect EACCES /var/run/docker.sock' } }));
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Subagents' }).click();
+  await expect(addons(page).getByRole('switch', { name: 'Subagent tool' })).toBeVisible();
 });

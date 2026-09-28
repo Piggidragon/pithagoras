@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { LiveEvents } from "./live-events.js";
-import { forgetChat, noteToolCall } from "./memory-llm.js";
+import { forgetChat, noteToolCall, subagentGone } from "./memory-llm.js";
 import { ModelErrors } from "./model-errors.js";
 import { EventEmitter } from "node:events";
 import type { PersonRow, Role } from "./people.js";
@@ -45,6 +45,7 @@ import {
   getSettings,
   markOrphanedSessionsInterrupted,
   openDetachedSubagents,
+  openSubagentsIn,
   browserAllowed,
   sessionTools,
   setSessionTools,
@@ -792,9 +793,12 @@ class SessionManager extends EventEmitter {
     const sub = msg.type === "portal_subagent" && msg.op === "event" ? msg.event ?? {} : undefined;
     const event = sub ?? msg;
     // Which chat Understory is thinking for, when its model is the chat's.
+    // By call, a subagent's under its own name: one ended mid-call takes its calls with it.
     if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
-      noteToolCall(sessionId, event.toolName, event.type === "tool_execution_start" ? "start" : "end");
+      const call = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
+      noteToolCall(sessionId, call, event.toolName, event.type === "tool_execution_start" ? "start" : "end");
     }
+    if (msg.type === "portal_subagent" && msg.op === "end") subagentGone(sessionId, String(msg.id));
     const id = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
     let calls = this.calls.get(sessionId);
     if (event.type === "tool_execution_start") {
@@ -2336,6 +2340,12 @@ class SessionManager extends EventEmitter {
     this.dropCommands(sessionId);
     // No memory tool of its is running any more, whatever it last said.
     forgetChat(sessionId);
+    // Nor a subagent in the background: it ran in this pi. Stopped, the
+    // bridge has said so already; crashed, nothing has — written here, once,
+    // for whichever is still open.
+    for (const id of openSubagentsIn(sessionId)) {
+      this.record(sessionId, "portal_subagent", { type: "portal_subagent", op: "end", id, detached: true, status: "stopped", error: "Its chat's pi went away" });
+    }
     // What the extensions showed went with the process that ran them: stopped
     // for a restart or a delete as much as crashed. Left, a status naming a
     // command had the page list the commands, starting pi.

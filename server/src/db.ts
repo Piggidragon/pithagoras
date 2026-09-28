@@ -1819,6 +1819,11 @@ function noteOpenSubagent(sessionId: string, payload: unknown): void {
  * Background subagents a chat started and whose end was never written: the
  * process that ran them went with the last server.
  */
+/** The background subagents one chat has open. */
+export function openSubagentsIn(sessionId: string): string[] {
+  return (getDb().prepare("SELECT id FROM open_subagents WHERE session_id = ?").all(sessionId) as { id: string }[]).map((r) => r.id);
+}
+
 export function openDetachedSubagents(): { sessionId: string; id: string }[] {
   return (getDb().prepare("SELECT session_id, id FROM open_subagents").all() as { session_id: string; id: string }[]).map((r) => ({
     sessionId: r.session_id,

@@ -1,4 +1,4 @@
-import { bindHost, loginThrottle, portalSecurityHeaders } from "./http-security.js";
+import { bindHost, loginThrottle, portalSecurityHeaders, tlsFiles } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
 import { canvasEvents, listCanvases } from "./canvases.js";
 import { clampLevel } from "./pi/model-runtime.js";
@@ -1392,11 +1392,10 @@ mkdirSync(BIN_DIR, { recursive: true });
  * to think about certificates. Needed for the embedded browser, which refuses
  * to run unless every page above it is a secure context.
  */
-const tlsCert = process.env.PORTAL_TLS_CERT;
-const tlsKey = process.env.PORTAL_TLS_KEY;
+const tlsAt = tlsFiles();
 const tls =
-  tlsCert && tlsKey && existsSync(tlsCert) && existsSync(tlsKey)
-    ? { cert: readFileSync(tlsCert), key: readFileSync(tlsKey) }
+  tlsAt
+    ? { cert: readFileSync(tlsAt.cert), key: readFileSync(tlsAt.key) }
     : null;
 
 const host = bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN);
