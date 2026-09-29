@@ -1,7 +1,11 @@
 import Database from "better-sqlite3";
 import { piSetting } from "./pi-settings.js";
+import { browserTool, toolEnabled } from "./tool-policy.js";
+import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { agentHome } from "./agent-home.js";
+import { DATA_DIR } from "./data-dir.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -20,8 +24,16 @@ export interface SessionRow {
   thinking_level: string | null;
   /** SQLite has no boolean; 0 or 1. */
   pinned: number;
+  /**
+   * 1 while the chat is still waiting to be named after its first message.
+   * A flag rather than a look at the title: a chat somebody calls "New chat" on
+   * purpose is theirs, and is not renamed.
+   */
+  auto_title: number;
   /** pi's own session file, so the exact conversation is reopened on restart. */
   pi_session_file: string | null;
+  /** How often its events were put back under seqs pages had read past: see bumpReloads. */
+  reloads?: number;
   /**
    * "task" for the ones you create here, "agent" for one reached through a
    * channel, "routine" for one a schedule owns.
@@ -50,6 +62,10 @@ export interface SessionRow {
   last_person_key: string | null;
   /** May this session drive the agent's browser? Off unless turned on. */
   browser: number;
+  /** Tools switched off for this conversation, newline separated. */
+  tools_off: string;
+  /** And switched on against a default that has them off. */
+  tools_on: string;
 }
 
 export interface EventRow {
@@ -60,7 +76,6 @@ export interface EventRow {
   created_at: string;
 }
 
-const DATA_DIR = process.env.DATA_DIR || "./data";
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
@@ -82,11 +97,13 @@ export function getDb(): Database.Database {
       model TEXT,
       thinking_level TEXT,
       pinned INTEGER NOT NULL DEFAULT 0,
+      auto_title INTEGER NOT NULL DEFAULT 0,
       pi_session_file TEXT,
       kind TEXT NOT NULL DEFAULT 'task',
       channel_slug TEXT,
       channel_key TEXT,
-      routine_slug TEXT
+      routine_slug TEXT,
+      reloads INTEGER NOT NULL DEFAULT 0
     );
     -- The index on (channel_id, channel_key) is created in migrate(), not here.
     -- CREATE TABLE IF NOT EXISTS is a no-op against an existing table, so on an
@@ -117,6 +134,27 @@ export function getDb(): Database.Database {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);
+
+    -- The other versions of a message: what followed a message that was
+    -- edited or sent again, kept so the page can switch back to it. Each row
+    -- is one branch not shown now — its events, and pi's file as it was —
+    -- after the message sent at seq "anchor" (0: the first message). "seq"
+    -- is the branch's own first message, which orders it among the others.
+    -- Of pi's file only what differs from the conversation it went on from:
+    -- "file" is the rest after its first "file_prefix" characters, which
+    -- hash to "prefix_hash"; a switch checks that start is still the same.
+    CREATE TABLE IF NOT EXISTS message_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      anchor INTEGER NOT NULL,
+      seq INTEGER NOT NULL,
+      rows TEXT NOT NULL,
+      file TEXT,
+      file_prefix INTEGER,
+      prefix_hash TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_message_versions ON message_versions(session_id, anchor);
 
     -- Two-way links into the agent session. Each row is one connection
     -- (a Telegram bot, a Slack app, an inbound webhook); messages arriving on
@@ -279,6 +317,24 @@ export function getDb(): Database.Database {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    -- Background subagents started and not yet ended, kept as their events
+    -- are written: what a server that went left open is read from here at
+    -- start, not dug out of every event there ever was.
+    CREATE TABLE IF NOT EXISTS open_subagents (
+      session_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      PRIMARY KEY (session_id, id)
+    );
+
+    -- Logins signed out before they ran out, by the signature of their cookie.
+    -- The cookie carries no state of its own, so without this a copy of one
+    -- would go on working for the rest of its thirty days.
+    CREATE TABLE IF NOT EXISTS signed_out (
+      mac TEXT PRIMARY KEY,
+      -- When the cookie would have stopped working anyway; past it, the row goes.
+      expires INTEGER NOT NULL
+    );
   `);
   migrate(db);
   return db;
@@ -303,6 +359,10 @@ function migrate(d: Database.Database): void {
   if (!names.includes("pinned")) {
     d.exec("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
   }
+  // Existing chats have their names already, so they default to none pending.
+  if (!names.includes("auto_title")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN auto_title INTEGER NOT NULL DEFAULT 0");
+  }
   if (!names.includes("pi_session_file")) {
     d.exec("ALTER TABLE sessions ADD COLUMN pi_session_file TEXT");
   }
@@ -317,6 +377,34 @@ function migrate(d: Database.Database): void {
   }
   if (!names.includes("role")) {
     d.exec("ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'primary'");
+  }
+  // Tools switched off for this conversation, by name, newline separated.
+  // Stored as the exceptions rather than the allowed set: a tool installed
+  // after the choice was made is on, which is what "off" was never said about.
+  if (!names.includes("tools_off")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN tools_off TEXT NOT NULL DEFAULT ''");
+  }
+  // And the ones switched back on against a default that has them off. Two
+  // lists rather than one, because a conversation holds exceptions to the
+  // default and an exception runs in both directions.
+  if (!names.includes("tools_on")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN tools_on TEXT NOT NULL DEFAULT ''");
+  }
+
+  // How often the chat's events were put back under seqs pages had read past:
+  // a page that last saw another count loads the chat again. See bumpReloads.
+  if (!names.includes("reloads")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN reloads INTEGER NOT NULL DEFAULT 0");
+  }
+  // Versions kept before pi's file was kept as the part after a checked start:
+  // one could not tell whether the conversation it would go back to was still
+  // there. Only ever on a test deploy; and the reload markers stored then.
+  const versionCols = (d.prepare("PRAGMA table_info(message_versions)").all() as { name: string }[]).map((c) => c.name);
+  if (versionCols.length && !versionCols.includes("prefix_hash")) {
+    d.exec("ALTER TABLE message_versions ADD COLUMN file_prefix INTEGER");
+    d.exec("ALTER TABLE message_versions ADD COLUMN prefix_hash TEXT");
+    d.exec("DELETE FROM message_versions");
+    d.exec("DELETE FROM events WHERE type = 'portal_reload'");
   }
 
   if (!names.includes("kind")) {
@@ -370,6 +458,16 @@ function migrate(d: Database.Database): void {
   if (routineCols.length && !routineCols.includes("guard")) {
     d.exec("ALTER TABLE routines ADD COLUMN guard INTEGER NOT NULL DEFAULT 1");
   }
+  // Where a routine's runs happen: NULL for Home, else a project's directory.
+  if (routineCols.length && !routineCols.includes("workspace")) {
+    d.exec("ALTER TABLE routines ADD COLUMN workspace TEXT");
+    // Until now every run was in Home, so every routine session is a Home one.
+    // A routine finds its session by place from here on, so one made under an
+    // earlier AGENT_HOME is moved to where Home is now rather than lost.
+    // Home is asked for only when there is one to move: a new database has none.
+    const runs = d.prepare("SELECT count(*) AS n FROM sessions WHERE kind = 'routine'").get() as { n: number };
+    if (runs.n) d.prepare("UPDATE sessions SET workspace = ? WHERE kind = 'routine'").run(agentHome());
+  }
   if (routineCols.length && !routineCols.includes("browser")) {
     d.exec("ALTER TABLE routines ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
   }
@@ -377,6 +475,23 @@ function migrate(d: Database.Database): void {
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_grants_open ON grants(session_id, tool, used_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC)");
+  // Messages sent into a run, and what settled them. Looked for across every
+  // chat at startup (unsettledMessages) and through a whole chat by every
+  // edit: the few among tens of thousands of events per chat, read without
+  // reading the rest. A query finds them only by repeating the same WHERE.
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_queued ON events(session_id, seq)
+       WHERE type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1`,
+  );
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_settled ON events(session_id, seq)
+       WHERE type IN ('portal_taken', 'portal_unsent')`,
+  );
+  // Commands and their ends, looked for at startup: see unansweredCommands.
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_commands ON events(session_id, seq)
+       WHERE type IN ('portal_command', 'portal_command_end')`,
+  );
   const ruleCols = (d.prepare("PRAGMA table_info(tool_rules)").all() as { name: string }[]).map(
     (c) => c.name
   );
@@ -397,6 +512,8 @@ function migrate(d: Database.Database): void {
   if (noteCols.length && !noteCols.includes("pending_delivery")) {
     d.exec("ALTER TABLE notes ADD COLUMN pending_delivery INTEGER NOT NULL DEFAULT 0");
   }
+  // Last, because it reads the settings the tables above have to exist for.
+  adoptBrowserGrants(d);
 }
 
 export function createSession(row: {
@@ -408,14 +525,16 @@ export function createSession(row: {
   channel_slug?: string | null;
   channel_key?: string | null;
   routine_slug?: string | null;
+  auto_title?: number;
 }): void {
   getDb()
     .prepare(
-      `INSERT INTO sessions (id, title, workspace, executor, kind, channel_slug, channel_key, routine_slug)
-       VALUES (@id, @title, @workspace, @executor, @kind, @channel_slug, @channel_key, @routine_slug)`
+      `INSERT INTO sessions (id, title, workspace, executor, kind, channel_slug, channel_key, routine_slug, auto_title)
+       VALUES (@id, @title, @workspace, @executor, @kind, @channel_slug, @channel_key, @routine_slug, @auto_title)`
     )
     .run({
       kind: "task",
+      auto_title: 0,
       channel_slug: null,
       channel_key: null,
       routine_slug: null,
@@ -444,11 +563,14 @@ export function findChannelSession(key: string): SessionRow | undefined {
     | undefined;
 }
 
-/** The session a routine owns, if it has run before. */
-export function findRoutineSession(slug: string): SessionRow | undefined {
+/**
+ * The session a routine owns in `workspace`, if it has run there before. One
+ * per place: moved to a project and back, it picks up its Home history again.
+ */
+export function findRoutineSession(slug: string, workspace: string): SessionRow | undefined {
   return getDb()
-    .prepare("SELECT * FROM sessions WHERE routine_slug = ? AND kind = 'routine' ORDER BY created_at ASC")
-    .get(slug) as SessionRow | undefined;
+    .prepare("SELECT * FROM sessions WHERE routine_slug = ? AND kind = 'routine' AND workspace = ? ORDER BY created_at ASC")
+    .get(slug, workspace) as SessionRow | undefined;
 }
 
 export function listRoutineSessions(slug?: string): SessionRow[] {
@@ -482,6 +604,7 @@ export function updateSession(
       | "model"
       | "thinking_level"
       | "pinned"
+      | "auto_title"
       | "pi_session_file"
     >
   >
@@ -503,7 +626,10 @@ export function deleteSession(id: string): void {
   const d = getDb();
   d.prepare("DELETE FROM canvases WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
+  d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+  d.prepare("DELETE FROM settings WHERE key = ?").run(`subagent_model:${id}`);
+  d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
 }
 
 /**
@@ -524,15 +650,20 @@ export function eventTime(createdAt: string | undefined): number | undefined {
 
 export function appendEvent(sessionId: string, type: string, payload: unknown): EventRow {
   const encodedPayload = JSON.stringify(payload);
+  // To the millisecond, and the same time live and after a reload: SQLite's
+  // own default keeps whole seconds, and a call timed from it took 0.1s or
+  // 1.0s depending on where the seconds fell.
+  const createdAt = new Date().toISOString();
   const info = getDb()
-    .prepare("INSERT INTO events (session_id, type, payload) VALUES (?, ?, ?)")
-    .run(sessionId, type, encodedPayload);
+    .prepare("INSERT INTO events (session_id, type, payload, created_at) VALUES (?, ?, ?, ?)")
+    .run(sessionId, type, encodedPayload, createdAt);
+  if (type === "portal_subagent") noteOpenSubagent(sessionId, payload);
   return {
     seq: Number(info.lastInsertRowid),
     session_id: sessionId,
     type,
     payload: encodedPayload,
-    created_at: new Date().toISOString(),
+    created_at: createdAt,
   };
 }
 
@@ -554,32 +685,313 @@ export function replayStart(sessionId: string, keep: number): number {
   return row?.seq ?? 0;
 }
 
-/** Every message the portal sent to the agent in this session, oldest first. */
-export function sentMessages(sessionId: string): { seq: number; message: string }[] {
+/**
+ * Where each message sent into a run was settled, by the seq it was sent at:
+ * the portal_taken that put it into the conversation, or the portal_unsent
+ * that dropped it. One missing from both is still waiting.
+ */
+function settledAt(sessionId: string): { taken: Map<number, number>; unsent: Map<number, number> } {
+  const taken = new Map<number, number>();
+  const unsent = new Map<number, number>();
   const rows = getDb()
-    .prepare("SELECT seq, payload FROM events WHERE session_id = ? AND type = 'portal_prompt' ORDER BY seq ASC")
-    .all(sessionId) as { seq: number; payload: string }[];
-  return rows.map((r) => ({ seq: r.seq, message: String(JSON.parse(r.payload)?.message ?? "") }));
+    .prepare("SELECT seq, type, payload FROM events WHERE session_id = ? AND type IN ('portal_taken', 'portal_unsent')")
+    .all(sessionId) as { seq: number; type: string; payload: string }[];
+  for (const r of rows) {
+    const p = JSON.parse(r.payload) ?? {};
+    if (r.type === "portal_taken") taken.set(Number(p.seq), r.seq);
+    else if (Array.isArray(p.seqs)) for (const seq of p.seqs) unsent.set(Number(seq), r.seq);
+  }
+  return { taken, unsent };
 }
 
 /**
- * Drops a stretch of a session's transcript: `from` up to, not including, `to` — or to the end.
- * Returns what it removed, so the caller can put it back.
+ * Where an event sits in the conversation.
+ *
+ * Its own seq, except for a message sent into a run: that one was written down
+ * when it was sent, in the middle of a reply, and read by the agent later — so
+ * it sits where it was taken in or dropped, which is where the transcript
+ * shows it. One still waiting sits after everything.
  */
-export function deleteEventsBetween(sessionId: string, from: number, to: number | null): EventRow[] {
+function placeOf(
+  row: { seq: number; type: string; payload: string },
+  settled: ReturnType<typeof settledAt>,
+): number {
+  // A command's end is where its command is: taken out with it, and kept
+  // with one that stays, when the end fell among what is taken out.
+  if (row.type === "portal_command_end") {
+    const of = (JSON.parse(row.payload) ?? {}).of;
+    return typeof of === "number" ? of : row.seq;
+  }
+  if (row.type !== "portal_prompt" || !(JSON.parse(row.payload) ?? {}).queued) return row.seq;
+  return settled.taken.get(row.seq) ?? settled.unsent.get(row.seq) ?? Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Every message the portal sent to the agent in this session, in the order the
+ * agent read them — which is the order of pi's file. `at` is where each sits in
+ * the transcript: see placeOf.
+ */
+export function sentMessages(
+  sessionId: string,
+): { seq: number; at: number; message: string; payload: Record<string, unknown> }[] {
+  const rows = getDb()
+    .prepare("SELECT seq, type, payload FROM events WHERE session_id = ? AND type = 'portal_prompt' ORDER BY seq ASC")
+    .all(sessionId) as { seq: number; type: string; payload: string }[];
+  const settled = settledAt(sessionId);
+  // One sent mid-run and stopped before pi took it in never reached pi's
+  // file, and counted here it would put every later message one out.
+  return rows
+    .filter((r) => !settled.unsent.has(r.seq))
+    .map((r) => {
+      const payload = JSON.parse(r.payload) ?? {};
+      return { seq: r.seq, at: placeOf(r, settled), message: String(payload.message ?? ""), payload };
+    })
+    .sort((a, b) => a.at - b.at || a.seq - b.seq);
+}
+
+/**
+ * Messages sent into a run that were neither taken in nor dropped: what a
+ * server that died mid-run left behind. By session, oldest first, each with
+ * the payload it was sent with.
+ *
+ * Read once at startup, so in two passes that each read a row once — the
+ * queued messages, then what settled them in the sessions that have any —
+ * rather than a lookup through a session's events per message.
+ */
+export function unsettledMessages(): {
+  sessionId: string;
+  seq: number;
+  message: string;
+  images: number;
+  prompt: Record<string, unknown>;
+}[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT session_id, seq, payload FROM events
+       WHERE type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1
+       ORDER BY session_id, seq`,
+    )
+    .all() as { session_id: string; seq: number; payload: string }[];
+  const settled = new Map<string, ReturnType<typeof settledAt>>();
+  const out: ReturnType<typeof unsettledMessages> = [];
+  for (const r of rows) {
+    if (!settled.has(r.session_id)) settled.set(r.session_id, settledAt(r.session_id));
+    const { taken, unsent } = settled.get(r.session_id)!;
+    if (taken.has(r.seq) || unsent.has(r.seq)) continue;
+    const prompt = JSON.parse(r.payload) ?? {};
+    out.push({
+      sessionId: r.session_id,
+      seq: r.seq,
+      message: String(prompt.message ?? ""),
+      images: Array.isArray(prompt.images) ? prompt.images.length : 0,
+      prompt,
+    });
+  }
+  return out;
+}
+
+/**
+ * Commands no end was written for. "type IN (…)" is repeated from
+ * idx_events_commands, or SQLite does not see that the index covers the
+ * query, and reads the whole table twice; ordered as the index is, or it reads
+ * the table in seq order to spare itself a sort.
+ */
+export const UNANSWERED_COMMANDS = `SELECT session_id, seq FROM events
+       WHERE type IN ('portal_command', 'portal_command_end') AND type = 'portal_command'
+         AND seq NOT IN (
+           -- Not one NULL among them: NOT IN a list holding one matches nothing.
+           SELECT json_extract(payload, '$.of') FROM events
+           WHERE type IN ('portal_command', 'portal_command_end') AND type = 'portal_command_end'
+             AND json_extract(payload, '$.of') IS NOT NULL
+         )
+       ORDER BY session_id, seq`;
+
+/**
+ * Commands a server that died left unanswered, with the reason each threw
+ * before it did, where pi said so. Found by SQL, from the commands and their
+ * ends alone: see idx_events_commands.
+ */
+export function unansweredCommands(): { sessionId: string; seq: number; error?: string }[] {
+  const rows = getDb().prepare(UNANSWERED_COMMANDS).all() as { session_id: string; seq: number }[];
+  // Its own failure, marked as its own: not the next one of the same name.
+  const threw = getDb().prepare(
+    `SELECT json_extract(payload, '$.reason') AS reason FROM events
+     WHERE session_id = ? AND seq > ? AND type = 'portal_notice' AND json_extract(payload, '$.of') = ?
+     LIMIT 1`,
+  );
+  return rows.map((r) => {
+    const found = threw.get(r.session_id, r.seq, r.seq) as { reason: unknown } | undefined;
+    return { sessionId: r.session_id, seq: r.seq, ...(found?.reason != null ? { error: String(found.reason) } : {}) };
+  });
+}
+
+/** One message the portal sent to the agent, by its seq, or undefined if that is not one. */
+export function sentMessage(
+  sessionId: string,
+  seq: number,
+): { seq: number; message: string; payload: Record<string, unknown> } | undefined {
+  const row = getDb()
+    .prepare("SELECT payload FROM events WHERE session_id = ? AND seq = ? AND type = 'portal_prompt'")
+    .get(sessionId, seq) as { payload: string } | undefined;
+  if (!row) return undefined;
+  const payload = JSON.parse(row.payload) ?? {};
+  return { seq, message: String(payload.message ?? ""), payload };
+}
+
+/**
+ * Drops a stretch of a session's transcript: what sits from `from` up to, not
+ * including, `to` — or to the end. Placed as placeOf places it, so a message
+ * sent into a run goes with the stretch it was read in, not the one it was
+ * typed during.
+ *
+ * Returns what it removed, so the caller can put it back, and how that differs
+ * from the plain seq range — `also` outside it, `kept` inside it — so a page
+ * holding the events can drop the same ones.
+ */
+export function deleteEventsBetween(
+  sessionId: string,
+  from: number,
+  to: number | null,
+): { rows: EventRow[]; also: number[]; kept: number[] } {
   const db = getDb();
   return db.transaction(() => {
+    const settled = settledAt(sessionId);
+    const inRange = (at: number) => at >= from && (to === null || at < to);
     const rows = db
-      .prepare("SELECT * FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?) ORDER BY seq ASC")
-      .all(sessionId, from, to, to) as EventRow[];
-    db.prepare("DELETE FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)").run(
-      sessionId,
-      from,
-      to,
-      to,
-    );
-    return rows;
+      .prepare(
+        `SELECT * FROM events WHERE session_id = ?
+           AND ((seq >= ? AND (? IS NULL OR seq < ?))
+                OR (type = 'portal_prompt' AND json_extract(payload, '$.queued') = 1)
+                -- The ends of commands after the range, for any of its commands: see placeOf.
+                OR (type IN ('portal_command', 'portal_command_end') AND type = 'portal_command_end' AND ? IS NOT NULL AND seq >= ?))
+         ORDER BY seq ASC`,
+      )
+      .all(sessionId, from, to, to, to, to) as EventRow[];
+    const gone = rows.filter((r) => inRange(placeOf(r, settled)));
+    const going = new Set(gone);
+    const also = gone.filter((r) => !inRange(r.seq)).map((r) => r.seq);
+    const kept = rows.filter((r) => inRange(r.seq) && !going.has(r)).map((r) => r.seq);
+    // The range in one statement, less the few messages placed outside it;
+    // then the few placed inside it from outside. A long chat's tail is tens
+    // of thousands of rows, and one statement per row held up the server.
+    db.prepare(
+      `DELETE FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)
+         AND seq NOT IN (SELECT value FROM json_each(?))`,
+    ).run(sessionId, from, to, to, JSON.stringify(kept));
+    const drop = db.prepare("DELETE FROM events WHERE seq = ?");
+    for (const seq of also) drop.run(seq);
+    return { rows: gone, also, kept };
   })();
+}
+
+/** A branch of a conversation not shown now: see message_versions. */
+export interface MessageVersion {
+  id: number;
+  anchor: number;
+  seq: number;
+  rows: EventRow[];
+  /** pi's file after its first `filePrefix` characters; null when there was no file. */
+  file: string | null;
+  filePrefix: number | null;
+  prefixHash: string | null;
+}
+
+type VersionRow = { id: number; anchor: number; seq: number; rows: string; file: string | null; file_prefix: number | null; prefix_hash: string | null };
+const versionOf = (r: VersionRow): MessageVersion => ({
+  id: r.id,
+  anchor: r.anchor,
+  seq: r.seq,
+  rows: JSON.parse(r.rows) as EventRow[],
+  file: r.file,
+  filePrefix: r.file_prefix,
+  prefixHash: r.prefix_hash,
+});
+
+/** Keeps a branch the conversation is leaving; returns its id. */
+export function saveVersion(sessionId: string, v: Omit<MessageVersion, "id">): number {
+  return Number(
+    getDb()
+      .prepare("INSERT INTO message_versions (session_id, anchor, seq, rows, file, file_prefix, prefix_hash) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(sessionId, v.anchor, v.seq, JSON.stringify(v.rows), v.file, v.filePrefix, v.prefixHash).lastInsertRowid,
+  );
+}
+
+/** The first messages of the branches kept after `anchor`, oldest first. */
+export function versionSeqs(sessionId: string): { anchor: number; seq: number }[] {
+  return getDb()
+    .prepare("SELECT anchor, seq FROM message_versions WHERE session_id = ? ORDER BY seq")
+    .all(sessionId) as { anchor: number; seq: number }[];
+}
+
+const VERSION_AT = "SELECT * FROM message_versions WHERE session_id = ? AND anchor = ? AND seq = ?";
+
+/** A kept branch, left where it is: undefined if there is none. */
+export function findVersion(sessionId: string, anchor: number, seq: number): MessageVersion | undefined {
+  const row = getDb().prepare(VERSION_AT).get(sessionId, anchor, seq) as VersionRow | undefined;
+  return row && versionOf(row);
+}
+
+/** Takes a kept branch out, to be shown again: undefined if there is none. */
+export function takeVersion(sessionId: string, anchor: number, seq: number): MessageVersion | undefined {
+  const d = getDb();
+  return d.transaction(() => {
+    const row = d.prepare(VERSION_AT).get(sessionId, anchor, seq) as VersionRow | undefined;
+    if (!row) return undefined;
+    d.prepare("DELETE FROM message_versions WHERE id = ?").run(row.id);
+    return versionOf(row);
+  })();
+}
+
+/** Forgets one kept branch. */
+export function dropVersion(id: number): void {
+  getDb().prepare("DELETE FROM message_versions WHERE id = ?").run(id);
+}
+
+/**
+ * Counts one more time a chat's events were put back under seqs its pages
+ * had read past, and returns the count: a page that last saw another loads
+ * the chat again.
+ */
+export function bumpReloads(sessionId: string): number {
+  const row = getDb().prepare("UPDATE sessions SET reloads = reloads + 1 WHERE id = ? RETURNING reloads").get(sessionId) as
+    | { reloads: number }
+    | undefined;
+  return row?.reloads ?? 0;
+}
+
+/**
+ * Forgets the versions kept after the messages at `anchors`, and the versions
+ * inside those that nothing else can reach any more: their anchors are
+ * messages kept only in what is being forgotten.
+ */
+export function dropVersionsAt(sessionId: string, anchors: number[]): void {
+  const d = getDb();
+  d.transaction(() => {
+    const find = d.prepare("SELECT id FROM message_versions WHERE session_id = ? AND anchor = ?");
+    // The messages inside one, found by SQLite: not the whole of it read into JavaScript.
+    const prompts = d.prepare(
+      `SELECT json_extract(value, '$.seq') AS seq FROM message_versions, json_each(message_versions.rows)
+       WHERE message_versions.id = ? AND json_extract(value, '$.type') = 'portal_prompt'`,
+    );
+    const drop = d.prepare("DELETE FROM message_versions WHERE id = ?");
+    const queue = [...anchors];
+    for (let anchor = queue.shift(); anchor !== undefined; anchor = queue.shift()) {
+      for (const v of find.all(sessionId, anchor) as { id: number }[]) {
+        for (const r of prompts.all(v.id) as { seq: number }[]) queue.push(r.seq);
+        drop.run(v.id);
+      }
+    }
+  })();
+}
+
+/** Takes events out by seq: see restoreEvents, which this undoes. */
+export function deleteEventSeqs(seqs: number[]): void {
+  getDb().prepare("DELETE FROM events WHERE seq IN (SELECT value FROM json_each(?))").run(JSON.stringify(seqs));
+}
+
+/** Runs `fn` as one transaction: all of what it writes, or none of it. */
+export function atomically<T>(fn: () => T): T {
+  return getDb().transaction(fn)();
 }
 
 /** Puts events back under the seq they had — the inverse of deleteEventsBetween. */
@@ -605,9 +1017,35 @@ export function latestSeq(): number {
   return row?.seq ?? 0;
 }
 
+/**
+ * Adds to what a portal_prompt says, once pi has said what it did with the
+ * message: that it queued one sent as starting a run, or the words it queued.
+ */
+export function notePromptQueued(seq: number, fields: Record<string, unknown>): void {
+  getDb()
+    .prepare("UPDATE events SET payload = json_patch(payload, ?) WHERE seq = ? AND type = 'portal_prompt'")
+    .run(JSON.stringify(fields), seq);
+}
+
 /** Drops one event. */
 export function deleteEvent(seq: number): void {
   getDb().prepare("DELETE FROM events WHERE seq = ?").run(seq);
+}
+
+/**
+ * Drops what a session recorded after `seq`, but for its status changes — an
+ * error among them is what says why the rest is gone — and the ends of
+ * commands sent before it, which stay. Returns the seqs dropped.
+ */
+export function deleteEventsAfter(sessionId: string, seq: number): number[] {
+  const db = getDb();
+  const which = `session_id = ? AND seq > ? AND type != 'portal_status'
+    AND NOT (type = 'portal_command_end' AND json_extract(payload, '$.of') <= ?)`;
+  return db.transaction(() => {
+    const gone = db.prepare(`SELECT seq FROM events WHERE ${which} ORDER BY seq`).all(sessionId, seq, seq) as { seq: number }[];
+    db.prepare(`DELETE FROM events WHERE ${which}`).run(sessionId, seq, seq);
+    return gone.map((r) => r.seq);
+  })();
 }
 
 /** The page before a cursor, oldest first — what a transcript scrolls back into. */
@@ -634,13 +1072,14 @@ export function eventsSince(sessionId: string, since = 0, limit = 5000): EventRo
  * that owned it died with the previous server. Mark them interrupted so the UI
  * can offer a resume instead of showing a spinner forever.
  */
-export function markOrphanedSessionsInterrupted(): number {
-  const info = getDb()
+/** The ids of the sessions it marked. */
+export function markOrphanedSessionsInterrupted(): string[] {
+  const rows = getDb()
     .prepare(
-      "UPDATE sessions SET status = 'interrupted', updated_at = datetime('now') WHERE status = 'running'"
+      "UPDATE sessions SET status = 'interrupted', updated_at = datetime('now') WHERE status = 'running' RETURNING id"
     )
-    .run();
-  return info.changes;
+    .all() as { id: string }[];
+  return rows.map((r) => r.id);
 }
 
 // --- global settings ---
@@ -666,6 +1105,12 @@ const SETTING_DEFAULTS = (): GlobalSettings => ({
     process.env.PI_THINKING_LEVEL || piSetting("defaultThinkingLevel") || "medium",
 });
 
+/** One setting the portal keeps, read on its own rather than with the whole table. */
+export function getSetting(key: string): string | undefined {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
+  return row?.value || undefined;
+}
+
 /** Only what the portal was explicitly told; absent keys fall through. */
 export function getStoredSettings(): Partial<GlobalSettings> {
   const rows = getDb().prepare("SELECT key, value FROM settings").all() as {
@@ -677,6 +1122,16 @@ export function getStoredSettings(): Partial<GlobalSettings> {
   ) as Partial<GlobalSettings>;
 }
 
+/**
+ * The stored defaults the page may see: the three it edits. The table holds
+ * much else — passwords, tokens, keys the portal keeps for its add-ons — and
+ * none of that is the page's to have.
+ */
+export function shownStoredSettings(): Partial<GlobalSettings> {
+  const { provider, model, thinkingLevel } = getStoredSettings();
+  return { ...(provider ? { provider } : {}), ...(model ? { model } : {}), ...(thinkingLevel ? { thinkingLevel } : {}) };
+}
+
 /** What pi is actually launched with: stored, else env, else pi's file. */
 export function getSettings(): GlobalSettings {
   const stored = getStoredSettings();
@@ -686,6 +1141,19 @@ export function getSettings(): GlobalSettings {
     model: stored.model || defaults.model,
     thinkingLevel: stored.thinkingLevel || defaults.thinkingLevel,
   };
+}
+
+/**
+ * The model a chat is started on: what its row names, and the defaults for
+ * whatever it does not — each half on its own, so a row naming only a
+ * provider runs the default model there. Kept in one place, for what the
+ * page is told about an idle chat to be what it would run.
+ */
+export function chatModel(
+  session: { provider?: string | null; model?: string | null },
+  settings: GlobalSettings = getSettings(),
+): { provider: string; model: string } {
+  return { provider: session.provider || settings.provider, model: session.model || settings.model };
 }
 
 export { SETTING_DEFAULTS as getSettingDefaults };
@@ -705,6 +1173,85 @@ export function setSettings(patch: Partial<GlobalSettings>): GlobalSettings {
     else clear.run(k);
   }
   return getSettings();
+}
+
+/**
+ * The context window a model really has, when that is not what its
+ * definition says.
+ *
+ * pi takes the window from the model's entry in models.json, and everything
+ * that depends on it — the percentage, when a chat is compacted — follows that
+ * number. A server can hold less: llama.cpp with `--parallel 2` splits
+ * `ctx-size` between two slots, so a chat gets half of what the definition
+ * promises and a long one fails instead of being compacted. The definition
+ * cannot be right for every deployment, so the number is kept here, per model,
+ * and wins when it is set.
+ */
+export const CONTEXT_LIMIT_MIN = 1_024;
+export const CONTEXT_LIMIT_MAX = 10_000_000;
+const contextLimitKey = (provider: string, model: string) => `context_limit:${provider}/${model}`;
+
+export function getContextLimit(provider: string, model: string): number | undefined {
+  const row = getDb()
+    .prepare("SELECT value FROM settings WHERE key = ?")
+    .get(contextLimitKey(provider, model)) as { value: string } | undefined;
+  const n = Number(row?.value);
+  return Number.isInteger(n) && n >= CONTEXT_LIMIT_MIN && n <= CONTEXT_LIMIT_MAX ? n : undefined;
+}
+
+/** `null` hands the model back to the default, or to what its definition says. */
+export function setContextLimit(provider: string, model: string, tokens: number | null): void {
+  storeLimit(contextLimitKey(provider, model), tokens);
+}
+
+const DEFAULT_LIMIT_KEY = "context_limit_default";
+
+/** The window every chat is held to, unless its model has one of its own. */
+export function getDefaultContextLimit(): number | undefined {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key = ?").get(DEFAULT_LIMIT_KEY) as
+    | { value: string }
+    | undefined;
+  const n = Number(row?.value);
+  return Number.isInteger(n) && n >= CONTEXT_LIMIT_MIN && n <= CONTEXT_LIMIT_MAX ? n : undefined;
+}
+
+export function setDefaultContextLimit(tokens: number | null): void {
+  storeLimit(DEFAULT_LIMIT_KEY, tokens);
+}
+
+function storeLimit(key: string, tokens: number | null): void {
+  if (tokens === null) getDb().prepare("DELETE FROM settings WHERE key = ?").run(key);
+  else
+    getDb()
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(key, String(tokens));
+}
+
+/**
+ * The window a chat on this model is held to.
+ *
+ * What was set for the model wins. Failing that, the default applies as a
+ * ceiling, not as a size: a model that declares less than the default keeps
+ * what it declares, since raising it would promise room it does not have.
+ * `declared` is the model's own number, when it has one.
+ */
+export function contextWindowFor(provider: string, model: string, declared?: number): number | undefined {
+  const own = getContextLimit(provider, model);
+  if (own) return own;
+  const fallback = getDefaultContextLimit();
+  if (!fallback) return declared;
+  return declared ? Math.min(declared, fallback) : fallback;
+}
+
+/** Why a window is refused, or undefined when it is fine. Shared by everything that accepts one. */
+export function contextLimitProblem(tokens: unknown): string | undefined {
+  if (Number.isInteger(tokens) && (tokens as number) >= CONTEXT_LIMIT_MIN && (tokens as number) <= CONTEXT_LIMIT_MAX) {
+    return undefined;
+  }
+  // en-US, not the server's locale: the message is English whatever the host is.
+  return `The context window must be a whole number between ${CONTEXT_LIMIT_MIN.toLocaleString("en-US")} and ${CONTEXT_LIMIT_MAX.toLocaleString("en-US")} tokens`;
 }
 
 /** Where reports go when a routine does not name a destination of its own. */
@@ -878,7 +1425,92 @@ export function routineGuards(slug: string | null | undefined): boolean {
   return row ? row.guard === 1 : true;
 }
 
-/** Does this session get the browser? Routines answer for their own runs. */
+/**
+ * Carry the old per-session browser grant into the tool switches.
+ *
+ * The browser used to be opt-in per conversation, stored in `sessions.browser`
+ * and off by default. It is an MCP server now, and a server's tools are on
+ * unless something says otherwise — which on an upgrade would hand every
+ * conversation that ever existed a browser signed into real accounts, because
+ * nobody had said otherwise about a switch that did not exist yet.
+ *
+ * So the posture is carried over rather than replaced: the browser's tools go
+ * into the defaults as off, and the conversations that had the grant get it
+ * back as their own exception. A new install is unaffected and starts the way
+ * any other server does. Run once, because after it the operator's own choices
+ * are the ones in there.
+ *
+ * It cannot run when the database opens. Which tools are the browser's is only
+ * known once a session has registered them, and on the first start after an
+ * upgrade none has: the catalogue is a key this build introduced. So the first
+ * call only decides whether there is a posture to carry — an install with
+ * conversations in it — and marks it `pending`. It runs again from
+ * `rememberTools()` and does the carrying the moment the browser's tools
+ * appear. Until then `browserAllowed()` goes on reading the old column. After
+ * it, a browser tool that shows up later is carried the same way.
+ */
+export function adoptBrowserGrants(d: Database.Database = getDb(), fresh: string[] = []): void {
+  const flag = d
+    .prepare("SELECT value FROM settings WHERE key = 'browser_tools_adopted'")
+    .get() as { value: string } | undefined;
+  if (flag?.value === "1") return;
+  const mark = (value: string) =>
+    d
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('browser_tools_adopted', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      )
+      .run(value);
+
+  let state = flag?.value;
+  if (!state) {
+    // Nobody has ever had a conversation: nothing was granted, nothing to keep.
+    if (!d.prepare("SELECT 1 FROM sessions LIMIT 1").get()) return void mark("1");
+    mark((state = "pending"));
+  }
+
+  const servers = mcpServerNames();
+  const browsers = browserServers();
+  // Waiting: every browser tool seen so far. Carrying: only the ones that are
+  // new. The catalogue is what one session happened to have registered — a lazy
+  // server has cached some of its tools and not others, and a pinned version
+  // that is bumped adds names — so the posture has to reach whatever turns up
+  // later, not only what was there on the first day. What was carried over and
+  // since changed by the operator is not touched again.
+  const names =
+    state === "pending"
+      ? knownTools()
+          .map((t) => t.name)
+          .filter((name) => browserTool(name, servers, browsers))
+      : fresh.filter((name) => browserTool(name, servers, browsers));
+  if (!names.length) return;
+
+  setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...names])]);
+  const granted = d
+    .prepare("SELECT id FROM sessions WHERE browser = 1 AND kind != 'routine'")
+    .all() as { id: string }[];
+  for (const { id } of granted) {
+    const tools = sessionTools(id);
+    setSessionTools(id, { off: tools.off, on: [...new Set([...tools.on, ...names])] });
+  }
+  mark("carry");
+}
+
+/** Is there a grant still waiting for the browser's tools to be seen? */
+function browserAdoptionPending(): boolean {
+  return (getStoredSettings() as Record<string, string>).browser_tools_adopted === "pending";
+}
+
+/**
+ * Does this session get the browser? Routines answer for their own runs.
+ *
+ * For an ordinary conversation this is not stored any more: the browser is an
+ * MCP server like any other, so its tools are switched in the tools list, and
+ * having the browser is having its tools. A second place recording the same
+ * answer could only ever disagree with the first.
+ *
+ * The `sessions.browser` column is what that second place was. It is left in
+ * the schema and read by nothing.
+ */
 export function browserAllowed(session: SessionRow): boolean {
   if (session.kind === "routine" && session.routine_slug) {
     const row = getDb().prepare("SELECT browser FROM routines WHERE slug = ?").get(
@@ -886,7 +1518,261 @@ export function browserAllowed(session: SessionRow): boolean {
     ) as { browser: number } | undefined;
     return row ? row.browser === 1 : false;
   }
-  return session.browser === 1;
+  const browserNames = seenBrowserTools();
+  if (!browserNames.length) return session.browser === 1 || !browserColumnDecides();
+  const defaults = toolDefaultsOff();
+  const exceptions = sessionTools(session.id);
+  return browserNames.some((name) => toolEnabled(name, defaults, exceptions));
+}
+
+/** The browser's tools, as far as any session has registered them. */
+function seenBrowserTools(): string[] {
+  const servers = mcpServerNames();
+  const browsers = browserServers();
+  return knownTools()
+    .map((t) => t.name)
+    .filter((name) => browserTool(name, servers, browsers));
+}
+
+/**
+ * With no browser tool seen there is no switch to read, and three situations
+ * look the same from here:
+ *
+ * - A container deployment, where pi is reached over RPC and never reports its
+ *   registry. The old per-session grant is still the only answer anyone has.
+ * - An upgrade still waiting for the browser's tools to appear, so the grants
+ *   can be carried over. The old column stands until they do.
+ * - No server that is the browser at all: nothing here to switch, so the column.
+ *
+ * Anything else is a browser server configured and not yet registered by any
+ * session — a fresh install whose first conversation is still starting, or a
+ * lazy server whose tools pi has not cached yet. Nobody has said anything about
+ * it, which is what a default is for, so it is on, as any other server is.
+ */
+function browserColumnDecides(): boolean {
+  if ((process.env.EXECUTOR || "host") === "container") return true;
+  if (browserAdoptionPending()) return true;
+  return browserServers().length === 0;
+}
+
+/**
+ * The conversations that disagree with the default about the browser.
+ *
+ * Every one that says anything about tools, and every one that holds the old
+ * grant, is asked — not those whose switches happen to mention the word
+ * `browser`, which is not what a server is called when it is called something
+ * else, and misses the column where that is still the only record.
+ */
+export function browserExceptions(): SessionRow[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM sessions
+       WHERE COALESCE(tools_off, '') != '' OR COALESCE(tools_on, '') != '' OR browser = 1
+       ORDER BY updated_at DESC`
+    )
+    .all() as SessionRow[];
+  const byDefault = browserByDefault();
+  return rows.filter((row) => browserAllowed(row) !== byDefault);
+}
+
+/** Is the browser on for a conversation that has never said anything about it? */
+export function browserByDefault(): boolean {
+  const names = seenBrowserTools();
+  if (!names.length) return !browserColumnDecides();
+  const off = new Set(toolDefaultsOff());
+  return names.some((name) => !off.has(name));
+}
+
+/**
+ * What a conversation says about tools, as exceptions to the default.
+ *
+ * Two lists because an exception runs both ways: a tool the default leaves on
+ * can be switched off here, and one the default has off can be switched on.
+ * Exceptions rather than a full picture so that changing a default reaches
+ * every conversation that never said anything about it, which is the whole
+ * point of having one.
+ */
+export interface SessionTools {
+  off: string[];
+  on: string[];
+}
+
+export function sessionTools(sessionId: string): SessionTools {
+  const row = getDb().prepare("SELECT tools_off, tools_on FROM sessions WHERE id = ?").get(
+    sessionId
+  ) as { tools_off: string | null; tools_on: string | null } | undefined;
+  return { off: parseToolsOff(row?.tools_off), on: parseToolsOff(row?.tools_on) };
+}
+
+export function parseToolsOff(raw: string | null | undefined): string[] {
+  return (raw ?? "")
+    .split("\n")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+/** Sorted and deduped, so the column reads the same however it was written. */
+const clean = (names: string[]): string[] =>
+  [...new Set(names.map((n) => n.trim()).filter(Boolean))].sort();
+
+export function setSessionTools(sessionId: string, tools: SessionTools): SessionTools {
+  const stored = { off: clean(tools.off), on: clean(tools.on) };
+  getDb()
+    .prepare("UPDATE sessions SET tools_off = ?, tools_on = ? WHERE id = ?")
+    .run(stored.off.join("\n"), stored.on.join("\n"), sessionId);
+  return stored;
+}
+
+/**
+ * A setting the portal keeps for itself, outside the model defaults.
+ *
+ * GlobalSettings is what a session launches with; these are neither that nor
+ * pi's, so they go straight to the table rather than widening a type that
+ * every launch reads.
+ */
+export function putSetting(key: string, value: string): void {
+  const db = getDb();
+  if (value)
+    db.prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(key, value);
+  else db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+}
+
+/** Remembers a login as signed out until it would have expired, and forgets those that have. */
+export function recordSignOut(mac: string, expires: number): void {
+  const d = getDb();
+  d.prepare("DELETE FROM signed_out WHERE expires < ?").run(Date.now());
+  d.prepare("INSERT OR IGNORE INTO signed_out (mac, expires) VALUES (?, ?)").run(mac, expires);
+}
+
+/** Asked on every request that carries a login, so prepared once. */
+let signedOutQuery: Database.Statement | undefined;
+
+export function isSignedOut(mac: string): boolean {
+  signedOutQuery ??= getDb().prepare("SELECT 1 FROM signed_out WHERE mac = ?");
+  return signedOutQuery.get(mac) !== undefined;
+}
+
+/**
+ * What a package's entry looked like before it was switched off, so switching
+ * it back on gives that back rather than a plain one.
+ */
+export function extensionStash(): Record<string, unknown> {
+  try {
+    const raw = JSON.parse((getStoredSettings() as Record<string, string>).extension_stash || "{}");
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setExtensionStash(stash: Record<string, unknown>): void {
+  putSetting("extension_stash", Object.keys(stash).length ? JSON.stringify(stash) : "");
+}
+
+/** Tools that are off unless a conversation says otherwise. */
+export function toolDefaultsOff(): string[] {
+  return parseToolsOff((getStoredSettings() as Record<string, string>).tools_off_default);
+}
+
+export function setToolDefaultsOff(names: string[]): string[] {
+  const stored = clean(names);
+  putSetting("tools_off_default", stored.join("\n"));
+  return stored;
+}
+
+/**
+ * Every tool the portal has seen a session register, so the settings page can
+ * offer a default for one without a conversation being open.
+ *
+ * A remembered list rather than a live one: pi builds its registry when a
+ * session starts, and nobody should have to start a chat to say that a tool
+ * should be off in all of them. Refreshed whenever a session does report.
+ */
+export interface KnownTool {
+  name: string;
+  source: string;
+  /** What the tool says it does, for the list shown before a chat has started. */
+  description?: string;
+}
+
+/**
+ * What each package is called here, where somebody has said.
+ *
+ * An npm name is an address, not a label: `@juicesharp/rpiv-ask-user-question`
+ * is the truth about where a thing came from and a poor heading for the list
+ * of what it can do. So a group may be given a name, and keeps the address
+ * underneath it for anyone who needs to install or remove the thing.
+ *
+ * Keyed by what the portal files a tool under — a package, an MCP server, or
+ * "built in" — because that is what the heading says.
+ */
+export function toolGroupNames(): Record<string, string> {
+  const raw = (getStoredSettings() as Record<string, string>).tool_group_names;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const names: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const label = typeof value === "string" ? value.trim() : "";
+      if (key.trim() && label) names[key] = label.slice(0, 60);
+    }
+    return names;
+  } catch {
+    return {};
+  }
+}
+
+export function setToolGroupNames(names: Record<string, unknown>): Record<string, string> {
+  const stored: Record<string, string> = {};
+  for (const [key, value] of Object.entries(names ?? {})) {
+    const label = typeof value === "string" ? value.trim() : "";
+    // An empty one is not a name of its own; it is asking for the name back.
+    if (key.trim() && label) stored[key.trim()] = label.slice(0, 60);
+  }
+  putSetting("tool_group_names", JSON.stringify(stored));
+  return stored;
+}
+
+export function knownTools(): KnownTool[] {
+  const raw = (getStoredSettings() as Record<string, string>).tools_seen;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((t) => t && typeof t.name === "string")
+      .map((t) => ({
+        name: String(t.name),
+        source: String(t.source ?? ""),
+        ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Take up what a session reported. Merged rather than replaced: another
+ * session may have extensions this one does not, and an extension that is
+ * merely not loaded today should not lose the default somebody set for it.
+ */
+export function rememberTools(tools: KnownTool[]): void {
+  if (!tools.length) return;
+  const merged = new Map(knownTools().map((t) => [t.name, t]));
+  const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
+  for (const tool of tools) {
+    // Kept short: it is a hint beside a checkbox, and the catalogue is one settings row.
+    const description = tool.description?.trim().slice(0, 300) || merged.get(tool.name)?.description;
+    merged.set(tool.name, { name: tool.name, source: tool.source, ...(description ? { description } : {}) });
+  }
+  const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+  putSetting("tools_seen", JSON.stringify(sorted));
+  // The first moment the browser's tools can be told apart from the rest, and
+  // every moment a new one turns up.
+  adoptBrowserGrants(getDb(), fresh);
 }
 
 /**
@@ -907,4 +1793,40 @@ export function setBrowserAllowlist(domains: string): void {
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
   );
   upsert.run("browser_allowlist", domains.trim());
+}
+
+/**
+ * The model a chat's subagents run on, where the chat says one: "provider/model",
+ * or "auto" for the one the chat is on. Null follows the portal's default.
+ */
+export function sessionSubagentModel(sessionId: string): string | null {
+  return getSetting(`subagent_model:${sessionId}`) ?? null;
+}
+
+export function setSessionSubagentModel(sessionId: string, model: string | null): void {
+  putSetting(`subagent_model:${sessionId}`, model ?? "");
+}
+
+/** A background subagent's start or end, as written: kept in open_subagents while it runs. */
+function noteOpenSubagent(sessionId: string, payload: unknown): void {
+  const p = payload as { op?: unknown; id?: unknown; detached?: unknown } | null;
+  if (!p || p.detached !== true || typeof p.id !== "string") return;
+  if (p.op === "start") getDb().prepare("INSERT OR IGNORE INTO open_subagents (session_id, id) VALUES (?, ?)").run(sessionId, p.id);
+  else if (p.op === "end") getDb().prepare("DELETE FROM open_subagents WHERE session_id = ? AND id = ?").run(sessionId, p.id);
+}
+
+/**
+ * Background subagents a chat started and whose end was never written: the
+ * process that ran them went with the last server.
+ */
+/** The background subagents one chat has open. */
+export function openSubagentsIn(sessionId: string): string[] {
+  return (getDb().prepare("SELECT id FROM open_subagents WHERE session_id = ?").all(sessionId) as { id: string }[]).map((r) => r.id);
+}
+
+export function openDetachedSubagents(): { sessionId: string; id: string }[] {
+  return (getDb().prepare("SELECT session_id, id FROM open_subagents").all() as { session_id: string; id: string }[]).map((r) => ({
+    sessionId: r.session_id,
+    id: r.id,
+  }));
 }

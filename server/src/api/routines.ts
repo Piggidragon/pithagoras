@@ -4,7 +4,8 @@ import { getDb, getDefaultReportTo, listRoutineSessions, setDefaultReportTo } fr
 import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
-import { isOneOff, routineSupervisor, whenNext, type RoutineRow } from "../routines/supervisor.js";
+import { isOneOff, oneOffDone, routineSupervisor, whenNext, type RoutineRow } from "../routines/supervisor.js";
+import { isWithin, placeProblem, routinePlace } from "../workspaces.js";
 
 /**
  * Scheduled work: a standing instruction, a cron expression, and a record of
@@ -21,11 +22,15 @@ const toApi = (row: RoutineRow) => ({
   /** "once" or "repeats" — the two are mutually exclusive. */
   mode: isOneOff(row) ? ("once" as const) : ("repeats" as const),
   /** A one-off that has already run. Kept so its result stays readable. */
-  done: isOneOff(row) && Boolean(row.last_run),
+  done: oneOffDone(row),
   instructions: row.instructions,
   freshSession: Boolean(row.fresh_session),
   guard: row.guard === 1,
   browser: row.browser === 1,
+  /** Where its runs happen: null for Home, else a project's directory. */
+  workspace: row.workspace ?? null,
+  /** Why that place cannot be used now, such as a project that was deleted; null when it can. */
+  workspaceProblem: placeProblem(row.workspace),
   /** null inherits the portal default; "" is an explicit "never report". */
   reportChannel: row.report_channel,
   reportTarget: row.report_target,
@@ -75,6 +80,43 @@ function readReport(body: any): { channel: string | null; target: string | null 
     return { channel, target: body.reportTarget };
   }
   return { channel: null, target: null };
+}
+
+/**
+ * Where a routine runs, as sent: absent leaves it as it is, and anything else
+ * is read as the agent's tool reads it. The place it already has is taken as
+ * it is, even one that has gone: saving another change must not need a new
+ * place first.
+ */
+export function readWorkspace(body: any, current?: string | null): { workspace: string | null } | { error: string } | undefined {
+  if (!body || !("workspace" in body)) return undefined;
+  if (current && body.workspace === current) return { workspace: current };
+  return routinePlace(body.workspace);
+}
+
+/** The routines that run in this folder, or in one below it, or through a link to either. */
+export function routinesIn(dir: string): { id: string; slug: string; name: string; enabled: boolean }[] {
+  return (getDb().prepare("SELECT id, slug, name, enabled, workspace FROM routines ORDER BY name").all() as Pick<RoutineRow, "id" | "slug" | "name" | "enabled" | "workspace">[])
+    .filter((r) => isWithin(dir, r.workspace))
+    .map((r) => ({ id: r.id, slug: r.slug, name: r.name, enabled: r.enabled === 1 }));
+}
+
+/**
+ * Switches off the routines whose folder has been deleted: each run would fail
+ * there. Their sessions are left alone, the record of what they did, and they
+ * run again once given another place and switched on. Taken from routinesIn
+ * before the folder went, since a link into it cannot be followed after.
+ * Returns the names of those that were on.
+ */
+export function switchOffRoutines(all: { id: string; name: string; enabled: boolean }[]): string[] {
+  const routines = all.filter((r) => r.enabled);
+  if (!routines.length) return [];
+  const off = getDb().prepare("UPDATE routines SET enabled = 0, updated_at = datetime('now') WHERE id = ?");
+  getDb().transaction(() => {
+    for (const r of routines) off.run(r.id);
+  })();
+  routineSupervisor.refreshSchedules();
+  return routines.map((r) => r.name);
 }
 
 /** Slugs own the sessions, so two routines must never share one. */
@@ -162,6 +204,8 @@ export function routinesRouter(): Router {
 
     const timing = readTiming({ schedule, runAt });
     if ("error" in timing) return res.status(400).json({ error: timing.error });
+    const place = readWorkspace(req.body);
+    if (place && "error" in place) return res.status(400).json({ error: place.error });
 
     const id = nanoid(10);
     const slug = freeSlug(typeof req.body?.slug === "string" && req.body.slug ? req.body.slug : name);
@@ -169,8 +213,8 @@ export function routinesRouter(): Router {
       .prepare(
         `INSERT INTO routines
            (id, slug, name, schedule, run_at, instructions, fresh_session, next_run,
-            report_channel, report_target)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            report_channel, report_target, workspace)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -182,7 +226,8 @@ export function routinesRouter(): Router {
         freshSession ? 1 : 0,
         timing.schedule ? (nextRun(parseCron(timing.schedule))?.toISOString() ?? null) : timing.runAt,
         report.channel,
-        report.target
+        report.target,
+        place?.workspace ?? null
       );
     res.json(toApi(rowById(id)!));
   });
@@ -216,9 +261,12 @@ export function routinesRouter(): Router {
       sets.push("schedule = ?", "run_at = ?");
       values.push(timing.schedule, timing.runAt);
       // Re-arming a one-off that already ran: forget the old outcome, or it
-      // would look done the moment it was saved.
+      // would look done the moment it was saved. Switched back on as well — it
+      // was switched off by having run, not by anybody, and a new time that
+      // then never fires is not what giving it one means.
       if (timing.runAt && timing.runAt !== row.run_at) {
         sets.push("last_run = NULL", "last_status = NULL", "last_output = NULL");
+        if (typeof enabled !== "boolean" && oneOffDone(row)) sets.push("enabled = 1");
       }
     }
     if (typeof instructions === "string") {
@@ -245,6 +293,12 @@ export function routinesRouter(): Router {
     if (typeof freshSession === "boolean") {
       sets.push("fresh_session = ?");
       values.push(freshSession ? 1 : 0);
+    }
+    const place = readWorkspace(req.body, row.workspace);
+    if (place && "error" in place) return res.status(400).json({ error: place.error });
+    if (place) {
+      sets.push("workspace = ?");
+      values.push(place.workspace);
     }
 
     if (sets.length) {

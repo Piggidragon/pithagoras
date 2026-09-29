@@ -1,13 +1,24 @@
 # Settings
 
-Settings open from the bottom of the sidebar, or `/settings`. Navigation runs
-down the left edge: **General**, **Channels**, **Extensions**, **Advanced**, plus
-a page for every extension that exposes configuration.
+Settings open from the bottom of the sidebar, or `/settings`. There is a search
+box at the top: it finds a setting by name or by what it does, in English or
+German. Navigation runs down the left edge, in four groups:
+
+| Group | Pages |
+| --- | --- |
+| **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
+| **Agent** | **Tools**, **Skills**, **MCP**, **Extensions** |
+| **Reach** | **Channels**, **People** |
+| **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **About**, **Advanced** |
+
+Plus a page for every extension that exposes configuration.
 
 There is no Session tab. Model, effort and context all live on the pills under
 the composer, and a second copy here would be two places to keep in sync.
 
-## General
+## Defaults
+
+*(The **Defaults** page; older links call it `general`.)*
 
 Defaults for newly created sessions, and read-only deployment facts — the
 executor, the workspace root, and where pi's `settings.json` lives.
@@ -19,6 +30,33 @@ hands the setting back to pi; clicking the active effort level again unsets it.
 This matters more than it sounds. An earlier version prefilled each field with
 the *resolved* value, so one click of Save pinned an inherited setting forever —
 which is how a portal could end up permanently stuck on a model nobody chose.
+
+**Notifications** are a switch on **This browser**, kept in this browser like
+the confirmations. Turned on, the browser asks for permission once, and after
+that a chat that finishes or an extension that needs an answer says so while you
+are on another tab or window. Nobody is told about the chat in front of them.
+It needs a secure connection — HTTPS, or `localhost` — because browsers do not
+offer notifications over plain HTTP; the switch says so where it is unavailable.
+A chat that is not open is noticed too: while one is running and notifications
+are on, a hidden page keeps checking every fifteen seconds.
+
+**Sign out**, also on **This browser**, appears when the portal has a password. It
+signs out this browser only, and the login it held stops working anywhere a
+copy of its cookie was taken. A login that runs out — after thirty days, or when
+the portal restarts without `PORTAL_SECRET` — brings the password screen back
+rather than failing every request with *Unauthorized*.
+
+### Language
+
+The portal speaks English and German. **This browser → Language** picks one,
+and is kept in this browser like the theme; until one is picked it follows the
+browser's own language, and English where there is none of its own. Dates and
+numbers are written the language's way. It changes the portal's words only:
+what the agent writes is up to the agent, and messages that come from the
+server — an error it reports, a channel's own description — stay as they are.
+
+A language is one file in `web/src/locales/`, mapping each English text to its
+own; adding one means adding that file, and the tests list what it lacks.
 
 ### Where a model comes from
 
@@ -40,6 +78,13 @@ created. The portal resolves the model a second time after binding. Without
 that, a session asking for a local model silently started on pi's fallback.
 :::
 
+## Tools, Skills and MCP
+
+**Tools** sets which tools every conversation starts with, see
+[The interface](/guide/interface#tools). **Skills** lists, creates, imports and
+switches the agent's procedures. **MCP** manages MCP servers, see
+[MCP servers](/guide/mcp).
+
 ## Channels
 
 Two-way links into the agent, and the packages that provide them. See
@@ -60,6 +105,28 @@ the settings object. The portal recovers them by reading the package source,
 which is a heuristic: a key built dynamically at runtime will not appear. Use
 Advanced to edit `settings.json` directly when that happens.
 :::
+
+## This browser, Add-ons and About
+
+**This browser** holds what is kept per browser: theme, language,
+notifications, confirmations and sign-out — see [The interface](/guide/interface).
+**Add-ons** installs the optional parts of the portal itself: Browser, Voice,
+Subagents and Memory, see [Docker add-ons](/guide/add-ons) and
+[Opt-in features](/guide/features). **About** shows where this portal runs the
+agent, its workspace root and where pi keeps its files.
+
+## Shortcuts
+
+Every keyboard shortcut, in one list. The voice-mode ones can be changed: choose
+**Change** and press the new keys, with any modifiers. **Clear** leaves an action
+without one, **Reset** puts its default back, and **Reset all** puts back every
+default. A key that another action already has moves to the one being changed,
+and the list says which action lost it. Shortcuts are kept in this browser.
+
+A shortcut is the physical key, so it stays the same key whatever the keyboard
+layout, and it is shown with the label on this keyboard where the browser can
+tell (Chromium can). The chat's own keys — `/`, Enter, Shift+Enter and Escape
+in the message box — are listed there too, and are fixed.
 
 ## Advanced
 

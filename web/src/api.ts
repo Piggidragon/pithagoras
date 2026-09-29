@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
@@ -80,6 +81,10 @@ export interface Routine {
   guard: boolean;
   /** True lets this routine's runs drive the agent's browser. */
   browser: boolean;
+  /** Where its runs happen: null for Home, else a project's directory. */
+  workspace: string | null;
+  /** Why that place cannot be used now, such as a project that was deleted; null when it can. */
+  workspaceProblem?: string | null;
   /** null inherits the portal default; "" means this one never reports. */
   reportChannel: string | null;
   reportTarget: string | null;
@@ -99,6 +104,8 @@ export interface AgentSetup {
   home: string;
   initialised: boolean;
   files: { name: string; exists: boolean; content: string }[];
+  /** Where the agent's memory is kept: while it is Understory, MEMORY.md is not read. */
+  memory?: "file" | "understory";
 }
 
 /** A conversation that reached the agent through a channel. */
@@ -114,23 +121,94 @@ export interface Workspace {
   isGit: boolean;
 }
 
+/** A folder made on purpose for chats to work in. Home, where "New" starts one, is not a project. */
+export interface Project {
+  name: string;
+  path: string;
+  isGit: boolean;
+  /** Whether the folder has an AGENTS.md — the project's instructions. */
+  hasInstructions: boolean;
+  /** How many chats work in it, and when one last moved. */
+  sessions: number;
+  lastActive: string | null;
+}
+
+/** What deleting a project would take with it. */
+export interface ProjectContents extends Project {
+  files: number;
+  bytes: number;
+  /** False when the count stopped early on a very large folder. */
+  complete: boolean;
+  /** The routines that run here and are on, by name. Deleting the project switches them off. */
+  routines?: string[];
+}
+
 export interface CompactionSettings {
   enabled: boolean;
   /** The floor a compaction cannot go below — kept verbatim, never summarised. */
   keepRecentTokens: number;
 }
 
+/** One thing in a chat's folder. "link" leads out of it, or nowhere, and is left alone. */
 export interface FileEntry {
   name: string;
-  type: "dir" | "file";
+  type: "dir" | "file" | "link";
+  /** A link, whatever `type` says: one to a folder in this one is a "dir", but deleting it removes only the link. */
+  link?: boolean;
   size: number;
   mtime: number;
 }
 
-export interface FileContent {
-  binary: boolean;
-  size: number;
-  content?: string;
+/** A file as the Files panel shows it: its text, or the fact that it has none to show. */
+export type FileContent =
+  | { binary: true; size: number; mtime: number }
+  | { binary: false; size: number; mtime: number; content: string };
+
+/** A tool a conversation could use, and whether it is switched on for it. */
+export interface PortalTool {
+  name: string;
+  description?: string;
+  /** The package or MCP server that registered it, for grouping. */
+  source: string;
+  enabled: boolean;
+  /** Whether it is on by default, so a chat can show where it disagrees. */
+  defaultOn?: boolean;
+}
+
+/** A picture going with a message: a data: URL, which the box also shows it from. */
+export interface PromptImage {
+  data: string;
+  mimeType: string;
+}
+
+export interface PromptOptions {
+  voice?: boolean;
+  images?: PromptImage[];
+  /** Sent mid-run, go into that run instead of waiting for it to end. */
+  steer?: boolean;
+}
+
+/** A job the agent left running — see server/src/background.ts. */
+export interface BackgroundJob {
+  key: string;
+  sid: number;
+  pids: number[];
+  command: string;
+  startedAt: number;
+  state: "running" | "stopped" | "exited";
+  exitedAt?: number;
+  hasOutput: boolean;
+  /** A tool call the chat is already showing. */
+  attached: boolean;
+}
+
+export interface BackgroundState {
+  supported: boolean;
+  jobs: BackgroundJob[];
+  statuses: { key: string; text: string }[];
+  widgets: { key: string; lines: string[] }[];
+  /** Whether the chat's pi is up, for the chat box's text to be worth telling it. */
+  piRunning?: boolean;
 }
 
 export interface PortalEvent {
@@ -141,11 +219,19 @@ export interface PortalEvent {
   payload: any;
 }
 
-async function json<T>(url: string, init?: RequestInit): Promise<T> {
+/**
+ * Fired when the server stops accepting this browser's login — it expired, or
+ * the portal restarted without PORTAL_SECRET — so the page can ask for the
+ * password again instead of failing every request with "Unauthorized".
+ */
+export const SIGNED_OUT = "pithagoras:signed-out";
+
+export async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
+  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
   return res.json();
 }
@@ -163,29 +249,58 @@ export interface VoiceConfig {
 
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; }
 export const api = {
-
-  listFiles: (workspace: string, dirPath: string) =>
-    json<{ path: string; entries: FileEntry[] }>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/files?path=${encodeURIComponent(dirPath)}`
+  listFiles: (sessionId: string, dir: string) =>
+    json<{ path: string; entries: FileEntry[]; truncated: boolean }>(
+      `/api/sessions/${sessionId}/files?path=${encodeURIComponent(dir)}`
     ),
-  readFile: (workspace: string, filePath: string) =>
-    json<FileContent>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/file?path=${encodeURIComponent(filePath)}`
-    ),
-  saveFile: (workspace: string, filePath: string, content: string) =>
+  readFile: (sessionId: string, file: string) =>
+    json<FileContent>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`),
+  /** `mtime` is the time the text on screen was read at; the save is refused if the file has changed since. */
+  saveFile: (sessionId: string, file: string, content: string, mtime?: number) =>
     json<{ ok: true; size: number; mtime: number }>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/file?path=${encodeURIComponent(filePath)}`,
-      { method: "PUT", body: JSON.stringify({ content }) }
+      `/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`,
+      { method: "PUT", body: JSON.stringify({ content, mtime }) }
     ),
-  deleteFile: (workspace: string, filePath: string) =>
-    json<{ ok: true }>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/file?path=${encodeURIComponent(filePath)}`,
-      { method: "DELETE" }
-    ),
-  fileDownloadUrl: (workspace: string, filePath: string) =>
-    `/api/workspaces/${encodeURIComponent(workspace)}/file?path=${encodeURIComponent(filePath)}&download=1`,
-  archiveDownloadUrl: (workspace: string) =>
-    `/api/workspaces/${encodeURIComponent(workspace)}/archive`,
+  /** Gives a file or folder another name in the same folder; answers with its new path. */
+  renameFile: (sessionId: string, file: string, name: string) =>
+    json<{ ok: true; path: string }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  /** A new, empty file; refused if something already has the name. */
+  createFile: (sessionId: string, file: string) =>
+    json<{ ok: true; size: number; mtime: number }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, {
+      method: "PUT",
+      body: JSON.stringify({ content: "", create: true }),
+    }),
+  createFolder: (sessionId: string, dir: string, name: string) =>
+    json<{ ok: true; path: string }>(`/api/sessions/${sessionId}/folder?path=${encodeURIComponent(dir)}`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  /**
+   * A file from this computer into the chat's folder. A taken name gets a
+   * number rather than replacing anything; the answer says what it is called.
+   */
+  uploadFile: async (sessionId: string, dir: string, file: File, name = file.name): Promise<{ path: string; size: number }> => {
+    const res = await fetch(`/api/sessions/${sessionId}/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`, {
+      method: "POST",
+      // Always a plain stream of bytes: what the file calls itself is not how it is sent.
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || t("Could not upload {name} ({status})", { name, status: res.status }));
+    return body;
+  },
+  deleteFile: (sessionId: string, file: string) =>
+    json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, { method: "DELETE" }),
+  fileDownloadUrl: (sessionId: string, file: string) =>
+    `/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}&download=1`,
+  /** The whole folder, or a folder in it. */
+  archiveDownloadUrl: (sessionId: string, dir = "") =>
+    `/api/sessions/${sessionId}/archive${dir ? `?path=${encodeURIComponent(dir)}` : ""}`,
   voiceInstallStatus: () => json<VoiceInstallStatus>('/api/voice/install'),
   voiceAction: (action: 'install' | 'start' | 'stop') => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST'}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
@@ -194,23 +309,53 @@ export const api = {
   authStatus: () => json<{ authRequired: boolean; authed: boolean }>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
+  logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   createWorkspace: (name: string) =>
     json<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify({ name }) }),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
-  createSession: (workspace: string, title?: string) =>
+  /** Without a workspace the chat starts in Home. */
+  createSession: (workspace?: string, title?: string) =>
     json<Session>("/api/sessions", {
       method: "POST",
       body: JSON.stringify({ workspace, title }),
     }),
+  projects: () => json<{ root: string; home: string; projects: Project[] }>("/api/projects"),
+  /** Only where Home is and which projects there are, without their counts: see /api/projects. */
+  places: () => json<{ root: string; home: string; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
+  createProject: (name: string, instructions?: string) =>
+    json<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name, instructions }) }),
+  projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),
+  projectInstructions: (name: string) =>
+    json<{ text: string }>(`/api/projects/${encodeURIComponent(name)}/instructions`),
+  setProjectInstructions: (name: string, text: string) =>
+    json<{ ok: true }>(`/api/projects/${encodeURIComponent(name)}/instructions`, {
+      method: "PUT",
+      body: JSON.stringify({ text }),
+    }),
+  deleteProject: (name: string) =>
+    json<{ ok: true; sessionsDeleted: number }>(`/api/projects/${encodeURIComponent(name)}`, { method: "DELETE" }),
   renameSession: (id: string, title: string) =>
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
-  prompt: (id: string, message: string, options?: { voice?: boolean }) =>
+  prompt: (id: string, message: string, options?: PromptOptions) =>
     json<{ ok: true }>(`/api/sessions/${id}/prompt`, {
       method: "POST",
-      body: JSON.stringify({ message, ...(options?.voice ? { voice: true } : {}) }),
+      body: JSON.stringify({
+        message,
+        ...(options?.voice ? { voice: true } : {}),
+        ...(options?.images?.length ? { images: options.images.map(({ data, mimeType }) => ({ data, mimeType })) } : {}),
+        ...(options?.steer ? { steer: true } : {}),
+      }),
     }),
+  /** A picture sent with a message, as the transcript shows it. */
+  imageUrl: (id: string, name: string) => `/api/sessions/${id}/images/${encodeURIComponent(name)}`,
+  /**
+   * A picture in the chat's folder, by its path there. `version` is anything
+   * that changes when the file does — the agent rewrites pictures in place.
+   */
+  pictureUrl: (id: string, path: string, version?: string | number) =>
+    `/api/sessions/${id}/picture?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /** Removes a message and the agent's answer to it — from the agent's memory too. */
   deleteMessage: (id: string, seq: number) =>
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}`, { method: "DELETE" }),
@@ -220,12 +365,58 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
+  /** Shows another version of a message, and what followed it then. */
+  switchVersion: (id: string, seq: number, to: number) =>
+    json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/version`, {
+      method: "POST",
+      body: JSON.stringify({ to }),
+    }),
+  /** Every tool the portal has seen, for setting a default without opening a chat. */
+  toolDefaults: () =>
+    json<{
+      tools: { name: string; source: string; defaultOn: boolean }[];
+      off: string[];
+      names: Record<string, string>;
+    }>("/api/tools"),
+  /** Which tools are off unless a conversation says otherwise. */
+  setToolDefaults: (off: string[]) =>
+    json<{ off: string[]; applied: number }>("/api/tools", { method: "PUT", body: JSON.stringify({ off }) }),
+  /** What this conversation could use. `live` is false when pi is not running to ask. */
+  tools: (sessionId: string) =>
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+      `/api/sessions/${sessionId}/tools`
+    ),
+  /** What each package is called here; everything unnamed keeps its own name. */
+  toolNames: () => json<{ names: Record<string, string> }>("/api/tool-names"),
+  setToolNames: (names: Record<string, string>) =>
+    json<{ names: Record<string, string> }>("/api/tool-names", {
+      method: "PUT",
+      body: JSON.stringify({ names }),
+    }),
+  /** Switch tools off by name; everything not named is on. */
+  setTools: (sessionId: string, off: string[]) =>
+    json<{ off: string[] }>(`/api/sessions/${sessionId}/tools`, {
+      method: "PUT",
+      body: JSON.stringify({ off }),
+    }),
   respondUi: (sessionId: string, id: string, payload: { value?: unknown; cancelled?: boolean }) =>
     json<{ ok: boolean; note?: string }>(`/api/sessions/${sessionId}/ui-response`, {
       method: "POST",
       body: JSON.stringify({ id, ...payload }),
     }),
 
+  /** Where models come from: servers in pi's models.json, keys in its auth.json. */
+  providers: () => json<ProvidersView>("/api/providers"),
+  probeProvider: (body: { kind: ProviderKind; baseUrl: string; apiKey?: string; id?: string }) =>
+    json<{ baseUrl: string; models: ProviderModel[] }>("/api/providers/probe", { method: "POST", body: JSON.stringify(body) }),
+  saveProvider: (id: string, body: { kind: ProviderKind; adding?: boolean; baseUrl?: string; api?: string; apiKey?: string; models?: ProviderModel[] }) =>
+    json<{ ok: true; note?: string }>(`/api/providers/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
+  /** `note` says what else came of it: a copy kept of a models.json whose comments were dropped. */
+  removeProvider: (id: string) => json<{ ok: true; note?: string }>(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Whether each server answers now. */
+  providerStatus: () => json<{ status: Record<string, ProviderStatus> }>("/api/providers/status"),
+  /** Every model pi can use now, outside any chat — for the defaults. */
+  allModels: () => json<{ models: AvailableModel[]; providers: Record<string, string> }>("/api/models"),
   mcp: () => json<McpConfigView>("/api/mcp"),
   saveMcpServer: (name: string, entry: McpServerEntry, from?: string) =>
     json<{ ok: true }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
@@ -314,6 +505,57 @@ export const api = {
     }),
   suggestBrowserPassword: () =>
     json<{ password: string }>("/api/browser/suggest-password"),
+  features: () => json<Features>("/api/features"),
+  /** The subagent tool alone: nothing of Understory or Docker asked for. */
+  subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
+  /** Only whether each is on — cheap, for the sidebar and the chat's menus. */
+  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean } }>("/api/features/flags"),
+  /** What a chat's subagents run on: its own choice (null follows `default`). */
+  subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
+  setSubagentModel: (id: string, model: string | null) =>
+    json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`, { method: "PUT", body: JSON.stringify({ model }) }),
+  memoryTree: () => json<MemoryNode>("/api/memory/tree"),
+  memoryConcept: (path: string) => json<MemoryConcept>(`/api/memory/concept?${new URLSearchParams({ path })}`),
+  memorySearch: (q: string) => json<MemoryHit[]>(`/api/memory/search?${new URLSearchParams({ q })}`),
+  memoryLog: () => json<MemoryChange[]>("/api/memory/log"),
+  memoryGraph: () => json<MemoryGraph>("/api/memory/graph"),
+  memoryTraces: () => json<MemoryTrace[]>("/api/memory/traces"),
+  memoryValidate: () => json<MemoryValidation>("/api/memory/validate"),
+  /** Whether notes can be changed here: only in the Understory the portal runs. */
+  memoryHealth: () => json<{ writable: boolean; health?: MemoryHealth }>("/api/memory/health"),
+  saveMemoryNote: (path: string, frontmatter: Record<string, unknown>, body: string) =>
+    json<{ concept: MemoryConcept; health: MemoryHealth }>("/api/memory/concept", { method: "PUT", body: JSON.stringify({ path, frontmatter, body }) }),
+  deleteMemoryNote: (path: string) =>
+    json<{ health: MemoryHealth }>(`/api/memory/concept?${new URLSearchParams({ path })}`, { method: "DELETE" }),
+  reindexMemory: () => json<{ pruned: string[]; reindexed: number; health: MemoryHealth }>("/api/memory/reindex", { method: "POST" }),
+  /** The model mends links to nothing and wires in orphans; `ran` is false when there were none. */
+  repairMemory: () =>
+    json<{ ran: boolean; reason?: string; summary?: string; filesChanged?: string[]; health: MemoryHealth }>("/api/memory/repair", { method: "POST" }),
+  clearMemoryLog: () => json<{ health: MemoryHealth }>("/api/memory/clear-log", { method: "POST" }),
+  /** Every note gone, the index and log empty: the memory from nothing. */
+  wipeMemory: () => json<{ health: MemoryHealth }>("/api/memory/wipe", { method: "POST" }),
+  setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) =>
+    json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string }) =>
+    json<{ understory: UnderstoryFeature }>("/api/features/understory/config", { method: "PUT", body: JSON.stringify(config) }),
+  dreamUnderstory: () => json<{ understory: UnderstoryFeature }>("/api/features/understory/dream", { method: "POST" }),
+  installUnderstory: () =>
+    json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>("/api/features/understory/install", { method: "POST" }),
+  understoryAction: (action: "start" | "stop") =>
+    json<{ understory: UnderstoryFeature }>(`/api/features/understory/${action}`, { method: "POST" }),
+  removeUnderstory: (forgetMemory = false) =>
+    json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>(
+      `/api/features/understory/install${forgetMemory ? "?memory=forget" : ""}`,
+      { method: "DELETE" },
+    ),
+  setUnderstoryFeature: (patch: { enabled: boolean; url?: string }) =>
+    json<{ understory: UnderstoryFeature; reloaded: number; waiting: number }>("/api/features/understory", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
   connectBrowser: () =>
     json<{ connectedAs: string | null }>("/api/browser/connect", { method: "POST" }),
   disconnectBrowser: () =>
@@ -322,11 +564,6 @@ export const api = {
     json<{ allowlist: string }>("/api/browser/allowlist", {
       method: "PUT",
       body: JSON.stringify({ domains }),
-    }),
-  setSessionBrowser: (id: string, enabled: boolean) =>
-    json<{ enabled: boolean }>(`/api/sessions/${id}/browser`, {
-      method: "PUT",
-      body: JSON.stringify({ enabled }),
     }),
 
   audit: (limit = 200) => json<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
@@ -368,6 +605,7 @@ export const api = {
     instructions?: string;
     reportChannel?: string | null;
     reportTarget?: string | null;
+    workspace?: string | null;
   }) =>
     json<Routine>("/api/routines", { method: "POST", body: JSON.stringify(input) }),
   updateRoutine: (
@@ -384,6 +622,7 @@ export const api = {
       browser?: boolean;
       reportChannel?: string | null;
       reportTarget?: string | null;
+      workspace?: string | null;
     }
   ) => json<Routine>(`/api/routines/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteRoutine: (id: string) => json<{ ok: true }>(`/api/routines/${id}`, { method: "DELETE" }),
@@ -430,8 +669,29 @@ export const api = {
 
   abort: (id: string) => json<{ ok: true }>(`/api/sessions/${id}/abort`, { method: "POST" }),
 
+  /** Jobs the agent left running in the chat's folder, and what extensions show about themselves. */
+  background: (id: string) => json<BackgroundState>(`/api/sessions/${id}/background`),
+  backgroundOutput: (id: string, key: string, from?: number) =>
+    json<{ text: string; from: number; size: number }>(
+      `/api/sessions/${id}/background/${encodeURIComponent(key)}/output${from === undefined ? "" : `?from=${from}`}`,
+    ),
+  stopBackground: (id: string, key: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/background/${encodeURIComponent(key)}/stop`, { method: "POST" }),
+  clearBackground: (id: string) => json<{ ok: true }>(`/api/sessions/${id}/background/clear`, { method: "POST" }),
+  /** A message for a subagent that said it takes them (subagent protocol, input: true). */
+  subagentInput: (id: string, agent: string, text: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/subagents/${encodeURIComponent(agent)}/input`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
+  subagentStop: (id: string, agent: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/subagents/${encodeURIComponent(agent)}/stop`, { method: "POST" }),
+
   /** Cheap: never starts pi. Stats are null when the session is not live. */
   config: (id: string) => json<PiConfig>(`/api/sessions/${id}/config`),
+  /** Only the token and context figures, which is all a run needs refreshed; does not start pi. */
+  stats: (id: string) => json<{ live: boolean; stats: PiConfig["stats"] }>(`/api/sessions/${id}/stats`),
   /** Starts pi if needed — only called when the model picker is opened. */
   models: (id: string) => json<PiConfig>(`/api/sessions/${id}/models`),
   setConfig: (id: string, patch: ConfigPatch) =>
@@ -439,10 +699,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify(patch),
     }),
+  /** The window a model really has on this server; `null` goes back to what its definition says. */
+  setContextLimit: (provider: string, model: string, tokens: number | null) =>
+    json<{ ok: true; contextLimit: number | null }>("/api/context-limit", {
+      method: "PUT",
+      body: JSON.stringify({ provider, model, tokens }),
+    }),
+  /** The window every chat is held to unless its model has its own; `null` removes it. */
+  setContextDefault: (tokens: number | null) =>
+    json<{ ok: true; contextDefault: number | null }>("/api/context-default", {
+      method: "PUT",
+      body: JSON.stringify({ tokens }),
+    }),
   compact: (id: string) =>
     json<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),
 
-  commands: (id: string) => json<{ commands: PiCommand[] }>(`/api/sessions/${id}/commands`),
+  /** `ifRunning`: only from a pi that is up, rather than starting one; `notRunning` when none was. */
+  commands: (id: string, opts?: { ifRunning?: boolean }) =>
+    json<{ commands: PiCommand[]; notRunning?: boolean }>(`/api/sessions/${id}/commands${opts?.ifRunning ? "?ifRunning=1" : ""}`),
+  /** What is in the chat box, for an extension that asks. */
+  draft: (id: string, text: string, caret?: { start: number; end: number }) =>
+    json<{ ok: true }>(`/api/sessions/${id}/draft`, { method: "PUT", body: JSON.stringify({ text, caret }) }),
   piSettings: () => json<{ path: string; content: string }>("/api/pi-settings"),
   savePiSettings: (content: string) =>
     json<{ ok: true; path: string; note: string }>("/api/pi-settings", {
@@ -462,6 +739,7 @@ export const api = {
       /** pi's own compaction tuning, which lives in its settings.json not ours. */
       compaction: CompactionSettings;
       compactionDefaults: CompactionSettings;
+      contextDefault: number | null;
       executor: string;
       workspaceRoot: string;
     }>("/api/settings"),
@@ -527,6 +805,9 @@ export const api = {
     }),
 
   packages: () => json<{ output: string }>("/api/packages"),
+  /** pi packages published on npm; `topic` "provider" for the ones that bring models. */
+  catalog: (q = "", topic?: "provider") =>
+    json<{ packages: CatalogPackage[] }>(`/api/packages/catalog?${new URLSearchParams({ q, ...(topic ? { topic } : {}) })}`),
   installPackage: (spec: string) =>
     json<{ ok: true; output: string }>("/api/packages", {
       method: "POST",
@@ -536,6 +817,11 @@ export const api = {
     json<{ ok: true; output: string }>("/api/packages", {
       method: "DELETE",
       body: JSON.stringify({ spec }),
+    }),
+  setExtensionEnabled: (spec: string, enabled: boolean) =>
+    json<{ ok: true; enabled: boolean; reloaded: number; waiting: number }>("/api/extensions/enabled", {
+      method: "PUT",
+      body: JSON.stringify({ spec, enabled }),
     }),
   updatePackages: () =>
     json<{ ok: true; output: string }>("/api/packages/update", { method: "POST" }),
@@ -563,10 +849,21 @@ export interface PiConfig {
   state: PiState;
   thinking: { levels: string[] };
   models: { models: PiModel[] };
+  /** The model the chat's row names, as it is now; none when it follows the default. */
+  named?: { provider: string | null; model: string | null };
+  /** The context window set for this model, when it differs from its definition. */
+  contextLimit?: number | null;
+  /** The window every chat is held to, as a ceiling; set in Settings. */
+  contextDefault?: number | null;
+  /** False when pi runs where the portal cannot change its window: EXECUTOR=container. */
+  contextLimitSupported?: boolean;
+  /** Why the window cannot be set, when `contextLimitSupported` is false. */
+  contextLimitNote?: string;
   stats: null | {
     tokens: { input: number; output: number; total: number };
     cost: number;
-    contextUsage: { tokens: number; contextWindow: number; percent: number };
+    /** `tokens` and `percent` are null just after a compaction, until the next reply. */
+    contextUsage: { tokens: number | null; contextWindow: number; percent: number | null };
     toolCalls: number;
     totalMessages: number;
   };
@@ -655,6 +952,10 @@ export interface ExtensionInfo {
   homepage?: string;
   version?: string;
   settings: DetectedSetting[];
+  /** Whether pi loads it; absent where the portal cannot switch it. */
+  enabled?: boolean;
+  /** Narrowed by hand in settings.json: some of what it brings is off already. */
+  filtered?: boolean;
 }
 
 export interface GlobalSettings {
@@ -669,6 +970,8 @@ export interface PiCommand {
   source: "builtin" | "extension" | "prompt" | "skill" | string;
   /** Builtins only: "client" commands are handled here, not sent to pi. */
   where?: "server" | "client";
+  /** Builtins only: does nothing without one, so choosing it leaves the box open for it. */
+  needsArgument?: boolean;
   sourceInfo?: { path?: string; scope?: string; origin?: string };
 }
 
@@ -767,6 +1070,140 @@ export interface AuditEntry {
 }
 
 /** The agent's browser, and who may drive it. */
+export type SubagentMode = "interrupt" | "background";
+
+/** The subagent tool the portal ships, off until switched on. */
+export interface SubagentFeature {
+  /** This install carries it. */
+  available: boolean;
+  installed: boolean;
+  enabled: boolean;
+  /** How pi's packages list names it. */
+  source: string | null;
+  mode: SubagentMode;
+  /** How many may run at once, across every chat. */
+  maxParallel: number;
+  /** The most that may be set. */
+  maxParallelLimit?: number;
+  /** What they run on unless a chat says: "auto", the model the chat is on, or "provider/model". */
+  model: string;
+}
+
+/** The model that keeps Understory's memory, as the page is told it: never the key. */
+export type UnderstoryLlm =
+  | { source: "auto" }
+  | { source: "provider"; provider: string; model: string }
+  | { source: "custom"; baseUrl: string; model: string; format: "openai" | "anthropic"; hasKey?: boolean };
+
+/** What the page sends for it: a custom key only when it is being changed. */
+export type UnderstoryLlmChoice =
+  | { source: "auto" }
+  | { source: "provider"; provider: string; model: string }
+  | { source: "custom"; baseUrl: string; model: string; format: "openai" | "anthropic"; apiKey?: string };
+
+/** The Understory the portal runs itself, in a container of its own. */
+export interface ManagedUnderstory {
+  /** The portal can reach Docker. */
+  available: boolean;
+  image: boolean;
+  /** "foreign": a container by that name the portal did not make, which it leaves alone. */
+  container: "absent" | "stopped" | "running" | "foreign";
+  pulling: { active: boolean; line: string; error?: string };
+  url: string;
+  /** `dreamAt`: once a day at this time ("03:00"), started by the portal; wins over the interval. */
+  config: { llm: UnderstoryLlm; dreamInterval: string; dreamAt: string };
+  /** "The chat's model" can be offered: not while the portal serves its own TLS. */
+  autoPossible: boolean;
+  /** Providers set up here that Understory can be pointed at. */
+  providers: { id: string; models: string[] }[];
+  /** A pass the portal started is running now. */
+  dreaming: boolean;
+  lastDream: { at: string; ok: boolean; ran?: boolean; said: string } | null;
+  nextDream: string | null;
+  /** The portal's time zone, which a set time is in. */
+  timeZone: string;
+}
+
+/** Understory as the agent's memory, over MCP. */
+export interface UnderstoryFeature {
+  enabled: boolean;
+  url: string;
+  /** MEMORY_UNDERSTORY_AUTH_TOKEN is set for the portal. */
+  tokenSet: boolean;
+  adapterInstalled: boolean;
+  /** Something answers at the address. */
+  reachable: boolean;
+  managed: ManagedUnderstory;
+  configError?: string;
+}
+
+/** A folder or a note in Understory's memory bundle. `reserved` are its own index and log. */
+export interface MemoryNode {
+  name: string;
+  path: string;
+  kind: "directory" | "concept" | "reserved";
+  type?: string;
+  title?: string;
+  description?: string;
+  children?: MemoryNode[];
+}
+
+export interface MemoryConcept {
+  path: string;
+  frontmatter: { type?: string; title?: string; description?: string; tags?: string[]; timestamp?: string; [key: string]: unknown };
+  body: string;
+}
+
+export interface MemoryHit {
+  path: string;
+  type?: string;
+  title?: string;
+  description?: string;
+  snippet?: string;
+}
+
+export interface MemoryChange {
+  date: string;
+  action: string;
+  summary: string;
+}
+
+export interface MemoryGraph {
+  nodes: { path: string; title?: string; type?: string; description?: string; links: number }[];
+  edges: { source: string; target: string }[];
+}
+
+/** A run of Understory's own agent over the memory: a query, or a change. */
+export interface MemoryTrace {
+  id: string;
+  kind: string;
+  input: string;
+  startedAt: string;
+  durationMs?: number;
+  notation?: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+}
+
+/** What a change may have left behind in the memory: links to nowhere, notes nothing links to, what the format says. */
+export interface MemoryHealth {
+  healthy: boolean;
+  orphans: { path: string; title?: string }[];
+  brokenLinks: { path: string; target: string }[];
+  issues: { path: string; severity: string; message: string }[];
+}
+
+export interface MemoryValidation {
+  conformant: boolean;
+  conceptCount?: number;
+  directoryCount?: number;
+  issues: { path: string; severity: "error" | "warning"; message: string }[];
+}
+
+export interface Features {
+  subagent: SubagentFeature;
+  understory: UnderstoryFeature;
+}
+
 export interface BrowserStatus {
   running: boolean;
   /** Running with no password on its web UI. */
@@ -788,6 +1225,87 @@ export interface BrowserStatus {
   pages: { title: string; url: string }[];
   uiPort: string;
   allowlist: string;
-  sessions: { id: string; title: string; kind: string }[];
+  /** Is the browser wired up at all, whether or not it is running right now? */
+  configured: boolean;
+  /** Does a conversation that has never said anything about it get the browser? */
+  byDefault: boolean;
+  /** Only the conversations that disagree with that — see "Who may drive it". */
+  sessions: { id: string; title: string; kind: string; allowed: boolean }[];
   routines: { slug: string; name: string }[];
+}
+
+export type ProviderKind = "llama-cpp" | "llama-swap" | "ollama" | "openrouter" | "hosted" | "custom";
+
+/** One kind of provider the Models page offers. */
+export interface ProviderPreset {
+  kind: ProviderKind;
+  label: string;
+  description: string;
+  id: string;
+  endpoint: boolean;
+  baseUrl?: string;
+  key: "none" | "optional" | "required";
+}
+
+/** A model as a server lists it, or as models.json keeps it. */
+export interface ProviderModel {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  input?: string[];
+  reasoning?: boolean;
+}
+
+export interface ProviderInfo {
+  id: string;
+  kind: ProviderKind;
+  label: string;
+  baseUrl?: string;
+  api?: string;
+  /** The key itself never leaves the server: only whether there is one, and how to tell it apart. */
+  key: { set: boolean; hint?: string; source?: string };
+  models: ProviderModel[];
+  endpoint: boolean;
+}
+
+export interface ProvidersView {
+  presets: ProviderPreset[];
+  apis: string[];
+  providers: ProviderInfo[];
+  /** The hosted services pi knows, by its own names. */
+  hosted: { id: string; name: string }[];
+}
+
+export interface ProviderStatus {
+  state: "up" | "down";
+  ms?: number;
+  message?: string;
+  listed?: number;
+  /** Chosen models the server no longer lists. */
+  missing?: string[];
+  /** What llama-swap has loaded now. */
+  loaded?: string[];
+}
+
+export interface CatalogPackage {
+  name: string;
+  version: string;
+  description?: string;
+  date?: string;
+  weekly?: number;
+  author?: string;
+  keywords: string[];
+  npm?: string;
+  homepage?: string;
+  provider: boolean;
+}
+
+export interface AvailableModel {
+  provider: string;
+  id: string;
+  name: string;
+  contextWindow?: number;
+  input?: string[];
+  reasoning: boolean;
 }

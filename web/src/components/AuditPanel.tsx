@@ -1,49 +1,37 @@
 import { useEffect, useState } from "react";
-import { LuBan, LuCircleCheck, LuKeyRound, LuRefreshCw, LuShield, LuUserX } from "react-icons/lu";
+import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuUserX } from "react-icons/lu";
+import { PageHeader, Stat } from "./PageHeader";
 import { api, type AuditEntry } from "../api";
+import { pollWhileVisible } from "../poll";
+import { msg, t, tp } from "../i18n";
+import { serverTime, sinceThen } from "../time";
 
 /** What each kind means at a glance, without reading the reason. */
 const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> = {
-  refused: { label: "Refused", icon: <LuBan className="h-3.5 w-3.5" />, tone: "text-danger" },
+  refused: { label: msg("Refused"), icon: <LuBan className="h-3.5 w-3.5" />, tone: "text-danger" },
   "allowed-by-rule": {
-    label: "Allowed by rule",
+    label: msg("Allowed by rule"),
     icon: <LuCircleCheck className="h-3.5 w-3.5" />,
     tone: "text-ok",
   },
   "allowed-by-approval": {
-    label: "Allowed by approval",
+    label: msg("Allowed by approval"),
     icon: <LuKeyRound className="h-3.5 w-3.5" />,
     tone: "text-ok",
   },
-  stranger: { label: "Turned away", icon: <LuUserX className="h-3.5 w-3.5" />, tone: "text-warn" },
-  answered: { label: "You answered", icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-accent" },
+  stranger: { label: msg("Turned away"), icon: <LuUserX className="h-3.5 w-3.5" />, tone: "text-warn" },
+  answered: { label: msg("You answered"), icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-accent" },
+  browsed: { label: msg("Page opened"), icon: <LuGlobe className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
 };
 
 const FILTERS = [
-  { id: "all", label: "Everything" },
-  { id: "refused", label: "Refused" },
-  { id: "allowed", label: "Allowed" },
-  { id: "stranger", label: "Strangers" },
+  { id: "all", label: msg("Everything") },
+  { id: "refused", label: msg("Refused") },
+  { id: "allowed", label: msg("Allowed") },
+  { id: "stranger", label: msg("Strangers") },
 ];
 
-function Stat({ value, label, tone }: { value: number; label: string; tone?: string }) {
-  return (
-    <span className="inline-flex items-baseline gap-1.5 rounded-lg bg-fg/5 px-2.5 py-1">
-      <span className={`text-sm font-medium ${tone ?? "text-fg"}`}>{value}</span>
-      <span className="text-[11px] text-fg-subtle">{label}</span>
-    </span>
-  );
-}
-
-const when = (iso: string) => {
-  // Stored as UTC without a zone marker, which Date reads as local time.
-  const t = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
-  const mins = Math.round((Date.now() - t.getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
-  return t.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-};
+const when = (iso: string) => sinceThen(serverTime(iso), { dateAfterDays: 1, dateFormat: { month: "short", day: "numeric" } });
 
 /**
  * What the agent was stopped from doing, and what it was let through on.
@@ -83,8 +71,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
+    return pollWhileVisible(load, 10_000);
   }, []);
 
   const shown = entries.filter((e) =>
@@ -98,7 +85,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
   if (loading) {
     return (
       <p className="flex items-center gap-2 text-sm text-fg-subtle">
-        <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading…
+        <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}
       </p>
     );
   }
@@ -111,25 +98,22 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
 
   return (
     <>
-      <header className="mb-5 rounded-2xl border border-line bg-gradient-to-br from-accent/10 via-transparent to-transparent px-5 py-5">
-        <div className="flex items-start gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/12 text-accent">
-            <LuShield className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold text-fg">Audit</h2>
-            <p className="mt-0.5 max-w-xl text-sm text-fg-muted">
-              What the agent was stopped from doing, what it was let through on, and who was
-              turned away. The last {entries.length} decisions.
-            </p>
-          </div>
-        </div>
+      <PageHeader
+        icon={<LuShield />}
+        title={t("Audit")}
+        className="mb-5"
+        description={
+          <>
+            {tp(entries.length, "What the agent was stopped from doing, what it was let through on, and who was turned away. The last decision.", "What the agent was stopped from doing, what it was let through on, and who was turned away. The last {n} decisions.")}
+          </>
+        }
+      >
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Stat value={counts.refused} label="refused" tone="text-danger" />
-          <Stat value={counts.allowed} label="allowed" tone="text-ok" />
-          <Stat value={counts.strangers} label="turned away" tone="text-warn" />
+          <Stat value={counts.refused} label={t("refused")} tone="text-danger" />
+          <Stat value={counts.allowed} label={t("allowed")} tone="text-ok" />
+          <Stat value={counts.strangers} label={t("turned away")} tone="text-warn" />
         </div>
-      </header>
+      </PageHeader>
 
       <div className="mb-3 flex flex-wrap items-center gap-1">
         {FILTERS.map((f) => (
@@ -142,7 +126,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
                 : "bg-fg/5 text-fg-muted hover:bg-fg/10"
             }`}
           >
-            {f.label}
+            {t(f.label)}
           </button>
         ))}
         <span className="ml-auto text-xs text-fg-faint">{shown.length}</span>
@@ -150,11 +134,10 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
 
       {shown.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-fg-faint">
-          Nothing recorded. The guard writes here when it refuses something, lets something
-          through on a rule or an approval, or turns a stranger away.
+          {t("Nothing recorded. The guard writes here when it refuses something, lets something through on a rule or an approval, or turns a stranger away.")}
         </p>
       ) : (
-        <ul className="space-y-1">
+        <ul className="stagger-in space-y-1">
           {shown.map((e) => {
             const k = KIND[e.kind] ?? {
               label: e.kind,
@@ -165,7 +148,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
               <li key={e.id} className="rounded-xl border border-line bg-raised/40 px-3 py-2">
                 <div className="flex items-center gap-2">
                   <span className={`shrink-0 ${k.tone}`}>{k.icon}</span>
-                  <span className={`shrink-0 text-xs ${k.tone}`}>{k.label}</span>
+                  <span className={`shrink-0 text-xs ${k.tone}`}>{t(k.label)}</span>
                   {e.person_name && (
                     <span className="truncate text-xs text-fg-muted">{e.person_name}</span>
                   )}

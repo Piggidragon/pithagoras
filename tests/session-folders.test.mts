@@ -1,0 +1,116 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  ELSEWHERE,
+  HOME,
+  folderFrom,
+  groupByFolder,
+  moveFolder,
+  projectKey,
+  readFolderOrder,
+  readFolderSort,
+  readOpenFolders,
+  sortFolders,
+  folderKeys,
+} from "../web/src/session-folders.ts";
+
+const places = {
+  home: "/data/agent",
+  projects: [
+    { name: "site", path: "/w/site" },
+    { name: "notes", path: "/w/notes" },
+    { name: "empty", path: "/w/empty" },
+  ],
+};
+
+const chat = (id: string, workspace: string, updated_at: string) => ({ id, workspace, updated_at });
+
+const chats = [
+  chat("a", "/data/agent", "2026-09-28T10:00"),
+  chat("b", "/w/site", "2026-09-28T12:00"),
+  chat("c", "/w/site/docs", "2026-09-27T09:00"),
+  chat("d", "/w/notes", "2026-09-28T11:00"),
+  chat("e", "/w", "2026-09-20T08:00"),
+];
+
+const keys = (folders: { key: string }[]) => folders.map((f) => f.key);
+
+test("chats go to Home, their project (a subfolder too) or Elsewhere", () => {
+  const folders = groupByFolder(chats, places);
+  assert.deepEqual(keys(folders), [HOME, projectKey("site"), projectKey("notes"), projectKey("empty"), ELSEWHERE]);
+  const ids = Object.fromEntries(folders.map((f) => [f.key, f.sessions.map((s) => s.id)]));
+  assert.deepEqual(ids, { [HOME]: ["a"], "project:site": ["b", "c"], "project:notes": ["d"], "project:empty": [], [ELSEWHERE]: ["e"] });
+  assert.equal(folders[1].lastActive, "2026-09-28T12:00");
+  assert.equal(folders[3].lastActive, "");
+});
+
+test("a folder named like the start of another is not it", () => {
+  const folders = groupByFolder([chat("x", "/w/site-old", "1")], places);
+  assert.deepEqual(folders.find((f) => f.key === ELSEWHERE)?.sessions.map((s) => s.id), ["x"]);
+});
+
+test("Elsewhere is only there with chats in it, Home and projects always", () => {
+  assert.deepEqual(keys(groupByFolder([], places)), [HOME, "project:site", "project:notes", "project:empty"]);
+});
+
+test("without Home's place, nothing is taken for Home", () => {
+  const folders = groupByFolder([chat("a", "/data/agent", "1")], { home: "", projects: [] });
+  assert.deepEqual(folders.find((f) => f.key === ELSEWHERE)?.sessions.map((s) => s.id), ["a"]);
+});
+
+test("latest first: by their latest chat, empty ones by name, Elsewhere last", () => {
+  const sorted = sortFolders(groupByFolder(chats, places), "recent");
+  assert.deepEqual(keys(sorted), ["project:site", "project:notes", HOME, "project:empty", ELSEWHERE]);
+});
+
+test("by name: Home first, then the projects, Elsewhere last", () => {
+  const sorted = sortFolders(groupByFolder(chats, places), "name");
+  assert.deepEqual(keys(sorted), [HOME, "project:empty", "project:notes", "project:site", ELSEWHERE]);
+});
+
+test("your order: as put, with folders never put after, the latest first", () => {
+  const sorted = sortFolders(groupByFolder(chats, places), "manual", ["project:notes", HOME]);
+  assert.deepEqual(keys(sorted), ["project:notes", HOME, "project:site", "project:empty", ELSEWHERE]);
+});
+
+test("moving a folder keeps the order it was shown in, and the hidden ones where they were", () => {
+  assert.deepEqual(moveFolder(["a", "b", "c"], "a", 1), ["b", "a", "c"]);
+  assert.deepEqual(moveFolder(["a", "b", "c"], "c", 0), ["c", "a", "b"]);
+  assert.deepEqual(moveFolder(["a", "b", "c"], "b", 9), ["a", "c", "b"]);
+  // x is not shown, and keeps its place at the top; a is put ahead of what was never in the order.
+  assert.deepEqual(moveFolder(["a", "b"], "b", 0, ["x", "a", "b"]), ["x", "b", "a"]);
+  assert.deepEqual(moveFolder(["a", "b", "c"], "c", 0, ["x", "b"]), ["x", "c", "a", "b"]);
+});
+
+test("stored choices are read back as far as they are sound", () => {
+  assert.deepEqual(readFolderOrder('["a", 3, "b", "a"]'), ["a", "b"]);
+  assert.deepEqual(readFolderOrder("{}"), []);
+  assert.deepEqual(readFolderOrder("nope"), []);
+  assert.equal(readFolderSort("name"), "name");
+  assert.equal(readFolderSort("sideways"), "recent");
+  assert.equal(readFolderSort(null), "recent");
+  assert.deepEqual(readOpenFolders('{"home": false, "x": 1, "project:a": true}'), { home: false, "project:a": true });
+  assert.deepEqual(readOpenFolders("[]"), {});
+});
+
+test("a link's folder is found by its key", () => {
+  const folders = groupByFolder(chats, places);
+  assert.equal(folderFrom(folders, "project:notes")?.name, "notes");
+  assert.equal(folderFrom(folders, "project:gone"), null);
+  assert.equal(folderFrom(folders, null), null);
+});
+
+test("Home and the workspace root inside each other: each chat in the deepest", () => {
+  // Home holds the root.
+  const inHome = groupByFolder([chat("a", "/u/repos/site", "1"), chat("b", "/u", "1")], { home: "/u", projects: [{ name: "site", path: "/u/repos/site" }] });
+  assert.deepEqual(inHome.map((f) => [f.key, f.sessions.map((s) => s.id)]), [[HOME, ["b"]], ["project:site", ["a"]]]);
+  // The root holds Home, which is listed as a project there: it is Home, not a folder of its own.
+  const places = { home: "/w/agent-home", projects: [{ name: "agent-home", path: "/w/agent-home" }, { name: "site", path: "/w/site" }] };
+  const inRoot = groupByFolder([chat("a", "/w/agent-home", "1")], places);
+  assert.deepEqual(inRoot.map((f) => [f.key, f.sessions.map((s) => s.id)]), [[HOME, ["a"]], ["project:site", []]]);
+  assert.deepEqual(folderKeys(places), [HOME, "project:site", ELSEWHERE]);
+});
+
+test("Elsewhere can be asked for when empty", () => {
+  assert.deepEqual(keys(groupByFolder([], places, { elsewhere: true })).at(-1), ELSEWHERE);
+});

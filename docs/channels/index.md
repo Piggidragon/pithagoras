@@ -4,6 +4,10 @@ Sessions are per-task: one workspace, one job, its own conversation. The **agent
 is the opposite — a single long-lived pi session rooted at a fixed directory,
 `agentHome`, that you talk to continuously.
 
+Chats you start with **New** in the portal work in `agentHome` too, so the agent's
+SOUL.md, PrimaryUser.md and MEMORY.md are there in those as well. Chats in a
+[project](/guide/projects) are ordinary per-task sessions and have none of them.
+
 A **channel** is a two-way link into that agent. Messages arrive through it and
 the agent's replies go back out the same way.
 
@@ -132,6 +136,12 @@ Each channel shows its real state on its page: `running`, `starting`,
 `stopped` or `error`, with the reason and the last fifty things it logged.
 A channel enabled with a package that has no `start()` reports that rather than
 looking healthy.
+
+A channel whose `start()` fails — the network was not up yet when the portal
+booted, the platform had a bad minute — is tried again on its own: after 30
+seconds, then twice as long each time, up to every fifteen minutes. Saving it
+tries at once, and so does installing a channel package, so a channel set up
+before its package was there starts when the package arrives.
 
 ### What happens to a message
 

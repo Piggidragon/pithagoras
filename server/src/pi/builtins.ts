@@ -1,4 +1,5 @@
 import type { PiClient, PiCommand } from "./types.js";
+import { piFile } from "./package.js";
 
 /**
  * pi's built-in slash commands are implemented by whichever mode is running,
@@ -22,7 +23,18 @@ const PORTAL_SUPPORTED: Record<string, "server" | "client"> = {
   model: "client",
   settings: "client",
   new: "client",
+  clear: "client",
   name: "client",
+};
+
+/**
+ * What the portal says about the commands it reinterprets. These win over pi's
+ * own wording: pi's /clear talks about clearing the context, while here it
+ * starts another chat, and the menu must not promise the one that is not done.
+ */
+const PORTAL_DESCRIPTIONS: Record<string, string> = {
+  new: "Start a new chat in this folder",
+  clear: "Start a fresh chat in this folder",
 };
 
 /** Used only if the SDK's internal module moves; keeps `/` working regardless. */
@@ -34,13 +46,19 @@ const FALLBACK_DESCRIPTIONS: Record<string, string> = {
   model: "Select model",
   settings: "Open settings",
   new: "Start a new session",
+  clear: "Start a fresh chat in this folder",
   name: "Set session display name",
 };
 
 export interface BuiltinCommand extends PiCommand {
   where: "server" | "client";
   argumentHint?: string;
+  /** Does nothing without an argument, so the menu completes it rather than running it. */
+  needsArgument?: boolean;
 }
+
+/** `/name` with no name is a command that silently does nothing. */
+const NEEDS_ARGUMENT = new Set(["name"]);
 
 let cached: BuiltinCommand[] | undefined;
 
@@ -50,10 +68,7 @@ export async function getBuiltinCommands(): Promise<BuiltinCommand[]> {
 
   let sdkCommands: { name: string; description: string; argumentHint?: string }[] = [];
   try {
-    // import.meta.resolve, not require.resolve: the package's exports map
-    // declares only an "import" condition, so CJS resolution fails outright.
-    const entry = import.meta.resolve("@earendil-works/pi-coding-agent");
-    const mod: any = await import(new URL("core/slash-commands.js", entry).href);
+    const mod: any = await import(piFile("core/slash-commands.js").href);
     sdkCommands = mod.BUILTIN_SLASH_COMMANDS ?? [];
   } catch (e) {
     console.error(`[portal] builtin command list unavailable from SDK: ${(e as Error).message}`);
@@ -62,8 +77,9 @@ export async function getBuiltinCommands(): Promise<BuiltinCommand[]> {
   const bySdk = new Map(sdkCommands.map((c) => [c.name, c]));
   cached = Object.entries(PORTAL_SUPPORTED).map(([name, where]) => ({
     name,
-    description: bySdk.get(name)?.description ?? FALLBACK_DESCRIPTIONS[name],
+    description: PORTAL_DESCRIPTIONS[name] ?? bySdk.get(name)?.description ?? FALLBACK_DESCRIPTIONS[name],
     argumentHint: bySdk.get(name)?.argumentHint,
+    ...(NEEDS_ARGUMENT.has(name) ? { needsArgument: true } : {}),
     source: "builtin",
     where,
   }));
@@ -72,6 +88,21 @@ export async function getBuiltinCommands(): Promise<BuiltinCommand[]> {
 
 export async function findServerBuiltin(name: string): Promise<BuiltinCommand | undefined> {
   return (await getBuiltinCommands()).find((c) => c.name === name && c.where === "server");
+}
+
+/**
+ * Why `message` cannot be sent with pictures, or undefined if it can.
+ *
+ * A portal command acts on the session and never reaches the model, so
+ * pictures sent with one would be lost without a word. Asked before anything
+ * is done with them, so the refusal reaches someone who can put them back.
+ */
+export async function picturesRefused(message: string): Promise<string | undefined> {
+  const name = /^\/([\w-]+)/.exec(message.trim())?.[1];
+  if (name && (await findServerBuiltin(name))) {
+    return `/${name} does not take pictures. Send them in a message of their own.`;
+  }
+  return undefined;
 }
 
 /** Run a server-side builtin, returning the notice to show in the transcript. */
@@ -90,7 +121,9 @@ export async function runBuiltin(name: string, args: string, client: PiClient): 
       return [
         `Model: ${state.model.name}`,
         `Effort: ${state.thinkingLevel}`,
-        `Context: ${stats.contextUsage.tokens.toLocaleString()} / ${stats.contextUsage.contextWindow.toLocaleString()} (${stats.contextUsage.percent.toFixed(1)}%)`,
+        stats.contextUsage.tokens === null || stats.contextUsage.percent === null
+          ? `Context: unknown until the next reply / ${stats.contextUsage.contextWindow.toLocaleString()}`
+          : `Context: ${stats.contextUsage.tokens.toLocaleString()} / ${stats.contextUsage.contextWindow.toLocaleString()} (${stats.contextUsage.percent.toFixed(1)}%)`,
         `Tokens: ${stats.tokens.input.toLocaleString()} in, ${stats.tokens.output.toLocaleString()} out`,
         `Cost: $${stats.cost.toFixed(4)}`,
         `Tool calls: ${stats.toolCalls}`,

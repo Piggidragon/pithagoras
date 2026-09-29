@@ -1,18 +1,35 @@
 import { CanvasTools } from "./canvas-tools.js";
+import { showImageTool } from "./show-image-tool.js";
 import { acceptPrompt } from "./accept-prompt.js";
-import { VoiceFirstTurn, audioSystemRules, audioMessage } from "./voice-first.js";
+import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { PiClient, PiCommand, PiState, PiStats } from "./types.js";
+import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
+import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
+import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
+import { contextWindowFor } from "../db.js";
+import { configStamp } from "../providers.js";
+import { rereadConfig } from "./model-runtime.js";
+import { UNDERSTORY_RULE, understoryOn } from "../features.js";
+
+/** A message on its way into pi: see SdkPiClient.prompt(). */
+interface Handoff {
+  /** Its words as handed to pi. */
+  text: string;
+  /** The queue it goes into if a run is going. */
+  lane: "steering" | "followUp";
+  /** Its words as pi queued them, once it has. */
+  queued?: string;
+}
 
 function asArray(v: any): any[] {
   const resolved = typeof v === "function" ? v() : v;
@@ -39,9 +56,48 @@ function asArray(v: any): any[] {
 const CONTEXT_FILES = ["SOUL.md", "PrimaryUser.md", "MEMORY.md"];
 const SHARED_FILES = ["SOUL.md", "TEAM.md"];
 
-const filesFor = (role?: string) => (!role || role === "primary" ? CONTEXT_FILES : SHARED_FILES);
+/**
+ * While Understory holds the agent's memory, MEMORY.md is not read: two
+ * memories would drift apart, and the file would be the stale one. It stays
+ * where it is, and is read again once Understory is switched off.
+ */
+const filesFor = (role?: string) =>
+  !role || role === "primary" ? (understoryOn() ? CONTEXT_FILES.filter((f) => f !== "MEMORY.md") : CONTEXT_FILES) : SHARED_FILES;
 
-function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
+/**
+ * pi's own theme, for extensions that style text with it even when nothing
+ * will draw it — as pi's no-UI context hands them. pi's CLI loads it on start;
+ * the SDK does not, and the theme object pi hands out throws on every read
+ * until it has. Loaded once, with the SDK, then read where pi keeps it.
+ */
+const THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
+let themeLoaded: string | null = null;
+export function loadTheme(
+  pi: { initTheme?: (name?: string, watch?: boolean) => void; SettingsManager?: { create(cwd: string): { getTheme(): string | undefined } } },
+  cwd = process.cwd(),
+) {
+  // The one set in pi's settings, as pi's CLI loads it; its default without one.
+  let name: string | undefined;
+  try {
+    name = pi.SettingsManager?.create(cwd).getTheme();
+  } catch {
+    // Settings that cannot be read leave the default.
+  }
+  if (themeLoaded === (name ?? "")) return;
+  themeLoaded = name ?? "";
+  try {
+    pi.initTheme?.(name, false);
+  } catch {
+    try {
+      pi.initTheme?.(undefined, false);
+    } catch {
+      // An extension reading it gets undefined, as it did before.
+    }
+  }
+}
+const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
+
+export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
   for (const name of filesFor(role)) {
     const file = path.join(cwd, name);
@@ -62,7 +118,8 @@ function extraContextFiles(cwd: string, role?: string): { path: string; content:
  * material, and the model read its own identity as notes about a third party.
  * One line at system level is enough to change what they are.
  */
-function framing(cwd: string, role?: string): string[] {
+/** The line saying the agent's own files are its own: the ones handed to it now. */
+function ownFiles(cwd: string, role?: string): string[] {
   const present = filesFor(role).filter((name) => {
     try {
       return existsSync(path.join(cwd, name));
@@ -70,16 +127,53 @@ function framing(cwd: string, role?: string): string[] {
       return false;
     }
   });
-  const lines: string[] = [...audioSystemRules(), BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE];
-  if (present.length) {
-    lines.push(
-      `${present.join(", ")} in your working directory are yours, not reference material about someone else. Each opens with a block saying what it is for; follow it.`,
-    );
-  }
+  return present.length
+    ? [`${present.join(", ")} in your working directory are yours, not reference material about someone else. Each opens with a block saying what it is for; follow it.`]
+    : [];
+}
+
+function framing(): string[] {
+  // The rule for spoken replies is not here: the resource loader adds it, to
+  // the conversations that have had voice (see PortalLoader and AudioRule).
+  // Nor the line naming the agent's own files: which there are can change
+  // under an open chat (Understory switched on takes MEMORY.md away), so it is
+  // asked for each time the prompt is built — see ownFiles.
+  const lines: string[] = [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE];
   // The bracketed-ref trap that used to need a line here is handled in the
   // guard now, which normalises the argument for every session whether it
   // reads this or not. Nothing to say, so nothing spent saying it.
   return lines;
+}
+
+/** pi's resource loader with the rule for spoken replies: see portalLoader. */
+let PortalLoader: (new (options: unknown, rule: AudioRule, said?: () => string[]) => any) | undefined;
+
+/**
+ * pi's resource loader, adding the rule for spoken replies to what pi appends
+ * to its system prompt where the conversation has had voice.
+ *
+ * Asked each time pi builds the prompt, so the rule is part of pi's own prompt
+ * and stays through every rebuild. Made once, the first time pi is loaded:
+ * pi is imported lazily, so the class cannot exist before.
+ */
+function portalLoader(pi: any): new (options: unknown, rule: AudioRule, said?: () => string[]) => any {
+  return (PortalLoader ??= class extends pi.DefaultResourceLoader {
+    private readonly rule: AudioRule;
+    /** Lines that depend on how the portal is set up now, asked each time like the rule. */
+    private readonly said: () => string[];
+    constructor(options: unknown, rule: AudioRule, said: () => string[] = () => []) {
+      super(options);
+      this.rule = rule;
+      this.said = said;
+    }
+    getAppendSystemPrompt(): string[] {
+      return [...super.getAppendSystemPrompt(), ...this.said(), ...(this.rule?.lines() ?? [])];
+    }
+    /** What is appended without the rule: where the rule goes after. */
+    appendedByPi(): string {
+      return [...super.getAppendSystemPrompt(), ...this.said()].join("\n\n");
+    }
+  });
 }
 
 /**
@@ -123,14 +217,48 @@ function viaProgressProxy<T extends { provider?: string; baseUrl?: string }>(
 }
 
 /**
- * Both ways a llama.cpp server shows up.
+ * The ways a llama.cpp server shows up.
  *
  * pi has a built-in provider called `llama.cpp`, and the `pi-llama-cpp` package
- * registers one per server as `llama-server=<url>`. This deployment uses the
- * second, so matching only the first meant the reroute never once ran.
+ * registers one per server as `llama-server=<url>`. Behind a llama-swap gateway
+ * neither fits — pi-llama-cpp probes `/props?model=<id>` for every model, which
+ * llama-swap answers by loading it — so the gateway is a plain provider in
+ * models.json named `llama-swap`. It is still llama-server underneath.
  */
 function isLlama(provider: string | undefined): boolean {
-  return provider === "llama.cpp" || (provider?.startsWith("llama-server") ?? false);
+  return provider === "llama.cpp" || provider === "llama-swap" || (provider?.startsWith("llama-server") ?? false);
+}
+
+/**
+ * Who a tool belongs to, said the way a person would.
+ *
+ * pi's own `source` is the kind of place it came from — "builtin", "auto",
+ * "inline" — which groups four unrelated packages under one word. The name is
+ * in the path: the package for anything installed, the file for a loose
+ * extension, and pi's own angle-bracketed markers for the rest.
+ */
+function sourceLabel(info: any): string {
+  const path = typeof info?.path === "string" ? info.path : "";
+
+  // pi writes its own as <builtin:read> and the portal's inline ones as
+  // <inline:canvases>. The second is worth naming; the first is the agent.
+  const marker = /^<(builtin|inline):([^>]+)>$/.exec(path);
+  if (marker) return marker[1] === "inline" ? marker[2] : "built in";
+
+  const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path);
+  if (pkg) return pkg[1];
+
+  if (path) {
+    const parts = path.split("/").filter(Boolean);
+    const file = parts.pop() ?? "";
+    const name = file.replace(/\.[cm]?[jt]sx?$/, "");
+    // An extension in a directory of its own is named by the directory, which
+    // is what its author called it — "index" is not a name.
+    return name === "index" ? (parts.pop() ?? name) : name || "built in";
+  }
+
+  const source = typeof info?.source === "string" ? info.source.trim() : "";
+  return source || "built in";
 }
 
 /** Read a member that may be a getter or a method, without assuming which. */
@@ -155,10 +283,47 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private disposed = false;
   private canvases?: CanvasTools;
   private voiceFirst?: VoiceFirstTurn;
+  private audioRule?: AudioRule;
+  private loader?: { appendedByPi(): string };
   /** Dialogs an extension is waiting on, keyed by request id. */
   private pendingUi = new Map<string, (r: { cancelled?: boolean; value?: unknown }) => void>();
+  /** The chat box's text, kept by the portal: see useDrafts. */
+  private drafts?: DraftStore;
+
+  useDrafts(drafts: DraftStore): void {
+    this.drafts = drafts;
+  }
   /** The portal's own id for this conversation — what prefill progress is reported against. */
   portalSessionId?: string;
+  /** The extensions' event bus, when this client made one. */
+  bus?: { emit(channel: string, data: unknown): void };
+  unbridge?: Bridge;
+
+  // Only to one running here that takes it: after a restart, the bus is new
+  // and nobody on it, and "sent" would be a message that went nowhere.
+  subagentInput(id: string, text: string): boolean {
+    if (!this.bus || !this.unbridge?.takes(id, "input")) return false;
+    this.bus.emit(SUBAGENT_INPUT, { id, text });
+    return true;
+  }
+
+  subagentStop(id: string): boolean {
+    if (!this.bus || !this.unbridge?.takes(id, "stop")) return false;
+    this.bus.emit(SUBAGENT_STOP, { id });
+    return true;
+  }
+
+  subagentsRunning(): number {
+    return this.unbridge?.running() ?? 0;
+  }
+
+  endSubagents(why: string): void {
+    this.unbridge?.endAll(why);
+  }
+  /** The model object applyContextLimit last put on the session, to tell it from one pi put there. */
+  private appliedModel?: object;
+  /** What each model's own definition says its window is, as last seen on a model that was pi's. */
+  private definitionWindows = new Map<string, number | undefined>();
 
   private constructor(
     private readonly session: any,
@@ -167,6 +332,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   ) {
     super();
     this.setMaxListeners(0);
+    this.guardActiveTools();
   }
 
   static async create(opts: {
@@ -191,23 +357,32 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     whoNow?: () => { role: string; key?: string };
     /** Lowest role this conversation serves, deciding which context files load. */
     role?: string;
+    /** Tools this conversation has switched off, by name. */
+    toolsOff?: string[];
     /** The portal's session id, for tools that record against it. */
     sessionId?: string;
     /** False lets a run act on what it read — see guardExtension. */
     enforceTaint?: boolean;
     /** Read at each tool call, so a change takes effect without a restart. */
     browserNow?: () => { allowed: boolean; allowlist: string[] };
+    /** What this chat's subagents run on, asked when one starts: see subagent-protocol.ts. */
+    subagentModel?: () => string | undefined;
   }): Promise<SdkPiClient> {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
     const pi: any = await import("@earendil-works/pi-coding-agent");
+    loadTheme(pi, opts.cwd);
 
     const modelRuntime = await pi.ModelRuntime.create();
+    // Shared with the extensions, so one that runs a subagent can tell the
+    // portal about it, and be told what the person wants of it.
+    const eventBus = typeof pi.createEventBus === "function" ? pi.createEventBus() : undefined;
 
     // Without an explicit loader the SDK starts with no extensions, skills or
     // prompt templates — so installed packages contribute no commands at all.
     // The CLI wires this up for you; here it has to be asked for.
     const voiceFirst = new VoiceFirstTurn();
+    const audioRule = new AudioRule();
     const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
     let resourceLoader: any;
     try {
@@ -227,6 +402,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           ) },
       ];
       if (canvases) factories.push({ name: "canvases", factory: canvases.extension });
+      // Beside the canvases: both are how the agent puts something on the screen.
+      if (opts.sessionId) factories.push({ name: "pictures", factory: showImageTool(opts.cwd) });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       // Only where it means something: a conversation with the primary user has
@@ -239,8 +416,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       if (opts.routineSlug !== undefined && reportToFor(opts.routineSlug)) {
         factories.push({ name: "report", factory: reportTool(opts.routineSlug ?? null) });
       }
-      resourceLoader = new pi.DefaultResourceLoader({
+      resourceLoader = new (portalLoader(pi))({
         cwd: opts.cwd,
+        ...(eventBus ? { eventBus } : {}),
         agentDir: pi.getAgentDir(),
         // Available everywhere without being installed, and not editable in
         // place: they belong to the image, so an edit would be lost on the next
@@ -265,8 +443,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // you" from its own base identity — verified: it read a fact out of
         // MEMORY.md correctly while insisting it was Pi, made by Baidu. This
         // says what the files are for.
-        appendSystemPrompt: framing(opts.cwd, opts.role),
-      });
+        appendSystemPrompt: framing(),
+        // Where MEMORY.md would have been, while Understory holds the memory:
+        // asked each time the prompt is built, so a switch reaches a reloaded chat.
+        // A conversation with anyone else had no memory to replace.
+      }, audioRule, () => [
+        ...ownFiles(opts.cwd, opts.role),
+        ...((!opts.role || opts.role === "primary") && understoryOn() ? [UNDERSTORY_RULE] : []),
+      ]);
       await resourceLoader.reload();
     } catch (e) {
       console.error(`[portal] resource loader unavailable: ${(e as Error).message}`);
@@ -298,6 +482,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       opts.sessionFile && existsSync(opts.sessionFile)
         ? pi.SessionManager.open(opts.sessionFile, opts.sessionDir, opts.cwd)
         : pi.SessionManager.create(opts.cwd, opts.sessionDir);
+    // Before the prompt is first built: a reopened conversation may have had
+    // voice. What the model is given, not the whole path: a spoken message
+    // compacted away left nothing the rule is about.
+    audioRule.set(spokenIn(sessionManager.buildContextEntries()));
 
     const { session } = await pi.createAgentSession({
       cwd: opts.cwd,
@@ -311,10 +499,33 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const client = new SdkPiClient(session, modelRuntime, () => {});
     client.portalSessionId = opts.sessionId;
     client.canvases = canvases;
+    if (eventBus && resourceLoader) {
+      client.bus = eventBus;
+      client.unbridge = bridgeSubagents(
+        eventBus,
+        (event) => client.emit("event", event),
+        () => {
+          const model = opts.subagentModel?.();
+          return model ? { model } : {};
+        },
+      );
+    }
     if (resourceLoader) {
       client.voiceFirst = voiceFirst;
+      client.audioRule = audioRule;
+      client.loader = resourceLoader;
+      client.sayAudioRuleEachTurn();
     }
-    const unsub = session.subscribe((event: any) => { canvases?.observe(event); client.emit("event", event); });
+    const unsub = session.subscribe((event: any) => {
+      // Before anything is measured against the window: pi swaps the model for the
+      // registry's whenever an extension registers a provider, and that undoes it.
+      if (event?.type === "agent_start") client.applyLimitQuietly();
+      canvases?.observe(event);
+      // As pi emits it, not as forward() passes it on: a queue_update held
+      // behind a settle would be too late for the prompt() that caused it.
+      client.noteQueue(event);
+      client.forward(event);
+    });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};
 
@@ -325,15 +536,17 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Binding a uiContext is what makes interactive commands work at all: an
     // unbound host makes ctx.ui.select() return a default immediately, so a
     // command that asks the user something silently does nothing.
+
+    client.switchedOff = new Set(opts.toolsOff ?? []);
     try {
       await session.bindExtensions({
         uiContext: client.buildUiContext(),
         mode: "rpc",
         commandContextActions: {
           waitForIdle: () => session.waitForIdle(),
-          reload: async () => {
-            await session.reload();
-          },
+          // Through the client, not the session: a reload has to put the tool
+          // switches back, and only the client knows them.
+          reload: () => client.reload(),
         },
         onError: (err: any) =>
           client.emit("event", {
@@ -378,6 +591,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       console.error(`[portal] could not route llama progress: ${(e as Error).message}`);
     }
 
+    client.applyLimitQuietly();
+    // After binding, not before: a tool an extension registers does not exist
+    // until then, and switching it off ahead of time switches off nothing.
+    if (client.switchedOff.size) client.applyToolsOff();
     return client;
   }
 
@@ -453,6 +670,46 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       setWorkingVisible: () => {},
       setWorkingIndicator: () => {},
       setHiddenThinkingLabel: () => {},
+      // The rest of pi's UI, which extensions call whether or not there is a
+      // terminal. Missing, a call threw — "ctx.ui.custom is not a function" —
+      // and the command failed for no reason of its own. As pi's RPC mode
+      // does: what a browser can do is passed on, the rest does nothing.
+      setFooter: () => {},
+      setHeader: () => {},
+      setTitle: () => {},
+      // A view drawn for the terminal. Passed on so the chat can say it cannot be shown.
+      custom: async () => {
+        fireAndForget({ method: "custom" });
+        return undefined;
+      },
+      // Into the chat box, for the person to send or change.
+      // What is in the box follows at once, for a getEditorText right after.
+      setEditorText: (text: string) => {
+        this.drafts?.set(String(text ?? ""));
+        fireAndForget({ method: "setEditorText", text: String(text ?? "") });
+      },
+      // Over what is selected, or at the end, as the page puts it.
+      pasteToEditor: (text: string) => {
+        const given = String(text ?? "");
+        const draft = this.drafts?.get()?.text ?? "";
+        const { start, end } = this.drafts?.get()?.caret ?? { start: draft.length, end: draft.length };
+        const at = start + given.length;
+        this.drafts?.set(draft.slice(0, start) + given + draft.slice(end), { start: at, end: at });
+        fireAndForget({ method: "setEditorText", text: given, paste: true });
+      },
+      // Answered with nothing, an extension that adds to the draft replaced it.
+      getEditorText: () => this.drafts?.get()?.text ?? "",
+      addAutocompleteProvider: () => {},
+      setEditorComponent: () => {},
+      getEditorComponent: () => undefined,
+      get theme() {
+        return piTheme();
+      },
+      getAllThemes: () => [],
+      getTheme: () => undefined,
+      setTheme: () => ({ success: false, error: "The portal's theme is set in the browser." }),
+      getToolsExpanded: () => false,
+      setToolsExpanded: () => {},
     };
   }
 
@@ -464,24 +721,215 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return true;
   }
 
-  async prompt(message: string, options?: { voice?: boolean }): Promise<void> {
+  async prompt(
+    message: string,
+    options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean },
+  ): Promise<PromptTaken> {
     if (options?.voice) {
       this.voiceFirst?.arm(this.isIdle());
     } else {
       this.voiceFirst?.reset();
     }
-    const promptOptions = { expandPromptTemplates: true, streamingBehavior: "followUp" };
+    const ruleFromThis = this.sayAudioRule(options?.voice === true);
+    const promptOptions = {
+      expandPromptTemplates: true,
+      // Mid-run, a message waits for the run to end — unless it was said to
+      // steer it, when it is taken in after the tools that are running now.
+      streamingBehavior: options?.steer ? "steer" : "followUp",
+      ...(options?.images?.length ? { images: options.images } : {}),
+    };
+    // Answered once pi has taken it, typed or spoken, not once the run it
+    // starts is over — as the RPC client does. `session.prompt()` holds on to
+    // the whole run, and so did the request that sent it: the browser was
+    // still "sending" for as long as the agent worked, and its Send stayed
+    // greyed out, with no way to steer. What fails after that is reported as
+    // portal_failed, ahead of the run's agent_settled: see forward().
+    const text = options?.voice ? audioMessage(message) : message;
+    const handoff: Handoff = { text, lane: options?.steer ? "steering" : "followUp" };
+    this.handoffs.push(handoff);
+    // pi says it has the message just before it either returns — queued, or
+    // handled by an extension — or starts the run: idle then and running a
+    // moment later is a run this message started.
+    let idleWhenTaken = false;
     try {
-      if (options?.voice) {
-        await acceptPrompt(
-          preflightResult => this.session.prompt(audioMessage(message), { ...promptOptions, preflightResult }),
-          error => {
-            this.voiceFirst?.reset();
-            this.emit("event", { type: "portal_notice", text: `Voice turn failed: ${error instanceof Error ? error.message : error}`, error: true });
-          },
-        );
-      } else await this.session.prompt(message, promptOptions);
-    } catch (error) { if (options?.voice) this.voiceFirst?.reset(); throw error; }
+      await acceptPrompt(
+        preflightResult =>
+          this.session.prompt(text, {
+            ...promptOptions,
+            preflightResult: (success: boolean) => {
+              idleWhenTaken = this.session.isIdle;
+              preflightResult(success);
+            },
+          }),
+        error => {
+          if (options?.voice) this.voiceFirst?.reset();
+          if (ruleFromThis) this.unsayAudioRule();
+          const reason = error instanceof Error ? error.message : String(error);
+          this.emit("event", { type: "portal_failed", error: `${options?.voice ? "Voice turn" : "The run"} failed: ${reason}` });
+        },
+      );
+    } catch (error) {
+      if (options?.voice) this.voiceFirst?.reset();
+      if (ruleFromThis) this.unsayAudioRule();
+      throw error;
+    }
+    finally {
+      this.handoffs.splice(this.handoffs.indexOf(handoff), 1);
+    }
+    if (handoff.queued !== undefined) return { outcome: "queued", lane: handoff.lane, text: handoff.queued };
+    if (idleWhenTaken && !this.session.isIdle) return { outcome: "started" };
+    // Taken by an extension, and not into the conversation.
+    if (ruleFromThis) this.unsayAudioRule();
+    return { outcome: "handled" };
+  }
+
+  /**
+   * The rule for spoken replies, in from this spoken message on. True when it
+   * was this message that put it in.
+   *
+   * Not taken out by a typed message: a spoken one still waiting in pi's queue
+   * is not on the conversation's path yet, and would be answered without it.
+   * Out it goes when this message was refused and no other spoken one is
+   * there (unsayAudioRule), or when the conversation is opened again with none
+   * in what the model is given — after a restart, a compaction, or an edit,
+   * which stops pi and reopens it.
+   *
+   * In before pi takes the message, so a run it starts has the rule from its
+   * first turn: pi's prompt is built again at once. Every turn after that is
+   * seen to by sayAudioRuleEachTurn, whoever set its prompt.
+   */
+  private sayAudioRule(spoken: boolean): boolean {
+    if (!spoken || !this.audioRule?.set(true)) return false;
+    if (this.buildPromptAgain()) return true;
+    // Off again, so the next spoken message tries once more.
+    this.audioRule.set(false);
+    return false;
+  }
+
+  /**
+   * The rule out again, for a spoken message pi refused or an extension took
+   * — unless another spoken one is in the conversation, in pi's queue, or
+   * being handed to it now.
+   */
+  private unsayAudioRule(): void {
+    const spoken = (text: string) => text.startsWith(AUDIO_MESSAGE_PREFIX);
+    let context: readonly unknown[] = [];
+    try {
+      context = this.session.sessionManager.buildContextEntries();
+    } catch {
+      return;
+    }
+    if (spokenIn(context)) return;
+    if ([...this.queue.steering, ...this.queue.followUp].some(spoken)) return;
+    if (this.handoffs.some((h) => spoken(h.text))) return;
+    if (this.audioRule?.set(false)) this.buildPromptAgain();
+  }
+
+  /**
+   * pi's prompt built again, with the tools as they are: `activate` is pi's own
+   * setter, beneath the tool switches, so nothing about them changes.
+   */
+  private buildPromptAgain(): boolean {
+    try {
+      this.activate?.(this.session.getActiveToolNames());
+      return !!this.activate;
+    } catch (e) {
+      console.error(`[portal] the system prompt could not be built again: ${(e as Error).message}`);
+      return false;
+    }
+  }
+
+  /**
+   * The rule as it should be, in the prompt of every turn after a run's first.
+   *
+   * pi takes that prompt afresh between turns, and that is how a message
+   * queued into a run that is going is answered: from pi's own prompt, which
+   * has the rule once it is on, or from one an extension set for the run when
+   * it started, which keeps whatever it was given then. pi-background-tasks
+   * sets one for every run on the test host. So the prompt each turn is to be
+   * sent is made to say what the rule says now, whoever built it.
+   */
+  private sayAudioRuleEachTurn(): void {
+    const agent = this.session?.agent;
+    const rule = this.audioRule;
+    const loader = this.loader;
+    const prepare = agent?.prepareNextTurnWithContext;
+    if (!rule || !loader || typeof prepare !== "function") return;
+    agent.prepareNextTurnWithContext = async (turn: unknown, signal: unknown) => {
+      const next = await prepare.call(agent, turn, signal);
+      const prompt = next?.context?.systemPrompt;
+      if (typeof prompt !== "string") return next;
+      const said = rule.into(prompt, loader.appendedByPi());
+      return said === prompt ? next : { ...next, context: { ...next.context, systemPrompt: said } };
+    };
+  }
+
+  /** Messages being handed to pi right now, oldest first: see noteQueue(). */
+  private handoffs: Handoff[] = [];
+
+  /** pi's queue as its last queue_update had it. */
+  private queue: Record<Handoff["lane"], string[]> = { steering: [], followUp: [] };
+
+  /**
+   * Which message pi just queued, and as what.
+   *
+   * pi queues the words it ends up with — a template or skill expanded, an
+   * input handler's rewrite applied — and says so in a queue_update with the
+   * one entry added at the end. That is the message it hands the agent later,
+   * word for word, so it is what the portal knows the message by. Given to the
+   * message being handed over into that lane that says the same, or else the
+   * oldest one: pi queues them in the order it is given them.
+   */
+  noteQueue(event: any): void {
+    if (event?.type !== "queue_update") return;
+    for (const lane of ["steering", "followUp"] as const) {
+      const now = (Array.isArray(event[lane]) ? event[lane] : []).map(String);
+      const was = this.queue[lane];
+      if (now.length === was.length + 1 && was.every((text, i) => now[i] === text)) {
+        const added = now[now.length - 1];
+        const open = this.handoffs.filter((h) => h.lane === lane && h.queued === undefined);
+        const handoff = open.find((h) => h.text === added) ?? open[0];
+        if (handoff) handoff.queued = added;
+      }
+      this.queue[lane] = now;
+    }
+  }
+
+  /** Events held back behind an agent_settled, in order: see forward(). */
+  private held?: any[];
+
+  /**
+   * Hands pi's events on, keeping one order the portal depends on.
+   *
+   * pi settles a run in the finally of its prompt(), and only after that does
+   * the prompt() throw for a run that failed. Passed on as they come, the
+   * portal saw the run settle cleanly — idle, and an ask() answered with
+   * whatever had been said — and heard about the failure afterwards, when
+   * nothing was listening. So a settle waits for the turn of the event loop
+   * after it, with anything behind it: nothing but promises stand between it
+   * and that throw, and all of them are through by then.
+   *
+   * Held for that one turn and no longer, with whatever pi emits in it: a
+   * prompt can start the next run in the moment pi has marked itself idle but
+   * not yet settled the last one, and events of that run are passed on after
+   * the settle rather than before it.
+   */
+  forward(event: any): void {
+    if (this.held) {
+      this.held.push(event);
+      return;
+    }
+    if (event?.type === "agent_settled") {
+      const held = (this.held = [event]);
+      setImmediate(() => {
+        this.held = undefined;
+        const [settled, ...after] = held;
+        this.emit("event", settled);
+        for (const e of after) this.forward(e);
+      });
+      return;
+    }
+    this.emit("event", event);
   }
 
   async abort(): Promise<void> {
@@ -505,7 +953,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return this.session.isIdle;
   }
 
+  clearQueue(): string[] {
+    const { steering, followUp } = this.session.clearQueue();
+    return [...steering, ...followUp].map(String);
+  }
+
   dispose(): void {
+    this.unbridge?.();
     if (this.disposed) return;
     this.disposed = true;
     this.canvases?.interrupt();
@@ -530,6 +984,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         name: model?.name ?? "unknown",
         provider: model?.provider ?? "unknown",
         contextWindow: model?.contextWindow,
+        input: Array.isArray(model?.input) ? model.input : undefined,
       },
       thinkingLevel: this.session.thinkingLevel ?? "medium",
       autoCompactionEnabled: callable(this.session, "autoCompactionEnabled") ?? true,
@@ -538,17 +993,23 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   async getStats(): Promise<PiStats> {
+    // Read here as well as on run start: the figure shown is worked out against
+    // whatever model the session has now.
+    this.applyLimitQuietly();
     const stats = (await this.session.getSessionStats?.()) ?? {};
     const usage = (await this.session.getContextUsage?.()) ?? {};
     const contextWindow = usage.contextWindow ?? this.session.model?.contextWindow ?? 0;
+    // pi says null, not 0, just after a compaction: the count it had was taken
+    // before it. Passed on as it is, or the pill claims an empty context.
+    const unknown = usage.tokens === null;
     const used = usage.tokens ?? 0;
     return {
       tokens: stats.tokens ?? { input: 0, output: 0, total: 0 },
       cost: stats.cost ?? 0,
       contextUsage: {
-        tokens: used,
+        tokens: unknown ? null : used,
         contextWindow,
-        percent: usage.percent ?? (contextWindow ? (used / contextWindow) * 100 : 0),
+        percent: unknown ? null : (usage.percent ?? (contextWindow ? (used / contextWindow) * 100 : 0)),
       },
       toolCalls: stats.toolCalls ?? 0,
       totalMessages: stats.totalMessages ?? 0,
@@ -562,15 +1023,186 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       : ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
   }
 
+  /** When pi's model and key files were last read here. */
+  private configSeen = configStamp();
+
   /** Only models with working auth, unlike RPC which listed the whole catalogue. */
   async getModels(): Promise<PiState["model"][]> {
+    // pi reads models.json and auth.json once, when the conversation starts. A
+    // provider set up in Settings since then is read in now, when the model
+    // menu is opened, rather than only in the next conversation.
+    const stamp = configStamp();
+    if (stamp !== this.configSeen) {
+      this.configSeen = stamp;
+      await rereadConfig(this.modelRuntime).catch(() => {});
+    }
     const available = (await this.modelRuntime.getAvailable?.()) ?? [];
     return available.map((m: any) => ({
       id: m.id,
       name: m.name ?? m.id,
       provider: m.provider,
       contextWindow: m.contextWindow,
+      input: Array.isArray(m.input) ? m.input : undefined,
     }));
+  }
+
+  /** Names this session has switched off. Applied at every start and on change. */
+  /** Not private: create() fills it before the session is handed over. */
+  switchedOff = new Set<string>();
+
+  /**
+   * What pi wants active, before the switches take anything out of it.
+   *
+   * The registry is not that: `getAllTools()` is every definition pi knows,
+   * including `grep`, `find` and `ls`, which it registers and leaves inactive.
+   * Subtracting the switches from the registry switched those on the first
+   * time anyone turned anything off. The baseline is pi's own choice, in
+   * whatever way it makes it — at start, when an extension registers a tool
+   * later, on a reload — and the switches only ever take names out of it.
+   */
+  private wanted = new Set<string>();
+  private activate?: (names: string[]) => void;
+
+  /**
+   * Put the switches in the one place every activation goes through.
+   *
+   * pi activates tools from several directions and none of them asks us: an
+   * extension that registers a tool later (`lifecycle: "lazy"` is the whole
+   * point of an MCP server that connects on first use) has it activated by
+   * `refreshTools()`, and a reload activates every extension tool again. Each
+   * ends in `setActiveToolsByName`, so that is where the names come out.
+   */
+  private guardActiveTools(): void {
+    const session = this.session;
+    if (typeof session?.setActiveToolsByName !== "function") return;
+    const original = session.setActiveToolsByName.bind(session) as (names: string[]) => void;
+    this.activate = original;
+    try {
+      this.wanted = new Set<string>(session.getActiveToolNames?.() ?? []);
+    } catch {
+      this.wanted = new Set();
+    }
+    session.setActiveToolsByName = (names: string[]) => {
+      this.wanted = new Set([...names, ...this.heldBack(session, names, this.fromExtension)]);
+      original(names.filter((name) => !this.switchedOff.has(name)));
+    };
+    this.hearExtensions(session);
+  }
+
+  /** True while an extension's `setActiveTools` is being carried out. */
+  private fromExtension = false;
+
+  /**
+   * Tell an extension's list of tools from pi's own.
+   *
+   * An extension is shown what is active — what the model is — so a switched-off
+   * tool is not in anything it reads, and whatever it writes into a prompt names
+   * only tools the model can call. So a list it sets says nothing about
+   * switched-off tools: pi-goal-x, on session start, sets what is active less
+   * its goal tools, and taken as a narrowing that dropped every switched-off
+   * tool from the chat's list for good — one switched off before the first
+   * message could not be switched on again. What is switched off is the
+   * switch's to decide: kept, and on again when it is switched on.
+   *
+   * Which also means an extension cannot hide a tool that is switched off: a
+   * list without it may be "not this one" or "one I could not see", and there
+   * is no telling the two apart. Switched on again, it is on — even where the
+   * extension, pi-goal-x with no goal set, would have kept its own tool
+   * hidden. That takes somebody switching it on on purpose; the other reading
+   * lost switched-off tools from the chat for good.
+   *
+   * Extensions reach pi through the runtime every extension API shares, which
+   * pi fills when it binds a runner — at start, and a new one on every reload.
+   */
+  private hearExtensions(session: any): void {
+    const hear = (runner: any) => {
+      const runtime = runner?.runtime;
+      if (!runtime || typeof runtime.setActiveTools !== "function") return;
+      const set = runtime.setActiveTools;
+      runtime.setActiveTools = (names: string[]) => {
+        this.fromExtension = true;
+        try {
+          return set(names);
+        } finally {
+          this.fromExtension = false;
+        }
+      };
+    };
+    hear(session._extensionRunner);
+    if (typeof session._bindExtensionCore !== "function") return;
+    const bind = session._bindExtensionCore.bind(session);
+    session._bindExtensionCore = (runner: any, ...rest: unknown[]) => {
+      const bound = bind(runner, ...rest);
+      hear(runner);
+      return bound;
+    };
+  }
+
+  /**
+   * What is switched off and still wanted, though `names` leaves it out.
+   *
+   * pi refreshes — an extension registering a tool, an MCP server connecting, a
+   * reload — by adding to `getActiveToolNames()`, which the switches have
+   * already thinned. Taken as it came, every refresh dropped whatever was off
+   * from what pi wants: gone from the chat's list, with no way to switch it
+   * back on. Such a list keeps everything that is active; one that leaves an
+   * active tool out is a choice, and means what it says. An extension's list
+   * never says anything about what is switched off (hearExtensions): it keeps
+   * it. Either way a tool pi no longer has, its extension unloaded, is not
+   * wanted any more.
+   */
+  private heldBack(session: any, names: string[], always = false): string[] {
+    let active: string[];
+    let known: Set<string>;
+    try {
+      active = session.getActiveToolNames?.() ?? [];
+      known = new Set((session.getAllTools?.() ?? []).map((tool: any) => String(tool.name)));
+    } catch {
+      return [];
+    }
+    if (!always && !active.every((name) => names.includes(name))) return [];
+    return [...this.wanted].filter((name) => this.switchedOff.has(name) && !names.includes(name) && known.has(name));
+  }
+
+  /**
+   * Every tool the session could be offered, with where it came from.
+   *
+   * The source is what a person recognises: a package name rather than the
+   * path pi tracks it by, so the list groups the way somebody thinks about it
+   * — "the web search one", not four unrelated rows. A tool pi leaves inactive
+   * is not listed: a tick beside something the model cannot call is a state
+   * the session is not in.
+   */
+  async getTools(): Promise<PiTool[]> {
+    const all: any[] = this.session.getAllTools?.() ?? [];
+    const offered = this.wanted.size ? all.filter((tool) => this.wanted.has(String(tool.name))) : all;
+    return offered.map((tool) => ({
+      name: String(tool.name),
+      description: typeof tool.description === "string" ? tool.description : undefined,
+      source: sourceLabel(tool.sourceInfo),
+      enabled: !this.switchedOff.has(String(tool.name)),
+    }));
+  }
+
+  /**
+   * Switch tools off by name.
+   *
+   * Named rather than listing what stays: pi wants the active set, but that is
+   * a snapshot, and a tool registered later would silently never be on. The
+   * active set is computed from what pi wants right now, every time.
+   */
+  async setToolsOff(names: string[]): Promise<void> {
+    this.switchedOff = new Set(names);
+    this.applyToolsOff();
+  }
+
+  applyToolsOff(): void {
+    try {
+      if (!this.activate || !this.wanted.size) return;
+      this.activate([...this.wanted].filter((name) => !this.switchedOff.has(name)));
+    } catch (e) {
+      console.error(`[portal] could not apply the tool switches: ${(e as Error).message}`);
+    }
   }
 
   /**
@@ -605,6 +1237,50 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const model = this.modelRuntime.getModel(provider, modelId);
     if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
     await this.session.setModel(viaProgressProxy(model, this.portalSessionId) ?? model);
+    this.applyLimitQuietly();
+  }
+
+  /**
+   * Give the session the context window this portal holds the model to.
+   *
+   * pi reads the window off the model it is running, so the number is put there
+   * rather than beside it — the percentage and the moment of compaction then
+   * agree with it. Assigned to the agent's state instead of going through
+   * setModel, which writes a model change into the conversation and into pi's
+   * default model. With nothing set the definition's own number is put back, so
+   * removing a limit takes effect too.
+   */
+  /**
+   * For the places that have another job first: reading a stored number and
+   * looking at the session's model can both fail (a database closing at
+   * shutdown, a pi release that stops exposing `agent`), and a run that never
+   * gets to say it started, or a config that answers 500 and takes every pill
+   * with it, is a poor price for a window that could not be read.
+   */
+  applyLimitQuietly(): void {
+    try {
+      this.applyContextLimit();
+    } catch (e) {
+      console.error(`[portal] could not apply the context window: ${(e as Error).message}`);
+    }
+  }
+
+  applyContextLimit(): void {
+    const current = this.session.model;
+    if (!current) return;
+    const key = `${current.provider}/${current.id}`;
+    // A model that is not the one put here last is pi's own — the registry's, put
+    // back after a reload or a provider registering — and its window is what the
+    // definition says. Kept, because the registry cannot always say it later: a
+    // provider that has gone leaves nothing to look it up in, and the window
+    // would then stay wherever it was last set.
+    if (current !== this.appliedModel) this.definitionWindows.set(key, current.contextWindow);
+    const declared = this.modelRuntime.getModel(current.provider, current.id)?.contextWindow ?? this.definitionWindows.get(key);
+    const wanted = contextWindowFor(current.provider, current.id, declared);
+    if (wanted === current.contextWindow) return;
+    const next = { ...current, contextWindow: wanted };
+    this.appliedModel = next;
+    this.session.agent.state.model = next;
   }
 
   async setThinkingLevel(level: string): Promise<void> {
@@ -638,6 +1314,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   async reload(): Promise<void> {
     await this.session.reload();
+    // Reloading has extensions register their providers again, which puts the
+    // registry's model, with its own window, back on the session.
+    this.applyLimitQuietly();
+    // And has pi switch every extension tool back on — which is every MCP tool,
+    // the browser's among them. The switches are the portal's to keep.
+    if (this.switchedOff.size) this.applyToolsOff();
   }
 
   /** HTML unless a .jsonl path is given, matching pi's own /export. */

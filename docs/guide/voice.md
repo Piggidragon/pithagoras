@@ -37,16 +37,17 @@ at 60 seconds and listening resumes automatically.
 
 Microphone access needs HTTPS or localhost. Voice mode replaces the chat and
 composer with an audio-reactive orb: teal for your voice and violet for spoken
-replies. The screen keeps only status, microphone/end controls and live words
-while you speak. Quiet synthesized sound cues mark connection, submission, mute
-and tool focus; the sound toggle remembers your preference. Reduced-motion
+replies. The screen keeps only status, the controls and live words while you
+speak. Quiet synthesized sound cues mark connection, submission, mute and tool
+focus; they can be turned off in the voice settings. Reduced-motion
 preferences disable panel transitions.
 
 Browser tool calls bring the live browser into a floating window and dock the
 orb. Terminal calls show the agent’s actual command and streamed output on the
 right, moving the orb left. With both open, the browser is larger and the terminal
-sits beside it; narrow screens stack them. Minimize either panel to reclaim space
-without interrupting the agent. Session option dialogs remain available when an
+sits beside it; narrow screens stack them. When the agent reads or changes a file
+in the chat's folder, [Files](/guide/files) opens the same way and shows it. Minimize
+any panel to reclaim space without interrupting the agent. Session option dialogs remain available when an
 action needs your input.
 
 **Mute** disables microphone capture without stopping the session or spoken
@@ -56,6 +57,82 @@ Leaving the session also releases these resources. Ending voice does not stop
 an already accepted agent task. Existing transcript history is never read aloud
 on activation. Status text shows listening, speech detection, transcription,
 and playback; errors remain visible in the voice screen.
+
+## Pictures, tool cards and controls
+
+**Giving the agent a picture.** Choose the picture button beside the microphone
+(on a phone it offers the camera too), paste a picture anywhere on the voice
+screen, or drop one onto it. Pictures wait at the top as thumbnails and go with
+the next thing you say, so "what is wrong with this?" arrives with the picture.
+Up to eight go with one message; remove one with its ×. They are kept if you
+end voice mode before speaking, and are there again when you turn it back on.
+The model has to take images; if it does not, the chat says so.
+
+**The agent showing you a picture.** The agent has a `show_image` tool: it saves
+a chart, a diagram or a screenshot in the chat's folder and calls it, and a
+**Pictures** window opens on it, like the browser and terminal do. Tap the
+picture to see it at full size, use the arrows to go back through earlier ones,
+or open it in a new tab. Outside voice mode the picture appears under the tool
+line in the chat. Canvases can include pictures from the folder too (see
+[Canvases](/guide/canvases)).
+
+**Tool cards.** The cards that fly out of the orb say what the agent is doing
+in words — "Editing app.ts", "Searching for “retry”", "Opening a page ·
+example.com" — and stay while the call runs, counting its time. When it ends
+they say what came of it: `+12 −3` lines for an edit, "8 matches", "Nothing
+found", or the first line of an error. Tap a card to open what it is about: the
+file in Files, the terminal, the browser, the document or the picture.
+
+**Controls.** Beside the microphone and End:
+
+| | |
+| --- | --- |
+| **Add a picture** | As above. The number on it is how many are waiting. |
+| **Repeat** | Plays the last reply again from the audio already made, at the current speed, without asking the agent. Saying "say that again", "repeat that", "sag das nochmal", "wie bitte?" and the like does the same; only a sentence that is nothing but that request counts, so "say that again, but shorter" still goes to the agent. |
+| **Stop** | Shown while the agent works. Stops the task without ending voice mode. |
+
+The buttons at the bottom right open the **conversation** — a window like Files,
+with what you said as it was transcribed and what came back as written — the
+canvases, Files, pictures, the browser and the terminal, and the **voice
+settings**:
+
+| Setting | |
+| --- | --- |
+| **Speaking speed** | 1×, 1.25×, 1.5× or 1.75×. Speech is made faster in the browser without raising the voice (WSOLA time stretching), so it works with every speech runtime and a streamed reply starts as early as before. |
+| **Talking while the agent works** | **Stops it** (default): speaking interrupts the task, as before. **Adds to the task**: what you say goes into the running task after its current step, and the task carries on; use Stop to stop it. |
+| **Push to talk** | Only what you say while holding <kbd>Space</kbd> (outside a text field) or the microphone button is heard. A tap, or a press with no speech in it, is not sent. Useful with background noise or other people talking. |
+| **Sound effects** | The cues for connection, sending, mute and panels. |
+
+Each setting is remembered in this browser.
+
+**Resizing windows.** Drag a window's left, right or bottom edge, or a bottom
+corner, to make it the size you want; the canvas panel has the same grips. A
+window keeps that size until the windows are arranged differently — one opens
+or closes — and then the layout places them again. On a phone the windows take
+the width and cannot be resized.
+
+**Reloading.** A reload keeps voice mode on in that tab. Where the browser will
+not play audio before the page is touched, the voice screen says "Click or
+press a key to continue voice mode" and carries on after that. Ending voice
+mode, or opening another chat, ends this too.
+
+**Keyboard shortcuts.** Everything above has a key; the tooltip of each button
+names it. They work while voice mode is on, except while typing in a field, and
+can be changed under **Settings → Shortcuts**.
+
+| Key | |
+| --- | --- |
+| <kbd>Alt</kbd>+<kbd>V</kbd> | Start or end voice mode, from the chat too |
+| <kbd>M</kbd> | Mute or unmute the microphone |
+| <kbd>Space</kbd> (held) | Talk, with push-to-talk on |
+| <kbd>Esc</kbd> | Stop what the agent is doing; with nothing running, end voice mode |
+| <kbd>P</kbd> / <kbd>R</kbd> | Add a picture / repeat the last reply |
+| <kbd>C</kbd> <kbd>D</kbd> <kbd>F</kbd> <kbd>I</kbd> <kbd>T</kbd> <kbd>B</kbd> | Conversation, canvases, files, pictures, terminal, browser |
+| <kbd>O</kbd> | Voice settings |
+| <kbd>.</kbd> / <kbd>,</kbd> | Speak faster / slower |
+| <kbd>A</kbd> | Switch between stopping and adding to the task |
+| <kbd>H</kbd> | Push-to-talk on or off |
+| <kbd>Shift</kbd>+<kbd>M</kbd> | Sound effects on or off |
 
 ## Dictation
 
@@ -250,14 +327,112 @@ The managed **Install voice** button still installs Breeze and Whisper; it does
 not know about this runtime. Do not run both on the same GPU unless it has the
 memory for both.
 
+### Behind llama-swap
+
+With [llama-swap](https://github.com/mostlygeek/llama-swap) as the only gateway
+on the host, audio.cpp does not need a port of its own: llama-swap starts it on
+the first speech request and routes `/v1/audio/speech` and
+`/v1/audio/transcriptions` to it by the request's `model`. One llama-swap entry
+serves both models, with the two model ids as aliases, so the request reaches
+audio.cpp with `chatterbox` or `qwen3-asr` unchanged:
+
+```yaml
+models:
+  audio-cpp:
+    cmd: |
+      /path/to/audiocpp_server --config /path/to/server.json
+      --host 127.0.0.1 --port ${PORT}
+    env: ["CUDA_DEVICE_ORDER=PCI_BUS_ID", "CUDA_VISIBLE_DEVICES=1"]
+    aliases: [chatterbox, qwen3-asr]
+    ttl: 900          # stop the process after 15 quiet minutes
+    unlisted: true    # not a chat model, so keep it out of /v1/models
+```
+
+Breeze, the English voice, is a third model in the same `server.json` (`"id":
+"breeze"`, `"family": "breeze_tts"`, `"mode": "streaming"`, the layout in
+`deploy/cortex-voice/audio-cpp.json`) with `breeze` added to the aliases. Choose
+**Breeze audio.cpp · streaming** as the speech runtime in the portal and it sends
+`model: breeze`. The
+audio.cpp build has to include the family: a build made with
+`--model-set custom --models chatterbox,qwen3_asr` cannot load it, so add
+`breeze_tts` to `--models` and rebuild. With `"max_loaded_models": 2` the server
+keeps Qwen3-ASR and whichever speaking voice was used last resident, and
+unloads the other. The Q8 file is published as
+`Breeze-TTS-2-GGUF/breeze-tts-2-q8_0.gguf` in `audio-cpp/audio.cpp-gguf`
+on Hugging Face, so no local quantizing step is needed.
+
+audio.cpp loads lazily on its own: with `"lazy_load": true` in `server.json` a
+model is read on the first request that names it, and `"idle_unload_ms"` frees
+it again after that long without use. llama-swap's `ttl` is the coarser layer
+above, ending the whole process and its CUDA context. A cold start through the
+gateway measured 6.5 s for a first spoken sentence.
+
+The gateway runs one model at a time unless told otherwise, so without a
+`routing` section every speech request would unload the language model. Put the
+audio entry in a matrix set with the LLM that leaves its GPU free. Speech lives
+on the second GPU, so it goes next to a model pinned to the first, and a model
+split across both stays alone:
+
+```yaml
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        vars: { o: Ornith1.5-35b, q: Qwen3.8-27b, a: audio-cpp }
+        sets:
+          pinned: "o & a"
+          split: "q"
+```
+
+In the portal, use the gateway for all three URLs. **Speech recognition URL**
+is `http://127.0.0.1:8080/v1/audio/transcriptions` and **Speech synthesis URL**
+is `http://127.0.0.1:8080/v1/audio/speech`; the model names stay `qwen3-asr` and
+`chatterbox`.
+
+The language model is a plain provider in pi's `models.json`, not the
+`pi-llama-cpp` package. That package asks `/props?model=<id>` about every model,
+and llama-swap answers such a request by loading the model, so registering three
+models swaps through all of them.
+
+```json
+{
+  "providers": {
+    "llama-swap": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "none",
+      "models": [{ "id": "Ornith1.5-35b", "reasoning": true, "contextWindow": 262144 }]
+    }
+  }
+}
+```
+
 ## First spoken response
 
 On the host executor with a llama.cpp provider, each voice prompt disables
 thinking for its first model call and asks for a brief spoken answer before
 tools. Later calls after tools use the session’s existing thinking setting.
-A permanent conditional rule in the base system prompt asks for plain, concise
-speech when the latest user message begins with `[Audio mode]`. The portal adds
-that prefix to microphone submissions and typed requests sent in voice mode.
+A conditional rule in the system prompt asks for plain, concise speech when the
+latest user message begins with `[Audio mode]`. The portal adds that prefix to
+microphone submissions and typed requests sent in voice mode. The rule is only in
+the system prompt of a conversation that has had voice, and it is part of the
+prompt pi builds, so it stays when tools come and go. It comes in with the first
+spoken message, including one sent while a typed run is still going, and typing
+again does not take it out, so the prompt does not change back and forth. It is
+left out again when a spoken message never reached the conversation (refused, or
+taken by an extension) and no other spoken one is there, and when the
+conversation is opened with no spoken message in what the model is given: after
+a restart, a compaction, or an edit that removed the spoken messages. A
+typed-only conversation never mentions `[Audio mode]`; with the rule there, a
+model took typed messages for spoken ones.
+
+The first spoken message in a conversation that was typed until then changes
+the system prompt once. A local model keeps a cache of the prompt it has
+already read, and that cache starts at the system prompt, so the whole
+conversation is read again before that first spoken reply. In a long
+conversation on llama.cpp, that can be a noticeable wait; every spoken or typed
+message after it has the cache again.
 The marker stays in model conversation history, while the chat UI shows the
 original user text. No temporary system messages are inserted. Ordinary text
 requests have no marker and use normal chat formatting, even after voice turns.
@@ -265,6 +440,36 @@ Tool calls and file contents keep their required formats. Saved thinking
 preferences are unchanged. This skips initial
 reasoning latency, but prompt processing and sentence synthesis still take time.
 Other providers and the container executor retain their normal thinking behavior.
+
+### Speaking instructions
+
+The rules above — a short spoken sentence before tools, plain text without
+Markdown, long reports in a canvas, pictures through `show_image`, the
+`(laugh)` / `(sigh)` cues — are one built-in block of text
+(`server/src/pi/voice-first.ts`), not a field in the UI. They are switched off as
+a whole with `VOICE_RESPONSE_INSTRUCTIONS=false` on the portal: no `[Audio mode]`
+prefix is added and the system-prompt rule is never sent, which is what the
+[comparison baseline](/guide/voice-comparison) does. Any other value leaves them
+on. `VOICE_SKIP_FIRST_THINKING=false` keeps thinking on for the first call. The
+remaining `VOICE_*` variables (`VOICE_PIPELINE_MODE`, `VOICE_SENTENCE_CHUNKS`,
+`VOICE_TTS_PREFETCH`, `VOICE_STATUS_SPEECH`, `VOICE_COMPARISON`) are described in
+the comparison guide.
+
+## Speech runtimes
+
+**Settings → Add-ons → Voice → Speech runtime** selects how speech is made, and
+each runtime has its own address:
+
+| Runtime | For | Notes |
+| --- | --- | --- |
+| `breeze` | A Python Breeze-TTS-2 service | Designed or cloned voices |
+| `audio-cpp` | Breeze on audio.cpp, streaming — what the managed container runs | Whisper on CPU |
+| `chatterbox` | Speech in another language, on audio.cpp | Needs an input language (not auto-detect) and a reference clone — Aria or a voice with a recording; see above |
+
+Recognition is Whisper by default. **Speech recognition model** takes another
+model id (letters, digits, `.`, `:`, `-`, `_`), such as `qwen3-asr` behind
+llama-swap. **Lazy load** and the speech-detection thresholds are saved with the
+rest by **Save voice settings**.
 
 ## Speech speed
 
@@ -433,11 +638,14 @@ still needs the private reference WAV and transcript described above.
 **Stop · release VRAM** stops both managed services without deleting models.
 **Start voice** reuses the installed files. The managed container does not start
 automatically after a host reboot; start it in Settings when needed. Setup failures
-remain visible in the log and can be retried. Port 8188 serves Whisper and port
-7862 serves Breeze, both bound to host loopback. These differ from the older manual
-systemd setup, which the installer does not modify. Stop older TTS services before
-using the managed service to avoid loading two copies into VRAM. The portal must
-be able to reach host loopback, as in the standard host-network Compose setup.
+remain visible in the log and can be retried. Whisper listens on loopback port 8188
+and Breeze on 7862, inside the portal's own network namespace: the voice container
+joins the portal container's network (or the host's, for a native portal) and
+publishes no host ports. These differ from the older manual systemd setup, which
+the installer does not modify. Stop older TTS services before using the managed
+service to avoid loading two copies into VRAM. A managed container made by an
+earlier version is migrated automatically; see
+[Docker add-ons](/guide/add-ons#service-addresses-and-health-checks).
 
 ### Lazy GPU loading
 

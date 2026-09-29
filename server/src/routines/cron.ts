@@ -22,16 +22,25 @@ interface Field {
   values: Set<number>;
 }
 
-const FIELDS: [name: string, min: number, max: number][] = [
+// Day of week runs to 7 because cron takes both 0 and 7 as Sunday; 7 is
+// stored as 0. The names are the ones cron accepts, in any case.
+const FIELDS: [name: string, min: number, max: number, names?: string[]][] = [
   ["minute", 0, 59],
   ["hour", 0, 23],
   ["day of month", 1, 31],
-  ["month", 1, 12],
-  ["day of week", 0, 6],
+  ["month", 1, 12, ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]],
+  ["day of week", 0, 7, ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]],
 ];
 
-function parseField(raw: string, min: number, max: number, label: string): Field {
+function parseField(raw: string, min: number, max: number, label: string, names?: string[]): Field {
   const values = new Set<number>();
+  if (names) {
+    raw = raw.replace(/[a-z]{3}/gi, (name) => {
+      const i = names.indexOf(name.toLowerCase());
+      if (i < 0) throw new Error(`Bad ${label}: "${name}"`);
+      return String(i + min);
+    });
+  }
 
   for (const part of raw.split(",")) {
     const piece = part.trim();
@@ -63,7 +72,7 @@ function parseField(raw: string, min: number, max: number, label: string): Field
     if (from < min || to > max || from > to) {
       throw new Error(`${label} out of range in "${piece}" — expected ${min}-${max}`);
     }
-    for (let v = from; v <= to; v += step) values.add(v);
+    for (let v = from; v <= to; v += step) values.add(label === "day of week" && v === 7 ? 0 : v);
   }
 
   return { min, max, values };
@@ -85,7 +94,7 @@ export function parseCron(input: string): Cron {
   }
   return {
     expression,
-    fields: parts.map((raw, i) => parseField(raw, FIELDS[i][1], FIELDS[i][2], FIELDS[i][0])),
+    fields: parts.map((raw, i) => parseField(raw, FIELDS[i][1], FIELDS[i][2], FIELDS[i][0], FIELDS[i][3])),
   };
 }
 

@@ -21,6 +21,9 @@ function apply(theme: Theme) {
   // does not fade every time something re-renders.
   root.classList.add("theme-switching");
   root.dataset.theme = resolve(theme);
+  // The installed app's title bar follows the page, not only the machine.
+  const canvas = getComputedStyle(root).getPropertyValue("--canvas").trim().split(/\s+/).join(", ");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", `rgb(${canvas})`);
   window.setTimeout(() => root.classList.remove("theme-switching"), 200);
 }
 

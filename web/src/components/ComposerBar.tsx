@@ -1,8 +1,16 @@
-import { LuGlobe } from "react-icons/lu";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { LuBlocks } from "react-icons/lu";
+import { StatusDot } from "./StatusDot";
+import { ToolSwitches } from "./ToolSwitches";
+import { SubagentModelPicker, useSubagentChoice } from "./SubagentModelPicker";
+import { useDismiss } from "../use-dismiss";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
 import { ContextPill } from "./ContextPill";
+import { t } from "../i18n";
+import { EFFORT_LEVELS, effortLabel } from "../effort";
 
 /**
  * pi's levels, and the same list the server falls back to.
@@ -11,7 +19,7 @@ import { ContextPill } from "./ContextPill";
  * having levels, and waiting for the catalogue meant the popover opened empty.
  * Replaced by whatever pi actually reports once that arrives.
  */
-const DEFAULT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const DEFAULT_LEVELS = EFFORT_LEVELS;
 
 /**
  * The model catalogue, kept between sessions and reloads.
@@ -70,10 +78,48 @@ function knownLevels(provider: string | null | undefined, model: string | null |
 const cachedLevels = (provider: string | null | undefined, model: string | null | undefined) =>
   knownLevels(provider, model) ?? DEFAULT_LEVELS;
 
-function cacheLevels(provider: string, model: string, levels: string[]) {
-  if (!model || !levels.length) return;
+/**
+ * For a chat naming no model: which model the levels kept under what it names
+ * were last reported for. Without it, levels drawn from there could not be
+ * told apart from another model's — the default's before it was changed —
+ * nor from the same model's, and either stayed wrongly or went wrongly.
+ */
+const FOLLOWS_KEY = "pithagoras.thinkingLevelsFollow";
+
+function readFollows(): Record<string, string> {
   try {
-    localStorage.setItem(LEVELS_KEY, JSON.stringify({ ...readLevels(), [levelsKey(provider, model)]: levels }));
+    const raw = JSON.parse(localStorage.getItem(FOLLOWS_KEY) || "{}");
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The model the levels a chat's first paint draws are for, when that is known. */
+function levelsModel(provider: string | null | undefined, model: string | null | undefined): string | undefined {
+  if (model) return levelsKey(provider ?? "", model);
+  const known = readFollows()[levelsKey(provider ?? "", "")];
+  return typeof known === "string" ? known : undefined;
+}
+
+/**
+ * `named`: what the chat's row names, as the server read it — said only when
+ * pi is on the model the row comes to. A chat naming no model follows the
+ * default, and its first paint looks the levels up by what the row names —
+ * its provider, if any, and no model — so they are kept there too, with the
+ * model they were for, and the next chat like it draws the default's control
+ * rather than the full slider.
+ */
+function cacheLevels(provider: string, model: string, levels: string[], named?: PiConfig["named"]) {
+  if (!model || !levels.length) return;
+  const follows = named && !named.model ? levelsKey(named.provider ?? "", "") : undefined;
+  try {
+    localStorage.setItem(LEVELS_KEY, JSON.stringify({
+      ...readLevels(),
+      [levelsKey(provider, model)]: levels,
+      ...(follows ? { [follows]: levels } : {}),
+    }));
+    if (follows) localStorage.setItem(FOLLOWS_KEY, JSON.stringify({ ...readFollows(), [follows]: levelsKey(provider, model) }));
   } catch {
     // Same as the catalogue: a full quota is not worth failing the pill over.
   }
@@ -128,7 +174,7 @@ function OriginTag({ provider }: { provider: string }) {
         o.local ? "bg-ok/10 text-ok" : "bg-fg/5 text-fg-subtle"
       }`}
     >
-      {o.local ? "local" : o.label}
+      {o.local ? t("local") : o.label}
     </span>
   );
 }
@@ -141,6 +187,8 @@ export function ComposerBar({
   sessionId,
   session,
   running,
+  turns,
+  started = true,
   panelRequest,
   onPanelConsumed,
   actions,
@@ -149,6 +197,14 @@ export function ComposerBar({
   /** What the sidebar already knows, so the pills can paint immediately. */
   session: Session;
   running: boolean;
+  /** How many turns the transcript holds; each one that ends leaves pi with a new token count. */
+  turns?: number;
+  /**
+   * Whether anything has been said in this conversation. Before that there is
+   * no context to measure — pi reports 0%, and a meter that reads 0% is not
+   * information, only a control that comes and goes with how the chat was made.
+   */
+  started?: boolean;
   /** Set by /model so the slash command opens the same picker as the pill. */
   panelRequest?: "model" | "effort" | null;
   onPanelConsumed?: () => void;
@@ -169,54 +225,73 @@ export function ComposerBar({
   });
 
   const [cfg, setCfg] = useState<PiConfig>(() => seed(session));
+  /** Which model the levels drawn are for, when that is known; see load. */
+  const levelsFor = useRef<string | undefined>(levelsModel(session.provider, session.model));
   /** True while a catalogue fetch is in flight — not "has one ever run". */
   const [loadingCatalogue, setLoadingCatalogue] = useState(false);
-  const [open, setOpen] = useState<null | "model" | "effort">(null);
-  const [browser, setBrowser] = useState(false);
-  const [hasBrowser, setHasBrowser] = useState(false);
-
-  // The browser is optional and its answer changes only when somebody starts a
-  // container, so this is asked once per session rather than polled.
-  useEffect(() => {
-    api
-      .browser()
-      .then((b) => {
-        setHasBrowser(b.running || b.sessions.length > 0);
-        setBrowser(b.sessions.some((x) => x.id === sessionId));
-      })
-      .catch(() => setHasBrowser(false));
-  }, [sessionId]);
+  const [open, setOpen] = useState<null | "model" | "effort" | "tools">(null);
+  const navigate = useNavigate();
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState("");
   const [recents, setRecents] = useState<string[]>(readRecents);
   const [busy, setBusy] = useState(false);
   /** Where the handle sits mid-drag, before the change is sent. */
   const [dragEffort, setDragEffort] = useState<number | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
+  // Each menu opens over its own button; see menu-anchor.ts.
+  const pills = { model: useRef<HTMLButtonElement>(null), effort: useRef<HTMLButtonElement>(null), tools: useRef<HTMLButtonElement>(null) };
+  const [menuLeft, setMenuLeft] = useState<number | undefined>();
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => setMenuLeft(anchorLeft(pills[open].current, MENU_WIDTH));
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
 
   const load = () =>
     api
       .config(sessionId)
       .then((next) => {
-        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels);
-        // /config is the cheap route and reports neither. The levels are then
-        // what was last reported for the model it names — not for the one the
-        // seed guessed, which for a chat with no model of its own (a fresh /new)
-        // was nothing at all, and drew the full slider for a model that only
-        // switches on and off. Failing that, whatever is already known stays.
+        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.named);
+        // /config is the cheap route and reports neither when pi's catalogue
+        // has not answered. The levels are then what was last reported for the
+        // model it names — not for the one the seed guessed, which for a chat
+        // with no model of its own (a fresh /new) was nothing at all, and drew
+        // the full slider for a model that only switches on and off.
+        //
+        // Failing that, what is drawn stays, unless it is known to be another
+        // model's: the default's, drawn first for a chat that follows it, once
+        // the default has been changed. Not merely because the seed named no
+        // model — that is every chat on the default, and the right control
+        // went back to the full slider whenever the catalogue was slow. Nor for
+        // pi's own default, which an idle chat cannot name: its answer says
+        // "default", and there is nothing to tell the two apart by.
+        const nextKey = levelsKey(next.state.model.provider, next.state.model.id);
         const known = knownLevels(next.state.model.provider, next.state.model.id);
+        const unnamed = !next.live && next.state.model.id === "default";
+        let thinking: PiConfig["thinking"] | null;
+        if (next.thinking.levels.length) thinking = next.thinking;
+        else if (known) thinking = { levels: known };
+        else if (unnamed || levelsFor.current === undefined || levelsFor.current === nextKey) thinking = null;
+        else thinking = { levels: DEFAULT_LEVELS };
+        if (thinking) levelsFor.current = thinking.levels === DEFAULT_LEVELS ? undefined : nextKey;
         setCfg((prev) => ({
           ...next,
-          thinking: next.thinking.levels.length ? next.thinking : known ? { levels: known } : prev.thinking,
+          thinking: thinking ?? prev.thinking,
           models: next.models.models.length ? next.models : prev.models,
         }));
       })
       .catch(() => {});
 
+  /** Whether the chat had started when last looked at — see the effect on `started`. */
+  const wasStarted = useRef(started);
   useEffect(() => {
+    levelsFor.current = levelsModel(session.provider, session.model);
     setCfg(seed(session));
     setOpen(null);
     setDragEffort(null);
+    // Another chat, loaded here: its having started already is no change.
+    wasStarted.current = started;
     load();
   }, [sessionId]);
 
@@ -226,7 +301,9 @@ export function ComposerBar({
       .models(sessionId)
       .then((next) => {
         setCfg(next);
+        levelsFor.current = levelsKey(next.state.model.provider, next.state.model.id);
         cacheModels(next.models?.models ?? []);
+        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.named);
       })
       .catch(() => {})
       .finally(() => setLoadingCatalogue(false));
@@ -243,25 +320,62 @@ export function ComposerBar({
     if (!running) load();
   }, [running]);
 
+  // And when the first thing is said. The meter is not drawn before that, and
+  // what it would show is whatever was fetched while the chat was still empty —
+  // nothing, for a chat pi had not started. A run that ends before the page has
+  // seen it begin would otherwise leave it out until the next one.
+  //
+  // Only when it changes to started: a chat opened with messages in it is
+  // loaded by the effects above, and a third request for the same would be
+  // one more rebuild of the model catalogue.
+  useEffect(() => {
+    if (started && !wasStarted.current) load();
+    wasStarted.current = started;
+  }, [started]);
+
+  // And after each turn of a run, when pi has the new token count: this used to
+  // wait for the whole run to end, so the percentage sat still for as long as
+  // the agent worked — the very time it is changing. Not while idle, where the
+  // ticks of an old transcript being opened would only be requests for nothing.
+  //
+  // Only the figures are asked for, not the whole config: that one carries the
+  // model catalogue, which pi rebuilds from each provider's credentials every
+  // time it is asked, and a long run has a great many turns.
+  const currentSession = useRef(sessionId);
+  currentSession.current = sessionId;
+  useEffect(() => {
+    if (!running || !turns) return;
+    const asked = sessionId;
+    api
+      .stats(asked)
+      .then((r) => {
+        // An answer for a chat that has since been left is not this one's.
+        if (r.stats && currentSession.current === asked) setCfg((prev) => ({ ...prev, stats: r.stats }));
+      })
+      .catch(() => {});
+  }, [turns, running, sessionId]);
+
   useEffect(() => {
     if (!panelRequest) return;
     setOpen(panelRequest);
     onPanelConsumed?.();
   }, [panelRequest]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) {
-        setOpen(null);
-        setShowAll(false);
-        setFilter("");
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  const menu = useRef<HTMLDivElement>(null);
+  const trigger = open ? pills[open] : undefined;
+  useDismiss(
+    !!open,
+    trigger ? [menu, trigger] : [menu],
+    () => {
+      setOpen(null);
+      setShowAll(false);
+      setFilter("");
+    },
+    trigger,
+  );
 
+  // With the chat, not with the menu: ready by the time the menu opens.
+  const subagents = useSubagentChoice(sessionId);
   const models = cfg.models.models ?? [];
   const byId = useMemo(() => new Map(models.map((m) => [m.id, m])), [models]);
 
@@ -350,9 +464,10 @@ export function ComposerBar({
   const flipThinking = () => applyLevel(thinkingOn ? "off" : onLevel);
 
   return (
-    <div ref={ref} className="composer-toolbar relative text-xs">
+    <div className="composer-toolbar relative text-xs">
       <div className="composer-settings">
         <button
+          ref={pills.model}
           type="button"
           disabled={busy}
           onClick={() => setOpen(open === "model" ? null : "model")}
@@ -363,18 +478,19 @@ export function ComposerBar({
         >
           <span className="inline-flex items-center gap-1.5">
             {origin(cfg.state.model.provider).local && (
-              <span className="h-1.5 w-1.5 rounded-full bg-ok" title="Running locally" />
+              <span className="h-1.5 w-1.5 rounded-full bg-ok" title={t("Running locally")} />
             )}
             {shortName(cfg.state.model)}
           </span>
         </button>
         <button
+          ref={pills.effort}
           type="button"
           disabled={busy || fixed}
           // On/off models flip right here; there is no scale to open a panel for.
           onClick={() => (onOff ? flipThinking() : setOpen(open === "effort" ? null : "effort"))}
           aria-pressed={onOff ? thinkingOn : undefined}
-          className={`rounded-lg px-2 py-1 capitalize transition disabled:opacity-50 ${
+          className={`rounded-lg px-2 py-1 transition first-letter:uppercase disabled:opacity-50 ${
             open === "effort"
               ? "bg-fg/10 text-fg"
               : onOff && thinkingOn
@@ -383,66 +499,66 @@ export function ComposerBar({
           }`}
           title={
             onOff
-              ? "Thinking on / off"
+              ? t("Thinking on / off")
               : fixed
-                ? "This model has a single thinking level"
-                : "Effort / thinking level"
+                ? t("This model has a single thinking level")
+                : t("Effort / thinking level")
           }
         >
-          {onOff ? `thinking ${thinkingOn ? "on" : "off"}` : cfg.state.thinkingLevel}
+          {onOff ? (thinkingOn ? t("thinking on") : t("thinking off")) : effortLabel(cfg.state.thinkingLevel)}
         </button>
-        {/* Only where there is a browser to grant. On a deployment without the
-            optional service this is not a disabled control, it is nothing. */}
-        {hasBrowser && (
-          <button
-            onClick={async () => {
-              const next = !browser;
-              setBrowser(next);
-              try {
-                await api.setSessionBrowser(sessionId, next);
-              } catch {
-                setBrowser(!next);
-              }
-            }}
-            className={`rounded-lg px-2 py-1 transition ${
-              browser ? "bg-accent/12 text-accent" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
-            }`}
-            title={
-              browser
-                ? "Browser on for this session — takes effect on its next start"
-                : "Let this session drive the agent's browser"
-            }
-          >
-            <LuGlobe className="h-3.5 w-3.5" />
-          </button>
-        )}
-        {cfg.stats && (
+        {/* Everything the agent may reach for in this conversation, the
+            browser included — it brings tools like any other package, and a
+            second switch of its own was two answers to one question. */}
+        <button
+          ref={pills.tools}
+          type="button"
+          onClick={() => setOpen(open === "tools" ? null : "tools")}
+          className={`rounded-lg px-2 py-1 transition ${
+            open === "tools" ? "bg-fg/10 text-fg" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
+          }`}
+          title={t("Which tools this conversation may use")}
+        >
+          <LuBlocks className="h-3.5 w-3.5" />
+        </button>
+        {cfg.stats && started && (
           <ContextPill
             sessionId={sessionId}
             cfg={cfg as PiConfig & { stats: NonNullable<PiConfig["stats"]> }}
             onChanged={load}
           />
         )}
-        <span
-          className={`ml-1 h-2 w-2 rounded-full ${running ? "animate-pulse bg-warn" : "bg-raised"}`}
-          title={running ? "working" : "idle"}
-        />
+        {/* The same mark as a working chat has in the lists, and its word shimmering as "Thinking" does. */}
+        {running && (
+          <span className="composer-working ml-1 inline-flex items-center gap-1.5">
+            <StatusDot status="running" bare />
+            <span className="working-text max-sm:hidden">{t("Working")}</span>
+          </span>
+        )}
       </div>
       {actions && <div className="composer-actions">{actions}</div>}
 
+      {/* Tools */}
+      {open === "tools" && (
+        <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+          <p className="px-3 py-1 text-[11px] text-fg-subtle">{t("Tools in this chat")}</p>
+          <ToolSwitches sessionId={sessionId} />
+        </div>
+      )}
+
       {/* Models */}
       {open === "model" && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <div className="flex items-center gap-2 px-3 py-1">
-            <p className="text-[11px] text-fg-subtle">Models</p>
+            <p className="text-[11px] text-fg-subtle">{t("Models")}</p>
             <button
               type="button"
               onClick={refreshCatalogue}
               disabled={loadingCatalogue}
-              title="Re-read the list from pi — needed after starting a local server"
+              title={t("Re-read the list from pi — needed after starting a local server")}
               className="ml-auto rounded px-1 text-[11px] text-fg-faint transition hover:text-fg disabled:opacity-50"
             >
-              {loadingCatalogue ? "refreshing…" : "refresh"}
+              {loadingCatalogue ? t("refreshing…") : t("refresh")}
             </button>
           </div>
           {!showAll ? (
@@ -467,7 +583,7 @@ export function ComposerBar({
                 onClick={() => setShowAll(true)}
                 className="flex w-full items-center px-3 py-1.5 text-left text-sm text-fg-muted transition hover:bg-fg/5 disabled:opacity-50"
               >
-                {models.length ? "More models" : loadingCatalogue ? "Loading models…" : "No models — refresh"}
+                {models.length ? t("More models") : loadingCatalogue ? t("Loading models…") : t("No models — refresh")}
                 {models.length > 0 && <span className="ml-auto text-fg-subtle">›</span>}
               </button>
             </>
@@ -477,7 +593,7 @@ export function ComposerBar({
                 autoFocus
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter models…"
+                placeholder={t("Filter models…")}
                 className="mx-2 mb-1 w-[calc(100%-1rem)] rounded border border-line bg-canvas px-2 py-1 text-xs outline-none focus:border-accent"
               />
               <div className="max-h-72 overflow-y-auto">
@@ -495,17 +611,26 @@ export function ComposerBar({
                   </button>
                 ))}
                 {filtered.length === 0 && (
-                  <p className="px-3 py-2 text-xs text-fg-subtle">No matches</p>
+                  <p className="px-3 py-2 text-xs text-fg-subtle">{t("No matches")}</p>
                 )}
               </div>
             </>
           )}
+          <SubagentModelPicker subagents={subagents} models={models} />
+          <div className="my-1 border-t border-line" />
+          <button
+            type="button"
+            onClick={() => { setOpen(null); navigate(`/s/${sessionId}/settings/models`); }}
+            className="flex w-full items-center px-3 py-1.5 text-left text-xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
+          >
+            {t("Add or change providers…")}
+          </button>
         </div>
       )}
 
       {/* Effort */}
       {open === "effort" && levels.length > 1 && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           {onOff ? (
             // Reached through /effort; the pill flips the same switch directly.
             <button
@@ -516,7 +641,7 @@ export function ComposerBar({
               onClick={flipThinking}
               className="flex w-full items-center justify-between text-sm text-fg-muted disabled:opacity-50"
             >
-              <span>Thinking</span>
+              <span>{t("Thinking")}</span>
               <span className={`relative h-5 w-9 rounded-full transition ${thinkingOn ? "bg-warn" : "bg-raised"}`}>
                 <span
                   className={`absolute top-0.5 h-4 w-4 rounded-full bg-surface transition-all ${
@@ -528,11 +653,11 @@ export function ComposerBar({
           ) : (
             <>
               <p className="text-sm text-fg-muted">
-                Effort <span className="capitalize text-fg">{levels[effortIndex] ?? cfg.state.thinkingLevel}</span>
+                {t("Effort")} <span className="inline-block text-fg first-letter:uppercase">{effortLabel(levels[effortIndex] ?? cfg.state.thinkingLevel)}</span>
               </p>
               <div className="mt-3 flex justify-between text-[11px] text-fg-subtle">
-                <span>Faster</span>
-                <span>Smarter</span>
+                <span>{t("Faster")}</span>
+                <span>{t("Smarter")}</span>
               </div>
               <input
                 type="range"
@@ -564,3 +689,4 @@ export function ComposerBar({
     </div>
   );
 }
+

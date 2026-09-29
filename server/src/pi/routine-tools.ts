@@ -2,10 +2,12 @@ import { Type } from "typebox";
 import { nanoid } from "nanoid";
 import { getDb, type SessionRow } from "../db.js";
 import { unscopeKey } from "../agent.js";
+import { placeProblem, routinePlace } from "../workspaces.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
 import {
+  oneOffDone,
   routineSupervisor,
   whenNext,
   type RoutineRow,
@@ -59,7 +61,28 @@ const describe = (r: RoutineRow) => ({
   lastRun: r.last_run,
   lastStatus: r.last_status,
   instructions: r.instructions,
+  runsIn: r.workspace ?? "Home",
+  ...problem(r.workspace),
 });
+
+/** Said only when there is something wrong with where it runs, as the Routines page says it. */
+function problem(workspace: string | null): { problem?: string } {
+  const why = placeProblem(workspace);
+  return why ? { problem: `${workspace}: ${why}. Its runs fail until it is given another place.` } : {};
+}
+
+/** A project to run in, by name or path, or Home when there is none: read as the HTTP API reads it. */
+function place(raw: unknown): { workspace: string | null } | { error: string } {
+  const where = routinePlace(raw);
+  return "error" in where ? { error: `Cannot run in "${raw}": ${where.error}` } : where;
+}
+
+const WORKSPACE_PARAM = Type.Optional(
+  Type.String({
+    description:
+      "Where its runs happen: a project's name or path under the workspace root, or 'home' for Home — the agent's own directory, which is the default.",
+  }),
+);
 
 /** Same rule as the HTTP API: a schedule or a moment, never both. */
 function timing(schedule?: string, runAt?: string) {
@@ -175,11 +198,14 @@ export function routineTools(sessionId?: string) {
               "Start each run with no memory of the last one. Defaults to false.",
           }),
         ),
+        workspace: WORKSPACE_PARAM,
       }),
       async execute(_id: string, p: any) {
         if (!p.name?.trim()) return bad("A routine needs a name");
         const t = timing(p.schedule, p.runAt);
         if ("error" in t) return bad(t.error!);
+        const where = place(p.workspace);
+        if ("error" in where) return bad(where.error);
 
         const id = nanoid(10);
         const slug = freeSlug(p.name);
@@ -188,8 +214,8 @@ export function routineTools(sessionId?: string) {
           .prepare(
             `INSERT INTO routines
            (id, slug, name, schedule, run_at, instructions, fresh_session, next_run,
-            report_channel, report_target)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            report_channel, report_target, workspace)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -204,6 +230,7 @@ export function routineTools(sessionId?: string) {
               : t.runAt,
             back.channel,
             back.target,
+            where.workspace,
           );
         routineSupervisor.refreshSchedules();
 
@@ -243,6 +270,7 @@ export function routineTools(sessionId?: string) {
               "False stops it running while keeping it. This is how you cancel one.",
           }),
         ),
+        workspace: WORKSPACE_PARAM,
       }),
       async execute(_id: string, p: any) {
         const row = byName(p.routine ?? "");
@@ -263,6 +291,12 @@ export function routineTools(sessionId?: string) {
           sets.push("enabled = ?");
           values.push(p.enabled ? 1 : 0);
         }
+        if (p.workspace !== undefined) {
+          const where = place(p.workspace);
+          if ("error" in where) return bad(where.error);
+          sets.push("workspace = ?");
+          values.push(where.workspace);
+        }
         if (p.schedule !== undefined || p.runAt !== undefined) {
           const t = timing(p.schedule, p.runAt);
           if ("error" in t) return bad(t.error!);
@@ -275,6 +309,8 @@ export function routineTools(sessionId?: string) {
               "last_status = NULL",
               "last_output = NULL",
             );
+            // It was switched off by having run; see the routes.
+            if (typeof p.enabled !== "boolean" && oneOffDone(row)) sets.push("enabled = 1");
           }
         }
         if (!sets.length)

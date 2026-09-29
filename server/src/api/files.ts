@@ -1,258 +1,320 @@
 import { spawn } from "node:child_process";
-import {
-  existsSync,
-  lstatSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, createReadStream, createWriteStream, fstatSync } from "node:fs";
 import path from "node:path";
-import express, { type Router } from "express";
+import express, { type Response, type Router } from "express";
+import { getSession } from "../db.js";
+import {
+  ARCHIVE_EXCLUDES,
+  FileError,
+  baseDir,
+  listDir,
+  folderPath,
+  makeFolder,
+  uploadTarget,
+  openDownload,
+  openPicture,
+  readText,
+  removeEntry,
+  renameEntry,
+  writeText,
+} from "../workspace-files.js";
 
 /**
- * Read/write/download access to a workspace's files from the browser.
+ * The files in a chat's folder, for the Files panel.
  *
- * A workspace is a folder pi already has full filesystem access to — this
- * just gives the browser the same view, scoped to one workspace and with path
- * traversal blocked, rather than requiring an SSH session or the host shell to
- * see what the agent produced.
- *
- * Lexical checks (`..`, absolute overrides) alone don't stop a symlink inside
- * a workspace from pointing outside it — `path.resolve` never looks at the
- * filesystem, so `<workspace>/escape -> /etc` would sail through them. Every
- * boundary check below also canonicalizes with `realpath` and re-checks the
- * resolved target against the canonical root.
+ * Keyed by chat, not by folder name: a chat can be in a project, in the
+ * workspace root, or in Home, which is outside it, and "the folder this chat
+ * works in" is the one thing that is the same for all of them. Everything that
+ * decides what may be reached is in workspace-files.ts; this only turns a chat
+ * into its folder and a refusal into a status.
  */
 
-// The same fallback the rest of the server uses — see index.ts. Reading only
-// WORKSPACE_ROOT pointed this router at /workspaces on a deploy still using
-// the legacy name, so it would browse a different tree from the one pi works
-// in. (WORKSPACES_DIR was restored in #21, after this branch was written.)
-const WORKSPACE_ROOT = canonicalize(
-  path.resolve(process.env.WORKSPACE_ROOT || process.env.WORKSPACES_DIR || "/workspaces")
-);
+/** An upload larger than this is cut off: the portal's disk is everyone's. */
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
-/** Excluded from "download whole workspace" — regenerable or huge, not the work itself. */
-const ARCHIVE_EXCLUDES = ["node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build"];
+const STATUS = { invalid: 400, missing: 404, conflict: 409, exists: 409, too_large: 413, failed: 500 } as const;
 
-/** Above this, a file is offered as a download only — not decoded into a JSON body. */
-const MAX_EDIT_BYTES = 2 * 1024 * 1024;
-
-/** realpath(p), or p itself if it doesn't exist yet (e.g. at process startup). */
-function canonicalize(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
-}
-
-/** True when a filesystem entry exists at `p`, including a dangling symlink. */
-function existsLexically(p: string): boolean {
-  try {
-    lstatSync(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * realpath of `target`, resolving symlinks in whichever leading portion of it
- * already exists. `target` itself may not exist yet — a PUT creating a new
- * file resolves through its (existing) parent directory instead, per CWE-59
- * guidance: canonicalize the existing ancestor, keep the not-yet-created tail
- * literal.
- *
- * The walk uses `lstatSync`, not `existsSync`: `existsSync` follows symlinks,
- * so it reports `false` for a *dangling* symlink and the loop would treat the
- * link's own name as an ordinary missing path component — reconstructing a
- * workspace-relative-looking path that passes the boundary check while
- * `writeFileSync` follows the link itself to wherever it actually points.
- * `lstatSync` sees the link as an existing entry regardless of where (or
- * whether) its target exists, so it stops the walk there and `realpathSync`
- * below is what gets to decide: dangling links throw and are rejected.
- */
-function realpathThroughExistingAncestor(target: string): string {
-  let current = target;
-  const missingTail: string[] = [];
-  while (!existsLexically(current)) {
-    const parent = path.dirname(current);
-    if (parent === current) throw new Error("Path does not exist");
-    missingTail.unshift(path.basename(current));
-    current = parent;
-  }
-  let real: string;
-  try {
-    real = realpathSync(current);
-  } catch {
-    throw new Error("Path escapes the workspace"); // dangling symlink
-  }
-  return missingTail.length ? path.join(real, ...missingTail) : real;
-}
-
-/** True when `p` is `root` or lexically nested inside it. */
-function isWithin(root: string, p: string): boolean {
-  return p === root || p.startsWith(root + path.sep);
-}
-
-/** The workspace's absolute, canonical directory, or throws for a name that isn't one. */
-function workspaceDir(name: string): string {
-  const dir = path.join(WORKSPACE_ROOT, name);
-  if (path.resolve(dir) !== dir || !isWithin(WORKSPACE_ROOT, dir)) {
-    throw new Error("Invalid workspace name");
-  }
-  if (!existsSync(dir)) throw new Error(`Workspace "${name}" not found`);
-  const real = realpathSync(dir);
-  if (!isWithin(WORKSPACE_ROOT, real)) {
-    // The workspace entry itself is a symlink pointing outside the root —
-    // treat it the same as a workspace that doesn't exist.
-    throw new Error(`Workspace "${name}" not found`);
-  }
-  return real;
-}
-
-/**
- * A path within a workspace, rejecting anything that escapes it via `..`, an
- * absolute override, or a symlink resolving outside — `base` must already be
- * canonical (as returned by workspaceDir).
- */
-function resolveSafe(base: string, relPath: string): string {
-  const rel = String(relPath ?? "").replace(/^[/\\]+/, "");
-  const resolved = path.resolve(base, rel);
-  if (!isWithin(base, resolved)) {
-    throw new Error("Path escapes the workspace");
-  }
-  if (!isWithin(base, realpathThroughExistingAncestor(resolved))) {
-    throw new Error("Path escapes the workspace");
-  }
-  return resolved;
-}
-
-/** Null bytes in the first few KB are the cheap, reliable "not text" signal. */
-function looksBinary(buf: Buffer): boolean {
-  return buf.subarray(0, 8000).includes(0);
+function fail(res: Response, e: unknown) {
+  if (e instanceof FileError) return res.status(STATUS[e.code]).json({ error: e.message });
+  console.error("[portal] files:", e);
+  res.status(500).json({ error: "Could not read or change the files" });
 }
 
 export function filesRouter(): Router {
   const router = express.Router();
 
-  router.get("/workspaces/:name/files", (req, res) => {
+  /** The chat's folder, or the answer that it has none. */
+  const folderOf = (id: string, res: Response): string | undefined => {
+    const session = getSession(id);
+    if (!session) {
+      res.status(404).json({ error: "Not found" });
+      return undefined;
+    }
     try {
-      const dir = workspaceDir(req.params.name);
-      const target = resolveSafe(dir, String(req.query.path ?? ""));
-      const stat = statSync(target);
-      if (!stat.isDirectory()) return res.status(400).json({ error: "Not a directory" });
-
-      const entries = readdirSync(target, { withFileTypes: true })
-        .filter((e) => e.name !== ".git")
-        .map((e) => {
-          const st = statSync(path.join(target, e.name));
-          return {
-            name: e.name,
-            type: e.isDirectory() ? ("dir" as const) : ("file" as const),
-            size: st.size,
-            mtime: st.mtimeMs,
-          };
-        })
-        .sort((a, b) =>
-          a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1
-        );
-
-      res.json({ path: path.relative(dir, target), entries });
+      return baseDir(session.workspace);
     } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
+      fail(res, e);
+      return undefined;
+    }
+  };
+
+  router.get("/sessions/:id/files", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    try {
+      res.json(listDir(base, req.query.path));
+    } catch (e) {
+      fail(res, e);
     }
   });
 
-  router.get("/workspaces/:name/file", (req, res) => {
+  router.get("/sessions/:id/file", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
     try {
-      const dir = workspaceDir(req.params.name);
-      const target = resolveSafe(dir, String(req.query.path ?? ""));
-      const stat = statSync(target);
-      if (!stat.isFile()) return res.status(400).json({ error: "Not a file" });
-
       if (req.query.download === "1") {
-        return res.download(target, path.basename(target));
+        // Sent from the descriptor that was checked, not from the path again: see openDownload.
+        const { fd, size, name } = openDownload(base, req.query.path);
+        res.attachment(name);
+        res.setHeader("Content-Length", size);
+        if (size === 0) {
+          closeSync(fd);
+          return void res.end();
+        }
+        // Up to the size that was announced, even if the file has grown since.
+        const stream = createReadStream("", { fd, start: 0, end: size - 1 });
+        let sent = 0;
+        stream.on("data", (chunk) => (sent += chunk.length));
+        // If it has shrunk since, the body ends short of the length that was
+        // announced, and a client waits for the rest until it gives up. The
+        // connection is cut instead, so the download fails at once.
+        stream.on("end", () => {
+          if (sent < size) {
+            console.error(`[portal] files: ${name} changed while it was sent (${sent} of ${size} bytes)`);
+            res.destroy();
+          }
+        });
+        stream.on("error", (e) => {
+          console.error("[portal] files: download failed:", e.message);
+          res.destroy();
+        });
+        res.on("close", () => stream.destroy());
+        return void stream.pipe(res);
       }
-
-      const buffer = readFileSync(target);
-      if (looksBinary(buffer) || stat.size > MAX_EDIT_BYTES) {
-        return res.json({ binary: true, size: stat.size });
-      }
-      res.json({ binary: false, size: stat.size, content: buffer.toString("utf8") });
+      res.json(readText(base, req.query.path));
     } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
-    }
-  });
-
-  router.put("/workspaces/:name/file", (req, res) => {
-    try {
-      const dir = workspaceDir(req.params.name);
-      const target = resolveSafe(dir, String(req.query.path ?? ""));
-      const { content } = req.body ?? {};
-      if (typeof content !== "string") return res.status(400).json({ error: "content required" });
-      writeFileSync(target, content, "utf8");
-      const stat = statSync(target);
-      res.json({ ok: true, size: stat.size, mtime: stat.mtimeMs });
-    } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
+      fail(res, e);
     }
   });
 
   /**
-   * Removes a file or a whole folder (recursively). The workspace root itself
-   * is refused — that would be deleting the workspace, not something in it.
+   * A picture in the folder, drawn in the page rather than downloaded: for the
+   * Files panel, a canvas that shows one, and what the agent puts in front of
+   * the person with show_image. Only what its bytes say is a picture is sent,
+   * with that type, and under a policy that would stop it running anything
+   * even if a browser disagreed.
    */
-  router.delete("/workspaces/:name/file", (req, res) => {
+  router.get("/sessions/:id/picture", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    let opened: ReturnType<typeof openPicture>;
     try {
-      const dir = workspaceDir(req.params.name);
-      const target = resolveSafe(dir, String(req.query.path ?? ""));
-      if (target === dir) return res.status(400).json({ error: "Cannot delete the workspace root" });
-      if (!existsSync(target)) return res.status(404).json({ error: "Not found" });
-      rmSync(target, { recursive: true });
+      opened = openPicture(base, req.query.path);
+    } catch (e) {
+      return fail(res, e);
+    }
+    const { fd, size, mimeType } = opened;
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+    // The agent rewrites files in place, so the browser asks every time — and
+    // is told it already has it unless the file changed.
+    res.setHeader("Cache-Control", "private, no-cache");
+    const modified = fstatSync(fd).mtime;
+    res.setHeader("ETag", `W/"${size.toString(16)}-${modified.getTime().toString(16)}"`);
+    res.setHeader("Last-Modified", modified.toUTCString());
+    if (req.fresh) {
+      closeSync(fd);
+      return void res.status(304).end();
+    }
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Content-Length", size);
+    const stream = createReadStream("", { fd, start: 0, end: Math.max(0, size - 1) });
+    stream.on("error", (e) => {
+      console.error("[portal] files: picture failed:", e.message);
+      res.destroy();
+    });
+    res.on("close", () => stream.destroy());
+    stream.pipe(res);
+  });
+
+  router.put("/sessions/:id/file", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    const { content, mtime, create } = req.body ?? {};
+    if (typeof content !== "string") return res.status(400).json({ error: "content is required" });
+    if (mtime !== undefined && typeof mtime !== "number") return res.status(400).json({ error: "mtime must be a number" });
+    try {
+      res.json({ ok: true, ...writeText(base, req.query.path, content, mtime, create === true) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  /** A new folder, named `name`, in the folder at `path`. */
+  router.post("/sessions/:id/folder", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    try {
+      res.json({ ok: true, path: makeFolder(base, req.query.path, req.body?.name) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  /**
+   * A file from the browser, as the request body, into the folder at `path`
+   * under `name` — or "name (2)" if that is taken. Streamed to disk, so a big
+   * file is never held in memory, and only put in place once all of it came.
+   */
+  router.post("/sessions/:id/upload", (req, res) => {
+    // Any answer given before the whole file came in closes the connection, the
+    // early refusals below included: kept open, Node would read the rest of the
+    // body — however big it said it was — just to throw it away.
+    res.setHeader("Connection", "close");
+    res.on("finish", () => {
+      if (!req.complete) req.destroy();
+    });
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    const announced = Number(req.headers["content-length"]);
+    if (announced > MAX_UPLOAD_BYTES) {
+      return res.status(413).json({ error: `Files over ${MAX_UPLOAD_BYTES / 1024 / 1024 / 1024} GB are not uploaded here` });
+    }
+    let target: ReturnType<typeof uploadTarget>;
+    try {
+      target = uploadTarget(base, req.query.path, req.query.name);
+    } catch (e) {
+      return fail(res, e);
+    }
+    const out = createWriteStream("", { fd: target.fd });
+    let received = 0;
+    let done = false;
+    const giveUp = (status: number, error: string) => {
+      if (done) return;
+      done = true;
+      req.unpipe(out);
+      out.destroy();
+      target.abandon();
+      // Nothing more of the body is read: the connection is closed once the
+      // answer is out, rather than taking in the rest of a file nobody keeps.
+      if (res.headersSent) return void req.destroy();
+      res.status(status).json({ error });
+    };
+    req.on("data", (chunk: Buffer) => {
+      received += chunk.length;
+      if (received > MAX_UPLOAD_BYTES) giveUp(413, `Files over ${MAX_UPLOAD_BYTES / 1024 / 1024 / 1024} GB are not uploaded here`);
+    });
+    // The browser went away, or the connection dropped: half a file is not a file.
+    req.on("aborted", () => giveUp(400, "The upload was interrupted"));
+    out.on("error", (e) => {
+      console.error("[portal] files: upload failed:", e.message);
+      giveUp(500, "The file could not be written");
+    });
+    out.on("finish", () => {
+      if (done) return;
+      done = true;
+      try {
+        res.removeHeader("Connection");
+        res.json({ ok: true, path: target.finish(), size: received });
+      } catch (e) {
+        fail(res, e);
+      }
+    });
+    req.pipe(out);
+  });
+
+  router.patch("/sessions/:id/file", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    try {
+      res.json({ ok: true, path: renameEntry(base, req.query.path, req.body?.name) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  router.delete("/sessions/:id/file", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    try {
+      removeEntry(base, req.query.path);
       res.json({ ok: true });
     } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
+      fail(res, e);
     }
   });
 
   /**
-   * The whole workspace as a .tar.gz. Streamed straight from `tar` rather than
-   * staged on disk first — a big repo would otherwise need double the space
-   * and a cleanup step.
+   * The folder — the chat's, or one inside it with `path` — as a .tar.gz,
+   * streamed out of `tar` rather than staged on disk first: a big project would
+   * need the space twice, and a clean-up.
    */
-  router.get("/workspaces/:name/archive", (req, res) => {
-    let dir: string;
+  router.get("/sessions/:id/archive", (req, res) => {
+    const chat = folderOf(req.params.id, res);
+    if (!chat) return;
+    let base: string;
     try {
-      dir = workspaceDir(req.params.name);
+      base = folderPath(chat, req.query.path);
     } catch (e) {
-      return res.status(400).json({ error: (e as Error).message });
+      return fail(res, e);
     }
-
-    res.setHeader("Content-Type", "application/gzip");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${req.params.name.replace(/[^a-zA-Z0-9_.-]/g, "_")}.tar.gz"`
-    );
-
-    const args = [
-      "-czf",
-      "-",
-      ...ARCHIVE_EXCLUDES.map((d) => `--exclude=${d}`),
-      "-C",
-      dir,
-      ".",
-    ];
-    const tar = spawn("tar", args);
-    tar.stdout.pipe(res);
-    // tar exits non-zero on excluded-but-vanished files etc.; the stream
-    // itself already carries whatever it managed to read, so ignore stderr.
-    tar.stderr.resume();
-    tar.on("error", () => res.end());
+    const name = path.basename(base).replace(/[^a-zA-Z0-9_.-]/g, "_") || "workspace";
+    const tar = spawn("tar", ["-czf", "-", ...ARCHIVE_EXCLUDES.map((d) => `--exclude=${d}`), "-C", base, "."]);
+    // The download is not announced until tar has produced something: a tar that
+    // cannot start, or dies at once, is then an error the person is told about,
+    // not a file of zero bytes that the browser calls finished.
+    let started = false;
+    // Answered already, by an error: whatever tar does after that is not heard.
+    let answered = false;
+    let complaints = "";
+    tar.stderr.on("data", (chunk) => {
+      if (complaints.length < 2_000) complaints += chunk;
+    });
+    const begin = () => {
+      started = true;
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Disposition", `attachment; filename="${name}.tar.gz"`);
+    };
+    tar.stdout.once("data", (first: Buffer) => {
+      begin();
+      res.write(first);
+      // Not ended by the pipe: how tar ended decides how this one does, below.
+      tar.stdout.pipe(res, { end: false });
+    });
+    tar.on("error", (e) => {
+      console.error("[portal] archive: could not run tar:", e.message);
+      answered = true;
+      if (started) res.destroy();
+      else res.status(500).json({ error: "Could not make the archive: tar is not available" });
+    });
+    tar.on("close", (code) => {
+      // Already answered, or killed because nobody was waiting any more.
+      if (answered || code === null || res.destroyed) return;
+      answered = true;
+      // 1 is "a file changed or vanished while it was read": what was read is in
+      // the archive, and that is the ordinary way a busy folder ends. Anything
+      // else means the archive is not the folder, so the download is cut off and
+      // fails, rather than ending as if it were whole.
+      if (code > 1) {
+        console.error(`[portal] archive: tar exited ${code}: ${complaints.trim()}`);
+        if (started) return void res.destroy();
+        return void res.status(500).json({ error: "Could not make the archive" });
+      }
+      if (!started) begin();
+      res.end();
+    });
+    // Nobody is waiting any more.
+    res.on("close", () => tar.kill());
   });
 
   return router;

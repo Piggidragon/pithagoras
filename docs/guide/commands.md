@@ -4,6 +4,21 @@ Type `/` in the composer and the palette lists everything available in that
 session. Commands are matched against the real list, so a message that merely
 begins with a path — `/etc/hosts is wrong` — is still sent as a message.
 
+The list is all of them — a lone `/` scrolls rather than stopping at the first
+few — narrowing as you type, by prefix, and it is driven from the keyboard:
+
+| Key | Does |
+| --- | --- |
+| `↑` `↓` | Move the highlight; it wraps |
+| `Tab` | Complete the highlighted command, leaving the cursor after it for arguments |
+| `Enter` | **Run** the highlighted command. `/cl` and Enter is `/clear`, not the message "/cl" |
+| `Esc` | Put the list away until something else is typed |
+
+A command typed out in full is the one highlighted, so `/skill:a` never runs
+`/skill:ab` because that was listed first. A command that does nothing without
+an argument — `/name` — is completed by Enter instead of run, so there is
+somewhere to type the name.
+
 A command that opens a dialog does not appear in the transcript. Its menu is the
 feedback; a chat bubble saying `/models` would be noise.
 
@@ -35,7 +50,8 @@ menu of things that quietly do nothing.
 | `/reload` | Reload extensions, skills, prompts and settings |
 | `/model` | Open the model picker |
 | `/settings` | Open settings |
-| `/new` | Start a session in this workspace |
+| `/new` | Start a new chat in this project (Home, if that is where you are) |
+| `/clear` | The same as `/new` |
 | `/name` | Rename the session |
 
 The first four act on the session server-side and report through the event

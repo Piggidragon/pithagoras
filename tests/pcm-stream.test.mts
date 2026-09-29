@@ -1,12 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { preparePcmSpeech } from '../web/src/pcm-stream.js';
+import { preparePcmSpeech, readPcmStream } from '../web/src/pcm-stream.js';
+import { stretch } from '../web/src/time-stretch.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function audio() {
   const sources: any[] = [];
   return { sources, context: {
     currentTime: 1,
-    createBuffer: (_channels: number, count: number, rate: number) => ({ duration: count / rate, getChannelData: () => new Float32Array(count) }),
+    createBuffer: (_channels: number, count: number, rate: number) => {
+      const data = new Float32Array(count);
+      return { duration: count / rate, getChannelData: () => data };
+    },
     createBufferSource: () => {
       const source = { buffer: null, onended: null as any, stopped: false, at: 0,
         connect() {}, disconnect() {}, start(at: number) { this.at = at; }, stop() { this.stopped = true; } };
@@ -31,6 +35,47 @@ test('PCM starts before generation ends and schedules incoming chunks contiguous
   writer.close(); await speech.completed;
   for (const source of sources) source.onended();
   await playing;
+});
+test('buffered PCM is stretched as it arrives, chunk by chunk, like the whole at once', async () => {
+  const { context } = audio(); const abort = new AbortController();
+  const rate = 1.5;
+  const samples = Float32Array.from({ length: 4800 }, (_, i) => 0.25 * Math.sin(i / 7)); // 9600 bytes
+  const bytesOf = (s: Float32Array) => {
+    const b = new Uint8Array(s.length * 2);
+    for (let i = 0; i < s.length; i++) { const v = Math.max(-1, Math.min(1, s[i])) * 32768 | 0; b[i * 2] = v & 255; b[i * 2 + 1] = (v >> 8) & 255; }
+    return b;
+  };
+  const decodedOf = (b: Uint8Array) => {
+    const n = b.length / 2, out = new Float32Array(n), v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    for (let i = 0; i < n; i++) out[i] = v.getInt16(i * 2, true) / 32768;
+    return out;
+  };
+  const wholeBytes = bytesOf(samples);
+  let writer!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(c) { writer = c; } });
+  const recorded: Float32Array[] = [];
+  // Cuts chosen mid-sample, so chunks end inside 16-bit samples.
+  const cuts = [3201, 6400]; const chunks: Uint8Array[] = [];
+  let from = 0; for (const cut of [...cuts, wholeBytes.length]) { chunks.push(wholeBytes.subarray(from, cut)); from = cut; }
+  writer.enqueue(chunks[0]); await tick();
+  const bufferPromise = readPcmStream(body, context, abort.signal, { rate, record: s => recorded.push(s) });
+  writer.enqueue(chunks[1]); await tick();
+  writer.enqueue(chunks[2]); writer.close();
+  const buffer = await bufferPromise;
+  assert.equal(recorded.length, 1);
+  // Recorded whole, as it was spoken.
+  assert.ok(recorded[0].every((v, i) => v === decodedOf(wholeBytes)[i]));
+  // And stretched exactly what the whole would have been.
+  const expected = stretch(decodedOf(wholeBytes), rate);
+  assert.equal(buffer.getChannelData(0).length, expected.length);
+  assert.ok(buffer.getChannelData(0).every((v, i) => Math.abs(v - expected[i]) < 1e-6));
+});
+test('buffered PCM with a missing half-sample is incomplete', async () => {
+  const { context } = audio();
+  let writer!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(c) { writer = c; } });
+  writer.enqueue(new Uint8Array(15)); writer.close();
+  await assert.rejects(readPcmStream(body, context, new AbortController().signal), /incomplete/);
 });
 test('barge-in cancels both streaming reads and scheduled audio', async () => {
   const { context, sources } = audio(); const abort = new AbortController(); let cancelled = false;

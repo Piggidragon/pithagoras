@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { agentHome } from "./agent.js";
+import { understoryOn } from "./features.js";
 
 /**
  * The agent's home directory.
@@ -32,6 +33,8 @@ export function agentFileStatus() {
   return {
     home: agentHome(),
     initialised: isInitialised(),
+    // Where the agent's memory is kept: while Understory holds it, MEMORY.md is not read.
+    memory: understoryOn() ? ("understory" as const) : ("file" as const),
     files: AGENT_FILES.map((name) => ({
       name,
       exists: existsSync(filePath(name)),

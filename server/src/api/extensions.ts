@@ -3,7 +3,10 @@ import { promisify } from "node:util";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
-import { piSettingsPath } from "../pi-settings.js";
+import { piSettingsPath, updatePiSettings } from "../pi-settings.js";
+import { extensionStash, setExtensionStash } from "../db.js";
+import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
+import { sessions } from "../session-manager.js";
 
 const run = promisify(execFile);
 
@@ -22,6 +25,13 @@ export interface ExtensionInfo {
   homepage?: string;
   version?: string;
   settings: DetectedSetting[];
+  /**
+   * Whether pi loads it. Absent where the portal cannot say, or cannot switch
+   * it: a package the project brings is that project's to decide.
+   */
+  enabled?: boolean;
+  /** Some of its files are off by hand; switching it off and on must not lose that. */
+  filtered?: boolean;
 }
 
 const settingsFile = piSettingsPath;
@@ -55,7 +65,9 @@ function parseList(output: string): { spec: string; path?: string; scope?: strin
     if (indent === 0) {
       scope = text.replace(/packages:?$/i, "").trim() || undefined;
     } else if (indent <= 2) {
-      out.push({ spec: text, scope });
+      // `pi list` says so after the source when the entry is an object, and
+      // that is not part of the name pi takes back in `remove`.
+      out.push({ spec: text.replace(/\s+\(filtered\)$/, ""), scope });
     } else {
       const last = out[out.length - 1];
       if (last && !last.path) last.path = text;
@@ -118,14 +130,100 @@ function detectSettingKeys(pkgPath: string): string[] {
   return [...keys].sort();
 }
 
+/**
+ * What `pi list` says, kept until the packages in settings.json change.
+ *
+ * Starting pi to ask takes a second or more, and Settings asks each time it
+ * opens: its rail lists the extensions that have settings, and they arrived
+ * after everything else had settled. What is installed only changes with the
+ * packages list, which install, remove and switching all rewrite.
+ */
+let listed: { stamp: string; value: Promise<{ spec: string; path?: string; scope?: string }[]> } | undefined;
+function installedPackages(settings: Record<string, unknown>) {
+  const stamp = JSON.stringify(settings.packages ?? null);
+  if (listed?.stamp !== stamp) {
+    const value = run("pi", ["list"], { timeout: 60_000 }).then(({ stdout }) => parseList(stdout));
+    listed = { stamp, value };
+    value.catch(() => { if (listed?.value === value) listed = undefined; });
+  }
+  return listed.value;
+}
+
+/**
+ * When the files a scan reads last changed, and how many there are — the
+ * same files detectSettingKeys reads, only looked at, not read.
+ */
+function sourceStamp(dir: string, depth = 0): string {
+  if (depth > 4) return "";
+  let newest = 0, count = 0;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return "";
+  }
+  const deeper: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) deeper.push(sourceStamp(full, depth + 1));
+    else if (/\.(ts|js|mjs|cjs)$/.test(entry.name)) {
+      try { newest = Math.max(newest, statSync(full).mtimeMs); count++; } catch { /* gone meanwhile */ }
+    }
+  }
+  return [`${newest}:${count}`, ...deeper].join(",");
+}
+
+/**
+ * The keys a package reads, found once per version of it rather than on
+ * every look. One from npm or git changes only by being installed again,
+ * which rewrites its package.json. One from a folder of its own is being
+ * worked on: an edit to its code is seen at the next look.
+ */
+const keysFound = new Map<string, { stamp: string; keys: string[] }>();
+export function settingKeysOf(dir: string, installed: boolean): string[] {
+  let stamp: string | undefined;
+  if (installed) {
+    try { stamp = String(statSync(path.join(dir, "package.json")).mtimeMs); } catch { /* looked at as a folder */ }
+  }
+  stamp ??= sourceStamp(dir);
+  const had = keysFound.get(dir);
+  if (had && had.stamp === stamp) return had.keys;
+  const keys = detectSettingKeys(dir);
+  keysFound.set(dir, { stamp, keys });
+  return keys;
+}
+
+/**
+ * Switch an installed package on or off in pi's settings, keeping a filter
+ * aside for switching it back. False where it is not listed there.
+ */
+export async function switchPackage(spec: string, enabled: boolean): Promise<boolean> {
+  let stashed: ReturnType<typeof extensionStash> | undefined;
+  await updatePiSettings(
+    (all) => {
+      // The stash is read and written in turn with the settings file: two
+      // switches at once would otherwise both start from the same stash,
+      // and the later write would drop what the earlier one kept.
+      const changed = setPackageEnabled(Array.isArray(all.packages) ? all.packages : [], spec, enabled, extensionStash());
+      if (!changed) return;
+      all.packages = changed.packages;
+      stashed = changed.stash;
+    },
+    // Written only once the file is: a failed write leaves both as they were.
+    () => stashed && setExtensionStash(stashed),
+  );
+  return stashed !== undefined;
+}
+
 export function extensionsRouter(): Router {
   const router = express.Router();
 
   router.get("/extensions", async (_req, res) => {
     try {
-      const { stdout } = await run("pi", ["list"], { timeout: 60_000 });
       const settings = readSettings();
-      const packages = parseList(stdout);
+      const packages = await installedPackages(settings);
+      const listed = Array.isArray(settings.packages) ? settings.packages : [];
 
       const infos: ExtensionInfo[] = packages.map((pkg) => {
         const info: ExtensionInfo = {
@@ -135,6 +233,14 @@ export function extensionsRouter(): Router {
           scope: pkg.scope,
           settings: [],
         };
+
+        if (!pkg.scope || /^user/i.test(pkg.scope)) {
+          const entry = listed.find((e) => sourceOf(e) === pkg.spec);
+          if (entry !== undefined) {
+            info.enabled = !isSwitchedOff(entry);
+            if (isFiltered(entry)) info.filtered = true;
+          }
+        }
 
         if (pkg.path && existsSync(path.join(pkg.path, "package.json"))) {
           try {
@@ -150,7 +256,7 @@ export function extensionsRouter(): Router {
           // settings.json. The key scanner finds them all the same, and a form
           // built from them would write keys the adapter never reads — so it
           // gets no config page here. Settings → MCP edits the real file.
-          const keys = info.name === "pi-mcp-adapter" ? [] : detectSettingKeys(pkg.path);
+          const keys = info.name === "pi-mcp-adapter" ? [] : settingKeysOf(pkg.path, /^(npm|git):/.test(pkg.spec));
           for (const key of keys) {
             info.settings.push({
               key,
@@ -163,6 +269,26 @@ export function extensionsRouter(): Router {
       });
 
       res.json({ extensions: infos, settingsPath: settingsFile() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * Switch an installed package off, or on again, without uninstalling it — the
+   * way `pi config` does, by emptying what it may load. Open conversations are
+   * reloaded so the change is there without a restart.
+   */
+  router.put("/extensions/enabled", async (req, res) => {
+    const { spec, enabled } = req.body ?? {};
+    if (typeof spec !== "string" || !spec || typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "spec and enabled are required" });
+    }
+    try {
+      const found = await switchPackage(spec, enabled);
+      if (!found) return res.status(404).json({ error: "That package is not installed for this user" });
+      const { reloaded, waiting } = await sessions.reloadIdle();
+      res.json({ ok: true, enabled, reloaded, waiting });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }

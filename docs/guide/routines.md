@@ -4,15 +4,23 @@ A routine is a standing instruction and a schedule. When it fires the agent is
 given the instruction, does the work, and goes quiet again — nobody is waiting
 on the other end, so a run may take as long as it takes.
 
-Routines live in the sidebar next to Sessions and Agent. They run in the agent's
-home directory, not a workspace, and they share the agent's memory.
+Routines live in the sidebar next to Sessions and Agent. By default they run in the
+agent's home directory and share the agent's memory; **Runs in** gives one a project
+instead, and its runs work in that folder. Each place keeps its own session, so
+moving a routine back picks up where it left off. If the folder is later removed,
+the routine says so and its runs fail until another place is chosen.
 
 ## Scheduling
 
 Either a five-field cron expression (`0 9 * * 1-5`) or one of the `@shorthands`,
 **or** a single moment for a one-off. Never both — a routine that repeats and a
 routine that happens once are different things, and the form says so rather than
-guessing.
+guessing. As in cron, Sunday is `0` or `7`, and days and months can be written
+by name: `30 8 * * mon-fri`, `0 9 1 jan *`.
+
+**Run now** on a one-off whose moment is still to come is a try-out: the moment
+stays, and it runs then as well. Giving a one-off that has already run a new
+time switches it back on.
 
 A one-off catches up: if its moment passed while the portal was down, it still
 runs when the portal comes back. A recurring one does not — it simply waits for

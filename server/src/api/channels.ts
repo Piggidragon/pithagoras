@@ -1,6 +1,7 @@
 import express, { type Router } from "express";
 import { nanoid } from "nanoid";
-import { countChannelSessions, getDb } from "../db.js";
+import { countChannelSessions, deleteSession, getDb } from "../db.js";
+import { sessions } from "../session-manager.js";
 import { agentHome } from "../agent.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { channelSupervisor } from "../channels/supervisor.js";
@@ -241,7 +242,7 @@ export function channelsRouter(): Router {
    * them — they are reconnected if it is recreated under the same slug. Pass
    * `?sessions=delete` to discard them instead.
    */
-  router.delete("/channels/:id", (req, res) => {
+  router.delete("/channels/:id", async (req, res) => {
     const row = rowById(req.params.id);
     if (!row) return res.json({ ok: true, stranded: 0, deleted: 0 });
 
@@ -251,10 +252,17 @@ export function channelsRouter(): Router {
       const ids = getDb()
         .prepare("SELECT id FROM sessions WHERE channel_slug = ?")
         .all(row.slug) as { id: string }[];
-      for (const s of ids) {
-        getDb().prepare("DELETE FROM events WHERE session_id = ?").run(s.id);
-        getDb().prepare("DELETE FROM sessions WHERE id = ?").run(s.id);
+      // The same as deleting a chat: brought to a stop first, its rows (canvases
+      // included) removed together, and the folder pi wrote for it after them.
+      try {
+        for (const s of ids) await sessions.discard(s.id);
+        getDb().transaction(() => {
+          for (const s of ids) deleteSession(s.id);
+        })();
+      } catch (e) {
+        return res.status(500).json({ error: (e as Error).message });
       }
+      for (const s of ids) sessions.removeFiles(s.id);
       deleted = ids.length;
     }
 
@@ -273,6 +281,8 @@ export function channelsRouter(): Router {
     try {
       const output = await installChannelPackage(spec.trim());
       const { channels, broken } = await loadChannels(true);
+      // A channel set up before its package was here has been waiting on it.
+      void channelSupervisor.sync().catch(() => {});
       res.json({ ok: true, output, kinds: channels.map(kindToApi), broken });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

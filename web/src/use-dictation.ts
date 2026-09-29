@@ -4,6 +4,7 @@ import { api, DEFAULT_VAD } from "./api";
 import { cleanTranscript } from "./dictation";
 import { LiveTranscription } from "./live-transcription";
 import { samplesWav } from "./voice";
+import { t } from "./i18n";
 
 /** Where dictated words go: into the message box to be edited, or straight to the agent. */
 export type DictationMode = "review" | "send";
@@ -128,7 +129,7 @@ export function useDictation({
         const text = cleanTranscript(await r.live!.finish(samples, signal));
         if (text && !signal.aborted) deliver(text);
       } catch (e) {
-        if (!signal.aborted) setError((e as Error).message || "Transcription failed");
+        if (!signal.aborted) setError((e as Error).message || t("Transcription failed"));
       } finally {
         setPendingNow(-1);
         if (!signal.aborted) settle();
@@ -182,7 +183,7 @@ export function useDictation({
     setError("");
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
-        throw new Error("Microphone access requires HTTPS or localhost.");
+        throw new Error(t("Microphone access requires HTTPS or localhost."));
       const mic = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
@@ -204,7 +205,7 @@ export function useDictation({
             signal,
           });
           const result = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(result.error || "Transcription failed");
+          if (!response.ok) throw new Error(result.error || t("Transcription failed"));
           return String(result.text ?? "");
         },
         (text) => {
@@ -270,7 +271,7 @@ export function useDictation({
       for (const track of mic.getTracks()) {
         track.onended = () => {
           if (r.closed || run.current !== r) return;
-          setError("Microphone disconnected. Reconnect it and turn dictation on again.");
+          setError(t("Microphone disconnected. Reconnect it and turn dictation on again."));
           void stop();
         };
       }

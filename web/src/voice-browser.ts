@@ -1,4 +1,5 @@
 import type { PortalEvent } from './api';
+import { SHELL_TOOL } from './tool-activity';
 /** Match direct browser tools and the MCP adapter's wrapped browser calls. */
 export function latestBrowserActivity(events: PortalEvent[]): number {
   for (let i = events.length - 1; i >= 0; i--) {
@@ -14,7 +15,7 @@ export function latestBrowserActivity(events: PortalEvent[]): number {
 export function latestTerminalActivity(events: PortalEvent[]): number {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (event.type === 'tool_execution_start' && /^(bash|shell|terminal|exec_command)$/.test(event.payload?.toolName ?? event.payload?.name ?? '')) return event.seq;
+    if (event.type === 'tool_execution_start' && SHELL_TOOL.test(event.payload?.toolName ?? event.payload?.name ?? '')) return event.seq;
   }
   return 0;
 }

@@ -1,148 +1,272 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Select } from "./Select";
 import {
   LuBlocks,
+  LuBrain,
   LuCheck,
-  LuChevronRight,
   LuCircleAlert,
   LuDownload,
   LuExternalLink,
+  LuEye,
   LuFileJson,
+  LuFolder,
+  LuHammer,
+  LuInfo,
+  LuKeyboard,
+  LuMonitor,
+  LuMoon,
   LuPlug,
   LuPuzzle,
   LuRadio,
   LuWrench,
   LuRefreshCw,
+  LuSearch,
   LuServer,
   LuSlidersHorizontal,
+  LuSun,
   LuTrash2,
   LuTriangleAlert,
   LuUsers,
 } from "react-icons/lu";
-import { api, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
+import { api, SIGNED_OUT, type AvailableModel, type ExtensionInfo, type GlobalSettings, type ReportTarget, type ReportTo } from "../api";
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
-import { KeepRecent, formatTokens, useKeepRecentSave } from "./KeepRecent";
+import { parseWindow } from "../context-window";
+import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
+import { formatTokens } from "../transcript";
+import { displayName } from "../tool-groups";
+import { useAsksBeforeDeleting } from "../confirm-prefs";
+import { useNotifyState } from "../notify";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
+import { ToolDefaults } from "./ToolDefaults";
+import { isEnter } from "../shortcuts";
+import { KeyboardShortcuts } from "./KeyboardShortcuts";
+import { ProvidersPanel } from "./ProvidersPanel";
+import { EffortPicker, Empty, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { PackageCatalog } from "./PackageCatalog";
+import { packageName } from "../package-names";
+import { load, useCached } from "../settings-cache";
+import { serialSaver } from "../serial-saver";
+import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
+import { useTheme, type Theme } from "../theme";
+import { humanKey, typed } from "../setting-values";
+import { effortLabel } from "../effort";
+import { modelTraits } from "../model-traits";
+import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
 
 export type Tab =
+  | "models"
   | "general"
   | "channels"
   | "people"
   | "add-ons"
+  | "tools"
   | "skills"
   | "mcp"
   | "extensions"
+  | "browser"
+  | "shortcuts"
+  | "about"
   | "advanced";
 
 /** Either a fixed tab or one extension's own configuration page. */
 type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; spec: string };
 
-const TABS: { id: Tab; label: string; icon: ReactNode; hint: string }[] = [
+type TabDef = { id: Tab; label: string; icon: ReactNode; hint: string };
+
+/**
+ * The rail, in the order a person setting the portal up needs it: where the
+ * models come from and how they are used, then what the agent can do, who it
+ * talks to, and last the portal itself.
+ */
+const GROUPS: { label: string; tabs: TabDef[] }[] = [
   {
-    id: "general",
-    label: "General",
-    icon: <LuSlidersHorizontal />,
-    hint: "Defaults applied to new sessions",
+    label: msg("Models"),
+    tabs: [
+      { id: "models", label: msg("Providers"), icon: <LuServer />, hint: msg("Where the models come from") },
+      { id: "general", label: msg("Defaults"), icon: <LuSlidersHorizontal />, hint: msg("Model, effort and context for new chats") },
+    ],
   },
   {
-    id: "channels",
-    label: "Channels",
-    icon: <LuRadio />,
-    hint: "Two-way links into the agent",
+    label: msg("Agent"),
+    tabs: [
+      { id: "tools", label: msg("Tools"), icon: <LuHammer />, hint: msg("What the agent may reach for, by default") },
+      { id: "skills", label: msg("Skills"), icon: <LuWrench />, hint: msg("Procedures the agent can reach for") },
+      { id: "mcp", label: msg("MCP"), icon: <LuPlug />, hint: msg("Servers the agent can pull tools from") },
+      { id: "extensions", label: msg("Extensions"), icon: <LuBlocks />, hint: msg("Install and manage packages") },
+    ],
   },
   {
-    id: "people",
-    label: "People",
-    icon: <LuUsers />,
-    hint: "Who the agent will talk to",
+    label: msg("Reach"),
+    tabs: [
+      { id: "channels", label: msg("Channels"), icon: <LuRadio />, hint: msg("Two-way links into the agent") },
+      { id: "people", label: msg("People"), icon: <LuUsers />, hint: msg("Who the agent will talk to") },
+    ],
   },
   {
-    id: "add-ons",
-    label: "Add-ons",
-    icon: <LuPuzzle />,
-    hint: "Optional parts of the portal itself",
+    label: msg("Portal"),
+    tabs: [
+      { id: "browser", label: msg("This browser"), icon: <LuMonitor />, hint: msg("Theme, notifications, confirmations") },
+      { id: "add-ons", label: msg("Add-ons"), icon: <LuPuzzle />, hint: msg("Optional parts of the portal itself") },
+      { id: "shortcuts", label: msg("Shortcuts"), icon: <LuKeyboard />, hint: msg("Keyboard shortcuts, and changing them") },
+      { id: "about", label: msg("About"), icon: <LuInfo />, hint: msg("Where this portal keeps things") },
+      { id: "advanced", label: msg("Advanced"), icon: <LuFileJson />, hint: msg("pi's raw settings file") },
+    ],
   },
-  {
-    id: "skills",
-    label: "Skills",
-    icon: <LuWrench />,
-    hint: "Procedures the agent can reach for",
-  },
-  {
-    id: "mcp",
-    label: "MCP",
-    icon: <LuPlug />,
-    hint: "Servers the agent can pull tools from",
-  },
-  { id: "extensions", label: "Extensions", icon: <LuBlocks />, hint: "Install and manage packages" },
-  { id: "advanced", label: "Advanced", icon: <LuFileJson />, hint: "pi's raw settings file" },
 ];
+const TABS = GROUPS.flatMap((g) => g.tabs);
+
+/**
+ * What Settings needs first, fetched before it is opened — a moment after the
+ * portal loads — so that opening it draws the page rather than a placeholder.
+ */
+export function prefetchSettings() {
+  const quietly = (p: Promise<unknown>) => void p.catch(() => {});
+  quietly(load("extensions", api.extensions, 30_000));
+  quietly(load("settings", api.settings, 30_000));
+  quietly(load("models", api.allModels, 30_000));
+  quietly(load("report-targets", api.reportTargets, 30_000));
+  quietly(load("providers", api.providers, 30_000));
+}
+
+/** The rail's extension pages as last seen, so a reload does not start without them. */
+const RAIL_KEY = "pithagoras.settings.extension-rail";
+function railSnapshot(): { spec: string; name: string }[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(RAIL_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((e) => e && typeof e.spec === "string" && typeof e.name === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 export function ConfigModal({
   onClose,
   initialTab = "general",
+  onSetup,
 }: {
   onClose: () => void;
   initialTab?: Tab;
+  /** Opens the setup assistant in its place. */
+  onSetup?: () => void;
 }) {
-  const [nav, setNav] = useState<Nav>({ kind: "tab", id: initialTab });
+  const [nav, setNav] = useState<Nav>({ kind: "tab", id: TABS.some((t) => t.id === initialTab) ? initialTab : "general" });
   const [error, setError] = useState<string | null>(null);
+  /** A section a search went to, to scroll to once its page has drawn it. */
+  const [target, setTarget] = useState<{ section: string; n: number } | null>(null);
+  const page = useRef<HTMLDivElement>(null);
 
   // Loaded here rather than inside the Extensions tab: the rail lists every
   // extension that exposes settings, so it needs them before anything is shown.
-  const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
-  const [settingsPath, setSettingsPath] = useState("");
-  const [loadingExts, setLoadingExts] = useState(true);
+  const exts = useCached("extensions", api.extensions, { onError: (e) => setError(e.message) });
+  const extensions = exts.value?.extensions ?? [];
+  const settingsPath = exts.value?.settingsPath ?? "";
+  const loadingExts = !exts.value && !exts.failed;
+  const loadExtensions = async () => (await exts.reload())?.extensions ?? [];
 
-  const loadExtensions = async () => {
-    setLoadingExts(true);
-    try {
-      const r = await api.extensions();
-      setExtensions(r.extensions);
-      setSettingsPath(r.settingsPath);
-      return r.extensions;
-    } catch (e) {
-      setError((e as Error).message);
-      return [];
-    } finally {
-      setLoadingExts(false);
-    }
-  };
+  useEffect(() => prefetchSettings(), []);
 
+  const configurable = exts.value ? extensions.filter((e) => e.settings.length > 0) : railSnapshot().map((e) => ({ ...e, settings: [] as ExtensionInfo["settings"], placeholder: true }));
   useEffect(() => {
-    loadExtensions();
-  }, []);
-
-  const configurable = extensions.filter((e) => e.settings.length > 0);
+    if (!exts.value) return;
+    try {
+      localStorage.setItem(RAIL_KEY, JSON.stringify(configurable.map((e) => ({ spec: e.spec, name: e.name }))));
+    } catch {
+      // Only a head start for next time.
+    }
+  }, [exts.value]);
   const activeExt =
     nav.kind === "ext" ? extensions.find((e) => e.spec === nav.spec) : undefined;
+  // The extension pages rise in when they arrive late; drawn from what was
+  // kept, they are simply there. Once in, a refresh does not replay it.
+  // Not over names already drawn from the snapshot: they would rise a second time.
+  const railShown = useRef(!!exts.value || railSnapshot().length > 0);
+  useEffect(() => {
+    if (!exts.value) return;
+    const t = setTimeout(() => (railShown.current = true), 600);
+    return () => clearTimeout(t);
+  }, [exts.value]);
+
+  // Every setting there is, the extensions' own among them, to search — by
+  // what it is called here and, in another language, by its English name too.
+  const lang = useLanguage();
+  const index = useMemo(() => {
+    const label = (id: string) => {
+      const tab = TABS.find((x) => x.id === id);
+      return tab ? t(tab.label) : id;
+    };
+    const fixed = SETTINGS_INDEX.map((e) => ({
+      ...e,
+      title: t(e.title),
+      section: e.section && t(e.section),
+      words: `${e.words ?? ""} ${e.title} ${e.section ?? ""}`,
+      where: label(e.tab),
+    }));
+    const own = extensions.flatMap((x) => [
+      { tab: "extensions", ext: x.spec, title: x.name, words: `${x.description ?? ""} extension settings`, where: t("Extension settings") },
+      ...x.settings.map((st) => ({ tab: "extensions", ext: x.spec, section: t("Settings"), title: humanKey(st.key), words: `${st.key} ${x.name}`, where: x.name })),
+    ]);
+    return [...fixed, ...own];
+  }, [extensions, lang]);
+
+  const go = (entry: SettingEntry) => {
+    setNav(entry.ext ? { kind: "ext", spec: entry.ext } : { kind: "tab", id: entry.tab as Tab });
+    if (entry.section) setTarget({ section: entry.section, n: Date.now() });
+  };
+
+  // Its page may still be fetching: look for the heading until it is there, for a few seconds.
+  useEffect(() => {
+    if (!target) return;
+    let frame = 0;
+    const until = performance.now() + 4000;
+    const seek = () => {
+      const el = findSection(page.current, target.section);
+      if (el) {
+        el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        el.classList.remove("setting-flash");
+        void el.offsetWidth;
+        el.classList.add("setting-flash");
+        setTimeout(() => el.classList.remove("setting-flash"), 1700);
+        return;
+      }
+      if (performance.now() < until) frame = requestAnimationFrame(seek);
+    };
+    frame = requestAnimationFrame(seek);
+    return () => cancelAnimationFrame(frame);
+  }, [target]);
 
   return (
     <Modal
       wide
-      title="Settings"
-      subtitle="Applies to the whole portal"
+      title={t("Settings")}
+      subtitle={t("Applies to the whole portal")}
       onClose={onClose}
+      startInRail={initialTab === "general"}
+      section={nav.kind === "tab" ? t(TABS.find((x) => x.id === nav.id)?.label ?? "") : activeExt?.name}
       rail={
+        <SettingsSearch index={index} onPick={go}>
         <div className="space-y-4">
-          <RailGroup>
-            {TABS.map((t) => (
-              <RailItem
-                key={t.id}
-                icon={t.icon}
-                label={t.label}
-                active={nav.kind === "tab" && nav.id === t.id}
-                onClick={() => setNav({ kind: "tab", id: t.id })}
-              />
-            ))}
-          </RailGroup>
+          {GROUPS.map((g) => (
+            <RailGroup key={g.label} label={t(g.label)}>
+              {g.tabs.map((tab) => (
+                <RailItem
+                  key={tab.id}
+                  icon={tab.icon}
+                  label={t(tab.label)}
+                  hint={t(tab.hint)}
+                  active={nav.kind === "tab" && nav.id === tab.id}
+                  onClick={() => setNav({ kind: "tab", id: tab.id })}
+                />
+              ))}
+            </RailGroup>
+          ))}
 
           {/* Only appears for extensions that actually read settings. */}
           {configurable.length > 0 && (
-            <RailGroup label="Extension config">
+            <RailGroup label={t("Extension settings")} className={exts.value && !railShown.current ? "stagger-in" : ""}>
               {configurable.map((e) => (
                 <RailItem
                   key={e.spec}
@@ -155,6 +279,7 @@ export function ConfigModal({
             </RailGroup>
           )}
         </div>
+        </SettingsSearch>
       }
     >
       {error && (
@@ -167,10 +292,15 @@ export function ConfigModal({
         </div>
       )}
 
-      {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} />}
+      <div key={nav.kind === "tab" ? nav.id : nav.spec} ref={page} className="settings-page">
+      {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} onSetup={onSetup} />}
+      {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
+      {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}
+      {nav.kind === "tab" && nav.id === "about" && <AboutPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "channels" && <ChannelsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "people" && <PeoplePanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "add-ons" && <PortalExtensions onError={setError} />}
+      {nav.kind === "tab" && nav.id === "tools" && <ToolDefaults onError={setError} />}
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "mcp" && <McpPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "extensions" && (
@@ -182,22 +312,26 @@ export function ConfigModal({
           onConfigure={(spec) => setNav({ kind: "ext", spec })}
         />
       )}
+      {nav.kind === "tab" && nav.id === "shortcuts" && <KeyboardShortcuts />}
       {nav.kind === "tab" && nav.id === "advanced" && (
         <AdvancedPanel settingsPath={settingsPath} onError={setError} />
       )}
       {nav.kind === "ext" &&
         (activeExt ? (
           <ExtensionPanel ext={activeExt} onError={setError} onSaved={loadExtensions} />
+        ) : loadingExts ? (
+          <div className="skeleton-group space-y-2"><div className="skeleton h-9 w-1/2" /><div className="skeleton h-16 w-full" /><div className="skeleton h-16 w-full" /></div>
         ) : (
-          <Empty>That extension is no longer installed.</Empty>
+          <Empty>{t("That extension is no longer installed.")}</Empty>
         ))}
+      </div>
     </Modal>
   );
 }
 
 // --- rail ---
 
-function RailGroup({ label, children }: { label?: string; children: ReactNode }) {
+function RailGroup({ label, children, className = "" }: { label?: string; children: ReactNode; className?: string }) {
   return (
     <div>
       {label && (
@@ -205,7 +339,100 @@ function RailGroup({ label, children }: { label?: string; children: ReactNode })
           {label}
         </p>
       )}
-      <div className="space-y-0.5">{children}</div>
+      <div className={`space-y-0.5 ${className}`}>{children}</div>
+    </div>
+  );
+}
+
+/** The heading a search names: a Section says its title; other pages have only their headings. */
+function findSection(root: HTMLElement | null, name: string): HTMLElement | null {
+  if (!root) return null;
+  const tagged = [...root.querySelectorAll<HTMLElement>("[data-setting]")].find((el) => el.dataset.setting === name);
+  if (tagged) return tagged;
+  const want = name.trim().toLowerCase();
+  const heading = [...root.querySelectorAll<HTMLElement>("h3")].find((h) => (h.textContent ?? "").trim().toLowerCase().startsWith(want));
+  return heading ? (heading.closest("section") as HTMLElement | null) ?? heading : null;
+}
+
+/**
+ * A search above the rail. While something is typed the rail shows what
+ * matches instead of its pages; arrows move through them, Enter goes to one,
+ * and Escape clears the search before it closes anything. "/" anywhere in
+ * Settings that is not a field comes here.
+ */
+function SettingsSearch({ index, onPick, children }: { index: (SettingEntry & { where?: string })[]; onPick: (e: SettingEntry) => void; children: ReactNode }) {
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const field = useRef<HTMLInputElement>(null);
+  const hits = useMemo(() => searchSettings(query, index), [query, index]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      e.preventDefault();
+      field.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  const pick = (e: SettingEntry) => {
+    onPick(e);
+    field.current?.blur();
+  };
+
+  return (
+    <div>
+      <div className="relative mb-3">
+        <LuSearch className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint" />
+        <input
+          ref={field}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setActive(0); }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, hits.length - 1)); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
+            else if (e.key === "Enter" && hits[active]) { e.preventDefault(); pick(hits[active]); }
+            else if (e.key === "Escape" && query) { e.preventDefault(); e.stopPropagation(); setQuery(""); }
+          }}
+          placeholder={t("Search settings")}
+          aria-label={t("Search settings")}
+          role="combobox"
+          aria-expanded={!!query}
+          aria-controls="settings-search-results"
+          aria-activedescendant={query && hits[active] ? `settings-hit-${active}` : undefined}
+          className="w-full rounded-lg border border-line bg-surface/70 py-1.5 pl-8 pr-7 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60"
+        />
+        {!query && <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-line px-1 font-mono text-[10px] text-fg-faint">/</kbd>}
+      </div>
+      {query ? (
+        <div id="settings-search-results" role="listbox" aria-label={t("Settings found")} className="float-in space-y-0.5">
+          {hits.length === 0 ? (
+            <p className="px-2 py-3 text-xs text-fg-faint">{t("Nothing called that. Try another word.")}</p>
+          ) : (
+            hits.map((h, i) => (
+              <button
+                key={`${h.ext ?? h.tab}:${h.title}`}
+                id={`settings-hit-${i}`}
+                role="option"
+                aria-selected={i === active}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => pick(h)}
+                className={`block w-full rounded-lg px-2.5 py-1.5 text-left transition ${i === active ? "bg-accent/10 text-accent" : "text-fg-muted hover:bg-fg/5"}`}
+              >
+                <span className="block truncate text-sm">{h.title}</span>
+                <span className="block truncate text-[10px] text-fg-faint">
+                  {h.where}{h.section && h.section !== h.title && h.section !== h.where ? ` › ${h.section}` : ""}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 }
@@ -213,17 +440,21 @@ function RailGroup({ label, children }: { label?: string; children: ReactNode })
 function RailItem({
   icon,
   label,
+  hint,
   active,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
+  hint?: string;
   active: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
+      title={hint}
+      aria-current={active ? "page" : undefined}
       className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition ${
         active
           ? "bg-accent/10 text-accent ring-1 ring-inset ring-accent/20"
@@ -236,58 +467,6 @@ function RailItem({
   );
 }
 
-// --- shared bits ---
-
-function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
-  return (
-    <section className="mb-6">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{title}</h3>
-      {hint && <p className="mt-0.5 text-xs text-fg-subtle">{hint}</p>}
-      <div className="mt-2.5">{children}</div>
-    </section>
-  );
-}
-
-/** Labels a field and says what it falls back to when left blank. */
-function Inherited({
-  label,
-  value,
-  children,
-}: {
-  label: string;
-  value: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className="block">
-      <div className="flex items-baseline gap-2">
-        <span className="text-xs text-fg-muted">{label}</span>
-        {value && (
-          <span className="truncate font-mono text-[10px] text-fg-faint">inherits {value}</span>
-        )}
-      </div>
-      {children}
-    </label>
-  );
-}
-
-function Empty({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-xl border border-dashed border-line px-3 py-8 text-center text-sm text-fg-subtle">
-      {children}
-    </div>
-  );
-}
-
-const inputCls =
-  "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
-const btnCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-3 py-2 text-sm text-fg transition hover:bg-fg/10 disabled:opacity-40";
-const primaryCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";
-
-const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
 // --- general ---
 
 /**
@@ -298,37 +477,27 @@ const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
  * opening a form.
  */
 function ReportDefault({ onError }: { onError: (e: string) => void }) {
-  const [targets, setTargets] = useState<ReportTarget[]>([]);
-  const [current, setCurrent] = useState<ReportTo | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  const load = () =>
-    api
-      .reportTargets()
-      .then((r) => {
-        setTargets(r.targets);
-        setCurrent(r.default);
-        setLoaded(true);
-      })
-      .catch((e) => onError((e as Error).message));
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  if (!loaded) return null;
+  const { value: kept, reload: load } = useCached("report-targets", api.reportTargets, { onError: (e) => onError(e.message) });
+  if (!kept) return null;
+  const targets: ReportTarget[] = kept.targets;
+  const current: ReportTo | null = kept.default;
 
   const value = current ? `${current.channel}\u0000${current.target}` : "";
 
   return (
     <Section
-      title="Routine reports"
-      hint="Where a scheduled run reaches you when it has something worth saying. The agent decides whether a run is worth reporting; a routine can point somewhere else of its own."
+      title={t("Routine reports")}
+      hint={t("Where a scheduled run reaches you when it has something worth saying. The agent decides whether a run is worth reporting; a routine can point somewhere else of its own.")}
     >
-      <select
+      <Select
+        className="w-full"
         value={value}
-        onChange={async (e) => {
-          const [channel, target] = e.target.value.split("\u0000");
+        options={[
+          { value: "", label: t("Nowhere — routines stay silent") },
+          ...targets.map((t) => ({ value: `${t.channel}\u0000${t.target}`, label: `${t.channel} — ${t.label}` })),
+        ]}
+        onChange={async (next) => {
+          const [channel, target] = next.split("\u0000");
           try {
             await api.setReportDefault(channel && target ? { channel, target } : null);
             await load();
@@ -336,72 +505,271 @@ function ReportDefault({ onError }: { onError: (e: string) => void }) {
             onError((err as Error).message);
           }
         }}
-        className={inputCls}
-      >
-        <option value="">Nowhere — routines stay silent</option>
-        {targets.map((t) => (
-          <option key={`${t.channel}\u0000${t.target}`} value={`${t.channel}\u0000${t.target}`}>
-            {t.channel} — {t.label}
-          </option>
-        ))}
-      </select>
+      />
       {targets.length === 0 && (
         <p className="mt-1.5 text-xs text-fg-faint">
-          Nothing to pick yet. A destination is a conversation that already exists on a channel
-          that can speak first — message your bot once and it appears here. A webhook never will:
-          it can only answer.
+          {t("Nothing to pick yet. A destination is a conversation that already exists on a channel that can speak first — message your bot once and it appears here. A webhook never will: it can only answer.")}
         </p>
       )}
     </Section>
   );
 }
 
-function GeneralPanel({ onError }: { onError: (e: string) => void }) {
-  /** Only the explicit overrides — an empty field means "inherit". */
-  const [stored, setStored] = useState<Partial<GlobalSettings> | null>(null);
-  const [defaults, setDefaults] = useState<GlobalSettings | null>(null);
-  const [meta, setMeta] = useState<{
-    executor: string;
-    workspaceRoot: string;
-    piSettingsPath: string;
-  } | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [keepRecent, setKeepRecent] = useState<number | null>(null);
-  const [applied, setApplied] = useState<string | null>(null);
+/** The one question the portal asks before it deletes, and whether it asks it. */
+function Confirmations() {
+  const [ask, setAsk] = useAsksBeforeDeleting();
+  return (
+    <SwitchRow
+      title={t("Ask before deleting")}
+      detail={t("Chats, messages, files, skills, routines, projects, voices, channels, providers. Unsaved changes are still asked about: there is no other copy of them.")}
+      on={ask}
+      onChange={setAsk}
+    />
+  );
+}
 
-  const load = () =>
-    api
-      .settings()
-      .then((r) => {
-        setStored(r.stored);
-        setDefaults(r.defaults);
-        setKeepRecent(r.compaction.keepRecentTokens);
-        setMeta({
-          executor: r.executor,
-          workspaceRoot: r.workspaceRoot,
-          piSettingsPath: r.piSettingsPath,
-        });
-      })
-      .catch((e) => onError((e as Error).message));
-
+/** Only where there is a password: without one there is nothing to sign out of. */
+function SignOut({ onError }: { onError: (e: string) => void }) {
+  const [required, setRequired] = useState(false);
   useEffect(() => {
-    load();
+    api.authStatus().then((s) => setRequired(s.authRequired)).catch(() => {});
   }, []);
+  if (!required) return null;
+  const signOut = () =>
+    api
+      .logout()
+      .then(() => window.dispatchEvent(new Event(SIGNED_OUT)))
+      .catch((e) => onError((e as Error).message));
+  return (
+    <Section title={t("Signed in")} hint={t("Signing out asks for the password here again. Other browsers stay signed in.")}>
+      <button onClick={signOut} className={btnCls}>
+        {t("Sign out")}
+      </button>
+    </Section>
+  );
+}
+
+/** Whether the browser may say so when a chat finishes or needs an answer. */
+function Notifications() {
+  const [state, setOn] = useNotifyState();
+  const note: Record<string, string> = {
+    unsupported: t("This browser does not offer them here — they need a secure connection (HTTPS, or localhost)."),
+    denied: t("The browser has blocked them for this site. Allow them in its site settings, then come back."),
+  };
+  return (
+    <SwitchRow
+      title={t("Tell me when a chat is done or needs me")}
+      detail={t("Only while you are on another tab or window: nobody needs telling about the chat in front of them. The tab title shows what a chat is doing either way.")}
+      on={state === "on"}
+      disabled={state === "unsupported" || state === "denied"}
+      onChange={(on) => void setOn(on)}
+      note={note[state]}
+    />
+  );
+}
+
+const THEMES: { value: Theme; label: string; icon: ReactNode }[] = [
+  { value: "light", label: msg("Light"), icon: <LuSun /> },
+  { value: "dark", label: msg("Dark"), icon: <LuMoon /> },
+  { value: "system", label: msg("Match the system"), icon: <LuMonitor /> },
+];
+
+/** Light, dark, or whichever the system is — as three cards, each a glimpse of itself. */
+function Appearance() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <div role="radiogroup" aria-label={t("Theme")} className="grid grid-cols-3 gap-2">
+      {THEMES.map((th) => (
+        <button
+          key={th.value}
+          type="button"
+          role="radio"
+          aria-checked={theme === th.value}
+          onClick={() => setTheme(th.value)}
+          className={`group rounded-xl border p-2 text-left transition ${
+            theme === th.value ? "border-accent/50 bg-accent/5 ring-1 ring-inset ring-accent/30" : "border-line hover:border-fg/20 hover:bg-fg/[.03]"
+          }`}
+        >
+          <span className={`theme-swatch theme-swatch-${th.value}`} aria-hidden="true"><i /><i /><i /></span>
+          <span className="mt-2 flex items-center gap-1.5 text-xs text-fg [&>svg]:h-3.5 [&>svg]:w-3.5">
+            {th.icon} {t(th.label)}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The portal's language: one of those there are, or the browser's — which is
+ * what it follows until one is picked.
+ */
+function LanguagePicker() {
+  const lang = useLanguage();
+  const [choice, setChoice] = useState<LanguageChoice>(languageChoice);
+  const system = languages().find((l) => l.code === lang)?.name ?? lang;
+  // One chosen here whose file has since gone is English now, and says so.
+  const shown = choice === "system" || languages().some((l) => l.code === choice) ? choice : lang;
+  return (
+    <Select
+      className="w-full sm:w-72"
+      aria-label={t("Language")}
+      value={shown}
+      options={[
+        { value: "system", label: t("Match the browser"), hint: choice === "system" ? system : undefined },
+        ...languages().map((l) => ({ value: l.code, label: l.name })),
+      ]}
+      onChange={(next) => {
+        setChoice(next);
+        setLanguage(next);
+      }}
+    />
+  );
+}
+
+/** What is kept in this browser rather than on the server. */
+function BrowserPanel({ onError }: { onError: (e: string) => void }) {
+  return (
+    <>
+      <p className="mb-5 text-xs text-fg-faint">
+        {t("Kept in this browser only — a phone can differ from the laptop.")}
+      </p>
+      <Section title={t("Appearance")}>
+        <Appearance />
+      </Section>
+      <Section title={t("Language")} hint={t("The portal's own words. What the agent writes is up to the agent.")}>
+        <LanguagePicker />
+      </Section>
+      <Section title={t("Notifications")}>
+        <Notifications />
+      </Section>
+      <Section title={t("Confirmations")}>
+        <Confirmations />
+      </Section>
+      <SignOut onError={onError} />
+    </>
+  );
+}
+
+/** Where this portal keeps what it keeps, set when it was deployed. */
+function AboutPanel({ onError }: { onError: (e: string) => void }) {
+  // What Defaults reads too, fetched ahead: drawn at once from what is kept.
+  const meta = useCached("settings", api.settings, { onError: (e) => onError(e.message) }).value;
+  if (!meta) return <div className="skeleton-group space-y-2"><div className="skeleton h-4 w-32" /><div className="skeleton h-28 w-full" /></div>;
+  const agentDir = meta.piSettingsPath.replace(/\/settings\.json$/, "");
+  const rows: { icon: ReactNode; label: string; value: string; detail: string }[] = [
+    {
+      icon: <LuServer />,
+      label: t("Where the agent runs"),
+      value: meta.executor === "container" ? t("In a container") : t("On this host"),
+      detail: meta.executor === "container" ? t("Each chat's pi runs in its own container.") : t("pi runs inside the portal's own process."),
+    },
+    { icon: <LuFolder />, label: t("Workspaces"), value: meta.workspaceRoot, detail: t("Where each chat's folder is made.") },
+    { icon: <LuFileJson />, label: t("pi's files"), value: agentDir, detail: t("settings.json, models.json, auth.json, and installed packages.") },
+  ];
+  return (
+    <>
+      <Section title={t("This portal")} hint={t("Set when it was deployed, through its environment.")}>
+        <dl className="divide-y divide-line/70 overflow-hidden rounded-xl border border-line bg-raised/40">
+          {rows.map((r) => (
+            <div key={r.label} className="flex items-start gap-3 px-3 py-2.5">
+              <span className="mt-0.5 text-fg-faint [&>svg]:h-4 [&>svg]:w-4">{r.icon}</span>
+              <div className="min-w-0 flex-1">
+                <dt className="text-xs text-fg-subtle">{r.label}</dt>
+                <dd className="truncate text-sm text-fg" title={r.value}>{r.value}</dd>
+                <p className="text-[11px] text-fg-faint">{r.detail}</p>
+              </div>
+            </div>
+          ))}
+        </dl>
+      </Section>
+    </>
+  );
+}
+
+/** What a model can do, said in a few words under its name. */
+function modelHint(m: AvailableModel): string {
+  return [m.name !== m.id ? m.id : "", ...modelTraits(m)].filter(Boolean).join(" · ");
+}
+
+function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; onProviders: () => void }) {
+  // All three are fetched ahead and kept, and the page waits for all three:
+  // drawn part by part, the model menus filled in and a warning pushed the
+  // context settings down after the page was already on screen.
+  const settings = useCached("settings", api.settings, { onError: (e) => onError(e.message) });
+  const modelsQuery = useCached("models", api.allModels);
+  const reports = useCached("report-targets", api.reportTargets);
+  const r = settings.value;
+  const models = modelsQuery.value ?? null;
+  const modelsFailed = !!modelsQuery.failed;
+  const defaults: GlobalSettings | null = r?.defaults ?? null;
+  const executor = r?.executor ?? "";
+
+  /** Only the explicit overrides — an empty value means "inherit". */
+  const [stored, setStored] = useState<Partial<GlobalSettings> | null>(r?.stored ?? null);
+  // What each save said, in the language shown when it is drawn.
+  const [saved, setSaved] = useState<(() => string) | null>(null);
+  const [keepRecent, setKeepRecent] = useState<number | null>(r?.compaction.keepRecentTokens ?? null);
+  const [applied, setApplied] = useState<(() => string) | null>(null);
+  /** Typed text, so that a half-written number is not turned into a request. */
+  const [ctxText, setCtxText] = useState(r?.contextDefault ? String(r.contextDefault) : "");
+  const [ctxSaved, setCtxSaved] = useState<number | null>(r?.contextDefault ?? null);
+  const [ctxNote, setCtxNote] = useState<(() => string) | null>(null);
+  /** The window's field, which what is saved elsewhere does not overwrite while it is being typed in. */
+  const ctxField = useRef<HTMLInputElement>(null);
+
+  /**
+   * Each change is saved as it is made: there is no form to forget to submit.
+   * One save at a time, ending on the last change asked for: two clicks in a
+   * row sent side by side could land in either order. Read again once the
+   * last one is in.
+   */
+  const saver = useMemo(
+    () =>
+      serialSaver<Partial<GlobalSettings>>(
+        async (next) => {
+          // Sent even when blank: an empty value clears the override server-side.
+          await api.saveSettings({ provider: next.provider ?? "", model: next.model ?? "", thinkingLevel: next.thinkingLevel ?? "" });
+        },
+        async () => {
+          setSaved(() => () => t("Saved"));
+          setTimeout(() => setSaved(null), 2000);
+          await settings.reload();
+        },
+      ),
+    // One saver for the page's life; what it calls stays the same.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  // What was kept is brought up to date when the page opens, or after a save —
+  // not while one is out, when what was read may be from before it.
+  useEffect(() => {
+    if (!r) return;
+    if (!saver.busy) setStored(r.stored);
+    setKeepRecent(r.compaction.keepRecentTokens);
+    setCtxSaved(r.contextDefault);
+    if (document.activeElement !== ctxField.current) {
+      setCtxText(r.contextDefault ? String(r.contextDefault) : "");
+    }
+  }, [r]);
+
+  const load = () => settings.reload();
 
   /**
    * Saved on release, on its own.
    *
-   * Not folded into Save defaults: that would submit whatever was loaded when
+   * Not folded into the defaults: that would submit whatever was loaded when
    * the panel opened, so a value set from the context popup in the meantime
    * would be silently rolled back by a save of unrelated fields.
    */
   const saveKeepRecent = useKeepRecentSave(
     (compaction, refreshed) => {
       setKeepRecent(compaction.keepRecentTokens);
-      setApplied(
-        refreshed > 0 ? `Applied to ${refreshed} open session${refreshed === 1 ? "" : "s"}` : "Saved",
+      setApplied(() => () =>
+        refreshed > 0 ? tp(refreshed, "Applied to {n} open session", "Applied to {n} open sessions") : t("Saved"),
       );
+      void load();
       setTimeout(() => setApplied(null), 3000);
     },
     (error) => {
@@ -410,146 +778,198 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
     },
   );
 
-  if (!stored || !defaults) return <p className="text-sm text-fg-subtle">Loading…</p>;
-
-  const save = async () => {
-    setBusy(true);
+  /** On leaving the field, on its own — like the slider above, not part of the defaults. */
+  const saveContextDefault = async () => {
+    const parsed = parseWindow(ctxText);
+    const n = parsed.kind === "ok" ? parsed.tokens : null;
+    if (parsed.kind === "bad") {
+      onError(t("{problem} — or leave it empty for none", { problem: parsed.message }));
+      return setCtxText(ctxSaved ? String(ctxSaved) : "");
+    }
+    if (n === ctxSaved) return setCtxText(ctxSaved ? String(ctxSaved) : "");
     try {
-      // Sent even when blank: an empty value clears the override server-side.
-      await api.saveSettings({
-        provider: stored.provider ?? "",
-        model: stored.model ?? "",
-        thinkingLevel: stored.thinkingLevel ?? "",
-      });
-      await load();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      const r = await api.setContextDefault(n);
+      setCtxSaved(r.contextDefault);
+      setCtxText(r.contextDefault ? String(r.contextDefault) : "");
+      setCtxNote(() => () => (n === null ? t("Removed") : t("Saved")));
+      void load();
+      setTimeout(() => setCtxNote(null), 3000);
     } catch (e) {
       onError((e as Error).message);
-    } finally {
-      setBusy(false);
+      setCtxText(ctxSaved ? String(ctxSaved) : "");
     }
   };
+
+  const byProvider = useMemo(() => {
+    const map = new Map<string, AvailableModel[]>();
+    for (const m of models?.models ?? []) map.set(m.provider, [...(map.get(m.provider) ?? []), m]);
+    return map;
+  }, [models]);
+
+  const ready = stored && defaults && (models || modelsFailed) && (reports.value || reports.failed);
+  if (!ready) {
+    // The shape of the page, so it does not jump when the page replaces it.
+    return (
+      <div className="skeleton-group space-y-7" aria-label={t("Loading")}>
+        {[56, 44].map((h) => (
+          <div key={h} className="space-y-2.5">
+            <div className="skeleton h-3 w-28" />
+            <div className="skeleton h-3 w-3/4" />
+            <div className="skeleton w-full" style={{ height: `${h / 4}rem` }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const save = async (next: Partial<GlobalSettings>) => {
+    setStored(next);
+    try {
+      await saver.request(next);
+    } catch (e) {
+      onError((e as Error).message);
+      void load();
+    }
+  };
+
+  const provider = stored.provider || defaults.provider;
+  const providerName = (id: string) => models?.providers[id] ?? id;
+  const providerOptions = [
+    { value: "", label: defaults.provider ? t("pi's default — {name}", { name: providerName(defaults.provider) }) : t("pi's default"), hint: t("From pi's own settings.json") },
+    ...[...byProvider.entries()].map(([id, list]) => ({ value: id, label: providerName(id), hint: tp(list.length, "{n} model", "{n} models") })),
+    ...(stored.provider && !byProvider.has(stored.provider)
+      ? [{ value: stored.provider, label: stored.provider, hint: t("Not available now — no key, or not set up") }]
+      : []),
+  ];
+  const offered = byProvider.get(provider ?? "") ?? [];
+  const modelOptions = [
+    { value: "", label: defaults.model && (!stored.provider || stored.provider === defaults.provider) ? t("pi's default — {name}", { name: offered.find((m) => m.id === defaults.model)?.name ?? defaults.model }) : t("pi's default"), hint: t("Whatever pi picks for the provider") },
+    ...offered.map((m) => ({ value: m.id, label: m.name, text: `${m.name} ${m.id}`, hint: modelHint(m) || undefined })),
+    ...(stored.model && !offered.some((m) => m.id === stored.model)
+      ? [{ value: stored.model, label: stored.model, hint: t("Not offered by this provider now") }]
+      : []),
+  ];
 
   return (
     <>
       <Section
-        title="Defaults for new sessions"
-        hint="Leave a field empty to inherit it from pi's own settings.json. A session keeps whatever you pick for it under the chat box."
+        title={t("For new chats")}
+        hint={t("What a new chat starts with. Each chat keeps whatever is picked for it under the chat box.")}
+        action={saved && <span className="pop-in inline-flex items-center gap-1 text-xs text-ok"><LuCheck className="h-3.5 w-3.5" /> {saved()}</span>}
       >
-        <div className="space-y-3">
-          <Inherited label="Provider" value={defaults.provider}>
-            <input
-              value={stored.provider ?? ""}
-              onChange={(e) => setStored({ ...stored, provider: e.target.value })}
-              placeholder={defaults.provider || "inherit"}
-              className={`${inputCls} mt-1 font-mono`}
-            />
-          </Inherited>
-          <Inherited label="Model" value={defaults.model}>
-            <input
-              value={stored.model ?? ""}
-              onChange={(e) => setStored({ ...stored, model: e.target.value })}
-              placeholder={defaults.model || "pi decides"}
-              className={`${inputCls} mt-1 font-mono`}
-            />
-          </Inherited>
+        <div className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
+          {models && models.models.length === 0 && (
+            <div className="flex items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">
+              <LuTriangleAlert className="h-3.5 w-3.5 shrink-0" />
+              <span className="flex-1">{t("No model is ready to use yet.")}</span>
+              <button type="button" onClick={onProviders} className="font-medium underline-offset-2 hover:underline">{t("Add a provider")}</button>
+            </div>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-xs text-fg-muted">{t("Provider")}</span>
+              {modelsFailed ? (
+                <input value={stored.provider ?? ""} onChange={(e) => setStored({ ...stored, provider: e.target.value })} onBlur={() => void save(stored)} placeholder={defaults.provider || t("inherit")} className={`${inputCls} mt-1 font-mono`} />
+              ) : (
+                <Select
+                  className="mt-1 w-full"
+                  aria-label={t("Default provider")}
+                  value={stored.provider ?? ""}
+                  options={providerOptions}
+                  disabled={!models}
+                  placeholder={t("Loading…")}
+                  onChange={(next) => {
+                    const keeps = (byProvider.get(next || defaults.provider) ?? []).some((m) => m.id === stored.model);
+                    void save({ ...stored, provider: next, model: keeps ? stored.model : "" });
+                  }}
+                />
+              )}
+            </label>
+            <label className="block">
+              <span className="text-xs text-fg-muted">{t("Model")}</span>
+              {modelsFailed ? (
+                <input value={stored.model ?? ""} onChange={(e) => setStored({ ...stored, model: e.target.value })} onBlur={() => void save(stored)} placeholder={defaults.model || t("pi decides")} className={`${inputCls} mt-1 font-mono`} />
+              ) : (
+                <Select
+                  className="mt-1 w-full"
+                  aria-label={t("Default model")}
+                  value={stored.model ?? ""}
+                  options={modelOptions}
+                  disabled={!models}
+                  placeholder={t("Loading…")}
+                  onChange={(next) => void save({ ...stored, model: next })}
+                />
+              )}
+            </label>
+          </div>
           <div>
             <div className="flex items-baseline gap-2">
-              <span className="text-xs text-fg-muted">Effort</span>
-              {!stored.thinkingLevel && defaults.thinkingLevel && (
-                <span className="text-[10px] text-fg-faint">
-                  inheriting {defaults.thinkingLevel}
-                </span>
-              )}
+              <span className="text-xs text-fg-muted">{t("Effort")}</span>
+              <span className="text-[10px] text-fg-faint">
+                {stored.thinkingLevel ? t("click again to go back to pi's default") : defaults.thinkingLevel ? t("pi's default: {level}", { level: effortLabel(defaults.thinkingLevel) }) : ""}
+              </span>
             </div>
-            <div className="mt-1 flex flex-wrap gap-1">
-              {LEVELS.map((lvl) => (
-                <button
-                  key={lvl}
-                  onClick={() =>
-                    setStored({
-                      ...stored,
-                      // Clicking the active level again hands it back to pi.
-                      thinkingLevel: stored.thinkingLevel === lvl ? "" : lvl,
-                    })
-                  }
-                  className={`rounded-lg px-2.5 py-1 text-xs capitalize transition ${
-                    stored.thinkingLevel === lvl
-                      ? "bg-warn/12 text-warn ring-1 ring-inset ring-warn/30"
-                      : "bg-fg/5 text-fg-muted hover:bg-fg/10"
-                  }`}
-                >
-                  {lvl}
-                </button>
-              ))}
+            <div className="mt-1">
+              <EffortPicker
+                label={t("Default effort")}
+                value={stored.thinkingLevel ?? ""}
+                inherited={defaults.thinkingLevel}
+                // Clicking the active level again hands it back to pi.
+                onChange={(lvl) => void save({ ...stored, thinkingLevel: lvl })}
+              />
             </div>
           </div>
-          <button onClick={save} disabled={busy} className={`${primaryCls} w-full justify-center`}>
-            {busy ? (
-              <>
-                <LuRefreshCw className="h-4 w-4 animate-spin" /> Saving…
-              </>
-            ) : saved ? (
-              <>
-                <LuCheck className="h-4 w-4" /> Saved
-              </>
-            ) : (
-              "Save defaults"
-            )}
-          </button>
+          <p className="flex items-center gap-3 text-[11px] text-fg-faint">
+            <span className="inline-flex items-center gap-1"><LuEye className="h-3 w-3" /> {t("sees images")}</span>
+            <span className="inline-flex items-center gap-1"><LuBrain className="h-3 w-3" /> {t("thinks — effort applies")}</span>
+            <button type="button" onClick={onProviders} className="ml-auto text-accent hover:underline">{t("Providers ›")}</button>
+          </p>
         </div>
       </Section>
 
       <Section
-        title="Compaction"
-        hint="What a compaction leaves untouched. The most recent stretch of a conversation is kept word for word; only what is older is replaced by a summary."
+        title={t("Context")}
+        hint={t("How much of a conversation a chat carries, and what is kept word for word when it is compacted.")}
       >
-        <div className="rounded-xl border border-line bg-raised/40 p-3">
-          {keepRecent !== null && (
-            <KeepRecent
-              value={keepRecent}
-              onChange={setKeepRecent}
-              onCommit={saveKeepRecent}
-              disabled={busy}
+        <div className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
+          <div>
+            <p className="text-xs text-fg-muted">{t("Window")}</p>
+            <input
+              ref={ctxField}
+              value={ctxText}
+              disabled={executor === "container"}
+              inputMode="numeric"
+              onChange={(e) => setCtxText(e.target.value)}
+              onBlur={saveContextDefault}
+              onKeyDown={(e) => isEnter(e) && e.currentTarget.blur()}
+              placeholder={t("what each model says")}
+              aria-label={t("Default context window in tokens")}
+              className={`${inputCls} mt-1 font-mono`}
             />
-          )}
-          <p className="mt-2 text-xs text-fg-faint">
-            This is the floor a compacted session settles at, before the summary is added — pi's
-            default of {formatTokens(20000)} is a third of a 64k window, which is why compacting can
-            look as though it did nothing. Saved as you release the slider, and unlike the defaults
-            above it reaches sessions that are already open.
-          </p>
-          {applied && <p className="mt-1 text-xs text-ok">{applied}</p>}
+            <p className="mt-1.5 text-xs text-fg-faint">
+              {tx("How many tokens a chat may hold before it is compacted, in every chat, open ones included. A model that says it has less keeps its own number, and one set for a model in its context pill wins over this. For a server that gives each chat less than the model declares — llama.cpp with {flag} gives each chat half of {size}. Saved when you leave the field.", { flag: <code>--parallel 2</code>, size: <code>ctx-size</code> })}
+            </p>
+            {executor === "container" && (
+              <p className="mt-1 text-xs text-warn">
+                {t("Not available with the container executor: pi runs inside the container, where the portal cannot change its context window.")}
+              </p>
+            )}
+            {ctxNote && <p className="mt-1 text-xs text-ok">{ctxNote()}</p>}
+          </div>
+          <div className="border-t border-line/70 pt-3">
+            <p className="text-xs text-fg-muted">{t("Kept when compacting")}</p>
+            {keepRecent !== null && (
+              <KeepRecent value={keepRecent} onChange={setKeepRecent} onCommit={saveKeepRecent} />
+            )}
+            <p className="mt-2 text-xs text-fg-faint">
+              {t("The most recent stretch is kept word for word; only what is older becomes a summary. pi's default of {n} is a third of a 64k window, which is why compacting can look as though it did nothing. Saved as you let go, and it reaches open chats too.", { n: formatTokens(20000) })}
+            </p>
+            {applied && <p className="mt-1 text-xs text-ok">{applied()}</p>}
+          </div>
         </div>
       </Section>
 
       <ReportDefault onError={onError} />
-
-      <Section title="Deployment">
-        <dl className="rounded-xl border border-line bg-raised/40 p-3 text-sm">
-          <div className="flex items-center gap-2 py-0.5">
-            <LuServer className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-            <dt className="text-fg-subtle">executor</dt>
-            <dd className="ml-auto font-mono text-fg-muted">{meta?.executor}</dd>
-          </div>
-          <div className="flex items-center gap-2 py-0.5">
-            <LuChevronRight className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-            <dt className="shrink-0 text-fg-subtle">workspaces</dt>
-            <dd className="ml-auto truncate pl-4 font-mono text-fg-muted">{meta?.workspaceRoot}</dd>
-          </div>
-          <div className="flex items-center gap-2 py-0.5">
-            <LuFileJson className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-            <dt className="shrink-0 text-fg-subtle">pi settings</dt>
-            <dd className="ml-auto truncate pl-4 font-mono text-fg-muted">
-              {meta?.piSettingsPath}
-            </dd>
-          </div>
-          <p className="mt-1.5 text-xs text-fg-faint">
-            Executor and workspace root are set at deploy time via environment.
-          </p>
-        </dl>
-      </Section>
     </>
   );
 }
@@ -557,10 +977,10 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
 // --- extensions ---
 
 const SOURCES = [
-  { label: "npm", placeholder: "npm:@scope/package", hint: "published on npm" },
-  { label: "git", placeholder: "git:github.com/user/repo@v1", hint: "a git repository" },
-  { label: "url", placeholder: "https://github.com/user/repo", hint: "a URL" },
-  { label: "path", placeholder: "/absolute/path/to/package", hint: "a local directory" },
+  { label: "npm", placeholder: "npm:@scope/package", hint: msg("Install from npm") },
+  { label: "git", placeholder: "git:github.com/user/repo@v1", hint: msg("Install from a git repository") },
+  { label: "url", placeholder: "https://github.com/user/repo", hint: msg("Install from a URL") },
+  { label: "path", placeholder: "/absolute/path/to/package", hint: msg("Install from a folder on the server") },
 ];
 
 function ExtensionsPanel({
@@ -578,9 +998,22 @@ function ExtensionsPanel({
 }) {
   const [spec, setSpec] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  /** What the last switch did to the conversations that were open. */
+  const [note, setNote] = useState<(() => string) | null>(null);
+  // The names given in Settings → Tools. A package is one thing and should be
+  // called the same thing wherever it appears; the spec underneath is what it
+  // is installed and removed by, and that does not change.
+  const [names, setNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api
+      .toolNames()
+      .then((r) => setNames(r.names))
+      .catch(() => setNames({}));
+  }, []);
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
+    setNote(null);
     try {
       await fn();
       await onRefresh();
@@ -592,18 +1025,41 @@ function ExtensionsPanel({
     }
   };
 
+  const switchPackage = (ext: ExtensionInfo) =>
+    act(ext.spec, async () => {
+      const on = !ext.enabled;
+      const r = await api.setExtensionEnabled(ext.spec, on);
+      const name = displayName(ext.name, names);
+      const parts = [() => (on ? t("{name} is on.", { name }) : t("{name} is off.", { name }))];
+      if (r.reloaded) parts.push(() => tp(r.reloaded, "{n} open conversation reloaded.", "{n} open conversations reloaded."));
+      if (r.waiting)
+        parts.push(() =>
+          tp(r.waiting, "{n} still working — it keeps it as it was until /reload, or its next start.", "{n} still working — they keep it as it was until /reload, or their next start."),
+        );
+      setNote(() => () => parts.map((part) => part()).join(" "));
+    });
+
+  const installed = useMemo(() => new Set(extensions.flatMap((e) => [e.name, packageName(e.spec)])), [extensions]);
+
   return (
     <>
       <Section
-        title="Install"
-        hint="Extensions, skills, prompt templates and themes. They persist across restarts."
+        title={t("Find packages")}
+        hint={t("Published for pi on npm: tools, skills, providers and themes. The most used first.")}
+      >
+        <PackageCatalog installed={installed} onInstalled={() => void onRefresh()} onError={onError} limit={6} />
+      </Section>
+
+      <Section
+        title={t("Install by name")}
+        hint={t("From npm, git, a URL or a folder on the server. They persist across restarts.")}
       >
         <div className="flex gap-2">
           <input
             value={spec}
             onChange={(e) => setSpec(e.target.value)}
             onKeyDown={(e) =>
-              e.key === "Enter" &&
+              isEnter(e) &&
               spec.trim() &&
               act("install", () => api.installPackage(spec.trim()))
             }
@@ -616,7 +1072,7 @@ function ExtensionsPanel({
             className={primaryCls}
           >
             <LuDownload className="h-4 w-4" />
-            {busy === "install" ? "Installing…" : "Install"}
+            {busy === "install" ? t("Installing…") : t("Install")}
           </button>
         </div>
         <div className="mt-2 flex flex-wrap gap-1">
@@ -624,7 +1080,7 @@ function ExtensionsPanel({
             <button
               key={s.label}
               onClick={() => setSpec(s.placeholder)}
-              title={`Install from ${s.hint}`}
+              title={t(s.hint)}
               className="rounded-lg bg-fg/5 px-2 py-0.5 font-mono text-[11px] text-fg-muted transition hover:bg-fg/10 hover:text-fg"
             >
               {s.label}
@@ -633,14 +1089,14 @@ function ExtensionsPanel({
         </div>
       </Section>
 
-      <Section title={`Installed${extensions.length ? ` (${extensions.length})` : ""}`}>
+      <Section title={`${t("Installed")}${extensions.length ? ` (${extensions.length})` : ""}`}>
         {loading ? (
-          <p className="text-sm text-fg-subtle">Reading installed packages…</p>
+          <p className="text-sm text-fg-subtle">{t("Reading installed packages…")}</p>
         ) : extensions.length === 0 ? (
           <Empty>
-            Nothing installed yet.
+            {t("Nothing installed yet.")}
             <p className="mt-1 text-xs text-fg-faint">
-              Installed commands show up in the chat box when you type “/”.
+              {t("Installed commands show up in the chat box when you type “/”.")}
             </p>
           </Empty>
         ) : (
@@ -652,7 +1108,23 @@ function ExtensionsPanel({
               >
                 <div className="flex items-center gap-2">
                   <LuPuzzle className="h-4 w-4 shrink-0 text-fg-subtle" />
-                  <p className="truncate text-sm text-fg">{ext.name}</p>
+                  <p
+                    title={ext.name}
+                    className={`truncate text-sm ${ext.enabled === false ? "text-fg-subtle line-through decoration-fg-faint" : "text-fg"}`}
+                  >
+                    {displayName(ext.name, names)}
+                  </p>
+                  {ext.enabled === false && (
+                    <span className="shrink-0 rounded bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">{t("off")}</span>
+                  )}
+                  {ext.filtered && (
+                    <span
+                      title={t("Some of what it brings is switched off in settings.json. Switching it off and on again keeps that.")}
+                      className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle"
+                    >
+                      {t("filtered")}
+                    </span>
+                  )}
                   {ext.version && (
                     <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 font-mono text-[10px] text-fg-subtle">
                       v{ext.version}
@@ -663,11 +1135,37 @@ function ExtensionsPanel({
                       {ext.scope}
                     </span>
                   )}
+                  {ext.enabled !== undefined && (
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={ext.enabled}
+                      aria-label={ext.enabled ? t("Switch off {name}", { name: displayName(ext.name, names) }) : t("Switch on {name}", { name: displayName(ext.name, names) })}
+                      title={
+                        ext.enabled
+                          ? t("On — click to switch it off without uninstalling it")
+                          : t("Off — its commands, skills and tools are not loaded. Click to switch it on")
+                      }
+                      disabled={busy !== null}
+                      onClick={() => switchPackage(ext)}
+                      className="ml-auto shrink-0 disabled:opacity-40"
+                    >
+                      <span
+                        className={`relative block h-5 w-9 rounded-full transition ${ext.enabled ? "bg-accent" : "bg-raised"}`}
+                      >
+                        <span
+                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                            ext.enabled ? "left-[1.125rem]" : "left-0.5"
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  )}
                   <button
                     disabled={busy !== null}
                     onClick={() => act(ext.spec, () => api.removePackage(ext.spec))}
-                    title="Remove"
-                    className="ml-auto shrink-0 rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                    title={t("Remove")}
+                    className={`${ext.enabled === undefined ? "ml-auto " : ""}shrink-0 rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40`}
                   >
                     {busy === ext.spec ? (
                       <LuRefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -688,13 +1186,19 @@ function ExtensionsPanel({
                       onClick={() => onConfigure(ext.spec)}
                       className="ml-auto shrink-0 text-[11px] text-accent hover:text-accent"
                     >
-                      Configure ({ext.settings.length}) ›
+                      {t("Configure ({n})", { n: ext.settings.length })} ›
                     </button>
                   )}
                 </div>
               </li>
             ))}
           </ul>
+        )}
+
+        {note && (
+          <p role="status" className="mt-2 text-xs text-fg-muted">
+            {note()}
+          </p>
         )}
 
         <div className="mt-2.5 flex items-center gap-2">
@@ -704,10 +1208,10 @@ function ExtensionsPanel({
             className={btnCls}
           >
             <LuDownload className="h-4 w-4" />
-            {busy === "update" ? "Updating…" : "Update all"}
+            {busy === "update" ? t("Updating…") : t("Update all")}
           </button>
           <button onClick={() => onRefresh()} className={btnCls}>
-            <LuRefreshCw className="h-4 w-4" /> Refresh
+            <LuRefreshCw className="h-4 w-4" /> {t("Refresh")}
           </button>
         </div>
       </Section>
@@ -733,14 +1237,25 @@ function ExtensionPanel({
   // Reset when switching between extensions, or the previous one's edits leak.
   useEffect(() => {
     setValues(
-      Object.fromEntries(ext.settings.map((s) => [s.key, s.value == null ? "" : String(s.value)]))
+      Object.fromEntries(ext.settings.map((s) => [s.key, s.value == null ? "" : typeof s.value === "object" ? JSON.stringify(s.value) : String(s.value)]))
     );
   }, [ext.spec]);
 
-  const save = async (key: string) => {
+  /** What was typed for a key, as the kind of value it is — told from the text when nothing is set yet. */
+  const typedFor = (key: string) => {
+    const setting = ext.settings.find((s) => s.key === key);
+    return typed(setting?.configured ? setting.value : undefined, values[key], key);
+  };
+
+  /**
+   * Stored as what it is: a number as a number, and a switch as true or false.
+   * Written as text, "false" was a string — which an extension reading
+   * `if (settings.x)` takes as on.
+   */
+  const save = async (key: string, value: unknown = typedFor(key)) => {
     setBusy(key);
     try {
-      await api.setExtensionSetting(key, values[key]);
+      await api.setExtensionSetting(key, value);
       await onSaved();
       setSavedKey(key);
       setTimeout(() => setSavedKey(null), 2000);
@@ -768,56 +1283,74 @@ function ExtensionPanel({
             target="_blank"
             rel="noreferrer"
             className="shrink-0 rounded-lg p-1.5 text-fg-subtle transition hover:bg-fg/10 hover:text-fg"
-            title="Homepage"
+            title={t("Homepage")}
           >
             <LuExternalLink className="h-4 w-4" />
           </a>
         )}
       </div>
 
-      <Section title="Settings">
-        <div className="space-y-3">
-          {ext.settings.map((s) => (
-            <div key={s.key}>
-              <div className="flex items-baseline gap-2">
-                <label className="font-mono text-xs text-fg-muted">{s.key}</label>
-                {!s.configured && (
-                  <span className="text-[10px] text-fg-faint">not set — using its default</span>
+      <Section title={t("Settings")} hint={t("Saved into pi's settings.json. An extension reads them when a chat starts.")}>
+        <div className="stagger-in space-y-2">
+          {ext.settings.map((s) => {
+            const flag = typeof s.value === "boolean" || s.value === "true" || s.value === "false";
+            return (
+              <div key={s.key} className="rounded-xl border border-line bg-raised/40 p-3">
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-fg">{humanKey(s.key)}</p>
+                    <p className="font-mono text-[10px] text-fg-faint">
+                      {s.key}
+                      {!s.configured && ` · ${t("not set, so the extension's own default")}`}
+                    </p>
+                  </div>
+                  {flag && (
+                    <Switch
+                      on={s.value === true || s.value === "true"}
+                      label={humanKey(s.key)}
+                      disabled={busy !== null}
+                      onChange={(on) => void save(s.key, on)}
+                    />
+                  )}
+                  {flag && savedKey === s.key && <LuCheck className="pop-in h-4 w-4 text-ok" />}
+                </div>
+                {!flag && (
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={values[s.key] ?? ""}
+                      onChange={(e) => setValues({ ...values, [s.key]: e.target.value })}
+                      onKeyDown={(e) => isEnter(e) && save(s.key)}
+                      inputMode={typeof s.value === "number" ? "numeric" : undefined}
+                      type={/(key|token|secret|password)$/i.test(s.key) ? "password" : "text"}
+                      placeholder={t("empty to unset")}
+                      className={`${inputCls} font-mono text-xs`}
+                      aria-label={humanKey(s.key)}
+                    />
+                    <button
+                      disabled={busy !== null || (values[s.key] ?? "") === (s.value == null ? "" : String(s.value))}
+                      onClick={() => save(s.key)}
+                      className={savedKey === s.key ? primaryCls : btnCls}
+                    >
+                      {busy === s.key ? (
+                        <LuRefreshCw className="h-4 w-4 animate-spin" />
+                      ) : savedKey === s.key ? (
+                        <LuCheck className="h-4 w-4" />
+                      ) : (
+                        t("Save")
+                      )}
+                    </button>
+                  </div>
                 )}
               </div>
-              <div className="mt-1 flex gap-2">
-                <input
-                  value={values[s.key] ?? ""}
-                  onChange={(e) => setValues({ ...values, [s.key]: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && save(s.key)}
-                  placeholder="empty to unset"
-                  className={`${inputCls} font-mono text-xs`}
-                />
-                <button
-                  disabled={busy !== null}
-                  onClick={() => save(s.key)}
-                  className={savedKey === s.key ? primaryCls : btnCls}
-                >
-                  {busy === s.key ? (
-                    <LuRefreshCw className="h-4 w-4 animate-spin" />
-                  ) : savedKey === s.key ? (
-                    <LuCheck className="h-4 w-4" />
-                  ) : (
-                    "Save"
-                  )}
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Section>
 
       <div className="flex items-start gap-2 rounded-xl border border-warn/25 bg-warn/10 px-3 py-2 text-xs text-warn/90">
         <LuTriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <p>
-          pi publishes no schema for extension settings, so these keys are recovered by reading the
-          package's source. A key built dynamically at runtime won't appear here — use Advanced to
-          edit settings.json directly.
+          {t("pi publishes no schema for extension settings, so these keys are recovered by reading the package's source. A key built dynamically at runtime won't appear here — use Advanced to edit settings.json directly.")}
         </p>
       </div>
     </>
@@ -844,10 +1377,10 @@ function AdvancedPanel({
   return (
     <Section
       title="settings.json"
-      hint="pi's own settings file, where installed extensions keep their configuration."
+      hint={t("pi's own settings file, where installed extensions keep their configuration.")}
     >
       {!file ? (
-        <p className="text-sm text-fg-subtle">Loading…</p>
+        <p className="text-sm text-fg-subtle">{t("Loading…")}</p>
       ) : (
         <div className="space-y-2">
           <textarea
@@ -876,10 +1409,10 @@ function AdvancedPanel({
             >
               {saved ? (
                 <>
-                  <LuCheck className="h-4 w-4" /> Saved
+                  <LuCheck className="h-4 w-4" /> {t("Saved")}
                 </>
               ) : (
-                "Save file"
+                t("Save file")
               )}
             </button>
             <span className="truncate font-mono text-[11px] text-fg-faint">

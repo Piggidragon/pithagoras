@@ -22,8 +22,8 @@ hero:
 features:
   - title: Runs on the server, not the tab
     details: A prompt is accepted and then owned by the server. Every event pi emits is appended to a log, so a browser that reconnects days later replays what it missed instead of having lost the run.
-  - title: One workspace per session
-    details: Sessions are created against a workspace directory and keep their own model, effort level and conversation. Pinned ones stay at the top of the sidebar.
+  - title: Home and projects
+    details: New starts a chat in Home. Projects are folders of their own with instructions for the agent, as an AGENTS.md. Each session keeps its own model, effort level and conversation, and pinned ones stay at the top of the sidebar.
   - title: Pluggable channels
     details: Reach the agent from Telegram, Slack, Discord, a webhook, or anything you write yourself. Channel types are packages, installable from a GitHub repo.
   - title: pi's own extensions

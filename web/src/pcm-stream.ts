@@ -1,11 +1,40 @@
+import { joinSamples } from "./samples";
+import { TimeStretch } from "./time-stretch";
+
+/**
+ * How a phrase is played: `rate` makes it faster without raising the voice
+ * (see time-stretch.ts), and `record` is given the phrase's samples as they
+ * were spoken, before any of that, so a reply can be played again later at
+ * whatever speed is chosen then.
+ */
+export interface SpeechOptions { rate?: number; record?: (samples: Float32Array) => void }
+
+const samplesOf = (bytes: Uint8Array, count: number) => {
+  const samples = new Float32Array(count), view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < count; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+  return samples;
+};
+
+/** A buffer holding `samples`, or none for none: a zero-length AudioBuffer is an error. */
+export function bufferOf(audio: BaseAudioContext, samples: Float32Array, sampleRate = 24000): AudioBuffer | undefined {
+  if (!samples.length) return undefined;
+  const buffer = audio.createBuffer(1, samples.length, sampleRate);
+  buffer.getChannelData(0).set(samples);
+  return buffer;
+}
+
 /** Buffer one spoken phrase so slower-than-realtime synthesis cannot interrupt words. */
 export async function readPcmStream(
-  body: ReadableStream<Uint8Array>, audio: AudioContext, signal: AbortSignal,
+  body: ReadableStream<Uint8Array>, audio: AudioContext, signal: AbortSignal, options: SpeechOptions = {},
 ): Promise<AudioBuffer> {
   signal.throwIfAborted();
   const reader = body.getReader();
+  // The stretch is worked on each chunk as it arrives, so the whole buffer
+  // does not have to wait for one long stretch pass over everything.
+  const stretcher = new TimeStretch(options.rate ?? 1);
   const chunks: Uint8Array[] = [];
-  let length = 0;
+  const stretched: Float32Array[] = [];
+  let length = 0, carry: number | undefined;
   const cancelRead = () => { void reader.cancel().catch(() => {}); };
   signal.addEventListener('abort', cancelRead, { once: true });
   try {
@@ -14,19 +43,25 @@ export async function readPcmStream(
       signal.throwIfAborted();
       if (done) break;
       chunks.push(value); length += value.length;
+      const bytes = new Uint8Array(value.length + (carry === undefined ? 0 : 1));
+      if (carry !== undefined) bytes[0] = carry;
+      bytes.set(value, carry === undefined ? 0 : 1);
+      carry = bytes.length % 2 ? bytes[bytes.length - 1] : undefined;
+      const count = Math.floor(bytes.length / 2);
+      if (count) stretched.push(stretcher.push(samplesOf(bytes, count)));
     }
   } finally {
     signal.removeEventListener('abort', cancelRead);
     await reader.cancel().catch(() => {}); reader.releaseLock();
   }
-  if (!length || length % 2) throw new Error('Breeze returned incomplete PCM audio');
+  if (!length || carry !== undefined) throw new Error('Breeze returned incomplete PCM audio');
+  stretched.push(stretcher.flush());
   const bytes = new Uint8Array(length);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-  const buffer = audio.createBuffer(1, length / 2, 24000);
-  const samples = buffer.getChannelData(0);
-  const view = new DataView(bytes.buffer);
-  for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+  options.record?.(samplesOf(bytes, length / 2));
+  const buffer = bufferOf(audio, joinSamples(stretched));
+  if (!buffer) throw new Error('Breeze returned incomplete PCM audio');
   signal.throwIfAborted();
   return buffer;
 }
@@ -45,14 +80,16 @@ export async function playAudioBuffer(buffer: AudioBuffer, audio: AudioContext, 
 }
 
 /** Combined helper for consumers that only have one phrase. */
-export async function playPcmStream(body: ReadableStream<Uint8Array>, audio: AudioContext, destination: AudioNode, signal: AbortSignal, onStarted: (scheduledAt?:number) => void): Promise<void> {
-  const buffer = await readPcmStream(body, audio, signal);
+export async function playPcmStream(body: ReadableStream<Uint8Array>, audio: AudioContext, destination: AudioNode, signal: AbortSignal, onStarted: (scheduledAt?:number) => void, options: SpeechOptions = {}): Promise<void> {
+  const buffer = await readPcmStream(body, audio, signal, options);
   await playAudioBuffer(buffer, audio, destination, signal, onStarted);
 }
 
 /** Start from a small PCM cushion while the producer continues generating. */
-export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: AudioContext, signal: AbortSignal) {
+export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: AudioContext, signal: AbortSignal, options: SpeechOptions = {}) {
   const reader = body.getReader();
+  const stretcher = new TimeStretch(options.rate ?? 1);
+  let spoken = 0;
   const pending: AudioBuffer[] = [];
   const sources = new Set<AudioBufferSourceNode>();
   let destination: AudioNode | undefined, nextTime = 0, finished = false, carry: number | undefined;
@@ -91,13 +128,17 @@ export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: 
         carry = bytes.length % 2 ? bytes[bytes.length - 1] : undefined;
         const count = Math.floor(bytes.length / 2);
         if (!count) continue;
-        const buffer = audio.createBuffer(1, count, 24000), samples = buffer.getChannelData(0), view = new DataView(bytes.buffer);
-        for (let i = 0; i < count; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+        const samples = samplesOf(bytes, count);
+        spoken += count; options.record?.(samples);
+        const buffer = bufferOf(audio, stretcher.push(samples));
+        if (!buffer) continue;
         pending.push(buffer); buffered += buffer.duration;
         if (buffered >= 0.65) ready();
         pump();
       }
-      if (!buffered || carry !== undefined) throw new Error('Breeze returned incomplete PCM audio');
+      if (!spoken || carry !== undefined) throw new Error('Breeze returned incomplete PCM audio');
+      const rest = bufferOf(audio, stretcher.flush());
+      if (rest) { pending.push(rest); buffered += rest.duration; }
       finished = true; ready(); pump();
     } catch (error) { rejectReady(error); failPlay?.(error); throw error; }
     finally { reader.releaseLock(); }

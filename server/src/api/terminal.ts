@@ -1,7 +1,11 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFileSync, readlinkSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import express, { type Router } from "express";
 import { getSession } from "../db.js";
+import { MARKER } from "../background.js";
+import { signalSession, statOf } from "../proc-stat.js";
 
 /**
  * A shell, in the portal.
@@ -22,6 +26,15 @@ import { getSession } from "../db.js";
 
 const MAX_SCROLLBACK = 200_000;
 
+/**
+ * How long a shell is kept with nobody watching it.
+ *
+ * The panel closes its shell when it goes, but a tab that is closed or reloaded
+ * never gets to say so, and each one used to leave a shell running for as long
+ * as the portal did. Long enough to ride out a reload or a dropped connection.
+ */
+const UNWATCHED_MS = 5 * 60_000;
+
 interface Term {
   id: string;
   proc: ChildProcess;
@@ -29,9 +42,115 @@ interface Term {
   buffer: string;
   listeners: Set<(chunk: string) => void>;
   exited: boolean;
+  /** Set while nobody is attached; ends the shell if nobody comes back. */
+  reaper?: NodeJS.Timeout;
 }
 
 const terms = new Map<string, Term>();
+
+/**
+ * Ends the shell, and whatever it started.
+ *
+ * Signalled directly rather than through `script`: util-linux 2.39 (Debian,
+ * the LXC image) ignores a hangup, so every closed panel left its shell
+ * running — and the test that closes one waited on it forever. The shell is in
+ * a session of its own on the pty, jobs included, so a hangup to all of it is
+ * what closing a real terminal does, and the shell is gone at once. What
+ * ignores that, a `nohup` job, is killed a moment later — only what the
+ * hangup found, and only if it is still there. Where the session cannot be
+ * found, `script` is terminated and the rest left to the hangup.
+ *
+ * The shell has its hangup at once, and passes it on to the jobs it knows of;
+ * the rest of the session has it once the walk has found them. `script` is
+ * terminated only after that: gone first, it takes the pty with it, and what
+ * the walk is still looking for has been left to itself in the meantime.
+ */
+function end(term: Term): void {
+  clearTimeout(term.reaper);
+  if (!term.exited) {
+    // Read once: a second look could find the shell gone, and the two
+    // answers disagree.
+    const shell = shellOf(term);
+    const session = shell ? sessionOf(shell) : undefined;
+    if (shell && session) {
+      try {
+        process.kill(shell, "SIGHUP");
+      } catch {
+        // Gone already; the walk finds whatever it left.
+      }
+    }
+    const members = session ? signalSession(session, "SIGHUP") : Promise.resolve([]);
+    void members.then(() => {
+      if (!term.exited) term.proc.kill("SIGTERM");
+    });
+    setTimeout(() => {
+      if (!term.exited) term.proc.kill("SIGKILL");
+      void members.then((pids) => {
+        for (const pid of pids) {
+          // Still in that session: a pid given to something else since is not.
+          if (Number(statOf(pid)?.[3]) !== session) continue;
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Gone in the meantime.
+          }
+        }
+      });
+    }, 2000).unref();
+  }
+  terms.delete(term.id);
+}
+
+/** The shell `script` started: the child that leads the session on the pty. */
+function shellOf(term: Term): number | undefined {
+  const pid = term.proc.pid;
+  if (!pid) return undefined;
+  try {
+    const [child] = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/);
+    return child ? Number(child) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+
+/**
+ * The session the shell leads — the id stays after the shell itself is gone.
+ * Never the portal's own: signalled, that would take the portal down with it.
+ */
+function sessionOf(shell: number): number | undefined {
+  const session = Number(statOf(shell)?.[3]);
+  return session > 0 && session !== Number(statOf(process.pid)?.[3]) ? session : undefined;
+}
+
+function watchUnattended(term: Term): void {
+  clearTimeout(term.reaper);
+  if (term.listeners.size) return;
+  term.reaper = setTimeout(() => end(term), UNWATCHED_MS);
+  term.reaper.unref();
+}
+
+/**
+ * The pty the shell is on: `script` holds the master, its child the other end.
+ *
+ * Linux only, through /proc, which is where the portal runs. Undefined anywhere
+ * it cannot be found, and the caller falls back.
+ */
+function ptyOf(term: Term): string | undefined {
+  const shell = shellOf(term);
+  try {
+    const tty = shell ? readlinkSync(`/proc/${shell}/fd/0`) : "";
+    return tty.startsWith("/dev/pts/") ? tty : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The portal's environment less MARKER, which everything else it starts carries. */
+export function personsEnv(): NodeJS.ProcessEnv {
+  const { [MARKER.split("=")[0]]: _mark, ...env } = process.env;
+  return env;
+}
 
 function create(cwd: string): Term {
   const id = randomUUID().slice(0, 8);
@@ -39,11 +158,21 @@ function create(cwd: string): Term {
   // command's exit status, and /dev/null because we want the pty, not a log.
   const proc = spawn("script", ["-qfec", process.env.SHELL || "bash -il", "/dev/null"], {
     cwd,
-    env: { ...process.env, TERM: "xterm-256color" },
+    // Without the agent's mark: what the person starts here — tmux, a server
+    // under setsid — is theirs, and not a job for the chat to list and stop.
+    env: { ...personsEnv(), TERM: "xterm-256color" },
     stdio: ["pipe", "pipe", "pipe"],
   });
 
   const term: Term = { id, proc, buffer: "", listeners: new Set(), exited: false };
+  // A folder that is gone, or no `script` on this machine. Unhandled, the
+  // spawn failure is thrown from the process object and takes the portal down.
+  proc.on("error", (e) => {
+    term.exited = true;
+    const text = `\r\nCould not start a shell: ${e.message}\r\n`;
+    term.buffer += text;
+    for (const l of term.listeners) l(text);
+  });
 
   const push = (chunk: Buffer) => {
     const text = chunk.toString("utf8");
@@ -54,10 +183,13 @@ function create(cwd: string): Term {
   proc.stderr?.on("data", push);
   proc.on("exit", () => {
     term.exited = true;
-    for (const l of term.listeners) l("\r\n[session ended]\r\n");
+    const text = "\r\n[session ended]\r\n";
+    term.buffer += text;
+    for (const l of term.listeners) l(text);
   });
 
   terms.set(id, term);
+  watchUnattended(term);
   return term;
 }
 
@@ -87,7 +219,14 @@ export function terminalRouter(): Router {
     // What is already on screen, so reconnecting does not show an empty shell.
     if (term.buffer) send(term.buffer);
     term.listeners.add(send);
-    req.on("close", () => term.listeners.delete(send));
+    watchUnattended(term);
+    // Without traffic a proxy takes an idle shell for a dead connection.
+    const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      term.listeners.delete(send);
+      watchUnattended(term);
+    });
   });
 
   router.post("/terminal/:id/input", (req, res) => {
@@ -100,23 +239,33 @@ export function terminalRouter(): Router {
   /**
    * Tell the pty its new size.
    *
-   * Written as a command rather than an ioctl: there is no pty handle here to
-   * resize, but there is a real tty on the other end, and stty is how you tell
-   * one how big it is.
+   * With stty from outside, on the shell's own tty: the kernel then tells
+   * whatever is in front — the shell, vim, top — that the window changed.
+   * Typing `stty` into the shell instead put the command on the screen and in
+   * the history on every resize, and into whatever program had the keyboard.
+   * That remains the fallback where the tty cannot be found.
    */
   router.post("/terminal/:id/resize", (req, res) => {
     const term = terms.get(req.params.id);
-    const rows = Number(req.body?.rows) || 24;
-    const cols = Number(req.body?.cols) || 80;
+    const size = (v: unknown, fallback: number) => {
+      const n = Math.round(Number(v));
+      return Number.isFinite(n) && n >= 2 && n <= 1000 ? n : fallback;
+    };
+    const rows = size(req.body?.rows, 24);
+    const cols = size(req.body?.cols, 80);
     if (!term || term.exited) return res.status(404).json({ error: "No such terminal" });
-    term.proc.stdin?.write(`stty rows ${rows} cols ${cols} 2>/dev/null\n`);
+    const tty = ptyOf(term);
+    if (tty) {
+      execFile("stty", ["-F", tty, "rows", String(rows), "cols", String(cols)], () => {});
+    } else {
+      term.proc.stdin?.write(`stty rows ${rows} cols ${cols} 2>/dev/null\n`);
+    }
     res.json({ ok: true });
   });
 
   router.delete("/terminal/:id", (req, res) => {
     const term = terms.get(req.params.id);
-    term?.proc.kill("SIGHUP");
-    terms.delete(req.params.id);
+    if (term) end(term);
     res.json({ ok: true });
   });
 

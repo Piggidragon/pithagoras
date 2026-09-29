@@ -3,7 +3,9 @@ import { promisify } from "node:util";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { piSettingsPath } from "../pi-settings.js";
+import { extensionStash, setExtensionStash } from "../db.js";
 import express, { type Router } from "express";
+import { searchCatalog } from "../catalog.js";
 
 const run = promisify(execFile);
 
@@ -14,7 +16,7 @@ const run = promisify(execFile);
  * They install under $HOME/.pi/agent, which the image points at a persistent
  * volume — otherwise every rebuild would silently wipe installed packages.
  */
-async function pi(args: string[]): Promise<{ stdout: string; stderr: string }> {
+export async function pi(args: string[]): Promise<{ stdout: string; stderr: string }> {
   try {
     return await run("pi", args, { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
   } catch (e) {
@@ -40,6 +42,17 @@ export function packagesRouter(): Router {
     }
   });
 
+  /** Packages published for pi, to pick from rather than spell out. */
+  router.get("/packages/catalog", async (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    const topic = req.query.topic === "provider" ? "provider" : undefined;
+    try {
+      res.json({ packages: await searchCatalog(q, topic) });
+    } catch (e) {
+      res.status(502).json({ error: (e as Error).message });
+    }
+  });
+
   router.post("/packages", async (req, res) => {
     const spec = req.body?.spec;
     if (typeof spec !== "string" || !SPEC_RE.test(spec)) {
@@ -62,6 +75,12 @@ export function packagesRouter(): Router {
     }
     try {
       const { stdout, stderr } = await pi(["remove", spec]);
+      // What was kept aside for switching it back on has nothing left to go to.
+      const stash = extensionStash();
+      if (spec in stash) {
+        delete stash[spec];
+        setExtensionStash(stash);
+      }
       res.json({ ok: true, output: (stdout + stderr).trim() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

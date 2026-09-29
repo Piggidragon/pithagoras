@@ -21,10 +21,12 @@ const SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
  */
 export const dockerAvailable = (): boolean => existsSync(SOCKET);
 
+/** `timeoutMs`: given up once so long has passed in all, answer or not — not only after a silence. */
 export function request<T = unknown>(
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  timeoutMs?: number,
 ): Promise<{ status: number; body: T }> {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -38,9 +40,12 @@ export function request<T = unknown>(
           : {},
       },
       (res) => {
-        let raw = "";
-        res.on("data", (c) => (raw += c));
+        // Bytes, put together once they are all there: a letter split across
+        // two chunks is two halves of one, not two broken ones.
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
           let parsed: unknown = raw;
           try {
             parsed = raw ? JSON.parse(raw) : null;
@@ -51,6 +56,10 @@ export function request<T = unknown>(
         });
       }
     );
+    const deadline = timeoutMs
+      ? setTimeout(() => req.destroy(Object.assign(new Error("Docker did not answer in time"), { code: "ETIMEDOUT" })), timeoutMs)
+      : undefined;
+    req.on("close", () => clearTimeout(deadline));
     req.on("error", reject);
     if (payload) req.write(payload);
     req.end();

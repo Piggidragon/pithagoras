@@ -1,0 +1,119 @@
+/**
+ * Where the notes of the agent's memory go in its graph: a small force
+ * layout, run to rest before anything is drawn.
+ *
+ * Notes push each other apart, a link pulls its two ends together, and
+ * everything is drawn towards the middle so unlinked notes do not drift off.
+ * Started on a circle rather than at random, so the same memory is laid out
+ * the same way each time. Quadratic in the number of notes, which a memory
+ * of a few hundred notes runs through in a moment.
+ */
+export interface Placed {
+  path: string;
+  x: number;
+  y: number;
+}
+
+export function layout(paths: string[], edges: { source: string; target: string }[], rounds = 300): Placed[] {
+  const n = paths.length;
+  const at = new Map(paths.map((p, i) => [p, i]));
+  const x = new Float64Array(n);
+  const y = new Float64Array(n);
+  const radius = 40 + 12 * n;
+  for (let i = 0; i < n; i++) {
+    x[i] = radius * Math.cos((2 * Math.PI * i) / Math.max(1, n));
+    y[i] = radius * Math.sin((2 * Math.PI * i) / Math.max(1, n));
+  }
+  const links = edges
+    .map((e) => [at.get(e.source), at.get(e.target)] as const)
+    .filter((l): l is readonly [number, number] => l[0] !== undefined && l[1] !== undefined && l[0] !== l[1]);
+
+  const REPEL = 6000;
+  const LENGTH = 90;
+  const SPRING = 0.06;
+  const GRAVITY = 0.012;
+  for (let round = 0; round < rounds; round++) {
+    // Cooling: big moves first, then settling.
+    const heat = 1 - round / rounds;
+    const dx = new Float64Array(n);
+    const dy = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        let ex = x[i] - x[j];
+        let ey = y[i] - y[j];
+        let d2 = ex * ex + ey * ey;
+        // Two in the same place are nudged apart, the same way each time.
+        if (d2 < 0.01) {
+          ex = ((i - j) % 7) + 0.5;
+          ey = ((j * 3 - i) % 5) + 0.5;
+          d2 = ex * ex + ey * ey;
+        }
+        const d = Math.sqrt(d2);
+        const f = REPEL / d2;
+        dx[i] += (ex / d) * f;
+        dy[i] += (ey / d) * f;
+        dx[j] -= (ex / d) * f;
+        dy[j] -= (ey / d) * f;
+      }
+    }
+    for (const [a, b] of links) {
+      const ex = x[b] - x[a];
+      const ey = y[b] - y[a];
+      const d = Math.sqrt(ex * ex + ey * ey) || 1;
+      const f = (d - LENGTH) * SPRING;
+      dx[a] += (ex / d) * f;
+      dy[a] += (ey / d) * f;
+      dx[b] -= (ex / d) * f;
+      dy[b] -= (ey / d) * f;
+    }
+    for (let i = 0; i < n; i++) {
+      dx[i] -= x[i] * GRAVITY;
+      dy[i] -= y[i] * GRAVITY;
+      // No step longer than the heat allows: the layout settles instead of shaking.
+      const step = Math.sqrt(dx[i] * dx[i] + dy[i] * dy[i]);
+      const most = 30 * heat + 0.5;
+      const scale = step > most ? most / step : 1;
+      x[i] += dx[i] * scale;
+      y[i] += dy[i] * scale;
+    }
+  }
+  return paths.map((path, i) => ({ path, x: x[i], y: y[i] }));
+}
+
+/**
+ * The box around the placed notes, with room for their labels — and never
+ * smaller than `least`, so a memory of three notes is not drawn so close that
+ * its labels fill the page.
+ */
+export function bounds(placed: Placed[], pad = 60, least = { width: 720, height: 480 }): { x: number; y: number; width: number; height: number } {
+  if (!placed.length) return { x: -least.width / 2, y: -least.height / 2, ...least };
+  const xs = placed.map((p) => p.x);
+  const ys = placed.map((p) => p.y);
+  const minX = Math.min(...xs) - pad;
+  const minY = Math.min(...ys) - pad;
+  const width = Math.max(...xs) + pad - minX;
+  const height = Math.max(...ys) + pad - minY;
+  const w = Math.max(width, least.width);
+  const h = Math.max(height, least.height);
+  return { x: minX - (w - width) / 2, y: minY - (h - height) / 2, width: w, height: h };
+}
+
+const COLOURS = ["#0ea5e9", "#8b5cf6", "#10b981", "#f59e0b", "#ec4899", "#f97316", "#6366f1", "#84cc16", "#d946ef", "#14b8a6"];
+const NONE = "#94a3b8";
+
+/**
+ * A colour per type of note: in the order of the memory's types, so the first
+ * ten never share one, and by the type's name past them.
+ */
+export function colours(types: Iterable<string | undefined>): (type: string | undefined) => string {
+  const known = [...new Set([...types].filter((t): t is string => !!t))].sort();
+  const at = new Map(known.map((t, i) => [t, i]));
+  return (type) => {
+    if (!type) return NONE;
+    const i = at.get(type);
+    if (i !== undefined && i < COLOURS.length) return COLOURS[i];
+    let h = 0;
+    for (const c of type) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    return COLOURS[h % COLOURS.length];
+  };
+}

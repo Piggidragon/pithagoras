@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { createSession, findRoutineSession, getDb, type SessionRow } from "../db.js";
 import { agentHome } from "../agent.js";
+import { checkWorkspace } from "../workspaces.js";
 import { sessions, EXECUTOR_KIND } from "../session-manager.js";
 import { isDue, nextRun, parseCron } from "./cron.js";
 import { reportFraming, reportToFor } from "../pi/report-tool.js";
@@ -28,6 +29,8 @@ export interface RoutineRow {
   guard: number;
   /** 1 lets this routine's runs drive the agent's browser. */
   browser: number;
+  /** Where its runs happen: null for Home, else a project's directory. */
+  workspace: string | null;
   /**
    * Where this routine's reports go. null inherits the portal default; the
    * empty string means it never reports, whatever the default is.
@@ -55,6 +58,12 @@ const TICK_MS = 20_000;
 class RoutineSupervisor {
   /** Routines with a run in flight — a slow one must not stack on itself. */
   private running = new Set<string>();
+  /**
+   * Routines that may not start a run, and by how many holds: the folder they
+   * run in is being deleted. Counted, so that one delete finishing does not
+   * lift the hold of another still under way.
+   */
+  private held = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
 
   private rows(): RoutineRow[] {
@@ -80,6 +89,25 @@ class RoutineSupervisor {
     }
   }
 
+  /**
+   * Keeps these routines from starting a run, by schedule or by hand, until the
+   * returned release is called: their folder is being deleted, and a run begun
+   * meanwhile would have it removed from under it.
+   */
+  hold(slugs: string[]): () => void {
+    for (const slug of slugs) this.held.set(slug, (this.held.get(slug) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const slug of slugs) {
+        const left = (this.held.get(slug) ?? 1) - 1;
+        if (left > 0) this.held.set(slug, left);
+        else this.held.delete(slug);
+      }
+    };
+  }
+
   isRunning(slug: string): boolean {
     return this.running.has(slug);
   }
@@ -87,13 +115,15 @@ class RoutineSupervisor {
   private async tick(): Promise<void> {
     const now = new Date();
     for (const row of this.rows()) {
-      if (!row.enabled || this.running.has(row.slug)) continue;
+      if (!row.enabled || this.running.has(row.slug) || this.held.has(row.slug)) continue;
 
       if (isOneOff(row)) {
         // Deliberately catches up: a one-off whose moment passed while the
         // server was down should still happen, unlike a recurring one which
         // simply waits for its next slot.
-        if (row.last_run || new Date(row.run_at!) > now) continue;
+        // Not `> now`: a time that cannot be read compares false to anything,
+        // and would run on every tick. Such a one never fires, like a bad cron.
+        if (oneOffDone(row) || !(new Date(row.run_at!) <= now)) continue;
         void this.run(row, "schedule");
         continue;
       }
@@ -118,14 +148,16 @@ class RoutineSupervisor {
    */
   async run(row: RoutineRow, trigger: "schedule" | "manual"): Promise<RoutineRow> {
     if (this.running.has(row.slug)) throw new Error(`"${row.name}" is already running`);
+    if (this.held.has(row.slug)) throw new Error(`"${row.name}" cannot run while the folder it runs in is being deleted`);
     this.running.add(row.slug);
 
     const started = Date.now();
+    const lastRun = new Date(started).toISOString();
     // Written before the work, so a crash mid-run cannot make it fire again
     // the moment the server comes back.
     getDb()
       .prepare("UPDATE routines SET last_run = ?, last_status = 'running' WHERE id = ?")
-      .run(new Date().toISOString(), row.id);
+      .run(lastRun, row.id);
 
     try {
       const session = this.sessionFor(row);
@@ -139,7 +171,9 @@ class RoutineSupervisor {
       this.running.delete(row.slug);
       // A one-off has nothing left to do. Disabled rather than deleted, so the
       // result stays readable and it can be re-armed by giving it a new time.
-      if (isOneOff(row)) {
+      // Not one run by hand ahead of its moment: that was a try, and the
+      // moment it was set for is still to come.
+      if (oneOffDone({ ...row, last_run: lastRun })) {
         getDb().prepare("UPDATE routines SET enabled = 0 WHERE id = ?").run(row.id);
       }
       this.refreshSchedules();
@@ -162,8 +196,14 @@ class RoutineSupervisor {
    * run a clean one instead, for work where history is only noise.
    */
   private sessionFor(row: RoutineRow): SessionRow {
+    // Its project, or Home. One that has gone is a failed run, said as such:
+    // falling back to Home would do the work somewhere it was never meant for.
+    const where = row.workspace ? checkWorkspace(row.workspace) : { path: agentHome() };
+    if ("error" in where) {
+      throw new Error(`Its project ${row.workspace} cannot be used (${where.error}). Choose where it runs in the routine.`);
+    }
     if (!row.fresh_session) {
-      const existing = findRoutineSession(row.slug);
+      const existing = findRoutineSession(row.slug, where.path);
       if (existing) return existing;
     }
 
@@ -172,7 +212,7 @@ class RoutineSupervisor {
     createSession({
       id,
       title: row.fresh_session ? `${row.name} — ${stamp}` : row.name,
-      workspace: agentHome(),
+      workspace: where.path,
       executor: EXECUTOR_KIND,
       kind: "routine",
       routine_slug: row.slug,
@@ -213,10 +253,21 @@ function prompt(row: RoutineRow, trigger: "schedule" | "manual"): string {
 export const isOneOff = (row: { run_at: string | null; schedule: string }) =>
   Boolean(row.run_at) && !row.schedule.trim();
 
+/**
+ * A one-off that has had its run: one at or after the moment it was set for.
+ * A run before it — by hand, to try it out — does not count. If that moment
+ * cannot be read there is no "before" to tell apart, and any run is its run.
+ */
+export const oneOffDone = (row: { run_at: string | null; schedule: string; last_run: string | null }) => {
+  if (!isOneOff(row) || !row.last_run) return false;
+  const at = new Date(row.run_at!).getTime();
+  return Number.isNaN(at) || new Date(row.last_run).getTime() >= at;
+};
+
 /** When it fires next, or null if it never will again. */
 export function whenNext(row: RoutineRow): string | null {
   if (!row.enabled) return null;
-  if (isOneOff(row)) return row.last_run ? null : row.run_at;
+  if (isOneOff(row)) return oneOffDone(row) ? null : row.run_at;
   try {
     return nextRun(parseCron(row.schedule))?.toISOString() ?? null;
   } catch {

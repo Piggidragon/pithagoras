@@ -1,128 +1,151 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { confirmDialog } from "./ConfirmDialog";
+import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { StatusDot, workingText } from "./StatusDot";
+import { ChatsHeading, FolderTree } from "./FolderTree";
 import {
   LuBot,
   LuPanelLeftClose,
   LuPanelLeftOpen,
+  LuPencil,
   LuClock,
+  LuFolderKanban,
   LuGlobe,
+  LuBrain,
   LuMessagesSquare,
   LuPin,
   LuPinOff,
   LuPlus,
+  LuSearch,
   LuSettings,
   LuShield,
   LuTrash2,
 } from "react-icons/lu";
-import type { Session, SessionStatus, Workspace } from "../api";
-
-const STATUS_STYLE: Record<SessionStatus, string> = {
-  running: "bg-accent animate-pulse",
-  idle: "bg-fg-faint",
-  error: "bg-danger",
-  interrupted: "bg-warn",
-};
-
-const STATUS_LABEL: Record<SessionStatus, string> = {
-  running: "running",
-  idle: "idle",
-  error: "error",
-  interrupted: "interrupted — server restarted mid-run",
-};
+import type { Session } from "../api";
+import { local } from "../safe-storage";
+import { filterSessions } from "../session-filter";
+import { isEscape } from "../shortcuts";
+import { HOME, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
+import { t } from "../i18n";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
 const RECENTS_LIMIT = 12;
-
-/** Mirrors the server's slugify so the preview matches what actually gets created. */
-function slugify(input: string): string {
-  return input
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^[-._]+|[-._]+$/g, "")
-    .slice(0, 64);
-}
-
-// Sentinel for the dropdown — a new workspace is the default choice.
-const NEW = "__new__";
+/** How many of a folder's chats the sidebar shows before deferring to Sessions, opened at that folder. */
+const FOLDER_LIMIT = 8;
 
 export function Sidebar({
   forceExpanded = false,
   sessions,
-  workspaces,
   executor,
   activeId,
   view,
   hasBrowser,
+  hasMemory = false,
+  places,
   onSelect,
-  onCreate,
+  onNewChat,
   onDelete,
   onRename,
   onPin,
-  onCreateWorkspace,
   onOpenSettings,
   onNavigate,
+  onOpenFolder,
 }: {
   forceExpanded?: boolean;
   sessions: Session[];
-  workspaces: Workspace[];
   executor: string;
   activeId: string | null;
   /** Which top-level destination is showing, so the nav can mark it. */
-  view: "chat" | "sessions" | "agent" | "routines" | "browser" | "audit";
+  view: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "audit";
   /** Whether the optional browser service is there at all. */
   hasBrowser: boolean;
+  /** Understory is the agent's memory: its page is there to read. */
+  hasMemory?: boolean;
+  /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
+  places?: Places | null;
   onSelect: (id: string) => void;
-  onCreate: (workspacePath: string) => Promise<void>;
+  /** A chat in `workspace`, or in Home without one, opened. */
+  onNewChat: (workspace?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
-  onCreateWorkspace: (name: string) => Promise<Workspace>;
   onOpenSettings: () => void;
-  onNavigate: (to: "sessions" | "agent" | "routines" | "browser" | "audit") => void;
+  onNavigate: (to: Destination) => void;
+  /** The Sessions page, showing only the chats in the folder `key` (see session-folders). */
+  onOpenFolder: (key: string) => void;
 }) {
-  const [storedCollapsed, setCollapsed] = useState(() => localStorage.getItem("sidebarCollapsed") === "true");
+  const [storedCollapsed, setCollapsed] = useState(() => local.get("sidebarCollapsed") === "true");
   const collapsed = forceExpanded ? false : storedCollapsed;
   const toggleSidebar = () => {
     setCollapsed(value => {
-      localStorage.setItem("sidebarCollapsed", String(!value));
+      local.set("sidebarCollapsed", String(!value));
       return !value;
     });
   };
-  const [creating, setCreating] = useState(false);
-  const [choice, setChoice] = useState<string>(NEW);
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const makingNew = choice === NEW;
-  const slug = slugify(name);
-  const canSubmit = makingNew ? slug.length > 0 : Boolean(choice);
-
-  const submit = async () => {
-    if (!canSubmit) return;
-    setError(null);
-    setBusy(true);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const newChat = async (workspace?: string) => {
+    if (starting) return;
+    setStarting(true);
+    setStartError(null);
     try {
-      // Either branch produces a workspace path; the session takes its name
-      // from that folder.
-      const workspacePath = makingNew ? (await onCreateWorkspace(name.trim())).path : choice;
-      await onCreate(workspacePath);
-      setName("");
-      setChoice(NEW);
-      setCreating(false);
+      await onNewChat(workspace);
     } catch (e) {
-      setError((e as Error).message);
+      setStartError((e as Error).message);
     } finally {
-      setBusy(false);
+      setStarting(false);
     }
   };
 
-  const pinned = sessions.filter((s) => s.pinned);
-  const recents = sessions.filter((s) => !s.pinned);
-  const shownRecents = recents.slice(0, RECENTS_LIMIT);
+  // Only worth a field once the list is longer than it shows: below that the
+  // chat you want is in front of you, and a search box is one more thing to skip.
+  const [query, setQuery] = useState("");
+  const searchable = sessions.length > RECENTS_LIMIT;
+  // The field goes away when the list shrinks below the limit; what was typed
+  // in it must not go on hiding chats from a list that has no box to clear it.
+  const searching = searchable && query.trim() !== "";
+  const found = useMemo(() => filterSessions(sessions, searching ? query : ""), [sessions, searching, query]);
+  const pinned = found.filter((s) => s.pinned);
+  const recents = found.filter((s) => !s.pinned);
+  // A search looks through all of them, not only the dozen that are listed.
+  const shownRecents = searching ? recents : recents.slice(0, RECENTS_LIMIT);
+
+  // Gathered by folder only where there is more than Home to gather them in.
+  const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
+  const hasProjects = !!places && places.projects.length > 0;
+  // Until the places are known, the chats are listed as they were: not held back for them.
+  const byFolder = grouping === "folders" && hasProjects;
+  // Each folder is counted, marked running and ordered by all its chats, as
+  // on the Sessions page, so that the two agree; pinned ones are listed at the
+  // top rather than in it (`listed`).
+  const { folders, listed } = useMemo(() => {
+    const all = byFolder && places ? sortFolders(groupByFolder(found, places), sort, order) : [];
+    const listed = new Map(all.map((f) => [f.key, f.sessions.filter((s) => !s.pinned)]));
+    return {
+      // Elsewhere is only there for chats to show in it; searching, only the folders with a match are.
+      folders: all.filter((f) => (f.kind !== "elsewhere" && !searching) || listed.get(f.key)!.length > 0),
+      listed,
+    };
+  }, [byFolder, found, places, sort, order, searching]);
+  /** Every folder there can be, for what is kept about them: see folderKeys. */
+  const allKeys = useMemo(() => (places ? folderKeys(places) : undefined), [places]);
+  const openFolders = useOpenFolders("sidebarFoldersOpen", (key) => key === HOME, searching, allKeys);
+  // The chat opened is in a folder that is open, however it was opened — once
+  // for each chat opened and the folder it is in: a folder shut while its chat
+  // is open stays shut, and a chat first put in Elsewhere, before its project
+  // was known, still has its project opened once it is.
+  const activeFolder = useMemo(() => folders.find((f) => listed.get(f.key)!.some((s) => s.id === activeId))?.key, [folders, listed, activeId]);
+  const openedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const opened = `${activeId}\n${activeFolder}`;
+    if (!activeFolder || openedFor.current === opened) return;
+    openedFor.current = opened;
+    openFolders.set(activeFolder, true);
+  }, [activeId, activeFolder]);
+
+  const headingProps = { grouping, sort, onGrouping: setGrouping, onSort: setSort };
 
   const item = (s: Session) => (
     <SessionItem
@@ -136,26 +159,54 @@ export function Sidebar({
     />
   );
 
+  const destinations: { to: Destination; icon: ReactNode; label: string }[] = [
+    { to: "sessions", icon: <LuMessagesSquare />, label: t("Sessions") },
+    { to: "projects", icon: <LuFolderKanban />, label: t("Projects") },
+    { to: "agent", icon: <LuBot />, label: t("Agent") },
+    { to: "routines", icon: <LuClock />, label: t("Routines") },
+    // Hidden unless there is one. The browser is an optional service, and
+    // a dead link to a feature you did not install is just clutter.
+    ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: t("Browser") }] : []),
+    // Likewise: only while Understory holds the agent's memory.
+    ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: t("Memory") }] : []),
+    { to: "audit", icon: <LuShield />, label: t("Audit") },
+  ];
+  const anyRunning = sessions.some((s) => s.status === "running");
+
   return (
-    <aside aria-label="Sidebar" className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-64"}`}>
-      <button type="button" onClick={toggleSidebar} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        title={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} aria-controls="sidebar-content"
+    <aside aria-label={t("Sidebar")} className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-64"}`}>
+      <button type="button" onClick={toggleSidebar} aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
+        title={collapsed ? t("Expand sidebar") : t("Collapse sidebar")} aria-expanded={!collapsed} aria-controls="sidebar-content"
         className="hidden md:grid absolute right-2 top-3 z-10 grid h-8 w-8 place-items-center rounded-lg text-fg-subtle transition-colors hover:bg-canvas hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
         {collapsed ? <LuPanelLeftOpen size={18} /> : <LuPanelLeftClose size={18} />}
       </button>
-      <div id="sidebar-content" className={`min-h-0 w-64 flex-1 flex-col ${collapsed ? "hidden" : "flex"}`}>
+      {/* Folded, the places are still one click away: a rail of their icons. */}
+      {collapsed && (
+        <nav className="sidebar-rail max-md:hidden" aria-label={t("Destinations")}>
+          <RailButton icon={<LuPlus />} label={t("New chat")} onClick={() => newChat()} />
+          <hr />
+          {destinations.map((d) => (
+            <RailButton key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} current={view === d.to}>
+              {d.to === "sessions" && anyRunning && <StatusDot status="running" bare />}
+            </RailButton>
+          ))}
+          <div className="mt-auto" />
+          <RailButton icon={<LuSettings />} label={t("Settings")} onClick={onOpenSettings} />
+        </nav>
+      )}
+      <div id="sidebar-content" className={`sidebar-content min-h-0 w-64 flex-1 flex-col ${collapsed ? "hidden" : "flex"}`}>
 
       <div className="flex items-center gap-2 pl-3 pr-12 pb-3 pt-4">
         <img
-          src="/logo-192.png"
+          src="/icon-192.png"
           alt=""
-          className="h-6 w-6 shrink-0 object-contain"
+          className="h-6 w-6 shrink-0 object-contain p-[5px]"
           draggable={false}
         />
         <h1 className="text-sm font-semibold tracking-tight text-fg">Pithagoras</h1>
         <span
           className="ml-auto text-[10px] uppercase tracking-wider text-fg-faint"
-          title="How sessions are executed"
+          title={t("How sessions are executed")}
         >
           {executor}
         </span>
@@ -163,116 +214,95 @@ export function Sidebar({
 
       {/* Destinations, above the session lists. */}
       <nav className="px-2 pb-2">
-        <NavItem icon={<LuPlus />} label="New" onClick={() => setCreating((v) => !v)} active={creating} />
-        <NavItem
-          icon={<LuMessagesSquare />}
-          label="Sessions"
-          onClick={() => onNavigate("sessions")}
-          active={view === "sessions"}
-        />
-        <NavItem
-          icon={<LuBot />}
-          label="Agent"
-          onClick={() => onNavigate("agent")}
-          active={view === "agent"}
-        />
-        <NavItem
-          icon={<LuClock />}
-          label="Routines"
-          onClick={() => onNavigate("routines")}
-          active={view === "routines"}
-        />
-        {/* Hidden unless there is one. The browser is an optional service, and
-            a dead link to a feature you did not install is just clutter. */}
-        {hasBrowser && (
-          <NavItem
-            icon={<LuGlobe />}
-            label="Browser"
-            onClick={() => onNavigate("browser")}
-            active={view === "browser"}
-          />
-        )}
-        <NavItem
-          icon={<LuShield />}
-          label="Audit"
-          onClick={() => onNavigate("audit")}
-          active={view === "audit"}
-        />
+        <NavItem icon={<LuPlus />} label={t("New")} onClick={() => newChat()} active={starting} />
+        {destinations.map((d) => (
+          <NavItem key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} active={view === d.to} />
+        ))}
 
-        {creating && (
-          <div className="mt-2 space-y-2 px-1">
-            <select
-              value={choice}
-              onChange={(e) => setChoice(e.target.value)}
-              className="w-full rounded-lg border border-line bg-raised/60 px-2 py-1.5 text-sm text-fg-muted"
-            >
-              <option value={NEW}>New workspace</option>
-              {workspaces.length > 0 && (
-                <optgroup label="Existing workspaces">
-                  {workspaces.map((w) => (
-                    <option key={w.path} value={w.path}>
-                      {w.name}
-                      {w.isGit ? " (git)" : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-
-            {makingNew && (
-              <div>
-                <input
-                  autoFocus
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && submit()}
-                  placeholder="Cool Project"
-                  className="w-full rounded-lg border border-line bg-raised/60 px-2 py-1.5 text-sm outline-none focus:border-accent/60"
-                />
-                {name.trim() && (
-                  <p className="mt-1 truncate font-mono text-[11px] text-fg-subtle">
-                    {slug ? `→ ${slug}` : "needs at least one letter or digit"}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {error && <p className="text-xs text-danger">{error}</p>}
-            <button
-              onClick={submit}
-              disabled={busy || !canSubmit}
-              className="w-full rounded-lg bg-accent/12 px-2 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
-            >
-              {busy ? "Creating…" : "Start session"}
-            </button>
-          </div>
-        )}
+        {startError && <p className="px-2.5 pt-1 text-xs text-danger">{startError}</p>}
       </nav>
 
+      {searchable && (
+        <div className="relative px-2 pb-1">
+          <LuSearch aria-hidden className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => isEscape(e) && setQuery("")}
+            placeholder={t("Search chats…")}
+            aria-label={t("Search chats")}
+            className="w-full rounded-lg border border-line bg-raised/60 py-1.5 pl-8 pr-2 text-xs outline-none placeholder:text-fg-faint focus:border-accent/60"
+          />
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-2 pb-2">
-        {sessions.length === 0 && (
-          <p className="px-2 py-4 text-xs text-fg-subtle">No sessions yet.</p>
+        {/* By folder, each says so itself, and a chat can be started in it. */}
+        {sessions.length === 0 && !byFolder && (
+          <p className="px-2 py-4 text-xs text-fg-subtle">{t("No sessions yet.")}</p>
+        )}
+        {sessions.length > 0 && found.length === 0 && (
+          <p className="px-2 py-4 text-xs text-fg-subtle">{t("Nothing matches “{query}”.", { query: query.trim() })}</p>
         )}
 
         {pinned.length > 0 && (
           <>
             <Divider />
-            <GroupLabel>Pinned</GroupLabel>
+            <GroupLabel>{t("Pinned")}</GroupLabel>
             {pinned.map(item)}
           </>
         )}
 
-        {shownRecents.length > 0 && (
+        {byFolder && folders.length > 0 && (
           <>
             <Divider />
-            <GroupLabel>Recents</GroupLabel>
+            <ChatsHeading label={t("Folders")} {...headingProps} />
+            <FolderTree
+              folders={folders}
+              isOpen={openFolders.isOpen}
+              onToggle={openFolders.toggle}
+              onMove={searching || !allKeys ? undefined : (shown, key, to) => move(shown, key, to, allKeys)}
+              onNewChat={(f) => newChat(f.kind === "home" ? undefined : f.path!)}
+            >
+              {(f) => {
+                const chats = listed.get(f.key)!;
+                const first = searching ? chats : chats.slice(0, FOLDER_LIMIT);
+                // The chat that is open is listed, however far down its folder it is.
+                const open = first.some((s) => s.id === activeId) ? null : chats.find((s) => s.id === activeId);
+                const shown = open ? [...first, open] : first;
+                return (
+                  <>
+                    {chats.length === 0 && (
+                      <p className="px-2.5 py-1 text-xs text-fg-faint">{f.sessions.length ? t("Only pinned chats, above.") : t("No chats yet.")}</p>
+                    )}
+                    {shown.map(item)}
+                    {chats.length > shown.length && (
+                      <button
+                        onClick={() => onOpenFolder(f.key)}
+                        className="mb-1 w-full rounded-lg px-2.5 py-1 text-left text-xs text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
+                      >
+                        {t("{n} more in {name}…", { n: chats.length - shown.length, name: folderName(f) })}
+                      </button>
+                    )}
+                  </>
+                );
+              }}
+            </FolderTree>
+          </>
+        )}
+
+        {!byFolder && shownRecents.length > 0 && (
+          <>
+            <Divider />
+            <ChatsHeading label={t("Recents")} controls={hasProjects} {...headingProps} />
             {shownRecents.map(item)}
             {recents.length > shownRecents.length && (
               <button
                 onClick={() => onNavigate("sessions")}
                 className="mt-1 w-full rounded-lg px-2 py-1.5 text-left text-xs text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
               >
-                {recents.length - shownRecents.length} more…
+                {t("{n} more…", { n: recents.length - shownRecents.length })}
               </button>
             )}
           </>
@@ -284,7 +314,7 @@ export function Sidebar({
           <div className="min-w-0 flex-1">
             <NavItem
               icon={<LuSettings />}
-              label="Settings"
+              label={t("Settings")}
               onClick={onOpenSettings}
               active={false}
             />
@@ -304,6 +334,29 @@ const GroupLabel = ({ children }: { children: ReactNode }) => (
     {children}
   </p>
 );
+
+type Destination = "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "audit";
+
+function RailButton({
+  icon,
+  label,
+  onClick,
+  current,
+  children,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  current?: boolean;
+  children?: ReactNode;
+}) {
+  return (
+    <button type="button" onClick={onClick} title={label} aria-label={label} aria-current={current ? "page" : undefined} className="sidebar-rail-button">
+      {icon}
+      {children}
+    </button>
+  );
+}
 
 function NavItem({
   icon,
@@ -351,55 +404,99 @@ function SessionItem({
   onDelete: (id: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
 }) {
+  const [renaming, setRenaming] = useState(false);
   return (
+    // A row with buttons in it, so not a button itself: reachable with Tab and
+    // opened with Enter all the same, which a bare div with a click was not.
     <div
       onClick={onSelect}
-      className={`group mb-0.5 cursor-pointer rounded-lg px-2.5 py-1.5 transition ${
+      tabIndex={0}
+      aria-current={active ? "page" : undefined}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget || renaming) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`group mb-0.5 cursor-pointer rounded-lg px-2.5 py-1.5 transition focus-visible:outline-offset-0 ${
         active ? "bg-fg/[0.07]" : "hover:bg-fg/5"
       }`}
     >
       <div className="flex items-center gap-2">
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[s.status]}`}
-          title={STATUS_LABEL[s.status]}
-        />
-        <span
-          className="truncate text-sm text-fg"
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            const next = prompt("Rename session", s.title);
-            if (next?.trim()) onRename(s.id, next.trim());
-          }}
-        >
-          {s.title}
-        </span>
+        <StatusDot status={s.status} />
+        {renaming ? (
+          <TitleInput
+            value={s.title}
+            label={t("Session name")}
+            className="flex-1 text-sm"
+            onCommit={(next) => {
+              setRenaming(false);
+              onRename(s.id, next);
+            }}
+            onCancel={() => setRenaming(false)}
+          />
+        ) : (
+          <span
+            className={`truncate text-sm text-fg ${workingText(s.status)}`}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setRenaming(true);
+            }}
+          >
+            {s.title}
+          </span>
+        )}
 
-        <div className="ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex">
+        {/* Without a mouse there is no hover: the open chat's row keeps them. */}
+        <div className={`ml-auto hidden shrink-0 items-center gap-0.5 group-focus-within:flex group-hover:flex ${active ? "[@media(hover:none)]:flex" : ""}`}>
           <button
             onClick={(e) => {
               e.stopPropagation();
               onPin(s.id, !s.pinned);
             }}
             className="rounded p-1 text-fg-subtle hover:text-accent"
-            title={s.pinned ? "Unpin" : "Pin"}
+            title={s.pinned ? t("Unpin") : t("Pin")}
           >
             {s.pinned ? <LuPinOff className="h-3 w-3" /> : <LuPin className="h-3 w-3" />}
           </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (confirm(`Delete "${s.title}"? This stops it if it is running.`)) {
+              setRenaming(true);
+            }}
+            className="rounded p-1 text-fg-subtle hover:text-accent"
+            title={t("Rename")}
+          >
+            <LuPencil className="h-3 w-3" />
+          </button>
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (
+                await confirmDialog({
+                  title: t("Delete \"{name}\"?", { name: s.title }),
+                  message: t("It is stopped if it is running, and its transcript is removed."),
+                  confirmLabel: t("Delete"),
+                  danger: true,
+                  deletes: true,
+                })
+              ) {
                 onDelete(s.id);
               }
             }}
             className="rounded p-1 text-fg-subtle hover:text-danger"
-            title="Delete session"
+            title={t("Delete session")}
           >
             <LuTrash2 className="h-3 w-3" />
           </button>
         </div>
       </div>
-      <div className="truncate pl-4 text-[11px] text-fg-subtle">{s.workspace.split("/").pop()}</div>
+      {/* Cut at the start, not the end: what tells chats apart is the last part of
+          the path. rtl moves the ellipsis; bdi keeps the path itself left to right. */}
+      <div className="truncate pl-4 text-left font-mono text-[10px] text-fg-subtle [direction:rtl]" title={s.workspace}>
+        <bdi>{s.workspace}</bdi>
+      </div>
     </div>
   );
 }

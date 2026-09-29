@@ -208,8 +208,8 @@ test('live transcription begins before turn completion and previews recognized w
 
 test('voice panels animate into browser, terminal and simultaneous layouts', async ({ page }) => {
   await page.addInitScript(() => {
-    class CanvasEvents { onmessage:any; onopen:any; constructor(){(window as any).canvasEvents=this;setTimeout(()=>this.onopen?.(),20)}close(){} }
-    (window as any).EventSource=CanvasEvents;
+    // The terminal's stream, which has no server behind it here.
+    (window as any).EventSource=class { onmessage:any; onopen:any; close(){} };
   });
   const failures: string[] = []; page.on('pageerror', e => failures.push(e.message));
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
@@ -219,8 +219,10 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
   await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
   await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-minimal.png' });
-  await page.getByRole('button', { name: 'Mute sound effects' }).click();
+  await page.getByRole('button', { name: 'Voice settings' }).click();
+  await page.getByRole('group', { name: 'Sound effects' }).getByRole('button', { name: 'Off' }).click();
   expect(await page.evaluate(() => localStorage.getItem('voiceSounds'))).toBe('off');
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Live browser', exact: true })).toBeVisible();
   await expect(page.locator('.voice-stage')).toHaveClass(/is-browsing/);
@@ -236,7 +238,7 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   expect(browser!.width).toBeGreaterThan(terminal!.width * 1.8);
   expect(browser!.x + browser!.width).toBeLessThan(terminal!.x);
   await page.getByTestId('workspace').screenshot({ path: '/tmp/pithagoras-voice-both.png' });
-  await page.evaluate(() => (window as any).canvasEvents.onmessage({data:JSON.stringify({type:'update',canvas:{id:'doc',title:'A shared draft',content:'# Live canvas\n\nWriting alongside the terminal.',revision:1,status:'writing',active_call:'draft',updated_at:''}})}));
+  await page.evaluate(() => (window as any).canvasFeed.message({type:'update',canvas:{id:'doc',title:'A shared draft',content:'# Live canvas\n\nWriting alongside the terminal.',revision:1,status:'writing',active_call:'draft',updated_at:''}}));
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels','2');
   await expect(page.locator('.voice-stage')).not.toHaveClass(/is-browsing/);
   await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
@@ -321,9 +323,9 @@ test('prompt and compaction progress remain visible in chat and voice',async({pa
  await page.route('**/voice/speech',r=>r.fulfill({body:sample,contentType:'audio/wav'}));
  await page.goto('/tests/voice.html');
  await page.getByRole('button',{name:'Show prefill',exact:true}).click();
- await expect(page.getByRole('progressbar',{name:'Prompt processing'})).toHaveCount(0);
+ // In the chat it is the status pill, there at once like the other phases rather than after two seconds.
  await expect(page.getByRole('progressbar',{name:'Prompt processing'})).toHaveAttribute('aria-valuenow','40');
- await expect(page.getByText('16,000 / 40,000 tokens · 8,000 cached')).toBeVisible();
+ await expect(page.getByRole('progressbar',{name:'Prompt processing'})).toHaveAttribute('aria-valuetext','40% — 16,000 / 40,000 tokens · 8,000 from cache');
  await page.getByRole('button',{name:'Turn on hands-free voice'}).click();
  await expect(page.locator('.voice-stage').getByRole('progressbar',{name:'Prompt processing'})).toBeVisible({timeout:25000});
  await page.getByRole('button',{name:'Start compaction',exact:true}).click();
@@ -335,14 +337,16 @@ test('prompt and compaction progress remain visible in chat and voice',async({pa
  await page.getByRole('button',{name:'End voice mode'}).click();
 });
 
-test('composer switches stop to send for a follow-up and canvas lives in the header',async({page})=>{
+test('composer offers send beside stop for a follow-up and canvas lives in the header',async({page})=>{
  await page.goto('/tests/voice.html');
  const input=page.locator('textarea').first();
  await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
  await page.getByRole('button',{name:'Stream reply',exact:true}).click();
  await expect(page.getByRole('button',{name:'Stop generation',exact:true})).toBeVisible();
  await input.fill('Change direction');
- await expect(page.getByRole('button',{name:'Stop generation',exact:true})).toHaveCount(0);
+ // Stop stays while a follow-up is written: steering and stopping are both still open.
+ await expect(page.getByRole('button',{name:'Stop generation',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'Send message',exact:true}).click();
  await expect(page.getByTestId('sent')).toHaveText('1');
  await expect(page.getByRole('button',{name:'Stop generation',exact:true})).toBeVisible();

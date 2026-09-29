@@ -1,3 +1,5 @@
+import { joinSamples } from "./samples";
+
 type Segment = {
   frames: Float32Array[]; revision: number; quiet: number; confirmed: boolean;
   requested: number; lastRequest: number; controller: AbortController;
@@ -40,16 +42,10 @@ export class LiveTranscription {
     this.preRoll = []; this.current = segment; this.segments.add(segment); this.preview('');
   }
   confirm() { if (this.current) this.current.confirmed = true; }
-  private samples(segment: Segment) {
-    const samples = new Float32Array(segment.frames.reduce((sum, frame) => sum + frame.length, 0));
-    let offset = 0;
-    for (const frame of segment.frames) { samples.set(frame, offset); offset += frame.length; }
-    return samples;
-  }
   private speculate(segment: Segment) {
     const revision = segment.revision;
     segment.requested = revision; segment.lastRequest = segment.frames.length;
-    segment.pending = this.request(this.samples(segment), segment.controller.signal).then(text => {
+    segment.pending = this.request(joinSamples(segment.frames), segment.controller.signal).then(text => {
       if (segment.controller.signal.aborted) return;
       segment.result = { revision, text };
       if (this.current === segment) this.preview(text);

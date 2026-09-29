@@ -18,12 +18,12 @@ test('upload a voice reference, select it, save settings, and delete it',async({
  await page.getByLabel('Reference recording').setInputFiles(path.resolve('tests/fixtures/jfk.wav'));
  await page.getByLabel('Exact words in the recording').fill('And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.');
  await page.getByRole('button',{name:'Save new voice',exact:true}).click();
- await expect(page.getByRole('combobox',{name:'Speaking voice',exact:true})).toHaveValue('voice-test');
+ await expect(page.getByRole('combobox',{name:'Speaking voice',exact:true})).toHaveText('New narrator');
  await expect(page.getByLabel('Voice reference preview')).toBeVisible();
  await page.getByRole('button',{name:'Save voice settings',exact:true}).click();
  expect(config.voice).toBe('voice-test');
  await page.screenshot({path:'/tmp/pithagoras-voice-library.png',fullPage:true});
  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Delete voice',exact:true}).click();
- await expect(page.getByRole('combobox',{name:'Speaking voice',exact:true})).toHaveValue('design');
+ await expect(page.getByRole('combobox',{name:'Speaking voice',exact:true})).toHaveText('Designed voice');
  await expect(page.locator('#error')).toBeEmpty();
 });

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useState } from "react";
+import { Select } from "./Select";
 import {
   LuChevronLeft,
   LuChevronRight,
@@ -15,6 +16,7 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type McpConfigView, type McpServerEntry, type McpServerView } from "../api";
+import { t, tx } from "../i18n";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -91,7 +93,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
   if (loading || !view) {
     return (
       <p className="flex items-center gap-2 text-sm text-fg-subtle">
-        <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> Reading configuration…
+        <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Reading configuration…")}
       </p>
     );
   }
@@ -119,10 +121,9 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
           <div className="flex items-start gap-2">
             <LuTriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm text-fg">The MCP adapter is not installed</p>
+              <p className="text-sm text-fg">{t("The MCP adapter is not installed")}</p>
               <p className="mt-1 text-xs text-fg-muted">
-                MCP support comes from the <span className="font-mono">pi-mcp-adapter</span>{" "}
-                extension. Until it is installed, servers configured here are read by nothing.
+                {tx("MCP support comes from the {name} extension. Until it is installed, servers configured here are read by nothing.", { name: <span className="font-mono">pi-mcp-adapter</span> })}
               </p>
               <button
                 className={`${primaryCls} mt-3`}
@@ -144,7 +145,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
                 ) : (
                   <LuDownload className="h-4 w-4" />
                 )}
-                Install it
+                {t("Install it")}
               </button>
             </div>
           </div>
@@ -156,10 +157,10 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
           <div className="flex items-start gap-2">
             <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
             <div className="min-w-0">
-              <p className="text-sm text-danger">This file does not parse</p>
+              <p className="text-sm text-danger">{t("This file does not parse")}</p>
               <p className="mt-1 font-mono text-xs text-fg-muted">{view.parseError}</p>
               <p className="mt-1 text-xs text-fg-faint">
-                Nothing is listed and nothing will be written until it is fixed — edit it below.
+                {t("Nothing is listed and nothing will be written until it is fixed — edit it below.")}
               </p>
             </div>
           </div>
@@ -169,25 +170,24 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
       <section className="mb-6 rounded-xl border border-line bg-raised/40 p-3">
         <div className="flex items-center gap-2">
           <LuFileJson className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-          <p className="text-xs text-fg-subtle">Config file</p>
+          <p className="text-xs text-fg-subtle">{t("Config file")}</p>
           <p className="ml-auto truncate pl-3 font-mono text-xs text-fg-muted">{view.path}</p>
         </div>
         <p className="mt-1.5 text-xs text-fg-faint">
-          Applies to every session in this portal. Changes are picked up by sessions started
-          afterwards, so restart a running one to pull in a new server.
+          {t("Applies to every session in this portal. Changes are picked up by sessions started afterwards, so restart a running one to pull in a new server.")}
         </p>
       </section>
 
       <section className="mb-6">
         <div className="mb-2 flex items-center gap-2">
-          <h3 className="text-sm font-medium text-fg">Servers</h3>
+          <h3 className="text-sm font-medium text-fg">{t("Servers")}</h3>
           <span className="text-xs text-fg-faint">{view.servers.length}</span>
           <div className="ml-auto flex gap-2">
             <button className={btnCls} onClick={() => setImporting((v) => !v)}>
-              <LuClipboardPaste className="h-4 w-4" /> Paste JSON
+              <LuClipboardPaste className="h-4 w-4" /> {t("Paste JSON")}
             </button>
             <button className={primaryCls} onClick={() => setEditing({ name: null })}>
-              <LuPlus className="h-4 w-4" /> Add server
+              <LuPlus className="h-4 w-4" /> {t("Add server")}
             </button>
           </div>
         </div>
@@ -205,8 +205,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
 
         {view.servers.length === 0 ? (
           <p className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-fg-faint">
-            No servers yet. Most MCP projects publish a JSON snippet in their README — paste it
-            straight in.
+            {t("No servers yet. Most MCP projects publish a JSON snippet in their README — paste it straight in.")}
           </p>
         ) : (
           <ul className="space-y-1.5">
@@ -240,7 +239,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
           <LuChevronRight
             className={`h-3.5 w-3.5 transition-transform ${rawOpen ? "rotate-90" : ""}`}
           />
-          Edit the file directly
+          {t("Edit the file directly")}
         </button>
         {rawOpen && (
           <RawEditor initial={view.raw} onSaved={load} onError={onError} />
@@ -269,7 +268,7 @@ function ServerRow({
         ? e.url
         : server.transport === "socket"
           ? e.socket
-          : "No transport configured";
+          : t("No transport configured");
 
   return (
     <li className="group flex items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5">
@@ -281,7 +280,7 @@ function ServerRow({
       <button className="min-w-0 flex-1 text-left" onClick={onOpen}>
         <p className={`truncate text-sm ${server.disabled ? "text-fg-subtle" : "text-fg"}`}>
           {server.name}
-          {server.disabled && <span className="ml-2 text-xs text-fg-faint">disabled</span>}
+          {server.disabled && <span className="ml-2 text-xs text-fg-faint">{t("disabled")}</span>}
         </p>
         <p className="truncate font-mono text-xs text-fg-faint">{summary}</p>
       </button>
@@ -292,16 +291,16 @@ function ServerRow({
           checked={!server.disabled}
           onChange={onToggle}
         />
-        On
+        {t("On")}
       </label>
       <button
-        className="shrink-0 rounded-lg p-1.5 text-fg-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
-        title="Remove"
+        className="shrink-0 rounded-lg p-1.5 text-fg-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+        title={t("Remove")}
         onClick={onDelete}
       >
         <LuTrash2 className="h-4 w-4" />
       </button>
-      <button className="shrink-0 text-fg-faint" onClick={onOpen} title="Edit">
+      <button className="shrink-0 text-fg-faint" onClick={onOpen} title={t("Edit")}>
         <LuChevronRight className="h-4 w-4" />
       </button>
     </li>
@@ -324,25 +323,24 @@ function ImportBox({
   return (
     <div className="mb-3 rounded-xl border border-line bg-raised/40 p-3">
       <p className="mb-2 text-xs text-fg-muted">
-        Accepts a whole config, a bare <span className="font-mono">mcpServers</span> map, or a single
-        server object.
+        {tx("Accepts a whole config, a bare {key} map, or a single server object.", { key: <span className="font-mono">mcpServers</span> })}
       </p>
       <textarea
         className={monoCls}
         rows={7}
         spellCheck={false}
-        placeholder={'{\n  "mcpServers": {\n    "filesystem": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]\n    }\n  }\n}'}
+        placeholder={"{\n  \"mcpServers\": {\n    \"filesystem\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/data\"]\n    }\n  }\n}"}
         value={text}
         onChange={(ev) => setText(ev.target.value)}
       />
       {result && (
         <div className="mt-2 text-xs">
           {result.added.length > 0 && (
-            <p className="text-ok">Added {result.added.join(", ")}</p>
+            <p className="text-ok">{t("Added {names}", { names: result.added.join(", ") })}</p>
           )}
           {result.skipped.map((s) => (
             <p key={s.name} className="text-warn">
-              Skipped {s.name}: {s.reason}
+              {t("Skipped {name}: {reason}", { name: s.name, reason: s.reason })}
             </p>
           ))}
         </div>
@@ -368,10 +366,10 @@ function ImportBox({
           }}
         >
           {busy ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : <LuDownload className="h-4 w-4" />}
-          Import
+          {t("Import")}
         </button>
         <button className={btnCls} onClick={onCancel}>
-          Cancel
+          {t("Cancel")}
         </button>
       </div>
     </div>
@@ -412,7 +410,7 @@ function ServerForm({
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    if (!name.trim()) return onError("Give the server a name");
+    if (!name.trim()) return onError(t("Give the server a name"));
     // Start from the stored entry so fields this form does not show — oauth
     // blocks, tracing, timeouts set by hand — survive an edit here.
     const next: McpServerEntry = { ...e };
@@ -464,11 +462,11 @@ function ServerForm({
         className="mb-4 flex items-center gap-1 text-sm text-fg-muted transition hover:text-fg"
         onClick={onBack}
       >
-        <LuChevronLeft className="h-4 w-4" /> Servers
+        <LuChevronLeft className="h-4 w-4" /> {t("Servers")}
       </button>
 
       <div className="space-y-4">
-        <Field label="Name" hint="How its tools are prefixed, so keep it short">
+        <Field label={t("Name")} hint={t("How its tools are prefixed, so keep it short")}>
           <input
             className={inputCls}
             value={name}
@@ -477,19 +475,19 @@ function ServerForm({
           />
         </Field>
 
-        <Field label="Transport">
+        <Field label={t("Transport")}>
           <div className="flex gap-2">
-            {(["stdio", "http", "socket"] as Transport[]).map((t) => (
+            {(["stdio", "http", "socket"] as Transport[]).map((kind) => (
               <button
-                key={t}
-                onClick={() => setTransport(t)}
+                key={kind}
+                onClick={() => setTransport(kind)}
                 className={`rounded-lg px-3 py-2 text-sm transition ${
-                  transport === t
+                  transport === kind
                     ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25"
                     : "bg-fg/5 text-fg-muted hover:bg-fg/10"
                 }`}
               >
-                {t === "stdio" ? "Local process" : t === "http" ? "HTTP" : "Unix socket"}
+                {kind === "stdio" ? t("Local process") : kind === "http" ? "HTTP" : t("Unix socket")}
               </button>
             ))}
           </div>
@@ -497,7 +495,7 @@ function ServerForm({
 
         {transport === "stdio" && (
           <>
-            <Field label="Command">
+            <Field label={t("Command")}>
               <input
                 className={inputCls}
                 value={command}
@@ -505,7 +503,7 @@ function ServerForm({
                 onChange={(ev) => setCommand(ev.target.value)}
               />
             </Field>
-            <Field label="Arguments" hint="One per line">
+            <Field label={t("Arguments")} hint={t("One per line")}>
               <textarea
                 className={monoCls}
                 rows={3}
@@ -515,7 +513,7 @@ function ServerForm({
                 onChange={(ev) => setArgs(ev.target.value)}
               />
             </Field>
-            <Field label="Environment" hint="KEY=value per line; ${VAR} is expanded at launch">
+            <Field label={t("Environment")} hint={t("KEY=value per line; ${VAR} is expanded at launch")}>
               <textarea
                 className={monoCls}
                 rows={2}
@@ -525,7 +523,7 @@ function ServerForm({
                 onChange={(ev) => setEnv(ev.target.value)}
               />
             </Field>
-            <Field label="Working directory" hint="Optional">
+            <Field label={t("Working directory")} hint={t("Optional")}>
               <input className={inputCls} value={cwd} onChange={(ev) => setCwd(ev.target.value)} />
             </Field>
           </>
@@ -533,7 +531,7 @@ function ServerForm({
 
         {transport === "http" && (
           <>
-            <Field label="URL">
+            <Field label={t("URL")}>
               <input
                 className={inputCls}
                 value={url}
@@ -541,7 +539,7 @@ function ServerForm({
                 onChange={(ev) => setUrl(ev.target.value)}
               />
             </Field>
-            <Field label="Headers" hint="Name: value per line">
+            <Field label={t("Headers")} hint={t("Name: value per line")}>
               <textarea
                 className={monoCls}
                 rows={2}
@@ -550,22 +548,23 @@ function ServerForm({
                 onChange={(ev) => setHeaders(ev.target.value)}
               />
             </Field>
-            <Field label="Authentication">
-              <select
-                className={inputCls}
+            <Field label={t("Authentication")}>
+              <Select
+                className="w-full"
                 value={auth}
-                onChange={(ev) => setAuth(ev.target.value)}
-              >
-                <option value="auto">Detect (OAuth if the server offers it)</option>
-                <option value="oauth">OAuth</option>
-                <option value="bearer">Bearer token</option>
-                <option value="none">None</option>
-              </select>
+                onChange={setAuth}
+                options={[
+                  { value: "auto", label: t("Detect"), hint: t("OAuth if the server offers it") },
+                  { value: "oauth", label: "OAuth" },
+                  { value: "bearer", label: t("Bearer token") },
+                  { value: "none", label: t("None") },
+                ]}
+              />
             </Field>
             {auth === "bearer" && (
               <Field
-                label="Token environment variable"
-                hint="The variable name, not the token — secrets do not belong in this file"
+                label={t("Token environment variable")}
+                hint={t("The variable name, not the token — secrets do not belong in this file")}
               >
                 <input
                   className={inputCls}
@@ -579,7 +578,7 @@ function ServerForm({
         )}
 
         {transport === "socket" && (
-          <Field label="Socket path">
+          <Field label={t("Socket path")}>
             <input
               className={inputCls}
               value={socket}
@@ -589,20 +588,21 @@ function ServerForm({
           </Field>
         )}
 
-        <Field label="Lifecycle" hint="Lazy connects on first use, which is usually what you want">
-          <select
-            className={inputCls}
+        <Field label={t("Lifecycle")} hint={t("Lazy connects on first use, which is usually what you want")}>
+          <Select
+            className="w-full"
             value={lifecycle}
-            onChange={(ev) => setLifecycle(ev.target.value as McpServerEntry["lifecycle"] & string)}
-          >
-            <option value="lazy">Lazy</option>
-            <option value="lazy-keep-alive">Lazy, then keep alive</option>
-            <option value="eager">Eager</option>
-            <option value="keep-alive">Keep alive</option>
-          </select>
+            onChange={(v) => setLifecycle(v as McpServerEntry["lifecycle"] & string)}
+            options={[
+              { value: "lazy", label: t("Lazy") },
+              { value: "lazy-keep-alive", label: t("Lazy, then keep alive") },
+              { value: "eager", label: t("Eager") },
+              { value: "keep-alive", label: t("Keep alive") },
+            ]}
+          />
         </Field>
 
-        <Field label="Only these tools" hint="One name or glob per line; leave empty for all">
+        <Field label={t("Only these tools")} hint={t("One name or glob per line; leave empty for all")}>
           <textarea
             className={monoCls}
             rows={2}
@@ -611,7 +611,7 @@ function ServerForm({
             onChange={(ev) => setIncludeTools(ev.target.value)}
           />
         </Field>
-        <Field label="Except these tools" hint="One name or glob per line">
+        <Field label={t("Except these tools")} hint={t("One name or glob per line")}>
           <textarea
             className={monoCls}
             rows={2}
@@ -625,25 +625,25 @@ function ServerForm({
           <Toggle
             checked={directTools}
             onChange={setDirectTools}
-            label="Register tools directly"
-            hint="Puts every tool in the system prompt instead of behind the proxy — 150–300 tokens each, so keep it to small servers"
+            label={t("Register tools directly")}
+            hint={t("Puts every tool in the system prompt instead of behind the proxy — 150–300 tokens each, so keep it to small servers")}
           />
-          <Toggle checked={debug} onChange={setDebug} label="Show server stderr" />
+          <Toggle checked={debug} onChange={setDebug} label={t("Show server stderr")} />
           <Toggle
             checked={disabled}
             onChange={setDisabled}
-            label="Disabled"
-            hint="Kept here but never connected"
+            label={t("Disabled")}
+            hint={t("Kept here but never connected")}
           />
         </div>
 
         <div className="flex gap-2 pt-1">
           <button className={primaryCls} disabled={saving} onClick={submit}>
             {saving && <LuRefreshCw className="h-4 w-4 animate-spin" />}
-            Save
+            {t("Save")}
           </button>
           <button className={btnCls} onClick={onBack}>
-            Cancel
+            {t("Cancel")}
           </button>
         </div>
       </div>
@@ -686,27 +686,28 @@ function GlobalSettings({
     <section>
       <div className="mb-2 flex items-center gap-2">
         <LuPlug className="h-3.5 w-3.5 text-fg-faint" />
-        <h3 className="text-sm font-medium text-fg">Adapter settings</h3>
+        <h3 className="text-sm font-medium text-fg">{t("Adapter settings")}</h3>
         {dirty && (
           <button className={`${primaryCls} ml-auto py-1.5`} onClick={save}>
-            Save
+            {t("Save")}
           </button>
         )}
       </div>
       <div className="grid gap-3 rounded-xl border border-line bg-raised/40 p-3 sm:grid-cols-3">
-        <Field label="Tool naming">
-          <select
-            className={inputCls}
+        <Field label={t("Tool naming")}>
+          <Select
+            className="w-full"
             value={prefix}
-            onChange={(ev) => track(setPrefix)(ev.target.value)}
-          >
-            <option value="server">server_tool</option>
-            <option value="short">short</option>
-            <option value="mcp">mcp_tool</option>
-            <option value="none">tool</option>
-          </select>
+            onChange={(v) => track(setPrefix)(v)}
+            options={[
+              { value: "server", label: "server_tool" },
+              { value: "short", label: "short" },
+              { value: "mcp", label: "mcp_tool" },
+              { value: "none", label: "tool" },
+            ]}
+          />
         </Field>
-        <Field label="Idle timeout" hint="Minutes; 0 never disconnects">
+        <Field label={t("Idle timeout")} hint={t("Minutes; 0 never disconnects")}>
           <input
             className={inputCls}
             value={idle}
@@ -715,11 +716,11 @@ function GlobalSettings({
             onChange={(ev) => track(setIdle)(ev.target.value)}
           />
         </Field>
-        <Field label="Request timeout" hint="Milliseconds">
+        <Field label={t("Request timeout")} hint={t("Milliseconds")}>
           <input
             className={inputCls}
             value={timeout}
-            placeholder="default"
+            placeholder={t("default")}
             inputMode="numeric"
             onChange={(ev) => track(setTimeout)(ev.target.value)}
           />
@@ -766,7 +767,7 @@ function RawEditor({
         }}
       >
         {saving && <LuRefreshCw className="h-4 w-4 animate-spin" />}
-        Save file
+        {t("Save file")}
       </button>
     </div>
   );
@@ -781,6 +782,18 @@ function Field({
   hint?: string;
   children: React.ReactNode;
 }) {
+  // A Select is a button: inside a label, a click anywhere on the label —
+  // the hint too — is passed on to it and opens the list, or shuts and opens
+  // it again. It is named by its own aria-label instead.
+  if (isValidElement<{ "aria-label"?: string }>(children) && children.type === Select) {
+    return (
+      <div className="block">
+        <span className="mb-1 block text-xs text-fg-subtle">{label}</span>
+        {cloneElement(children, { "aria-label": label })}
+        {hint && <span className="mt-1 block text-xs text-fg-faint">{hint}</span>}
+      </div>
+    );
+  }
   return (
     <label className="block">
       <span className="mb-1 block text-xs text-fg-subtle">{label}</span>
