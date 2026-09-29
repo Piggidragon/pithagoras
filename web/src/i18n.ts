@@ -145,8 +145,14 @@ const subscribe = (listener: () => void) => {
   return () => listeners.delete(listener);
 };
 
-/** The language in effect, drawing the component again when it changes. */
-export const useLanguage = (): string => useSyncExternalStore(subscribe, language, language);
+/** What a change is: the language, or only how it writes numbers and dates — either is drawn anew. */
+const snapshot = () => `${current.code}|${formatLocale}`;
+
+/** The language in effect, drawing the component again when it — or how it writes numbers and dates — changes. */
+export const useLanguage = (): string => {
+  useSyncExternalStore(subscribe, snapshot, snapshot);
+  return current.code;
+};
 
 const fill = (text: string, vars?: Record<string, string | number>) =>
   vars ? text.replace(/\{(\w+)\}/g, (all, name: string) => (Object.hasOwn(vars, name) ? String(vars[name]) : all)) : text;
@@ -173,6 +179,17 @@ export function tp(n: number, one: string, other: string, vars?: Record<string, 
   const form = pluralOf(current.code, n);
   const text = said && typeof said === "object" ? (said[form] ?? said.other) : form === "one" ? one : other;
   return fill(text, { n: formatNumber(n), ...vars });
+}
+
+/**
+ * A text whose English is the same word as another's with another meaning —
+ * "Open" a pull request is in, and "Open" on a button — told apart by what it
+ * is: `tc("Open", "state")`. English shows the text; a language keys it as
+ * `"Open\u0004state"`, as gettext does.
+ */
+export function tc(text: string, context: string, vars?: Record<string, string | number>): string {
+  const said = current.strings[`${text}\u0004${context}`];
+  return fill(typeof said === "string" ? said : text, vars);
 }
 
 /** Marks a text kept for later, to be put through `t` where it is shown. */

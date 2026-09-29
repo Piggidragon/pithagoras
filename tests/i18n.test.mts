@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { addLocale, ENGLISH, formatDate, formatDateTime, formatsFor, formatTime, labelOf, languages, resolve, setLanguage, t, tp, tx, type Locale, type Plural } from "../web/src/i18n.ts";
+import { addLocale, ENGLISH, formatDate, formatDateTime, formatsFor, formatTime, labelOf, languages, resolve, setLanguage, t, tc, tp, tx, type Locale, type Plural } from "../web/src/i18n.ts";
 
 const SRC = path.resolve(import.meta.dirname, "../web/src");
 const LOCALES = path.join(SRC, "locales");
@@ -28,6 +28,11 @@ function texts(): Map<string, { plural: boolean; where: string }> {
         if (name === "t" || name === "tx" || name === "msg") {
           const key = literal(n.arguments[0]);
           if (key !== undefined) found.set(key, { plural: false, where });
+        } else if (name === "tc") {
+          const text = literal(n.arguments[0]);
+          const context = literal(n.arguments[1]);
+          assert.ok(text !== undefined && context !== undefined, `${where}: tc takes its text and context as they are written`);
+          found.set(`${text}\u0004${context}`, { plural: false, where });
         } else if (name === "tp") {
           const one = literal(n.arguments[1]);
           const other = literal(n.arguments[2]);
@@ -166,6 +171,20 @@ test("a word in braces is filled in only from what was given", () => {
   setLanguage("en");
   try {
     assert.equal(t("Set {constructor} and {name}", { name: "x" }), "Set {constructor} and x");
+  } finally {
+    setLanguage("system");
+  }
+});
+
+test("the same English word with two meanings is told apart by what it is", () => {
+  addLocale({ code: "zz", name: "Zett", strings: { Open: "Öffnen", "Open\u0004state": "Offen" } });
+  try {
+    setLanguage("en");
+    assert.equal(tc("Open", "state"), "Open", "English shows the word");
+    setLanguage("zz");
+    assert.equal(t("Open"), "Öffnen");
+    assert.equal(tc("Open", "state"), "Offen");
+    assert.equal(tc("Closed", "state"), "Closed", "one the language lacks is the English");
   } finally {
     setLanguage("system");
   }

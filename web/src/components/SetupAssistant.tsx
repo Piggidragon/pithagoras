@@ -10,6 +10,7 @@ import { Select } from "./Select";
 import { EffortPicker, ghostCls, primaryCls } from "./SettingsUi";
 import { msg, t, tp } from "../i18n";
 
+import { modelTraits } from "../model-traits";
 const DONE_KEY = "pithagoras.setup";
 
 /** Whether this browser has been through the assistant, or waved it away. */
@@ -238,9 +239,5 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
 }
 
 function describe(m: AvailableModel, providerName?: string): string {
-  const parts = [providerName ?? m.provider];
-  if (m.contextWindow) parts.push(`${formatTokens(m.contextWindow)} window`);
-  if (m.input?.includes("image")) parts.push("sees images");
-  if (m.reasoning) parts.push("thinks");
-  return parts.join(" · ");
+  return [providerName ?? m.provider, ...modelTraits(m)].join(" · ");
 }

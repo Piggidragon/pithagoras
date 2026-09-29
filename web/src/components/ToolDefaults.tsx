@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuChevronDown, LuChevronRight, LuCheck, LuPencil, LuX } from "react-icons/lu";
 import { api } from "../api";
-import { displayName, groupSummary, groupTools, nextOff } from "../tool-groups";
+import { displayName, groupSummary, groupTools, nextOff, sourceName } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 import { isEnter, isEscape } from "../shortcuts";
 import { t } from "../i18n";
@@ -125,7 +125,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                         if (isEscape(e)) setRenaming(null);
                       }}
                       placeholder={displayName(group.source)}
-                      aria-label={t("Name for {source}", { source: group.source })}
+                      aria-label={t("Name for {source}", { source: sourceName(group.source) })}
                       className="min-w-0 flex-1 rounded border border-line bg-canvas px-1.5 py-0.5 text-xs text-fg outline-none focus:border-accent/60"
                     />
                     <button
@@ -159,7 +159,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                         <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
                       )}
                       <span
-                        title={group.source}
+                        title={sourceName(group.source)}
                         className="min-w-0 flex-1 truncate text-xs font-medium text-fg-muted"
                       >
                         {displayName(group.source, names)}
@@ -175,8 +175,8 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                       onClick={() =>
                         setRenaming({ source: group.source, value: names[group.source] ?? "" })
                       }
-                      title={t("Rename — it is {source}", { source: group.source })}
-                      aria-label={t("Rename {name}", { name: group.source })}
+                      title={t("Rename — it is {source}", { source: sourceName(group.source) })}
+                      aria-label={t("Rename {name}", { name: sourceName(group.source) })}
                       className="shrink-0 rounded p-1 text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
                     >
                       <LuPencil className="h-3 w-3" />

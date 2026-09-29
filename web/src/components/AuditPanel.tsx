@@ -3,7 +3,7 @@ import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuUse
 import { PageHeader, Stat } from "./PageHeader";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
-import { labelOf, msg, t, tp } from "../i18n";
+import { msg, t, tp } from "../i18n";
 import { serverTime, sinceThen } from "../time";
 
 /** What each kind means at a glance, without reading the reason. */
@@ -23,8 +23,6 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   answered: { label: msg("You answered"), icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-accent" },
   browsed: { label: msg("Page opened"), icon: <LuGlobe className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
 };
-
-const KIND_LABEL = Object.fromEntries(Object.entries(KIND).map(([kind, k]) => [kind, k.label]));
 
 const FILTERS = [
   { id: "all", label: msg("Everything") },
@@ -150,7 +148,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
               <li key={e.id} className="rounded-xl border border-line bg-raised/40 px-3 py-2">
                 <div className="flex items-center gap-2">
                   <span className={`shrink-0 ${k.tone}`}>{k.icon}</span>
-                  <span className={`shrink-0 text-xs ${k.tone}`}>{labelOf(KIND_LABEL, e.kind)}</span>
+                  <span className={`shrink-0 text-xs ${k.tone}`}>{t(k.label)}</span>
                   {e.person_name && (
                     <span className="truncate text-xs text-fg-muted">{e.person_name}</span>
                   )}

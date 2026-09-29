@@ -18,7 +18,8 @@ export function KeyboardShortcuts() {
   const bindings = useKeybindings();
   const layout = useKeyLabels();
   const [recording, setRecording] = useState<ActionId | null>(null);
-  const [note, setNote] = useState("");
+  // Said in the language shown when it is drawn.
+  const [note, setNote] = useState<(() => string) | null>(null);
 
   useEffect(() => {
     if (!recording) return;
@@ -29,7 +30,7 @@ export function KeyboardShortcuts() {
       if (!binding) return;
       const took = setBinding(recording, binding);
       const label = ACTIONS.find(a => a.id === took)?.label;
-      setNote(label ? t("{keys} was used for “{action}”, which now has no shortcut.", { keys: describe(binding, layout), action: t(label) }) : "");
+      setNote(label ? () => () => t("{keys} was used for “{action}”, which now has no shortcut.", { keys: describe(binding, layout), action: t(label) }) : null);
       setRecording(null);
     };
     const swallow = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation(); };
@@ -48,9 +49,9 @@ export function KeyboardShortcuts() {
             {t("Work while voice mode is on, except when typing in a field. Starting voice mode works from the chat too. Kept in this browser.")}
           </p>
         </div>
-        <button className={`${btnCls} shrink-0 whitespace-nowrap`} disabled={!changed} onClick={() => { resetAll(); setNote(""); setRecording(null); }}><LuRotateCcw className="h-3.5 w-3.5" />{t("Reset all")}</button>
+        <button className={`${btnCls} shrink-0 whitespace-nowrap`} disabled={!changed} onClick={() => { resetAll(); setNote(null); setRecording(null); }}><LuRotateCcw className="h-3.5 w-3.5" />{t("Reset all")}</button>
       </div>
-      {note && <p role="status" className="mt-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">{note}</p>}
+      {note && <p role="status" className="mt-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">{note()}</p>}
       <ul className="mt-2.5 divide-y divide-line rounded-xl border border-line bg-raised/40" aria-label={t("Voice mode shortcuts")}>
         {ACTIONS.map(action => {
           const binding = bindings[action.id];
@@ -64,12 +65,12 @@ export function KeyboardShortcuts() {
             <div className="flex gap-1">
               {listening
                 ? <button className={btnCls} onClick={() => setRecording(null)}>{t("Cancel")}</button>
-                : <button className={btnCls} onClick={() => { setNote(""); setRecording(action.id); }}>{t("Change")}</button>}
-              <button className={btnCls} disabled={listening || !binding} onClick={() => { setBinding(action.id, null); setNote(""); }}>{t("Clear")}</button>
+                : <button className={btnCls} onClick={() => { setNote(null); setRecording(action.id); }}>{t("Change")}</button>}
+              <button className={btnCls} disabled={listening || !binding} onClick={() => { setBinding(action.id, null); setNote(null); }}>{t("Clear")}</button>
               <button className={btnCls} disabled={listening || isDefault} title={t("Back to {keys}", { keys: describe(action.default, layout) || t("none") })} onClick={() => {
                 const took = resetBinding(action.id);
                 const label = ACTIONS.find(a => a.id === took)?.label;
-                setNote(label ? t("That was used for “{action}”, which now has no shortcut.", { action: t(label) }) : "");
+                setNote(label ? () => () => t("That was used for “{action}”, which now has no shortcut.", { action: t(label) }) : null);
               }}>{t("Reset")}</button>
             </div>
           </li>;
@@ -82,7 +83,7 @@ export function KeyboardShortcuts() {
       <ul className="mt-2.5 divide-y divide-line rounded-xl border border-line bg-raised/40" aria-label={t("Chat shortcuts")}>
         {FIXED.map(item => <li key={item.label} className="flex items-center gap-2 px-3 py-2">
           <span className="min-w-0 flex-1 text-sm text-fg">{t(item.label)}</span>
-          <kbd className={kbdCls}>{item.keys}</kbd>
+          <kbd className={kbdCls}>{describe(item.keys, layout)}</kbd>
         </li>)}
       </ul>
     </section>

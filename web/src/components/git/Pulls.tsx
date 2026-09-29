@@ -7,7 +7,7 @@ import { confirmDialog } from "../ConfirmDialog";
 import { Counts, ErrorNote, Letter, Quiet, SectionHead, splitPath, TextButton } from "./bits";
 import { useGit } from "./context";
 import { when } from "../../time";
-import { labelOf, msg, t, tp, tx } from "../../i18n";
+import { labelOf, msg, t, tc, tp, tx } from "../../i18n";
 
 
 /** Where a pull request is: open, draft, merged or closed. */
@@ -19,7 +19,13 @@ function StateBadge({ pull }: { pull: Pick<PullSummary, "state" | "isDraft"> }) 
     MERGED: "text-accent ring-accent/30",
     CLOSED: "text-danger ring-danger/30",
   };
-  return <span className={`shrink-0 rounded px-1 text-[10px] ring-1 ring-inset ${look[state] ?? "text-fg-subtle ring-line"}`}>{state.toLowerCase()}</span>;
+  const named: Record<string, string> = {
+    OPEN: tc("open", "pull request state"),
+    DRAFT: tc("draft", "pull request state"),
+    MERGED: tc("merged", "pull request state"),
+    CLOSED: tc("closed", "pull request state"),
+  };
+  return <span className={`shrink-0 rounded px-1 text-[10px] ring-1 ring-inset ${look[state] ?? "text-fg-subtle ring-line"}`}>{named[state] ?? state.toLowerCase()}</span>;
 }
 
 /**
@@ -116,7 +122,7 @@ export function Pulls() {
           )}
           <SectionHead title={t("Pull requests")}>
             <select value={state} onChange={(e) => setState(e.target.value)} aria-label={t("Which pull requests")} className="rounded border border-line bg-canvas px-1 py-0.5 text-[11px] text-fg">
-              <option value="open">{t("Open")}</option>
+              <option value="open">{tc("Open", "pull request state")}</option>
               <option value="merged">{t("Merged")}</option>
               <option value="closed">{t("Closed")}</option>
               <option value="all">{t("All")}</option>
@@ -124,7 +130,7 @@ export function Pulls() {
           </SectionHead>
           {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
           {!list && !error && <Quiet>{t("Loading…")}</Quiet>}
-          {list && !list.length && <Quiet>None.</Quiet>}
+          {list && !list.length && <Quiet>{t("None.")}</Quiet>}
           {list?.map((p) => <PullRow key={p.number} pull={p} />)}
         </>
       )}

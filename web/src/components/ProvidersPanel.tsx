@@ -323,7 +323,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   const [apiType, setApiType] = useState(provider?.api ?? "openai-completions");
   const [key, setKey] = useState("");
   const [rows, setRows] = useState<Row[]>(() => (provider?.models ?? []).map((m) => toRow(m, true, false, true)));
-  const [probe, setProbe] = useState<{ state: "idle" | "asking" | "ok" | "failed"; message?: string }>({ state: "idle" });
+  const [probe, setProbe] = useState<{ state: "idle" | "asking" | "ok" | "failed"; message?: () => string }>({ state: "idle" });
   const [manual, setManual] = useState("");
   const [saving, setSaving] = useState(false);
   const probeSeq = useRef(0);
@@ -367,11 +367,12 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         // not listed; one only found at an address asked before goes with it.
         return [...merged, ...[...known.values()].filter((row) => row.own).map((row) => ({ ...row, found: false }))];
       });
-      setProbe({ state: "ok", message: r.models.length ? tp(r.models.length, "{n} model found", "{n} models found") : t("It answered, but lists no models — add them by name below.") });
+      setProbe({ state: "ok", message: () => (r.models.length ? tp(r.models.length, "{n} model found", "{n} models found") : t("It answered, but lists no models — add them by name below.")) });
       if (r.baseUrl !== url.trim()) setBaseUrl(r.baseUrl);
     } catch (e) {
       if (seq !== probeSeq.current) return;
-      setProbe({ state: "failed", message: (e as Error).message });
+      const said = (e as Error).message;
+      setProbe({ state: "failed", message: () => said });
     }
   };
 
@@ -522,7 +523,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
           <div className="flex items-center gap-2">
             <p className="text-xs text-fg-muted">{t("Models")}</p>
             {probe.message && (
-              <span role="status" className={`truncate text-[11px] ${probe.state === "failed" ? "text-danger" : "text-fg-faint"}`}>{probe.message}</span>
+              <span role="status" className={`truncate text-[11px] ${probe.state === "failed" ? "text-danger" : "text-fg-faint"}`}>{probe.message()}</span>
             )}
             <button type="button" onClick={() => void ask()} disabled={!baseUrl.trim() || probe.state === "asking"} className={`${ghostCls} ml-auto`}>
               <LuRefreshCw className={`h-3.5 w-3.5 ${probe.state === "asking" ? "animate-spin" : ""}`} /> {t("Ask again")}

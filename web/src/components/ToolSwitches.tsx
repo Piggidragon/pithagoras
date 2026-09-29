@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { api, type PortalTool } from "../api";
-import { displayName, groupSummary, groupTools, nextOff } from "../tool-groups";
+import { displayName, groupSummary, groupTools, nextOff, sourceName } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 import { t, tp } from "../i18n";
 
@@ -118,7 +118,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
                 <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
               )}
               <span
-                title={group.source}
+                title={sourceName(group.source)}
                 className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-muted"
               >
                 {displayName(group.source, names)}

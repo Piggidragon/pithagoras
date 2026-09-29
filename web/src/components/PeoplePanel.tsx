@@ -28,8 +28,18 @@ const ROLES: { id: Role; label: string; hint: string }[] = [
   { id: "unknown", label: msg("Blocked"), hint: msg("Turned away before reaching the agent.") },
 ];
 
-const ROLE_LABEL = Object.fromEntries(ROLES.map((r) => [r.id, r.label]));
-const roleLabel = (id: string) => labelOf(ROLE_LABEL, id);
+const roleLabel = (id: string) => {
+  const role = ROLES.find((r) => r.id === id);
+  return role ? t(role.label) : id;
+};
+
+/** Who a rule for a whole role reaches, said of them all. */
+const EVERYONE: Record<string, string> = {
+  primary: msg("the primary user"),
+  colleague: msg("all colleagues"),
+  guest: msg("all guests"),
+  unknown: msg("everyone blocked"),
+};
 
 const ROLE_STYLE: Record<string, string> = {
   primary: "text-accent",
@@ -143,7 +153,7 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
               <RuleRow
                 key={r.id}
                 rule={r}
-                scope={t("every {role}", { role: roleLabel(r.role) })}
+                scope={labelOf(EVERYONE, r.role, (role) => t("everyone with the role {role}", { role }))}
                 onDelete={async () => {
                   try {
                     setRules((await api.deleteToolRule(r.id)).rules);

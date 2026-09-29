@@ -54,6 +54,7 @@ import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-s
 import { useTheme, type Theme } from "../theme";
 import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
+import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
 
 export type Tab =
@@ -688,11 +689,7 @@ function AboutPanel({ onError }: { onError: (e: string) => void }) {
 
 /** What a model can do, said in a few words under its name. */
 function modelHint(m: AvailableModel): string {
-  const parts = [m.name !== m.id ? m.id : ""];
-  if (m.contextWindow) parts.push(t("{n} window", { n: formatTokens(m.contextWindow) }));
-  if (m.input?.includes("image")) parts.push(t("sees images"));
-  if (m.reasoning) parts.push(t("thinks"));
-  return parts.filter(Boolean).join(" · ");
+  return [m.name !== m.id ? m.id : "", ...modelTraits(m)].filter(Boolean).join(" · ");
 }
 
 function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; onProviders: () => void }) {
@@ -710,13 +707,16 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
 
   /** Only the explicit overrides — an empty value means "inherit". */
   const [stored, setStored] = useState<Partial<GlobalSettings> | null>(r?.stored ?? null);
-  const [saved, setSaved] = useState<string | null>(null);
+  // What each save said, in the language shown when it is drawn.
+  const [saved, setSaved] = useState<(() => string) | null>(null);
   const [keepRecent, setKeepRecent] = useState<number | null>(r?.compaction.keepRecentTokens ?? null);
-  const [applied, setApplied] = useState<string | null>(null);
+  const [applied, setApplied] = useState<(() => string) | null>(null);
   /** Typed text, so that a half-written number is not turned into a request. */
   const [ctxText, setCtxText] = useState(r?.contextDefault ? String(r.contextDefault) : "");
   const [ctxSaved, setCtxSaved] = useState<number | null>(r?.contextDefault ?? null);
-  const [ctxNote, setCtxNote] = useState<string | null>(null);
+  const [ctxNote, setCtxNote] = useState<(() => string) | null>(null);
+  /** The window's field, which what is saved elsewhere does not overwrite while it is being typed in. */
+  const ctxField = useRef<HTMLInputElement>(null);
 
   /**
    * Each change is saved as it is made: there is no form to forget to submit.
@@ -732,7 +732,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
           await api.saveSettings({ provider: next.provider ?? "", model: next.model ?? "", thinkingLevel: next.thinkingLevel ?? "" });
         },
         async () => {
-          setSaved(t("Saved"));
+          setSaved(() => () => t("Saved"));
           setTimeout(() => setSaved(null), 2000);
           await settings.reload();
         },
@@ -749,7 +749,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
     if (!saver.busy) setStored(r.stored);
     setKeepRecent(r.compaction.keepRecentTokens);
     setCtxSaved(r.contextDefault);
-    if (document.activeElement?.getAttribute("aria-label") !== t("Default context window in tokens")) {
+    if (document.activeElement !== ctxField.current) {
       setCtxText(r.contextDefault ? String(r.contextDefault) : "");
     }
   }, [r]);
@@ -766,7 +766,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
   const saveKeepRecent = useKeepRecentSave(
     (compaction, refreshed) => {
       setKeepRecent(compaction.keepRecentTokens);
-      setApplied(
+      setApplied(() => () =>
         refreshed > 0 ? tp(refreshed, "Applied to {n} open session", "Applied to {n} open sessions") : t("Saved"),
       );
       void load();
@@ -791,7 +791,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
       const r = await api.setContextDefault(n);
       setCtxSaved(r.contextDefault);
       setCtxText(r.contextDefault ? String(r.contextDefault) : "");
-      setCtxNote(n === null ? t("Removed") : t("Saved"));
+      setCtxNote(() => () => (n === null ? t("Removed") : t("Saved")));
       void load();
       setTimeout(() => setCtxNote(null), 3000);
     } catch (e) {
@@ -855,7 +855,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
       <Section
         title={t("For new chats")}
         hint={t("What a new chat starts with. Each chat keeps whatever is picked for it under the chat box.")}
-        action={saved && <span className="pop-in inline-flex items-center gap-1 text-xs text-ok"><LuCheck className="h-3.5 w-3.5" /> {saved}</span>}
+        action={saved && <span className="pop-in inline-flex items-center gap-1 text-xs text-ok"><LuCheck className="h-3.5 w-3.5" /> {saved()}</span>}
       >
         <div className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
           {models && models.models.length === 0 && (
@@ -935,6 +935,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
           <div>
             <p className="text-xs text-fg-muted">{t("Window")}</p>
             <input
+              ref={ctxField}
               value={ctxText}
               disabled={executor === "container"}
               inputMode="numeric"
@@ -953,7 +954,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
                 {t("Not available with the container executor: pi runs inside the container, where the portal cannot change its context window.")}
               </p>
             )}
-            {ctxNote && <p className="mt-1 text-xs text-ok">{ctxNote}</p>}
+            {ctxNote && <p className="mt-1 text-xs text-ok">{ctxNote()}</p>}
           </div>
           <div className="border-t border-line/70 pt-3">
             <p className="text-xs text-fg-muted">{t("Kept when compacting")}</p>
@@ -963,7 +964,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
             <p className="mt-2 text-xs text-fg-faint">
               {t("The most recent stretch is kept word for word; only what is older becomes a summary. pi's default of {n} is a third of a 64k window, which is why compacting can look as though it did nothing. Saved as you let go, and it reaches open chats too.", { n: formatTokens(20000) })}
             </p>
-            {applied && <p className="mt-1 text-xs text-ok">{applied}</p>}
+            {applied && <p className="mt-1 text-xs text-ok">{applied()}</p>}
           </div>
         </div>
       </Section>

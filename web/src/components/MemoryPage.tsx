@@ -663,15 +663,17 @@ function AfterChange({
 }) {
   const [health, setHealth] = useState(first);
   const [busy, setBusy] = useState<string | null>(null);
-  const [said, setSaid] = useState<string | null>(null);
+  // What came of it, said in the language shown when it is drawn.
+  const [said, setSaid] = useState<(() => string) | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const act = async (what: string, run: () => Promise<string>) => {
+  const act = async (what: string, run: () => Promise<() => string>) => {
     setBusy(what);
     setError(null);
     setSaid(null);
     try {
-      setSaid(await run());
+      const came = await run();
+      setSaid(() => came);
       onRefresh();
     } catch (e) {
       setError((e as Error).message);
@@ -683,10 +685,10 @@ function AfterChange({
     act(msg("Writing the indexes anew…"), async () => {
       const r = await api.reindexMemory();
       setHealth(r.health);
-      const written = tp(r.reindexed, "{n} index written anew", "{n} indexes written anew");
-      return r.pruned.length
-        ? `${written}, ${tp(r.pruned.length, "{n} empty folder removed", "{n} empty folders removed")}.`
-        : `${written}.`;
+      return () => {
+        const written = tp(r.reindexed, "{n} index written anew", "{n} indexes written anew");
+        return r.pruned.length ? `${written}, ${tp(r.pruned.length, "{n} empty folder removed", "{n} empty folders removed")}.` : `${written}.`;
+      };
     });
   // What the model said it did, whole, beside the one line.
   const [told, setTold] = useState<string | null>(null);
@@ -695,9 +697,9 @@ function AfterChange({
       setTold(null);
       const r = await api.repairMemory();
       setHealth(r.health);
-      if (!r.ran) return t("Nothing for the model to repair.");
+      if (!r.ran) return () => t("Nothing for the model to repair.");
       if (r.summary) setTold(r.summary);
-      return tp(r.filesChanged?.length ?? 0, "The model changed {n} file.", "The model changed {n} files.");
+      return () => tp(r.filesChanged?.length ?? 0, "The model changed {n} file.", "The model changed {n} files.");
     });
   const nothingToRepair = health.brokenLinks.length === 0 && health.orphans.length === 0;
 
@@ -796,7 +798,7 @@ function AfterChange({
             <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t(busy)}
           </p>
         )}
-        {said && !busy && <p className="text-xs text-fg-muted">{said}</p>}
+        {said && !busy && <p className="text-xs text-fg-muted">{said()}</p>}
         {told && !busy && (
           <details className="rounded-lg border border-line px-3 py-2 text-xs">
             <summary className="cursor-pointer text-fg-muted">{t("What the model said")}</summary>
