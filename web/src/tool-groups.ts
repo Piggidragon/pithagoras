@@ -1,5 +1,5 @@
 import type { PortalTool } from "./api";
-import { msg, t } from "./i18n";
+import { formatNumber, msg, t, tp } from "./i18n";
 
 /**
  * Tools as somebody thinks about them: by what they came from.
@@ -73,9 +73,9 @@ export function nextOff(off: string[], names: string[], enabled: boolean): strin
  */
 export function groupSummary(group: ToolGroup): string {
   const total = group.tools.length;
-  if (group.allOff) return t("{n} off", { n: total });
+  if (group.allOff) return tp(total, "{n} off", "{n} off");
   const off = group.tools.filter((tool) => !tool.enabled).length;
-  return off ? t("{off} of {n} off", { off, n: total }) : t("{n} on", { n: total });
+  return off ? tp(total, "{off} of {n} off", "{off} of {n} off", { off: formatNumber(off) }) : tp(total, "{n} on", "{n} on");
 }
 
 /** Opening one group, or shutting it. */

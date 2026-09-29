@@ -2,7 +2,7 @@ import type { PortalEvent } from "./api";
 import type { Item } from "./transcript";
 import { SHELL_TOOL } from "./tool-activity";
 
-import { t } from "./i18n";
+import { msg, t } from "./i18n";
 /**
  * The agents working beside the main one, as the chat shows them.
  *
@@ -13,6 +13,12 @@ import { t } from "./i18n";
  * research tool, a delegate — is shown by what it reports: its text, and the
  * steps in its details where they look like steps.
  */
+/** What a subagent that gives no name is called: kept as the English, said where it is drawn. */
+const UNNAMED = msg("Subagent");
+
+/** A subagent's name as it is shown. */
+export const subagentName = (agent: { label: string }): string => (agent.label === UNNAMED ? t(UNNAMED) : agent.label);
+
 export interface Subagent {
   /** The protocol's id, or `tool:<call id>`. */
   id: string;
@@ -84,7 +90,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
       sub = {
         id,
         kind: "protocol",
-        label: String(p.label ?? t("Subagent")),
+        label: String(p.label ?? UNNAMED),
         status: "running",
         ...(typeof p.detail === "string" ? { detail: p.detail } : {}),
         ...(ev.at !== undefined ? { since: ev.at } : {}),
@@ -110,7 +116,7 @@ export function subagents(events: PortalEvent[], items: Item[], ended = false): 
       sub = {
         id,
         kind: "protocol",
-        label: t("Subagent"),
+        label: UNNAMED,
         status: "running",
         input: false,
         stop: false,

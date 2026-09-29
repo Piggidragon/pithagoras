@@ -101,7 +101,8 @@ export function ProjectsPage({
       const going = parts.length === 2
         ? t("{first} and {second} go with it.", { first: parts[0], second: parts[1] })
         : parts.length === 1
-          ? t("{what} goes with it.", { what: parts[0] })
+          // The verb agrees with what goes: "1 chat goes", "3 chats go", "over 1,000 files go".
+          ? tp(contents.sessions || (contents.complete ? contents.files : Math.max(2, contents.files)), "{what} goes with it.", "{what} go with it.", { what: parts[0] })
           : t("It is empty.");
       const ok = await confirmDialog({
         title: t("Delete the project \"{name}\"?", { name: p.name }),

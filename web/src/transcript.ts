@@ -76,7 +76,8 @@ export type Item =
     }
   /** The conversation summarized to make room, while that runs and after. */
   | { kind: "compaction"; id: string; status: "running" | "done" | "failed"; tokensBefore?: number; summary?: string; since?: number; until?: number }
-  | { kind: "notice"; id: string; text: string; tone: "info" | "warn" | "error" }
+  /** `portal`: the portal's own words, a msg() key translated where it is drawn; otherwise text as it came. */
+  | { kind: "notice"; id: string; text: string; tone: "info" | "warn" | "error"; portal?: true }
   /**
    * A slash command sent, and how it went: `done` when it showed something of
    * its own, `quiet` when it ran and showed nothing, `started`/`queued` when it
@@ -406,7 +407,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           items.push({ kind: "notice", id: `n${ev.seq}`, text: String(p.error), tone: "error" });
         }
         if (p.status === "idle" && p.aborted) {
-          items.push({ kind: "notice", id: `n${ev.seq}`, text: t("Aborted"), tone: "info" });
+          items.push({ kind: "notice", id: `n${ev.seq}`, text: msg("Aborted"), tone: "info", portal: true });
         }
         if (typeof p.status === "string" && p.status !== "running") settle();
         break;

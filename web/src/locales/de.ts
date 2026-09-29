@@ -988,7 +988,7 @@ const de: Locale = {
     "The routine {names} runs here: it is switched off until it is given another place, and keeps its history.": "Die Routine {names} läuft hier: Sie wird ausgeschaltet, bis sie einen anderen Ort bekommt, und behält ihren Verlauf.",
     "The routines {names} run here: they are switched off until they are given another place, and keep their history.": "Die Routinen {names} laufen hier: Sie werden ausgeschaltet, bis sie einen anderen Ort bekommen, und behalten ihren Verlauf.",
     "{first} and {second} go with it.": "{first} und {second} werden mitgelöscht.",
-    "{what} goes with it.": "{what} wird mitgelöscht.",
+    "{what} go with it.": { one: "{what} wird mitgelöscht.", other: "{what} werden mitgelöscht." },
     "It is empty.": "Es ist leer.",
     "Delete the project \"{name}\"?": "Das Projekt „{name}“ löschen?",
     "This cannot be undone.": "Das lässt sich nicht rückgängig machen.",
@@ -1263,6 +1263,9 @@ const de: Locale = {
     "all": "alle",
     "A ticked skill you already have will be replaced, including any edits you made to it.": "Ein angehakter Skill, den du schon hast, wird ersetzt, einschließlich deiner Änderungen daran.",
     "Nothing is executed by an import — a skill is markdown. But it is markdown the agent will follow, so take them from somewhere you would take instructions from.": "Beim Importieren wird nichts ausgeführt — ein Skill ist Markdown. Aber Markdown, dem der Agent folgt, also hol sie dir von dort, wo du auch Anweisungen annehmen würdest.",
+    // components/StatusDot.tsx
+    "idle": "bereit",
+    "interrupted — server restarted mid-run": "unterbrochen — der Server wurde mitten im Lauf neu gestartet",
     // components/SubagentModelPicker.tsx
     "this chat's model": "das Modell dieses Chats",
     "Subagents in this chat run on": "Subagents in diesem Chat laufen auf",
@@ -1787,9 +1790,9 @@ const de: Locale = {
     "{n} entries": { one: "{n} Eintrag", other: "{n} Einträge" },
     // tool-groups.ts
     "built in": "eingebaut",
-    "{n} off": "{n} aus",
-    "{off} of {n} off": "{off} von {n} aus",
-    "{n} on": "{n} an",
+    "{n} off": { one: "{n} aus", other: "{n} aus" },
+    "{off} of {n} off": { one: "{off} von {n} aus", other: "{off} von {n} aus" },
+    "{n} on": { one: "{n} an", other: "{n} an" },
     // transcript.ts
     "Aborted": "Abgebrochen",
     "Reading the conversation": "Liest den Chat",

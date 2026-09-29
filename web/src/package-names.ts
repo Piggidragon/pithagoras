@@ -3,7 +3,7 @@
  * Kept apart from the components so the tests can reach them.
  */
 
-import { language, t } from "./i18n";
+import { formatRelative, t } from "./i18n";
 
 /** The npm name in a pi package spec: `npm:@scope/pkg@1.2.0` is `@scope/pkg`. Anything else is itself. */
 export function packageName(spec: string): string {
@@ -20,7 +20,11 @@ export function compactCount(n: number): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
-/** How long ago, in the one unit that says it best, in the language shown. */
+/**
+ * How long ago, in the one unit that says it best, in the language shown —
+ * written out, where time.ts is terse: a package's age runs to months and
+ * years, which "{n}d ago" does not.
+ */
 export function ago(iso: string | undefined, now = Date.now()): string {
   const then = iso ? Date.parse(iso) : NaN;
   if (!Number.isFinite(then)) return "";
@@ -30,7 +34,7 @@ export function ago(iso: string | undefined, now = Date.now()): string {
   for (const [size, unit] of steps) {
     if (v < size) {
       const n = Math.floor(v);
-      return unit === "second" ? t("just now") : new Intl.RelativeTimeFormat(language(), { numeric: "always" }).format(-n, unit);
+      return unit === "second" ? t("just now") : formatRelative(-n, unit);
     }
     v /= size;
   }

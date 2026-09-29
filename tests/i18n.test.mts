@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { addLocale, ENGLISH, formatDate, formatDateTime, formatTime, labelOf, languages, resolve, setLanguage, t, tp, tx, type Locale, type Plural } from "../web/src/i18n.ts";
+import { addLocale, ENGLISH, formatDate, formatDateTime, formatsFor, formatTime, labelOf, languages, resolve, setLanguage, t, tp, tx, type Locale, type Plural } from "../web/src/i18n.ts";
 
 const SRC = path.resolve(import.meta.dirname, "../web/src");
 const LOCALES = path.join(SRC, "locales");
@@ -93,7 +93,7 @@ test("English is what the code says; another language where it has the text", ()
     setLanguage("en");
     assert.equal(t("Hello {name}", { name: "Ada" }), "Hello Ada");
     assert.equal(tp(1, "{n} file", "{n} files"), "1 file");
-    assert.equal(tp(1234, "{n} file", "{n} files"), "1,234 files");
+    assert.equal(tp(1234, "{n} file", "{n} files"), `${(1234).toLocaleString(formatsFor("en"))} files`, "written as this browser writes numbers");
     setLanguage("xx");
     assert.equal(t("Hello {name}", { name: "Ada" }), "Hallo Ada");
     assert.equal(t("Not there"), "Not there", "what a language lacks is shown in English");
@@ -138,11 +138,34 @@ test("dates are written as toLocaleString would, from formatters made once", () 
   setLanguage("en");
   try {
     const d = new Date(Date.UTC(2026, 8, 29, 13, 4, 5));
-    const locale = navigator.languages?.find((l) => l.startsWith("en")) ?? "en";
+    const locale = formatsFor("en");
     assert.equal(formatDateTime(d), d.toLocaleString(locale));
     assert.equal(formatDate(d), d.toLocaleDateString(locale));
     assert.equal(formatTime(d), d.toLocaleTimeString(locale));
     assert.equal(formatDate(d, { month: "short", day: "numeric" }), d.toLocaleDateString(locale, { month: "short", day: "numeric" }));
+  } finally {
+    setLanguage("system");
+  }
+});
+
+test("a date that cannot be read says so instead of failing the page", () => {
+  assert.equal(formatDateTime("not a date"), "Invalid Date");
+  assert.equal(formatDate(NaN), "Invalid Date");
+  assert.equal(formatTime(new Date("")), "Invalid Date");
+});
+
+test("numbers and dates follow the browser where it speaks the language, or is on the English page for want of its own", () => {
+  assert.equal(formatsFor("de", ["de-AT", "en"]), "de-AT", "the browser's German");
+  assert.equal(formatsFor("de", ["en-US"]), "de", "a German page on an American browser writes German dates");
+  assert.equal(formatsFor("en", ["en-GB", "de"]), "en-GB");
+  assert.equal(formatsFor("en", ["fr-FR"]), "fr-FR", "a French browser, with no French file, keeps French dates");
+  assert.equal(formatsFor("en", []), "en");
+});
+
+test("a word in braces is filled in only from what was given", () => {
+  setLanguage("en");
+  try {
+    assert.equal(t("Set {constructor} and {name}", { name: "x" }), "Set {constructor} and x");
   } finally {
     setLanguage("system");
   }

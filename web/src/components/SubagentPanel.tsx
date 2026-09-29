@@ -3,7 +3,7 @@ import { Streamdown } from "streamdown";
 import { LuArrowUp, LuBot, LuSquare } from "react-icons/lu";
 import { api } from "../api";
 import { buildTranscript, formatElapsed, type Item } from "../transcript";
-import { reportedSteps, type Subagent } from "../subagents";
+import { reportedSteps, subagentName, type Subagent } from "../subagents";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CompactionMarker, Ring, Shimmer, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { isEnter } from "../shortcuts";
@@ -45,7 +45,7 @@ export function SubagentPanel({
           {agents.map((a) => (
             <button key={a.id} type="button" role="tab" aria-selected={a.id === agent.id} onClick={() => onSelect(a.id)} className={`sub-tab is-${a.status}`}>
               {a.status === "running" ? <Ring /> : <i className="bg-job-dot" aria-hidden />}
-              {a.label}
+              {subagentName(a)}
             </button>
           ))}
         </div>
@@ -74,7 +74,7 @@ function AgentView({ sessionId, agent, items }: { sessionId: string; agent: Suba
       <div className="sub-head">
         <span className="sub-head-icon">{running ? <Ring /> : <LuBot aria-hidden />}</span>
         <div className="min-w-0 flex-1">
-          <div className="sub-head-title">{agent.label}</div>
+          <div className="sub-head-title">{subagentName(agent)}</div>
           <div className="sub-head-detail">
             {running ? <Shimmer>{agent.detail ?? t("Working")}</Shimmer> : agent.status === "done" ? t("Finished") : agent.status === "stopped" ? t("Stopped") : agent.error ?? t("Failed")}
             {seconds !== undefined && ` · ${formatElapsed(seconds)}`}
@@ -120,7 +120,7 @@ function ChildItem({ item, running }: { item: Item; running: boolean }) {
     case "compaction":
       return <CompactionMarker item={item} />;
     default:
-      return <div className="sub-notice">{item.text}</div>;
+      return <div className="sub-notice">{item.kind === "notice" && item.portal ? t(item.text) : item.text}</div>;
   }
 }
 
@@ -186,8 +186,8 @@ function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }
         <textarea
           value={text}
           rows={2}
-          placeholder={t("Tell {name} something…", { name: agent.label })}
-          aria-label={t("Message for {name}", { name: agent.label })}
+          placeholder={t("Tell {name} something…", { name: subagentName(agent) })}
+          aria-label={t("Message for {name}", { name: subagentName(agent) })}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (isEnter(e) && !e.shiftKey) {

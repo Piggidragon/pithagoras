@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuBot, LuPlay, LuRefreshCw, LuSquareTerminal } from "react-icons/lu";
 import type { BackgroundJob } from "../api";
-import type { Subagent } from "../subagents";
+import { subagentName, type Subagent } from "../subagents";
 import { formatElapsed } from "../transcript";
 import { Ring } from "./ChatActivity";
 import { statusParts } from "../status-commands";
@@ -56,10 +56,10 @@ export function RunningTray({
   return (
     <div className="running-tray" aria-label={t("Running beside the conversation")}>
       {runningAgents.map((a) => (
-        <button key={a.id} type="button" className="running-chip is-agent" onClick={() => onAgent(a.id)} title={a.detail ? `${a.label} — ${a.detail}` : a.label}>
+        <button key={a.id} type="button" className="running-chip is-agent" onClick={() => onAgent(a.id)} title={a.detail ? `${subagentName(a)} — ${a.detail}` : subagentName(a)}>
           <span className="running-chip-icon"><Ring /></span>
           <LuBot className="running-chip-kind" aria-hidden />
-          <span className="running-chip-label">{a.label}</span>
+          <span className="running-chip-label">{subagentName(a)}</span>
           {a.detail && <span className="running-chip-detail">{a.detail}</span>}
           <span className="running-chip-time">{since(a.since)}</span>
         </button>

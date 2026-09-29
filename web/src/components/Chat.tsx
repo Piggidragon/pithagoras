@@ -42,7 +42,7 @@ import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
-import { msg, t, tp, useLanguage } from "../i18n";
+import { msg, t, tp } from "../i18n";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -696,9 +696,7 @@ export function Chat({
   const lastSpoken = useRef<string | null>(null);
   // Interrupted or failed, the process is gone: nothing it started is still going.
   const ended = session.status === "interrupted" || session.status === "error";
-  // Built again in a language chosen: a notice it adds ("Aborted") is in words.
-  const lang = useLanguage();
-  const items = useMemo(() => buildTranscript(events, { ended }), [events, ended, lang]);
+  const items = useMemo(() => buildTranscript(events, { ended }), [events, ended]);
   // What arrived while the chat was open slides in; what was there when it
   // opened, or was loaded from further up, is simply there.
   const entered = useRef<{ session: string; ready: boolean; at: Map<string, number> }>({ session: session.id, ready: false, at: new Map() });
@@ -874,7 +872,7 @@ export function Chat({
   // panel draws its transcript again only when there is more of it, not on
   // every word of the main chat.
   const lastAgents = useRef<Subagent[]>([]);
-  const agents = useMemo(() => (lastAgents.current = stableSubagents(lastAgents.current, subagents(events, items, ended))), [events, items, ended, lang]);
+  const agents = useMemo(() => (lastAgents.current = stableSubagents(lastAgents.current, subagents(events, items, ended))), [events, items, ended]);
   const [background, refreshBackground] = useBackground(session.id, running, events);
   const agentFor = (callId?: string) => (callId ? agents.find((a) => a.toolCallId === callId || a.id === `tool:${callId}`) : undefined);
   // The thinking block and the compaction marker already say so, animated,
@@ -1859,7 +1857,7 @@ export function Chat({
                     : "bg-raised/60 text-fg-muted"
               }`}
             >
-              {item.text}
+              {item.portal ? t(item.text) : item.text}
             </div>
           );
         })}

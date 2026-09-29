@@ -607,11 +607,13 @@ function LanguagePicker() {
   const lang = useLanguage();
   const [choice, setChoice] = useState<LanguageChoice>(languageChoice);
   const system = languages().find((l) => l.code === lang)?.name ?? lang;
+  // One chosen here whose file has since gone is English now, and says so.
+  const shown = choice === "system" || languages().some((l) => l.code === choice) ? choice : lang;
   return (
     <Select
       className="w-full sm:w-72"
       aria-label={t("Language")}
-      value={choice}
+      value={shown}
       options={[
         { value: "system", label: t("Match the browser"), hint: choice === "system" ? system : undefined },
         ...languages().map((l) => ({ value: l.code, label: l.name })),

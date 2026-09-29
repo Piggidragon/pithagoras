@@ -10,7 +10,7 @@ import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
 import { ContextPill } from "./ContextPill";
 import { t } from "../i18n";
-import { effortLabel } from "../effort";
+import { EFFORT_LEVELS, effortLabel } from "../effort";
 
 /**
  * pi's levels, and the same list the server falls back to.
@@ -19,7 +19,7 @@ import { effortLabel } from "../effort";
  * having levels, and waiting for the catalogue meant the popover opened empty.
  * Replaced by whatever pi actually reports once that arrives.
  */
-const DEFAULT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const DEFAULT_LEVELS = EFFORT_LEVELS;
 
 /**
  * The model catalogue, kept between sessions and reloads.

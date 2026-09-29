@@ -48,7 +48,7 @@ const locales = new Map<string, Locale>([[ENGLISH.code, ENGLISH]]);
 /** A language to offer. Added before the app is drawn, from `locales/`. */
 export function addLocale(locale: Locale): void {
   locales.set(locale.code, locale);
-  current = resolve(choice);
+  settle();
 }
 
 /** Every language there is, English first, then by name. */
@@ -88,7 +88,29 @@ export function resolve(choice: LanguageChoice, wanted: readonly string[] = brow
 const storedChoice = (): LanguageChoice => local.get(KEY) || "system";
 
 let choice: LanguageChoice = storedChoice();
-let current: Locale = resolve(choice);
+let current: Locale = ENGLISH;
+/** How numbers and dates are written, worked out with the language: see `formatsFor`. */
+let formatLocale = "en";
+
+/**
+ * How numbers and dates are written: the browser's own way where it speaks the
+ * language shown — "en-GB" writes the date first — and the language's
+ * otherwise, so a German page does not show a date the American way. English
+ * is also what is shown for a browser language there is no file for, so a
+ * French browser on the English page keeps its French dates.
+ */
+export function formatsFor(code: string, wanted: readonly string[] = browserLanguages()): string {
+  const base = code.split("-")[0];
+  return wanted.find((l) => l.split("-")[0] === base) ?? (code === ENGLISH.code && wanted[0] ? wanted[0] : code);
+}
+
+/** The language a choice comes to now, and how it writes numbers and dates. */
+function settle(): void {
+  current = resolve(choice);
+  formatLocale = formatsFor(current.code);
+}
+settle();
+
 const listeners = new Set<() => void>();
 
 /** The language chosen in this browser, "system" when none was. */
@@ -108,13 +130,14 @@ export function setLanguage(next: LanguageChoice): void {
 /** Take up the language again — the browser's may have changed — and tell the page. */
 export function apply(): void {
   const was = current;
-  current = resolve(choice);
+  const wasFormats = formatLocale;
+  settle();
   try {
     document.documentElement.lang = current.code;
   } catch {
     // Not in a browser: the tests.
   }
-  if (current !== was) listeners.forEach((l) => l());
+  if (current !== was || formatLocale !== wasFormats) listeners.forEach((l) => l());
 }
 
 const subscribe = (listener: () => void) => {
@@ -126,7 +149,7 @@ const subscribe = (listener: () => void) => {
 export const useLanguage = (): string => useSyncExternalStore(subscribe, language, language);
 
 const fill = (text: string, vars?: Record<string, string | number>) =>
-  vars ? text.replace(/\{(\w+)\}/g, (all, name: string) => (name in vars ? String(vars[name]) : all)) : text;
+  vars ? text.replace(/\{(\w+)\}/g, (all, name: string) => (Object.hasOwn(vars, name) ? String(vars[name]) : all)) : text;
 
 /** A text in the language in effect. */
 export function t(text: string, vars?: Record<string, string | number>): string {
@@ -170,26 +193,18 @@ export const labelOf = (labels: Readonly<Record<string, string>>, value: string,
 export function tx(text: string, vars: Record<string, ReactNode>): ReactNode {
   const said = current.strings[text];
   const parts = (typeof said === "string" ? said : text).split(/\{(\w+)\}/);
-  return createElement(Fragment, null, ...parts.map((part, i) => (i % 2 ? (part in vars ? vars[part] : `{${part}}`) : part)));
+  return createElement(Fragment, null, ...parts.map((part, i) => (i % 2 ? (Object.hasOwn(vars, part) ? vars[part] : `{${part}}`) : part)));
 }
 
-/**
- * How numbers and dates are written: the browser's own way where it speaks the
- * language shown — "en-GB" writes the date first — and the language's
- * otherwise, so a German page does not show a date the American way.
- */
-function formats(): string {
-  const base = current.code.split("-")[0];
-  return browserLanguages().find((code) => code.split("-")[0] === base) ?? current.code;
-}
 
 /**
  * Formatters are costly to make and shown by the hundred — a count in every
  * row — so each is made once per language and set of options.
  */
-const formatters = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat | Intl.DisplayNames>();
-function formatter<F extends Intl.NumberFormat | Intl.DateTimeFormat | Intl.DisplayNames>(kind: string, locale: string, options: object | undefined, make: () => F): F {
-  const key = `${kind}|${locale}|${options ? JSON.stringify(options) : ""}`;
+const formatters = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat | Intl.DisplayNames | Intl.RelativeTimeFormat>();
+function formatter<F extends Intl.NumberFormat | Intl.DateTimeFormat | Intl.DisplayNames | Intl.RelativeTimeFormat>(kind: string, locale: string, options: object | undefined, make: () => F): F {
+  // Most calls pass no options — a count in a row — and are found without building a key from them.
+  const key = options ? `${kind}|${locale}|${JSON.stringify(options)}` : `${kind}|${locale}`;
   let made = formatters.get(key) as F | undefined;
   if (!made) formatters.set(key, (made = make()));
   return made;
@@ -208,13 +223,16 @@ function withDefaults(options: Intl.DateTimeFormatOptions | undefined, fill: Int
 }
 
 const dateTime = (d: Date | number | string, kind: string, options: Intl.DateTimeFormatOptions) => {
-  const locale = formats();
-  return formatter(kind, locale, options, () => new Intl.DateTimeFormat(locale, options)).format(new Date(d));
+  const at = new Date(d);
+  // What cannot be read says so, as toLocaleString did, rather than throwing.
+  if (Number.isNaN(at.getTime())) return String(at);
+  const locale = formatLocale;
+  return formatter(kind, locale, options, () => new Intl.DateTimeFormat(locale, options)).format(at);
 };
 
 /** A number the language's way. */
 export const formatNumber = (n: number, options?: Intl.NumberFormatOptions): string => {
-  const locale = formats();
+  const locale = formatLocale;
   return formatter("number", locale, options, () => new Intl.NumberFormat(locale, options)).format(n);
 };
 
@@ -238,3 +256,7 @@ export function languageName(code: string, fallback = code): string {
     return fallback;
   }
 }
+
+/** "3 days ago", with the unit given, the language's way. */
+export const formatRelative = (value: number, unit: Intl.RelativeTimeFormatUnit): string =>
+  formatter("relative", current.code, undefined, () => new Intl.RelativeTimeFormat(current.code, { numeric: "always" })).format(value, unit);

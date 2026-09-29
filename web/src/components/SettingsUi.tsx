@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { t } from "../i18n";
-import { effortLabel } from "../effort";
+import { EFFORT_LEVELS, effortLabel } from "../effort";
 
 /**
  * The pieces every Settings page is built from, so the pages look like one
@@ -85,7 +85,7 @@ export const primaryCls =
 export const ghostCls =
   "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-fg-muted transition hover:bg-fg/5 hover:text-fg disabled:opacity-40";
 
-export const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+export const LEVELS = EFFORT_LEVELS;
 
 /**
  * How hard a model thinks, as a row of levels. `inherited` is the level that
