@@ -48,25 +48,6 @@ nightly pass — is in [Opt-in features](/guide/features#memory-understory).
 
 ## Audit
 
-**Audit** is always in the sidebar. It answers *what has my agent been asked to
-do this week*: every time the guard refused something, let something through, or
-turned someone away. See [People](/people/) for who is allowed what.
-
-The page lists the latest decisions, newest first, updating every ten seconds
-while it is visible. It shows counts of *refused*, *allowed* and *turned away*,
-and filters:
-
-| Filter | Shows |
-| --- | --- |
-| Everything | All of it |
-| Refused | What the guard stopped |
-| Allowed | What went through on a rule or an approval |
-| Strangers | People turned away |
-
-Each row has its kind — *Refused*, *Allowed by rule*, *Allowed by approval*,
-*Turned away*, *You answered* or *Page opened* — who it concerned, when, the tool
-and what it was aimed at, and the reason. A rule that never shows up here is not
-pulling its weight; a person turned away often may be worth a
-[role](/people/roles).
-
-The page loads the last 300 decisions, of up to 2,000 kept (`GET /api/audit`).
+**Audit** is in the sidebar too: the guard's record of what it refused, let
+through or turned away, with filters. It is described under
+[Sessions → Audit](/guide/sessions#audit).
