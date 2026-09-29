@@ -179,6 +179,107 @@ model.
 
 `compact` fails with a message when the session is too short for pi to bother.
 
+## Editing messages
+
+| | |
+| --- | --- |
+| `DELETE /api/sessions/:id/messages/:seq` | Removes a message and the agent's answer to it. 409 while the chat is running, 404 for an unknown message |
+| `POST /api/sessions/:id/messages/:seq/edit` | `{ message }` — replaces the message: it and everything after it are dropped, and the new text is sent. The old text stays as another version |
+| `POST /api/sessions/:id/messages/:seq/version` | `{ to }` — shows another version of the message, and what followed it then |
+| `PUT /api/sessions/:id/draft` | `{ text, caret?: { start, end } }` — what is in the chat box, which an extension can ask for. Starts nothing |
+| `GET /api/sessions/:id/stats` | Context usage and token counts, without the model catalogue |
+| `GET /api/sessions/:id/models` | The live model list; starts pi when necessary |
+
+## Git
+
+The Git panel's routes, all for the folder of session `:id`. Each is refused when
+the folder is not a repository, except `init`. See [Git](/guide/git).
+
+| | |
+| --- | --- |
+| `GET /api/sessions/:id/git` | Branch, upstream, ahead/behind, changed files, an operation in progress. Reads the disk only |
+| `GET /api/sessions/:id/git/gh` | Whether pull requests can be had through `gh`, and for which GitHub repository. `?fresh=1` asks again |
+| `POST /api/sessions/:id/git/init` | Make the folder a repository |
+| `GET /api/sessions/:id/git/diff?of=` | A diff: `of` is `unstaged`, `staged`, `untracked` (with `path`), `commit` (`sha`), `range` (`base`) or `stash` (`stash`) |
+| `POST …/git/stage` · `/unstage` · `/discard` | `{ paths }` or `{ all: true }` (not for `discard`) |
+| `POST …/git/commit` | `{ message, amend? }` |
+| `POST …/git/abort` · `/continue` | Abort or continue a paused merge or rebase |
+| `GET …/git/log` · `GET …/git/commits/:sha` | History, in pages; one commit with its files |
+| `GET …/git/branches` · `POST …/git/branches` · `POST …/git/branches/delete` | List, `{ name, from? }`, `{ name, force? }` |
+| `POST …/git/switch` | `{ name, remote? }` |
+| `POST …/git/fetch` · `/pull` · `/push` | Each answers `{ said }`; pull is fast-forward only |
+| `GET …/git/stashes` · `POST …/git/stashes` | List; `{ message? }` stashes the changes. `POST …/git/stashes/apply` · `/pop` · `/drop` with `{ ref, sha? }` act on one |
+| `GET …/git/compare?base=` | The branch against its base |
+| `GET …/git/pulls?state=` · `…/pulls/current` · `…/pulls/:n` · `…/pulls/:n/diff` | Pull requests, through `gh` |
+| `POST …/git/pulls` | `{ title, body, base?, draft? }` |
+| `POST …/git/pulls/:n/checkout` · `/merge` · `/comment` · `/review` | `merge`: `{ method, deleteBranch? }`; `comment`: `{ body }`; `review`: `{ action, body }` |
+
+## Terminal, background jobs and subagents
+
+| | |
+| --- | --- |
+| `POST /api/terminal` | `{ sessionId? }` → opens a shell in that session's folder (home otherwise); answers `{ id, cwd }` |
+| `GET /api/terminal/:id/stream` | Server-sent events: its output |
+| `POST /api/terminal/:id/input` · `/resize` | Keystrokes; the size of the panel |
+| `DELETE /api/terminal/:id` | Ends the shell |
+| `GET /api/sessions/:id/background` | `{ supported, jobs, …extension status, piRunning }` — background jobs are listed on the host executor on Linux only |
+| `GET /api/sessions/:id/background/:key/output` | A job's output; 404 when it is not in a file the portal can follow |
+| `POST /api/sessions/:id/background/:key/stop` · `/background/clear` | Stop one; clear the finished ones |
+| `POST /api/sessions/:id/subagents/:agent/input` | `{ text }` — say something to a running subagent. 409 when it cannot be reached |
+| `POST /api/sessions/:id/subagents/:agent/stop` | Stop it |
+
+## Model providers
+
+| | |
+| --- | --- |
+| `GET /api/providers` | The providers pi knows, without their keys |
+| `GET /api/providers/status` | Whether each server answers now |
+| `POST /api/providers/probe` | Ask a server for its models, before or after it is saved |
+| `PUT /api/providers/:id` | `{ kind, adding?, baseUrl?, api?, apiKey?, models? }` — 409 if `adding` and the id is taken |
+| `DELETE /api/providers/:id` | Remove one |
+| `GET /api/models` | Every model pi can use now — the ones with a key |
+| `GET /api/packages/catalog?q=&topic=` | Packages published for pi; `topic=provider` narrows to provider packages |
+| `GET /api/features/flags` | Only which opt-in features are on — for the sidebar and menus |
+
+See [Models and providers](/guide/models).
+
+## Browser add-on
+
+| | |
+| --- | --- |
+| `GET /api/browser` | State, connection and settings |
+| `POST /api/browser/install` · `/start` · `/stop` | Lifecycle of the managed container |
+| `DELETE /api/browser/install` | Remove it; `?profile=forget` drops the logins too |
+| `POST /api/browser/connect` · `DELETE /api/browser/connect` | Give the agent the browser's tools, or take them away |
+| `PUT /api/browser/config` · `GET /api/browser/suggest-password` | The login of the browser view; a suggestion |
+| `PUT /api/browser/allowlist` | Domains it may be pointed at; empty means no restriction |
+| `PUT /api/sessions/:id/browser` | Whether this chat may use it |
+
+See [The agent's browser](/guide/browser).
+
+## Voice
+
+| | |
+| --- | --- |
+| `GET /api/voice` · `PUT /api/voice` | The voice settings |
+| `GET /api/voice/install` · `POST /api/voice/install` · `/start` · `/stop` | The managed voice container and its readiness |
+| `POST /api/voice/connect` | Use the managed services in the settings |
+| `GET/POST /api/voice/presets` · `GET …/presets/:id/audio` · `DELETE …/presets/:id` | Saved voices |
+| `POST /api/sessions/:id/voice/connection` | Take or give back a lease on the voice services |
+| `POST /api/sessions/:id/voice/transcribe` | `audio/wav` body (12 MB at most) → `{ text }` |
+| `POST /api/sessions/:id/voice/speech` | Text → audio |
+
+The session routes answer 409 until Voice is enabled in Settings → Add-ons. See [Voice control](/guide/voice).
+
+## Canvases
+
+| | |
+| --- | --- |
+| `GET /api/sessions/:id/canvases` · `POST` | List; `{ title }` creates one |
+| `PUT /api/sessions/:id/canvases/:cid` | `{ revision, title, content }` — 409 when `revision` is stale |
+| `POST /api/sessions/:id/canvases/:cid/persist` | Store a temporary canvas |
+| `DELETE /api/sessions/:id/canvases/:cid` | Delete |
+
 ## Portal settings
 
 | | |

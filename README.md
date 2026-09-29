@@ -28,20 +28,48 @@ adds 150–300 tokens per tool.
 ## Quick start
 
 ```bash
-cp .env.example .env      # set PORTAL_PASSWORD and your provider key
+git clone https://github.com/thecodacus/pithagoras.git && cd pithagoras
+cp .env.example .env      # set PORTAL_PASSWORD, and WORKSPACES_DIR to where your repos are
 docker compose up -d --build
 ```
 
-Then open `http://<host>:4100`.
+Then open `http://<host>:4100` and sign in. The setup assistant in **Settings → Providers**
+walks you through adding a model provider (a local llama.cpp / Ollama server, OpenRouter,
+Anthropic, …); you can also set a key in `.env`.
 
-The container uses host networking, so pi and its extensions reach services on
-the box at `127.0.0.1` — a llama.cpp server on `:8080`, for example — exactly as
-they would outside a container.
+The container uses host networking, so pi and its extensions reach services on the box at
+`127.0.0.1` — a llama.cpp server on `:8080`, for example — exactly as they would outside a
+container. It needs the Docker socket mount to install the Browser and Voice add-ons.
+Running from source, the Portainer stack and the full variable list are in
+[Deploying](https://thecodacus.github.io/pithagoras/guide/deploying).
+
+Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
+
+## What is in it
+
+- **Chats that outlive the tab** — runs belong to the server; reconnecting replays the log.
+  Edit or delete a message, steer a running chat, switch tools off per chat.
+- **Home and projects** — chats work in the agent's Home or in a project folder with its own
+  `AGENTS.md`; the sidebar lists them by folder.
+- **Panels beside the chat** — Files (browse, edit, follow the agent), Git (changes, history,
+  branches, pull requests through `gh`), a terminal, canvases, subagents and background jobs,
+  each dockable on its own side.
+- **Models and extensions** — set up providers from Settings, per-model context windows, pi
+  packages from a catalogue, MCP servers, skills, and a switch to turn a package off without
+  removing it.
+- **Voice mode** — local speech-to-text and text-to-speech in a managed container, pictures
+  both ways, push-to-talk.
+- **Add-ons** — the agent's own browser, and opt-in features: a subagent tool and Understory
+  memory with a Memory page.
+- **Channels and people** — reach the agent from Telegram, Slack, Discord or a webhook, with
+  roles, approvals and an audit log.
+- **Routines** — scheduled runs that report to a channel.
+- **Portal** — installable app, light/dark theme, English and German.
 
 ## How it works
 
 ```
-Browser ──SSE (replay + tail)──▶ portal ──JSONL over stdio──▶ pi --mode rpc
+Browser ──SSE (replay + tail)──▶ portal ──▶ pi (SDK, in process — or in a container)
                                     │
                                     └─▶ SQLite: sessions + full event log
 ```
@@ -54,60 +82,56 @@ the run continues server-side. The client reconnects with the last event id it s
 
 | `EXECUTOR` | What it does |
 |---|---|
-| `host` (default) | pi runs inside the portal container, working directly on the repos mounted at `/projects`. Fast, real git, full access to those directories. |
-| `container` | Each task gets its own container with only its project mounted, dropped capabilities, `no-new-privileges`, and memory/CPU/PID caps. Needs the Docker socket mount. |
+| `host` (default) | pi runs inside the portal process, working directly on the repos mounted at `/workspaces`. Fast, real git, full access to those directories. |
+| `container` | Each task gets its own container (`PI_IMAGE`, default `pithagoras-runner:latest`) with only its project mounted, dropped capabilities, `no-new-privileges`, and memory/CPU/PID caps. Needs the Docker socket mount. |
 
 pi has **no approval prompts** — by design it runs with the permissions of its process
 ("real isolation needs to come from the OS or a container boundary"). That is what makes
-unattended runs possible, and also why `PORTAL_PASSWORD` is required and why the portal
-should stay on Tailscale/LAN rather than the public internet.
-
-## Config panel
-
-The **Config** button in a task opens the web equivalent of pi's TUI slash commands, in three tabs:
-
-- **Session** — model (searchable across the whole provider catalogue), thinking level, live
-  context usage / tokens / cost, auto-compaction toggle, and compact-now. Read from the running
-  pi process, so it reflects what that session is actually using.
-- **Global** — provider, default model and default thinking level applied to every **newly
-  started** session. Stored in the portal database, so they outlive restarts and override the
-  env defaults. Running sessions keep their own settings.
-- **Packages** — install, remove and update pi packages (extensions, skills, prompts, themes)
-  from npm, git, a URL or a path. They install under a persistent home directory, so they
-  survive container rebuilds.
+unattended runs possible, and also why a password is required and why the portal should stay
+on Tailscale/LAN rather than the public internet.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORTAL_PASSWORD` | — | **Required.** Shared password for the UI. |
+| `PORTAL_PASSWORD` | — | **Required** (or `PORTAL_ALLOW_NO_PASSWORD=1` behind an authenticating proxy). |
 | `PORTAL_SECRET` | random | HMAC key for the auth cookie. Set it so logins survive restarts. |
-| `WORKSPACES_DIR` | `/root/repos` | Host directory holding the workspaces pi may work in. |
+| `WORKSPACES_DIR` | `/root/repos` | Host directory mounted at `/workspaces` (Compose only). |
+| `PORTAL_DATA_DIR` | named volume | Host directory for the data volume, instead of a Docker volume (Compose only). |
 | `EXECUTOR` | `host` | `host` or `container`. |
-| `PI_PROVIDER` / `PI_MODEL` | inherit / inherit | Session and portal overrides take precedence; pi settings decide when unset. Last-resort provider is `openrouter`, model is left to pi. |
-| `OPENROUTER_API_KEY` etc. | — | Provider credentials, forwarded to pi. |
+| `PI_PROVIDER` / `PI_MODEL` / `PI_THINKING_LEVEL` | inherit | Overrides only; pi's `settings.json` decides when unset. |
+| `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` | — | Provider credentials, forwarded to pi. |
 | `TASK_MEMORY_MB` / `TASK_CPUS` / `TASK_PIDS_LIMIT` | `2048` / `2` / `512` | Per-task caps in `container` mode. |
+
+The rest is in [Configuration](https://thecodacus.github.io/pithagoras/reference/configuration).
+
+## Settings
+
+**Settings** (bottom of the sidebar) is the web equivalent of pi's slash commands:
+**Providers** and **Defaults** for models, **Tools**, **Skills**, **MCP** and **Extensions**
+for the agent, **Channels** and **People**, and **This browser**, **Add-ons**, **Shortcuts**,
+**About** and **Advanced** for the portal. What a chat uses lives on the pills under its
+composer. Defaults you set apply to **newly started** sessions only.
 
 ## Sessions and workspaces
 
 A **session** is a conversation, and it works in a folder. **New** starts one in **Home**, the
-agent's own directory, where its SOUL.md, PrimaryUser.md and MEMORY.md are. A **project** is an extra folder you make on purpose, on the
-Projects tab: `"Cool Project"` becomes `cool-project`, with instructions of its own saved as its
-`AGENTS.md`. Opening a project opens its chat, and `/new` or `/clear` starts a fresh one in it.
-Deleting a session never deletes a folder.
+agent's own directory, where its SOUL.md, PrimaryUser.md and MEMORY.md are. A **project** is an
+extra folder you make on purpose, on the Projects tab: `"Cool Project"` becomes `cool-project`,
+with instructions of its own saved as its `AGENTS.md`. Opening a project opens its chat, and
+`/new` or `/clear` starts a fresh one in it. Deleting a session never deletes a folder.
 
-Each session has its own pi conversation, workspace, and status. The sidebar shows
-them all with a live status dot: running, idle, error, or **interrupted** — meaning the
-server restarted while that task was mid-run. Sessions are marked interrupted rather than
-left spinning forever; sending another message resumes the conversation.
+The sidebar shows every session with a live status dot: running, idle, error, or
+**interrupted** — the server restarted while that task was mid-run. Sending another message
+resumes the conversation.
 
 ## Limitations
 
-- A session does not survive a **portal restart**, only a browser disconnect. pi persists its
-  own session files, so the conversation is intact and can be continued, but the in-flight
-  run stops.
-- Two sessions pointed at the same workspace in `host` mode will edit the same working tree.
-  Use `container` mode or separate workspaces if you want to run those in parallel.
+- A run does not survive a **portal restart**, only a browser disconnect. pi persists its own
+  session files, so the conversation is intact and can be continued, but the in-flight run stops.
+- Two sessions pointed at the same workspace in `host` mode edit the same working tree. Use
+  `container` mode or separate workspaces to run those in parallel.
+- One portal per data directory: a second one on the same data refuses to start.
 
 ## Documentation
 

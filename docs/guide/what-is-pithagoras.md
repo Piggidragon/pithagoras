@@ -42,6 +42,17 @@ so adding one is installing a repo rather than patching the portal. See
 portal's slash command palette, interactive menus included. See
 [Extensions](/guide/extensions).
 
+**Panels** sit beside the chat: [Files](/guide/files), [Git](/guide/git), a
+[terminal](/guide/terminal) with background jobs and subagents, and
+[canvases](/guide/canvases). Each docks on its own side.
+
+**Models** are set up from Settings, without editing files — see
+[Models and providers](/guide/models). **Voice** talks to the agent with local
+speech recognition and synthesis ([Voice control](/guide/voice)), and the
+agent's own [browser](/guide/browser) and an [Understory memory](/guide/memory)
+are optional add-ons. The portal installs as an app and speaks English and
+German — see [The interface](/guide/interface).
+
 ## Status
 
 Honest state of things, so you know what you are getting:
@@ -51,6 +62,7 @@ Honest state of things, so you know what you are getting:
 | Sessions, workspaces, transcript replay | Working |
 | Model and effort per session, surviving restarts | Working |
 | Slash commands — builtin, extension, prompt, skill | Working |
+| Files, Git, terminal, canvases, voice, model providers | Working |
 | Settings, extension config, package management | Working |
 | Channel packages: loading, installing, configuring | Working |
 | The channel supervisor — starting them, routing replies | Working |

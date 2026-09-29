@@ -2,7 +2,8 @@
 
 Two capabilities ship with Pithagoras and are **off** until you switch them on
 in **Settings → Add-ons**: a **subagent tool** and **Understory** as the agent's
-memory. A fresh install has neither. Switching one on writes it into pi's own
+memory. A fresh install has neither. (The same tab holds the Docker-based
+[Browser and Voice](/guide/add-ons).) Switching one on writes it into pi's own
 configuration — a package, an MCP server — so it can also be seen, and undone,
 from Settings → Extensions and Settings → MCP. Switching it off removes it.
 

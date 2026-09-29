@@ -20,7 +20,17 @@ are a portal concept with a separate format and a separate install directory.
 
 ## Installing
 
-Settings → Extensions. Four spec forms:
+Settings → Extensions has three parts: **Find packages**, **Install a package**
+and the **Installed** list.
+
+**Find packages** searches the npm registry for packages published for pi — by
+keyword, with a separate search for packages that bring a model provider — and
+shows downloads last week, author and last update. **Install** asks first: a
+package runs inside pi with the same rights as the agent, reading files and
+running commands, so install ones you trust. The registry can be another one
+(`NPM_REGISTRY_URL`); results are kept for ten minutes.
+
+**Install a package** takes a spec, in four forms:
 
 | Form | Example |
 | --- | --- |
@@ -30,7 +40,8 @@ Settings → Extensions. Four spec forms:
 | path | `/absolute/path/to/package` |
 
 They persist across restarts, because `HOME` points at the data volume. **Update
-all** upgrades everything; the bin icon removes one.
+all** upgrades everything; the bin icon removes one. Chats started from then on
+have the package; open ones pick it up with `/reload`.
 
 ## Switching one off
 

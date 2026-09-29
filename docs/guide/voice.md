@@ -441,6 +441,36 @@ preferences are unchanged. This skips initial
 reasoning latency, but prompt processing and sentence synthesis still take time.
 Other providers and the container executor retain their normal thinking behavior.
 
+### Speaking instructions
+
+The rules above — a short spoken sentence before tools, plain text without
+Markdown, long reports in a canvas, pictures through `show_image`, the
+`(laugh)` / `(sigh)` cues — are one built-in block of text
+(`server/src/pi/voice-first.ts`), not a field in the UI. They are switched off as
+a whole with `VOICE_RESPONSE_INSTRUCTIONS=false` on the portal: no `[Audio mode]`
+prefix is added and the system-prompt rule is never sent, which is what the
+[comparison baseline](/guide/voice-comparison) does. Any other value leaves them
+on. `VOICE_SKIP_FIRST_THINKING=false` keeps thinking on for the first call. The
+remaining `VOICE_*` variables (`VOICE_PIPELINE_MODE`, `VOICE_SENTENCE_CHUNKS`,
+`VOICE_TTS_PREFETCH`, `VOICE_STATUS_SPEECH`, `VOICE_COMPARISON`) are described in
+the comparison guide.
+
+## Speech runtimes
+
+**Settings → Add-ons → Voice → Speech runtime** selects how speech is made, and
+each runtime has its own address:
+
+| Runtime | For | Notes |
+| --- | --- | --- |
+| `breeze` | A Python Breeze-TTS-2 service | Designed or cloned voices |
+| `audio-cpp` | Breeze on audio.cpp, streaming — what the managed container runs | Whisper on CPU |
+| `chatterbox` | Speech in another language, on audio.cpp | Needs an input language (not auto-detect) and a reference clone — Aria or a voice with a recording; see above |
+
+Recognition is Whisper by default. **Speech recognition model** takes another
+model id (letters, digits, `.`, `:`, `-`, `_`), such as `qwen3-asr` behind
+llama-swap. **Lazy load** and the speech-detection thresholds are saved with the
+rest by **Save voice settings**.
+
 ## Speech speed
 
 **Speech generation → Fast** uses CFG 1, avoiding the extra guidance branch.
@@ -608,11 +638,14 @@ still needs the private reference WAV and transcript described above.
 **Stop · release VRAM** stops both managed services without deleting models.
 **Start voice** reuses the installed files. The managed container does not start
 automatically after a host reboot; start it in Settings when needed. Setup failures
-remain visible in the log and can be retried. Port 8188 serves Whisper and port
-7862 serves Breeze, both bound to host loopback. These differ from the older manual
-systemd setup, which the installer does not modify. Stop older TTS services before
-using the managed service to avoid loading two copies into VRAM. The portal must
-be able to reach host loopback, as in the standard host-network Compose setup.
+remain visible in the log and can be retried. Whisper listens on loopback port 8188
+and Breeze on 7862, inside the portal's own network namespace: the voice container
+joins the portal container's network (or the host's, for a native portal) and
+publishes no host ports. These differ from the older manual systemd setup, which
+the installer does not modify. Stop older TTS services before using the managed
+service to avoid loading two copies into VRAM. A managed container made by an
+earlier version is migrated automatically; see
+[Docker add-ons](/guide/add-ons#service-addresses-and-health-checks).
 
 ### Lazy GPU loading
 
