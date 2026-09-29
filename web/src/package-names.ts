@@ -3,6 +3,8 @@
  * Kept apart from the components so the tests can reach them.
  */
 
+import { formatRelative, t } from "./i18n";
+
 /** The npm name in a pi package spec: `npm:@scope/pkg@1.2.0` is `@scope/pkg`. Anything else is itself. */
 export function packageName(spec: string): string {
   if (!spec.startsWith("npm:")) return spec;
@@ -18,17 +20,21 @@ export function compactCount(n: number): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
-/** How long ago, in the one unit that says it best. */
+/**
+ * How long ago, in the one unit that says it best, in the language shown —
+ * written out, where time.ts is terse: a package's age runs to months and
+ * years, which "{n}d ago" does not.
+ */
 export function ago(iso: string | undefined, now = Date.now()): string {
-  const t = iso ? Date.parse(iso) : NaN;
-  if (!Number.isFinite(t)) return "";
-  const s = Math.max(0, (now - t) / 1000);
-  const steps: [number, string][] = [[60, "second"], [60, "minute"], [24, "hour"], [30, "day"], [12, "month"], [Infinity, "year"]];
+  const then = iso ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(then)) return "";
+  const s = Math.max(0, (now - then) / 1000);
+  const steps: [number, Intl.RelativeTimeFormatUnit][] = [[60, "second"], [60, "minute"], [24, "hour"], [30, "day"], [12, "month"], [Infinity, "year"]];
   let v = s;
   for (const [size, unit] of steps) {
     if (v < size) {
       const n = Math.floor(v);
-      return unit === "second" ? "just now" : `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+      return unit === "second" ? t("just now") : formatRelative(-n, unit);
     }
     v /= size;
   }

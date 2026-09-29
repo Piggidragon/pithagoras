@@ -24,6 +24,7 @@ import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, stri
 import { SHELL_TOOL, unwrapCall } from "../tool-activity";
 import { argLabel, isBlock, isScalar } from "../tool-args";
 import { useFollowBottom } from "../use-follow-bottom";
+import { formatNumber, t, tp } from "../i18n";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
@@ -96,7 +97,7 @@ export function ThinkingBlock({
   const now = useNow(streaming);
 
   const seconds = since ? Math.max(0, Math.round(((streaming ? now : until ?? since) - since) / 1000)) : undefined;
-  const label = streaming ? "Thinking" : seconds && seconds >= 1 ? `Thought for ${formatElapsed(seconds)}` : "Thought process";
+  const label = streaming ? t("Thinking") : seconds && seconds >= 1 ? t("Thought for {time}", { time: formatElapsed(seconds) }) : t("Thought process");
   // The end of what it is thinking, under a closed header.
   const tail = streaming && !open ? recentText(thinking) : "";
   // As high as what it shows, up to three lines — a sentence of reasoning is
@@ -280,11 +281,11 @@ export function shellOutcome(status: ToolItem["status"], output: string, interru
   const code = /Command exited with code (-?\d+)\s*$/.exec(output);
   if (code) return { label: `exit ${code[1]}`, tone: "error" };
   const timeout = /Command timed out after (\d+) seconds\s*$/.exec(output);
-  if (timeout) return { label: `timed out · ${timeout[1]}s`, tone: "warn" };
-  if (/Command aborted\s*$/.test(output)) return { label: "stopped", tone: "warn" };
+  if (timeout) return { label: t("timed out · {n}s", { n: timeout[1] }), tone: "warn" };
+  if (/Command aborted\s*$/.test(output)) return { label: t("stopped"), tone: "warn" };
   const other = reportedExit(output);
   if (other !== undefined) return { label: `exit ${other}`, tone: "error" };
-  return { label: "failed", tone: "error" };
+  return { label: t("failed"), tone: "error" };
 }
 
 /** Past this, the output shown in the chat is the end of it; the terminal has the rest. */
@@ -367,14 +368,14 @@ export function ToolCall({
         {took !== undefined && <span className="chat-faint tabular-nums">{coarse ? (took < 1000 ? "<1s" : formatElapsed(Math.round(took / 1000))) : formatDuration(took)}</span>}
         {shell && lines > 0 && (
           <span className="chat-faint tabular-nums">
-            {lines.toLocaleString()} {lines === 1 ? "line" : "lines"}
+            {tp(lines, "{n} line", "{n} lines")}
           </span>
         )}
         <LuChevronRight className="chat-chevron" aria-hidden />
       </button>
       {onOpenAgent && (
         <button type="button" className="chat-tool-agent" onClick={onOpenAgent}>
-          <LuBot aria-hidden /> {running ? "Watch" : "Open"}
+          <LuBot aria-hidden /> {running ? t("Watch") : t("Open")}
         </button>
       )}
       {recent.length > 0 && (
@@ -391,7 +392,7 @@ export function ToolCall({
           {shell ? (
             <pre className="chat-tool-command">
               <span aria-hidden>$ </span>
-              {command || "(no command)"}
+              {command || t("(no command)")}
             </pre>
           ) : (
             <ToolArgs args={wrapped ? call.input : item.args} />
@@ -399,8 +400,8 @@ export function ToolCall({
           {output ? (
             <div className="chat-tool-output-wrap">
               <div className="chat-tool-label">
-                {item.status === "error" && !item.interrupted ? "Error" : "Output"}
-                {clipped && <span className="chat-faint"> · last {INLINE_OUTPUT.toLocaleString()} characters</span>}
+                {item.status === "error" && !item.interrupted ? t("Error") : t("Output")}
+                {clipped && <span className="chat-faint"> · {t("last {n} characters", { n: formatNumber(INLINE_OUTPUT) })}</span>}
               </div>
               {structured ? (
                 <div className="chat-tool-output is-structured">
@@ -411,12 +412,12 @@ export function ToolCall({
               )}
             </div>
           ) : (
-            item.status === "running" && <div className="chat-tool-label"><Shimmer>Waiting for output…</Shimmer></div>
+            item.status === "running" && <div className="chat-tool-label"><Shimmer>{t("Waiting for output…")}</Shimmer></div>
           )}
           {shell && onOpenTerminal && item.callId && (
             <button type="button" className="chat-tool-link" onClick={() => onOpenTerminal(item.callId!)}>
               <LuSquareTerminal aria-hidden />
-              {clipped ? "Show the whole output in the agent terminal" : "Open in the agent terminal"}
+              {clipped ? t("Show the whole output in the agent terminal") : t("Open in the agent terminal")}
             </button>
           )}
         </div>
@@ -431,9 +432,9 @@ export function ToolCall({
  * whatever is inside an object the same way, a step in. See tool-args.ts.
  */
 export function ToolArgs({ args }: { args: unknown }) {
-  if (args === undefined || args === null) return <div className="chat-tool-label">No parameters</div>;
+  if (args === undefined || args === null) return <div className="chat-tool-label">{t("No parameters")}</div>;
   if (typeof args !== "object") return <pre className="chat-tool-value">{String(args)}</pre>;
-  if (!Object.keys(args as object).length) return <div className="chat-tool-label">No parameters</div>;
+  if (!Object.keys(args as object).length) return <div className="chat-tool-label">{t("No parameters")}</div>;
   return <ArgValue value={args} depth={0} />;
 }
 
@@ -441,17 +442,17 @@ export function ToolArgs({ args }: { args: unknown }) {
 const ARG_DEPTH = 4;
 
 function ArgValue({ value, depth }: { value: unknown; depth: number }): ReactNode {
-  if (value === null || value === undefined) return <span className="chat-arg-none">none</span>;
-  if (typeof value === "boolean") return <span className="chat-arg-scalar">{value ? "yes" : "no"}</span>;
+  if (value === null || value === undefined) return <span className="chat-arg-none">{t("none")}</span>;
+  if (typeof value === "boolean") return <span className="chat-arg-scalar">{value ? t("yes") : t("no")}</span>;
   // As written: 8080 is a port, not "8,080", and 0.0001 is not 0.
   if (typeof value === "number") return <span className="chat-arg-scalar tabular-nums">{String(value)}</span>;
   if (typeof value === "string") {
-    if (!value) return <span className="chat-arg-none">empty</span>;
+    if (!value) return <span className="chat-arg-none">{t("empty")}</span>;
     return isBlock(value) ? <pre className="chat-tool-value">{value}</pre> : <span className="chat-arg-scalar">{value}</span>;
   }
   if (depth >= ARG_DEPTH) return <pre className="chat-tool-value">{JSON.stringify(value, null, 2)}</pre>;
   if (Array.isArray(value)) {
-    if (!value.length) return <span className="chat-arg-none">none</span>;
+    if (!value.length) return <span className="chat-arg-none">{t("none")}</span>;
     // A list of words is read down, one to a line.
     if (value.every(isScalar)) {
       return (
@@ -480,7 +481,7 @@ function ArgValue({ value, depth }: { value: unknown; depth: number }): ReactNod
     );
   }
   const entries = Object.entries(value as Record<string, unknown>);
-  if (!entries.length) return <span className="chat-arg-none">none</span>;
+  if (!entries.length) return <span className="chat-arg-none">{t("none")}</span>;
   return (
     <dl className={`chat-tool-args ${depth ? "is-nested" : ""}`}>
       {entries.map(([key, v]) => (
@@ -537,7 +538,7 @@ export function CompactionMarker({ item }: { item: CompactionItem }) {
             <i />
             <i />
           </span>
-          <Shimmer>Compacting the conversation</Shimmer>
+          <Shimmer>{t("Compacting the conversation")}</Shimmer>
           {seconds >= 1 && <span className="chat-faint tabular-nums">{formatElapsed(seconds)}</span>}
         </span>
         <span className="chat-compaction-rule" />
@@ -558,8 +559,8 @@ export function CompactionMarker({ item }: { item: CompactionItem }) {
         >
           {failed ? <LuTriangleAlert aria-hidden /> : <LuFoldVertical aria-hidden />}
           <span>
-            {failed ? "Compaction did not finish" : "Conversation compacted"}
-            {!failed && item.tokensBefore ? ` · ${formatTokens(item.tokensBefore)} tokens summarized` : ""}
+            {failed ? t("Compaction did not finish") : t("Conversation compacted")}
+            {!failed && item.tokensBefore ? ` · ${t("{n} tokens summarized", { n: formatTokens(item.tokensBefore) })}` : ""}
           </span>
           {item.summary && <LuChevronRight className="chat-chevron" aria-hidden />}
         </button>
@@ -591,7 +592,7 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
   const p = phase.prefill;
   // `processed` already counts the cached prefix.
   const { done, percent } = prefillShare(p);
-  const detail = p ? `${done.toLocaleString()} / ${p.total.toLocaleString()} tokens${p.cache ? ` · ${p.cache.toLocaleString()} from cache` : ""}` : undefined;
+  const detail = p ? `${t("{done} / {total} tokens", { done: formatNumber(done), total: formatNumber(p.total) })}${p.cache ? ` · ${t("{n} from cache", { n: formatNumber(p.cache) })}` : ""}` : undefined;
   let kind: string;
   let icon: ReactNode;
   let text: ReactNode;
@@ -606,7 +607,7 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
           <i />
         </span>
       );
-      text = <Shimmer>Loading model</Shimmer>;
+      text = <Shimmer>{t("Loading model")}</Shimmer>;
       extra = phase.model ? <span className="chat-status-model">{phase.model}</span> : null;
       break;
     case "processing the prompt": {
@@ -635,18 +636,18 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
           <i />
         </span>
       );
-      text = <Shimmer>Compacting the conversation</Shimmer>;
+      text = <Shimmer>{t("Compacting the conversation")}</Shimmer>;
       break;
     case "retrying after an error":
       kind = "retry";
       icon = <Ring />;
-      text = <span className="text-warn">Retrying after an error</span>;
+      text = <span className="text-warn">{t("Retrying after an error")}</span>;
       break;
     case "thinking":
     case "working":
       kind = "thinking";
       icon = <span className="chat-orbit" aria-hidden><i /><i /><i /></span>;
-      text = <Shimmer>{phase.label === "thinking" ? "Thinking" : "Working"}</Shimmer>;
+      text = <Shimmer>{phase.label === "thinking" ? t("Thinking") : t("Working")}</Shimmer>;
       break;
     default:
       return null;
@@ -660,7 +661,7 @@ export function StatusIndicator({ phase, now }: { phase: Activity; now: number }
         key={kind}
         className="chat-status-pill"
         {...(kind === "prefill" && percent !== undefined
-          ? { role: "progressbar", "aria-label": "Prompt processing", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-valuetext": `${percent}% — ${detail}` }
+          ? { role: "progressbar", "aria-label": t("Prompt processing"), "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-valuetext": `${percent}% — ${detail}` }
           : {})}
       >
         <span className="chat-status-icon">{icon}</span>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type PiModel } from "../api";
 import { load, peek, useCached } from "../settings-cache";
 import { Select } from "./Select";
+import { t } from "../i18n";
 
 export interface SubagentChoice {
   /** The subagent tool is on: there is something to decide. */
@@ -73,20 +74,20 @@ export function useSubagentChoice(sessionId: string, onError?: (e: string) => vo
 export function SubagentModelPicker({ subagents, models }: { subagents: SubagentChoice; models: PiModel[] }) {
   const { on, choice, set } = subagents;
   if (!on || !choice) return null;
-  const named = (value: string) => (value === "auto" ? "this chat's model" : value);
+  const named = (value: string) => (value === "auto" ? t("this chat's model") : value);
   const value = choice.model ?? "";
   return (
     <div className="px-3 py-1.5">
-      <p className="text-[11px] text-fg-subtle">Subagents in this chat run on</p>
+      <p className="text-[11px] text-fg-subtle">{t("Subagents in this chat run on")}</p>
       <Select
-        aria-label="Subagents in this chat run on"
+        aria-label={t("Subagents in this chat run on")}
         size="sm"
         className="mt-1 w-full"
         value={value}
         onChange={(v) => set(v === "" ? null : v)}
         options={[
-          { value: "", label: `Default — ${named(choice.default)}` },
-          { value: "auto", label: "This chat's model", hint: "The one it is on when it starts one" },
+          { value: "", label: t("Default — {model}", { model: named(choice.default) }) },
+          { value: "auto", label: t("This chat's model"), hint: t("The one it is on when it starts one") },
           ...(value && value !== "auto" && !models.some((m) => `${m.provider}/${m.id}` === value) ? [{ value, label: value }] : []),
           ...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
         ]}

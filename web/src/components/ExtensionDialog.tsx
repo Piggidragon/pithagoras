@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LuCheck, LuTerminal, LuX } from "react-icons/lu";
 import { api } from "../api";
 import { isEnter, isEscape } from "../shortcuts";
+import { t } from "../i18n";
 
 export interface UiRequest {
   id: string;
@@ -38,7 +39,7 @@ export function ExtensionDialog({
     setError("");
     try {
       const result = await api.respondUi(sessionId, request.id, payload);
-      if (!result.ok) { setError(result.note || "This question has expired. Your answer was not delivered."); return; }
+      if (!result.ok) { setError(result.note || t("This question has expired. Your answer was not delivered.")); return; }
       onDone();
     } catch (e) {
       setError((e as Error).message);
@@ -63,7 +64,7 @@ export function ExtensionDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={request.title || "Extension"}
+        aria-label={request.title || t("Extension")}
         className="w-full max-w-md overflow-hidden rounded-2xl border border-line bg-surface shadow-pop"
       >
         <header className="flex items-start gap-3 border-b border-line px-4 py-3">
@@ -71,7 +72,7 @@ export function ExtensionDialog({
             <LuTerminal className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-medium text-fg">{request.title || "Extension"}</h2>
+            <h2 className="text-sm font-medium text-fg">{request.title || t("Extension")}</h2>
             {request.message && (
               <p className="mt-0.5 text-xs text-fg-muted">{request.message}</p>
             )}
@@ -100,7 +101,7 @@ export function ExtensionDialog({
                 </li>
               ))}
               {(request.options ?? []).length === 0 && (
-                <p className="px-3 py-2 text-sm text-fg-subtle">No options offered.</p>
+                <p className="px-3 py-2 text-sm text-fg-subtle">{t("No options offered.")}</p>
               )}
             </ul>
           )}
@@ -130,14 +131,14 @@ export function ExtensionDialog({
                   onClick={() => respond({ cancelled: true })}
                   className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/10"
                 >
-                  Cancel
+                  {t("Cancel")}
                 </button>
                 <button
                   disabled={busy}
                   onClick={() => respond({ value })}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
                 >
-                  <LuCheck className="h-3.5 w-3.5" /> Submit
+                  <LuCheck className="h-3.5 w-3.5" /> {t("Submit")}
                 </button>
               </div>
             </>
@@ -150,14 +151,14 @@ export function ExtensionDialog({
                 onClick={() => respond({ value: false })}
                 className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/10"
               >
-                No
+                {t("No")}
               </button>
               <button
                 disabled={busy}
                 onClick={() => respond({ value: true })}
                 className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
               >
-                Yes
+                {t("Yes")}
               </button>
             </div>
           )}

@@ -20,16 +20,8 @@ import { confirmDialog } from "./ConfirmDialog";
 import { StatusDot } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { pollWhileVisible } from "../poll";
-
-const when = (iso: string) => {
-  const then = new Date(iso + (iso.endsWith("Z") ? "" : "Z")).getTime();
-  const mins = Math.round((Date.now() - then) / 60000);
-  if (!Number.isFinite(mins)) return iso;
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
-  return `${Math.round(mins / 1440)}d ago`;
-};
+import { t } from "../i18n";
+import { when } from "../time";
 
 /**
  * The agent's conversations, one per chat rather than one overall.
@@ -96,11 +88,11 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
   const remove = async (s: AgentSession) => {
     const fresh = s.channel && s.channel.slug !== BROWSER;
     const ok = await confirmDialog({
-      title: `Delete "${s.title}"?`,
+      title: t("Delete \"{name}\"?", { name: s.title }),
       message: fresh
-        ? "The agent forgets this conversation, and the next message in that chat starts a new one."
-        : "It is stopped if it is running, and its transcript is removed.",
-      confirmLabel: "Delete",
+        ? t("The agent forgets this conversation, and the next message in that chat starts a new one.")
+        : t("It is stopped if it is running, and its transcript is removed."),
+      confirmLabel: t("Delete"),
       danger: true,
       deletes: true,
     });
@@ -124,7 +116,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
       const key = s.channel?.slug ?? "none";
       if (!out.has(key)) {
         out.set(key, {
-          name: key === BROWSER ? "Here, in the portal" : (s.channel?.name ?? "No channel"),
+          name: s.channel?.name ?? "",
           kind: s.channel?.kind ?? null,
           // A browser conversation has no channel by design, so it must not be
           // flagged as one whose channel went missing.
@@ -153,11 +145,10 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
         <div className="mx-auto w-full max-w-3xl">
           <PageHeader
             icon={<LuBot />}
-            title="Agent"
+            title={t("Agent")}
             description={
               <>
-                Conversations that reached the agent through a channel. Each chat gets its own
-                session, so a group and a DM never share a memory.
+                {t("Conversations that reached the agent through a channel. Each chat gets its own session, so a group and a DM never share a memory.")}
               </>
             }
             action={
@@ -178,13 +169,13 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
                 ) : (
                   <LuPlus className="h-4 w-4" />
                 )}
-                New conversation
+                {t("New conversation")}
               </button>
             }
           >
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Stat value={sessions.length} label="conversations" />
-              <Stat value={sessions.filter((s) => s.status === "running").length} label="running" tone="text-accent" />
+              <Stat value={sessions.length} label={t("conversations")} />
+              <Stat value={sessions.filter((s) => s.status === "running").length} label={t("running")} tone="text-accent" />
               <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
                 <LuFolder className="h-3 w-3 shrink-0 text-fg-faint" />
                 <span className="truncate font-mono text-[11px] text-fg-subtle">{home}</span>
@@ -196,7 +187,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
 
           {loadError && (
             <div className="mt-4 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">
-              Could not refresh the conversations — what is shown may be out of date. {loadError}
+              {t("Could not refresh the conversations — what is shown may be out of date.")} {loadError}
             </div>
           )}
           {error && (
@@ -207,10 +198,9 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
             <RowsSkeleton />
           ) : sessions.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-line px-4 py-10 text-center">
-              <p className="text-sm text-fg-muted">Nothing has reached the agent yet.</p>
+              <p className="text-sm text-fg-muted">{t("Nothing has reached the agent yet.")}</p>
               <p className="mx-auto mt-2 max-w-md text-xs text-fg-faint">
-                Start one here, or message a channel — a Telegram chat, a webhook — and it
-                appears in this list. They all reach the same agent and share its memory.
+                {t("Start one here, or message a channel — a Telegram chat, a webhook — and it appears in this list. They all reach the same agent and share its memory.")}
               </p>
             </div>
           ) : (
@@ -223,7 +213,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
                     ) : (
                       <LuRadio className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
                     )}
-                    <h3 className="truncate text-xs font-medium text-fg-muted">{group.name}</h3>
+                    <h3 className="truncate text-xs font-medium text-fg-muted">{id === BROWSER ? t("Here, in the portal") : group.name || t("No channel")}</h3>
                     {group.kind && id !== BROWSER && (
                       <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">
                         {group.kind}
@@ -232,9 +222,9 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
                     {!group.present && (
                       <span
                         className="shrink-0 rounded bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn/90"
-                        title={`Recreate a channel with the slug "${id}" to reconnect these`}
+                        title={t("Recreate a channel with the slug \"{slug}\" to reconnect these", { slug: id })}
                       >
-                        no channel
+                        {t("no channel")}
                       </span>
                     )}
                     <span className="ml-auto shrink-0 text-[11px] text-fg-faint">
@@ -255,7 +245,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
                               title={
                                 <TitleInput
                                   value={s.title}
-                                  label="Conversation name"
+                                  label={t("Conversation name")}
                                   className="w-full text-sm"
                                   onCommit={(next) => rename(s, next)}
                                   onCancel={() => setRenaming(null)}
@@ -276,16 +266,16 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
                             <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                               <button
                                 onClick={() => setRenaming(s.id)}
-                                title="Rename"
-                                aria-label={`Rename ${s.title}`}
+                                title={t("Rename")}
+                                aria-label={t("Rename {name}", { name: s.title })}
                                 className="rounded p-1.5 text-fg-subtle transition hover:text-accent"
                               >
                                 <LuPencil className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 onClick={() => remove(s)}
-                                title="Delete conversation"
-                                aria-label={`Delete ${s.title}`}
+                                title={t("Delete conversation")}
+                                aria-label={t("Delete {name}", { name: s.title })}
                                 className="rounded p-1.5 text-fg-subtle transition hover:text-danger"
                               >
                                 <LuTrash2 className="h-3.5 w-3.5" />
@@ -370,7 +360,7 @@ function AgentFiles({ setup, onSaved }: { setup: Setup; onSaved: (s: Setup) => v
           </button>
         ))}
         <span className="ml-auto text-[11px] text-fg-faint">
-          loaded as context when a conversation starts
+          {t("loaded as context when a conversation starts")}
         </span>
       </div>
 
@@ -378,7 +368,7 @@ function AgentFiles({ setup, onSaved }: { setup: Setup; onSaved: (s: Setup) => v
         <div className="mt-2">
           {unread(file.name) && (
             <p role="note" className="mb-2 text-xs text-fg-muted">
-              Not read while Understory is the agent's memory (Settings → Add-ons → Memory). It is kept, and read again once Understory is switched off.
+              {t("Not read while Understory is the agent's memory (Settings → Add-ons → Memory). It is kept, and read again once Understory is switched off.")}
             </p>
           )}
           <textarea
@@ -398,7 +388,7 @@ function AgentFiles({ setup, onSaved }: { setup: Setup; onSaved: (s: Setup) => v
             ) : saved ? (
               <LuCheck className="h-4 w-4" />
             ) : null}
-            {saved ? "Saved" : "Save"}
+            {saved ? t("Saved") : t("Save")}
           </button>
         </div>
       )}

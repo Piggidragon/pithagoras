@@ -9,6 +9,7 @@ import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import { isEnter } from "../shortcuts";
+import { t, tp, tx } from "../i18n";
 
 /**
  * The folders chats work in.
@@ -81,9 +82,11 @@ export function ProjectsPage({
     attempt(async () => {
       const contents = await api.projectContents(p.name);
       const parts = [
-        contents.sessions ? `${contents.sessions} chat${contents.sessions === 1 ? "" : "s"}` : "",
+        contents.sessions ? tp(contents.sessions, "{n} chat", "{n} chats") : "",
         contents.files
-          ? `${contents.complete ? "" : "over "}${contents.files.toLocaleString()} file${contents.files === 1 ? "" : "s"} (${bytesLabel(contents.bytes)}) in its folder`
+          ? contents.complete
+            ? tp(contents.files, "{n} file ({size}) in its folder", "{n} files ({size}) in its folder", { size: bytesLabel(contents.bytes) })
+            : tp(contents.files, "over {n} file ({size}) in its folder", "over {n} files ({size}) in its folder", { size: bytesLabel(contents.bytes) })
           : "",
       ].filter(Boolean);
       const routines = contents.routines ?? [];
@@ -93,12 +96,18 @@ export function ProjectsPage({
         routines.length === 0
           ? ""
           : routines.length === 1
-            ? ` The routine ${names} runs here: it is switched off until it is given another place, and keeps its history.`
-            : ` The routines ${names} run here: they are switched off until they are given another place, and keep their history.`;
+            ? ` ${t("The routine {names} runs here: it is switched off until it is given another place, and keeps its history.", { names })}`
+            : ` ${t("The routines {names} run here: they are switched off until they are given another place, and keep their history.", { names })}`;
+      const going = parts.length === 2
+        ? t("{first} and {second} go with it.", { first: parts[0], second: parts[1] })
+        : parts.length === 1
+          // The verb agrees with what goes: "1 chat goes", "3 chats go", "over 1,000 files go".
+          ? tp(contents.sessions || (contents.complete ? contents.files : Math.max(2, contents.files)), "{what} goes with it.", "{what} go with it.", { what: parts[0] })
+          : t("It is empty.");
       const ok = await confirmDialog({
-        title: `Delete the project "${p.name}"?`,
-        message: `${parts.length ? parts.join(" and ") + " go with it. " : "It is empty. "}This cannot be undone.${stranded}`,
-        confirmLabel: "Delete project",
+        title: t("Delete the project \"{name}\"?", { name: p.name }),
+        message: `${going} ${t("This cannot be undone.")}${stranded}`,
+        confirmLabel: t("Delete project"),
         danger: true,
         deletes: true,
       });
@@ -114,11 +123,10 @@ export function ProjectsPage({
         <div className="mx-auto w-full max-w-3xl">
           <PageHeader
             icon={<LuFolderKanban />}
-            title="Projects"
+            title={t("Projects")}
             description={
               <>
-                New chats start in Home. A project is a folder of its own with instructions for the
-                agent — saved as its AGENTS.md — for work that should stay together.
+                {t("New chats start in Home. A project is a folder of its own with instructions for the agent — saved as its AGENTS.md — for work that should stay together.")}
               </>
             }
             action={
@@ -126,7 +134,7 @@ export function ProjectsPage({
                 onClick={() => setCreating(true)}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
               >
-                <LuPlus className="h-4 w-4" /> New project
+                <LuPlus className="h-4 w-4" /> {t("New project")}
               </button>
             }
           />
@@ -139,7 +147,7 @@ export function ProjectsPage({
             <ul className="stagger-in mt-4 space-y-1">
               {projects.length === 0 && (
                 <li className="py-12 text-center text-sm text-fg-subtle">
-                  No projects yet. New chats start in Home; make a project for work that should stay together.
+                  {t("No projects yet. New chats start in Home; make a project for work that should stay together.")}
                 </li>
               )}
               {projects.map((p) => (
@@ -155,15 +163,15 @@ export function ProjectsPage({
                     <div className="flex items-baseline gap-2">
                       <p className="truncate text-sm text-fg">{p.name}</p>
                       {p.hasInstructions && (
-                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">instructions</span>
+                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">{t("instructions")}</span>
                       )}
                     </div>
                     <p className="truncate font-mono text-[11px] text-fg-faint" title={p.path}>
                       {p.path}
                     </p>
                     <p className="truncate text-[11px] text-fg-faint">
-                      {p.sessions} chat{p.sessions === 1 ? "" : "s"}
-                      {lastActive(p) ? ` · last ${when(lastActive(p)!)}` : ""}
+                      {tp(p.sessions, "{n} chat", "{n} chats")}
+                      {lastActive(p) ? ` · ${t("last {when}", { when: when(lastActive(p)!) })}` : ""}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
@@ -173,8 +181,8 @@ export function ProjectsPage({
                         attempt(() => onNewChat(p.path));
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-accent"
-                      title="New chat here"
-                      aria-label={`New chat in ${p.name}`}
+                      title={t("New chat here")}
+                      aria-label={t("New chat in {name}", { name: p.name })}
                     >
                       <LuPlus className="h-3.5 w-3.5" />
                     </button>
@@ -184,8 +192,8 @@ export function ProjectsPage({
                         setEditing(p);
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-accent"
-                      title="Instructions (AGENTS.md)"
-                      aria-label={`Instructions for ${p.name}`}
+                      title={t("Instructions (AGENTS.md)")}
+                      aria-label={t("Instructions for {name}", { name: p.name })}
                     >
                       <LuFileText className="h-3.5 w-3.5" />
                     </button>
@@ -195,8 +203,8 @@ export function ProjectsPage({
                         remove(p);
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-danger"
-                      title="Delete project"
-                      aria-label={`Delete ${p.name}`}
+                      title={t("Delete project")}
+                      aria-label={t("Delete {name}", { name: p.name })}
                     >
                       <LuTrash2 className="h-3.5 w-3.5" />
                     </button>
@@ -223,7 +231,7 @@ export function ProjectsPage({
             try {
               await onNewChat(project.path);
             } catch (e) {
-              setError(`"${project.name}" was created, but its chat did not open: ${(e as Error).message}`);
+              setError(t("\"{name}\" was created, but its chat did not open: {error}", { name: project.name, error: (e as Error).message }));
             }
           }}
         />
@@ -274,48 +282,48 @@ function NewProject({
 
   return (
     <Modal
-      title="New project"
-      subtitle="A folder of its own, with instructions the agent follows in it"
+      title={t("New project")}
+      subtitle={t("A folder of its own, with instructions the agent follows in it")}
       onClose={onClose}
       footer={
         <div className="flex items-center justify-end gap-2">
           {error && <p className="mr-auto text-xs text-danger">{error}</p>}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             onClick={submit}
             disabled={!slug || busy}
             className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
           >
-            {busy ? "Creating…" : "Create and open"}
+            {busy ? t("Creating…") : t("Create and open")}
           </button>
         </div>
       }
     >
       <label className="block text-xs text-fg-muted">
-        Name
+        {t("Name")}
         <input
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => isEnter(e) && submit()}
-          placeholder="Cool Project"
+          placeholder={t("Cool Project")}
           className={`${FIELD} mt-1`}
         />
       </label>
       {name.trim() && (
         <p className="mt-1 truncate font-mono text-[11px] text-fg-subtle">
-          {slug ? `→ ${root ? `${root}/` : ""}${slug}` : "needs at least one letter or digit"}
+          {slug ? `→ ${root ? `${root}/` : ""}${slug}` : t("needs at least one letter or digit")}
         </p>
       )}
       <label className="mt-4 block text-xs text-fg-muted">
-        Instructions <span className="text-fg-faint">(optional — saved as AGENTS.md)</span>
+        {t("Instructions")} <span className="text-fg-faint">{t("(optional — saved as AGENTS.md)")}</span>
         <textarea
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
           rows={8}
-          placeholder="What this project is, and how the agent should work in it."
+          placeholder={t("What this project is, and how the agent should work in it.")}
           className={`${FIELD} mt-1 resize-y font-mono text-xs`}
         />
       </label>
@@ -362,41 +370,40 @@ function Instructions({
 
   return (
     <Modal
-      title={`Instructions · ${project.name}`}
-      subtitle="Saved as AGENTS.md in the folder — edit it there too if you like"
+      title={t("Instructions · {name}", { name: project.name })}
+      subtitle={t("Saved as AGENTS.md in the folder — edit it there too if you like")}
       onClose={onClose}
       footer={
         <div className="flex items-center justify-end gap-2">
           {error && <p className="mr-auto text-xs text-danger">{error}</p>}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             onClick={save}
             disabled={text === null || text === saved || busy}
             className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
           >
-            {busy ? "Saving…" : "Save"}
+            {busy ? t("Saving…") : t("Save")}
           </button>
         </div>
       }
     >
       {text === null ? (
-        <p className="py-8 text-center text-sm text-fg-subtle">{error ? "" : "Loading…"}</p>
+        <p className="py-8 text-center text-sm text-fg-subtle">{error ? "" : t("Loading…")}</p>
       ) : (
         <>
           <textarea
             autoFocus
-            aria-label="Project instructions"
+            aria-label={t("Project instructions")}
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={14}
-            placeholder="What this project is, and how the agent should work in it."
+            placeholder={t("What this project is, and how the agent should work in it.")}
             className={`${FIELD} resize-y font-mono text-xs`}
           />
           <p className="mt-2 text-[11px] text-fg-subtle">
-            Chats started after saving pick this up. One already open does after <code>/reload</code>.
-            Leave it empty to remove the file.
+            {tx("Chats started after saving pick this up. One already open does after {command}. Leave it empty to remove the file.", { command: <code>/reload</code> })}
           </p>
         </>
       )}

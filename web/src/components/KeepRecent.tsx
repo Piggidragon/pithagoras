@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { api, type CompactionSettings } from "../api";
 import { formatTokens } from "../transcript";
+import { t } from "../i18n";
 
 /**
  * How much of a conversation compaction leaves alone.
@@ -52,10 +53,10 @@ export function KeepRecent({
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs text-fg-subtle">Keep recent</span>
+        <span className="text-xs text-fg-subtle">{t("Keep recent")}</span>
         <span className="tabular-nums text-xs text-fg">
-          {formatTokens(clamped)} tokens
-          {share !== null && <span className="ml-1 text-fg-faint">· {share.toFixed(0)}% of window</span>}
+          {t("{n} tokens", { n: formatTokens(clamped) })}
+          {share !== null && <span className="ml-1 text-fg-faint">· {t("{n}% of window", { n: share.toFixed(0) })}</span>}
         </span>
       </div>
       <input
@@ -68,7 +69,7 @@ export function KeepRecent({
         onChange={(e) => onChange(Number(e.target.value))}
         onPointerUp={(e) => onCommit?.(Number((e.target as HTMLInputElement).value))}
         onKeyUp={(e) => onCommit?.(Number((e.target as HTMLInputElement).value))}
-        aria-label="Tokens kept verbatim by compaction"
+        aria-label={t("Tokens kept verbatim by compaction")}
         className="mt-1.5 h-1 w-full cursor-pointer appearance-none rounded-full bg-raised accent-accent disabled:opacity-40"
       />
       <div className="mt-1 flex justify-between text-[10px] text-fg-faint">

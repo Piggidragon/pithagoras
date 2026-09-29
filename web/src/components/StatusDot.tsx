@@ -1,10 +1,11 @@
 import type { SessionStatus } from "../api";
+import { labelOf, msg } from "../i18n";
 
 const LABEL: Record<SessionStatus, string> = {
-  running: "running",
-  idle: "idle",
-  error: "error",
-  interrupted: "interrupted — server restarted mid-run",
+  running: msg("running"),
+  idle: msg("idle"),
+  error: msg("error"),
+  interrupted: msg("interrupted — server restarted mid-run"),
 };
 
 /**
@@ -29,11 +30,11 @@ export function StatusDot({
 }) {
   const mark =
     status === "running" ? (
-      <span className={`status-working ${bare ? className : ""}`} title={LABEL.running} role="img" aria-label={LABEL.running}>
+      <span className={`status-working ${bare ? className : ""}`} title={labelOf(LABEL, "running")} role="img" aria-label={labelOf(LABEL, "running")}>
         <span aria-hidden>π</span>
       </span>
     ) : (
-      <span className={`status-dot is-${status} ${bare ? className : ""}`} title={LABEL[status]} role="img" aria-label={LABEL[status]} />
+      <span className={`status-dot is-${status} ${bare ? className : ""}`} title={labelOf(LABEL, status)} role="img" aria-label={labelOf(LABEL, status)} />
     );
   return bare ? mark : <span className={`status-slot ${className}`}>{mark}</span>;
 }

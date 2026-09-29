@@ -19,6 +19,7 @@ import { VoiceTerminal } from "./VoiceTerminal";
 import { api, type PortalEvent } from "../api";
 import type { VoiceCue } from "../voice-cues";
 import type { VoicePhase } from "../hands-free";
+import { t } from "../i18n";
 
 export interface VoiceLevels { input: number; output: number }
 type OrbMode = "input" | "output" | "idle" | "muted";
@@ -324,9 +325,9 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     let cancelled = false;
     void api.browser().then(status => {
       if (cancelled) return;
-      if (status.install.container !== 'running') { setBrowserError('The browser viewer is unavailable.'); return; }
+      if (status.install.container !== 'running') { setBrowserError(t('The browser viewer is unavailable.')); return; }
       setBrowserError(''); setLoaded(true); setShown(true); onCue('focus');
-    }).catch(() => { if (!cancelled) setBrowserError('Could not connect to the browser viewer.'); });
+    }).catch(() => { if (!cancelled) setBrowserError(t('Could not connect to the browser viewer.')); });
     return () => { cancelled = true; };
   }, [browserActivity, onCue]);
   const open = () => { setLoaded(true); setShown(true); onCue('focus'); };
@@ -361,7 +362,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
   const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
-  const status = waitingForTap ? (touch ? "Tap to continue voice mode" : "Click or press a key to continue voice mode") : starting ? "Connecting" : input || holding ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : ptt ? (touch || !bindings["voice.hold"] ? "Hold the microphone to talk" : `Hold ${describe(bindings["voice.hold"], layout)} to talk`) : "Listening";
+  const status = waitingForTap ? (touch ? t("Tap to continue voice mode") : t("Click or press a key to continue voice mode")) : starting ? t("Connecting") : input || holding ? t("Hearing you") : speaking ? t("Speaking") : phase === "Speaking" ? t("Preparing your reply") : phase === "Thinking" ? t("Thinking") : phase === "Transcribing" ? t("Transcribing") : muted ? t("Microphone muted") : ptt ? (touch || !bindings["voice.hold"] ? t("Hold the microphone to talk") : t("Hold {keys} to talk", { keys: describe(bindings["voice.hold"], layout) })) : t("Listening");
   const anyPanel = shown || terminalShown || filesShown || picturesShown || conversation;
   // A window sized by hand keeps its size until the windows are arranged
   // differently — one opens or closes — and then the layout places it again.
@@ -451,59 +452,59 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // is-docked: the compact chrome that goes with a window open — the dock's
   // styles, and the pictures and cards out of the windows' way — over which
   // the orb standing on its own has its own.
-  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${stageWindows || orb === "dock" ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label="Voice conversation" data-panels={panels} data-orb={orb} data-mode={mode}
+  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${stageWindows || orb === "dock" ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label={t("Voice conversation")} data-panels={panels} data-orb={orb} data-mode={mode}
     onDragOver={e => { if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); }}
     onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
     onDrop={drop}>
     <header className="voice-stage-header">
       <span className="voice-stage-session">{title}</span>
       <div className="voice-utilities">
-        {!conversation && <button type="button" onClick={() => { setConversation(true); onCue("focus"); }} title={`Conversation${hint("voice.conversation")}`} aria-label="Show the conversation"><LuMessageSquareText /></button>}
-        <button type="button" onClick={onCanvasToggle} title={`Session canvases${hint("voice.canvas")}`} aria-label="Session canvases" aria-expanded={canvasOpen}><LuFileText /></button>
-        {!filesShown && <button type="button" onClick={openFiles} title={`Show files${hint("voice.files")}`} aria-label="Show files"><LuFolderOpen /></button>}
-        {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title={`Show pictures${hint("voice.pictures")}`} aria-label="Show pictures"><LuImage /></button>}
-        {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title={`Show browser${hint("voice.browser")}`} aria-label="Show browser"><LuGlobe /></button>}
-        {!terminalShown && <button type="button" aria-label="Show terminal" title={`Show terminal${hint("voice.terminal")}`} onClick={() => { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
-        <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title={`Voice settings${hint("voice.settings")}`} aria-label="Voice settings" aria-expanded={settings}><LuSlidersHorizontal /></button>
+        {!conversation && <button type="button" onClick={() => { setConversation(true); onCue("focus"); }} title={`${t("Conversation")}${hint("voice.conversation")}`} aria-label={t("Show the conversation")}><LuMessageSquareText /></button>}
+        <button type="button" onClick={onCanvasToggle} title={`${t("Session canvases")}${hint("voice.canvas")}`} aria-label={t("Session canvases")} aria-expanded={canvasOpen}><LuFileText /></button>
+        {!filesShown && <button type="button" onClick={openFiles} title={`${t("Show files")}${hint("voice.files")}`} aria-label={t("Show files")}><LuFolderOpen /></button>}
+        {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title={`${t("Show pictures")}${hint("voice.pictures")}`} aria-label={t("Show pictures")}><LuImage /></button>}
+        {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title={`${t("Show browser")}${hint("voice.browser")}`} aria-label={t("Show browser")}><LuGlobe /></button>}
+        {!terminalShown && <button type="button" aria-label={t("Show terminal")} title={`${t("Show terminal")}${hint("voice.terminal")}`} onClick={() => { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
+        <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title={`${t("Voice settings")}${hint("voice.settings")}`} aria-label={t("Voice settings")} aria-expanded={settings}><LuSlidersHorizontal /></button>
       </div>
       {settings && <VoiceSettings anchor={settingsToggle} sounds={sounds} onSounds={onSounds} rate={rate} onRate={onRate} steer={steer} onSteer={onSteer} ptt={ptt} onPtt={onPtt} onClose={() => setSettings(false)} />}
     </header>
-    {attachments.length > 0 && <div className="voice-attachments" aria-label="Pictures for your next message">
+    {attachments.length > 0 && <div className="voice-attachments" aria-label={t("Pictures for your next message")}>
       <div>{attachments.map(a => <figure key={a.id}>
         <img src={a.data} alt={a.name} />
-        <button type="button" aria-label={`Remove ${a.name}`} title="Remove" onClick={() => onRemovePicture(a.id)}><LuX /></button>
+        <button type="button" aria-label={t("Remove {name}", { name: a.name })} title={t("Remove")} onClick={() => onRemovePicture(a.id)}><LuX /></button>
       </figure>)}</div>
-      <span>Sent with what you say next</span>
+      <span>{t("Sent with what you say next")}</span>
     </div>}
-    {dropping && <div className="voice-drop-hint" aria-hidden="true"><LuImagePlus />Drop pictures to send them with what you say next</div>}
+    {dropping && <div className="voice-drop-hint" aria-hidden="true"><LuImagePlus />{t("Drop pictures to send them with what you say next")}</div>}
     <input ref={picker} type="file" accept={IMAGE_TYPES.join(",")} multiple hidden onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) onAddPictures(files); }} />
-    <section ref={browser} className={`voice-browser-window ${shown ? 'is-open' : ''} ${maximized ? 'is-maximized' : ''}`} aria-label="Live browser" aria-hidden={!shown}>
-      <header><span><i />Live browser</span><div>
+    <section ref={browser} className={`voice-browser-window ${shown ? 'is-open' : ''} ${maximized ? 'is-maximized' : ''}`} aria-label={t("Live browser")} aria-hidden={!shown}>
+      <header><span><i />{t("Live browser")}</span><div>
         {maximized
-          ? <button type="button" aria-label="Restore browser size" title="Restore size (Esc)" onClick={() => setBrowserMax(false)}><LuMinimize2 /></button>
-          : <button type="button" aria-label="Maximize browser" title="Maximize" onClick={() => setBrowserMax(true)}><LuMaximize2 /></button>}
-        <button type="button" aria-label="Minimize browser" title="Minimize browser" onClick={minimize}><LuMinus /></button>
+          ? <button type="button" aria-label={t("Restore browser size")} title={t("Restore size (Esc)")} onClick={() => setBrowserMax(false)}><LuMinimize2 /></button>
+          : <button type="button" aria-label={t("Maximize browser")} title={t("Maximize")} onClick={() => setBrowserMax(true)}><LuMaximize2 /></button>}
+        <button type="button" aria-label={t("Minimize browser")} title={t("Minimize browser")} onClick={minimize}><LuMinus /></button>
       </div></header>
-      {loaded && <iframe onLoad={e => frameKeys(e.currentTarget)} src="/browser-ui/" title="The agent's browser" allow="clipboard-read; clipboard-write; fullscreen" />}
+      {loaded && <iframe onLoad={e => frameKeys(e.currentTarget)} src="/browser-ui/" title={t("The agent's browser")} allow="clipboard-read; clipboard-write; fullscreen" />}
       <ResizeHandles target={browser} />
     </section>
-    <section ref={terminal} className={`voice-terminal-window ${terminalShown ? 'is-open' : ''}`} aria-label="Live terminal" aria-hidden={!terminalShown}>
-      <header><span><LuTerminal />Terminal</span><div><button type="button" aria-label="Minimize terminal" title="Minimize terminal" onClick={() => { setTerminalShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
+    <section ref={terminal} className={`voice-terminal-window ${terminalShown ? 'is-open' : ''}`} aria-label={t("Live terminal")} aria-hidden={!terminalShown}>
+      <header><span><LuTerminal />{t("Terminal")}</span><div><button type="button" aria-label={t("Minimize terminal")} title={t("Minimize terminal")} onClick={() => { setTerminalShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {terminalUsed && <VoiceTerminal events={toolEvents} />}
       <ResizeHandles target={terminal} />
     </section>
-    <section ref={filesWindow} className={`voice-files-window ${filesMain ? 'as-main' : 'as-side'} ${filesShown ? 'is-open' : ''}`} aria-label="Files" aria-hidden={!filesShown}>
-      <header><span><LuFolderOpen />Files</span><div><button type="button" aria-label="Minimize files" title="Minimize files" onClick={() => { setFilesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
+    <section ref={filesWindow} className={`voice-files-window ${filesMain ? 'as-main' : 'as-side'} ${filesShown ? 'is-open' : ''}`} aria-label={t("Files")} aria-hidden={!filesShown}>
+      <header><span><LuFolderOpen />{t("Files")}</span><div><button type="button" aria-label={t("Minimize files")} title={t("Minimize files")} onClick={() => { setFilesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {filesUsed && <FilesPanel sessionId={sessionId} folder={folder} activity={fileActivity} since={filesSince} />}
       <ResizeHandles target={filesWindow} />
     </section>
-    <section ref={picturesWindow} className={`voice-files-window voice-pictures-window ${picturesMain ? 'as-main' : 'as-side'} ${picturesShown ? 'is-open' : ''}`} aria-label="Pictures" aria-hidden={!picturesShown}>
-      <header><span><LuImage />Pictures</span><div><button type="button" aria-label="Minimize pictures" title="Minimize pictures" onClick={() => { setPicturesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
+    <section ref={picturesWindow} className={`voice-files-window voice-pictures-window ${picturesMain ? 'as-main' : 'as-side'} ${picturesShown ? 'is-open' : ''}`} aria-label={t("Pictures")} aria-hidden={!picturesShown}>
+      <header><span><LuImage />{t("Pictures")}</span><div><button type="button" aria-label={t("Minimize pictures")} title={t("Minimize pictures")} onClick={() => { setPicturesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {picturesShown && <VoicePictures sessionId={sessionId} pictures={pictures} index={Math.min(pictureIndex, pictures.length - 1)} onIndex={setPictureIndex} />}
       <ResizeHandles target={picturesWindow} />
     </section>
-    <section ref={conversationWindow} className={`voice-files-window voice-conversation-window ${conversationMain ? 'as-main' : 'as-side'} ${conversation ? 'is-open' : ''}`} aria-label="Conversation" aria-hidden={!conversation}>
-      <header><span><LuMessageSquareText />Conversation</span><div><button type="button" aria-label="Close the conversation" title="Close" onClick={() => { setConversation(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
+    <section ref={conversationWindow} className={`voice-files-window voice-conversation-window ${conversationMain ? 'as-main' : 'as-side'} ${conversation ? 'is-open' : ''}`} aria-label={t("Conversation")} aria-hidden={!conversation}>
+      <header><span><LuMessageSquareText />{t("Conversation")}</span><div><button type="button" aria-label={t("Close the conversation")} title={t("Close")} onClick={() => { setConversation(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {conversation && <VoiceConversation sessionId={sessionId} items={items} />}
       <ResizeHandles target={conversationWindow} />
     </section>
@@ -512,22 +513,22 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       <div className="voice-avatar"><VoiceOrb mode={mode} levels={levels} /></div>
       <div className="voice-dock-center">
         {workPhase && ['processing the prompt','compacting the conversation'].includes(workPhase.label) ? <ActivityProgress phase={workPhase} compact /> : <>
-        <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? phase : thought && anyPanel ? 'Thinking' : status}</div>
-        {anyPanel && thought && phase !== 'Compacting context' && <div ref={thoughtViewport} className="voice-thought-stream" aria-label="Live model thinking">{thought.slice(-1200)}</div>}
+        <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? t('Compacting context') : thought && anyPanel ? t("Thinking") : status}</div>
+        {anyPanel && thought && phase !== 'Compacting context' && <div ref={thoughtViewport} className="voice-thought-stream" aria-label={t("Live model thinking")}>{thought.slice(-1200)}</div>}
         </>}
       </div>
-      {!anyPanel && transcript && (input || holding || phase === "Transcribing") && <p className="voice-live-transcript" aria-label="Live transcription">{transcript}</p>}
+      {!anyPanel && transcript && (input || holding || phase === "Transcribing") && <p className="voice-live-transcript" aria-label={t("Live transcription")}>{transcript}</p>}
 
       <div className="voice-stage-controls">
         {ptt
-          ? <button type="button" className={`voice-stage-action voice-hold ${holding ? "is-holding" : ""}`} title={`Hold to talk${touch ? "" : hint("voice.hold")}`} aria-label="Hold to talk" aria-pressed={holding} disabled={starting}
+          ? <button type="button" className={`voice-stage-action voice-hold ${holding ? "is-holding" : ""}`} title={`${t("Hold to talk")}${touch ? "" : hint("voice.hold")}`} aria-label={t("Hold to talk")} aria-pressed={holding} disabled={starting}
               onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); onHold(true); }}
               onPointerUp={() => onHold(false)} onPointerCancel={() => onHold(false)} onContextMenu={e => e.preventDefault()}><LuMic /></button>
-          : <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={`${muted ? 'Unmute' : 'Mute'} microphone${hint('voice.mute')}`} aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>}
-        <button type="button" className={`voice-stage-action ${attachments.length ? "has-pictures" : ""}`} title={`Add a picture${hint("voice.picture")}`} aria-label="Add a picture" disabled={starting} onClick={() => picker.current?.click()}><LuImagePlus />{attachments.length > 0 && <i>{attachments.length}</i>}</button>
-        <button type="button" className="voice-stage-action" title={`Repeat the last reply${hint("voice.repeat")}`} aria-label="Repeat the last reply" disabled={starting || !canRepeat || speaking} onClick={onRepeat}><LuRotateCcw /></button>
-        {running && <button type="button" className="voice-stage-action voice-stop" title={`Stop what the agent is doing${hint("voice.stop")}`} aria-label="Stop the agent" onClick={onStop}><LuSquare /></button>}
-        <button ref={end} type="button" className="voice-stage-action voice-end" title={`End voice mode${hint("voice.toggle")}${running || !bindings["voice.stop"] ? "" : ` or ${describe(bindings["voice.stop"], layout)}`}`} aria-label="End voice mode" onClick={onEnd}><LuX /></button>
+          : <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={`${muted ? t('Unmute microphone') : t('Mute microphone')}${hint('voice.mute')}`} aria-label={muted ? t("Unmute microphone") : t("Mute microphone")} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>}
+        <button type="button" className={`voice-stage-action ${attachments.length ? "has-pictures" : ""}`} title={`${t("Add a picture")}${hint("voice.picture")}`} aria-label={t("Add a picture")} disabled={starting} onClick={() => picker.current?.click()}><LuImagePlus />{attachments.length > 0 && <i>{attachments.length}</i>}</button>
+        <button type="button" className="voice-stage-action" title={`${t("Repeat the last reply")}${hint("voice.repeat")}`} aria-label={t("Repeat the last reply")} disabled={starting || !canRepeat || speaking} onClick={onRepeat}><LuRotateCcw /></button>
+        {running && <button type="button" className="voice-stage-action voice-stop" title={`${t("Stop what the agent is doing")}${hint("voice.stop")}`} aria-label={t("Stop the agent")} onClick={onStop}><LuSquare /></button>}
+        <button ref={end} type="button" className="voice-stage-action voice-end" title={`${t("End voice mode")}${hint("voice.toggle")}${running || !bindings["voice.stop"] ? "" : ` ${t("or {keys}", { keys: describe(bindings["voice.stop"], layout) })}`}`} aria-label={t("End voice mode")} onClick={onEnd}><LuX /></button>
       </div>
     </div>
     {(error || browserError) && <p role="alert" className="voice-stage-error">{error || browserError}</p>}

@@ -4,6 +4,7 @@ import { gitApi, type Branch } from "../../git-api";
 import { confirmDialog } from "../ConfirmDialog";
 import { ago, ErrorNote, IconButton, Quiet, SectionHead, TextButton } from "./bits";
 import { useGit } from "./context";
+import { msg, t } from "../../i18n";
 
 /** The branches here and on the remotes: switched to, made, deleted. */
 export function Branches() {
@@ -30,11 +31,11 @@ export function Branches() {
     e.preventDefault();
     const wanted = name.trim();
     if (!wanted) return;
-    if (await act(`Making ${wanted}`, () => gitApi.createBranch(id, wanted))) setName("");
+    if (await act(msg("Making {name}"), () => gitApi.createBranch(id, wanted), { name: wanted })) setName("");
   };
 
   const remove = async (b: Branch) => {
-    if (!(await confirmDialog({ title: `Delete the branch ${b.name}?`, message: "Only the branch here — not on the remote.", confirmLabel: "Delete", danger: true }))) return;
+    if (!(await confirmDialog({ title: t("Delete the branch {name}?", { name: b.name }), message: t("Only the branch here — not on the remote."), confirmLabel: t("Delete"), danger: true }))) return;
     const refused = await gitApi.deleteBranch(id, b.name).then(
       () => null,
       (e) => (e as Error).message,
@@ -43,16 +44,16 @@ export function Branches() {
     // Not merged anywhere: its commits go with it, so that is asked separately.
     if (!/not fully merged/i.test(refused)) return setError(refused);
     const sure = await confirmDialog({
-      title: `${b.name} is not merged`,
-      message: "Its commits are on no other branch. Deleting it loses them unless you have their hashes.",
-      confirmLabel: "Delete anyway",
+      title: t("{name} is not merged", { name: b.name }),
+      message: t("Its commits are on no other branch. Deleting it loses them unless you have their hashes."),
+      confirmLabel: t("Delete anyway"),
       danger: true,
     });
-    if (sure) await act(`Deleting ${b.name}`, () => gitApi.deleteBranch(id, b.name, true));
+    if (sure) await act(msg("Deleting {name}"), () => gitApi.deleteBranch(id, b.name, true), { name: b.name });
   };
 
   if (error) return <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>;
-  if (!list) return <Quiet>Loading…</Quiet>;
+  if (!list) return <Quiet>{t("Loading…")}</Quiet>;
   const match = (b: Branch) => !filter || b.name.toLowerCase().includes(filter.toLowerCase());
   const local = list.filter((b) => !b.remote && match(b));
   const remote = list.filter((b) => b.remote && match(b));
@@ -64,28 +65,28 @@ export function Branches() {
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={`New branch from ${repo.branch ?? "here"}`}
-          aria-label="Name of the new branch"
+          placeholder={repo.branch ? t("New branch from {branch}", { branch: repo.branch }) : t("New branch from here")}
+          aria-label={t("Name of the new branch")}
           spellCheck={false}
           className="min-w-0 flex-1 rounded border border-line bg-canvas px-1.5 py-0.5 font-mono text-xs text-fg outline-none focus:border-accent/60"
         />
         <TextButton type="submit" primary disabled={!name.trim() || !!busy}>
-          Create
+          {t("Create")}
         </TextButton>
       </form>
       {list.length > 8 && (
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter"
-          aria-label="Filter the branches"
+          placeholder={t("Filter")}
+          aria-label={t("Filter the branches")}
           className="mx-2 my-1.5 shrink-0 rounded border border-line bg-canvas px-1.5 py-0.5 text-xs text-fg outline-none focus:border-accent/60"
         />
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <SectionHead title="Here" count={local.length} />
+        <SectionHead title={t("Here")} count={local.length} />
         {local.map((b) => (
-          <BranchRow key={b.name} branch={b} onSwitch={() => void act(`Switching to ${b.name}`, () => gitApi.switch(id, b.name))} onDelete={() => void remove(b)} />
+          <BranchRow key={b.name} branch={b} onSwitch={() => void act(msg("Switching to {name}"), () => gitApi.switch(id, b.name), { name: b.name })} onDelete={() => void remove(b)} />
         ))}
         {remote.length > 0 && (
           <>
@@ -96,7 +97,7 @@ export function Branches() {
               className="sticky top-0 flex w-full items-center gap-1 border-b border-line/60 bg-surface/95 px-3 py-1 text-left text-[11px] font-medium uppercase tracking-wide text-fg-subtle"
             >
               {remotesOpen || filter ? <LuChevronDown aria-hidden className="h-3 w-3" /> : <LuChevronRight aria-hidden className="h-3 w-3" />}
-              On the remote
+              {t("On the remote")}
               <span className="rounded-full bg-fg/8 px-1.5 text-[10px] normal-case">{remote.length}</span>
             </button>
             {(remotesOpen || filter) &&
@@ -104,7 +105,7 @@ export function Branches() {
                 <BranchRow
                   key={b.name}
                   branch={b}
-                  onSwitch={() => void act(`Checking out ${b.name}`, () => gitApi.switch(id, b.name, true))}
+                  onSwitch={() => void act(msg("Checking out {name}"), () => gitApi.switch(id, b.name, true), { name: b.name })}
                 />
               ))}
           </>
@@ -122,11 +123,11 @@ function BranchRow({ branch: b, onSwitch, onDelete }: { branch: Branch; onSwitch
         type="button"
         onClick={onSwitch}
         disabled={b.current || !!busy}
-        title={b.current ? "Checked out" : b.remote ? `Check out ${b.name}, as a local branch following it` : `Switch to ${b.name}`}
+        title={b.current ? t("Checked out") : b.remote ? t("Check out {name}, as a local branch following it", { name: b.name }) : t("Switch to {name}", { name: b.name })}
         className="flex min-w-0 flex-1 flex-col gap-0.5 py-1 text-left disabled:cursor-default"
       >
         <span className="flex min-w-0 items-center gap-1">
-          {b.current ? <LuCheck aria-label="Checked out" className="h-3 w-3 shrink-0 text-accent" /> : <span className="w-3 shrink-0" />}
+          {b.current ? <LuCheck aria-label={t("Checked out")} className="h-3 w-3 shrink-0 text-accent" /> : <span className="w-3 shrink-0" />}
           <span className={`min-w-0 truncate font-mono text-xs ${b.current ? "font-semibold text-fg" : "text-fg"}`}>{b.name}</span>
           {(b.ahead > 0 || b.behind > 0) && (
             <span className="shrink-0 font-mono text-[10px]">
@@ -135,8 +136,8 @@ function BranchRow({ branch: b, onSwitch, onDelete }: { branch: Branch; onSwitch
             </span>
           )}
           {b.gone && (
-            <span className="shrink-0 rounded px-1 text-[10px] text-warn ring-1 ring-inset ring-warn/30" title="Its branch on the remote was deleted">
-              gone
+            <span className="shrink-0 rounded px-1 text-[10px] text-warn ring-1 ring-inset ring-warn/30" title={t("Its branch on the remote was deleted")}>
+              {t("gone")}
             </span>
           )}
         </span>
@@ -147,7 +148,7 @@ function BranchRow({ branch: b, onSwitch, onDelete }: { branch: Branch; onSwitch
       </button>
       {onDelete && !b.current && (
         <div className="shrink-0 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
-          <IconButton label={`Delete ${b.name}`} danger disabled={!!busy} onClick={onDelete}>
+          <IconButton label={t("Delete {name}", { name: b.name })} danger disabled={!!busy} onClick={onDelete}>
             <LuTrash2 aria-hidden className="h-3.5 w-3.5" />
           </IconButton>
         </div>

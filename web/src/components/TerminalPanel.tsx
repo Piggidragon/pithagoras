@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 import { orderedInput } from "../ordered-input";
 import { api } from "../api";
 
+import { t } from "../i18n";
 /**
  * A shell in the workspace of the session you are looking at.
  *
@@ -61,13 +62,13 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
             () => {
               if (told || closed) return;
               told = true;
-              term.write("\r\n[Connection to the shell lost — close this panel and open it again]\r\n");
+              term.write(`\r\n[${t("Connection to the shell lost — close this panel and open it again")}]\r\n`);
             },
           ),
         );
         resize();
       })
-      .catch((e) => term.write(`\r\nCould not open a shell: ${e.message}\r\n`));
+      .catch((e) => term.write(`\r\n${t("Could not open a shell: {error}", { error: e.message })}\r\n`));
 
     // The panel is resizable, so the pty has to be told when it changes.
     const observer = new ResizeObserver(() => {

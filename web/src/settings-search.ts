@@ -7,6 +7,8 @@
  * this portal think in.
  */
 
+import { msg } from "./i18n";
+
 export interface SettingEntry {
   /** The Settings page it is on. */
   tab: string;
@@ -19,35 +21,36 @@ export interface SettingEntry {
 }
 
 export const SETTINGS_INDEX: SettingEntry[] = [
-  { tab: "models", section: "Providers", title: "Providers", words: "add provider server endpoint base url address llama.cpp llama-server llama-swap ollama openrouter openai anthropic google vllm lm studio models.json anbieter" },
-  { tab: "models", section: "Providers", title: "API keys", words: "key token secret password auth.json openrouter anthropic openai google schlüssel" },
-  { tab: "models", section: "Providers", title: "Whether a server answers", words: "status online offline reachable latency loaded running erreichbar" },
-  { tab: "models", section: "Providers", title: "Setup assistant", words: "wizard first run getting started onboarding einrichtung assistent" },
-  { tab: "models", section: "Provider packages", title: "Provider packages", words: "npm install extension catalog litellm gateway proxy paket" },
-  { tab: "general", section: "For new chats", title: "Default model", words: "model provider default new chat standard modell" },
-  { tab: "general", section: "For new chats", title: "Effort", words: "thinking reasoning level effort denken nachdenken" },
-  { tab: "general", section: "Context", title: "Context window", words: "tokens ctx context window size length kontext fenster" },
-  { tab: "general", section: "Context", title: "Kept when compacting", words: "compaction compact keep recent summary kompaktieren zusammenfassung" },
-  { tab: "general", section: "Routine reports", title: "Routine reports", words: "routine schedule cron report destination channel bericht" },
-  { tab: "tools", title: "Default tools", words: "tools enable disable default on off werkzeuge" },
-  { tab: "skills", title: "Skills", words: "skill procedure import repository fähigkeiten" },
-  { tab: "mcp", title: "MCP servers", words: "mcp model context protocol server adapter tools" },
-  { tab: "extensions", section: "Find packages", title: "Find packages", words: "browse catalog gallery npm pi-package search discover katalog paket" },
-  { tab: "extensions", section: "Install by name", title: "Install a package", words: "install npm git url path spec installieren" },
-  { tab: "extensions", section: "Installed", title: "Installed packages", words: "extensions packages installed remove uninstall switch off update erweiterungen" },
-  { tab: "channels", title: "Channels", words: "telegram discord slack matrix signal email webhook bot kanäle" },
-  { tab: "people", title: "People", words: "allow deny stranger contact who users personen" },
-  { tab: "browser", section: "Appearance", title: "Theme", words: "dark light mode appearance colour color design dunkel hell" },
-  { tab: "browser", section: "Notifications", title: "Notifications", words: "notify alert done finished benachrichtigung" },
-  { tab: "browser", section: "Confirmations", title: "Ask before deleting", words: "confirm delete question prompt bestätigen löschen" },
-  { tab: "browser", section: "Signed in", title: "Sign out", words: "logout log out password session abmelden" },
-  { tab: "add-ons", title: "Add-ons", words: "portal addon optional voice browser terminal" },
-  { tab: "shortcuts", section: "Chat", title: "Keyboard shortcuts", words: "keys hotkey keybinding shortcut tastenkürzel tastatur" },
-  { tab: "shortcuts", section: "Voice mode", title: "Voice mode shortcuts", words: "voice speak microphone push to talk sprache" },
-  { tab: "about", section: "This portal", title: "Where the agent runs", words: "executor container host docker" },
-  { tab: "about", section: "This portal", title: "Workspaces", words: "folder path directory workspace ordner" },
-  { tab: "about", section: "This portal", title: "pi's files", words: "settings.json models.json auth.json agent directory dateien" },
-  { tab: "advanced", section: "settings.json", title: "settings.json", words: "raw json edit file advanced datei" },
+  { tab: "models", section: msg("Providers"), title: msg("Providers"), words: "add provider server endpoint base url address llama.cpp llama-server llama-swap ollama openrouter openai anthropic google vllm lm studio models.json anbieter" },
+  { tab: "models", section: msg("Providers"), title: msg("API keys"), words: "key token secret password auth.json openrouter anthropic openai google schlüssel" },
+  { tab: "models", section: msg("Providers"), title: msg("Whether a server answers"), words: "status online offline reachable latency loaded running erreichbar" },
+  { tab: "models", section: msg("Providers"), title: msg("Setup assistant"), words: "wizard first run getting started onboarding einrichtung assistent" },
+  { tab: "models", section: msg("Provider packages"), title: msg("Provider packages"), words: "npm install extension catalog litellm gateway proxy paket" },
+  { tab: "general", section: msg("For new chats"), title: msg("Default model"), words: "model provider default new chat standard modell" },
+  { tab: "general", section: msg("For new chats"), title: msg("Effort"), words: "thinking reasoning level effort denken nachdenken" },
+  { tab: "general", section: msg("Context"), title: msg("Context window"), words: "tokens ctx context window size length kontext fenster" },
+  { tab: "general", section: msg("Context"), title: msg("Kept when compacting"), words: "compaction compact keep recent summary kompaktieren zusammenfassung" },
+  { tab: "general", section: msg("Routine reports"), title: msg("Routine reports"), words: "routine schedule cron report destination channel bericht" },
+  { tab: "tools", title: msg("Default tools"), words: "tools enable disable default on off werkzeuge" },
+  { tab: "skills", title: msg("Skills"), words: "skill procedure import repository fähigkeiten" },
+  { tab: "mcp", title: msg("MCP servers"), words: "mcp model context protocol server adapter tools" },
+  { tab: "extensions", section: msg("Find packages"), title: msg("Find packages"), words: "browse catalog gallery npm pi-package search discover katalog paket" },
+  { tab: "extensions", section: msg("Install by name"), title: msg("Install a package"), words: "install npm git url path spec installieren" },
+  { tab: "extensions", section: msg("Installed"), title: msg("Installed packages"), words: "extensions packages installed remove uninstall switch off update erweiterungen" },
+  { tab: "channels", title: msg("Channels"), words: "telegram discord slack matrix signal email webhook bot kanäle" },
+  { tab: "people", title: msg("People"), words: "allow deny stranger contact who users personen" },
+  { tab: "browser", section: msg("Appearance"), title: msg("Theme"), words: "dark light mode appearance colour color design dunkel hell" },
+  { tab: "browser", section: msg("Language"), title: msg("Language"), words: "language locale translation german english deutsch englisch sprache übersetzung" },
+  { tab: "browser", section: msg("Notifications"), title: msg("Notifications"), words: "notify alert done finished benachrichtigung" },
+  { tab: "browser", section: msg("Confirmations"), title: msg("Ask before deleting"), words: "confirm delete question prompt bestätigen löschen" },
+  { tab: "browser", section: msg("Signed in"), title: msg("Sign out"), words: "logout log out password session abmelden" },
+  { tab: "add-ons", title: msg("Add-ons"), words: "portal addon optional voice browser terminal" },
+  { tab: "shortcuts", section: msg("Chat"), title: msg("Keyboard shortcuts"), words: "keys hotkey keybinding shortcut tastenkürzel tastatur" },
+  { tab: "shortcuts", section: msg("Voice mode"), title: msg("Voice mode shortcuts"), words: "voice speak microphone push to talk sprache" },
+  { tab: "about", section: msg("This portal"), title: msg("Where the agent runs"), words: "executor container host docker" },
+  { tab: "about", section: msg("This portal"), title: msg("Workspaces"), words: "folder path directory workspace ordner" },
+  { tab: "about", section: msg("This portal"), title: msg("pi's files"), words: "settings.json models.json auth.json agent directory dateien" },
+  { tab: "advanced", section: msg("settings.json"), title: msg("settings.json"), words: "raw json edit file advanced datei" },
 ];
 
 /** Lower case, without accents: "Schlüssel" is found by "schlussel" too. */

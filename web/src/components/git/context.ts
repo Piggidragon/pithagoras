@@ -3,6 +3,7 @@ import type { DiffOf, GhState, GitState } from "../../git-api";
 import type { DiffFile } from "../../git-diff";
 
 /** The repository, and what gh says about it — null while GitHub has not answered. */
+export type Busy = { label: string; vars?: Record<string, string | number> };
 export type Repo = Extract<GitState, { repo: true }> & { gh: GhState | null };
 
 /** What the panel shows over its tab, one on top of another: Back goes to the one below. */
@@ -22,8 +23,14 @@ export interface GitCtx {
    * Do something to the repository: one thing at a time, named while it runs,
    * what it failed with shown, and the state read again after. True when it worked.
    */
-  act: (label: string, step: () => Promise<unknown>) => Promise<boolean>;
-  busy: string | null;
+  /**
+   * One change at a time, said while it runs. `label` is the English, marked
+   * with msg(), and `vars` what it names: translated where it is shown, so a
+   * check on what is running (`busy?.label === "Refreshing"`) holds in every
+   * language.
+   */
+  act: (label: string, step: () => Promise<unknown>, vars?: Record<string, string | number>) => Promise<boolean>;
+  busy: Busy | null;
   show: (view: View) => void;
   /** Open a file (by its path in the repository) in the Files panel. Only one in the chat's folder: see inFolder. */
   openFile?: (path: string) => void;

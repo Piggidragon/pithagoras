@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { asksBeforeDeleting } from "../confirm-prefs";
+import { t } from "../i18n";
 
 /**
  * Asking "are you sure" in the portal's own dialog instead of the browser's.
@@ -120,7 +121,7 @@ export function ConfirmHost() {
             onClick={() => answer(false)}
             className="rounded-lg px-3 py-1.5 text-sm text-fg-muted transition hover:bg-fg/5 hover:text-fg"
           >
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             key={`confirm-${current.id}`}
@@ -134,7 +135,7 @@ export function ConfirmHost() {
                 : "bg-accent/15 text-accent ring-accent/30 hover:bg-accent/25"
             }`}
           >
-            {current.confirmLabel ?? "OK"}
+            {current.confirmLabel ?? t("OK")}
           </button>
         </div>
       </div>

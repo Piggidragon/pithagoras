@@ -3,18 +3,19 @@ import { LuArrowDown, LuArrowLeft, LuArrowUp, LuCloudDownload, LuGitBranch, LuRe
 import { gitApi, type GhState, type GitState } from "../../git-api";
 import { Branches } from "./Branches";
 import { Changes } from "./Changes";
-import { Ctx, useGit, type GitCtx, type View } from "./context";
+import { Ctx, useGit, type Busy, type GitCtx, type View } from "./context";
 import { ErrorNote, Quiet, TextButton } from "./bits";
 import { History } from "./History";
 import { Pulls } from "./Pulls";
 import { ViewHost } from "./views";
+import { msg, t, tp } from "../../i18n";
 
 export type GitTab = "changes" | "history" | "branches" | "pulls";
 export const GIT_TABS: { id: GitTab; label: string }[] = [
-  { id: "changes", label: "Changes" },
-  { id: "history", label: "History" },
-  { id: "branches", label: "Branches" },
-  { id: "pulls", label: "Pull requests" },
+  { id: "changes", label: msg("Changes") },
+  { id: "history", label: msg("History") },
+  { id: "branches", label: msg("Branches") },
+  { id: "pulls", label: msg("Pull requests") },
 ];
 
 /** While the agent works, what it commits or checks out from the shell is noticed this often. */
@@ -57,7 +58,7 @@ export function GitPanel({
 }) {
   const [state, setState] = useState<GitState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Busy | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const [stack, setStack] = useState<View[]>([]);
@@ -131,9 +132,9 @@ export function GitPanel({
   useEffect(() => setStack([]), [tab]);
 
   const act = useCallback(
-    async (label: string, step: () => Promise<unknown>) => {
+    async (label: string, step: () => Promise<unknown>, vars?: Record<string, string | number>) => {
       if (busy) return false;
-      setBusy(label);
+      setBusy({ label, vars });
       setError(null);
       setSaid(null);
       try {
@@ -169,15 +170,15 @@ export function GitPanel({
   }, [state, gh, sessionId, reload, act, busy, onOpenFile]);
 
   if (!state) {
-    return loadError ? <ErrorNote>{loadError}</ErrorNote> : <Quiet>Loading…</Quiet>;
+    return loadError ? <ErrorNote>{loadError}</ErrorNote> : <Quiet>{t("Loading…")}</Quiet>;
   }
 
   if (!state.repo) {
     return (
       <div className="flex flex-col items-start gap-2 p-3 text-xs text-fg-subtle">
-        <p>This chat's folder is not in a git repository.</p>
-        <TextButton primary disabled={!!busy} onClick={() => void act("Making a repository", () => gitApi.init(sessionId))}>
-          Make it one (git init)
+        <p>{t("This chat's folder is not in a git repository.")}</p>
+        <TextButton primary disabled={!!busy} onClick={() => void act(msg("Making a repository"), () => gitApi.init(sessionId))}>
+          {t("Make it one (git init)")}
         </TextButton>
         {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
       </div>
@@ -188,18 +189,18 @@ export function GitPanel({
   return (
     <Ctx.Provider value={ctx}>
       <div className="flex h-full min-h-0 flex-col text-sm" data-git-tab={tab}>
-        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => void act("Refreshing", () => askGh(true))} />
+        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => void act(msg("Refreshing"), () => askGh(true))} />
         {state.operation && <Operation />}
         {busy && (
           <p role="status" className="shrink-0 border-b border-line bg-accent/5 px-3 py-1 text-[11px] text-accent">
-            {busy}…
+            {t(busy.label, busy.vars)}…
           </p>
         )}
         {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
         {said && (
           <p role="status" className="mx-2 mt-2 flex items-start gap-1 rounded-lg bg-fg/5 px-2 py-1.5 font-mono text-[11px] text-fg-subtle">
             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{said}</span>
-            <button type="button" onClick={() => setSaid(null)} aria-label="Dismiss" className="shrink-0 rounded px-1 hover:text-fg">
+            <button type="button" onClick={() => setSaid(null)} aria-label={t("Dismiss")} className="shrink-0 rounded px-1 hover:text-fg">
               ✕
             </button>
           </p>
@@ -211,7 +212,7 @@ export function GitPanel({
               onClick={() => setStack((s) => s.slice(0, -1))}
               className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1 text-left text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
             >
-              <LuArrowLeft aria-hidden className="h-3 w-3" /> Back
+              <LuArrowLeft aria-hidden className="h-3 w-3" /> {t("Back")}
             </button>
             <ViewHost key={stack.length} view={top} onDone={() => setStack((s) => s.slice(0, -1))} />
           </div>
@@ -237,44 +238,44 @@ function BranchBar({ onBranches, onRefresh }: { onBranches: () => void; onRefres
       <button
         type="button"
         onClick={onBranches}
-        title={repo.branch ? `On ${repo.branch} — branches` : "Not on a branch — branches"}
+        title={repo.branch ? t("On {branch} — branches", { branch: repo.branch }) : t("Not on a branch — branches")}
         className="flex min-w-0 max-w-[60%] items-center gap-1 rounded px-1.5 py-0.5 text-fg transition hover:bg-fg/5"
       >
         <LuGitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-fg-subtle" />
-        <span className="truncate font-mono text-[11.5px]">{repo.branch ?? `detached at ${repo.head?.slice(0, 7) ?? "nothing"}`}</span>
+        <span className="truncate font-mono text-[11.5px]">{repo.branch ?? t("detached at {commit}", { commit: repo.head?.slice(0, 7) ?? t("nothing") })}</span>
       </button>
       {repo.upstream ? (
-        <span className="shrink-0 font-mono text-[10.5px] text-fg-faint" title={`Following ${repo.upstream}: ${repo.ahead} to push, ${repo.behind} to pull`}>
+        <span className="shrink-0 font-mono text-[10.5px] text-fg-faint" title={t("Following {upstream}: {ahead} to push, {behind} to pull", { upstream: repo.upstream, ahead: repo.ahead, behind: repo.behind })}>
           {repo.ahead > 0 && <span className="text-accent">↑{repo.ahead} </span>}
           {repo.behind > 0 && <span className="text-warn">↓{repo.behind} </span>}
           {!repo.ahead && !repo.behind && "✓ "}
           {repo.upstream}
         </span>
       ) : (
-        repo.branch && hasRemote && <span className="shrink-0 text-[10.5px] text-fg-faint">not on the remote yet</span>
+        repo.branch && hasRemote && <span className="shrink-0 text-[10.5px] text-fg-faint">{t("not on the remote yet")}</span>
       )}
       <div className="ml-auto flex items-center gap-0.5">
         {hasRemote && (
           <>
-            <BarButton label="Fetch — see what is new on the remote" disabled={!!busy} onClick={() => void act("Fetching", () => gitApi.fetch(id))}>
+            <BarButton label={t("Fetch — see what is new on the remote")} disabled={!!busy} onClick={() => void act(msg("Fetching"), () => gitApi.fetch(id))}>
               <LuCloudDownload aria-hidden className="h-3.5 w-3.5" />
             </BarButton>
-            <BarButton label={`Pull${repo.behind ? ` ${repo.behind}` : ""} — fast-forward only`} disabled={!!busy || !repo.upstream} onClick={() => void act("Pulling", () => gitApi.pull(id))}>
+            <BarButton label={repo.behind ? t("Pull {n} — fast-forward only", { n: repo.behind }) : t("Pull — fast-forward only")} disabled={!!busy || !repo.upstream} onClick={() => void act(msg("Pulling"), () => gitApi.pull(id))}>
               <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
               {repo.behind > 0 && <span className="text-[10px]">{repo.behind}</span>}
             </BarButton>
             <BarButton
-              label={repo.upstream ? `Push${repo.ahead ? ` ${repo.ahead}` : ""}` : "Publish this branch to the remote"}
+              label={repo.upstream ? (repo.ahead ? t("Push {n}", { n: repo.ahead }) : t("Push")) : t("Publish this branch to the remote")}
               disabled={!!busy || !repo.branch || (!!repo.upstream && !repo.ahead)}
-              onClick={() => void act(repo.upstream ? "Pushing" : "Publishing", () => gitApi.push(id))}
+              onClick={() => void act(repo.upstream ? msg("Pushing") : msg("Publishing"), () => gitApi.push(id))}
             >
               <LuArrowUp aria-hidden className="h-3.5 w-3.5" />
-              {repo.upstream ? repo.ahead > 0 && <span className="text-[10px]">{repo.ahead}</span> : <span className="text-[10px]">Publish</span>}
+              {repo.upstream ? repo.ahead > 0 && <span className="text-[10px]">{repo.ahead}</span> : <span className="text-[10px]">{t("Publish")}</span>}
             </BarButton>
           </>
         )}
-        <BarButton label="Refresh" disabled={!!busy} onClick={onRefresh}>
-          <LuRefreshCw aria-hidden className={`h-3.5 w-3.5 ${busy === "Refreshing" ? "animate-spin" : ""}`} />
+        <BarButton label={t("Refresh")} disabled={!!busy} onClick={onRefresh}>
+          <LuRefreshCw aria-hidden className={`h-3.5 w-3.5 ${busy?.label === "Refreshing" ? "animate-spin" : ""}`} />
         </BarButton>
       </div>
     </div>
@@ -301,18 +302,18 @@ function Operation() {
   const { id, repo, act, busy } = useGit();
   const conflicts = repo.files.filter((f) => f.kind === "conflict").length;
   const name =
-    repo.operation === "cherry-pick" ? "Cherry-picking" : repo.operation === "revert" ? "Reverting" : repo.operation === "rebase" ? "Rebasing" : repo.operation === "am" ? "Applying patches" : "Merging";
+    repo.operation === "cherry-pick" ? t("Cherry-picking") : repo.operation === "revert" ? t("Reverting") : repo.operation === "rebase" ? t("Rebasing") : repo.operation === "am" ? t("Applying patches") : t("Merging");
   return (
     <div role="status" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-warn/10 px-3 py-1.5 text-xs text-warn">
       <span className="min-w-0 flex-1">
         {name} —{" "}
-        {conflicts ? `${conflicts} ${conflicts === 1 ? "file is" : "files are"} in conflict. Resolve and stage them, then continue.` : "ready to continue."}
+        {conflicts ? tp(conflicts, "{n} file is in conflict. Resolve and stage it, then continue.", "{n} files are in conflict. Resolve and stage them, then continue.") : t("ready to continue.")}
       </span>
-      <TextButton disabled={!!busy || conflicts > 0} onClick={() => void act("Continuing", () => gitApi.continue(id))}>
-        Continue
+      <TextButton disabled={!!busy || conflicts > 0} onClick={() => void act(msg("Continuing"), () => gitApi.continue(id))}>
+        {t("Continue")}
       </TextButton>
-      <TextButton danger disabled={!!busy} onClick={() => void act(`Giving up the ${repo.operation}`, () => gitApi.abort(id))}>
-        Abort
+      <TextButton danger disabled={!!busy} onClick={() => void act(msg("Giving up the {operation}"), () => gitApi.abort(id), { operation: repo.operation ?? "" })}>
+        {t("Abort")}
       </TextButton>
     </div>
   );

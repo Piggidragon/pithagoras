@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { local } from "./safe-storage";
 
+import { msg, tc } from "./i18n";
 /**
  * Keyboard shortcuts, and the person's own choice of them.
  *
@@ -56,32 +57,32 @@ export interface Action {
 }
 
 export const ACTIONS: Action[] = [
-  { id: "voice.toggle", label: "Start or end voice mode", scope: "Voice mode", anywhere: true, default: { code: "KeyV", alt: true } },
-  { id: "voice.mute", label: "Mute or unmute the microphone", scope: "Voice mode", default: { code: "KeyM" } },
-  { id: "voice.hold", label: "Talk, with push-to-talk on (hold)", scope: "Voice mode", hold: true, default: { code: "Space" } },
-  { id: "voice.stop", label: "Stop the agent, or end voice mode when it is idle", scope: "Voice mode", default: { code: "Escape" } },
-  { id: "voice.picture", label: "Add a picture", scope: "Voice mode", default: { code: "KeyP" } },
-  { id: "voice.repeat", label: "Repeat the last reply", scope: "Voice mode", default: { code: "KeyR" } },
-  { id: "voice.conversation", label: "Show or hide the conversation", scope: "Voice mode", default: { code: "KeyC" } },
-  { id: "voice.canvas", label: "Show or hide canvases", scope: "Voice mode", default: { code: "KeyD" } },
-  { id: "voice.files", label: "Show or hide files", scope: "Voice mode", default: { code: "KeyF" } },
-  { id: "voice.pictures", label: "Show or hide pictures", scope: "Voice mode", default: { code: "KeyI" } },
-  { id: "voice.terminal", label: "Show or hide the terminal", scope: "Voice mode", default: { code: "KeyT" } },
-  { id: "voice.browser", label: "Show or hide the browser", scope: "Voice mode", default: { code: "KeyB" } },
-  { id: "voice.settings", label: "Open or close voice settings", scope: "Voice mode", default: { code: "KeyO" } },
-  { id: "voice.faster", label: "Speak faster", scope: "Voice mode", default: { code: "Period" } },
-  { id: "voice.slower", label: "Speak slower", scope: "Voice mode", default: { code: "Comma" } },
-  { id: "voice.steer", label: "Switch between stopping and adding to the task", scope: "Voice mode", default: { code: "KeyA" } },
-  { id: "voice.ptt", label: "Turn push-to-talk on or off", scope: "Voice mode", default: { code: "KeyH" } },
-  { id: "voice.sounds", label: "Turn sound effects on or off", scope: "Voice mode", default: { code: "KeyM", shift: true } },
+  { id: "voice.toggle", label: msg("Start or end voice mode"), scope: "Voice mode", anywhere: true, default: { code: "KeyV", alt: true } },
+  { id: "voice.mute", label: msg("Mute or unmute the microphone"), scope: "Voice mode", default: { code: "KeyM" } },
+  { id: "voice.hold", label: msg("Talk, with push-to-talk on (hold)"), scope: "Voice mode", hold: true, default: { code: "Space" } },
+  { id: "voice.stop", label: msg("Stop the agent, or end voice mode when it is idle"), scope: "Voice mode", default: { code: "Escape" } },
+  { id: "voice.picture", label: msg("Add a picture"), scope: "Voice mode", default: { code: "KeyP" } },
+  { id: "voice.repeat", label: msg("Repeat the last reply"), scope: "Voice mode", default: { code: "KeyR" } },
+  { id: "voice.conversation", label: msg("Show or hide the conversation"), scope: "Voice mode", default: { code: "KeyC" } },
+  { id: "voice.canvas", label: msg("Show or hide canvases"), scope: "Voice mode", default: { code: "KeyD" } },
+  { id: "voice.files", label: msg("Show or hide files"), scope: "Voice mode", default: { code: "KeyF" } },
+  { id: "voice.pictures", label: msg("Show or hide pictures"), scope: "Voice mode", default: { code: "KeyI" } },
+  { id: "voice.terminal", label: msg("Show or hide the terminal"), scope: "Voice mode", default: { code: "KeyT" } },
+  { id: "voice.browser", label: msg("Show or hide the browser"), scope: "Voice mode", default: { code: "KeyB" } },
+  { id: "voice.settings", label: msg("Open or close voice settings"), scope: "Voice mode", default: { code: "KeyO" } },
+  { id: "voice.faster", label: msg("Speak faster"), scope: "Voice mode", default: { code: "Period" } },
+  { id: "voice.slower", label: msg("Speak slower"), scope: "Voice mode", default: { code: "Comma" } },
+  { id: "voice.steer", label: msg("Switch between stopping and adding to the task"), scope: "Voice mode", default: { code: "KeyA" } },
+  { id: "voice.ptt", label: msg("Turn push-to-talk on or off"), scope: "Voice mode", default: { code: "KeyH" } },
+  { id: "voice.sounds", label: msg("Turn sound effects on or off"), scope: "Voice mode", default: { code: "KeyM", shift: true } },
 ];
 
 /** Shortcuts that are part of how text fields work, listed so they can be found, not changed. */
-export const FIXED: { label: string; keys: string; scope: string }[] = [
-  { label: "Jump to the message box", keys: "/", scope: "Chat" },
-  { label: "Send the message", keys: "Enter", scope: "Chat" },
-  { label: "New line in the message", keys: "Shift+Enter", scope: "Chat" },
-  { label: "Stop the run (with the message box empty)", keys: "Esc", scope: "Chat" },
+export const FIXED: { label: string; keys: Binding; scope: string }[] = [
+  { label: msg("Jump to the message box"), keys: { code: "Slash" }, scope: "Chat" },
+  { label: msg("Send the message"), keys: { code: "Enter" }, scope: "Chat" },
+  { label: msg("New line in the message"), keys: { code: "Enter", shift: true }, scope: "Chat" },
+  { label: msg("Stop the run (with the message box empty)"), keys: { code: "Escape" }, scope: "Chat" },
 ];
 
 const STORE = "keybindings";
@@ -183,13 +184,28 @@ const NAMES: Record<string, string> = {
   Comma: ",", Period: ".", Slash: "/", Semicolon: ";", Quote: "'", BracketLeft: "[", BracketRight: "]", Backslash: "\\", Minus: "-", Equal: "=", Backquote: "`",
 };
 
+/** The keys with a word for a name, in the language shown: a key's "Home" is not the folder's. */
+const SPOKEN: Record<string, () => string> = {
+  Space: () => tc("Space", "key"),
+  Escape: () => tc("Esc", "key"),
+  Enter: () => tc("Enter", "key"),
+  Backspace: () => tc("Backspace", "key"),
+  Tab: () => tc("Tab", "key"),
+  Delete: () => tc("Del", "key"),
+  Home: () => tc("Home", "key"),
+  End: () => tc("End", "key"),
+  PageUp: () => tc("Page up", "key"),
+  PageDown: () => tc("Page down", "key"),
+};
+
 /**
- * What a key is called: a named key by its name, any other by what it types on
- * this keyboard when the layout is known, and by the US layout otherwise.
+ * What a key is called: a named key by its name, in the language shown, any
+ * other by what it types on this keyboard when the layout is known, and by the
+ * US layout otherwise.
  */
 export function keyName(code: string, layout?: Map<string, string> | null): string {
   const named = NAMES[code];
-  if (named && /^[A-Z][a-z]/.test(named)) return named;
+  if (SPOKEN[code]) return SPOKEN[code]();
   const typed = layout?.get(code);
   if (typed && typed.trim()) return typed.toUpperCase();
   if (named) return named;
@@ -206,7 +222,7 @@ export function describe(b: Binding | null, layout?: Map<string, string> | null,
   if (!b) return "";
   const key = keyName(b.code, layout);
   if (onMac) return `${b.ctrl ? "⌃" : ""}${b.alt ? "⌥" : ""}${b.shift ? "⇧" : ""}${b.meta ? "⌘" : ""}${key}`;
-  return [b.ctrl && "Ctrl", b.alt && "Alt", b.shift && "Shift", b.meta && "Win", key].filter(Boolean).join("+");
+  return [b.ctrl && tc("Ctrl", "key"), b.alt && tc("Alt", "key"), b.shift && tc("Shift", "key"), b.meta && "Win", key].filter(Boolean).join("+");
 }
 
 /** The shortcuts now, kept up to date when they are changed anywhere in the page. */

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { t } from "../i18n";
 
 /** The speeds offered. Faster than 1.75× stops being speech anyone follows. */
 export const VOICE_RATES = [1, 1.25, 1.5, 1.75];
@@ -46,32 +47,32 @@ export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, o
   }, []);
   const choice = <T,>(value: T, current: T, label: string, pick: (value: T) => void) =>
     <button type="button" aria-pressed={value === current} onClick={() => pick(value)}>{label}</button>;
-  return createPortal(<div ref={card} className="voice-settings" role="dialog" aria-label="Voice settings" style={at ? { right: at.right, bottom: at.bottom } : { visibility: "hidden" }}>
-    <div className="voice-setting" role="group" aria-label="Speaking speed">
-      <span aria-hidden="true">Speaking speed</span>
+  return createPortal(<div ref={card} className="voice-settings" role="dialog" aria-label={t("Voice settings")} style={at ? { right: at.right, bottom: at.bottom } : { visibility: "hidden" }}>
+    <div className="voice-setting" role="group" aria-label={t("Speaking speed")}>
+      <span aria-hidden="true">{t("Speaking speed")}</span>
       <div className="voice-segments">{VOICE_RATES.map(r => <Fragment key={r}>{choice(r, rate, `${r}×`, onRate)}</Fragment>)}</div>
     </div>
-    <div className="voice-setting" role="group" aria-label="Talking while the agent works">
-      <span aria-hidden="true">Talking while the agent works</span>
+    <div className="voice-setting" role="group" aria-label={t("Talking while the agent works")}>
+      <span aria-hidden="true">{t("Talking while the agent works")}</span>
       <div className="voice-segments">
-        {choice(false, steer, "Stops it", onSteer)}
-        {choice(true, steer, "Adds to the task", onSteer)}
+        {choice(false, steer, t("Stops it"), onSteer)}
+        {choice(true, steer, t("Adds to the task"), onSteer)}
       </div>
-      <p>{steer ? "What you say goes into the running task after its current step. The stop button still stops it." : "What you say stops the task and starts a new turn."}</p>
+      <p>{steer ? t("What you say goes into the running task after its current step. The stop button still stops it.") : t("What you say stops the task and starts a new turn.")}</p>
     </div>
-    <div className="voice-setting" role="group" aria-label="Push to talk">
-      <span aria-hidden="true">Push to talk</span>
+    <div className="voice-setting" role="group" aria-label={t("Push to talk")}>
+      <span aria-hidden="true">{t("Push to talk")}</span>
       <div className="voice-segments">
-        {choice(false, ptt, "Off", onPtt)}
-        {choice(true, ptt, "On", onPtt)}
+        {choice(false, ptt, t("Off"), onPtt)}
+        {choice(true, ptt, t("On"), onPtt)}
       </div>
-      <p>{ptt ? "Only heard while you hold the push-to-talk key (Space unless changed) or the microphone button." : "Heard whenever you speak."}</p>
+      <p>{ptt ? t("Only heard while you hold the push-to-talk key (Space unless changed) or the microphone button.") : t("Heard whenever you speak.")}</p>
     </div>
-    <div className="voice-setting" role="group" aria-label="Sound effects">
-      <span aria-hidden="true">Sound effects</span>
+    <div className="voice-setting" role="group" aria-label={t("Sound effects")}>
+      <span aria-hidden="true">{t("Sound effects")}</span>
       <div className="voice-segments">
-        {choice(false, sounds, "Off", () => sounds && onSounds())}
-        {choice(true, sounds, "On", () => !sounds && onSounds())}
+        {choice(false, sounds, t("Off"), () => sounds && onSounds())}
+        {choice(true, sounds, t("On"), () => !sounds && onSounds())}
       </div>
     </div>
   </div>, document.body);

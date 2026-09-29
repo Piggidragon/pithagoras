@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { DiffFile } from "../../git-diff";
+import { t } from "../../i18n";
 
 const ROW: Record<string, string> = {
   add: "bg-ok/10",
@@ -23,16 +24,16 @@ export function DiffView({ file, truncated }: { file: DiffFile; truncated?: bool
     return `${String(most).length + 1.5}ch`;
   }, [file]);
 
-  if (file.binary) return <p className="p-6 text-center text-xs text-fg-subtle">A binary file — its changes are not shown here.</p>;
+  if (file.binary) return <p className="p-6 text-center text-xs text-fg-subtle">{t("A binary file — its changes are not shown here.")}</p>;
   if (!file.rows.length) {
     return (
       <p className="p-6 text-center text-xs text-fg-subtle">
-        {file.status === "renamed" ? "Renamed, with nothing in it changed." : "No changes in the text — only its mode, or nothing at all."}
+        {file.status === "renamed" ? t("Renamed, with nothing in it changed.") : t("No changes in the text — only its mode, or nothing at all.")}
       </p>
     );
   }
   return (
-    <div className="git-diff min-h-0 flex-1 overflow-auto font-mono text-[11.5px] leading-[1.55]" role="table" aria-label={`Changes to ${file.path}`}>
+    <div className="git-diff min-h-0 flex-1 overflow-auto font-mono text-[11.5px] leading-[1.55]" role="table" aria-label={t("Changes to {path}", { path: file.path })}>
       <div className="min-w-max">
         {file.rows.map((row, i) =>
           row.kind === "hunk" ? (
@@ -53,12 +54,12 @@ export function DiffView({ file, truncated }: { file: DiffFile; truncated?: bool
               >
                 {row.mark ?? MARK[row.kind]}
               </span>
-              <span className="whitespace-pre pr-4 text-fg">{row.text || " "}</span>
+              <span className="whitespace-pre pr-4 text-fg">{(row.kind === "note" ? t(row.text) : row.text) || " "}</span>
             </div>
           ),
         )}
       </div>
-      {truncated && <p className="px-3 py-2 text-xs text-warn">This diff is too large to show whole — it stops here.</p>}
+      {truncated && <p className="px-3 py-2 text-xs text-warn">{t("This diff is too large to show whole — it stops here.")}</p>}
     </div>
   );
 }

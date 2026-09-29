@@ -3,6 +3,7 @@ import { LuSquare, LuTrash2 } from "react-icons/lu";
 import { api, type BackgroundState } from "../api";
 import { useFollowBottom } from "../use-follow-bottom";
 import { formatElapsed, stripAnsi } from "../transcript";
+import { t } from "../i18n";
 
 /** Output kept on screen for one job; the file has the rest. */
 const KEEP = 400_000;
@@ -49,15 +50,15 @@ export function BackgroundJobs({
         </div>
       )}
       {!state.supported && (
-        <p className="bg-jobs-empty">Background jobs can only be followed when pi runs on the host (EXECUTOR=host).</p>
+        <p className="bg-jobs-empty">{t("Background jobs can only be followed when pi runs on the host (EXECUTOR=host).")}</p>
       )}
       {state.supported && !jobs.length && (
-        <p className="bg-jobs-empty">Nothing running in the background. What the agent leaves running — a dev server, a watcher, an extension's job — shows up here.</p>
+        <p className="bg-jobs-empty">{t("Nothing running in the background. What the agent leaves running — a dev server, a watcher, an extension's job — shows up here.")}</p>
       )}
       {jobs.length > 0 && (
         <>
           <div className="bg-jobs-list">
-            <div role="listbox" aria-label="Background jobs" className="contents">
+            <div role="listbox" aria-label={t("Background jobs")} className="contents">
             {jobs.map((j) => (
               <button
                 key={j.key}
@@ -70,14 +71,14 @@ export function BackgroundJobs({
                 <i className="bg-job-dot" aria-hidden />
                 <span className="bg-job-command">{j.command}</span>
                 <span className="bg-job-meta">
-                  {j.state === "exited" ? `finished · ran ${took(j.startedAt, j.exitedAt)}` : j.state === "stopped" ? "paused" : took(j.startedAt)}
+                  {j.state === "exited" ? t("finished · ran {time}", { time: took(j.startedAt, j.exitedAt) }) : j.state === "stopped" ? t("paused") : took(j.startedAt)}
                 </span>
               </button>
             ))}
             </div>
             {jobs.some((j) => j.state === "exited") && (
-              <button type="button" className="bg-jobs-clear" onClick={() => void api.clearBackground(sessionId).then(onChanged)} title="Forget the finished jobs">
-                <LuTrash2 aria-hidden /> Clear finished
+              <button type="button" className="bg-jobs-clear" onClick={() => void api.clearBackground(sessionId).then(onChanged)} title={t("Forget the finished jobs")}>
+                <LuTrash2 aria-hidden /> {t("Clear finished")}
               </button>
             )}
           </div>
@@ -85,7 +86,7 @@ export function BackgroundJobs({
             <div className="bg-job-view">
               <div className="bg-job-head">
                 <code>{job.command}</code>
-                <span className={`bg-job-state is-${job.state}`}>{job.state === "exited" ? "finished" : job.state === "stopped" ? "paused" : "running"}</span>
+                <span className={`bg-job-state is-${job.state}`}>{job.state === "exited" ? t("finished") : job.state === "stopped" ? t("paused") : t("running")}</span>
                 {job.pids.length > 0 && <span className="bg-job-pid">pid {job.pids.join(", ")}</span>}
                 {job.state !== "exited" && (
                   <button
@@ -96,7 +97,7 @@ export function BackgroundJobs({
                       api.stopBackground(sessionId, job.key).then(onChanged, (e) => setError((e as Error).message));
                     }}
                   >
-                    <LuSquare aria-hidden fill="currentColor" /> Stop
+                    <LuSquare aria-hidden fill="currentColor" /> {t("Stop")}
                   </button>
                 )}
               </div>
@@ -104,7 +105,7 @@ export function BackgroundJobs({
               {job.hasOutput ? (
                 <JobOutput key={job.key} sessionId={sessionId} jobKey={job.key} live={job.state !== "exited"} />
               ) : (
-                <p className="bg-jobs-empty">This job's output does not go to a file, so it cannot be followed from here{job.attached ? " — it is a command the chat shows." : "."}</p>
+                <p className="bg-jobs-empty">{job.attached ? t("This job's output does not go to a file, so it cannot be followed from here — it is a command the chat shows.") : t("This job's output does not go to a file, so it cannot be followed from here.")}</p>
               )}
             </div>
           )}
@@ -145,7 +146,7 @@ function JobOutput({ sessionId, jobKey, live }: { sessionId: string; jobKey: str
   if (gone) return <p className="bg-jobs-empty">{gone}</p>;
   return (
     <pre ref={attach} onScroll={onScroll} className="bg-job-output">
-      {stripAnsi(text) || (live ? "Waiting for output…" : "(no output)")}
+      {stripAnsi(text) || (live ? t("Waiting for output…") : t("(no output)"))}
     </pre>
   );
 }

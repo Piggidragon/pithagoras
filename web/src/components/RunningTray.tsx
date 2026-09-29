@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { LuBot, LuPlay, LuRefreshCw, LuSquareTerminal } from "react-icons/lu";
 import type { BackgroundJob } from "../api";
-import type { Subagent } from "../subagents";
+import { subagentName, type Subagent } from "../subagents";
 import { formatElapsed } from "../transcript";
 import { Ring } from "./ChatActivity";
 import { statusParts } from "../status-commands";
+import { t } from "../i18n";
 
 /**
  * What is running beside the conversation, just above the box: subagents,
@@ -53,12 +54,12 @@ export function RunningTray({
   const since = (at?: number) => (at ? formatElapsed(Math.max(0, Math.floor((now - at) / 1000))) : "");
 
   return (
-    <div className="running-tray" aria-label="Running beside the conversation">
+    <div className="running-tray" aria-label={t("Running beside the conversation")}>
       {runningAgents.map((a) => (
-        <button key={a.id} type="button" className="running-chip is-agent" onClick={() => onAgent(a.id)} title={a.detail ? `${a.label} — ${a.detail}` : a.label}>
+        <button key={a.id} type="button" className="running-chip is-agent" onClick={() => onAgent(a.id)} title={a.detail ? `${subagentName(a)} — ${a.detail}` : subagentName(a)}>
           <span className="running-chip-icon"><Ring /></span>
           <LuBot className="running-chip-kind" aria-hidden />
-          <span className="running-chip-label">{a.label}</span>
+          <span className="running-chip-label">{subagentName(a)}</span>
           {a.detail && <span className="running-chip-detail">{a.detail}</span>}
           <span className="running-chip-time">{since(a.since)}</span>
         </button>
@@ -68,7 +69,7 @@ export function RunningTray({
           <span className="running-chip-icon"><i className="running-dot" /></span>
           <LuSquareTerminal className="running-chip-kind" aria-hidden />
           <span className="running-chip-label is-mono">{j.command}</span>
-          <span className="running-chip-time">{j.state === "stopped" ? "paused" : since(j.startedAt)}</span>
+          <span className="running-chip-time">{j.state === "stopped" ? t("paused") : since(j.startedAt)}</span>
         </button>
       ))}
       {statuses.map((s) => {
@@ -81,7 +82,7 @@ export function RunningTray({
         if (named.length === 1) {
           const busy = runningCommand === named[0];
           return (
-            <button key={s.key} type="button" className="running-chip is-status is-action" disabled={runningCommand !== null} onClick={() => void run(named[0])} title={`${s.key} — click to run /${named[0]}`}>
+            <button key={s.key} type="button" className="running-chip is-status is-action" disabled={runningCommand !== null} onClick={() => void run(named[0])} title={t("{name} — click to run /{command}", { name: s.key, command: named[0] })}>
               <span className="running-chip-label">{text}</span>
               {busy ? <LuRefreshCw className="running-chip-kind animate-spin" aria-hidden /> : <LuPlay className="running-chip-kind" aria-hidden />}
             </button>
@@ -91,7 +92,7 @@ export function RunningTray({
           <span key={s.key} className="running-chip is-status" title={`${s.key}: ${s.text}`}>
             <span className="running-chip-label">
               {parts.map((p, i) => ("command" in p ? (
-                <button key={i} type="button" className="running-chip-command" disabled={runningCommand !== null} onClick={() => void run(p.command)} title={`Run /${p.command}`}>/{p.command}</button>
+                <button key={i} type="button" className="running-chip-command" disabled={runningCommand !== null} onClick={() => void run(p.command)} title={t("Run /{command}", { command: p.command })}>/{p.command}</button>
               ) : <span key={i}>{p.text}</span>))}
             </span>
           </span>

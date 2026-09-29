@@ -1,5 +1,6 @@
 import { LuLoaderCircle, LuMic } from "react-icons/lu";
 import type { Dictation, DictationMode } from "../use-dictation";
+import { msg, t } from "../i18n";
 
 /** Turns dictation on and off. Hidden until voice is set up, since that is what transcribes. */
 export function DictationButton({ dictation }: { dictation: Dictation }) {
@@ -10,13 +11,13 @@ export function DictationButton({ dictation }: { dictation: Dictation }) {
       type="button"
       onClick={dictation.toggle}
       aria-pressed={on}
-      aria-label={on ? "Stop dictating" : "Dictate a message"}
+      aria-label={on ? t("Stop dictating") : t("Dictate a message")}
       title={
         on
-          ? "Stop dictating"
+          ? t("Stop dictating")
           : dictation.mode === "send"
-            ? "Dictate — what you say is sent when you pause"
-            : "Dictate — what you say is typed into the box"
+            ? t("Dictate — what you say is sent when you pause")
+            : t("Dictate — what you say is typed into the box")
       }
       className="prompt-action"
     >
@@ -25,9 +26,15 @@ export function DictationButton({ dictation }: { dictation: Dictation }) {
   );
 }
 
+const PHASE: Record<Dictation["phase"], string> = {
+  Listening: msg("Listening"),
+  "Hearing you": msg("Hearing you"),
+  Transcribing: msg("Transcribing"),
+};
+
 const MODES: { id: DictationMode; label: string; hint: string }[] = [
-  { id: "review", label: "Edit first", hint: "Words are typed into the box, so you can change them before sending" },
-  { id: "send", label: "Send at once", hint: "A message is sent as soon as you pause" },
+  { id: "review", label: msg("Edit first"), hint: msg("Words are typed into the box, so you can change them before sending") },
+  { id: "send", label: msg("Send at once"), hint: msg("A message is sent as soon as you pause") },
 ];
 
 /**
@@ -56,24 +63,24 @@ export function DictationStrip({ dictation }: { dictation: Dictation }) {
             hearing ? "animate-pulse bg-accent" : dictation.phase === "Transcribing" ? "bg-fg-subtle" : "bg-fg-faint"
           }`}
         />
-        {dictation.starting ? "Starting the microphone…" : dictation.active ? dictation.phase : "Finishing…"}
+        {dictation.starting ? t("Starting the microphone…") : dictation.active ? t(PHASE[dictation.phase]) : t("Finishing…")}
       </span>
       <span className="min-w-0 flex-1 basis-40 truncate italic text-fg-subtle" aria-live="off">
         {words}
       </span>
-      <div role="group" aria-label="Where dictated words go" className="flex shrink-0 rounded-lg bg-fg/5 p-0.5">
+      <div role="group" aria-label={t("Where dictated words go")} className="flex shrink-0 rounded-lg bg-fg/5 p-0.5">
         {MODES.map((m) => (
           <button
             key={m.id}
             type="button"
-            title={m.hint}
+            title={t(m.hint)}
             aria-pressed={dictation.mode === m.id}
             onClick={() => dictation.setMode(m.id)}
             className={`rounded-md px-2 py-0.5 transition ${
               dictation.mode === m.id ? "bg-surface text-fg shadow-sm" : "text-fg-subtle hover:text-fg"
             }`}
           >
-            {m.label}
+            {t(m.label)}
           </button>
         ))}
       </div>

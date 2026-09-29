@@ -22,6 +22,7 @@ import { api, type FileEntry } from "../api";
 import type { FileActivity } from "../file-activity";
 import { confirmDialog } from "./ConfirmDialog";
 import { isEnter, isEscape } from "../shortcuts";
+import { t, tp } from "../i18n";
 
 /** What the server says when a save would put older text over newer. */
 const CHANGED = "The file changed after you opened it";
@@ -56,7 +57,7 @@ const looksLikePicture = (p: string) => /\.(png|jpe?g|gif|webp)$/i.test(p);
 /** A picture, shown instead of the "not text" note; a file that turns out not to be one gets the note after all. */
 function FilePicture({ src, name }: { src: string; name: string }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return <p className="p-6 text-center text-xs text-fg-subtle">Not a picture that can be shown here. Download it to open it.</p>;
+  if (failed) return <p className="p-6 text-center text-xs text-fg-subtle">{t("Not a picture that can be shown here. Download it to open it.")}</p>;
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-[repeating-conic-gradient(rgb(var(--fg)/.05)_0%_25%,transparent_0%_50%)] bg-[length:16px_16px] p-3">
       <img src={src} alt={name} onError={() => setFailed(true)} className="max-h-full max-w-full object-contain" />
@@ -200,7 +201,7 @@ export function FilesPanel({
   /** True to go on: nothing is lost, or the person said it may be. */
   const mayLeave = async () =>
     !dirtyRef.current ||
-    confirmDialog({ title: "Discard your changes?", message: "The file has changes that are not saved.", confirmLabel: "Discard", danger: true });
+    confirmDialog({ title: t("Discard your changes?"), message: t("The file has changes that are not saved."), confirmLabel: t("Discard"), danger: true });
 
   // The agent read or changed a file: show it, unless somebody is in the middle of editing.
   useEffect(() => {
@@ -322,12 +323,14 @@ export function FilesPanel({
     const path = join(dir, entry.name);
     // A link to a folder is listed as a folder, but only the link goes.
     const message = entry.link
-      ? "This removes the link only. What it points to is not touched."
-      : `This removes the ${entry.type === "dir" ? "folder and everything in it" : "file"}. It cannot be undone.`;
+      ? t("This removes the link only. What it points to is not touched.")
+      : entry.type === "dir"
+        ? t("This removes the folder and everything in it. It cannot be undone.")
+        : t("This removes the file. It cannot be undone.");
     const ok = await confirmDialog({
-      title: `Delete "${entry.name}"?`,
+      title: t("Delete \"{name}\"?", { name: entry.name }),
       message,
-      confirmLabel: "Delete",
+      confirmLabel: t("Delete"),
       danger: true,
       deletes: true,
     });
@@ -397,7 +400,7 @@ export function FilesPanel({
   return (
     <div className="flex h-full min-h-0 flex-col text-sm">
       <div className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1.5 text-xs text-fg-subtle">
-        <nav aria-label="Folder" className="flex min-w-0 flex-1 flex-wrap items-center gap-x-0.5 overflow-hidden">
+        <nav aria-label={t("Folder")} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-0.5 overflow-hidden">
           <button onClick={() => void goTo("")} className="max-w-full truncate rounded px-1 py-0.5 hover:bg-fg/5 hover:text-fg" title={folder}>
             {root}
           </button>
@@ -414,36 +417,36 @@ export function FilesPanel({
           onClick={follow}
           disabled={following}
           aria-pressed={following}
-          title={following ? "Showing what the agent reads and changes" : "Show what the agent reads and changes"}
+          title={following ? t("Showing what the agent reads and changes") : t("Show what the agent reads and changes")}
           className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 transition ${
             following ? "text-accent" : "text-fg-faint hover:bg-fg/5 hover:text-fg"
           }`}
         >
           <LuLocateFixed aria-hidden className="h-3.5 w-3.5" />
-          <span>{following ? "Following" : "Follow"}</span>
+          <span>{following ? t("Following") : t("Follow")}</span>
         </button>
         {!file && (
           <>
             <button
               onClick={() => startCreate("file")}
-              title="New file here"
-              aria-label="New file"
+              title={t("New file here")}
+              aria-label={t("New file")}
               className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
             >
               <LuFilePlus aria-hidden className="h-3.5 w-3.5" />
             </button>
             <button
               onClick={() => startCreate("folder")}
-              title="New folder here"
-              aria-label="New folder"
+              title={t("New folder here")}
+              aria-label={t("New folder")}
               className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
             >
               <LuFolderPlus aria-hidden className="h-3.5 w-3.5" />
             </button>
             <button
               onClick={() => picker.current?.click()}
-              title="Upload files here — or drop them on the list"
-              aria-label="Upload files"
+              title={t("Upload files here — or drop them on the list")}
+              aria-label={t("Upload files")}
               className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
             >
               <LuUpload aria-hidden className="h-3.5 w-3.5" />
@@ -464,24 +467,24 @@ export function FilesPanel({
         <button
           onClick={toggleHidden}
           aria-pressed={showHidden}
-          title={showHidden ? "Hide names that start with a dot" : "Show names that start with a dot"}
-          aria-label={showHidden ? "Hide hidden files" : "Show hidden files"}
+          title={showHidden ? t("Hide names that start with a dot") : t("Show names that start with a dot")}
+          aria-label={showHidden ? t("Hide hidden files") : t("Show hidden files")}
           className={`shrink-0 rounded p-1 transition hover:bg-fg/5 hover:text-fg ${showHidden ? "text-accent" : "text-fg-faint"}`}
         >
           {showHidden ? <LuEye aria-hidden className="h-3.5 w-3.5" /> : <LuEyeOff aria-hidden className="h-3.5 w-3.5" />}
         </button>
         <button
           onClick={() => void loadDir(dir)}
-          title="Refresh"
-          aria-label="Refresh"
+          title={t("Refresh")}
+          aria-label={t("Refresh")}
           className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
         >
           <LuRefreshCw aria-hidden className={`h-3.5 w-3.5 ${listing ? "animate-spin" : ""}`} />
         </button>
         <a
           href={api.archiveDownloadUrl(sessionId, dir)}
-          title={dir ? "Download this folder as a .tar.gz" : "Download the whole folder as a .tar.gz"}
-          aria-label="Download this folder"
+          title={dir ? t("Download this folder as a .tar.gz") : t("Download the whole folder as a .tar.gz")}
+          aria-label={t("Download this folder")}
           className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
         >
           <LuDownload aria-hidden className="h-3.5 w-3.5" />
@@ -491,13 +494,13 @@ export function FilesPanel({
       {file ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
-            <button onClick={() => void closeFile()} title="Back to the folder" aria-label="Back to the folder" className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg">
+            <button onClick={() => void closeFile()} title={t("Back to the folder")} aria-label={t("Back to the folder")} className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg">
               <LuArrowLeft aria-hidden className="h-3.5 w-3.5" />
             </button>
             <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg" title={file.path}>
               {file.path}
               {dirty && (
-                <span className="ml-1 text-accent" title="Not saved">
+                <span className="ml-1 text-accent" title={t("Not saved")}>
                   •
                 </span>
               )}
@@ -505,7 +508,7 @@ export function FilesPanel({
             {!file.loading && !file.error && (
               <span className="shrink-0 text-[10px] text-fg-faint">{sizeOf(file.size)}</span>
             )}
-            <a href={api.fileDownloadUrl(sessionId, file.path)} title="Download this file" aria-label="Download this file" className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg">
+            <a href={api.fileDownloadUrl(sessionId, file.path)} title={t("Download this file")} aria-label={t("Download this file")} className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg">
               <LuDownload aria-hidden className="h-3.5 w-3.5" />
             </a>
             {!file.binary && !file.loading && !file.error && (
@@ -515,18 +518,18 @@ export function FilesPanel({
                 className="flex shrink-0 items-center gap-1 rounded-md bg-accent/12 px-2 py-1 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
               >
                 <LuSave aria-hidden className="h-3.5 w-3.5" />
-                {saving ? "Saving…" : "Save"}
+                {saving ? t("Saving…") : t("Save")}
               </button>
             )}
           </div>
           {changed && (
             <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-warn/10 px-3 py-1.5 text-xs text-warn">
-              <span className="min-w-0 flex-1">This file changed after you opened it.</span>
+              <span className="min-w-0 flex-1">{t("This file changed after you opened it.")}</span>
               <button onClick={() => void loadFile(file.path)} className="rounded px-1.5 py-0.5 underline hover:text-fg">
-                Load the new version
+                {t("Load the new version")}
               </button>
               <button onClick={() => void save(true)} className="rounded px-1.5 py-0.5 underline hover:text-fg">
-                Save mine anyway
+                {t("Save mine anyway")}
               </button>
             </div>
           )}
@@ -535,11 +538,11 @@ export function FilesPanel({
               <LuCircleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {file.error}
             </p>
           ) : file.loading ? (
-            <p className="px-3 py-3 text-xs text-fg-subtle">Loading…</p>
+            <p className="px-3 py-3 text-xs text-fg-subtle">{t("Loading…")}</p>
           ) : file.binary && looksLikePicture(file.path) ? (
             <FilePicture key={`${file.path}@${file.mtime}`} src={api.pictureUrl(sessionId, file.path, file.mtime)} name={file.path} />
           ) : file.binary ? (
-            <p className="p-6 text-center text-xs text-fg-subtle">Not text, or too large to show. Download it to open it.</p>
+            <p className="p-6 text-center text-xs text-fg-subtle">{t("Not text, or too large to show. Download it to open it.")}</p>
           ) : (
             <textarea
               value={draft}
@@ -551,7 +554,7 @@ export function FilesPanel({
                 }
               }}
               spellCheck={false}
-              aria-label={`Contents of ${file.path}`}
+              aria-label={t("Contents of {path}", { path: file.path })}
               className="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-xs leading-relaxed text-fg outline-none"
             />
           )}
@@ -577,7 +580,7 @@ export function FilesPanel({
         >
           {uploading > 0 && (
             <p role="status" className="px-2 py-1.5 text-xs text-fg-subtle">
-              Uploading {uploading} {uploading === 1 ? "file" : "files"}…
+              {tp(uploading, "Uploading {n} file…", "Uploading {n} files…")}
             </p>
           )}
           {creating && (
@@ -596,8 +599,8 @@ export function FilesPanel({
                   else if (isEscape(e)) setCreating(null);
                 }}
                 onBlur={() => setCreating(null)}
-                placeholder={creating === "folder" ? "Folder name" : "File name, e.g. notes.md"}
-                aria-label={creating === "folder" ? "Name of the new folder" : "Name of the new file"}
+                placeholder={creating === "folder" ? t("Folder name") : t("File name, e.g. notes.md")}
+                aria-label={creating === "folder" ? t("Name of the new folder") : t("Name of the new file")}
                 spellCheck={false}
                 className="min-w-0 flex-1 rounded border border-accent/40 bg-transparent px-1.5 py-0.5 text-sm text-fg outline-none"
               />
@@ -609,7 +612,7 @@ export function FilesPanel({
             </p>
           )}
           {!listError && !listing && !creating && shown.length === 0 && (
-            <p className="px-2 py-3 text-xs text-fg-subtle">{entries.length === 0 ? "Nothing in this folder yet — drop files here to upload them." : "Nothing here but hidden files."}</p>
+            <p className="px-2 py-3 text-xs text-fg-subtle">{entries.length === 0 ? t("Nothing in this folder yet — drop files here to upload them.") : t("Nothing here but hidden files.")}</p>
           )}
           {shown.map((entry) => (
             <div key={entry.name} className="group flex items-center rounded-lg px-1 transition hover:bg-fg/5 focus-within:bg-fg/5">
@@ -636,7 +639,7 @@ export function FilesPanel({
                       else if (isEscape(e)) setRenaming(null);
                     }}
                     onBlur={() => setRenaming(null)}
-                    aria-label={`New name for ${entry.name}`}
+                    aria-label={t("New name for {name}", { name: entry.name })}
                     spellCheck={false}
                     className="min-w-0 flex-1 rounded border border-accent/40 bg-transparent px-1.5 py-0.5 text-sm text-fg outline-none"
                   />
@@ -646,7 +649,7 @@ export function FilesPanel({
                   <button
                     onClick={() => void openEntry(entry)}
                     disabled={entry.type === "link"}
-                    title={entry.type === "link" ? "A link that leads out of this folder, or nowhere" : entry.name}
+                    title={entry.type === "link" ? t("A link that leads out of this folder, or nowhere") : entry.name}
                     className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1.5 text-left text-fg disabled:cursor-default disabled:text-fg-faint"
                   >
                     {entry.type === "dir" ? (
@@ -657,7 +660,7 @@ export function FilesPanel({
                       <LuFileText aria-hidden className="h-4 w-4 shrink-0 text-fg-faint" />
                     )}
                     <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                    {entry.link && entry.type !== "link" && <LuLink aria-label="A link" className="h-3 w-3 shrink-0 text-fg-faint" />}
+                    {entry.link && entry.type !== "link" && <LuLink aria-label={t("A link")} className="h-3 w-3 shrink-0 text-fg-faint" />}
                     {entry.type === "file" && <span className="shrink-0 text-[10px] text-fg-faint">{sizeOf(entry.size)}</span>}
                   </button>
                   {/* Out of the way until the row is pointed at, but always there on a touch screen, which cannot point. */}
@@ -665,8 +668,8 @@ export function FilesPanel({
                     {entry.type !== "link" && (
                       <a
                         href={entry.type === "dir" ? api.archiveDownloadUrl(sessionId, join(dir, entry.name)) : api.fileDownloadUrl(sessionId, join(dir, entry.name))}
-                        title={entry.type === "dir" ? `Download ${entry.name} as a .tar.gz` : `Download ${entry.name}`}
-                        aria-label={`Download ${entry.name}`}
+                        title={entry.type === "dir" ? t("Download {name} as a .tar.gz", { name: entry.name }) : t("Download {name}", { name: entry.name })}
+                        aria-label={t("Download {name}", { name: entry.name })}
                         className="rounded p-1 text-fg-faint transition hover:bg-fg/10 hover:text-fg"
                       >
                         <LuDownload aria-hidden className="h-3.5 w-3.5" />
@@ -674,16 +677,16 @@ export function FilesPanel({
                     )}
                     <button
                       onClick={() => startRename(entry)}
-                      title={`Rename ${entry.name}`}
-                      aria-label={`Rename ${entry.name}`}
+                      title={t("Rename {name}", { name: entry.name })}
+                      aria-label={t("Rename {name}", { name: entry.name })}
                       className="rounded p-1 text-fg-faint transition hover:bg-fg/10 hover:text-fg"
                     >
                       <LuPencil aria-hidden className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={() => void remove(entry)}
-                      title={`Delete ${entry.name}`}
-                      aria-label={`Delete ${entry.name}`}
+                      title={t("Delete {name}", { name: entry.name })}
+                      aria-label={t("Delete {name}", { name: entry.name })}
                       className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger"
                     >
                       <LuTrash2 aria-hidden className="h-3.5 w-3.5" />
@@ -695,10 +698,10 @@ export function FilesPanel({
           ))}
           {!showHidden && entries.length > shown.length && (
             <button onClick={toggleHidden} className="px-2 py-2 text-left text-xs text-fg-subtle underline-offset-2 hover:text-fg hover:underline">
-              {entries.length - shown.length} hidden {entries.length - shown.length === 1 ? "file" : "files"} — show
+              {tp(entries.length - shown.length, "{n} hidden file — show", "{n} hidden files — show")}
             </button>
           )}
-          {truncated && <p className="px-2 py-2 text-xs text-fg-subtle">This folder has more than is listed here.</p>}
+          {truncated && <p className="px-2 py-2 text-xs text-fg-subtle">{t("This folder has more than is listed here.")}</p>}
         </div>
       )}
     </div>

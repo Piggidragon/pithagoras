@@ -1,6 +1,7 @@
 import type { PortalEvent } from "./api";
 import { unwrap } from "./tool-activity";
 import { argsSummary } from "./tool-args";
+import { msg, t } from "./i18n";
 
 /** A picture that went with a message, by the name the server keeps it under. */
 export interface SentImage {
@@ -75,7 +76,8 @@ export type Item =
     }
   /** The conversation summarized to make room, while that runs and after. */
   | { kind: "compaction"; id: string; status: "running" | "done" | "failed"; tokensBefore?: number; summary?: string; since?: number; until?: number }
-  | { kind: "notice"; id: string; text: string; tone: "info" | "warn" | "error" }
+  /** `portal`: the portal's own words, a msg() key translated where it is drawn; otherwise text as it came. */
+  | { kind: "notice"; id: string; text: string; tone: "info" | "warn" | "error"; portal?: true }
   /**
    * A slash command sent, and how it went: `done` when it showed something of
    * its own, `quiet` when it ran and showed nothing, `started`/`queued` when it
@@ -405,7 +407,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           items.push({ kind: "notice", id: `n${ev.seq}`, text: String(p.error), tone: "error" });
         }
         if (p.status === "idle" && p.aborted) {
-          items.push({ kind: "notice", id: `n${ev.seq}`, text: "Aborted", tone: "info" });
+          items.push({ kind: "notice", id: `n${ev.seq}`, text: msg("Aborted"), tone: "info", portal: true });
         }
         if (typeof p.status === "string" && p.status !== "running") settle();
         break;
@@ -504,10 +506,10 @@ export const formatTokens = (n: number) =>
 export const formatElapsed = (s: number) =>
   s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 
-const PROMPT_LABELS = ["Reading the conversation", "Reviewing the context", "Preparing to respond"];
+const PROMPT_LABELS = [msg("Reading the conversation"), msg("Reviewing the context"), msg("Preparing to respond")];
 
 /** What reading the prompt is called `seconds` in: it moves on every few seconds, so a long one is seen to be going. */
-export const promptLabel = (seconds: number) => PROMPT_LABELS[Math.floor(seconds / 4) % PROMPT_LABELS.length];
+export const promptLabel = (seconds: number) => t(PROMPT_LABELS[Math.floor(seconds / 4) % PROMPT_LABELS.length]);
 
 /** How far prefill has got: tokens read, counting the cached prefix, and that as a percentage when there is a total. */
 export function prefillShare(prefill: Activity["prefill"]): { done: number; percent?: number } {

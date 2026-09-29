@@ -10,8 +10,9 @@ import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { ChatsHeading, FolderTree } from "./FolderTree";
 import { RowsSkeleton } from "./Skeleton";
-import { folderFrom, folderKeys, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { folderFrom, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
+import { t } from "../i18n";
 
 /**
  * How long a click on a name waits for a second one. The chat opens on a click
@@ -66,7 +67,7 @@ export function SessionsPage({
     const n = ++renames.current;
     setPending({ id: s.id, title, n });
     onRename(s.id, title)
-      .catch((e) => setError(`Could not rename "${s.title}": ${(e as Error).message}`))
+      .catch((e) => setError(t("Could not rename \"{name}\": {error}", { name: s.title, error: (e as Error).message })))
       // Only its own: a later rename's name stays until that one is done.
       .finally(() => setPending((p) => (p?.n === n ? null : p)));
   };
@@ -141,7 +142,7 @@ export function SessionsPage({
             {renaming === s.id ? (
               <TitleInput
                 value={s.title}
-                label="Session name"
+                label={t("Session name")}
                 className="flex-1 text-sm"
                 onCommit={(next) => rename(s, next)}
                 onCancel={() => setRenaming(null)}
@@ -165,7 +166,7 @@ export function SessionsPage({
               </p>
             )}
             {s.pinned && (
-              <LuPin className="h-3 w-3 shrink-0 text-accent/70" title="Pinned" />
+              <LuPin className="h-3 w-3 shrink-0 text-accent/70" title={t("Pinned")} />
             )}
           </div>
           <p className="truncate font-mono text-[11px] text-fg-faint">{s.workspace}</p>
@@ -178,7 +179,7 @@ export function SessionsPage({
               onPin(s.id, !s.pinned);
             }}
             className="rounded p-1.5 text-fg-subtle hover:text-accent"
-            title={s.pinned ? "Unpin" : "Pin"}
+            title={s.pinned ? t("Unpin") : t("Pin")}
           >
             {s.pinned ? <LuPinOff className="h-3.5 w-3.5" /> : <LuPin className="h-3.5 w-3.5" />}
           </button>
@@ -188,8 +189,8 @@ export function SessionsPage({
               setRenaming(s.id);
             }}
             className="rounded p-1.5 text-fg-subtle hover:text-accent"
-            title="Rename"
-            aria-label={`Rename ${s.title}`}
+            title={t("Rename")}
+            aria-label={t("Rename {name}", { name: s.title })}
           >
             <LuPencil className="h-3.5 w-3.5" />
           </button>
@@ -198,9 +199,9 @@ export function SessionsPage({
               e.stopPropagation();
               if (
                 await confirmDialog({
-                  title: `Delete "${s.title}"?`,
-                  message: "It is stopped if it is running, and its transcript is removed.",
-                  confirmLabel: "Delete",
+                  title: t("Delete \"{name}\"?", { name: s.title }),
+                  message: t("It is stopped if it is running, and its transcript is removed."),
+                  confirmLabel: t("Delete"),
                   danger: true,
                   deletes: true,
                 })
@@ -209,7 +210,7 @@ export function SessionsPage({
               }
             }}
             className="rounded p-1.5 text-fg-subtle hover:text-danger"
-            title="Delete session"
+            title={t("Delete session")}
           >
             <LuTrash2 className="h-3.5 w-3.5" />
           </button>
@@ -223,18 +224,17 @@ export function SessionsPage({
         <div className="mx-auto w-full max-w-3xl">
           <PageHeader
             icon={<LuMessagesSquare />}
-            title="Sessions"
+            title={t("Sessions")}
             description={
               <>
-                Every task you have handed to pi. Each one runs on the server, so you can close
-                the tab and pick it back up here once it is done.
+                {t("Every task you have handed to pi. Each one runs on the server, so you can close the tab and pick it back up here once it is done.")}
               </>
             }
           >
             <div className="mt-4 flex flex-wrap gap-2">
-              <Stat label="total" value={sessions.length} />
-              <Stat label="running" value={running} tone="text-accent" />
-              <Stat label="pinned" value={pinnedCount} />
+              <Stat label={t("total")} value={sessions.length} />
+              <Stat label={t("running")} value={running} tone="text-accent" />
+              <Stat label={t("pinned")} value={pinnedCount} />
             </div>
           </PageHeader>
 
@@ -243,12 +243,12 @@ export function SessionsPage({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name or workspace…"
+              placeholder={t("Search by name or workspace…")}
               className="w-full rounded-lg border border-line bg-raised/60 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-fg-faint focus:border-accent/60"
             />
             {query && (
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-fg-faint">
-                {shown.length} of {only ? only.sessions.length : sessions.length}
+                {t("{n} of {all}", { n: shown.length, all: only ? only.sessions.length : sessions.length })}
               </span>
             )}
           </div>
@@ -257,7 +257,7 @@ export function SessionsPage({
             <div role="alert" className="mt-3 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
               <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <span className="min-w-0 flex-1">{error}</span>
-              <button onClick={() => setError(null)} aria-label="Dismiss">✕</button>
+              <button onClick={() => setError(null)} aria-label={t("Dismiss")}>✕</button>
             </div>
           )}
           {startError && <p role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{startError}</p>}
@@ -267,9 +267,9 @@ export function SessionsPage({
               <span className={`inline-flex min-w-0 items-center gap-1.5 rounded-lg py-1 pl-2.5 pr-1 text-xs ring-1 ring-inset ${gone ? "bg-warn/10 text-warn ring-warn/25" : "bg-accent/12 text-accent ring-accent/25"}`}>
                 <LuFilter aria-hidden className="h-3 w-3 shrink-0" />
                 <span className="truncate">
-                  {only ? `Only ${only.name}` : gone ? `There is no folder “${asked.replace(/^project:/, "")}” any more` : "Only one folder"}
+                  {only ? t("Only {name}", { name: folderName(only) }) : gone ? t("There is no folder “{name}” any more", { name: asked.replace(/^project:/, "") }) : t("Only one folder")}
                 </span>
-                <button type="button" onClick={() => showOnly(null)} aria-label="Show every folder" title="Show every folder" className="rounded p-0.5 hover:bg-fg/10">
+                <button type="button" onClick={() => showOnly(null)} aria-label={t("Show every folder")} title={t("Show every folder")} className="rounded p-0.5 hover:bg-fg/10">
                   <LuX className="h-3 w-3" />
                 </button>
               </span>
@@ -277,7 +277,7 @@ export function SessionsPage({
           ) : (
             hasProjects && (
               <div className="mt-3">
-                <ChatsHeading size="md" label={byFolder ? "Folders" : "All chats"} grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />
+                <ChatsHeading size="md" label={byFolder ? t("Folders") : t("All chats")} grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />
               </div>
             )
           )}
@@ -286,12 +286,12 @@ export function SessionsPage({
             <RowsSkeleton />
           ) : gone ? null : shown.length === 0 && !byFolder ? (
             <p className="py-12 text-center text-sm text-fg-subtle">
-              {sessions.length === 0 ? "No sessions yet." : only && !searching ? `No chats in ${only.name} yet.` : "Nothing matches that."}
+              {sessions.length === 0 ? t("No sessions yet.") : only && !searching ? t("No chats in {name} yet.", { name: folderName(only) }) : t("Nothing matches that.")}
             </p>
           ) : byFolder ? (
             <div className="mt-2">
               {searching && folders.every((f) => f.sessions.length === 0) && (
-                <p className="py-12 text-center text-sm text-fg-subtle">Nothing matches that.</p>
+                <p className="py-12 text-center text-sm text-fg-subtle">{t("Nothing matches that.")}</p>
               )}
               <FolderTree
                 size="md"
@@ -304,8 +304,8 @@ export function SessionsPage({
                   <button
                     type="button"
                     onClick={() => showOnly(f.key)}
-                    aria-label={`Only ${f.name}`}
-                    title={`Only ${f.name}`}
+                    aria-label={t("Only {name}", { name: folderName(f) })}
+                    title={t("Only {name}", { name: folderName(f) })}
                     className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-opacity hover:text-accent focus-visible:opacity-100 group-hover/folder:opacity-100 [@media(hover:none)]:opacity-100"
                   >
                     <LuFilter className="h-3 w-3" />
@@ -314,7 +314,7 @@ export function SessionsPage({
               >
                 {(f) =>
                   f.sessions.length === 0 ? (
-                    <p className="px-3 py-1 text-xs text-fg-faint">No chats yet.</p>
+                    <p className="px-3 py-1 text-xs text-fg-faint">{t("No chats yet.")}</p>
                   ) : (
                     <ul className="space-y-1">{f.sessions.map(row)}</ul>
                   )

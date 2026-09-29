@@ -14,6 +14,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { formatTokens } from "../transcript";
 import { Select } from "./Select";
 import { Empty, Field, Section, btnCls, ghostCls, inputCls, primaryCls } from "./SettingsUi";
+import { t, tp } from "../i18n";
 
 const KIND_ICONS: Record<ProviderKind, IconType> = {
   "llama-cpp": LuCpu, "llama-swap": LuShuffle, ollama: LuHardDrive, openrouter: LuRoute, hosted: LuCloud, custom: LuServer,
@@ -54,11 +55,11 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
 
   const remove = async (p: ProviderInfo) => {
     const ok = await confirmDialog({
-      title: `Remove ${p.label}?`,
+      title: t("Remove {name}?", { name: p.label }),
       message: p.endpoint
-        ? `Its ${p.models.length === 1 ? "model goes" : `${p.models.length} models go`} from every model menu. Chats that use one keep their history but need another model to go on.`
-        : "Its key is deleted from pi's auth.json. A key in the environment is not touched.",
-      confirmLabel: "Remove",
+        ? tp(p.models.length, "Its model goes from every model menu. Chats that use it keep their history but need another model to go on.", "Its {n} models go from every model menu. Chats that use one keep their history but need another model to go on.")
+        : t("Its key is deleted from pi's auth.json. A key in the environment is not touched."),
+      confirmLabel: t("Remove"),
       danger: true,
       deletes: true,
     });
@@ -85,17 +86,17 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
   return (
     <>
       <Section
-        title="Providers"
-        hint="Where the agent's models come from. Each one's models appear in the model menu under the chat box."
+        title={t("Providers")}
+        hint={t("Where the agent's models come from. Each one's models appear in the model menu under the chat box.")}
         action={editing !== "new" && (
           <div className="flex items-center gap-1.5">
             {onSetup && (
-              <button type="button" onClick={onSetup} className={ghostCls} title="Provider, model and what the agent can do, one step at a time">
-                <LuWandSparkles className="h-3.5 w-3.5" /> Setup assistant
+              <button type="button" onClick={onSetup} className={ghostCls} title={t("Provider, model and what the agent can do, one step at a time")}>
+                <LuWandSparkles className="h-3.5 w-3.5" /> {t("Setup assistant")}
               </button>
             )}
             <button type="button" onClick={() => setEditing("new")} className={primaryCls}>
-              <LuPlus className="h-4 w-4" /> Add a provider
+              <LuPlus className="h-4 w-4" /> {t("Add a provider")}
             </button>
           </div>
         )}
@@ -106,8 +107,8 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
         )}
         {view.providers.length === 0 && editing !== "new" ? (
           <Empty>
-            No provider yet.
-            <p className="mt-1 text-xs text-fg-faint">Add a llama.cpp server, Ollama, OpenRouter or any OpenAI-compatible endpoint.</p>
+            {t("No provider yet.")}
+            <p className="mt-1 text-xs text-fg-faint">{t("Add a llama.cpp server, Ollama, OpenRouter or any OpenAI-compatible endpoint.")}</p>
           </Empty>
         ) : (
           <ul className="stagger-in space-y-2">
@@ -131,11 +132,11 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
       </Section>
 
       <Section
-        title="Provider packages"
-        hint="A service pi does not know of on its own — a gateway, a proxy, a new host — often comes as a package that adds it."
+        title={t("Provider packages")}
+        hint={t("A service pi does not know of on its own — a gateway, a proxy, a new host — often comes as a package that adds it.")}
         action={!browsing && (
           <button type="button" onClick={() => setBrowsing(true)} className={ghostCls}>
-            <LuPackage className="h-3.5 w-3.5" /> Browse
+            <LuPackage className="h-3.5 w-3.5" /> {t("Browse")}
           </button>
         )}
       >
@@ -171,7 +172,7 @@ export function useInstalledPackages() {
 
 function ProvidersSkeleton() {
   return (
-    <div className="skeleton-group space-y-2" aria-label="Loading providers">
+    <div className="skeleton-group space-y-2" aria-label={t("Loading providers")}>
       <div className="skeleton h-4 w-40" />
       <div className="skeleton h-20 w-full" />
       <div className="skeleton h-20 w-full" />
@@ -180,7 +181,7 @@ function ProvidersSkeleton() {
 }
 
 const presetLabel = (kind: ProviderKind) =>
-  ({ "llama-cpp": "llama.cpp", "llama-swap": "llama-swap", ollama: "Ollama", openrouter: "OpenRouter", hosted: "Hosted", custom: "Custom" })[kind];
+  ({ "llama-cpp": "llama.cpp", "llama-swap": "llama-swap", ollama: "Ollama", openrouter: "OpenRouter", hosted: t("Hosted"), custom: t("Custom") })[kind];
 
 function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provider: ProviderInfo; status?: ProviderStatus; busy: boolean; onEdit?: () => void; onRemove?: () => void }) {
   const [open, setOpen] = useState(false);
@@ -198,9 +199,9 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
               <span className="rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">{presetLabel(p.kind)}</span>
             )}
             {p.key.set && (
-              <span className="inline-flex items-center gap-1 rounded bg-ok/10 px-1.5 py-0.5 text-[10px] text-ok" title={p.key.source === "environment" ? "pi finds its key in the environment" : "A key is stored for it"}>
+              <span className="inline-flex items-center gap-1 rounded bg-ok/10 px-1.5 py-0.5 text-[10px] text-ok" title={p.key.source === "environment" ? t("pi finds its key in the environment") : t("A key is stored for it")}>
                 <LuKeyRound className="h-2.5 w-2.5" />
-                {p.key.source === "environment" ? "key from the environment" : p.key.hint ?? "key set"}
+                {p.key.source === "environment" ? t("key from the environment") : p.key.hint ?? t("key set")}
               </span>
             )}
           </div>
@@ -213,19 +214,21 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
           {status?.state === "down" && status.message && <p className="float-in mt-1 text-[11px] text-danger/90">{status.message}</p>}
           {status?.state === "up" && !!status.missing?.length && (
             <p className="float-in mt-1 text-[11px] text-warn">
-              {status.missing.length === 1 ? `${status.missing[0]} is` : `${status.missing.length} chosen models are`} not listed by the server any more.
+              {status.missing.length === 1
+                ? t("{model} is not listed by the server any more.", { model: status.missing[0] })
+                : t("{n} chosen models are not listed by the server any more.", { n: status.missing.length })}
             </p>
           )}
-          {!p.endpoint && <p className="mt-0.5 text-[11px] text-fg-faint">Every model pi knows of from this service is in the model menu.</p>}
+          {!p.endpoint && <p className="mt-0.5 text-[11px] text-fg-faint">{t("Every model pi knows of from this service is in the model menu.")}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition group-hover:opacity-100">
           {onEdit && (
-            <button type="button" onClick={onEdit} title="Edit" aria-label={`Edit ${p.label}`} className="rounded-lg p-1.5 text-fg-subtle transition hover:bg-fg/10 hover:text-fg">
+            <button type="button" onClick={onEdit} title={t("Edit")} aria-label={t("Edit {name}", { name: p.label })} className="rounded-lg p-1.5 text-fg-subtle transition hover:bg-fg/10 hover:text-fg">
               <LuPencil className="h-3.5 w-3.5" />
             </button>
           )}
           {onRemove && (
-            <button type="button" onClick={onRemove} disabled={busy} title="Remove" aria-label={`Remove ${p.label}`} className="rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40">
+            <button type="button" onClick={onRemove} disabled={busy} title={t("Remove")} aria-label={t("Remove {name}", { name: p.label })} className="rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40">
               {busy ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuTrash2 className="h-3.5 w-3.5" />}
             </button>
           )}
@@ -233,11 +236,11 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
       </div>
       {p.endpoint && (
         <div className="mt-2.5 flex flex-wrap gap-1.5 pl-12">
-          {p.models.length === 0 && <span className="text-xs text-warn">No models chosen yet — edit it to pick some.</span>}
+          {p.models.length === 0 && <span className="text-xs text-warn">{t("No models chosen yet — edit it to pick some.")}</span>}
           {shown.map((m) => <ModelChip key={m.id} model={m} loaded={status?.loaded?.includes(m.id)} missing={status?.missing?.includes(m.id)} />)}
           {p.models.length > 6 && (
             <button type="button" onClick={() => setOpen(!open)} className="rounded-md px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/10">
-              {open ? "Fewer" : `${p.models.length - 6} more`}
+              {open ? t("Fewer") : t("{n} more", { n: p.models.length - 6 })}
             </button>
           )}
         </div>
@@ -252,11 +255,11 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
  */
 export function StatusBadge({ status }: { status?: ProviderStatus }) {
   const state = status?.state ?? "checking";
-  const text = state === "up" ? `Online${status?.ms !== undefined ? ` · ${status.ms} ms` : ""}` : state === "down" ? "Offline" : "Checking…";
+  const text = state === "up" ? (status?.ms !== undefined ? t("Online · {ms} ms", { ms: status.ms }) : t("Online")) : state === "down" ? t("Offline") : t("Checking…");
   return (
     <span
       className={`provider-status is-${state} inline-flex shrink-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px]`}
-      title={state === "down" ? status?.message : state === "up" ? `Answered in ${status?.ms} ms, listing ${status?.listed ?? 0} models` : "Asking the server"}
+      title={state === "down" ? status?.message : state === "up" ? tp(status?.listed ?? 0, "Answered in {ms} ms, listing {n} model", "Answered in {ms} ms, listing {n} models", { ms: status?.ms ?? 0 }) : t("Asking the server")}
     >
       <i aria-hidden="true" />
       {text}
@@ -268,13 +271,13 @@ function ModelChip({ model: m, loaded, missing }: { model: ProviderModel; loaded
   return (
     <span
       className={`inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] ${loaded ? "bg-ok/10 text-ok" : missing ? "bg-warn/10 text-warn line-through decoration-warn/50" : "bg-fg/5 text-fg-muted"}`}
-      title={loaded ? `${m.id} — loaded now` : missing ? `${m.id} — the server does not list it now` : m.id}
+      title={loaded ? t("{model} — loaded now", { model: m.id }) : missing ? t("{model} — the server does not list it now", { model: m.id }) : m.id}
     >
       {loaded && <i className="provider-loaded-dot" aria-hidden="true" />}
       <span className="truncate">{m.name ?? m.id}</span>
       {m.contextWindow && <span className="font-mono text-[10px] text-fg-faint">{formatTokens(m.contextWindow)}</span>}
-      {m.input?.includes("image") && <LuEye className="h-3 w-3 text-fg-faint" aria-label="Sees images" />}
-      {m.reasoning && <LuBrain className="h-3 w-3 text-fg-faint" aria-label="Thinks" />}
+      {m.input?.includes("image") && <LuEye className="h-3 w-3 text-fg-faint" aria-label={t("Sees images")} />}
+      {m.reasoning && <LuBrain className="h-3 w-3 text-fg-faint" aria-label={t("Thinks")} />}
     </span>
   );
 }
@@ -320,7 +323,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   const [apiType, setApiType] = useState(provider?.api ?? "openai-completions");
   const [key, setKey] = useState("");
   const [rows, setRows] = useState<Row[]>(() => (provider?.models ?? []).map((m) => toRow(m, true, false, true)));
-  const [probe, setProbe] = useState<{ state: "idle" | "asking" | "ok" | "failed"; message?: string }>({ state: "idle" });
+  const [probe, setProbe] = useState<{ state: "idle" | "asking" | "ok" | "failed"; message?: () => string }>({ state: "idle" });
   const [manual, setManual] = useState("");
   const [saving, setSaving] = useState(false);
   const probeSeq = useRef(0);
@@ -364,11 +367,12 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         // not listed; one only found at an address asked before goes with it.
         return [...merged, ...[...known.values()].filter((row) => row.own).map((row) => ({ ...row, found: false }))];
       });
-      setProbe({ state: "ok", message: r.models.length ? `${r.models.length} model${r.models.length === 1 ? "" : "s"} found` : "It answered, but lists no models — add them by name below." });
+      setProbe({ state: "ok", message: () => (r.models.length ? tp(r.models.length, "{n} model found", "{n} models found") : t("It answered, but lists no models — add them by name below.")) });
       if (r.baseUrl !== url.trim()) setBaseUrl(r.baseUrl);
     } catch (e) {
       if (seq !== probeSeq.current) return;
-      setProbe({ state: "failed", message: (e as Error).message });
+      const said = (e as Error).message;
+      setProbe({ state: "failed", message: () => said });
     }
   };
 
@@ -428,9 +432,9 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
     })),
     {
       value: "package",
-      label: <span className="inline-flex items-center gap-2"><LuPackage className="h-3.5 w-3.5 text-accent" />From a package</span>,
-      text: "From a package",
-      hint: "A service pi does not know of, added by a pi package from npm — LiteLLM, Cohere, gateways.",
+      label: <span className="inline-flex items-center gap-2"><LuPackage className="h-3.5 w-3.5 text-accent" />{t("From a package")}</span>,
+      text: t("From a package"),
+      hint: t("A service pi does not know of, added by a pi package from npm — LiteLLM, Cohere, gateways."),
     },
   ];
 
@@ -438,16 +442,16 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
     <div className={embedded ? "" : "float-in mb-2 rounded-xl border border-accent/30 bg-raised/50 p-4 shadow-lg shadow-black/10"}>
       {!embedded && (
         <div className="mb-3 flex items-center gap-2">
-          <h4 className="text-sm font-medium text-fg">{editing ? `Edit ${provider!.label}` : "Add a provider"}</h4>
-          <button type="button" onClick={onCancel} aria-label="Cancel" className="ml-auto rounded-lg p-1 text-fg-subtle transition hover:bg-fg/10 hover:text-fg">
+          <h4 className="text-sm font-medium text-fg">{editing ? t("Edit {name}", { name: provider!.label }) : t("Add a provider")}</h4>
+          <button type="button" onClick={onCancel} aria-label={t("Cancel")} className="ml-auto rounded-lg p-1 text-fg-subtle transition hover:bg-fg/10 hover:text-fg">
             <LuX className="h-4 w-4" />
           </button>
         </div>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Kind" className="sm:col-span-2">
-          <Select<EditorKind> className="w-full" aria-label="Kind of provider" value={choice} options={kindOptions} onChange={pickKind} disabled={editing} />
+        <Field label={t("Kind")} className="sm:col-span-2">
+          <Select<EditorKind> className="w-full" aria-label={t("Kind of provider")} value={choice} options={kindOptions} onChange={pickKind} disabled={editing} />
           {!editing && <p className="mt-1 text-[11px] text-fg-faint">{kindOptions.find((o) => o.value === choice)?.hint}</p>}
         </Field>
       </div>
@@ -456,8 +460,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         <div key="package" className="float-in mt-3">
           <PackageCatalog topic="provider" installed={installed.names} onInstalled={() => { void installed.reload(); forget("models"); onInstalled?.(); }} onError={onError} limit={5} />
           <p className="mt-2 text-[11px] text-fg-faint">
-            A package's models show in the model menu of chats started after it is installed. Most want a key or an
-            address of their own: they appear under Extension settings when it can be set there.
+            {t("A package's models show in the model menu of chats started after it is installed. Most want a key or an address of their own: they appear under Extension settings when it can be set there.")}
           </p>
         </div>
       ) : (
@@ -465,25 +468,25 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
       <div key={kind} className="mt-3 grid gap-3 sm:grid-cols-2">
 
         {kind === "hosted" ? (
-          <Field label="Service" className="sm:col-span-2">
+          <Field label={t("Service")} className="sm:col-span-2">
             <Select
               className="w-full"
-              aria-label="Hosted service"
+              aria-label={t("Hosted service")}
               value={id}
-              placeholder="Choose a service…"
+              placeholder={t("Choose a service…")}
               disabled={editing}
-              options={hostedChoices.map((h) => ({ value: h.id, label: h.name, hint: taken.has(h.id) && !editing ? "Already set up" : undefined, disabled: taken.has(h.id) && !editing }))}
+              options={hostedChoices.map((h) => ({ value: h.id, label: h.name, hint: taken.has(h.id) && !editing ? t("Already set up") : undefined, disabled: taken.has(h.id) && !editing }))}
               onChange={setId}
             />
           </Field>
         ) : kind !== "openrouter" && (
-          <Field label="Name" hint={editing ? "What its models are filed under. Fixed once saved." : "What its models are filed under in the model menu."}>
-            <input value={id} onChange={(e) => setId(e.target.value.replace(/\s+/g, "-"))} disabled={editing} spellCheck={false} className={`${inputCls} font-mono`} aria-label="Provider name" />
+          <Field label={t("Name")} hint={editing ? t("What its models are filed under. Fixed once saved.") : t("What its models are filed under in the model menu.")}>
+            <input value={id} onChange={(e) => setId(e.target.value.replace(/\s+/g, "-"))} disabled={editing} spellCheck={false} className={`${inputCls} font-mono`} aria-label={t("Provider name")} />
           </Field>
         )}
 
         {preset.endpoint && (
-          <Field label="Address" hint={kind === "custom" ? "The base of its OpenAI API, usually ending in /v1." : undefined}>
+          <Field label={t("Address")} hint={kind === "custom" ? t("The base of its OpenAI API, usually ending in /v1.") : undefined}>
             <div className="relative">
               <input
                 value={baseUrl}
@@ -491,7 +494,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
                 placeholder={preset.baseUrl ?? "https://host/v1"}
                 spellCheck={false}
                 className={`${inputCls} pr-9 font-mono`}
-                aria-label="Server address"
+                aria-label={t("Server address")}
               />
               <ProbeMark state={probe.state} />
             </div>
@@ -499,18 +502,18 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         )}
 
         {kind === "custom" && (
-          <Field label="API">
-            <Select className="w-full" aria-label="API" value={apiType} onChange={setApiType} options={view.apis.map((a) => ({ value: a, label: API_LABELS[a] ?? a, hint: a }))} />
+          <Field label={t("API")}>
+            <Select className="w-full" aria-label={t("API")} value={apiType} onChange={setApiType} options={view.apis.map((a) => ({ value: a, label: API_LABELS[a] ?? a, hint: a }))} />
           </Field>
         )}
 
         {preset.key !== "none" && (
           <Field
-            label={preset.key === "required" ? "API key" : "API key (if the server wants one)"}
-            hint={provider?.key.set ? `Leave empty to keep the one stored (${provider.key.hint ?? "set"}).` : "Stored in pi's auth files, readable by the portal's user only. $NAME reads it from the environment."}
+            label={preset.key === "required" ? t("API key") : t("API key (if the server wants one)")}
+            hint={provider?.key.set ? t("Leave empty to keep the one stored ({hint}).", { hint: provider.key.hint ?? t("set") }) : t("Stored in pi's auth files, readable by the portal's user only. $NAME reads it from the environment.")}
             className={preset.endpoint ? "" : "sm:col-span-2"}
           >
-            <input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={provider?.key.set ? "••••••••" : preset.key === "required" ? "sk-…" : "none"} className={`${inputCls} font-mono`} aria-label="API key" />
+            <input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={provider?.key.set ? "••••••••" : preset.key === "required" ? "sk-…" : t("none")} className={`${inputCls} font-mono`} aria-label={t("API key")} />
           </Field>
         )}
       </div>
@@ -518,12 +521,12 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
       {preset.endpoint && (
         <div className="mt-4">
           <div className="flex items-center gap-2">
-            <p className="text-xs text-fg-muted">Models</p>
+            <p className="text-xs text-fg-muted">{t("Models")}</p>
             {probe.message && (
-              <span role="status" className={`truncate text-[11px] ${probe.state === "failed" ? "text-danger" : "text-fg-faint"}`}>{probe.message}</span>
+              <span role="status" className={`truncate text-[11px] ${probe.state === "failed" ? "text-danger" : "text-fg-faint"}`}>{probe.message()}</span>
             )}
             <button type="button" onClick={() => void ask()} disabled={!baseUrl.trim() || probe.state === "asking"} className={`${ghostCls} ml-auto`}>
-              <LuRefreshCw className={`h-3.5 w-3.5 ${probe.state === "asking" ? "animate-spin" : ""}`} /> Ask again
+              <LuRefreshCw className={`h-3.5 w-3.5 ${probe.state === "asking" ? "animate-spin" : ""}`} /> {t("Ask again")}
             </button>
           </div>
           <ModelRows rows={rows} onChange={setRow} onAll={(keep) => setRows(rows.map((r) => ({ ...r, keep })))} />
@@ -532,10 +535,10 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
               value={manual}
               onChange={(e) => setManual(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addManual(); } }}
-              placeholder="Add a model by its id"
+              placeholder={t("Add a model by its id")}
               spellCheck={false}
               className={`${inputCls} py-1.5 font-mono text-xs`}
-              aria-label="Model id to add"
+              aria-label={t("Model id to add")}
             />
             <button type="button" onClick={addManual} disabled={!manual.trim()} className={btnCls}><LuPlus className="h-4 w-4" /></button>
           </div>
@@ -549,12 +552,16 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
         {choice !== "package" && (
           <button type="button" onClick={() => void save()} disabled={!canSave} className={primaryCls}>
             {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : <LuCheck className="h-4 w-4" />}
-            {editing ? "Save" : "Add"}
+            {editing ? t("Save") : t("Add")}
           </button>
         )}
-        {!embedded && <button type="button" onClick={onCancel} className={ghostCls}>{choice === "package" ? "Done" : "Cancel"}</button>}
+        {!embedded && <button type="button" onClick={onCancel} className={ghostCls}>{choice === "package" ? t("Done") : t("Cancel")}</button>}
         <span className="ml-auto text-[11px] text-fg-faint">
-          {clash ? `${kind === "openrouter" ? "OpenRouter" : `“${id.trim()}”`} is set up already — edit it in the list${kind === "openrouter" || kind === "hosted" ? "" : ", or pick another name"}.` : badCtx ? `${badCtx.id}: the window is a whole number of tokens.` : needsKey ? "It needs a key." : preset.endpoint && kept.length === 0 && rows.length > 0 ? "Tick at least one model." : ""}
+          {clash
+            ? kind === "openrouter" || kind === "hosted"
+              ? t("{name} is set up already — edit it in the list.", { name: kind === "openrouter" ? "OpenRouter" : `“${id.trim()}”` })
+              : t("{name} is set up already — edit it in the list, or pick another name.", { name: `“${id.trim()}”` })
+            : badCtx ? t("{model}: the window is a whole number of tokens.", { model: badCtx.id }) : needsKey ? t("It needs a key.") : preset.endpoint && kept.length === 0 && rows.length > 0 ? t("Tick at least one model.") : ""}
         </span>
       </div>
     </div>
@@ -570,9 +577,9 @@ const API_LABELS: Record<string, string> = {
 
 function ProbeMark({ state }: { state: "idle" | "asking" | "ok" | "failed" }) {
   const cls = "pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2";
-  if (state === "asking") return <LuRefreshCw className={`${cls} animate-spin text-fg-faint`} aria-label="Asking the server" />;
-  if (state === "ok") return <LuCheck className={`${cls} pop-in text-ok`} aria-label="The server answered" />;
-  if (state === "failed") return <LuX className={`${cls} pop-in text-danger`} aria-label="The server did not answer" />;
+  if (state === "asking") return <LuRefreshCw className={`${cls} animate-spin text-fg-faint`} aria-label={t("Asking the server")} />;
+  if (state === "ok") return <LuCheck className={`${cls} pop-in text-ok`} aria-label={t("The server answered")} />;
+  if (state === "failed") return <LuX className={`${cls} pop-in text-danger`} aria-label={t("The server did not answer")} />;
   return null;
 }
 
@@ -582,42 +589,42 @@ function ModelRows({ rows, onChange, onAll }: { rows: Row[]; onChange: (id: stri
     const q = filter.trim().toLowerCase();
     return q ? rows.filter((r) => r.id.toLowerCase().includes(q) || r.name?.toLowerCase().includes(q)) : rows;
   }, [rows, filter]);
-  if (!rows.length) return <p className="mt-2 rounded-lg border border-dashed border-line px-3 py-4 text-center text-xs text-fg-faint">Its models appear here once the server answers.</p>;
+  if (!rows.length) return <p className="mt-2 rounded-lg border border-dashed border-line px-3 py-4 text-center text-xs text-fg-faint">{t("Its models appear here once the server answers.")}</p>;
   const all = rows.every((r) => r.keep);
   return (
     <div className="mt-2 overflow-hidden rounded-lg border border-line">
       <div className="flex items-center gap-2 border-b border-line bg-fg/[.03] px-2.5 py-1.5">
-        <input type="checkbox" checked={all} onChange={() => onAll(!all)} className="h-3.5 w-3.5 accent-accent" aria-label="Choose every model" />
+        <input type="checkbox" checked={all} onChange={() => onAll(!all)} className="h-3.5 w-3.5 accent-accent" aria-label={t("Choose every model")} />
         {rows.length > 8 ? (
           <div className="relative flex-1">
             <LuSearch className="pointer-events-none absolute left-0 top-1/2 h-3 w-3 -translate-y-1/2 text-fg-faint" />
-            <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={`Filter ${rows.length} models`} className="w-full bg-transparent pl-4 text-xs outline-none placeholder:text-fg-faint" aria-label="Filter models" />
+            <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filter {n} models", { n: rows.length })} className="w-full bg-transparent pl-4 text-xs outline-none placeholder:text-fg-faint" aria-label={t("Filter models")} />
           </div>
-        ) : <span className="flex-1 text-[11px] text-fg-faint">{rows.filter((r) => r.keep).length} of {rows.length} chosen</span>}
-        <span className="w-20 text-right text-[10px] uppercase tracking-wider text-fg-faint">Window</span>
-        <span className="w-14 text-center text-[10px] uppercase tracking-wider text-fg-faint">Can</span>
+        ) : <span className="flex-1 text-[11px] text-fg-faint">{t("{n} of {all} chosen", { n: rows.filter((r) => r.keep).length, all: rows.length })}</span>}
+        <span className="w-20 text-right text-[10px] uppercase tracking-wider text-fg-faint">{t("Window")}</span>
+        <span className="w-14 text-center text-[10px] uppercase tracking-wider text-fg-faint">{t("Can")}</span>
       </div>
       <ul className="max-h-72 divide-y divide-line/60 overflow-y-auto">
         {shown.map((r) => (
           <li key={r.id} className={`flex items-center gap-2 px-2.5 py-1.5 transition-colors ${r.keep ? "" : "opacity-55"}`}>
-            <input type="checkbox" checked={r.keep} onChange={() => onChange(r.id, { keep: !r.keep })} className="h-3.5 w-3.5 accent-accent" aria-label={`Use ${r.id}`} />
+            <input type="checkbox" checked={r.keep} onChange={() => onChange(r.id, { keep: !r.keep })} className="h-3.5 w-3.5 accent-accent" aria-label={t("Use {model}", { model: r.id })} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs text-fg" title={r.id}>{r.name ?? r.id}</p>
               {r.name && <p className="truncate font-mono text-[10px] text-fg-faint">{r.id}</p>}
-              {!r.found && <p className="text-[10px] text-fg-faint">Not listed by the server right now</p>}
+              {!r.found && <p className="text-[10px] text-fg-faint">{t("Not listed by the server right now")}</p>}
             </div>
             <input
               value={r.ctxText}
               onChange={(e) => onChange(r.id, { ctxText: e.target.value })}
-              placeholder="default"
+              placeholder={t("default")}
               inputMode="numeric"
-              title="How many tokens it may hold. Empty: pi's default of 128k."
-              aria-label={`Context window of ${r.id}`}
+              title={t("How many tokens it may hold. Empty: pi's default of 128k.")}
+              aria-label={t("Context window of {model}", { model: r.id })}
               className={`w-20 rounded-md border bg-transparent px-1.5 py-0.5 text-right font-mono text-[11px] outline-none focus:border-accent/60 ${parseWindow(r.ctxText).kind === "bad" ? "border-danger/60" : "border-line"}`}
             />
             <div className="flex w-14 justify-center gap-0.5">
-              <Toggle on={!!r.input?.includes("image")} label="Sees images" onClick={() => onChange(r.id, { input: r.input?.includes("image") ? undefined : ["text", "image"] })}><LuEye /></Toggle>
-              <Toggle on={!!r.reasoning} label="Thinks before answering" onClick={() => onChange(r.id, { reasoning: !r.reasoning })}><LuBrain /></Toggle>
+              <Toggle on={!!r.input?.includes("image")} label={t("Sees images")} onClick={() => onChange(r.id, { input: r.input?.includes("image") ? undefined : ["text", "image"] })}><LuEye /></Toggle>
+              <Toggle on={!!r.reasoning} label={t("Thinks before answering")} onClick={() => onChange(r.id, { reasoning: !r.reasoning })}><LuBrain /></Toggle>
             </div>
           </li>
         ))}

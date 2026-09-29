@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
+import { labelOf, languageName, msg, t } from "../i18n";
+
+/** What the voice service is doing, as its badge says it. */
+const INSTALL_STATE: Record<string, string> = {
+  unavailable: msg("unavailable"),
+  starting: msg("starting"),
+  stopped: msg("stopped"),
+  failed: msg("failed"),
+};
 
 export function VoiceAddon({ onError }: { onError: (message: string) => void }) {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
@@ -27,71 +36,71 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const setRuntime = (runtime: VoiceConfig["runtime"]) => update(runtime === "chatterbox" && !CHATTERBOX_LANGUAGES.includes(config.language ?? "auto")
     ? { runtime, language: "en" } : { runtime });
   return <div className="mt-4 space-y-4">
-    <div><p className="text-sm text-fg">Voice</p><p className="mt-1 text-xs text-fg-faint">Talk naturally, interrupt anytime, and hear replies in your chosen voice.</p></div>
-    <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.enabled} onChange={e => update({ enabled: e.target.checked })} />Enable voice controls in sessions</label>
+    <div><p className="text-sm text-fg">{t("Voice")}</p><p className="mt-1 text-xs text-fg-faint">{t("Talk naturally, interrupt anytime, and hear replies in your chosen voice.")}</p></div>
+    <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.enabled} onChange={e => update({ enabled: e.target.checked })} />{t("Enable voice controls in sessions")}</label>
     <section className="rounded-xl border border-line bg-surface/50 p-4 space-y-4">
-      <div><h3 className="text-sm font-medium">Your voice</h3><p className="mt-1 text-xs text-fg-muted">Choose how your assistant sounds.</p></div>
+      <div><h3 className="text-sm font-medium">{t("Your voice")}</h3><p className="mt-1 text-xs text-fg-muted">{t("Choose how your assistant sounds.")}</p></div>
     <VoiceLibrary value={config.voice || "design"} onChange={voice=>update({voice})} onError={onError}/>
-      {["design","aria"].includes(config.voice||"design") && <label className="block text-xs text-fg-muted">Describe the speaking voice<input className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config.instruction} onChange={e=>update({instruction:e.target.value})}/></label>}
+      {["design","aria"].includes(config.voice||"design") && <label className="block text-xs text-fg-muted">{t("Describe the speaking voice")}<input className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config.instruction} onChange={e=>update({instruction:e.target.value})}/></label>}
     </section>
     <section className="rounded-xl border border-line bg-surface/50 p-4 space-y-4">
-      <h3 className="text-sm font-medium">Conversation</h3>
-    <div className="block text-xs text-fg-muted">Input language<Select aria-label="Input language" size="sm" className="mt-1.5 w-full" value={config.language || "auto"} onChange={language => update({ language })} options={languages.map(([value, label]) => ({ value, label }))} /></div>
-    <p className="text-xs text-fg-faint">Choosing your language improves recognition on short turns.</p>
+      <h3 className="text-sm font-medium">{t("Conversation")}</h3>
+    <div className="block text-xs text-fg-muted">{t("Input language")}<Select aria-label={t("Input language")} size="sm" className="mt-1.5 w-full" value={config.language || "auto"} onChange={language => update({ language })} options={languages.map(([value, label]) => ({ value, label: value === "auto" ? t("Auto-detect") : languageName(value, label) }))} /></div>
+    <p className="text-xs text-fg-faint">{t("Choosing your language improves recognition on short turns.")}</p>
     {chatterbox
-      ? <div className="block text-xs text-fg-muted">Speech delivery<Select<number> aria-label="Speech delivery" size="sm" className="mt-1.5 w-full" value={config.exaggeration ?? 0.5} onChange={exaggeration => update({ exaggeration })} options={[{ value: 0.3, label: "Calm", hint: "Flatter delivery" }, { value: 0.5, label: "Natural", hint: "As recorded" }, { value: 0.8, label: "Expressive", hint: "Stronger emotion" }]} /></div>
-      : <div className="block text-xs text-fg-muted">Speech generation<Select<number> aria-label="Speech generation" size="sm" className="mt-1.5 w-full" value={config.cfgScale ?? 4} onChange={cfgScale => update({ cfgScale })} options={[{ value: 1, label: "Fast", hint: "Lighter voice guidance" }, { value: 4, label: "Expressive", hint: "Stronger voice guidance" }]} /></div>}
-    {chatterbox && <p className="text-xs text-fg-faint">Chatterbox speaks your input language and clones the selected reference voice; it has no designed voice.{NUMBER_PACK_LANGUAGES.includes(config.language ?? "") ? " Numbers are written out before synthesis so they are spoken correctly." : " Numbers stay as digits in this language, which Chatterbox reads unreliably."}</p>}
-    {chatterbox && (config.voice || "design") === "design" && <p role="alert" className="text-xs text-red-400">Choose Aria or a voice with a recording above: Chatterbox cannot speak with a designed voice.</p>}
+      ? <div className="block text-xs text-fg-muted">{t("Speech delivery")}<Select<number> aria-label={t("Speech delivery")} size="sm" className="mt-1.5 w-full" value={config.exaggeration ?? 0.5} onChange={exaggeration => update({ exaggeration })} options={[{ value: 0.3, label: t("Calm"), hint: t("Flatter delivery") }, { value: 0.5, label: t("Natural"), hint: t("As recorded") }, { value: 0.8, label: t("Expressive"), hint: t("Stronger emotion") }]} /></div>
+      : <div className="block text-xs text-fg-muted">{t("Speech generation")}<Select<number> aria-label={t("Speech generation")} size="sm" className="mt-1.5 w-full" value={config.cfgScale ?? 4} onChange={cfgScale => update({ cfgScale })} options={[{ value: 1, label: t("Fast"), hint: t("Lighter voice guidance") }, { value: 4, label: t("Expressive"), hint: t("Stronger voice guidance") }]} /></div>}
+    {chatterbox && <p className="text-xs text-fg-faint">{t("Chatterbox speaks your input language and clones the selected reference voice; it has no designed voice.")} {NUMBER_PACK_LANGUAGES.includes(config.language ?? "") ? t("Numbers are written out before synthesis so they are spoken correctly.") : t("Numbers stay as digits in this language, which Chatterbox reads unreliably.")}</p>}
+    {chatterbox && (config.voice || "design") === "design" && <p role="alert" className="text-xs text-red-400">{t("Choose Aria or a voice with a recording above: Chatterbox cannot speak with a designed voice.")}</p>}
     </section>
     <details className="rounded-xl border border-line p-4">
-      <summary className="cursor-pointer text-sm font-medium">Speech detection<span className="mt-1 block text-xs font-normal text-fg-muted">Turn timing and microphone sensitivity · Silero VAD</span></summary>
+      <summary className="cursor-pointer text-sm font-medium">{t("Speech detection")}<span className="mt-1 block text-xs font-normal text-fg-muted">{t("Turn timing and microphone sensitivity · Silero VAD")}</span></summary>
       <div className="mt-4 space-y-4">
-        <p className="text-xs text-fg-faint">Save, then restart voice mode to apply. Shorter silence responds faster but can cut off pauses.</p>
+        <p className="text-xs text-fg-faint">{t("Save, then restart voice mode to apply. Shorter silence responds faster but can cut off pauses.")}</p>
         {([
-          ['redemptionMs', 'End-of-turn silence', 200, 3000, 50, 'ms', 'How long to wait after speech before sending your turn.'],
-          ['positiveSpeechThreshold', 'Speech-start threshold', 0.01, 1, 0.01, '', 'Higher values reject more noise but may miss quiet speech.'],
-          ['negativeSpeechThreshold', 'Speech-end threshold', 0, 0.99, 0.01, '', 'Below this confidence, audio counts as silence. Must be lower than the start threshold.'],
-          ['minSpeechMs', 'Minimum speech duration', 64, 2000, 16, 'ms', 'Shorter sounds are ignored as accidental triggers.'],
-          ['preSpeechPadMs', 'Audio before speech', 0, 1000, 20, 'ms', 'Retain the beginning of words before speech is confirmed.'],
+          ['redemptionMs', msg('End-of-turn silence'), 200, 3000, 50, 'ms', msg('How long to wait after speech before sending your turn.')],
+          ['positiveSpeechThreshold', msg('Speech-start threshold'), 0.01, 1, 0.01, '', msg('Higher values reject more noise but may miss quiet speech.')],
+          ['negativeSpeechThreshold', msg('Speech-end threshold'), 0, 0.99, 0.01, '', msg('Below this confidence, audio counts as silence. Must be lower than the start threshold.')],
+          ['minSpeechMs', msg('Minimum speech duration'), 64, 2000, 16, 'ms', msg('Shorter sounds are ignored as accidental triggers.')],
+          ['preSpeechPadMs', msg('Audio before speech'), 0, 1000, 20, 'ms', msg('Retain the beginning of words before speech is confirmed.')],
         ] as const).map(([key, label, min, max, step, unit, help]) => <label key={key} className="block text-xs text-fg-muted">
-          <span className="flex justify-between gap-3"><span>{label}</span><span className="tabular-nums text-accent">{config.vad?.[key] ?? DEFAULT_VAD[key]} {unit}</span></span>
+          <span className="flex justify-between gap-3"><span>{t(label)}</span><span className="tabular-nums text-accent">{config.vad?.[key] ?? DEFAULT_VAD[key]} {unit}</span></span>
           <input type="range" className="mt-2 w-full accent-current" min={min} max={max} step={step} value={config.vad?.[key] ?? DEFAULT_VAD[key]} onChange={e => update({ vad: { ...DEFAULT_VAD, ...config.vad, [key]: Number(e.target.value) } })} />
-          <span className="mt-1 block text-fg-faint">{help}</span>
+          <span className="mt-1 block text-fg-faint">{t(help)}</span>
         </label>)}
-        <button type="button" className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={() => update({vad: {...DEFAULT_VAD}})}>Reset speech detection</button>
+        <button type="button" className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={() => update({vad: {...DEFAULT_VAD}})}>{t("Reset speech detection")}</button>
       </div>
     </details>
     <details className="group rounded-xl border border-line p-4">
-      <summary className="cursor-pointer text-sm font-medium">Voice service <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-normal text-accent">{install?.state === 'absent' ? 'Not installed' : install?.state === 'running' ? 'Ready' : install?.state ?? 'Checking…'}</span><span className="mt-1 block text-xs font-normal text-fg-muted">Installation, GPU memory and service controls</span></summary>
+      <summary className="cursor-pointer text-sm font-medium">{t("Voice service")} <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-normal text-accent">{install?.state === 'absent' ? t("Not installed") : install?.state === 'running' ? t("Ready") : install?.state ? labelOf(INSTALL_STATE, install.state) : t("Checking…")}</span><span className="mt-1 block text-xs font-normal text-fg-muted">{t("Installation, GPU memory and service controls")}</span></summary>
     <div className="mt-4 space-y-3">
-      <p className="text-xs text-fg-faint">Install once on your NVIDIA Docker host. Setup downloads and quantizes Breeze, and installs Whisper. Allow 30 GB of disk space during setup.</p>
+      <p className="text-xs text-fg-faint">{t("Install once on your NVIDIA Docker host. Setup downloads and quantizes Breeze, and installs Whisper. Allow 30 GB of disk space during setup.")}</p>
       <div className="flex gap-2 flex-wrap">
-        {install?.available && <button disabled={actionBusy || install.busy || ['starting','running'].includes(install.state)} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage(install.state==='absent'?'install':'start')}>{install.state==='absent'?'Install voice':install.state==='failed'?'Retry setup':'Start voice'}</button>}
-        {install?.available && ['starting','running'].includes(install.state) && <button disabled={actionBusy} className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={()=>manage('stop')}>Stop · release VRAM</button>}
-        {install?.state==='running' && <button disabled={busy} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent" onClick={async()=>{setBusy(true);try{setConfig(await api.connectVoice());window.dispatchEvent(new Event('voice-config-changed'));}catch(e){onError((e as Error).message);}finally{setBusy(false);}}}>Use installed voice</button>}
+        {install?.available && <button disabled={actionBusy || install.busy || ['starting','running'].includes(install.state)} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage(install.state==='absent'?'install':'start')}>{install.state==='absent'?t("Install voice"):install.state==='failed'?t("Retry setup"):t("Start voice")}</button>}
+        {install?.available && ['starting','running'].includes(install.state) && <button disabled={actionBusy} className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={()=>manage('stop')}>{t("Stop · release VRAM")}</button>}
+        {install?.state==='running' && <button disabled={busy} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent" onClick={async()=>{setBusy(true);try{setConfig(await api.connectVoice());window.dispatchEvent(new Event('voice-config-changed'));}catch(e){onError((e as Error).message);}finally{setBusy(false);}}}>{t("Use installed voice")}</button>}
       </div>
       {install?.error && <p role="alert" className="text-xs text-red-400">{install.error}</p>}
-      {install?.progress && <details open={install.state==='starting'||install.state==='failed'||install.busy}><summary className="text-xs cursor-pointer text-fg-muted">Setup log</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px] text-fg-faint" aria-label="Voice setup log">{install.progress}</pre></details>}
-      <p className="text-xs text-fg-faint">Stopping releases GPU memory and keeps your models.</p>
+      {install?.progress && <details open={install.state==='starting'||install.state==='failed'||install.busy}><summary className="text-xs cursor-pointer text-fg-muted">{t("Setup log")}</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px] text-fg-faint" aria-label={t("Voice setup log")}>{install.progress}</pre></details>}
+      <p className="text-xs text-fg-faint">{t("Stopping releases GPU memory and keeps your models.")}</p>
     </div>
       <div className="mt-4 border-t border-line pt-4 space-y-2">
-    <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.lazyLoad!==false} onChange={e=>update({lazyLoad:e.target.checked})}/>Lazy load · release GPU memory when voice is idle</label>
-    <p className="text-xs text-fg-faint">Load on connection and release memory after the last session ends. Turn off to keep Breeze ready for faster starts.</p>
+    <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.lazyLoad!==false} onChange={e=>update({lazyLoad:e.target.checked})}/>{t("Lazy load · release GPU memory when voice is idle")}</label>
+    <p className="text-xs text-fg-faint">{t("Load on connection and release memory after the last session ends. Turn off to keep Breeze ready for faster starts.")}</p>
       </div>
     </details>
     <details className="rounded-xl border border-line p-4">
-      <summary className="cursor-pointer text-sm font-medium">Advanced connection<span className="mt-1 block text-xs font-normal text-fg-muted">Custom runtime and service addresses</span></summary>
+      <summary className="cursor-pointer text-sm font-medium">{t("Advanced connection")}<span className="mt-1 block text-xs font-normal text-fg-muted">{t("Custom runtime and service addresses")}</span></summary>
       <div className="mt-4 space-y-4">
-    <div className="block text-xs text-fg-muted">Speech runtime<Select aria-label="Speech runtime" size="sm" className="mt-1.5 w-full" value={config.runtime ?? "breeze"} onChange={v => setRuntime(v as VoiceConfig["runtime"])} options={[{ value: "breeze", label: "Breeze Python" }, { value: "audio-cpp", label: "Breeze audio.cpp", hint: "Streaming" }, { value: "chatterbox", label: "Chatterbox audio.cpp", hint: "Multilingual" }]} /></div>
-    {([['whisperUrl', 'Speech recognition URL'], ['breezeUrl', 'Speech synthesis URL']] as const).map(([key, label]) => <label key={key} className="block text-xs text-fg-muted">{label}<input className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config[key]} onChange={e => update({ [key]: e.target.value })} /></label>)}
-    <label className="block text-xs text-fg-muted">Speech recognition model<input className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" placeholder="Whisper.cpp needs none; audio.cpp names its model, e.g. qwen3-asr" value={config.sttModel ?? ""} onChange={e => update({ sttModel: e.target.value })} /></label>
+    <div className="block text-xs text-fg-muted">{t("Speech runtime")}<Select aria-label={t("Speech runtime")} size="sm" className="mt-1.5 w-full" value={config.runtime ?? "breeze"} onChange={v => setRuntime(v as VoiceConfig["runtime"])} options={[{ value: "breeze", label: "Breeze Python" }, { value: "audio-cpp", label: "Breeze audio.cpp", hint: t("Streaming") }, { value: "chatterbox", label: "Chatterbox audio.cpp", hint: t("Multilingual") }]} /></div>
+    {([['whisperUrl', msg('Speech recognition URL')], ['breezeUrl', msg('Speech synthesis URL')]] as const).map(([key, label]) => <label key={key} className="block text-xs text-fg-muted">{t(label)}<input className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config[key]} onChange={e => update({ [key]: e.target.value })} /></label>)}
+    <label className="block text-xs text-fg-muted">{t("Speech recognition model")}<input className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" placeholder={t("Whisper.cpp needs none; audio.cpp names its model, e.g. qwen3-asr")} value={config.sttModel ?? ""} onChange={e => update({ sttModel: e.target.value })} /></label>
       </div>
     </details>
     <div className="sticky -bottom-4 z-10 -mx-5 !-mb-4 flex justify-end border-t border-line bg-raised px-5 pt-3 pb-7">
     <button disabled={busy} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-black disabled:opacity-40" onClick={async () => {
       setBusy(true); try { setConfig(await api.setVoice(config)); setSaved(true); window.dispatchEvent(new Event('voice-config-changed')); } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
-    }}>{busy ? 'Saving…' : saved ? 'Saved' : 'Save voice settings'}</button>
+    }}>{busy ? t("Saving…") : saved ? t("Saved") : t("Save voice settings")}</button>
     </div>
   </div>;
 }

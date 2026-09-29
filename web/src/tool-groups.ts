@@ -1,4 +1,5 @@
 import type { PortalTool } from "./api";
+import { formatNumber, msg, t, tp } from "./i18n";
 
 /**
  * Tools as somebody thinks about them: by what they came from.
@@ -18,7 +19,7 @@ export interface ToolGroup {
 }
 
 /** What the portal registers itself, which is not an extension anyone installed. */
-const BUILT_IN = "built in";
+const BUILT_IN = msg("built in");
 
 export function groupTools(tools: PortalTool[]): ToolGroup[] {
   const groups = new Map<string, PortalTool[]>();
@@ -72,9 +73,9 @@ export function nextOff(off: string[], names: string[], enabled: boolean): strin
  */
 export function groupSummary(group: ToolGroup): string {
   const total = group.tools.length;
-  if (group.allOff) return `${total} off`;
-  const off = group.tools.filter((t) => !t.enabled).length;
-  return off ? `${off} of ${total} off` : `${total} on`;
+  if (group.allOff) return tp(total, "{n} off", "{n} off");
+  const off = group.tools.filter((tool) => !tool.enabled).length;
+  return off ? tp(total, "{off} of {n} off", "{off} of {n} off", { off: formatNumber(off) }) : tp(total, "{n} on", "{n} on");
 }
 
 /** Opening one group, or shutting it. */
@@ -91,8 +92,12 @@ export function toggleOpen(open: string[], source: string): string[] {
  * address is still there, under the package in the extensions list and in the
  * heading's tooltip.
  */
+/** Where a group of tools comes from, as it is: a package's spec, or what the portal brings itself, in words. */
+export const sourceName = (source: string): string => (source === BUILT_IN ? t(BUILT_IN) : source);
+
 export function displayName(source: string, names: Record<string, string> = {}): string {
   const given = names[source]?.trim();
   if (given) return given;
+  if (source === BUILT_IN) return t(BUILT_IN);
   return source.replace(/^@[^/]+\//, "") || source;
 }

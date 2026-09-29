@@ -18,6 +18,8 @@ import { RowsSkeleton } from "./Skeleton";
 import { api, type ReportTarget, type ReportTo, type Routine, type Workspace } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
+import { formatDateTime, labelOf, msg, t, tx } from "../i18n";
+import { serverTime, sinceThen } from "../time";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -32,24 +34,27 @@ const STATUS_STYLE: Record<string, string> = {
   running: "text-accent",
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  ok: msg("ok"),
+  error: msg("error"),
+  running: msg("running"),
+};
+const statusLabel = (status: string) => labelOf(STATUS_LABEL, status);
+
 const PRESETS = [
-  { label: "Every 15 min", cron: "*/15 * * * *" },
-  { label: "Hourly", cron: "@hourly" },
-  { label: "Daily 9am", cron: "0 9 * * *" },
-  { label: "Weekdays 8am", cron: "0 8 * * 1-5" },
-  { label: "Weekly", cron: "@weekly" },
+  { label: msg("Every 15 min"), cron: "*/15 * * * *" },
+  { label: msg("Hourly"), cron: "@hourly" },
+  { label: msg("Daily 9am"), cron: "0 9 * * *" },
+  { label: msg("Weekdays 8am"), cron: "0 8 * * 1-5" },
+  { label: msg("Weekly"), cron: "@weekly" },
 ];
 
 const when = (iso: string | null) => {
-  if (!iso) return "never";
-  const then = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z").getTime();
-  const mins = Math.round((Date.now() - then) / 60000);
-  if (!Number.isFinite(mins)) return iso;
-  if (mins < 0) return "soon";
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
-  return `${Math.round(mins / 1440)}d ago`;
+  if (!iso) return t("never");
+  const then = serverTime(iso);
+  // A run stamped a moment ahead of this clock.
+  if (+then - Date.now() > 30_000) return t("soon");
+  return sinceThen(then) || iso;
 };
 
 /** datetime-local wants "YYYY-MM-DDTHH:mm" in local time, not an ISO string. */
@@ -60,13 +65,13 @@ const toLocalInput = (iso: string | null) => {
 };
 
 const until = (iso: string | null) => {
-  if (!iso) return "not scheduled";
+  if (!iso) return t("not scheduled");
   const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
-  if (!Number.isFinite(mins) || mins < 0) return "due";
-  if (mins < 1) return "in under a minute";
-  if (mins < 60) return `in ${mins}m`;
-  if (mins < 1440) return `in ${Math.round(mins / 60)}h`;
-  return `in ${Math.round(mins / 1440)}d`;
+  if (!Number.isFinite(mins) || mins < 0) return t("due");
+  if (mins < 1) return t("in under a minute");
+  if (mins < 60) return t("in {n}m", { n: mins });
+  if (mins < 1440) return t("in {n}h", { n: Math.round(mins / 60) });
+  return t("in {n}d", { n: Math.round(mins / 1440) });
 };
 
 /**
@@ -104,7 +109,7 @@ function Timing({
                 : "bg-fg/5 text-fg-muted hover:bg-fg/10"
             }`}
           >
-            {m === "repeats" ? "Repeats" : "Once"}
+            {m === "repeats" ? t("Repeats") : t("Once")}
           </button>
         ))}
       </div>
@@ -113,7 +118,7 @@ function Timing({
         <SchedulePicker value={schedule} onChange={onSchedule} />
       ) : (
         <div>
-          <span className="text-xs text-fg-muted">Run at</span>
+          <span className="text-xs text-fg-muted">{t("Run at")}</span>
           <input
             type="datetime-local"
             value={runAt}
@@ -121,8 +126,7 @@ function Timing({
             className={`${inputCls} mt-1 text-xs [color-scheme:dark]`}
           />
           <p className="mt-1 text-[11px] text-fg-faint">
-            Your local time. It runs once and then switches itself off, keeping the result. A time
-            that passed while the portal was down still runs when it comes back.
+            {t("Your local time. It runs once and then switches itself off, keeping the result. A time that passed while the portal was down still runs when it comes back.")}
           </p>
         </div>
       )}
@@ -203,20 +207,19 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
       <div className="mx-auto w-full max-w-3xl">
         <PageHeader
           icon={<LuClock />}
-          title="Routines"
+          title={t("Routines")}
           description={
             <>
-              Work the agent does on a schedule instead of because you asked. It wakes up, follows
-              its instructions, and goes quiet again.
+              {t("Work the agent does on a schedule instead of because you asked. It wakes up, follows its instructions, and goes quiet again.")}
             </>
           }
         >
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Stat value={routines.length} label="routines" />
-            <Stat value={routines.filter((r) => r.enabled).length} label="enabled" tone="text-accent" />
+            <Stat value={routines.length} label={t("routines")} />
+            <Stat value={routines.filter((r) => r.enabled).length} label={t("enabled")} tone="text-accent" />
             <Stat
               value={routines.filter((r) => r.lastStatus === "error").length}
-              label="failing"
+              label={t("failing")}
               tone="text-danger"
             />
           </div>
@@ -232,10 +235,10 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
 
         <div className="mt-4 flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            Scheduled
+            {t("Scheduled")}
           </h3>
           <button onClick={() => setAdding(!adding)} className={adding ? btnCls : primaryCls}>
-            <LuPlus className="h-4 w-4" /> {adding ? "Cancel" : "New routine"}
+            <LuPlus className="h-4 w-4" /> {adding ? t("Cancel") : t("New routine")}
           </button>
         </div>
 
@@ -256,10 +259,9 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
           <RowsSkeleton />
         ) : routines.length === 0 ? (
           <div className="mt-3 rounded-xl border border-dashed border-line px-4 py-10 text-center">
-            <p className="text-sm text-fg-muted">No routines yet.</p>
+            <p className="text-sm text-fg-muted">{t("No routines yet.")}</p>
             <p className="mx-auto mt-2 max-w-md text-xs text-fg-faint">
-              A morning summary of what changed overnight, a nightly check that backups ran, a
-              weekly tidy of a directory — anything you would otherwise remember to ask for.
+              {t("A morning summary of what changed overnight, a nightly check that backups ran, a weekly tidy of a directory — anything you would otherwise remember to ask for.")}
             </p>
           </div>
         ) : (
@@ -278,22 +280,23 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
                     <p className="truncate text-[11px] text-fg-faint">
                       <span className="font-mono">
                         {r.mode === "once"
-                          ? `once · ${r.runAt ? new Date(r.runAt).toLocaleString() : "no time set"}`
+                          ? `${t("once")} · ${r.runAt ? formatDateTime(r.runAt) : t("no time set")}`
                           : r.schedule}
                       </span>
                       {" · "}
                       <span
                         className={r.workspaceProblem ? "text-danger" : ""}
-                        title={r.workspaceProblem ? `${r.workspace}: ${r.workspaceProblem}` : (r.workspace ?? "Home — the agent's own directory")}
+                        title={r.workspaceProblem ? `${r.workspace}: ${r.workspaceProblem}` : (r.workspace ?? t("Home — the agent's own directory"))}
                       >
                         {placeName(r.workspace, places.root)}
-                        {r.workspaceProblem ? " (gone)" : ""}
+                        {r.workspaceProblem ? ` (${t("gone")})` : ""}
                       </span>
-                      {r.done ? " · done" : r.enabled ? ` · ${until(r.nextRun)}` : " · disabled"}
+                      {" · "}
+                      {r.done ? t("done") : r.enabled ? until(r.nextRun) : t("disabled")}
                       {r.lastStatus && (
                         <>
                           {" · "}
-                          <span className={STATUS_STYLE[r.lastStatus] ?? ""}>{r.lastStatus}</span>
+                          <span className={STATUS_STYLE[r.lastStatus] ?? ""}>{statusLabel(r.lastStatus)}</span>
                           {" "}
                           {when(r.lastRun)}
                         </>
@@ -308,9 +311,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
         )}
 
         <p className="mt-6 text-[11px] leading-relaxed text-fg-faint">
-          Repeating schedules use the server's clock and five-field cron, or a shorthand like{" "}
-          <code>@daily</code>; a one-off uses the time you pick in your own timezone. A routine
-          still running when its next slot comes round is skipped rather than stacked.
+          {tx("Repeating schedules use the server's clock and five-field cron, or a shorthand like {example}; a one-off uses the time you pick in your own timezone. A routine still running when its next slot comes round is skipped rather than stacked.", { example: <code>@daily</code> })}
         </p>
       </div>
     </div>
@@ -338,7 +339,7 @@ function usePlaces(): Places {
 
 /** Home, or where under the projects' root it runs: "site", or "site/docs" for a folder in one. */
 const placeName = (workspace: string | null, root: string | null) => {
-  if (!workspace) return "Home";
+  if (!workspace) return t("Home");
   if (root && workspace.startsWith(root + "/")) return workspace.slice(root.length + 1);
   return workspace.split("/").filter(Boolean).pop() ?? workspace;
 };
@@ -367,19 +368,19 @@ function WorkspacePicker({
   return (
     // Not a label: it would pass a click on the hint to the Select's button.
     <div className="block">
-      <span className="text-xs text-fg-muted">Runs in</span>
+      <span className="text-xs text-fg-muted">{t("Runs in")}</span>
       <Select
         className="mt-1 w-full"
-        aria-label="Where it runs"
+        aria-label={t("Where it runs")}
         value={value}
         onChange={onChange}
-        placeholder="Loading…"
+        placeholder={t("Loading…")}
         options={[
           {
             value: "",
-            label: <span className="inline-flex items-center gap-2"><LuHouse className="h-3.5 w-3.5 text-accent" />Home</span>,
-            text: "Home",
-            hint: "The agent's own directory, with its notes and memory",
+            label: <span className="inline-flex items-center gap-2"><LuHouse className="h-3.5 w-3.5 text-accent" />{t("Home")}</span>,
+            text: t("Home"),
+            hint: t("The agent's own directory, with its notes and memory"),
           },
           ...(list ?? []).map((w) => ({
             value: w.path,
@@ -389,17 +390,17 @@ function WorkspacePicker({
           })),
           // Shown for what it is, rather than as nothing.
           ...(value && list && !known
-            ? [{ value, label: placeName(value, root), text: placeName(value, root), hint: problem ? "Not there any more — runs fail until another is chosen" : value }]
+            ? [{ value, label: placeName(value, root), text: placeName(value, root), hint: problem ? t("Not there any more — runs fail until another is chosen") : value }]
             : []),
         ]}
       />
       <p className="mt-1 text-[11px] text-fg-faint">
-        Its runs work in this directory. Each place keeps its own session, so moving it back picks up where it left off.
-        {error && ` The projects could not be listed (${error}), so only Home is offered.`}
+        {t("Its runs work in this directory. Each place keeps its own session, so moving it back picks up where it left off.")}
+        {error && ` ${t("The projects could not be listed ({error}), so only Home is offered.", { error })}`}
       </p>
       {problem && value && (
         <p className="mt-1 text-[11px] text-danger">
-          {value} is not there any more ({problem}). Its runs fail until another place is chosen.
+          {t("{place} is not there any more ({problem}). Its runs fail until another place is chosen.", { place: value, problem })}
         </p>
       )}
     </div>
@@ -432,7 +433,7 @@ function SchedulePicker({
 
   return (
     <div>
-      <span className="text-xs text-fg-muted">Schedule</span>
+      <span className="text-xs text-fg-muted">{t("Schedule")}</span>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -447,14 +448,14 @@ function SchedulePicker({
             onClick={() => onChange(p.cron)}
             className="rounded-lg bg-fg/5 px-2 py-0.5 text-[11px] text-fg-muted transition hover:bg-fg/10 hover:text-fg"
           >
-            {p.label}
+            {t(p.label)}
           </button>
         ))}
       </div>
       {preview.error && <p className="mt-1.5 text-[11px] text-danger">{preview.error}</p>}
       {preview.runs && preview.runs.length > 0 && (
         <p className="mt-1.5 text-[11px] text-fg-subtle">
-          Next: {preview.runs.slice(0, 3).map((r) => new Date(r).toLocaleString()).join(" · ")}
+          {t("Next: {when}", { when: preview.runs.slice(0, 3).map((r) => formatDateTime(r)).join(" · ") })}
         </p>
       )}
     </div>
@@ -500,12 +501,12 @@ function NewRoutine({
   return (
     <div className="mt-3 space-y-3 rounded-xl border border-line bg-raised/40 p-3">
       <label className="block">
-        <span className="text-xs text-fg-muted">Name</span>
+        <span className="text-xs text-fg-muted">{t("Name")}</span>
         <input
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Morning summary"
+          placeholder={t("Morning summary")}
           className={`${inputCls} mt-1`}
         />
       </label>
@@ -520,12 +521,12 @@ function NewRoutine({
       />
 
       <label className="block">
-        <span className="text-xs text-fg-muted">Instructions</span>
+        <span className="text-xs text-fg-muted">{t("Instructions")}</span>
         <textarea
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
           rows={5}
-          placeholder="What to do when it fires. Written as an instruction, not a question — nobody is there to answer one."
+          placeholder={t("What to do when it fires. Written as an instruction, not a question — nobody is there to answer one.")}
           className={`${inputCls} mt-1 resize-y text-xs leading-relaxed`}
         />
       </label>
@@ -535,10 +536,10 @@ function NewRoutine({
       <div className="flex items-center gap-2">
         <button disabled={!name.trim() || busy} onClick={create} className={primaryCls}>
           {busy ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : <LuCheck className="h-4 w-4" />}
-          Create
+          {t("Create")}
         </button>
         <button onClick={onCancel} className={btnCls}>
-          Cancel
+          {t("Cancel")}
         </button>
       </div>
     </div>
@@ -636,7 +637,7 @@ function RoutineDetail({
         onClick={onBack}
         className="mb-4 inline-flex items-center gap-1.5 text-xs text-fg-subtle transition hover:text-fg-muted"
       >
-        <LuChevronLeft className="h-3.5 w-3.5" /> Routines
+        <LuChevronLeft className="h-3.5 w-3.5" /> {t("Routines")}
       </button>
 
       <div className="mb-5 flex items-start gap-3">
@@ -654,14 +655,14 @@ function RoutineDetail({
             className="w-full bg-transparent text-sm font-medium text-fg outline-none"
           />
           <p className="truncate text-xs text-fg-subtle">
-            {r.done ? "already ran" : r.enabled ? until(r.nextRun) : "disabled"} ·{" "}
+            {r.done ? t("already ran") : r.enabled ? until(r.nextRun) : t("disabled")} ·{" "}
             <span className="font-mono">{r.slug}</span>
           </p>
         </div>
         <button
           onClick={() => act("save", () => api.updateRoutine(r.id, { enabled: !r.enabled }))}
           disabled={busy !== null}
-          title={r.enabled ? "Disable" : "Enable"}
+          title={r.enabled ? t("Disable") : t("Enable")}
           className={`relative mt-1 h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40 ${
             r.enabled ? "bg-accent" : "bg-raised"
           }`}
@@ -685,7 +686,7 @@ function RoutineDetail({
         />
 
         <label className="block">
-          <span className="text-xs text-fg-muted">Instructions</span>
+          <span className="text-xs text-fg-muted">{t("Instructions")}</span>
           <textarea
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
@@ -693,8 +694,7 @@ function RoutineDetail({
             className={`${inputCls} mt-1 resize-y text-xs leading-relaxed`}
           />
           <p className="mt-1 text-[11px] text-fg-faint">
-            Given to the agent verbatim, with a note that it was woken by a schedule and that
-            nobody is waiting on a reply.
+            {t("Given to the agent verbatim, with a note that it was woken by a schedule and that nobody is waiting on a reply.")}
           </p>
         </label>
 
@@ -711,10 +711,9 @@ function RoutineDetail({
           className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
         >
           <div className="min-w-0 flex-1">
-            <p className="text-sm text-fg">Fresh session each run</p>
+            <p className="text-sm text-fg">{t("Fresh session each run")}</p>
             <p className="text-[11px] text-fg-subtle">
-              Off: one session it keeps, so a run can see what the last one did. On: a clean start
-              every time.
+              {t("Off: one session it keeps, so a run can see what the last one did. On: a clean start every time.")}
             </p>
           </div>
           <span
@@ -736,13 +735,9 @@ function RoutineDetail({
           className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
         >
           <div className="min-w-0 flex-1">
-            <p className="text-sm text-fg">Injection guard</p>
+            <p className="text-sm text-fg">{t("Injection guard")}</p>
             <p className="text-[11px] text-fg-subtle">
-              On: after reading anything untrusted — logs fetched over the network, a web page,
-              mail — this run cannot push, write onto PATH, upload or read credentials. Turn it
-              off for work that reads those things and then has to act on them. Content is still
-              labelled as untrusted, and anything it does that the rules would have stopped is
-              recorded in Audit.
+              {t("On: after reading anything untrusted — logs fetched over the network, a web page, mail — this run cannot push, write onto PATH, upload or read credentials. Turn it off for work that reads those things and then has to act on them. Content is still labelled as untrusted, and anything it does that the rules would have stopped is recorded in Audit.")}
             </p>
           </div>
           <span
@@ -764,10 +759,9 @@ function RoutineDetail({
           className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
         >
           <div className="min-w-0 flex-1">
-            <p className="text-sm text-fg">Browser</p>
+            <p className="text-sm text-fg">{t("Browser")}</p>
             <p className="text-[11px] text-fg-subtle">
-              Lets this routine drive the agent's browser, which is signed into the agent's own
-              accounts. Off by default. Every page it opens is recorded in Audit.
+              {t("Lets this routine drive the agent's browser, which is signed into the agent's own accounts. Off by default. Every page it opens is recorded in Audit.")}
             </p>
           </div>
           <span
@@ -785,47 +779,46 @@ function RoutineDetail({
 
         {/* Not a label: it would pass a click on the hint to the Select's button. */}
         <div className="block pt-1">
-          <span className="mb-1 block text-xs text-fg-subtle">Report to</span>
+          <span className="mb-1 block text-xs text-fg-subtle">{t("Report to")}</span>
           <Select
-            aria-label="Report to"
+            aria-label={t("Report to")}
             className="w-full"
             value={report}
             onChange={setReport}
             options={[
               {
                 value: "",
-                label: fallback ? `Default — ${labelFor(targets, fallback) ?? fallback.channel}` : "Default — none set",
+                label: fallback ? t("Default — {target}", { target: labelFor(targets, fallback) ?? fallback.channel }) : t("Default — none set"),
               },
-              { value: "off", label: "Never report" },
-              ...targets.map((t) => ({ value: `${t.channel}\u0000${t.target}`, label: `${t.channel} — ${t.label}` })),
+              { value: "off", label: t("Never report") },
+              ...targets.map((x) => ({ value: `${x.channel}\u0000${x.target}`, label: `${x.channel} — ${x.label}` })),
             ]}
           />
           <p className="mt-1 text-[11px] text-fg-faint">
-            The agent decides whether a run is worth reporting and writes the message itself. It
-            only has somewhere to send it if this points at a conversation.
+            {t("The agent decides whether a run is worth reporting and writes the message itself. It only has somewhere to send it if this points at a conversation.")}
             {targets.length === 0 &&
-              " Nothing to pick yet — message a channel that can start a conversation, and it appears here."}
+              ` ${t("Nothing to pick yet — message a channel that can start a conversation, and it appears here.")}`}
           </p>
         </div>
       </section>
 
       {r.lastStatus && (
         <section className="mb-6">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Last run</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Last run")}</h3>
           <div className="mt-2 rounded-xl border border-line bg-raised/40 p-3">
             <p className="text-xs">
-              <span className={STATUS_STYLE[r.lastStatus] ?? "text-fg-muted"}>{r.lastStatus}</span>
+              <span className={STATUS_STYLE[r.lastStatus] ?? "text-fg-muted"}>{statusLabel(r.lastStatus)}</span>
               <span className="text-fg-faint">
                 {" "}
                 · {when(r.lastRun)}
-                {r.lastMs ? ` · took ${Math.round(r.lastMs / 1000)}s` : ""}
+                {r.lastMs ? ` · ${t("took {n}s", { n: Math.round(r.lastMs / 1000) })}` : ""}
               </span>
               {/* Writing the account out and never sending it looks identical to
                   having nothing to say, unless this says which happened. */}
               {reported(r) ? (
-                <span className="text-ok"> · reported</span>
+                <span className="text-ok"> · {t("reported")}</span>
               ) : (
-                <span className="text-fg-faint"> · nothing sent</span>
+                <span className="text-fg-faint"> · {t("nothing sent")}</span>
               )}
             </p>
             {r.lastOutput && (
@@ -840,7 +833,7 @@ function RoutineDetail({
       {runs.length > 0 && (
         <section className="mb-6">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            Sessions ({runs.length})
+            {t("Sessions ({n})", { n: runs.length })}
           </h3>
           <ul className="mt-2 space-y-1">
             {runs.slice(0, 8).map((s) => (
@@ -887,30 +880,30 @@ function RoutineDetail({
           ) : saved ? (
             <LuCheck className="h-4 w-4" />
           ) : null}
-          {saved ? "Saved" : "Save"}
+          {saved ? t("Saved") : t("Save")}
         </button>
 
         <button
           onClick={() => act("run", () => api.runRoutine(r.id))}
           disabled={busy !== null}
           className={btnCls}
-          title="Run it now, without waiting for the schedule"
+          title={t("Run it now, without waiting for the schedule")}
         >
           {busy === "run" ? (
             <LuRefreshCw className="h-4 w-4 animate-spin" />
           ) : (
             <LuPlay className="h-4 w-4" />
           )}
-          {busy === "run" ? "Running…" : "Run now"}
+          {busy === "run" ? t("Running…") : t("Run now")}
         </button>
 
         <button
           onClick={async () => {
             if (
               await confirmDialog({
-                title: `Delete "${r.name}"?`,
-                message: "Its sessions are kept.",
-                confirmLabel: "Delete",
+                title: t("Delete \"{name}\"?", { name: r.name }),
+                message: t("Its sessions are kept."),
+                confirmLabel: t("Delete"),
                 danger: true,
                 deletes: true,
               })
@@ -924,7 +917,7 @@ function RoutineDetail({
           disabled={busy !== null}
           className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
         >
-          <LuTrash2 className="h-3.5 w-3.5" /> Delete
+          <LuTrash2 className="h-3.5 w-3.5" /> {t("Delete")}
         </button>
       </div>
     </>

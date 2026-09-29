@@ -37,6 +37,7 @@ import { NOTE_LINK, linkNotes } from "../memory-links";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import { inputCls } from "./SettingsUi";
+import { formatDateTime, msg, t, tp, tx } from "../i18n";
 
 /**
  * The agent's memory in Understory, laid out as Understory's own page lays it
@@ -105,10 +106,9 @@ export function MemoryPage() {
   /** The memory from nothing, after asking. */
   const wipe = async () => {
     const ok = await confirmDialog({
-      title: "Clear the whole memory?",
-      message:
-        "Every note and folder is deleted, and the index and log start empty, as in a new memory. The agent forgets everything it kept here. This cannot be undone.",
-      confirmLabel: "Clear the memory",
+      title: t("Clear the whole memory?"),
+      message: t("Every note and folder is deleted, and the index and log start empty, as in a new memory. The agent forgets everything it kept here. This cannot be undone."),
+      confirmLabel: t("Clear the memory"),
       danger: true,
       deletes: true,
     });
@@ -175,14 +175,14 @@ export function MemoryPage() {
       <div className="flex h-full items-center justify-center p-6">
         <div className="max-w-md rounded-xl border border-dashed border-line px-6 py-8 text-center">
           <LuBrain className="mx-auto h-6 w-6 text-fg-faint" />
-          <p className="mt-3 text-sm text-fg-muted">The memory could not be read.</p>
+          <p className="mt-3 text-sm text-fg-muted">{t("The memory could not be read.")}</p>
           <p className="mt-2 text-xs text-fg-faint">{failed}</p>
           <div className="mt-4 flex items-center justify-center gap-4 text-xs">
             <button type="button" onClick={load} className="text-accent hover:underline">
-              Try again
+              {t("Try again")}
             </button>
             <Link to="/settings/add-ons" className="text-accent hover:underline">
-              Settings → Add-ons → Memory
+              {t("Settings → Add-ons → Memory")}
             </Link>
           </div>
         </div>
@@ -195,18 +195,18 @@ export function MemoryPage() {
     <Colours.Provider value={palette}>
       <div className="flex h-full min-h-0">
         {/* On a phone, the side or what is open: one at a time. */}
-        <aside aria-label="Memory" className={`${open ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-line md:w-72`}>
+        <aside aria-label={t("Memory")} className={`${open ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-line md:w-72`}>
           <div className="flex items-center gap-2 px-3 pb-2 pt-3">
             <LuBrain className="h-4 w-4 text-accent" />
-            <h1 className="text-sm font-medium text-fg">Memory</h1>
+            <h1 className="text-sm font-medium text-fg">{t("Memory")}</h1>
             {validation && (
               <button
                 type="button"
                 onClick={() => openView("issues")}
-                title={validation.conformant ? "The bundle is well-formed" : `${validation.issues.length} issues in the bundle`}
+                title={validation.conformant ? t("The bundle is well-formed") : tp(validation.issues.length, "{n} issue in the bundle", "{n} issues in the bundle")}
                 className={`rounded px-1.5 py-0.5 text-[10px] ${validation.conformant ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"}`}
               >
-                {validation.conformant ? "conformant" : `${validation.issues.length} issues`}
+                {validation.conformant ? t("conformant") : tp(validation.issues.length, "{n} issue", "{n} issues")}
               </button>
             )}
             {writable && (
@@ -214,8 +214,8 @@ export function MemoryPage() {
                 type="button"
                 onClick={() => void wipe()}
                 disabled={loading || wiping}
-                aria-label="Clear the memory"
-                title="Clear the memory: every note, and an empty index and log"
+                aria-label={t("Clear the memory")}
+                title={t("Clear the memory: every note, and an empty index and log")}
                 className="ml-auto rounded p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
               >
                 {wiping ? <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> : <LuTrash2 className="h-3.5 w-3.5" />}
@@ -225,8 +225,8 @@ export function MemoryPage() {
               type="button"
               onClick={load}
               disabled={loading}
-              aria-label="Read the memory again"
-              title="Read the memory again"
+              aria-label={t("Read the memory again")}
+              title={t("Read the memory again")}
               className={`${writable ? "" : "ml-auto "}rounded p-1.5 text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40`}
             >
               <LuRefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -237,15 +237,15 @@ export function MemoryPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search…"
-              aria-label="Search the memory"
+              placeholder={t("Search…")}
+              aria-label={t("Search the memory")}
               className={`w-full rounded-lg border border-line bg-raised/60 py-1.5 pl-8 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60 ${query ? "pr-8" : "pr-3"}`}
             />
             {query && (
               <button
                 type="button"
                 onClick={() => setQuery("")}
-                aria-label="Clear the search"
+                aria-label={t("Clear the search")}
                 className="absolute right-4 top-1/2 -translate-y-1/2 rounded p-1 text-fg-faint hover:text-fg"
               >
                 <LuX className="h-3.5 w-3.5" />
@@ -253,15 +253,15 @@ export function MemoryPage() {
             )}
           </div>
           {failed && tree && <p className="px-3 pt-2 text-xs text-warn">{failed}</p>}
-          <nav aria-label="Notes" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+          <nav aria-label={t("Notes")} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
             {hits ? (
               <Hits hits={hits} asked={asked} open={note} onOpen={openNote} />
             ) : !tree ? (
-              <div className="skeleton-group space-y-1.5 px-1" aria-label="Loading the memory">
+              <div className="skeleton-group space-y-1.5 px-1" aria-label={t("Loading the memory")}>
                 {[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-6 w-full" />)}
               </div>
             ) : !tree.children?.length ? (
-              <p className="px-2 py-6 text-center text-xs text-fg-subtle">Nothing is in the memory yet. The agent adds to it as it learns.</p>
+              <p className="px-2 py-6 text-center text-xs text-fg-subtle">{t("Nothing is in the memory yet. The agent adds to it as it learns.")}</p>
             ) : (
               <ul className="space-y-0.5">
                 {tree.children.map((n) => (
@@ -282,7 +282,7 @@ export function MemoryPage() {
                 }`}
               >
                 {v === "log" ? <LuHistory className="h-3.5 w-3.5" /> : <LuWaypoints className="h-3.5 w-3.5" />}
-                {v === "log" ? "Log" : "Graph"}
+                {v === "log" ? t("Log") : t("Graph")}
               </button>
             ))}
           </div>
@@ -300,11 +300,10 @@ export function MemoryPage() {
           ) : (
             <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-fg-subtle">
               <div>
-                <p>Choose a note, or open the log or the graph.</p>
+                <p>{t("Choose a note, or open the log or the graph.")}</p>
                 {validation?.conceptCount !== undefined && (
                   <p className="mt-1 text-xs text-fg-faint">
-                    {validation.conceptCount} {validation.conceptCount === 1 ? "note" : "notes"} in {validation.directoryCount ?? 0}{" "}
-                    {validation.directoryCount === 1 ? "folder" : "folders"}
+                    {t("{notes} in {folders}", { notes: tp(validation.conceptCount, "{n} note", "{n} notes"), folders: tp(validation.directoryCount ?? 0, "{n} folder", "{n} folders") })}
                   </p>
                 )}
               </div>
@@ -321,7 +320,7 @@ export function MemoryPage() {
 function Bar({ title, onBack, children }: { title: ReactNode; onBack: () => void; children?: ReactNode }) {
   return (
     <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-      <button type="button" onClick={onBack} aria-label="Back to the notes" className="-ml-1 rounded p-1 text-fg-subtle hover:text-fg md:hidden">
+      <button type="button" onClick={onBack} aria-label={t("Back to the notes")} className="-ml-1 rounded p-1 text-fg-subtle hover:text-fg md:hidden">
         <LuChevronLeft className="h-4 w-4" />
       </button>
       <h2 className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{title}</h2>
@@ -386,9 +385,9 @@ function TreeNode({ node, depth, open, onOpen }: { node: MemoryNode; depth: numb
 }
 
 function Hits({ hits, asked, open, onOpen }: { hits: MemoryHit[]; asked: string; open: string | null; onOpen: (path: string) => void }) {
-  if (!hits.length) return <p className="px-2 py-6 text-center text-xs text-fg-subtle">Nothing in the memory matches “{asked}”.</p>;
+  if (!hits.length) return <p className="px-2 py-6 text-center text-xs text-fg-subtle">{t("Nothing in the memory matches “{query}”.", { query: asked })}</p>;
   return (
-    <ul aria-label="Found in the memory" className="space-y-1">
+    <ul aria-label={t("Found in the memory")} className="space-y-1">
       {hits.map((h) => (
         <li key={h.path}>
           <button
@@ -519,9 +518,9 @@ function Note({
 
   const remove = async () => {
     const ok = await confirmDialog({
-      title: `Delete “${title}”?`,
-      message: "It is gone from the memory, and the agent no longer knows it. Links to it from other notes then lead nowhere.",
-      confirmLabel: "Delete",
+      title: t("Delete “{name}”?", { name: title ?? "" }),
+      message: t("It is gone from the memory, and the agent no longer knows it. Links to it from other notes then lead nowhere."),
+      confirmLabel: t("Delete"),
       danger: true,
       deletes: true,
     });
@@ -542,10 +541,10 @@ function Note({
       <Bar title={title} onBack={onBack}>
         {canChange && !draft && (
           <>
-            <button type="button" onClick={edit} disabled={busy} aria-label="Edit the note" title="Edit" className="rounded p-1.5 text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40">
+            <button type="button" onClick={edit} disabled={busy} aria-label={t("Edit the note")} title={t("Edit")} className="rounded p-1.5 text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40">
               <LuPencil className="h-3.5 w-3.5" />
             </button>
-            <button type="button" onClick={() => void remove()} disabled={busy} aria-label="Delete the note" title="Delete" className="rounded p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40">
+            <button type="button" onClick={() => void remove()} disabled={busy} aria-label={t("Delete the note")} title={t("Delete")} className="rounded p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40">
               <LuTrash2 className="h-3.5 w-3.5" />
             </button>
           </>
@@ -557,13 +556,13 @@ function Note({
           {failed ? (
             <p className="text-sm text-warn">{failed}</p>
           ) : !concept ? (
-            <div className="skeleton-group space-y-2" aria-label="Loading the note">
+            <div className="skeleton-group space-y-2" aria-label={t("Loading the note")}>
               <div className="skeleton h-24 w-full" />
               <div className="skeleton h-40 w-full" />
             </div>
           ) : draft ? (
             <form
-              aria-label="Edit the note"
+              aria-label={t("Edit the note")}
               onSubmit={(e) => {
                 e.preventDefault();
                 void save();
@@ -572,24 +571,24 @@ function Note({
             >
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-xs text-fg-muted">
-                  Title
+                  {t("Title")}
                   <input required value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} className={`${inputCls} mt-1`} />
                 </label>
                 <label className="block text-xs text-fg-muted">
-                  Type
+                  {t("Type")}
                   <input required value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })} className={`${inputCls} mt-1`} />
                 </label>
               </div>
               <label className="block text-xs text-fg-muted">
-                Description
+                {t("Description")}
                 <input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} className={`${inputCls} mt-1`} />
               </label>
               <label className="block text-xs text-fg-muted">
-                Tags, separated by commas
+                {t("Tags, separated by commas")}
                 <input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} className={`${inputCls} mt-1`} />
               </label>
               <label className="block text-xs text-fg-muted">
-                Text, in markdown
+                {t("Text, in markdown")}
                 <textarea
                   value={draft.body}
                   onChange={(e) => setDraft({ ...draft, body: e.target.value })}
@@ -601,7 +600,7 @@ function Note({
               <p className="font-mono text-[10px] text-fg-faint">{path}</p>
               <div className="flex items-center justify-end gap-2">
                 <button type="button" onClick={() => setDraft(null)} disabled={busy} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
-                  Cancel
+                  {t("Cancel")}
                 </button>
                 <button
                   type="submit"
@@ -609,7 +608,7 @@ function Note({
                   className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
                 >
                   {busy && <LuRefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                  Save
+                  {t("Save")}
                 </button>
               </div>
             </form>
@@ -624,7 +623,7 @@ function Note({
                         #{String(t)}
                       </span>
                     ))}
-                    {when && !Number.isNaN(when.getTime()) && <span className="ml-auto text-fg-faint">{when.toLocaleString()}</span>}
+                    {when && !Number.isNaN(when.getTime()) && <span className="ml-auto text-fg-faint">{formatDateTime(when)}</span>}
                   </p>
                 )}
                 <h3 className="mt-2 text-lg font-semibold text-fg">{title}</h3>
@@ -664,15 +663,17 @@ function AfterChange({
 }) {
   const [health, setHealth] = useState(first);
   const [busy, setBusy] = useState<string | null>(null);
-  const [said, setSaid] = useState<string | null>(null);
+  // What came of it, said in the language shown when it is drawn.
+  const [said, setSaid] = useState<(() => string) | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const act = async (what: string, run: () => Promise<string>) => {
+  const act = async (what: string, run: () => Promise<() => string>) => {
     setBusy(what);
     setError(null);
     setSaid(null);
     try {
-      setSaid(await run());
+      const came = await run();
+      setSaid(() => came);
       onRefresh();
     } catch (e) {
       setError((e as Error).message);
@@ -681,22 +682,24 @@ function AfterChange({
     }
   };
   const reindex = () =>
-    act("Writing the indexes anew…", async () => {
+    act(msg("Writing the indexes anew…"), async () => {
       const r = await api.reindexMemory();
       setHealth(r.health);
-      return `${r.reindexed} ${r.reindexed === 1 ? "index" : "indexes"} written anew${r.pruned.length ? `, ${r.pruned.length} empty ${r.pruned.length === 1 ? "folder" : "folders"} removed` : ""}.`;
+      return () => {
+        const written = tp(r.reindexed, "{n} index written anew", "{n} indexes written anew");
+        return r.pruned.length ? `${written}, ${tp(r.pruned.length, "{n} empty folder removed", "{n} empty folders removed")}.` : `${written}.`;
+      };
     });
   // What the model said it did, whole, beside the one line.
   const [told, setTold] = useState<string | null>(null);
   const repair = () =>
-    act("Repairing with the model — this takes as long as the model needs…", async () => {
+    act(msg("Repairing with the model — this takes as long as the model needs…"), async () => {
       setTold(null);
       const r = await api.repairMemory();
       setHealth(r.health);
-      if (!r.ran) return "Nothing for the model to repair.";
+      if (!r.ran) return () => t("Nothing for the model to repair.");
       if (r.summary) setTold(r.summary);
-      const n = r.filesChanged?.length ?? 0;
-      return `The model changed ${n} ${n === 1 ? "file" : "files"}.`;
+      return () => tp(r.filesChanged?.length ?? 0, "The model changed {n} file.", "The model changed {n} files.");
     });
   const nothingToRepair = health.brokenLinks.length === 0 && health.orphans.length === 0;
 
@@ -707,13 +710,13 @@ function AfterChange({
   const problems = health.brokenLinks.length + health.orphans.length + health.issues.length;
   return (
     <Modal
-      title={what === "deleted" ? "The note is deleted" : "The note is saved"}
-      subtitle="Understory has updated its index and log. Check what the change left behind."
+      title={what === "deleted" ? t("The note is deleted") : t("The note is saved")}
+      subtitle={t("Understory has updated its index and log. Check what the change left behind.")}
       onClose={onClose}
       footer={
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button type="button" onClick={onClose} disabled={busy !== null} className="mr-auto rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
-            Leave it
+            {t("Leave it")}
           </button>
           <button
             type="button"
@@ -721,16 +724,16 @@ function AfterChange({
             disabled={busy !== null}
             className="rounded-lg bg-fg/5 px-3 py-1.5 text-sm text-fg transition hover:bg-fg/10 disabled:opacity-40"
           >
-            Rebuild the index
+            {t("Rebuild the index")}
           </button>
           <button
             type="button"
             onClick={() => void repair()}
             disabled={busy !== null || nothingToRepair}
-            title={nothingToRepair ? "No links to nothing and no notes nothing links to: nothing for the model to do" : undefined}
+            title={nothingToRepair ? t("No links to nothing and no notes nothing links to: nothing for the model to do") : undefined}
             className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
           >
-            Repair with the model
+            {t("Repair with the model")}
           </button>
         </div>
       }
@@ -738,16 +741,16 @@ function AfterChange({
       <div role="status" className="space-y-3 text-sm">
         {problems === 0 ? (
           <p className="flex items-center gap-2 text-ok">
-            <LuCircleCheck className="h-4 w-4 shrink-0" /> Every link leads somewhere and every note is linked in.
+            <LuCircleCheck className="h-4 w-4 shrink-0" /> {t("Every link leads somewhere and every note is linked in.")}
           </p>
         ) : (
           <p className="flex items-center gap-2 text-warn">
-            <LuTriangleAlert className="h-4 w-4 shrink-0" /> The memory has {problems} {problems === 1 ? "thing" : "things"} to put right.
+            <LuTriangleAlert className="h-4 w-4 shrink-0" /> {tp(problems, "The memory has {n} thing to put right.", "The memory has {n} things to put right.")}
           </p>
         )}
         {health.brokenLinks.length > 0 && (
           <section>
-            <h4 className="text-xs font-medium text-fg-muted">Links to nothing</h4>
+            <h4 className="text-xs font-medium text-fg-muted">{t("Links to nothing")}</h4>
             <ul className="mt-1 space-y-1 text-xs">
               {health.brokenLinks.map((b, i) => (
                 <li key={i}>
@@ -762,7 +765,7 @@ function AfterChange({
         )}
         {health.orphans.length > 0 && (
           <section>
-            <h4 className="text-xs font-medium text-fg-muted">Notes nothing links to</h4>
+            <h4 className="text-xs font-medium text-fg-muted">{t("Notes nothing links to")}</h4>
             <ul className="mt-1 space-y-1 text-xs">
               {health.orphans.map((o) => (
                 <li key={o.path}>
@@ -776,7 +779,7 @@ function AfterChange({
         )}
         {health.issues.length > 0 && (
           <section>
-            <h4 className="text-xs font-medium text-fg-muted">Against the format</h4>
+            <h4 className="text-xs font-medium text-fg-muted">{t("Against the format")}</h4>
             <ul className="mt-1 space-y-1 text-xs">
               {health.issues.map((issue, i) => (
                 <li key={i}>
@@ -787,19 +790,18 @@ function AfterChange({
           </section>
         )}
         <p className="text-xs text-fg-faint">
-          <strong className="font-medium text-fg-muted">Rebuild the index</strong> writes every folder's index.md anew and removes empty
-          folders, without the model. <strong className="font-medium text-fg-muted">Repair with the model</strong> has the model mend the
-          links to nothing and wire in the notes nothing links to — only when there are any; it takes a while and costs tokens.
+          {tx("{rebuild} writes every folder's index.md anew and removes empty folders, without the model.", { rebuild: <strong className="font-medium text-fg-muted">{t("Rebuild the index")}</strong> })}{" "}
+          {tx("{repair} has the model mend the links to nothing and wire in the notes nothing links to — only when there are any; it takes a while and costs tokens.", { repair: <strong className="font-medium text-fg-muted">{t("Repair with the model")}</strong> })}
         </p>
         {busy && (
           <p className="flex items-center gap-2 text-xs text-fg-subtle">
-            <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {busy}
+            <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t(busy)}
           </p>
         )}
-        {said && !busy && <p className="text-xs text-fg-muted">{said}</p>}
+        {said && !busy && <p className="text-xs text-fg-muted">{said()}</p>}
         {told && !busy && (
           <details className="rounded-lg border border-line px-3 py-2 text-xs">
-            <summary className="cursor-pointer text-fg-muted">What the model said</summary>
+            <summary className="cursor-pointer text-fg-muted">{t("What the model said")}</summary>
             <div className="md mt-2 max-h-60 overflow-y-auto text-fg">
               <Streamdown>{told}</Streamdown>
             </div>
@@ -822,10 +824,9 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
   /** The record starts over; what it records stays. */
   const clear = async () => {
     const ok = await confirmDialog({
-      title: "Clear the log?",
-      message:
-        "The record of what changed in the memory is emptied, and so are the paths Understory's queries took (the graph's Query paths). The notes stay as they are.",
-      confirmLabel: "Clear it",
+      title: t("Clear the log?"),
+      message: t("The record of what changed in the memory is emptied, and so are the paths Understory's queries took (the graph's Query paths). The notes stay as they are."),
+      confirmLabel: t("Clear it"),
       danger: true,
       deletes: true,
     });
@@ -846,7 +847,7 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
   const recent = log ?? [];
   return (
     <>
-      <Bar title="Log" onBack={onBack}>
+      <Bar title={t("Log")} onBack={onBack}>
         {writable && log && log.length > 0 && (
           <button
             type="button"
@@ -854,20 +855,20 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
             disabled={busy}
             className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
           >
-            <LuTrash2 className="h-3.5 w-3.5" /> Clear the log
+            <LuTrash2 className="h-3.5 w-3.5" /> {t("Clear the log")}
           </button>
         )}
       </Bar>
-      <section aria-label="Changes to the memory" className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
+      <section aria-label={t("Changes to the memory")} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
         <div className="mx-auto max-w-3xl">
           {failed ? (
             <p className="text-sm text-warn">{failed}</p>
           ) : !log ? (
-            <div className="skeleton-group space-y-2" aria-label="Loading the log">
+            <div className="skeleton-group space-y-2" aria-label={t("Loading the log")}>
               {[0, 1, 2].map((i) => <div key={i} className="skeleton h-12 w-full" />)}
             </div>
           ) : recent.length === 0 ? (
-            <p className="text-sm text-fg-subtle">Nothing has changed yet.</p>
+            <p className="text-sm text-fg-subtle">{t("Nothing has changed yet.")}</p>
           ) : (
             <ol className="space-y-3 border-l border-line pl-4">
               {recent.map((c, i) => (
@@ -893,14 +894,14 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
 function Issues({ validation, onOpen, onBack }: { validation: MemoryValidation | null; onOpen: (path: string) => void; onBack: () => void }) {
   return (
     <>
-      <Bar title="Is the bundle well-formed?" onBack={onBack} />
+      <Bar title={t("Is the bundle well-formed?")} onBack={onBack} />
       <section className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
         <div className="mx-auto max-w-3xl text-sm">
           {!validation ? (
-            <p className="text-fg-subtle">Understory did not say.</p>
+            <p className="text-fg-subtle">{t("Understory did not say.")}</p>
           ) : validation.conformant && !validation.issues.length ? (
             <p className="flex items-center gap-2 text-ok">
-              <LuCircleCheck className="h-4 w-4" /> Every note is where and how the format wants it.
+              <LuCircleCheck className="h-4 w-4" /> {t("Every note is where and how the format wants it.")}
             </p>
           ) : (
             <ul className="space-y-2">
@@ -987,18 +988,18 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
 
   return (
     <>
-      <Bar title="Graph" onBack={onBack} />
+      <Bar title={t("Graph")} onBack={onBack} />
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {failed ? (
           <p className="p-4 text-sm text-warn">{failed}</p>
         ) : !graph ? (
-          <div className="skeleton m-4 h-64" aria-label="Loading the graph" />
+          <div className="skeleton m-4 h-64" aria-label={t("Loading the graph")} />
         ) : (
           <>
             <svg
               ref={svg}
               role="img"
-              aria-label={`The memory's notes and their links: ${graph.nodes.length} notes, ${graph.edges.length} links`}
+              aria-label={t("The memory's notes and their links: {notes}, {links}", { notes: tp(graph.nodes.length, "{n} note", "{n} notes"), links: tp(graph.edges.length, "{n} link", "{n} links") })}
               viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
               className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
               onPointerDown={down}
@@ -1038,7 +1039,7 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
             </svg>
 
             {(types.length > 0 || graph.nodes.some((n) => n.links === 0)) && (
-              <ul aria-label="What the colours are" className="absolute left-3 top-3 max-w-[45%] space-y-1 rounded-lg border border-line bg-surface/90 px-3 py-2 text-[11px] text-fg-muted">
+              <ul aria-label={t("What the colours are")} className="absolute left-3 top-3 max-w-[45%] space-y-1 rounded-lg border border-line bg-surface/90 px-3 py-2 text-[11px] text-fg-muted">
                 {types.map((t) => (
                   <li key={t} className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colourOf(t) }} />
@@ -1048,7 +1049,7 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
                 {graph.nodes.some((n) => n.links === 0) && (
                   <li className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-[#ef4444]" />
-                    orphan (unlinked)
+                    {t("orphan (unlinked)")}
                   </li>
                 )}
               </ul>
@@ -1056,18 +1057,18 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
 
             {traces.length > 0 && (
               <details className="absolute right-3 top-3 w-72 max-w-[calc(100%-1.5rem)] rounded-lg border border-line bg-surface/90 text-[11px] max-md:hidden">
-                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-fg">Query paths</summary>
+                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-fg">{t("Query paths")}</summary>
                 <ul className="max-h-72 space-y-2 overflow-y-auto px-3 pb-3">
-                  {traces.slice(0, 30).map((t) => (
-                    <li key={t.id} title={t.input}>
+                  {traces.slice(0, 30).map((trace) => (
+                    <li key={trace.id} title={trace.input}>
                       <p className="flex items-center gap-1.5 text-fg">
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${t.kind === "mutation" ? "bg-warn" : "bg-accent"}`} />
-                        <span className="truncate">{t.input}</span>
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${trace.kind === "mutation" ? "bg-warn" : "bg-accent"}`} />
+                        <span className="truncate">{trace.input}</span>
                       </p>
                       <p className="mt-0.5 flex gap-2 font-mono text-[10px] text-fg-faint">
-                        <span className="min-w-0 flex-1 truncate">{t.notation}</span>
+                        <span className="min-w-0 flex-1 truncate">{trace.notation}</span>
                         <span className="shrink-0">
-                          {tokens(t.usage?.inputTokens)}→{tokens(t.usage?.outputTokens)} tok
+                          {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
                         </span>
                       </p>
                     </li>
@@ -1077,19 +1078,18 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
             )}
 
             <div className="absolute bottom-10 right-3 flex flex-col overflow-hidden rounded-lg border border-line bg-surface/90">
-              <button type="button" onClick={() => zoom(1 / 1.3)} aria-label="Zoom in" className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
+              <button type="button" onClick={() => zoom(1 / 1.3)} aria-label={t("Zoom in")} className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
                 <LuPlus className="h-3.5 w-3.5" />
               </button>
-              <button type="button" onClick={() => zoom(1.3)} aria-label="Zoom out" className="border-y border-line p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
+              <button type="button" onClick={() => zoom(1.3)} aria-label={t("Zoom out")} className="border-y border-line p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
                 <LuMinus className="h-3.5 w-3.5" />
               </button>
-              <button type="button" onClick={() => setBox(fit)} aria-label="Show all of it" className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
+              <button type="button" onClick={() => setBox(fit)} aria-label={t("Show all of it")} className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
                 <LuLocateFixed className="h-3.5 w-3.5" />
               </button>
             </div>
             <p className="absolute bottom-3 left-3 text-[11px] text-fg-faint">
-              {graph.nodes.length} {graph.nodes.length === 1 ? "note" : "notes"} · {graph.edges.length} {graph.edges.length === 1 ? "link" : "links"} — drag to
-              move · scroll to zoom · click to open
+              {tp(graph.nodes.length, "{n} note", "{n} notes")} · {tp(graph.edges.length, "{n} link", "{n} links")} {t("— drag to move · scroll to zoom · click to open")}
             </p>
           </>
         )}

@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { createPortal } from "react-dom";
 import { LuCheck, LuChevronDown } from "react-icons/lu";
 
+import { t } from "../i18n";
 export interface SelectOption<T extends string | number = string> {
   value: T;
   label: ReactNode;
@@ -26,7 +27,7 @@ export function Select<T extends string | number = string>({
   value,
   onChange,
   options,
-  placeholder = "Choose…",
+  placeholder,
   disabled,
   className = "",
   size = "md",
@@ -194,7 +195,7 @@ export function Select<T extends string | number = string>({
         onKeyDown={onKey}
         className={`ui-select ui-select-${size} ${open ? "is-open" : ""} ${className}`}
       >
-        <span className={`ui-select-value ${selected ? "" : "is-placeholder"}`}>{selected ? selected.label : placeholder}</span>
+        <span className={`ui-select-value ${selected ? "" : "is-placeholder"}`}>{selected ? selected.label : (placeholder ?? t("Choose…"))}</span>
         <LuChevronDown className="ui-select-chevron" aria-hidden />
       </button>
       {open &&

@@ -3,10 +3,11 @@ import { Streamdown } from "streamdown";
 import { LuArrowUp, LuBot, LuSquare } from "react-icons/lu";
 import { api } from "../api";
 import { buildTranscript, formatElapsed, type Item } from "../transcript";
-import { reportedSteps, type Subagent } from "../subagents";
+import { reportedSteps, subagentName, type Subagent } from "../subagents";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CompactionMarker, Ring, Shimmer, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { isEnter } from "../shortcuts";
+import { t } from "../i18n";
 
 /**
  * The subagents of a chat, one at a time: what it is doing, drawn like the
@@ -32,7 +33,7 @@ export function SubagentPanel({
     return (
       <div className="sub-panel">
         <p className="bg-jobs-empty">
-          No subagents in this chat yet. An extension's agent shows up here while it works — and takes messages if the extension speaks the subagent protocol.
+          {t("No subagents in this chat yet. An extension's agent shows up here while it works — and takes messages if the extension speaks the subagent protocol.")}
         </p>
       </div>
     );
@@ -40,11 +41,11 @@ export function SubagentPanel({
   return (
     <div className="sub-panel">
       {agents.length > 1 && (
-        <div className="sub-tabs" role="tablist" aria-label="Subagents">
+        <div className="sub-tabs" role="tablist" aria-label={t("Subagents")}>
           {agents.map((a) => (
             <button key={a.id} type="button" role="tab" aria-selected={a.id === agent.id} onClick={() => onSelect(a.id)} className={`sub-tab is-${a.status}`}>
               {a.status === "running" ? <Ring /> : <i className="bg-job-dot" aria-hidden />}
-              {a.label}
+              {subagentName(a)}
             </button>
           ))}
         </div>
@@ -73,21 +74,21 @@ function AgentView({ sessionId, agent, items }: { sessionId: string; agent: Suba
       <div className="sub-head">
         <span className="sub-head-icon">{running ? <Ring /> : <LuBot aria-hidden />}</span>
         <div className="min-w-0 flex-1">
-          <div className="sub-head-title">{agent.label}</div>
+          <div className="sub-head-title">{subagentName(agent)}</div>
           <div className="sub-head-detail">
-            {running ? <Shimmer>{agent.detail ?? "Working"}</Shimmer> : agent.status === "done" ? "Finished" : agent.status === "stopped" ? "Stopped" : agent.error ?? "Failed"}
+            {running ? <Shimmer>{agent.detail ?? t("Working")}</Shimmer> : agent.status === "done" ? t("Finished") : agent.status === "stopped" ? t("Stopped") : agent.error ?? t("Failed")}
             {seconds !== undefined && ` · ${formatElapsed(seconds)}`}
           </div>
         </div>
         {agent.stop && running && (
           <button type="button" className="bg-job-stop" onClick={() => void api.subagentStop(sessionId, agent.id).catch(() => undefined)}>
-            <LuSquare aria-hidden fill="currentColor" /> Stop
+            <LuSquare aria-hidden fill="currentColor" /> {t("Stop")}
           </button>
         )}
       </div>
       <div ref={attach} onScroll={onScroll} className="sub-body">
         {agent.kind === "protocol" ? (
-          childItems.length ? childItems.map((item) => <ChildItem key={item.id} item={item} running={running} />) : <p className="bg-jobs-empty"><Shimmer>Starting…</Shimmer></p>
+          childItems.length ? childItems.map((item) => <ChildItem key={item.id} item={item} running={running} />) : <p className="bg-jobs-empty"><Shimmer>{t("Starting…")}</Shimmer></p>
         ) : (
           tool && <ToolReport tool={tool} running={running} />
         )}
@@ -119,7 +120,7 @@ function ChildItem({ item, running }: { item: Item; running: boolean }) {
     case "compaction":
       return <CompactionMarker item={item} />;
     default:
-      return <div className="sub-notice">{item.text}</div>;
+      return <div className="sub-notice">{item.kind === "notice" && item.portal ? t(item.text) : item.text}</div>;
   }
 }
 
@@ -142,7 +143,7 @@ function ToolReport({ tool, running }: { tool: Extract<Item, { kind: "tool" }>; 
           <Streamdown parseIncompleteMarkdown>{tool.output}</Streamdown>
         </div>
       )}
-      {!steps.length && !tool.output && running && <p className="bg-jobs-empty"><Shimmer>Working…</Shimmer></p>}
+      {!steps.length && !tool.output && running && <p className="bg-jobs-empty"><Shimmer>{t("Working…")}</Shimmer></p>}
     </>
   );
 }
@@ -157,8 +158,8 @@ function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }
     return (
       <p className="sub-input-note">
         {agent.kind === "tool"
-          ? "This extension does not take messages for its agent. It can, by speaking the subagent protocol."
-          : "This subagent does not take messages."}
+          ? t("This extension does not take messages for its agent. It can, by speaking the subagent protocol.")
+          : t("This subagent does not take messages.")}
       </p>
     );
   }
@@ -179,14 +180,14 @@ function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }
   };
   return (
     <div className="sub-input">
-      {sent.length > 0 && <div className="sub-input-sent">Sent: “{sent[sent.length - 1]}”</div>}
+      {sent.length > 0 && <div className="sub-input-sent">{t("Sent: “{text}”", { text: sent[sent.length - 1] })}</div>}
       {error && <p className="bg-jobs-error">{error}</p>}
       <div className="sub-input-box">
         <textarea
           value={text}
           rows={2}
-          placeholder={`Tell ${agent.label} something…`}
-          aria-label={`Message for ${agent.label}`}
+          placeholder={t("Tell {name} something…", { name: subagentName(agent) })}
+          aria-label={t("Message for {name}", { name: subagentName(agent) })}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (isEnter(e) && !e.shiftKey) {
@@ -195,7 +196,7 @@ function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }
             }
           }}
         />
-        <button type="button" className="prompt-action prompt-send" aria-label="Send to the subagent" disabled={!text.trim() || sending} onClick={() => void send()}>
+        <button type="button" className="prompt-action prompt-send" aria-label={t("Send to the subagent")} disabled={!text.trim() || sending} onClick={() => void send()}>
           <LuArrowUp aria-hidden className="h-4 w-4" />
         </button>
       </div>

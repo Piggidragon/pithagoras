@@ -8,6 +8,8 @@
  * Home and every project are there even without chats, so that a chat can be
  * started in any of them from the tree.
  */
+
+import { msg, t } from "./i18n";
 export type FolderKind = "home" | "project" | "elsewhere";
 
 export type Folder<S> = {
@@ -22,6 +24,9 @@ export type Folder<S> = {
   /** When one of its chats last moved: "" for none. */
   lastActive: string;
 };
+
+/** What a folder is called where it is shown: Home and Elsewhere in the language shown, a project as it is named. */
+export const folderName = (f: { kind: string; name: string }) => (f.kind === "project" ? f.name : t(f.name));
 
 export const HOME = "home";
 export const ELSEWHERE = "elsewhere";
@@ -52,8 +57,8 @@ export function groupByFolder<S extends { workspace: string; updated_at: string 
   places: Places,
   { elsewhere: always = false }: { elsewhere?: boolean } = {},
 ): Folder<S>[] {
-  const home: Folder<S> = { key: HOME, kind: "home", name: "Home", path: places.home, sessions: [], lastActive: "" };
-  const elsewhere: Folder<S> = { key: ELSEWHERE, kind: "elsewhere", name: "Elsewhere", path: null, sessions: [], lastActive: "" };
+  const home: Folder<S> = { key: HOME, kind: "home", name: msg("Home"), path: places.home, sessions: [], lastActive: "" };
+  const elsewhere: Folder<S> = { key: ELSEWHERE, kind: "elsewhere", name: msg("Elsewhere"), path: null, sessions: [], lastActive: "" };
   const projects = projectsOf(places).map<Folder<S>>((p) => ({
     key: projectKey(p.name),
     kind: "project",

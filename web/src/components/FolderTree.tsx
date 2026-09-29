@@ -2,10 +2,11 @@ import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type Poin
 import { LuChevronRight, LuFolder, LuFolderOpen, LuFolderSearch, LuFolderTree, LuGripVertical, LuHouse, LuList, LuPlus } from "react-icons/lu";
 import type { SessionStatus } from "../api";
 import { followPointer } from "../pointer-drag";
-import type { Folder, FolderSort } from "../session-folders";
+import { folderName, type Folder, type FolderSort } from "../session-folders";
 import type { Grouping } from "../use-session-folders";
 import { Select } from "./Select";
 import { StatusDot } from "./StatusDot";
+import { msg, t, tp } from "../i18n";
 
 /** How far a grip is pulled before it is a drag rather than a press. */
 const DRAG_SLOP = 4;
@@ -160,7 +161,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
               {onMove && (
                 <span
                   aria-hidden
-                  title="Drag to move"
+                  title={t("Drag to move")}
                   onPointerDown={(e) => carry(f, e)}
                   className="folder-grip -ml-0.5 cursor-grab touch-none rounded p-0.5 text-fg-faint opacity-0 transition-opacity hover:text-fg-muted active:cursor-grabbing group-hover/folder:opacity-100 group-focus-within/folder:opacity-100 [@media(hover:none)]:opacity-100"
                 >
@@ -182,10 +183,10 @@ export function FolderTree<S extends { status: SessionStatus }>({
               >
                 <LuChevronRight aria-hidden className={`h-3 w-3 shrink-0 text-fg-faint transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`} />
                 <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-                <span className="truncate font-medium">{f.name}</span>
+                <span className="truncate font-medium">{folderName(f)}</span>
               </button>
               {running && <StatusDot status="running" bare />}
-              <span className="shrink-0 px-1 text-[11px] tabular-nums text-fg-faint" aria-label={`${f.sessions.length} chat${f.sessions.length === 1 ? "" : "s"}`}>
+              <span className="shrink-0 px-1 text-[11px] tabular-nums text-fg-faint" aria-label={tp(f.sessions.length, "{n} chat", "{n} chats")}>
                 {f.sessions.length}
               </span>
               {extra?.(f)}
@@ -193,8 +194,8 @@ export function FolderTree<S extends { status: SessionStatus }>({
                 <button
                   type="button"
                   onClick={() => onNewChat(f)}
-                  aria-label={`New chat in ${f.name}`}
-                  title={`New chat in ${f.name}`}
+                  aria-label={t("New chat in {name}", { name: folderName(f) })}
+                  title={t("New chat in {name}", { name: folderName(f) })}
                   className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-opacity hover:text-accent focus-visible:opacity-100 group-hover/folder:opacity-100 [@media(hover:none)]:opacity-100"
                 >
                   <LuPlus className="h-3 w-3" />
@@ -202,7 +203,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
               )}
             </div>
             {open && (
-              <div id={body} role="group" aria-label={f.name} className={md ? "mt-1 space-y-1 pl-4" : "pl-3"}>
+              <div id={body} role="group" aria-label={folderName(f)} className={md ? "mt-1 space-y-1 pl-4" : "pl-3"}>
                 {children(f)}
               </div>
             )}
@@ -215,9 +216,9 @@ export function FolderTree<S extends { status: SessionStatus }>({
 }
 
 const SORTS: { value: FolderSort; label: string }[] = [
-  { value: "recent", label: "Latest first" },
-  { value: "name", label: "By name" },
-  { value: "manual", label: "Your order" },
+  { value: "recent", label: msg("Latest first") },
+  { value: "name", label: msg("By name") },
+  { value: "manual", label: msg("Your order") },
 ];
 
 /** How the chats are listed: by folder or as one list, and the folders in which order. */
@@ -238,18 +239,18 @@ export function FolderControls({
       {byFolder && (
         <Select
           size="sm"
-          aria-label="Order of the folders"
+          aria-label={t("Order of the folders")}
           value={sort}
           onChange={onSort}
-          options={SORTS}
+          options={SORTS.map((s) => ({ ...s, label: t(s.label) }))}
           className="folder-sort !gap-1 !border-transparent !bg-transparent !py-0.5 !pl-1.5 !pr-1 !text-[11px] text-fg-subtle"
         />
       )}
       <button
         type="button"
         onClick={() => onGrouping(byFolder ? "list" : "folders")}
-        aria-label={byFolder ? "List the chats together" : "Group the chats by folder"}
-        title={byFolder ? "List the chats together" : "Group the chats by folder"}
+        aria-label={byFolder ? t("List the chats together") : t("Group the chats by folder")}
+        title={byFolder ? t("List the chats together") : t("Group the chats by folder")}
         className="shrink-0 rounded p-1 text-fg-faint hover:bg-fg/5 hover:text-fg-muted"
       >
         {byFolder ? <LuList className="h-3.5 w-3.5" /> : <LuFolderTree className="h-3.5 w-3.5" />}

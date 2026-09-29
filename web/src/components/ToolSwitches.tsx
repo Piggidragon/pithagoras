@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { api, type PortalTool } from "../api";
-import { displayName, groupSummary, groupTools, nextOff } from "../tool-groups";
+import { displayName, groupSummary, groupTools, nextOff, sourceName } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
+import { t, tp } from "../i18n";
 
 /**
  * Which tools this conversation may use.
@@ -72,7 +73,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
     }
   };
 
-  if (!tools) return <p className="px-3 py-2 text-xs text-fg-subtle">Loading…</p>;
+  if (!tools) return <p className="px-3 py-2 text-xs text-fg-subtle">{t("Loading…")}</p>;
 
   if (refusal) {
     return <p className="px-3 py-2 text-xs text-fg-subtle">{refusal}</p>;
@@ -82,10 +83,10 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
     return (
       <p className="px-3 py-2 text-xs text-fg-subtle">
         {live
-          ? "No tools registered."
+          ? t("No tools registered.")
           : off.length
-            ? `${off.length} switched off. The rest are listed once a conversation has run.`
-            : "No tools seen yet — they are listed once a conversation has run."}
+            ? tp(off.length, "{n} switched off. The rest are listed once a conversation has run.", "{n} switched off. The rest are listed once a conversation has run.")
+            : t("No tools seen yet — they are listed once a conversation has run.")}
       </p>
     );
   }
@@ -97,8 +98,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
           from its start — the default is not touched. */}
       {!live && (
         <p className="px-3 pb-1.5 text-[10px] text-fg-faint">
-          Not started yet — these are the tools earlier chats had. What you switch here holds for
-          this chat from its first message; the defaults stay as they are.
+          {t("Not started yet — these are the tools earlier chats had. What you switch here holds for this chat from its first message; the defaults stay as they are.")}
         </p>
       )}
       {groupTools(tools).map((group) => {
@@ -118,7 +118,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
                 <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
               )}
               <span
-                title={group.source}
+                title={sourceName(group.source)}
                 className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-muted"
               >
                 {displayName(group.source, names)}
@@ -131,7 +131,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
               onClick={() => flip(group.tools.map((t) => t.name), group.allOff)}
               className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
             >
-              {group.allOff ? "all on" : "all off"}
+              {group.allOff ? t("all on") : t("all off")}
             </button>
           </div>
           <ul className={open ? "pb-1" : "hidden"}>
@@ -159,7 +159,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
                       setting is findable from the place it is being overruled. */}
                   {tool.defaultOn !== undefined && tool.defaultOn !== tool.enabled && (
                     <span className="shrink-0 text-[10px] text-fg-faint">
-                      default {tool.defaultOn ? "on" : "off"}
+                      {tool.defaultOn ? t("default on") : t("default off")}
                     </span>
                   )}
                 </label>
@@ -171,8 +171,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
       })}
       {live && (
         <p className="px-3 py-1.5 text-[10px] text-fg-faint">
-          Applies from the next message, for this conversation. Settings → Tools sets what every
-          conversation starts with.
+          {t("Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with.")}
         </p>
       )}
     </div>

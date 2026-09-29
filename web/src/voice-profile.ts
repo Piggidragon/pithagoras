@@ -1,4 +1,5 @@
 /** Browser-clock latency trace. Contains timing metadata only, never speech/text. */
+import { msg } from "./i18n";
 export type VoiceMark = { name:string; at:number; detail?:Record<string,number|string|boolean> };
 export type VoiceTrace = { id:number; started:number; marks:VoiceMark[]; status:string };
 export class VoiceProfiler {
@@ -27,7 +28,7 @@ export function voiceProfileSummary(trace:VoiceTrace){
  const last=(name:string)=>trace.marks.filter(m=>m.name===name).at(-1)?.at;
  const start=last('last_speech'),end=first('reply_playback_estimate');
  if(start===undefined||end===undefined||end<=start)return null;
- const checkpoints:[string,number|undefined][]=[['Turn detection',last('endpoint')],['Remaining transcription',last('transcript_ready')],['Dispatch / pending abort',first('send')],['Request setup / prefill → first token',first('first_model_token')],['Thinking / tools → first reply text',first('first_text')],['Sentence accumulation',first('reply_chunk')],['TTS queue',first('reply_tts_request')],['TTS request → first audio bytes',first('reply_first_bytes')],['Audio buffering / decoding',first('reply_audio_ready')],['Playback queue / output estimate',end]];
+ const checkpoints:[string,number|undefined][]=[[msg('Turn detection'),last('endpoint')],[msg('Remaining transcription'),last('transcript_ready')],[msg('Dispatch / pending abort'),first('send')],[msg('Request setup / prefill → first token'),first('first_model_token')],[msg('Thinking / tools → first reply text'),first('first_text')],[msg('Sentence accumulation'),first('reply_chunk')],[msg('TTS queue'),first('reply_tts_request')],[msg('TTS request → first audio bytes'),first('reply_first_bytes')],[msg('Audio buffering / decoding'),first('reply_audio_ready')],[msg('Playback queue / output estimate'),end]];
  let cursor=start;const stages=[];
  for(const [label,at] of checkpoints){if(at===undefined)continue;const stop=Math.max(cursor,Math.min(end,at));stages.push({label,ms:stop-cursor,percent:(stop-cursor)/(end-start)*100});cursor=stop;}
  return {totalMs:end-start,speechToAudioMs:end-trace.started,stages};

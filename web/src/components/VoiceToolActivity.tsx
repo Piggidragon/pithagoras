@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSparkles } from 'react-icons/lu';
 import type { PortalEvent } from '../api';
-import { describeCall, describeOutcome, elapsed, type ToolCall } from '../tool-activity';
+import { describeCall, describeOutcome, elapsed, type ToolCall, type ToolTarget } from '../tool-activity';
+import { msg, t } from "../i18n";
 
 /** A card for one tool call, in one of four places around the orb. */
 type Card = ToolCall & {
@@ -25,6 +26,15 @@ const SLOTS = 4;
  * goes a few seconds later. One that can be looked at opens it when tapped:
  * the file in Files, the terminal, the browser, the document, the picture.
  */
+/** Where a card leads, as its title names it. */
+const TARGET: Record<ToolTarget, string> = {
+  terminal: msg("the terminal"),
+  files: msg("the files"),
+  browser: msg("the browser"),
+  canvas: msg("the document"),
+  pictures: msg("the picture"),
+};
+
 export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEvent[]; folder: string; onOpen: (call: ToolCall) => void }) {
   const seen = useRef(events.reduce((n, e) => Math.max(n, e.seq), 0));
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
@@ -85,7 +95,7 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
   }, [running]);
   useEffect(() => () => { for (const timer of timers.current) clearTimeout(timer); }, []);
 
-  return <div className="voice-tool-activity" aria-label="Tool activity" aria-live="polite" aria-relevant="additions">
+  return <div className="voice-tool-activity" aria-label={t("Tool activity")} aria-live="polite" aria-relevant="additions">
     {shown.map(card => {
       const took = Date.now() - card.startedAt;
       const note = card.status === 'running' ? (took >= 3000 ? elapsed(took) : '') : card.outcome;
@@ -95,12 +105,12 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
         <div>
           <span>{card.label}</span>
           {card.detail && <p>{card.detail}</p>}
-          {note && <p className="voice-tool-note">{card.status === 'failed' ? `Failed: ${note}` : note}</p>}
-          {!note && card.status === 'failed' && <p className="voice-tool-note">Failed</p>}
+          {note && <p className="voice-tool-note">{card.status === 'failed' ? t('Failed: {note}', { note }) : note}</p>}
+          {!note && card.status === 'failed' && <p className="voice-tool-note">{t("Failed")}</p>}
         </div>
       </>;
       return card.target
-        ? <button key={card.id} type="button" className={className} onClick={() => onOpen(card)} title={`Show ${card.target === 'files' ? card.path ?? 'files' : card.target}`}>{body}</button>
+        ? <button key={card.id} type="button" className={className} onClick={() => onOpen(card)} title={t('Show {what}', { what: card.target === 'files' && card.path ? card.path : t(TARGET[card.target]) })}>{body}</button>
         : <div key={card.id} className={className}>{body}</div>;
     })}
   </div>;

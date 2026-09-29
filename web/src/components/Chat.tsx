@@ -42,6 +42,7 @@ import { copyText } from "../clipboard";
 import { isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
+import { msg, t, tp } from "../i18n";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -69,11 +70,11 @@ const ASIDE: Record<Dock, string> = {
 type AsidePanel = "browser" | "agents" | "files" | "git" | "terminal";
 /** What each panel is called: in its header, and on its close button. */
 const PANEL: Record<AsidePanel, { label: string; close: string }> = {
-  browser: { label: "Browser", close: "Close the browser" },
-  agents: { label: "Subagents", close: "Close the subagents" },
-  files: { label: "Files", close: "Close the files" },
-  git: { label: "Git", close: "Close the git panel" },
-  terminal: { label: "Terminal", close: "Close the terminal" },
+  browser: { label: msg("Browser"), close: msg("Close the browser") },
+  agents: { label: msg("Subagents"), close: msg("Close the subagents") },
+  files: { label: msg("Files"), close: msg("Close the files") },
+  git: { label: msg("Git"), close: msg("Close the git panel") },
+  terminal: { label: msg("Terminal"), close: msg("Close the terminal") },
 };
 
 type Movable = HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void };
@@ -163,11 +164,11 @@ function persistComposerHeight(height: number) {
  */
 /** Keep in step with what the server attaches — see channels/supervisor.ts. */
 const CONTEXT_BLOCKS: { tag: string; label: string }[] = [
-  { tag: "speaker", label: "Speaker" },
-  { tag: "sent-since-you-last-spoke", label: "Sent while idle" },
-  { tag: "answer-from-primary", label: "Answer" },
-  { tag: "channel-instructions", label: "Channel instructions" },
-  { tag: "routine", label: "Routine" },
+  { tag: "speaker", label: msg("Speaker") },
+  { tag: "sent-since-you-last-spoke", label: msg("Sent while idle") },
+  { tag: "answer-from-primary", label: msg("Answer") },
+  { tag: "channel-instructions", label: msg("Channel instructions") },
+  { tag: "routine", label: msg("Routine") },
 ];
 
 function splitContext(raw: string): { text: string; blocks: { label: string; body: string }[] } {
@@ -200,7 +201,7 @@ function ContextChip({ label, body }: { label: string; body: string }) {
             ? "bg-accent/20 text-accent"
             : "bg-fg/5 text-fg-faint hover:bg-fg/10 hover:text-fg-muted"
         }`}
-        title="Context the portal attached to this message"
+        title={t("Context the portal attached to this message")}
       >
         {label}
       </button>
@@ -369,7 +370,7 @@ export function Chat({
   const closeFiles = async () => {
     if (
       filesDirty &&
-      !(await confirmDialog({ title: "Discard your changes?", message: "The file open in Files has changes that are not saved.", confirmLabel: "Discard", danger: true }))
+      !(await confirmDialog({ title: t("Discard your changes?"), message: t("The file open in Files has changes that are not saved."), confirmLabel: t("Discard"), danger: true }))
     ) {
       return;
     }
@@ -1095,7 +1096,7 @@ export function Chat({
   /** A message from the conversation, with its pictures, sent as a new one. */
   const sendAgain = async (item: { images?: SentImage[] }, text: string) => {
     const images = await Promise.all(
-      (item.images ?? []).map((image) => refetchImage(api.imageUrl(session.id, image.name), "A picture")),
+      (item.images ?? []).map((image) => refetchImage(api.imageUrl(session.id, image.name), t("A picture"))),
     );
     // Into a run that is going, the same as typing it again would.
     const steer = running && !voiceMode;
@@ -1262,34 +1263,34 @@ export function Chat({
         onPointerDown={beside ? carryPanel(kind) : undefined}
         className="chat-aside-head flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5"
       >
-        <span title="Drag to an edge to dock this panel there, anywhere else to float it" className="-ml-1.5 shrink-0 text-fg-faint max-md:hidden">
+        <span title={t("Drag to an edge to dock this panel there, anywhere else to float it")} className="-ml-1.5 shrink-0 text-fg-faint max-md:hidden">
           <LuGripVertical aria-hidden className="h-3.5 w-3.5" />
         </span>
         {kind === "terminal" ? (
-          <div className="chat-tabs" role="tablist" aria-label="Terminals">
+          <div className="chat-tabs" role="tablist" aria-label={t("Terminals")}>
             <button type="button" role="tab" aria-selected={terminalTab === "agent"} onClick={() => setTerminalTab("agent")}>
-              Agent
-              {running && <i className="chat-tab-live" aria-label="Running" />}
+              {t("Agent")}
+              {running && <i className="chat-tab-live" aria-label={t("Running")} />}
             </button>
             <button type="button" role="tab" aria-selected={terminalTab === "jobs"} onClick={() => setTerminalTab("jobs")}>
-              Background
-              {background.jobs.some((j) => j.state === "running" && !j.attached) && <i className="chat-tab-live" aria-label="Running" />}
+              {t("Background")}
+              {background.jobs.some((j) => j.state === "running" && !j.attached) && <i className="chat-tab-live" aria-label={t("Running")} />}
             </button>
             <button type="button" role="tab" aria-selected={terminalTab === "shell"} onClick={() => setTerminalTab("shell")}>
-              Your shell
+              {t("Your shell")}
             </button>
           </div>
         ) : kind === "git" ? (
-          <div className="chat-tabs" role="tablist" aria-label="Git">
-            {GIT_TABS.map((t) => (
-              <button key={t.id} type="button" role="tab" aria-selected={gitTab === t.id} onClick={() => setGitTab(t.id)}>
-                {t.label}
-                {t.id === "changes" && gitCount > 0 && <span className="ml-1 rounded-full bg-fg/10 px-1 text-[10px]">{gitCount}</span>}
+          <div className="chat-tabs" role="tablist" aria-label={t("Git")}>
+            {GIT_TABS.map((tab) => (
+              <button key={tab.id} type="button" role="tab" aria-selected={gitTab === tab.id} onClick={() => setGitTab(tab.id)}>
+                {t(tab.label)}
+                {tab.id === "changes" && gitCount > 0 && <span className="ml-1 rounded-full bg-fg/10 px-1 text-[10px]">{gitCount}</span>}
               </button>
             ))}
           </div>
         ) : (
-          <span className="text-[11px] text-fg-subtle">{PANEL[kind].label}</span>
+          <span className="text-[11px] text-fg-subtle">{t(PANEL[kind].label)}</span>
         )}
         {kind === "terminal" && terminalTab === "shell" && <span className="max-md:hidden truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
         <div className="ml-auto flex items-center gap-0.5">
@@ -1301,13 +1302,13 @@ export function Chat({
               onClick={() => boxes.box("browser").requestFullscreen?.()}
               className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
             >
-              Fullscreen
+              {t("Fullscreen")}
             </button>
           )}
           <button
             onClick={closePanel[kind]}
-            title="Collapse"
-            aria-label={PANEL[kind].close}
+            title={t("Collapse")}
+            aria-label={t(PANEL[kind].close)}
             className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
           >
             ✕
@@ -1317,7 +1318,7 @@ export function Chat({
       {kind === "browser" && (
         <iframe
           src="/browser-ui/"
-          title="The agent's browser"
+          title={t("The agent's browser")}
           className="min-h-0 flex-1 border-0"
           allow="clipboard-read; clipboard-write; fullscreen"
         />
@@ -1369,7 +1370,7 @@ export function Chat({
         {i > 0 && (
           <div
             onPointerDown={dragSplit(place)}
-            title="Drag to resize"
+            title={t("Drag to resize")}
             className={`shrink-0 touch-none bg-line transition hover:bg-accent/40 ${across(place) ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize"}`}
           />
         )}
@@ -1392,7 +1393,7 @@ export function Chat({
           asides.current[place] = el;
         }}
         data-dock={place}
-        aria-label={wide ? "Panels at the bottom" : `Panels on the ${place}`}
+        aria-label={wide ? t("Panels at the bottom") : place === "left" ? t("Panels on the left") : t("Panels on the right")}
         // At a side, as wide as made, giving way where the conversation would
         // be squeezed (see sideStyle). At the bottom, never so tall that the
         // composer and a few lines above it are squeezed out (260px): a chat
@@ -1406,7 +1407,7 @@ export function Chat({
     const edge = (
       <div
         onPointerDown={dragSize(place)}
-        title="Drag to resize"
+        title={t("Drag to resize")}
         className={`chat-aside-edge shrink-0 touch-none bg-line transition hover:bg-accent/40 max-md:hidden ${wide ? "h-1 cursor-row-resize" : "w-1 cursor-col-resize"}`}
       />
     );
@@ -1423,12 +1424,12 @@ export function Chat({
           asides.current[kind] = el;
         }}
         data-dock="float"
-        aria-label={`${PANEL[kind].label}, floating`}
+        aria-label={t("{panel}, floating", { panel: t(PANEL[kind].label) })}
         style={{ left: at.x, top: at.y, width: at.w, height: at.h }}
         className={`chat-aside flex flex-col overflow-hidden ${ASIDE.float} ${onTop === kind ? "!z-[21]" : ""} ${COVER}`}
       >
         {slotsIn("float", [kind])}
-        <div onPointerDown={sizeFrame(kind)} title="Drag to resize" aria-hidden="true" className="chat-aside-grip max-md:hidden" />
+        <div onPointerDown={sizeFrame(kind)} title={t("Drag to resize")} aria-hidden="true" className="chat-aside-grip max-md:hidden" />
       </aside>
     );
   };
@@ -1440,7 +1441,7 @@ export function Chat({
       <header className={voiceMode ? "hidden" : "chat-header border-b border-line px-4 py-3 max-md:px-3 max-md:py-2"}>
         <div className="mx-auto flex w-full max-w-3xl items-center gap-3 max-md:gap-2">
         {onOpenNavigation && (
-          <button type="button" aria-label="Open navigation" aria-controls="mobile-navigation" onClick={onOpenNavigation} className="-ml-1 rounded-lg p-2 text-fg hover:bg-fg/10 md:hidden">
+          <button type="button" aria-label={t("Open navigation")} aria-controls="mobile-navigation" onClick={onOpenNavigation} className="-ml-1 rounded-lg p-2 text-fg hover:bg-fg/10 md:hidden">
             <LuMenu size={20} aria-hidden />
           </button>
         )}
@@ -1448,7 +1449,7 @@ export function Chat({
           {renaming ? (
             <TitleInput
               value={session.title}
-              label="Chat name"
+              label={t("Chat name")}
               // The field's padding hangs outside the line, so the header
               // keeps its height and the text stays where the title was.
               className="-my-0.5 -ml-1.5 block w-full text-sm font-medium leading-5"
@@ -1463,7 +1464,7 @@ export function Chat({
               <button
                 type="button"
                 onClick={() => setRenaming(true)}
-                title="Rename this chat"
+                title={t("Rename this chat")}
                 className={`max-w-full truncate rounded text-left hover:text-accent ${workingText(session.status)}`}
               >
                 {session.title}
@@ -1475,15 +1476,15 @@ export function Chat({
         <div className="ml-auto flex items-center gap-2">
           {session.status === "interrupted" && (
             <span className="rounded-md bg-warn/10 px-2 py-0.5 text-[11px] text-warn">
-              interrupted — send a message to resume
+              {t("interrupted — send a message to resume")}
             </span>
           )}
           {agents.length > 0 && (
             <PanelToggle
               open={agentsOpen}
               onClick={() => setAgentsOpen((v) => !v)}
-              label="Subagents"
-              title={agentsOpen ? "Hide the subagents" : "The agents working beside this one"}
+              label={t("Subagents")}
+              title={agentsOpen ? t("Hide the subagents") : t("The agents working beside this one")}
               live={agents.some((a) => a.status === "running")}
             >
               <LuBot />
@@ -1493,8 +1494,8 @@ export function Chat({
             <PanelToggle
               open={watching}
               onClick={() => setWatching((v) => !v)}
-              label="Browser"
-              title={watching ? "Hide the browser" : "Watch the browser the agent is driving"}
+              label={t("Browser")}
+              title={watching ? t("Hide the browser") : t("Watch the browser the agent is driving")}
             >
               <LuGlobe />
             </PanelToggle>
@@ -1502,28 +1503,28 @@ export function Chat({
           <PanelToggle
             open={terminal}
             onClick={() => setTerminal((v) => !v)}
-            label="Terminal"
-            title={terminal ? "Hide the terminal" : "The agent's terminal, and a shell of your own in this workspace"}
+            label={t("Terminal")}
+            title={terminal ? t("Hide the terminal") : t("The agent's terminal, and a shell of your own in this workspace")}
           >
             <LuSquareTerminal />
           </PanelToggle>
           <PanelToggle
             open={files}
             onClick={() => (files ? void closeFiles() : setFiles(true))}
-            label="Files"
-            title={files ? "Hide the files" : "Browse the files in this chat's folder"}
+            label={t("Files")}
+            title={files ? t("Hide the files") : t("Browse the files in this chat's folder")}
           >
             <LuFolderOpen />
           </PanelToggle>
           <PanelToggle
             open={git}
             onClick={() => setGit((v) => !v)}
-            label="Git"
-            title={git ? "Hide git" : "What changed, commits, branches and pull requests — for this chat's repository"}
+            label={t("Git")}
+            title={git ? t("Hide git") : t("What changed, commits, branches and pull requests — for this chat's repository")}
           >
             <LuGitBranch />
           </PanelToggle>
-          <PanelToggle open={canvasOpen} onClick={() => setCanvasOpen((v) => !v)} label="Session canvases" title="Session canvases">
+          <PanelToggle open={canvasOpen} onClick={() => setCanvasOpen((v) => !v)} label={t("Session canvases")} title={t("Session canvases")}>
             <LuFileText />
           </PanelToggle>
         </div>
@@ -1562,7 +1563,7 @@ export function Chat({
               disabled={loadingEarlier}
               className="rounded-lg border border-line px-3 py-1 text-xs text-fg-muted transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
             >
-              {loadingEarlier ? "Loading…" : "Load earlier messages"}
+              {loadingEarlier ? t("Loading…") : t("Load earlier messages")}
             </button>
           </div>
         )}
@@ -1572,8 +1573,8 @@ export function Chat({
         {!loading && items.length === 0 && (
           <div className="chat-empty pt-16 text-center">
             <img src="/icon-192.png" alt="" draggable={false} className="chat-empty-mark mx-auto mb-4 h-11 w-11 object-contain" />
-            <p className="text-sm text-fg-muted">Give pi a task.</p>
-            <p className="mt-1 text-xs text-fg-faint">You can close this tab — it keeps working.</p>
+            <p className="text-sm text-fg-muted">{t("Give pi a task.")}</p>
+            <p className="mt-1 text-xs text-fg-faint">{t("You can close this tab — it keeps working.")}</p>
           </div>
         )}
 
@@ -1587,7 +1588,7 @@ export function Chat({
               return (
                 <div key={item.id} className="flex flex-wrap justify-end gap-1">
                   {blocks.map((b, i) => (
-                    <ContextChip key={i} label={b.label} body={b.body} />
+                    <ContextChip key={i} label={t(b.label)} body={b.body} />
                   ))}
                 </div>
               );
@@ -1622,7 +1623,7 @@ export function Chat({
                 <div key={item.id} className={`group flex flex-col items-end gap-1${enter}`}>
                   <div className="max-w-[80%] rounded-2xl rounded-br-md border border-dashed border-accent/30 bg-accent/5 px-3.5 py-2 text-sm text-fg-muted">
                     {text && <div className="whitespace-pre-wrap">{text}</div>}
-                    {item.images && <div className="mt-1 text-[11px] text-fg-subtle">{item.images.length === 1 ? "1 picture" : `${item.images.length} pictures`}</div>}
+                    {item.images && <div className="mt-1 text-[11px] text-fg-subtle">{tp(item.images.length, "{n} picture", "{n} pictures")}</div>}
                   </div>
                   <div className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
                     {waits ? (
@@ -1630,20 +1631,20 @@ export function Chat({
                         <LuClock aria-hidden className="h-3 w-3" />
                         <span>
                           {running
-                            ? `Waiting — goes in ${item.steer ? "after the current step" : "when the run ends"}`
-                            : "Waiting — the agent has it, and reads it next"}
+                            ? item.steer ? t("Waiting — goes in after the current step") : t("Waiting — goes in when the run ends")
+                            : t("Waiting — the agent has it, and reads it next")}
                         </span>
                       </>
                     ) : (
                       <span>
                         {item.unsent === "unsure"
-                          ? "May not have been sent — the portal restarted, and could not tell whether the agent took it in"
-                          : `Not sent — ${item.unsent === "restarted" ? "the portal restarted" : "the run was stopped"} before the agent took it in`}
+                          ? t("May not have been sent — the portal restarted, and could not tell whether the agent took it in")
+                          : item.unsent === "restarted" ? t("Not sent — the portal restarted before the agent took it in") : t("Not sent — the run was stopped before the agent took it in")}
                       </span>
                     )}
                     {text && <CopyAction text={text} />}
                     {!waits && (
-                      <MessageAction label="Send again as a new message" onClick={() => attempt(() => sendAgain(item, text))}>
+                      <MessageAction label={t("Send again as a new message")} onClick={() => attempt(() => sendAgain(item, text))}>
                         <LuRotateCw className="h-3 w-3" />
                       </MessageAction>
                     )}
@@ -1654,14 +1655,14 @@ export function Chat({
             return (
               <div key={item.id} className={`group flex flex-col items-end gap-1${enter}`}>
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
-                  {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title="Sent in voice mode"><LuAudioLines size={13} aria-hidden="true" /><span>Audio</span></div>}
+                  {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title={t("Sent in voice mode")}><LuAudioLines size={13} aria-hidden="true" /><span>{t("Audio")}</span></div>}
                   {item.images && (
                     <div className={`flex flex-wrap justify-end gap-1.5 ${text ? "mb-1.5" : ""}`}>
                       {item.images.map((image) => (
-                        <a key={image.name} href={api.imageUrl(session.id, image.name)} target="_blank" rel="noreferrer" title="Open the picture">
+                        <a key={image.name} href={api.imageUrl(session.id, image.name)} target="_blank" rel="noreferrer" title={t("Open the picture")}>
                           <img
                             src={api.imageUrl(session.id, image.name)}
-                            alt="A picture sent with this message"
+                            alt={t("A picture sent with this message")}
                             loading="lazy"
                             className="max-h-48 max-w-full rounded-lg object-contain ring-1 ring-line"
                           />
@@ -1673,7 +1674,7 @@ export function Chat({
                   {blocks.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap justify-end gap-1">
                       {blocks.map((b, i) => (
-                        <ContextChip key={i} label={b.label} body={b.body} />
+                        <ContextChip key={i} label={t(b.label)} body={b.body} />
                       ))}
                     </div>
                   )}
@@ -1712,8 +1713,8 @@ export function Chat({
                     <MessageAction
                       label={
                         running
-                          ? "Stop the run to retry"
-                          : "Retry — drops the reply and sends this message again"
+                          ? t("Stop the run to retry")
+                          : t("Retry — drops the reply and sends this message again")
                       }
                       disabled={running}
                       onClick={() => attempt(() => onEditMessage(item.seq, text))}
@@ -1722,7 +1723,7 @@ export function Chat({
                     </MessageAction>
                   ) : (
                     <MessageAction
-                      label="Send again as a new message"
+                      label={t("Send again as a new message")}
                       onClick={() => attempt(() => sendAgain(item, text))}
                     >
                       <LuRotateCw className="h-3 w-3" />
@@ -1731,8 +1732,8 @@ export function Chat({
                   <MessageAction
                     label={
                       running
-                        ? "Stop the run to edit"
-                        : `Edit — replaces this message and everything after it${item.id === lastSaid ? " (↑ in an empty box)" : ""}`
+                        ? t("Stop the run to edit")
+                        : item.id === lastSaid ? t("Edit — replaces this message and everything after it (↑ in an empty box)") : t("Edit — replaces this message and everything after it")
                     }
                     disabled={running}
                     onClick={() => setEditing(item.seq)}
@@ -1740,15 +1741,15 @@ export function Chat({
                     <LuPencil className="h-3 w-3" />
                   </MessageAction>
                   <MessageAction
-                    label={running ? "Stop the run to delete" : "Delete this message and the reply to it"}
+                    label={running ? t("Stop the run to delete") : t("Delete this message and the reply to it")}
                     disabled={running}
                     danger
                     onClick={async () => {
                       if (
                         await confirmDialog({
-                          title: "Delete this message?",
-                          message: "The agent's reply to it goes too, and the agent forgets both.",
-                          confirmLabel: "Delete",
+                          title: t("Delete this message?"),
+                          message: t("The agent's reply to it goes too, and the agent forgets both."),
+                          confirmLabel: t("Delete"),
                           danger: true,
                           deletes: true,
                         })
@@ -1856,7 +1857,7 @@ export function Chat({
                     : "bg-raised/60 text-fg-muted"
               }`}
             >
-              {item.text}
+              {item.portal ? t(item.text) : item.text}
             </div>
           );
         })}
@@ -1907,14 +1908,14 @@ export function Chat({
             className="jump-to-end float-in absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs text-fg-muted shadow-pop transition hover:text-fg"
           >
             <LuArrowDown aria-hidden className="h-3.5 w-3.5" />
-            {running ? "Latest output" : "Jump to the end"}
+            {running ? t("Latest output") : t("Jump to the end")}
           </button>
         )}
         {matches.length > 0 && (
           <div
             ref={paletteRef}
             role="listbox"
-            aria-label="Commands"
+            aria-label={t("Commands")}
             className="float-in absolute bottom-full left-0 right-0 mb-2 max-h-[min(18rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop"
           >
             {matches.map((c, i) => (
@@ -1951,11 +1952,11 @@ export function Chat({
             setComposerHeight(nextHeight);
             persistComposerHeight(nextHeight);
           }}
-          aria-label="Resize message composer vertically"
+          aria-label={t("Resize message composer vertically")}
           aria-valuemin={MIN_COMPOSER_HEIGHT}
           aria-valuemax={Math.round(window.innerHeight * 0.45)}
           aria-valuenow={Math.round(composerHeight)}
-          title="Drag up or down to resize"
+          title={t("Drag up or down to resize")}
           className="group flex h-3 w-full touch-none cursor-ns-resize items-center justify-center"
         >
           <span className="h-1 w-12 rounded-full bg-fg/15 transition group-hover:bg-accent/60" />
@@ -1972,26 +1973,26 @@ export function Chat({
         <DictationStrip dictation={dictation} />
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-accent/60 bg-accent/10 text-xs text-accent">
-            Drop pictures to send them, or files to put them in the folder
+            {t("Drop pictures to send them, or files to put them in the folder")}
           </div>
         )}
         {(attached.length > 0 || adding > 0) && (
-          <div className="flex flex-wrap items-center gap-2 px-3 pt-3" aria-label="Pictures going with the message">
+          <div className="flex flex-wrap items-center gap-2 px-3 pt-3" aria-label={t("Pictures going with the message")}>
             {attached.map((a) => (
               <div key={a.id} className="pop-in group/att relative">
                 <img src={a.data} alt={a.name} title={a.name} className="h-14 w-14 rounded-lg object-cover ring-1 ring-line" />
                 <button
                   type="button"
                   onClick={() => changeAttached(attached.filter((x) => x.id !== a.id))}
-                  aria-label={`Remove ${a.name}`}
-                  title="Remove"
+                  aria-label={t("Remove {name}", { name: a.name })}
+                  title={t("Remove")}
                   className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-surface text-fg-muted shadow ring-1 ring-line transition hover:text-danger"
                 >
                   <LuX aria-hidden className="h-3 w-3" />
                 </button>
               </div>
             ))}
-            {adding > 0 && <span role="status" className="text-[11px] text-fg-subtle">Adding…</span>}
+            {adding > 0 && <span role="status" className="text-[11px] text-fg-subtle">{t("Adding…")}</span>}
           </div>
         )}
         <input
@@ -2089,12 +2090,12 @@ export function Chat({
           rows={2}
           placeholder={
             dictation.active
-              ? "Speak — your words appear here…"
+              ? t("Speak — your words appear here…")
               : running
-                ? "pi is working — what you send goes into the run after its current step…"
-                : "Describe the task…"
+                ? t("pi is working — what you send goes into the run after its current step…")
+                : t("Describe the task…")
           }
-          aria-label="Message"
+          aria-label={t("Message")}
           className="prompt-input"
           style={{ height: composerHeight, minHeight: MIN_COMPOSER_HEIGHT, maxHeight: "45vh" }}
         />
@@ -2110,8 +2111,8 @@ export function Chat({
               <button
                 type="button"
                 onClick={() => picker.current?.click()}
-                aria-label="Attach pictures or files"
-                title="Attach pictures or files — or paste or drop them here. Pictures go to the model; other files go in the chat's folder."
+                aria-label={t("Attach pictures or files")}
+                title={t("Attach pictures or files — or paste or drop them here. Pictures go to the model; other files go in the chat's folder.")}
                 className="prompt-action"
               >
                 <LuPaperclip aria-hidden className="h-4 w-4" />
@@ -2121,10 +2122,10 @@ export function Chat({
               {/* Mid-run, Stop stays while a message is written: it is the
                   moment the agent is seen going the wrong way, and whether to
                   steer it or stop it is still open. */}
-              {running && <button type="button" aria-label="Stop generation" title="Stop generation (Esc)" onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
+              {running && <button type="button" aria-label={t("Stop generation")} title={t("Stop generation (Esc)")} onClick={() => void attempt(onAbort)} className="prompt-action prompt-stop">
                 <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />
               </button>}
-              {(!running || input.trim() || attached.length > 0) && <button type="submit" aria-label="Send message" title={running ? 'Send into the running task — it goes in after the current step' : 'Send message'} disabled={sending || adding > 0 || (!input.trim() && !attached.length)}
+              {(!running || input.trim() || attached.length > 0) && <button type="submit" aria-label={t("Send message")} title={running ? t("Send into the running task — it goes in after the current step") : t("Send message")} disabled={sending || adding > 0 || (!input.trim() && !attached.length)}
                 className="prompt-action prompt-send">
                 <LuArrowUp aria-hidden className="h-5 w-5" />
               </button>}
@@ -2171,7 +2172,7 @@ const assistantText = (item: Extract<Item, { kind: "assistant" }>) =>
 function TranscriptSkeleton() {
   return (
     <div role="status" className="skeleton-group space-y-5 pt-6">
-      <span className="sr-only">Loading the conversation…</span>
+      <span className="sr-only">{t("Loading the conversation…")}</span>
       <div className="flex justify-end">
         <div className="skeleton h-10 w-[55%] rounded-2xl rounded-br-md" />
       </div>
@@ -2248,14 +2249,14 @@ function VersionSwitch({
   const at = seqs.indexOf(seq);
   if (at < 0) return null;
   return (
-    <div className="message-versions flex items-center text-[11px] text-fg-subtle" role="group" aria-label="Versions of this message">
-      <MessageAction label={running ? "Stop the run to switch versions" : "Previous version"} disabled={running || busy || at === 0} onClick={() => onSwitch(seqs[at - 1])}>
+    <div className="message-versions flex items-center text-[11px] text-fg-subtle" role="group" aria-label={t("Versions of this message")}>
+      <MessageAction label={running ? t("Stop the run to switch versions") : t("Previous version")} disabled={running || busy || at === 0} onClick={() => onSwitch(seqs[at - 1])}>
         <LuChevronLeft className="h-3 w-3" />
       </MessageAction>
       <span className="min-w-[2.2rem] text-center tabular-nums" aria-live="polite">
         {at + 1} / {seqs.length}
       </span>
-      <MessageAction label={running ? "Stop the run to switch versions" : "Next version"} disabled={running || busy || at === seqs.length - 1} onClick={() => onSwitch(seqs[at + 1])}>
+      <MessageAction label={running ? t("Stop the run to switch versions") : t("Next version")} disabled={running || busy || at === seqs.length - 1} onClick={() => onSwitch(seqs[at + 1])}>
         <LuChevronRight className="h-3 w-3" />
       </MessageAction>
     </div>
@@ -2269,7 +2270,7 @@ function CopyAction({ text }: { text: string }) {
   useEffect(() => () => window.clearTimeout(timer.current), []);
   return (
     <MessageAction
-      label={result === "done" ? "Copied" : result === "failed" ? "Could not copy" : "Copy"}
+      label={result === "done" ? t("Copied") : result === "failed" ? t("Could not copy") : t("Copy")}
       onClick={async () => {
         setResult((await copyText(text)) ? "done" : "failed");
         window.clearTimeout(timer.current);
@@ -2352,19 +2353,19 @@ function MessageEditor({
           }
         }}
         rows={Math.min(10, Math.max(2, value.split("\n").length))}
-        aria-label="Edit message"
+        aria-label={t("Edit message")}
         className="w-full resize-none bg-transparent px-1.5 py-1 text-sm text-fg outline-none"
       />
       <div className="mt-1 flex items-center gap-2 px-1">
         <span className="text-[11px] text-fg-faint">
-          Replaces this message and everything after it.{hasImages && " The pictures go with it again."}
+          {hasImages ? t("Replaces this message and everything after it. The pictures go with it again.") : t("Replaces this message and everything after it.")}
         </span>
         <button
           type="button"
           onClick={onCancel}
           className="ml-auto rounded-lg px-2.5 py-1 text-xs text-fg-muted transition hover:bg-fg/5"
         >
-          Cancel
+          {t("Cancel")}
         </button>
         <button
           type="button"
@@ -2372,7 +2373,7 @@ function MessageEditor({
           disabled={saving || !changed || empty}
           className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/25 disabled:opacity-40"
         >
-          {saving ? "Sending…" : "Send"}
+          {saving ? t("Sending…") : t("Send")}
         </button>
       </div>
     </div>

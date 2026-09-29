@@ -17,6 +17,7 @@ import { api, type BrokenChannelPackage, type Channel, type ChannelKind } from "
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
 import { isEnter } from "../shortcuts";
+import { formatTime, labelOf, msg, t, tp, tx } from "../i18n";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -28,6 +29,13 @@ const STATE_STYLE: Record<string, string> = {
   error: "text-danger",
   stopped: "text-fg-subtle",
 };
+const STATE_LABEL: Record<string, string> = {
+  running: msg("running"),
+  starting: msg("starting"),
+  error: msg("error"),
+  stopped: msg("stopped"),
+};
+const stateLabel = (state: string) => labelOf(STATE_LABEL, state);
 
 const primaryCls =
   "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";
@@ -110,32 +118,31 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
       <section className="mb-6 rounded-xl border border-line bg-raised/40 p-3">
         <div className="flex items-center gap-2">
           <LuFolder className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-          <p className="text-xs text-fg-subtle">Agent home</p>
+          <p className="text-xs text-fg-subtle">{t("Agent home")}</p>
           <p className="ml-auto truncate pl-3 font-mono text-xs text-fg-muted">{home || "…"}</p>
         </div>
         <p className="mt-1.5 text-xs text-fg-faint">
-          Every channel below is a door into one long-lived session running here. They share the
-          agent's memory rather than each starting a conversation of their own.
+          {t("Every channel below is a door into one long-lived session running here. They share the agent's memory rather than each starting a conversation of their own.")}
         </p>
       </section>
 
       <section className="mb-6">
         <div className="flex items-baseline justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            Channels{channels.length ? ` (${channels.length})` : ""}
+            {t("Channels")}{channels.length ? ` (${channels.length})` : ""}
           </h3>
           <button onClick={load} className="text-[11px] text-fg-subtle hover:text-fg-muted">
-            Refresh
+            {t("Refresh")}
           </button>
         </div>
 
         {loading ? (
-          <p className="mt-2 text-sm text-fg-subtle">Loading…</p>
+          <p className="mt-2 text-sm text-fg-subtle">{t("Loading…")}</p>
         ) : channels.length === 0 ? (
           <div className="mt-2 rounded-xl border border-dashed border-line px-3 py-6 text-center text-sm text-fg-subtle">
-            No channels yet.
+            {t("No channels yet.")}
             <p className="mt-1 text-xs text-fg-faint">
-              Add one below to reach the agent from outside the portal.
+              {t("Add one below to reach the agent from outside the portal.")}
             </p>
           </div>
         ) : (
@@ -153,7 +160,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
       </section>
 
       <section className="mb-6">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Add channel</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Add channel")}</h3>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {kinds.map((k) => (
             <button
@@ -186,10 +193,9 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
       </section>
 
       <section className="mb-6">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Packages</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Packages")}</h3>
         <p className="mt-0.5 text-xs text-fg-subtle">
-          Channel types come from packages. Point at a GitHub repo following the convention and it
-          becomes available above.
+          {t("Channel types come from packages. Point at a GitHub repo following the convention and it becomes available above.")}
         </p>
 
         <div className="mt-2 flex gap-2">
@@ -210,12 +216,11 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
             ) : (
               <LuDownload className="h-4 w-4" />
             )}
-            {installing ? "Installing…" : "Install"}
+            {installing ? t("Installing…") : t("Install")}
           </button>
         </div>
         <p className="mt-1 text-[11px] text-fg-faint">
-          Anything npm understands: <code>user/repo</code>, <code>github:user/repo#v2</code>, a git
-          URL, or an npm package name.
+          {tx("Anything npm understands: {short}, {long}, a git URL, or an npm package name.", { short: <code>user/repo</code>, long: <code>github:user/repo#v2</code> })}
         </p>
 
         <ul className="mt-3 space-y-1">
@@ -231,7 +236,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
                   <span className="font-mono text-[10px] text-fg-faint">{k.packageName}</span>
                 </p>
                 {!k.runnable && (
-                  <p className="text-[10px] text-warn/90">no start() — cannot run</p>
+                  <p className="text-[10px] text-warn/90">{t("no start() — cannot run")}</p>
                 )}
               </div>
               {k.version && (
@@ -239,16 +244,16 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
               )}
               {k.builtin ? (
                 <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">
-                  builtin
+                  {t("builtin")}
                 </span>
               ) : (
                 <button
                   onClick={async () => {
                     if (
                       await confirmDialog({
-                        title: `Uninstall ${k.packageName}?`,
-                        message: "Configured channels are kept.",
-                        confirmLabel: "Uninstall",
+                        title: t("Uninstall {name}?", { name: k.packageName }),
+                        message: t("Configured channels are kept."),
+                        confirmLabel: t("Uninstall"),
                         danger: true,
                         deletes: true,
                       })
@@ -257,7 +262,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
                     }
                   }}
                   className="shrink-0 rounded p-1 text-fg-subtle hover:text-danger"
-                  title="Uninstall"
+                  title={t("Uninstall")}
                 >
                   <LuTrash2 className="h-3.5 w-3.5" />
                 </button>
@@ -287,8 +292,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
       <div className="flex items-start gap-2 rounded-xl border border-line bg-raised/40 px-3 py-2 text-xs text-fg-subtle">
         <LuTriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-faint" />
         <p>
-          An enabled channel is started as soon as you save it, and again when the portal restarts.
-          Each conversation it sees becomes its own session on the Agent tab.
+          {t("An enabled channel is started as soon as you save it, and again when the portal restarts. Each conversation it sees becomes its own session on the Agent tab.")}
         </p>
       </div>
     </>
@@ -359,15 +363,15 @@ function ChannelRow({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm text-fg">{ch.name}</p>
           <p className="truncate text-[11px] text-fg-faint">
-            <span className={STATE_STYLE[ch.state] ?? ""}>{ch.state}</span> ·{" "}
+            <span className={STATE_STYLE[ch.state] ?? ""}>{stateLabel(ch.state)}</span> ·{" "}
             {kind?.label ?? ch.kind} · {ch.slug}
-            {ch.sessionCount ? ` · ${ch.sessionCount} chats` : ""}
-            {ch.instructions ? " · instructions" : ""}
+            {ch.sessionCount ? ` · ${tp(ch.sessionCount, "{n} chat", "{n} chats")}` : ""}
+            {ch.instructions ? ` · ${t("instructions")}` : ""}
           </p>
         </div>
         {!ch.enabled && (
           <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">
-            disabled
+            {t("disabled")}
           </span>
         )}
         <LuChevronRight className="h-4 w-4 shrink-0 text-fg-faint" />
@@ -452,7 +456,7 @@ function ChannelDetail({
         onClick={onBack}
         className="mb-4 inline-flex items-center gap-1.5 text-xs text-fg-subtle transition hover:text-fg-muted"
       >
-        <LuChevronLeft className="h-3.5 w-3.5" /> Channels
+        <LuChevronLeft className="h-3.5 w-3.5" /> {t("Channels")}
       </button>
 
       <div className="mb-5 flex items-start gap-3">
@@ -475,14 +479,14 @@ function ChannelDetail({
           />
           <p className="truncate text-xs text-fg-subtle">
             {kind?.label ?? ch.kind} ·{" "}
-            <span className={STATE_STYLE[ch.state] ?? ""}>{ch.state}</span>
-            {ch.since && ch.state === "running" ? ` since ${new Date(ch.since).toLocaleTimeString()}` : ""}
+            <span className={STATE_STYLE[ch.state] ?? ""}>{stateLabel(ch.state)}</span>
+            {ch.since && ch.state === "running" ? ` ${t("since {time}", { time: formatTime(ch.since) })}` : ""}
           </p>
         </div>
         <button
           onClick={() => act(() => api.updateChannel(ch.id, { enabled: !ch.enabled }))}
           disabled={busy}
-          title={ch.enabled ? "Disable" : "Enable"}
+          title={ch.enabled ? t("Disable") : t("Enable")}
           className={`relative mt-1 h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40 ${
             ch.enabled ? "bg-accent" : "bg-raised"
           }`}
@@ -503,11 +507,9 @@ function ChannelDetail({
       )}
 
       <section className="mb-6">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Identity</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Identity")}</h3>
         <p className="mt-0.5 text-xs text-fg-subtle">
-          The agent's conversations hang off this slug, not off the channel itself. Delete this
-          channel and recreate it under the same slug and its conversations come back; change the
-          slug and it starts fresh.
+          {t("The agent's conversations hang off this slug, not off the channel itself. Delete this channel and recreate it under the same slug and its conversations come back; change the slug and it starts fresh.")}
         </p>
         <input
           value={slug}
@@ -516,60 +518,57 @@ function ChannelDetail({
         />
         <p className="mt-1 text-[11px] text-fg-faint">
           {ch.sessionCount > 0
-            ? `${ch.sessionCount} conversation${ch.sessionCount === 1 ? "" : "s"} keyed to "${ch.slug}".`
-            : "No conversations yet."}
+            ? tp(ch.sessionCount, "{n} conversation keyed to \"{slug}\".", "{n} conversations keyed to \"{slug}\".", { slug: ch.slug })
+            : t("No conversations yet.")}
         </p>
       </section>
 
       <section className="mb-6">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-          While it works
+          {t("While it works")}
         </h3>
         <p className="mt-0.5 text-xs text-fg-subtle">
-          A real task takes minutes. These decide whether the chat shows that, or stays quiet until
-          there is an answer.
+          {t("A real task takes minutes. These decide whether the chat shows that, or stays quiet until there is an answer.")}
         </p>
         <div className="mt-2 space-y-1">
           <Toggle
             on={relayProgress}
             onChange={setRelayProgress}
-            label="Progress"
-            hint="What the agent says between tool calls, as it says it"
+            label={t("Progress")}
+            hint={t("What the agent says between tool calls, as it says it")}
           />
           <Toggle
             on={relayTools}
             onChange={setRelayTools}
-            label="Tool activity"
-            hint="The name of each tool as it runs — ⚙ bash · npm test"
+            label={t("Tool activity")}
+            hint={t("The name of each tool as it runs — ⚙ bash · npm test")}
           />
         </div>
       </section>
 
       <section className="mb-6">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-          Instructions
+          {t("Instructions")}
         </h3>
         <p className="mt-0.5 text-xs text-fg-subtle">
-          Appended to the agent's system prompt for every message that arrives through this
-          channel. Use it for standing guidance that only applies here — the shape of the reply,
-          who is on the other end, what to leave out.
+          {t("Appended to the agent's system prompt for every message that arrives through this channel. Use it for standing guidance that only applies here — the shape of the reply, who is on the other end, what to leave out.")}
         </p>
         <textarea
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
           rows={6}
-          placeholder={"You are answering over " + (kind?.label ?? "this channel") + ". Keep replies short — they are read on a phone. Never paste secrets or full file contents."}
+          placeholder={t("You are answering over {channel}. Keep replies short — they are read on a phone. Never paste secrets or full file contents.", { channel: kind?.label ?? t("this channel") })}
           className={`${inputCls} mt-2 resize-y text-xs leading-relaxed`}
         />
         <p className="mt-1 text-[11px] text-fg-faint">
-          Leave empty for none. The agent's own memory is shared across channels; this is not.
+          {t("Leave empty for none. The agent's own memory is shared across channels; this is not.")}
         </p>
       </section>
 
       {kind && kind.fields.length > 0 && (
         <section className="mb-6">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            Connection
+            {t("Connection")}
           </h3>
           <div className="mt-2 space-y-3">
             {kind.fields.map((f) => (
@@ -578,9 +577,9 @@ function ChannelDetail({
                   <label className="font-mono text-xs text-fg-muted">{f.label}</label>
                   {f.secret &&
                     (ch.secretsSet.includes(f.key) ? (
-                      <span className="text-[10px] text-ok/80">stored</span>
+                      <span className="text-[10px] text-ok/80">{t("stored")}</span>
                     ) : (
-                      <span className="text-[10px] text-fg-faint">not set</span>
+                      <span className="text-[10px] text-fg-faint">{t("not set")}</span>
                     ))}
                 </div>
                 <input
@@ -589,7 +588,7 @@ function ChannelDetail({
                   onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
                   placeholder={
                     f.secret && ch.secretsSet.includes(f.key)
-                      ? "leave blank to keep the stored value"
+                      ? t("leave blank to keep the stored value")
                       : f.placeholder
                   }
                   className={`${inputCls} mt-1 font-mono text-xs`}
@@ -605,20 +604,19 @@ function ChannelDetail({
         <div className="mb-6 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
           <LuCircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p>
-            No installed package provides “{ch.kind}”. Reinstall it to edit this channel, or delete
-            the channel below.
+            {t("No installed package provides “{kind}”. Reinstall it to edit this channel, or delete the channel below.", { kind: ch.kind })}
           </p>
         </div>
       )}
 
       {ch.log.length > 0 && (
         <section className="mb-6">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Activity</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Activity")}</h3>
           <ul className="mt-2 max-h-40 space-y-0.5 overflow-y-auto rounded-xl border border-line bg-raised/60 p-2">
             {[...ch.log].reverse().map((entry, i) => (
               <li key={i} className="flex gap-2 font-mono text-[11px]">
                 <span className="shrink-0 text-fg-faint">
-                  {new Date(entry.at).toLocaleTimeString()}
+                  {formatTime(entry.at)}
                 </span>
                 <span className="min-w-0 text-fg-muted">{entry.text}</span>
               </li>
@@ -633,10 +631,10 @@ function ChannelDetail({
             <LuRefreshCw className="h-4 w-4 animate-spin" />
           ) : saved ? (
             <>
-              <LuCheck className="h-4 w-4" /> Saved
+              <LuCheck className="h-4 w-4" /> {t("Saved")}
             </>
           ) : (
-            "Save"
+            t("Save")
           )}
         </button>
         <button
@@ -645,15 +643,13 @@ function ChannelDetail({
             // to discover later that the agent forgot them.
             const fate =
               ch.sessionCount > 0
-                ? `Its ${ch.sessionCount} conversation${
-                    ch.sessionCount === 1 ? "" : "s"
-                  } are kept, and come back if you recreate a channel with the slug "${ch.slug}".`
+                ? tp(ch.sessionCount, "Its conversation is kept, and comes back if you recreate a channel with the slug \"{slug}\".", "Its {n} conversations are kept, and come back if you recreate a channel with the slug \"{slug}\".", { slug: ch.slug })
                 : "";
             if (
               await confirmDialog({
-                title: `Remove "${ch.name}"?`,
+                title: t("Remove \"{name}\"?", { name: ch.name }),
                 message: fate || undefined,
-                confirmLabel: "Remove",
+                confirmLabel: t("Remove"),
                 danger: true,
                 deletes: true,
               })
@@ -667,7 +663,7 @@ function ChannelDetail({
           disabled={busy}
           className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
         >
-          <LuTrash2 className="h-3.5 w-3.5" /> Remove channel
+          <LuTrash2 className="h-3.5 w-3.5" /> {t("Remove channel")}
         </button>
       </div>
     </>
@@ -711,7 +707,7 @@ function NewChannelForm({
       <p className="text-xs text-fg-subtle">{kind.blurb}</p>
 
       <div>
-        <label className="text-xs text-fg-muted">Name</label>
+        <label className="text-xs text-fg-muted">{t("Name")}</label>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -723,7 +719,7 @@ function NewChannelForm({
         <div key={f.key}>
           <div className="flex items-baseline gap-2">
             <label className="font-mono text-xs text-fg-muted">{f.label}</label>
-            {f.required && <span className="text-[10px] text-fg-faint">required</span>}
+            {f.required && <span className="text-[10px] text-fg-faint">{t("required")}</span>}
           </div>
           <input
             type={f.secret ? "password" : "text"}
@@ -738,10 +734,10 @@ function NewChannelForm({
 
       <div className="flex items-center gap-2">
         <button onClick={create} disabled={busy} className={primaryCls}>
-          {busy ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : "Add channel"}
+          {busy ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : t("Add channel")}
         </button>
         <button onClick={onCancel} className={btnCls}>
-          Cancel
+          {t("Cancel")}
         </button>
       </div>
     </div>

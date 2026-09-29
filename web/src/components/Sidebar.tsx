@@ -26,8 +26,9 @@ import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
-import { HOME, folderKeys, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { HOME, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
+import { t } from "../i18n";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
 const RECENTS_LIMIT = 12;
@@ -159,30 +160,30 @@ export function Sidebar({
   );
 
   const destinations: { to: Destination; icon: ReactNode; label: string }[] = [
-    { to: "sessions", icon: <LuMessagesSquare />, label: "Sessions" },
-    { to: "projects", icon: <LuFolderKanban />, label: "Projects" },
-    { to: "agent", icon: <LuBot />, label: "Agent" },
-    { to: "routines", icon: <LuClock />, label: "Routines" },
+    { to: "sessions", icon: <LuMessagesSquare />, label: t("Sessions") },
+    { to: "projects", icon: <LuFolderKanban />, label: t("Projects") },
+    { to: "agent", icon: <LuBot />, label: t("Agent") },
+    { to: "routines", icon: <LuClock />, label: t("Routines") },
     // Hidden unless there is one. The browser is an optional service, and
     // a dead link to a feature you did not install is just clutter.
-    ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: "Browser" }] : []),
+    ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: t("Browser") }] : []),
     // Likewise: only while Understory holds the agent's memory.
-    ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: "Memory" }] : []),
-    { to: "audit", icon: <LuShield />, label: "Audit" },
+    ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: t("Memory") }] : []),
+    { to: "audit", icon: <LuShield />, label: t("Audit") },
   ];
   const anyRunning = sessions.some((s) => s.status === "running");
 
   return (
-    <aside aria-label="Sidebar" className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-64"}`}>
-      <button type="button" onClick={toggleSidebar} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        title={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} aria-controls="sidebar-content"
+    <aside aria-label={t("Sidebar")} className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-64"}`}>
+      <button type="button" onClick={toggleSidebar} aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
+        title={collapsed ? t("Expand sidebar") : t("Collapse sidebar")} aria-expanded={!collapsed} aria-controls="sidebar-content"
         className="hidden md:grid absolute right-2 top-3 z-10 grid h-8 w-8 place-items-center rounded-lg text-fg-subtle transition-colors hover:bg-canvas hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
         {collapsed ? <LuPanelLeftOpen size={18} /> : <LuPanelLeftClose size={18} />}
       </button>
       {/* Folded, the places are still one click away: a rail of their icons. */}
       {collapsed && (
-        <nav className="sidebar-rail max-md:hidden" aria-label="Destinations">
-          <RailButton icon={<LuPlus />} label="New chat" onClick={() => newChat()} />
+        <nav className="sidebar-rail max-md:hidden" aria-label={t("Destinations")}>
+          <RailButton icon={<LuPlus />} label={t("New chat")} onClick={() => newChat()} />
           <hr />
           {destinations.map((d) => (
             <RailButton key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} current={view === d.to}>
@@ -190,7 +191,7 @@ export function Sidebar({
             </RailButton>
           ))}
           <div className="mt-auto" />
-          <RailButton icon={<LuSettings />} label="Settings" onClick={onOpenSettings} />
+          <RailButton icon={<LuSettings />} label={t("Settings")} onClick={onOpenSettings} />
         </nav>
       )}
       <div id="sidebar-content" className={`sidebar-content min-h-0 w-64 flex-1 flex-col ${collapsed ? "hidden" : "flex"}`}>
@@ -205,7 +206,7 @@ export function Sidebar({
         <h1 className="text-sm font-semibold tracking-tight text-fg">Pithagoras</h1>
         <span
           className="ml-auto text-[10px] uppercase tracking-wider text-fg-faint"
-          title="How sessions are executed"
+          title={t("How sessions are executed")}
         >
           {executor}
         </span>
@@ -213,7 +214,7 @@ export function Sidebar({
 
       {/* Destinations, above the session lists. */}
       <nav className="px-2 pb-2">
-        <NavItem icon={<LuPlus />} label="New" onClick={() => newChat()} active={starting} />
+        <NavItem icon={<LuPlus />} label={t("New")} onClick={() => newChat()} active={starting} />
         {destinations.map((d) => (
           <NavItem key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} active={view === d.to} />
         ))}
@@ -229,8 +230,8 @@ export function Sidebar({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => isEscape(e) && setQuery("")}
-            placeholder="Search chats…"
-            aria-label="Search chats"
+            placeholder={t("Search chats…")}
+            aria-label={t("Search chats")}
             className="w-full rounded-lg border border-line bg-raised/60 py-1.5 pl-8 pr-2 text-xs outline-none placeholder:text-fg-faint focus:border-accent/60"
           />
         </div>
@@ -239,16 +240,16 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto px-2 pb-2">
         {/* By folder, each says so itself, and a chat can be started in it. */}
         {sessions.length === 0 && !byFolder && (
-          <p className="px-2 py-4 text-xs text-fg-subtle">No sessions yet.</p>
+          <p className="px-2 py-4 text-xs text-fg-subtle">{t("No sessions yet.")}</p>
         )}
         {sessions.length > 0 && found.length === 0 && (
-          <p className="px-2 py-4 text-xs text-fg-subtle">Nothing matches “{query.trim()}”.</p>
+          <p className="px-2 py-4 text-xs text-fg-subtle">{t("Nothing matches “{query}”.", { query: query.trim() })}</p>
         )}
 
         {pinned.length > 0 && (
           <>
             <Divider />
-            <GroupLabel>Pinned</GroupLabel>
+            <GroupLabel>{t("Pinned")}</GroupLabel>
             {pinned.map(item)}
           </>
         )}
@@ -256,7 +257,7 @@ export function Sidebar({
         {byFolder && folders.length > 0 && (
           <>
             <Divider />
-            <ChatsHeading label="Folders" {...headingProps} />
+            <ChatsHeading label={t("Folders")} {...headingProps} />
             <FolderTree
               folders={folders}
               isOpen={openFolders.isOpen}
@@ -273,7 +274,7 @@ export function Sidebar({
                 return (
                   <>
                     {chats.length === 0 && (
-                      <p className="px-2.5 py-1 text-xs text-fg-faint">{f.sessions.length ? "Only pinned chats, above." : "No chats yet."}</p>
+                      <p className="px-2.5 py-1 text-xs text-fg-faint">{f.sessions.length ? t("Only pinned chats, above.") : t("No chats yet.")}</p>
                     )}
                     {shown.map(item)}
                     {chats.length > shown.length && (
@@ -281,7 +282,7 @@ export function Sidebar({
                         onClick={() => onOpenFolder(f.key)}
                         className="mb-1 w-full rounded-lg px-2.5 py-1 text-left text-xs text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
                       >
-                        {chats.length - shown.length} more in {f.name}…
+                        {t("{n} more in {name}…", { n: chats.length - shown.length, name: folderName(f) })}
                       </button>
                     )}
                   </>
@@ -294,14 +295,14 @@ export function Sidebar({
         {!byFolder && shownRecents.length > 0 && (
           <>
             <Divider />
-            <ChatsHeading label="Recents" controls={hasProjects} {...headingProps} />
+            <ChatsHeading label={t("Recents")} controls={hasProjects} {...headingProps} />
             {shownRecents.map(item)}
             {recents.length > shownRecents.length && (
               <button
                 onClick={() => onNavigate("sessions")}
                 className="mt-1 w-full rounded-lg px-2 py-1.5 text-left text-xs text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
               >
-                {recents.length - shownRecents.length} more…
+                {t("{n} more…", { n: recents.length - shownRecents.length })}
               </button>
             )}
           </>
@@ -313,7 +314,7 @@ export function Sidebar({
           <div className="min-w-0 flex-1">
             <NavItem
               icon={<LuSettings />}
-              label="Settings"
+              label={t("Settings")}
               onClick={onOpenSettings}
               active={false}
             />
@@ -427,7 +428,7 @@ function SessionItem({
         {renaming ? (
           <TitleInput
             value={s.title}
-            label="Session name"
+            label={t("Session name")}
             className="flex-1 text-sm"
             onCommit={(next) => {
               setRenaming(false);
@@ -455,7 +456,7 @@ function SessionItem({
               onPin(s.id, !s.pinned);
             }}
             className="rounded p-1 text-fg-subtle hover:text-accent"
-            title={s.pinned ? "Unpin" : "Pin"}
+            title={s.pinned ? t("Unpin") : t("Pin")}
           >
             {s.pinned ? <LuPinOff className="h-3 w-3" /> : <LuPin className="h-3 w-3" />}
           </button>
@@ -465,7 +466,7 @@ function SessionItem({
               setRenaming(true);
             }}
             className="rounded p-1 text-fg-subtle hover:text-accent"
-            title="Rename"
+            title={t("Rename")}
           >
             <LuPencil className="h-3 w-3" />
           </button>
@@ -474,9 +475,9 @@ function SessionItem({
               e.stopPropagation();
               if (
                 await confirmDialog({
-                  title: `Delete "${s.title}"?`,
-                  message: "It is stopped if it is running, and its transcript is removed.",
-                  confirmLabel: "Delete",
+                  title: t("Delete \"{name}\"?", { name: s.title }),
+                  message: t("It is stopped if it is running, and its transcript is removed."),
+                  confirmLabel: t("Delete"),
                   danger: true,
                   deletes: true,
                 })
@@ -485,7 +486,7 @@ function SessionItem({
               }
             }}
             className="rounded p-1 text-fg-subtle hover:text-danger"
-            title="Delete session"
+            title={t("Delete session")}
           >
             <LuTrash2 className="h-3 w-3" />
           </button>
