@@ -84,6 +84,17 @@ stray file would attach the wrong conversation.
 Migrations run in place with `ALTER TABLE` rather than recreating anything, so
 upgrades keep existing sessions and their history.
 
+## Beside the run
+
+Not everything goes through pi. The Files, Git and terminal panels talk to the
+session's folder directly (`server/src/workspace-files.ts`, `git.ts`, a pty per
+terminal). Managed add-ons — Browser, Voice, Understory — are Docker containers
+the portal starts through the socket; voice shares the portal's network
+namespace so its services need no published ports. Opt-in pi extensions the
+portal ships (`extensions/`, the subagent tool) are installed as local pi
+packages only when switched on. The server holds one socket in its data
+directory so only one portal runs on it.
+
 ## Front end
 
 React with react-router. Every meaningful view has a URL — a session, the
@@ -91,6 +102,8 @@ sessions list, the agents page, each settings tab — so deep links and the back
 button work, with an SPA fallback on the server.
 
 State is polled every five seconds and pushed over SSE for the open session.
+Text is translated in the browser: every English string goes through `t()`, and a
+language is one file in `web/src/locales/`. See [Settings → Language](/guide/settings#language).
 
 ## Channel loading
 

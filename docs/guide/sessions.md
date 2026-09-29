@@ -115,14 +115,35 @@ drops the summary with everything after. A conversation with branches from pi's
 record by its exact text (or as a voice turn), never by a fragment of it. Nothing
 is changed when this happens.
 
+An edited message, or one sent again, keeps the version it replaced. Where there
+are several, a small `‹ 2 / 3 ›` switch beside the message shows another one —
+the message and what followed it at the time. Switching, like editing, is only
+possible while nothing is running.
+
 If an edit's replacement is refused — the model is unreachable, say — the
 conversation is put back as it was, rather than left without the messages the
 edit meant to replace.
 
+## Drafts and what is running
+
+What you have typed into a chat's box and not sent is kept per chat, so half a
+message does not follow you into the next chat, and survives a reload of the
+page (in the browser's session storage, so not a new browser). An extension that
+asks for what is in the box is told it.
+
+Above the box, a small tray lists what runs beside the conversation: subagents,
+background jobs the agent left running, and the status lines extensions set.
+Each opens its own window — see
+[Subagents and background jobs](/guide/extensions#subagents-and-background-jobs).
+A status that names one of the chat's slash commands runs it when clicked.
+
 ## Sidebar and the sessions page
 
-The sidebar opens with New, Sessions, Projects and Agent, then **Pinned**, then
-**Recents**; under each chat's title it shows the folder it works in. Recents is capped at twelve; anything past that is reachable from
+The sidebar opens with New, then the places — Sessions, Projects, Agent,
+Routines and [Audit](#audit), with Browser and Memory added while the
+[browser](/guide/browser) is installed and [Understory](/guide/features#memory-understory)
+holds the agent's memory — then **Pinned**, then **Recents**. The button at its
+top edge folds it to a rail of icons; under each chat's title it shows the folder it works in. Recents is capped at twelve; anything past that is reachable from
 the Sessions page, which lists everything with search over names and workspace
 paths.
 
@@ -305,3 +326,24 @@ failed. It is not shown for a blip.
 | Grey | Idle |
 | Amber | Interrupted — the server restarted mid-run |
 | Red | Error; the message is in the transcript |
+
+## Audit
+
+**Audit** in the sidebar is the guard's record of what it decided, newest first,
+kept for the last 2,000 decisions. Each row says what happened, for whom, when
+and, for a tool, which tool and what it was asked to do:
+
+| Kind | Meaning |
+| --- | --- |
+| Refused | The agent was stopped from doing something |
+| Allowed by rule | A [standing rule](/people/rules) let it through |
+| Allowed by approval | Somebody [approved it](/people/approvals) |
+| Turned away | A stranger on a channel was refused |
+| You answered | A question from the agent was answered |
+| Page opened | The agent's [browser](/guide/browser) was pointed at a page |
+
+The buttons above the list filter it: **Everything**, **Refused**, **Allowed**
+(both kinds) or **Strangers**, with counts of each and how many are shown. The
+page shows the latest 300 and refreshes every ten seconds while it is visible.
+Who is named is who they are called now: renaming a person renames them through
+the history. There is no button to clear it.

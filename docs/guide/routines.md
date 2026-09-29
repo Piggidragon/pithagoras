@@ -4,8 +4,11 @@ A routine is a standing instruction and a schedule. When it fires the agent is
 given the instruction, does the work, and goes quiet again — nobody is waiting
 on the other end, so a run may take as long as it takes.
 
-Routines live in the sidebar next to Sessions and Agent. They run in the agent's
-home directory, not a workspace, and they share the agent's memory.
+Routines live in the sidebar next to Sessions and Agent. By default they run in the
+agent's home directory and share the agent's memory; **Runs in** gives one a project
+instead, and its runs work in that folder. Each place keeps its own session, so
+moving a routine back picks up where it left off. If the folder is later removed,
+the routine says so and its runs fail until another place is chosen.
 
 ## Scheduling
 

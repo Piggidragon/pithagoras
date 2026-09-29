@@ -19,6 +19,11 @@ PORTAL_SECRET=$(openssl rand -hex 32)
 WORKSPACES_DIR=/root/repos
 ```
 
+`.env.example` lists every variable Compose reads. `WORKSPACES_DIR` is the host
+folder your repositories are in; `PORTAL_DATA_DIR` (optional) is an absolute host
+path to keep the portal's data in, instead of the `portal-data` Docker volume.
+Keep it apart from `WORKSPACES_DIR`.
+
 `PORTAL_SECRET` signs the login cookie. Leave it out and logins are invalidated
 on every restart, which is exactly the annoyance you would expect.
 
@@ -28,9 +33,21 @@ Then:
 docker compose up -d --build
 ```
 
+Open `http://<host>:4100`, sign in, and add a model provider under **Settings →
+Providers** — the setup assistant offers to find a local server, or take a key.
+Nothing else is needed for a first chat.
+
 The portal listens on `:4100`. Compose uses `network_mode: host`, so it binds
 that port directly on the host — which is also what lets pi reach a llama-server
 running on the same machine at `localhost`.
+
+## HTTPS
+
+Browsers offer notifications and installing the portal as an app only over
+HTTPS or on `localhost`, and the embedded browser needs it. Either put a proxy
+in front (`tailscale serve` is the shortest), or give the portal the
+certificate itself: mount the folder with `PORTAL_TLS_DIR` (it appears at
+`/certs`) and set `PORTAL_TLS_CERT` and `PORTAL_TLS_KEY` to the files in it.
 
 ## Workspace paths
 
@@ -52,6 +69,27 @@ To install Browser or Voice from Settings:
 
 Follow [Docker add-ons](/guide/add-ons) for installation, controls, storage and cleanup.
 
+## The runner image
+
+`EXECUTOR=container` starts each task from `PI_IMAGE` (default
+`pithagoras-runner:latest`) by running `pi` in it. The repository does not ship
+that image, so build one — anything with `pi`, `git` and whatever your tasks
+need:
+
+```dockerfile
+FROM node:22-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @earendil-works/pi-coding-agent@latest
+```
+
+```bash
+docker build -t pithagoras-runner:latest .
+```
+
+The per-task limits are `TASK_MEMORY_MB`, `TASK_CPUS` and `TASK_PIDS_LIMIT`.
+The default `host` executor needs no image: pi runs inside the portal.
+
 ## Resuming container sessions
 
 The container executor automatically removes completed runners. Before starting
@@ -62,6 +100,13 @@ A running runner is left alone. Wait for its current task to finish before
 resuming. If an unrelated container uses the same name, the portal reports the
 collision; inspect that container and rename or remove it yourself once you
 have identified it. The portal does not force-delete it.
+
+## Only one portal per data directory
+
+The portal holds a socket in its data directory (`portal.sock`); a second
+server started on the same data — including one an agent starts from a chat with
+another `PORT` — exits with *already running* instead of marking the first one's
+chats interrupted.
 
 ## Updating
 
@@ -133,6 +178,13 @@ Everything here is optional except the password.
 | `PORT` | `4100` | Port to listen on. |
 | `EXECUTOR` | `host` | `host` or `container` — see [Architecture](/reference/architecture#executors). |
 | `WORKSPACE_ROOT` | `/workspaces` | Where workspaces live inside the container. |
+| `PORTAL_DATA_DIR` | `portal-data` volume | Compose only: an absolute host path to mount at `/data` instead of the volume. |
+| `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file; Compose mounts `PORTAL_TLS_DIR` at `/certs`. |
+| `PORTAL_CONTAINER_NAME` | `pithagoras` (Compose) | The portal's own container name, for managed add-ons and container mounts. Unset natively. |
+| `PI_IMAGE` | `pithagoras-runner:latest` | Container executor's image. |
+| `TASK_MEMORY_MB` / `TASK_CPUS` / `TASK_PIDS_LIMIT` | `2048` / `2` / `512` | Container executor limits. |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the add-ons and container executor talk to. |
+| `NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the package catalogue searches. |
 | `CHANNELS_DIR` | `/data/channels` | Where third-party channel packages install. |
 | `AGENT_HOME` | `/data/agent-home` | The agent session's working directory. |
 | `PI_PROVIDER` | — | Overrides pi's `defaultProvider`. |

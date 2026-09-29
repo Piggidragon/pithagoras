@@ -142,6 +142,20 @@ The first installation needs internet access for container registries, Ubuntu pa
 Avoid port conflicts and keep browser/debugging ports private.
 :::
 
+Environment variables on the portal adjust it; a value saved in Settings wins over
+the variable:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BROWSER_USER` / `BROWSER_PASSWORD` | `agent` / — | Login for the browser web UI |
+| `BROWSER_PORT` / `BROWSER_HTTPS_PORT` | `3010` / `3011` | Its HTTP and HTTPS ports |
+| `BROWSER_STREAM_PORT` | `8082` | The port the embedded live view reads frames from |
+| `BROWSER_HOST` | `127.0.0.1` | Where the portal reaches the browser |
+| `BROWSER_CDP_URL` | `http://127.0.0.1:9222` | The debugging endpoint the agent's browser tools use |
+| `BROWSER_VOLUME` | `pithagoras_browser-profile` | The profile volume |
+| `BROWSER_EXTERNAL` | — | `true` for a browser you run yourself (see below) |
+| `BROWSER_BINARY` | — | Without a Docker socket — typically the portal run from source — the portal starts a Chrome or Chromium already on the machine, and this names its binary; the profile is kept in `$DATA_DIR/browser-profile` |
+
 For embedded browser access, serve Pithagoras over HTTPS and follow the certificate setup in the [browser guide](/guide/browser). Voice microphone access also requires HTTPS, except on localhost.
 
 ### Browser controls

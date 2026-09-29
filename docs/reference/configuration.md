@@ -58,7 +58,19 @@ an empty field inherits, and clearing one hands the setting back.
 | `MEMORY_UNDERSTORY_URL` | `http://localhost:3800/mcp` | Where Settings → Add-ons → Memory looks for Understory first. |
 | `MEMORY_UNDERSTORY_AUTH_TOKEN` | — | Understory's bearer token, named in `mcp.json` rather than copied into it. |
 | `UNDERSTORY_PORT` | `3800` | The port the Understory the portal runs listens on (host network). |
+| `NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the package catalogue in Settings → Extensions searches. |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the managed add-ons use. |
+| `PORTAL_CONTAINER_NAME` | — (Compose: `pithagoras`) | The portal's own container name; managed voice joins its network, and the container executor finds its mounts through it. |
+| `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file. |
+| `ALLOW_OPEN` | — | `1` lets a portal with no password listen on the network; without one it binds `127.0.0.1` only. |
+| `GIT_SSH_COMMAND` | `ssh -o BatchMode=yes` | What the Git panel's fetch, pull and push run ssh with. |
+| `LLAMA_DISK_CACHE_MODELS` | — | Comma-separated model names whose llama.cpp prompt cache is kept on disk between chats. |
 | `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume holding that Understory's memory. |
+
+The Browser add-on's `BROWSER_*` variables are in [Docker add-ons](/guide/add-ons), and the `VOICE_*` ones in [Voice control](/guide/voice).
+
+Settings that are kept in the browser rather than on the server — theme, language,
+notifications, confirmations, shortcuts — are in [The interface](/guide/interface).
 
 The host executor inherits the portal environment. The container executor currently forwards `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PI_PROVIDER`, and `PI_MODEL`; it does not forward arbitrary extension variables. Explicit session provider/model choices are passed as CLI arguments.
 

@@ -1,0 +1,90 @@
+# Terminal, background jobs and subagents
+
+Two buttons in a chat's header open the panels for what runs beside the
+conversation: **Terminal** and **Subagents**. Like Files and Git they are
+[panels](/guide/files#panels): at most two are open at once, and each can be docked
+left, right or at the bottom, or floated, by dragging its header. In
+[voice mode](/guide/voice) they are not shown.
+
+## Terminal
+
+The terminal panel has three tabs.
+
+| Tab | What it is |
+| --- | --- |
+| **Agent** | The commands the agent runs in this chat and what they print, as a terminal. A live dot shows while the chat is running. |
+| **Background** | What the agent left running in the background — see below. A live dot shows while one is. |
+| **Your shell** | A real shell of your own, in this chat's workspace. |
+
+A command in the conversation can be shown in the Agent tab from its own card, and
+a background job opens the Background tab on that job.
+
+### Your shell
+
+**Your shell** is a login shell in the chat's folder (`$SHELL`, else `bash -il`)
+on a real terminal: a prompt, colours, job control, full-screen programs such as
+`vim` or `htop`. It starts when you first open the tab, and shows 5,000 lines of
+scrollback in the page.
+
+Output comes to the page as a server-sent event stream and keystrokes go back as
+requests, so nothing but plain HTTP is needed behind a reverse proxy. The last
+200,000 characters are kept on the server and replayed when you reconnect, so
+closing the panel or reloading the page keeps the screen. A shell nobody is
+watching for a while is ended; closing the panel ends it at once, together with
+what it started. If the connection to the shell is lost — it exited, or the portal
+restarted — the panel says so once; close it and open it again for a new one.
+
+::: warning It is a shell in the portal's container
+Anyone who can log in to the portal can open one, with the portal's own
+permissions. That is nothing new — the agent has a shell in every chat — but it is
+not a lesser thing than the chat box beside it. What you start there, a tmux
+session or a server, is yours and is not listed as an agent job. See
+[Prompt injection](/guide/security).
+:::
+
+It needs a `script` binary (util-linux), which the image has, and is Linux only.
+
+### Background jobs
+
+The **Background** tab lists what the agent started and left running — a dev
+server, a watcher, a job an extension started. Each row shows its state and how
+long it has run, or how long it ran once it is **finished**, and it can be
+**paused**. Pick one to follow its output as it writes, up to the last 400,000
+characters on screen; the file has the rest. **Stop** ends a running job, and
+**Clear finished** forgets the ones that are done.
+
+What an extension shows in pi's footer — its status lines and widgets — is listed
+above the jobs.
+
+Some limits:
+
+- Jobs are followed only when pi runs **on the host** (`EXECUTOR=host`) on Linux.
+  With `EXECUTOR=container` the tab says so instead.
+- A job whose output does not go to a file cannot be followed from here, and says
+  so. A command the chat itself shows is in the Agent tab, not listed here.
+- Stopping a job that has already ended is refused with a message.
+
+## Subagents
+
+The **Subagents** panel is where the agents working beside this one are shown: one
+tab per subagent, each drawn like the conversation itself — what it is doing, its
+tool steps and output — with its state: *Working* while it runs, then *Finished*,
+*Stopped* or *Failed* with the reason. **Stop** ends a running one.
+
+Where its extension speaks the subagent protocol, the panel has a box to
+**tell it something** — a message is sent to that subagent while it runs. One that
+does not take messages says so. A subagent needs the chat to be running here, and
+with `EXECUTOR=container` the portal cannot reach extensions to send to.
+
+The bundled subagent tool is one of the [opt-in features](/guide/features); an
+extension can announce its own agents to the panel too, and a tool that is not on
+the protocol still shows its steps. With no subagents in the chat, the panel says
+so.
+
+## HTTP
+
+The terminal is `POST /api/terminal` (optionally with the session, to start in its
+workspace), a stream at `/api/terminal/:id/stream`, and `input`, `resize` and
+`DELETE` on the same id. Background jobs and subagents are under
+`/api/sessions/:id/background` and `/api/sessions/:id/subagents/:agent`. See the
+[HTTP API](/reference/api#terminal-background-jobs-and-subagents).
