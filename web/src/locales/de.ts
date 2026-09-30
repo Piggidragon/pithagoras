@@ -996,7 +996,7 @@ const de: Locale = {
     "{n} commits that no remote has": { one: "{n} Commit, den kein Remote hat", other: "{n} Commits, die kein Remote hat" },
     "{n} stashes": { one: "{n} Stash", other: "{n} Stashes" },
     "There may be more: not everything in it could be read.": "Es kann mehr sein: Nicht alles darin ließ sich lesen.",
-    "Whether it holds git work that exists nowhere else could not be told.": "Ob er Git-Arbeit enthält, die es nirgends sonst gibt, ließ sich nicht feststellen.",
+    "Whether the folder holds git work that exists nowhere else could not be told.": "Ob der Ordner Git-Arbeit enthält, die es nirgends sonst gibt, ließ sich nicht feststellen.",
     "Files git ignores, such as .env, are not looked at.": "Dateien, die Git ignoriert, etwa .env, werden nicht geprüft.",
     "Delete the project \"{name}\" and its unsaved work?": "Das Projekt „{name}“ und seine ungesicherte Arbeit löschen?",
     "This folder holds git work that exists nowhere else: {list}.": "Dieser Ordner enthält Git-Arbeit, die es nirgends sonst gibt: {list}.",

@@ -138,9 +138,10 @@ export function ProjectsPage({
       u?.unknown
         ? lost.length
           ? t("There may be more: not everything in it could be read.")
-          : t("Whether it holds git work that exists nowhere else could not be told.")
+          : t("Whether the folder holds git work that exists nowhere else could not be told.")
         : "",
-      u ? t("Files git ignores, such as .env, are not looked at.") : "",
+      // Only where git could be asked: a folder too big to look through may have no git at all.
+      u && (lost.length || !u.unknown) ? t("Files git ignores, such as .env, are not looked at.") : "",
     ].filter(Boolean);
     const ok = await confirmDialog({
       title: lost.length

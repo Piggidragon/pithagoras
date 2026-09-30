@@ -45,8 +45,12 @@ has and when one last moved.
   new folder counts once), commits no remote has, and stashes. It then asks
   again in its own words, and the server refuses the delete without that. A
   repository that cannot be read is treated the same. Commits that only a tag
-  holds are taken for ones a remote has. Files git ignores (such as `.env`),
-  anything in `node_modules`, and bare repositories are not looked at.
+  holds are taken for ones a remote has. A remote that is itself inside the
+  folder is not counted as a copy, since it goes too. A project that sits inside a repository — the workspace root
+  being one — counts that repository's changes under the folder. Files git
+  ignores (such as `.env`), bare repositories, and what is in `node_modules`,
+  `.venv`, `venv`, `__pycache__`, `.tox`, `.mypy_cache` or `.cache` are not
+  looked at.
 
 ## Chats inside a project
 

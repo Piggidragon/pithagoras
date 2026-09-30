@@ -565,9 +565,8 @@ test("unsaved work: what only a repository's folder holds, so deleting it can be
   mkdirSync(plain);
   const inside = path.join(dir, "sub");
   mkdirSync(inside);
-  // Not a repository of its own, or one that is only somebody else's part.
+  // No repository in it or around it.
   assert.equal(await g.unsavedWork(plain), null);
-  assert.equal(await g.unsavedWork(inside), null);
 
   // Committed, but no remote has it: the commit exists only here.
   assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 1, stashes: 0 });
@@ -724,6 +723,68 @@ test("unsaved work: commits a tag holds are taken for ones a remote has", async 
 test("unsaved work: a worktree inside the folder of its own repository does not count its branches twice", async () => {
   const dir = repo();
   sh(dir, "worktree", "add", "-q", "-b", "wt", path.join(dir, "wt"));
-  // The worktree is a new folder to the main one; the one commit, on main and wt, is counted once.
-  assert.deepEqual(await g.unsavedWork(dir), { changed: 1, unpushed: 1, stashes: 0 });
+  // Not a change of the main one: it is counted on its own. The one commit, on main and wt, is counted once.
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 1, stashes: 0 });
+});
+
+test("unsaved work: a clean clone inside a repository is not a change of it", async () => {
+  const dir = repo();
+  pushed(dir);
+  execFileSync("git", ["clone", "-q", repo(), path.join(dir, "vendor", "lib")]);
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 0, stashes: 0 });
+  // Something else new beside it is a change: the folder, once.
+  writeFileSync(path.join(dir, "vendor", "README"), "r\n");
+  writeFileSync(path.join(dir, "vendor", "NOTES"), "n\n");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 1, unpushed: 0, stashes: 0 });
+});
+
+test("unsaved work: a remote inside the folder goes with it, so what it has is not saved", async () => {
+  const folder = path.join(home, `pair${++n}`);
+  mkdirSync(folder);
+  const origin = path.join(folder, "origin.git");
+  execFileSync("git", ["init", "-q", "--bare", origin]);
+  const work = path.join(folder, "work");
+  execFileSync("git", ["clone", "-q", origin, work]);
+  writeFileSync(path.join(work, "a.txt"), "a\n");
+  sh(work, "add", "-A");
+  sh(work, "commit", "-qm", "first");
+  sh(work, "push", "-q", "origin", "main");
+  assert.deepEqual(await g.unsavedWork(folder), { changed: 0, unpushed: 1, stashes: 0 });
+  // Pushed somewhere that stays as well: saved.
+  const away = path.join(home, `remote${++n}.git`);
+  execFileSync("git", ["init", "-q", "--bare", away]);
+  sh(work, "remote", "add", "away", away);
+  sh(work, "push", "-q", "away", "main");
+  assert.deepEqual(await g.unsavedWork(folder), { changed: 0, unpushed: 0, stashes: 0 });
+});
+
+test("unsaved work: a folder inside a repository counts what that repository would lose of it", async () => {
+  const dir = repo();
+  const inside = path.join(dir, "sub");
+  mkdirSync(inside);
+  assert.deepEqual(await g.unsavedWork(inside), { changed: 0, unpushed: 0, stashes: 0 });
+  writeFileSync(path.join(inside, "t.txt"), "t\n");
+  sh(dir, "add", "-A");
+  sh(dir, "commit", "-qm", "sub");
+  writeFileSync(path.join(inside, "t.txt"), "changed\n");
+  writeFileSync(path.join(dir, "a.txt"), "outside the folder\n");
+  assert.deepEqual(await g.unsavedWork(inside), { changed: 1, unpushed: 0, stashes: 0 });
+
+  // A folder git has none of is as good as one without git.
+  const loose = path.join(dir, "loose");
+  mkdirSync(loose);
+  writeFileSync(path.join(loose, "l.txt"), "l\n");
+  assert.equal(await g.unsavedWork(loose), null);
+});
+
+test("unsaved work: a folder that cannot be listed is not taken for an empty one", { skip: process.getuid?.() === 0 && "root reads any folder" }, async () => {
+  const folder = path.join(home, `locked${++n}`);
+  const shut = path.join(folder, "shut");
+  mkdirSync(shut, { recursive: true });
+  chmodSync(shut, 0o000);
+  try {
+    assert.equal((await g.unsavedWork(folder))?.unknown, true);
+  } finally {
+    chmodSync(shut, 0o755);
+  }
 });
