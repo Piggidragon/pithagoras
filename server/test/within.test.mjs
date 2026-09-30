@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const { insideReal, isUnderText, isWithinReal, isWithinText, pathBelow } = await import("../dist/within.js");
+const { insideReal, isUnderText, isWithinText, pathBelow } = await import("../dist/within.js");
 
 test("the folder itself and what is under it are within it, by text", () => {
   assert.equal(isWithinText("/w/site", "/w/site"), true);
@@ -30,6 +30,8 @@ test("under is inside and not the folder itself; below says what is under it", (
   assert.equal(pathBelow("/w/site/", "/w/site/docs/../a.md"), "a.md");
   assert.equal(pathBelow("/w/site", "/w/site"), "");
   assert.equal(pathBelow("/w/site", "/w/other"), undefined);
+  // "" is "/", as on the web.
+  assert.equal(pathBelow("", "/etc"), "etc");
 });
 
 test("what is written with .. or doubled separators is judged by where it goes", () => {
@@ -46,9 +48,9 @@ test("by where it leads, a link into the folder counts as inside, and an empty p
   mkdirSync(path.join(project, "docs"), { recursive: true });
   symlinkSync(path.join(project, "docs"), path.join(home, "shortcut"));
   assert.equal(isWithinText(project, path.join(home, "shortcut")), false);
-  assert.equal(isWithinReal(project, path.join(home, "shortcut")), true);
-  assert.equal(isWithinReal(project, path.join(home, "site-old")), false);
-  assert.equal(isWithinReal(project, null), false);
+  assert.equal(insideReal(project)(path.join(home, "shortcut")), true);
+  assert.equal(insideReal(project)(path.join(home, "site-old")), false);
+  assert.equal(insideReal(project)(null), false);
   // One test for many places answers each the same.
   const inside = insideReal(project);
   assert.deepEqual([path.join(home, "shortcut"), path.join(project, "docs"), home].map(inside), [true, true, false]);

@@ -76,13 +76,19 @@ async function loadFromPi(): Promise<{ skills: LoadedSkill[]; diagnostics: any[]
   return { skills: result?.skills ?? [], diagnostics: result?.diagnostics ?? [] };
 }
 
-/** `p` really leads to somewhere inside the skills root, links followed, and is not the root itself. */
-const underRoot = (p: string) => {
-  const [real, realRoot] = [realPath(p), realPath(skillsRoot())];
-  return real !== null && realRoot !== null && isUnderText(realRoot, real);
+/**
+ * Whether a path really leads somewhere inside the skills root, links
+ * followed, and is not the root itself — which is what makes a skill editable
+ * here. The root is followed once, for as many paths as the test is put to.
+ */
+const underRoot = () => {
+  const realRoot = realPath(skillsRoot());
+  return (p: string) => {
+    if (realRoot === null) return false;
+    const real = realPath(p);
+    return real !== null && isUnderText(realRoot, real);
+  };
 };
-
-const isEditable = underRoot;
 
 /** The directory that owns a skill, which is what delete removes. */
 const skillDir = (filePath: string) => path.dirname(path.resolve(filePath));
@@ -95,18 +101,18 @@ function readBody(filePath: string): string {
   }
 }
 
-const toApi = (s: LoadedSkill) => ({
+const toApi = (s: LoadedSkill, editable: boolean) => ({
   name: s.name,
   description: s.description,
   path: s.filePath,
   scope: s.sourceInfo?.scope ?? s.sourceInfo?.origin ?? "agent",
-  editable: isEditable(s.filePath),
+  editable,
   // Only invocable as /skill:name, never chosen by the model on its own.
   manualOnly: Boolean(s.disableModelInvocation),
   broken: false,
   enabled: true,
-  source: isEditable(s.filePath) ? readSource(skillDir(s.filePath)) : null,
-  content: isEditable(s.filePath) ? readBody(s.filePath) : "",
+  source: editable ? readSource(skillDir(s.filePath)) : null,
+  content: editable ? readBody(s.filePath) : "",
 });
 
 /**
@@ -203,7 +209,7 @@ export function skillsRouter(): Router {
   router.param("name", (req, res, next, name) => {
     if (!isValidSlug(name)) return res.status(400).json({ error: "Invalid skill name" });
     const dir = path.join(skillsRoot(), name);
-    if (existsSync(dir) && !underRoot(dir)) {
+    if (existsSync(dir) && !underRoot()(dir)) {
       return res.status(400).json({ error: "Skill directory escapes its root" });
     }
     next();
@@ -213,11 +219,11 @@ export function skillsRouter(): Router {
   const locate = async (name: string) => {
     const { skills } = await loadFromPi();
     const loaded = skills.find((s) => s.name === name);
-    if (loaded) return { file: loaded.filePath, editable: isEditable(loaded.filePath) };
+    if (loaded) return { file: loaded.filePath, editable: underRoot()(loaded.filePath) };
     // Not loaded means broken or disabled — both still editable and deletable.
     for (const candidate of ["SKILL.md", DISABLED]) {
       const file = path.join(skillsRoot(), name, candidate);
-      if (existsSync(file)) return { file, editable: isEditable(file) };
+      if (existsSync(file)) return { file, editable: underRoot()(file) };
     }
     return null;
   };
@@ -225,9 +231,10 @@ export function skillsRouter(): Router {
   router.get("/skills", async (_req, res) => {
     try {
       const { skills, diagnostics } = await loadFromPi();
+      const editable = underRoot();
       res.json({
         root: skillsRoot(),
-        skills: [...skills.map(toApi), ...brokenSkills(skills), ...disabledSkills()],
+        skills: [...skills.map((s) => toApi(s, editable(s.filePath))), ...brokenSkills(skills), ...disabledSkills()],
         // Name collisions and unreadable files — pi reports them, so should we.
         diagnostics: (diagnostics ?? []).map((d: any) => ({
           type: d.type,

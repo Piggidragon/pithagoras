@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
-import { isUnderText, isWithinReal, realPath } from "./within.js";
+import { insideReal, isUnderText, realPath } from "./within.js";
 
 /**
  * Git, and GitHub through `gh` where it is installed, for the Git panel.
@@ -695,7 +695,7 @@ async function repoWork(dir: string, folder: string, counted: Set<string>, tops:
   const remotes = urls.map((line) => {
     const [key, ...rest] = line.split(" ");
     const where = localRemote(rest.join(" "), repo.root);
-    return { name: key.replace(/^remote\./, "").replace(/\.url$/, ""), goes: where !== null && isWithinReal(folder, where) };
+    return { name: key.replace(/^remote\./, "").replace(/\.url$/, ""), goes: insideReal(folder)(where) };
   });
   const saved = remotes.some((r) => r.goes) ? remotes.filter((r) => !r.goes).map((r) => `--remotes=${r.name}`) : ["--remotes"];
   const count = async (args: string[]) => {
@@ -714,7 +714,7 @@ async function repoWork(dir: string, folder: string, counted: Set<string>, tops:
   // inside the folder, loses them all.
   const common = (await git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
   const data = realpathSync(common);
-  if (!isWithinReal(folder, data)) return { changed, unpushed: await onlyIn(now.head ? ["HEAD"] : []), stashes: 0 };
+  if (!insideReal(folder)(data)) return { changed, unpushed: await onlyIn(now.head ? ["HEAD"] : []), stashes: 0 };
   // Counted once, with every HEAD in it, by whichever of its worktrees came first.
   if (counted.has(data)) return { changed, unpushed: 0, stashes: 0 };
   counted.add(data);

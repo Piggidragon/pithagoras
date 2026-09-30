@@ -22,7 +22,7 @@ import {
 import path from "node:path";
 import { holdsWork, unsavedIn, unsavedRefusal, type Unsaved } from "./git.js";
 import { pictureType } from "./prompt-images.js";
-import { isWithinText } from "./within.js";
+import { isWithinText, pathBelow } from "./within.js";
 
 /**
  * Looking at, changing and taking away the files in a chat's folder, from the browser.
@@ -410,8 +410,9 @@ function removable(base: string, rel: unknown): string {
   const text = String(rel ?? "");
   if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
   const lexical = path.resolve(base, text.replace(/^[/\\]+/, ""));
-  if (!isWithinText(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
-  if (path.relative(base, lexical) === "") throw new FileError("invalid", "The folder itself is not removed from here");
+  const under = pathBelow(base, lexical);
+  if (under === undefined) throw new FileError("invalid", "That path leads outside the folder");
+  if (under === "") throw new FileError("invalid", "The folder itself is not removed from here");
   const parent = resolveInside(base, path.relative(base, path.dirname(lexical)));
   const target = path.join(parent, path.basename(lexical));
   if (!lexists(target)) throw new FileError("missing", "There is no such file or folder");
@@ -469,8 +470,9 @@ export function renameEntry(base: string, rel: unknown, newName: unknown): strin
   const text = String(rel ?? "");
   if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
   const lexical = path.resolve(base, text.replace(/^[/\\]+/, ""));
-  if (!isWithinText(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
-  if (path.relative(base, lexical) === "") throw new FileError("invalid", "The folder itself is not renamed from here");
+  const under = pathBelow(base, lexical);
+  if (under === undefined) throw new FileError("invalid", "That path leads outside the folder");
+  if (under === "") throw new FileError("invalid", "The folder itself is not renamed from here");
   // The parent is followed and checked; the last name is not, so that a link
   // is renamed and not what it leads to.
   const parent = resolveInside(base, path.relative(base, path.dirname(lexical)));

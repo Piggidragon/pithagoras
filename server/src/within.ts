@@ -10,7 +10,10 @@ import { below } from "./paths.js";
  * a sibling that only shares the start of the name (`/w/site-old`) is not
  * inside. Everything is inside `/`.
  */
-export const pathBelow = (dir: string, where: string): string | undefined => below(path.normalize(dir), path.normalize(where));
+export const pathBelow = (dir: string, where: string): string | undefined => below(normal(dir), normal(where));
+
+/** `path.normalize`, but "" stays "" — the web's `below` reads it as "/", and normalize would make it ".". */
+const normal = (p: string) => (p === "" ? "" : path.normalize(p));
 
 /** `where` is the folder `dir` or inside it, by the text of the path alone. */
 export const isWithinText = (dir: string, where: string): boolean => pathBelow(dir, where) !== undefined;
@@ -28,16 +31,10 @@ export function realPath(p: string): string | null {
 }
 
 /**
- * `where` is the folder `dir` or inside it, by the text or by where it really
- * leads, so that a link to a project counts as in the project.
- */
-export function isWithinReal(dir: string, where: string | null): boolean {
-  return insideReal(dir)(where);
-}
-
-/**
- * `isWithinReal` as a test to put to many places, which follows `dir` once,
- * the first time the text alone does not answer.
+ * A test for whether a place is the folder `dir` or inside it, by the text or
+ * by where it really leads, so that a link to a project counts as in the
+ * project. `dir` is followed once, the first time the text alone does not
+ * answer, however many places the test is put to.
  */
 export function insideReal(dir: string): (where: string | null) => boolean {
   let realDir: string | null | undefined;
