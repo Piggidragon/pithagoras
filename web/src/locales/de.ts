@@ -999,6 +999,7 @@ const de: Locale = {
     "Whether the folder holds git work that exists nowhere else could not be told.": "Ob der Ordner Git-Arbeit enthält, die es nirgends sonst gibt, ließ sich nicht feststellen.",
     "Files git ignores, such as .env, are not looked at.": "Dateien, die Git ignoriert, etwa .env, werden nicht geprüft.",
     "Delete the project \"{name}\" and its unsaved work?": "Das Projekt „{name}“ und seine ungesicherte Arbeit löschen?",
+    "Delete \"{name}\" and its unsaved work?": "„{name}“ und die ungesicherte Arbeit darin löschen?",
     "This folder holds git work that exists nowhere else: {list}.": "Dieser Ordner enthält Git-Arbeit, die es nirgends sonst gibt: {list}.",
     "Projects": "Projekte",
     "New chats start in Home. A project is a folder of its own with instructions for the agent — saved as its AGENTS.md — for work that should stay together.": "Neue Chats beginnen in Home. Ein Projekt ist ein eigener Ordner mit Anweisungen für den Agenten — gespeichert als AGENTS.md — für Arbeit, die zusammenbleiben soll.",

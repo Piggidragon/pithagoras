@@ -3,6 +3,7 @@ import { LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "reac
 import { PageHeader } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
 import { api, ApiError, type Project, type ProjectContents, type Session } from "../api";
+import { unsavedNotes } from "../unsaved";
 import { bytesLabel, slugify } from "../projects";
 import { within } from "../session-folders";
 import { when } from "../time";
@@ -123,28 +124,9 @@ export function ProjectsPage({
         ? tp(contents.sessions || (contents.complete ? contents.files : Math.max(2, contents.files)), "{what} goes with it.", "{what} go with it.", { what: parts[0] })
         : t("It is empty.");
     // A repository's own history, changes and stashes are in the folder and nowhere else.
-    const u = contents.unsaved;
-    const lost = u
-      ? [
-          u.changed ? tp(u.changed, "{n} uncommitted change", "{n} uncommitted changes") : "",
-          u.unpushed ? tp(u.unpushed, "{n} commit that no remote has", "{n} commits that no remote has") : "",
-          u.stashes ? tp(u.stashes, "{n} stash", "{n} stashes") : "",
-        ].filter(Boolean)
-      : [];
-    const risky = lost.length > 0 || !!u?.unknown;
-    const git = [
-      lost.length ? t("This folder holds git work that exists nowhere else: {list}.", { list: lost.join(", ") }) : "",
-      // Not said as a fact: what could not be read may be nothing.
-      u?.unknown
-        ? lost.length
-          ? t("There may be more: not everything in it could be read.")
-          : t("Whether the folder holds git work that exists nowhere else could not be told.")
-        : "",
-      // Only where git could be asked: a folder too big to look through may have no git at all.
-      u && (lost.length || !u.unknown) ? t("Files git ignores, such as .env, are not looked at.") : "",
-    ].filter(Boolean);
+    const { lost, risky, sentences: git } = unsavedNotes(contents.unsaved);
     const ok = await confirmDialog({
-      title: lost.length
+      title: lost
         ? t("Delete the project \"{name}\" and its unsaved work?", { name: p.name })
         : t("Delete the project \"{name}\"?", { name: p.name }),
       message: [...git, going, t("This cannot be undone.")].join(" ") + stranded,

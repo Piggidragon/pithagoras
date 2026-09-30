@@ -37,7 +37,14 @@ that started there. Nothing outside it can be reached.
   name, Escape leaves it. It is a new name in the same folder, and never replaces
   something that is already there.
 - **Delete** a file or a folder and everything in it, after a confirmation. A
-  link is removed as the link; what it points at stays.
+  link is removed as the link; what it points at stays. A folder that holds git
+  work nothing else has — uncommitted changes, commits no remote has, stashes,
+  in a repository or a clone inside it — asks a second time, naming what would
+  be lost, even when Settings says not to ask before deleting; the server
+  refuses without it. It looks and stops where
+  [deleting a project](/guide/projects#the-projects-tab) does. A file goes as it
+  is, and so does a folder called `node_modules`, `.venv`, `venv`,
+  `__pycache__`, `.tox`, `.mypy_cache` or `.cache`.
 
 A save is made whole: the text is written beside the file and put in place, so a
 save that fails (a full disk, say) leaves the file as it was.

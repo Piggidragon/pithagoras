@@ -5,6 +5,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { Chat } from '../src/components/Chat';
+import { ConfirmHost } from '../src/components/ConfirmDialog';
 import { fillFrom } from '../src/editor-fills';
 import { Select } from '../src/components/Select';
 import type { PortalEvent, Session } from '../src/api';
@@ -247,4 +248,4 @@ function Fixture() {
   </div>;
 }
 // Inside a router, as in the app: the chat's links go through it.
-createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /></BrowserRouter>);
+createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /><ConfirmHost /></BrowserRouter>);

@@ -18,10 +18,11 @@ import {
   LuTrash2,
   LuUpload,
 } from "react-icons/lu";
-import { api, type FileEntry } from "../api";
+import { api, ApiError, type FileEntry, type Unsaved } from "../api";
 import type { FileActivity } from "../file-activity";
 import { confirmDialog } from "./ConfirmDialog";
 import { isEnter, isEscape } from "../shortcuts";
+import { unsavedNotes } from "../unsaved";
 import { t, tp } from "../i18n";
 
 /** What the server says when a save would put older text over newer. */
@@ -319,6 +320,19 @@ export function FilesPanel({
     if (problem) setListError(problem);
   };
 
+  /** Whether to delete a folder anyway, now that the server has said what only it holds. */
+  const askAboutUnsaved = (name: string, u: Unsaved) => {
+    const { lost, sentences } = unsavedNotes(u);
+    return confirmDialog({
+      title: lost ? t("Delete \"{name}\" and its unsaved work?", { name }) : t("Delete \"{name}\"?", { name }),
+      message: [...sentences, t("This removes the folder and everything in it. It cannot be undone.")].join(" "),
+      confirmLabel: t("Delete anyway"),
+      danger: true,
+      // Asked whatever Settings says: the server refused, and what is lost has no copy.
+      deletes: false,
+    });
+  };
+
   const remove = async (entry: FileEntry) => {
     const path = join(dir, entry.name);
     // A link to a folder is listed as a folder, but only the link goes.
@@ -337,7 +351,18 @@ export function FilesPanel({
     if (!ok) return;
     let problem: string | null = null;
     try {
-      await api.deleteFile(sessionId, path);
+      let discard = false;
+      for (;;) {
+        try {
+          await api.deleteFile(sessionId, path, discard);
+          break;
+        } catch (e) {
+          // A folder with git work that nothing else has: asked about in its own words, then sent again.
+          if (discard || !(e instanceof ApiError) || e.body.code !== "unsaved-work") throw e;
+          if (!(await askAboutUnsaved(entry.name, e.body.unsaved as Unsaved))) return;
+          discard = true;
+        }
+      }
       if (file && (file.path === path || file.path.startsWith(path + "/"))) {
         fileAsk.current++;
         setFile(null);
