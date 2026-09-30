@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
-import { api, type Project, type Session } from "../api";
+import { api, ApiError, type Project, type ProjectContents, type Session } from "../api";
 import { bytesLabel, slugify } from "../projects";
 import { within } from "../session-folders";
 import { when } from "../time";
@@ -80,42 +80,81 @@ export function ProjectsPage({
 
   const remove = (p: Project) =>
     attempt(async () => {
-      const contents = await api.projectContents(p.name);
-      const parts = [
-        contents.sessions ? tp(contents.sessions, "{n} chat", "{n} chats") : "",
-        contents.files
-          ? contents.complete
-            ? tp(contents.files, "{n} file ({size}) in its folder", "{n} files ({size}) in its folder", { size: bytesLabel(contents.bytes) })
-            : tp(contents.files, "over {n} file ({size}) in its folder", "over {n} files ({size}) in its folder", { size: bytesLabel(contents.bytes) })
-          : "",
-      ].filter(Boolean);
-      const routines = contents.routines ?? [];
-      // They stay, with their history, but have nowhere left to run.
-      const names = routines.map((r) => `"${r}"`).join(", ");
-      const stranded =
-        routines.length === 0
-          ? ""
-          : routines.length === 1
-            ? ` ${t("The routine {names} runs here: it is switched off until it is given another place, and keeps its history.", { names })}`
-            : ` ${t("The routines {names} run here: they are switched off until they are given another place, and keep their history.", { names })}`;
-      const going = parts.length === 2
-        ? t("{first} and {second} go with it.", { first: parts[0], second: parts[1] })
-        : parts.length === 1
-          // The verb agrees with what goes: "1 chat goes", "3 chats go", "over 1,000 files go".
-          ? tp(contents.sessions || (contents.complete ? contents.files : Math.max(2, contents.files)), "{what} goes with it.", "{what} go with it.", { what: parts[0] })
-          : t("It is empty.");
-      const ok = await confirmDialog({
-        title: t("Delete the project \"{name}\"?", { name: p.name }),
-        message: `${going} ${t("This cannot be undone.")}${stranded}`,
-        confirmLabel: t("Delete project"),
-        danger: true,
-        deletes: true,
-      });
-      if (!ok) return;
-      await api.deleteProject(p.name);
+      let contents = await api.projectContents(p.name);
+      for (;;) {
+        const discard = await askToRemove(p, contents);
+        if (discard === null) return;
+        try {
+          await api.deleteProject(p.name, discard);
+          break;
+        } catch (e) {
+          // Work turned up between the question and the delete: asked again, with it.
+          if (!(e instanceof ApiError) || e.body.code !== "unsaved-work") throw e;
+          contents = { ...contents, unsaved: e.body.unsaved as ProjectContents["unsaved"] };
+        }
+      }
       onChanged();
       load();
     });
+
+  /** Whether to delete, and whether unsaved work goes with it: null for "no". */
+  const askToRemove = async (p: Project, contents: ProjectContents): Promise<boolean | null> => {
+    const parts = [
+      contents.sessions ? tp(contents.sessions, "{n} chat", "{n} chats") : "",
+      contents.files
+        ? contents.complete
+          ? tp(contents.files, "{n} file ({size}) in its folder", "{n} files ({size}) in its folder", { size: bytesLabel(contents.bytes) })
+          : tp(contents.files, "over {n} file ({size}) in its folder", "over {n} files ({size}) in its folder", { size: bytesLabel(contents.bytes) })
+        : "",
+    ].filter(Boolean);
+    const routines = contents.routines ?? [];
+    // They stay, with their history, but have nowhere left to run.
+    const names = routines.map((r) => `"${r}"`).join(", ");
+    const stranded =
+      routines.length === 0
+        ? ""
+        : routines.length === 1
+          ? ` ${t("The routine {names} runs here: it is switched off until it is given another place, and keeps its history.", { names })}`
+          : ` ${t("The routines {names} run here: they are switched off until they are given another place, and keep their history.", { names })}`;
+    const going = parts.length === 2
+      ? t("{first} and {second} go with it.", { first: parts[0], second: parts[1] })
+      : parts.length === 1
+        // The verb agrees with what goes: "1 chat goes", "3 chats go", "over 1,000 files go".
+        ? tp(contents.sessions || (contents.complete ? contents.files : Math.max(2, contents.files)), "{what} goes with it.", "{what} go with it.", { what: parts[0] })
+        : t("It is empty.");
+    // A repository's own history, changes and stashes are in the folder and nowhere else.
+    const u = contents.unsaved;
+    const lost = u
+      ? [
+          u.changed ? tp(u.changed, "{n} uncommitted change", "{n} uncommitted changes") : "",
+          u.unpushed ? tp(u.unpushed, "{n} commit that no remote has", "{n} commits that no remote has") : "",
+          u.stashes ? tp(u.stashes, "{n} stash", "{n} stashes") : "",
+        ].filter(Boolean)
+      : [];
+    const risky = lost.length > 0 || !!u?.unknown;
+    const git = [
+      lost.length ? t("This folder holds git work that exists nowhere else: {list}.", { list: lost.join(", ") }) : "",
+      // Not said as a fact: what could not be read may be nothing.
+      u?.unknown
+        ? lost.length
+          ? t("There may be more: not everything in it could be read.")
+          : t("Whether the folder holds git work that exists nowhere else could not be told.")
+        : "",
+      // Only where git could be asked: a folder too big to look through may have no git at all.
+      u && (lost.length || !u.unknown) ? t("Files git ignores, such as .env, are not looked at.") : "",
+    ].filter(Boolean);
+    const ok = await confirmDialog({
+      title: lost.length
+        ? t("Delete the project \"{name}\" and its unsaved work?", { name: p.name })
+        : t("Delete the project \"{name}\"?", { name: p.name }),
+      message: [...git, going, t("This cannot be undone.")].join(" ") + stranded,
+      confirmLabel: risky ? t("Delete anyway") : t("Delete project"),
+      danger: true,
+      // Asked whatever Settings says: the server refuses without it, and what is lost has no copy.
+      deletes: !risky,
+    });
+    return ok ? risky : null;
+  };
 
   return (
     <div className="flex h-full flex-col">

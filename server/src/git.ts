@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
+import { isWithin } from "./workspaces.js";
 
 /**
  * Git, and GitHub through `gh` where it is installed, for the Git panel.
@@ -435,6 +437,213 @@ export async function status(repo: Repo): Promise<Status> {
     ...(file.y !== "." && file.y !== "?" && inTree.has(file.path) ? { unstaged: inTree.get(file.path) } : {}),
   }));
   return { ...parsed, files, truncated: parsed.files.length > MAX_FILES, operation: operationIn(repo.gitDir), remotes };
+}
+
+/** What deleting a folder would lose for good: nothing else holds a copy of these. */
+export interface Unsaved {
+  /** Changes that are not committed: a changed file, a new one, or a new folder, which counts once. */
+  changed: number;
+  /** Commits on a local branch, or on a detached HEAD, that no remote has. */
+  unpushed: number;
+  /** Stashes whose repository is inside the folder, so they go with it. */
+  stashes: number;
+  /** Not everything could be read, so there may be more than this says. */
+  unknown?: true;
+}
+
+/** More folders than this are not searched for repositories: the answer is "could not tell". */
+const REPO_SEARCH_LIMIT = 50_000;
+
+/** Not looked into: what these hold was fetched or made from elsewhere, and can be tens of thousands of folders. */
+const GENERATED = new Set(["node_modules", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache", ".cache"]);
+
+/**
+ * Every folder at or under `folder` with a .git of its own — the folder itself,
+ * submodules, repositories cloned into a subfolder — or null when there are
+ * too many folders to look through. Symlinks are not followed, as a delete does
+ * not follow them. A folder that cannot be listed is an error, not an empty one.
+ */
+async function reposUnder(folder: string): Promise<string[] | null> {
+  const found: string[] = [];
+  let level = [folder];
+  let seen = 0;
+  while (level.length) {
+    seen += level.length;
+    if (seen > REPO_SEARCH_LIMIT) return null;
+    const listed = await Promise.all(
+      level.map((dir) =>
+        readdir(dir, { withFileTypes: true }).then(
+          (entries) => ({ dir, entries }),
+          (e: NodeJS.ErrnoException) => {
+            // Gone since it was listed: nothing of it is deleted either.
+            if (e.code === "ENOENT" || e.code === "ENOTDIR") return { dir, entries: [] };
+            throw e;
+          },
+        ),
+      ),
+    );
+    level = [];
+    for (const { dir, entries } of listed) {
+      for (const entry of entries) {
+        if (entry.name === ".git") found.push(dir);
+        else if (entry.isDirectory() && !GENERATED.has(entry.name)) level.push(path.join(dir, entry.name));
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * What the folder holds that only it has, or null when no repository is in it
+ * or around it. A repository that cannot be read — "dubious ownership", a
+ * broken one, git missing — is not taken for a clean one.
+ */
+export async function unsavedWork(folder: string): Promise<Unsaved | null> {
+  const unknown: Unsaved = { changed: 0, unpushed: 0, stashes: 0, unknown: true };
+  let repos: string[] | null;
+  let tops: Set<string>;
+  let outer: number | null;
+  try {
+    repos = await reposUnder(folder);
+    if (!repos) {
+      console.warn(`[git] could not tell what ${folder} holds: more than ${REPO_SEARCH_LIMIT} folders to look through`);
+      return unknown;
+    }
+    tops = new Set(repos.map((dir) => realpathSync(dir)));
+    outer = await outerChanges(folder, tops);
+  } catch (e) {
+    console.warn(`[git] could not tell what ${folder} holds: ${(e as Error).message}`);
+    return unknown;
+  }
+  if (!repos.length && outer === null) return null;
+  const total: Unsaved = { changed: outer ?? 0, unpushed: 0, stashes: 0 };
+  // A repository's branches and stashes are counted once, however many of its worktrees are here.
+  const counted = new Set<string>();
+  // A few at a time: each is several git processes, and none waits on another.
+  let next = 0;
+  const worker = async () => {
+    while (next < repos.length) {
+      const dir = repos[next++];
+      try {
+        const work = await repoWork(dir, folder, counted, tops);
+        total.changed += work.changed;
+        total.unpushed += work.unpushed;
+        total.stashes += work.stashes;
+      } catch (e) {
+        // Said, not swallowed: the page can only say "could not be read".
+        console.warn(`[git] could not tell what ${dir} holds: ${(e as Error).message}`);
+        total.unknown = true;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, repos.length) }, worker));
+  return total;
+}
+
+/** A path's real place, or the path when it is gone. */
+function real(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * How many changes git sees, less the repositories under it that are counted
+ * on their own. A new folder counts once, and not at all when all it holds is
+ * such repositories.
+ */
+async function ownChanges(repo: Repo, files: ChangedFile[], tops: Set<string>): Promise<number> {
+  const isTop = (f: ChangedFile) => f.kind === "untracked" && f.path.endsWith("/") && tops.has(real(path.join(repo.root, f.path)));
+  let n = 0;
+  for (const f of files) {
+    if (isTop(f)) continue;
+    const at = real(path.join(repo.root, f.path));
+    if (f.kind !== "untracked" || !f.path.endsWith("/") || ![...tops].some((top) => top.startsWith(at + path.sep))) {
+      n++;
+      continue;
+    }
+    // git gives a new folder as one line, even when a repository is in it: what else is in it, then.
+    const ran = await git(repo, ["status", "--porcelain=v2", "-z", "--untracked-files=all", "--", literal(f.path)]);
+    if (ran.cut) throw new GitError(409, "git status said more than could be read");
+    if (parseStatus(ran.stdout).files.some((inner) => !isTop(inner))) n++;
+  }
+  return n;
+}
+
+/**
+ * Changes to files under `folder` that a repository around it tracks, as when
+ * the workspace root is one: that repository stays, the changes go. Null when
+ * no repository is around it, or git has none of the folder.
+ */
+async function outerChanges(folder: string, tops: Set<string>): Promise<number | null> {
+  let repo: Repo | null;
+  try {
+    repo = await findRepo(folder);
+  } catch (e) {
+    // No git at all: nothing git holds can be lost.
+    if (e instanceof GitError && e.status === 501) return null;
+    throw e;
+  }
+  // None around it, or the folder's own, which is counted on its own.
+  if (!repo || !repo.prefix) return null;
+  const ran = await git(repo, ["status", "--porcelain=v2", "-z", "--untracked-files=normal", "--ignore-submodules=dirty", "--", literal(repo.prefix)]);
+  if (ran.cut) throw new GitError(409, "git status said more than could be read");
+  const files = parseStatus(ran.stdout).files;
+  // The whole folder untracked: git has none of it, as if there were no git.
+  if (files.length === 1 && files[0].kind === "untracked" && files[0].path === `${repo.prefix}/`) return null;
+  return ownChanges(repo, files, tops);
+}
+
+/** Where a remote's URL is on this machine, or null when it is elsewhere. */
+function localRemote(url: string, base: string): string | null {
+  if (url.startsWith("file://")) return url.slice("file://".length);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return null;
+  // user@host:path, as scp writes it: a colon before any slash.
+  if (/^[^/]*:/.test(url)) return null;
+  return path.resolve(base, url);
+}
+
+/** What the repository whose top is `dir` would lose when `folder`, which holds it, goes. */
+async function repoWork(dir: string, folder: string, counted: Set<string>, tops: Set<string>): Promise<Unsaved> {
+  const repo = await findRepo(dir);
+  // A .git that git does not take for the folder's own repository is a broken one.
+  if (!repo || realpathSync(repo.root) !== realpathSync(dir)) throw new GitError(409, "not a readable repository");
+  // One command, and only whether something is there: a new folder is one
+  // entry, not every file in it, and status() would also run two diffs.
+  const ran = await git(repo, ["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=normal", "--ignore-submodules=dirty"]);
+  if (ran.cut) throw new GitError(409, "git status said more than could be read");
+  const now = parseStatus(ran.stdout);
+  const changed = await ownChanges(repo, now.files, tops);
+  // A remote inside the folder goes with it: what only it has is not saved.
+  // Then only the others count, named one by one.
+  const urls = (await git(repo, ["config", "--get-regexp", "^remote\\..*\\.url$"], { ok: [1] })).stdout.split("\n").filter(Boolean);
+  const remotes = urls.map((line) => {
+    const [key, ...rest] = line.split(" ");
+    const where = localRemote(rest.join(" "), repo.root);
+    return { name: key.replace(/^remote\./, "").replace(/\.url$/, ""), goes: where !== null && isWithin(folder, where) };
+  });
+  const saved = remotes.some((r) => r.goes) ? remotes.filter((r) => !r.goes).map((r) => `--remotes=${r.name}`) : ["--remotes"];
+  const count = async (args: string[]) => {
+    const out = (await git(repo, ["rev-list", ...args, "--count"])).stdout.trim();
+    // Not `|| 0`: output that is not a number is not "none", and the guard fails closed.
+    if (!/^\d+$/.test(out)) throw new GitError(409, `rev-list said "${out.slice(0, 40)}"`);
+    return Number(out);
+  };
+  // Commits only HEAD holds — detached, mid-rebase, in a worktree — and no
+  // branch, tag or remote. A commit a tag holds is taken for one a remote has:
+  // that is where tags mostly come from. Nothing to ask before the first commit.
+  const detached = now.head ? await count(["HEAD", "--not", "--branches", "--tags", ...saved]) : 0;
+  // Branches and stashes live where the repository's data does. A linked
+  // worktree of a repository elsewhere loses only its files and HEAD; a
+  // submodule, whose data is in the parent's .git, or a .git that points
+  // inside the folder, loses them all.
+  const common = (await git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
+  const data = realpathSync(common);
+  if (!isWithin(folder, data) || counted.has(data)) return { changed, unpushed: detached, stashes: 0 };
+  counted.add(data);
+  return { changed, unpushed: detached + (await count(["--branches", "--not", ...saved])), stashes: now.stashes };
 }
 
 // --- remotes ------------------------------------------------------------------

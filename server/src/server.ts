@@ -42,6 +42,7 @@ import { channelsRouter } from "./api/channels.js";
 import { routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
 import { gitRouter } from "./api/git.js";
+import { unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { featuresRouter } from "./api/features.js";
@@ -368,11 +369,13 @@ app.post("/api/projects", (req, res) => {
 });
 
 /** What deleting a project would take with it, for the confirmation. */
-app.get("/api/projects/:name", (req, res) => {
+app.get("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
+    const unsaved = await unsavedWork(project.path);
     res.json({
       ...project,
+      ...(unsaved ? { unsaved } : {}),
       sessions: workingIn(project.path, listSessions()).length,
       // The ones a delete would switch off: one already off is not changed by it.
       routines: routinesIn(project.path).filter((r) => r.enabled).map((r) => r.name),
@@ -404,7 +407,11 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 
 /**
  * The project, its chats and its folder. Refused while any chat or routine run
- * in it is working.
+ * in it is working, and while its folder holds repositories — itself, submodules,
+ * clones in subfolders — with work that only the folder has — uncommitted
+ * changes, commits no remote has, stashes —
+ * unless `?discard=1` says that is meant. Folders here can be repositories the
+ * portal never made, and nothing brings one back.
  *
  * A routine that runs here keeps its sessions, the record of what it did, as
  * deleting the routine itself does. It is switched off once the folder is gone:
@@ -413,6 +420,19 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
+    // First, before the checks below: git can take seconds, and a chat or a
+    // routine may start in that time, which is what those checks are for. Not
+    // asked at all once ?discard=1 says the answer does not matter.
+    if (req.query.discard !== "1") {
+      const unsaved = await unsavedWork(project.path);
+      if (unsaved && (unsaved.changed || unsaved.unpushed || unsaved.stashes || unsaved.unknown)) {
+        return res.status(409).json({
+          error: "This folder holds work that exists nowhere else. Delete it only when that is meant.",
+          code: "unsaved-work",
+          unsaved,
+        });
+      }
+    }
     const chats = workingIn(project.path, listSessions());
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });

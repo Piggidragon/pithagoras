@@ -39,7 +39,18 @@ has and when one last moved.
 - **Instructions** (the document icon) edits the folder's instructions.
 - **Delete** removes the project: its chats and its folder, after a confirmation
   that says how many chats and files go with it. It is refused while a chat in
-  the project is running.
+  the project is running. When the folder holds git repositories — it is one,
+  has submodules, or has repositories cloned into its subfolders — the
+  confirmation also lists what only the folder holds: uncommitted changes (a
+  new folder counts once), commits no remote has, and stashes. It then asks
+  again in its own words, and the server refuses the delete without that. A
+  repository that cannot be read is treated the same. Commits that only a tag
+  holds are taken for ones a remote has. A remote that is itself inside the
+  folder is not counted as a copy, since it goes too. A project that sits inside a repository — the workspace root
+  being one — counts that repository's changes under the folder. Files git
+  ignores (such as `.env`), bare repositories, and what is in `node_modules`,
+  `.venv`, `venv`, `__pycache__`, `.tox`, `.mypy_cache` or `.cache` are not
+  looked at.
 
 ## Chats inside a project
 
