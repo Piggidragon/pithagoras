@@ -64,6 +64,10 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
+  // Apart, so a poll that works does not hide why a clear failed.
+  const [pollFailed, setPollFailed] = useState<string | null>(null);
+  const [clearFailed, setClearFailed] = useState<string | null>(null);
+  useEffect(() => onError(clearFailed ?? pollFailed), [clearFailed, pollFailed]);
   // Counts clears: an answer asked for before one must not bring the cleared
   // entries back when it arrives after it. Only clears, not every poll — on a
   // slow link each answer can land after the next poll went out, and must
@@ -77,9 +81,11 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
       .then((r) => {
         if (since !== cleared.current) return;
         setEntries(r.entries);
-        onError(null);
+        setPollFailed(null);
       })
-      .catch((e) => onError((e as Error).message))
+      .catch((e) => {
+        if (since === cleared.current) setPollFailed((e as Error).message);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -103,6 +109,7 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
     });
     if (!ok) return;
     setClearing(true);
+    setClearFailed(null);
     try {
       await api.clearAudit(through);
       // Gone even if the reload below fails, which would otherwise leave the
@@ -111,12 +118,14 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
       setEntries((now) => now.filter((e) => e.id > through));
       await load();
     } catch (e) {
-      onError((e as Error).message);
+      setClearFailed((e as Error).message);
     } finally {
       setClearing(false);
     }
   };
 
+  // The "cleared" notes are housekeeping, not decisions, and a clear keeps them.
+  const decisions = entries.filter((e) => e.kind !== "cleared");
   const shown = entries.filter((e) =>
     filter === "all"
       ? true
@@ -147,7 +156,7 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
         className="mb-5"
         description={
           <>
-            {tp(entries.length, "What the agent was stopped from doing, what it was let through on, and who was turned away. The last decision.", "What the agent was stopped from doing, what it was let through on, and who was turned away. The last {n} decisions.")}
+            {tp(decisions.length, "What the agent was stopped from doing, what it was let through on, and who was turned away. The last decision.", "What the agent was stopped from doing, what it was let through on, and who was turned away. The last {n} decisions.")}
           </>
         }
       >
@@ -175,7 +184,7 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
         <span className="ml-auto text-xs text-fg-faint">{shown.length}</span>
         <button
           onClick={clear}
-          disabled={entries.length === 0 || clearing}
+          disabled={decisions.length === 0 || clearing}
           className="ml-2 flex items-center gap-1 rounded-lg bg-fg/5 px-2.5 py-1 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger disabled:pointer-events-none disabled:opacity-40"
         >
           <LuTrash2 className="h-3 w-3" /> {t("Clear the log")}
@@ -210,7 +219,7 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
                     {e.subject}
                   </p>
                 )}
-                {e.kind === "cleared" ? (
+                {e.kind === "cleared" && Number.isFinite(Number(e.reason)) ? (
                   <p className="mt-0.5 text-[11px] text-fg-faint">
                     {tp(Number(e.reason), "One entry was deleted.", "{n} entries were deleted.")}
                   </p>
