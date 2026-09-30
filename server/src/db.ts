@@ -1417,6 +1417,26 @@ export function recordAudit(entry: {
 export const listAudit = (limit = 200): AuditRow[] =>
   getDb().prepare("SELECT * FROM audit ORDER BY id DESC LIMIT ?").all(limit) as AuditRow[];
 
+/**
+ * Empties the log, for when its history is no longer wanted; returns how many
+ * entries went. With `through`, only entries up to that id go: the ones
+ * somebody saw before deciding, not whatever was recorded since. Earlier
+ * "cleared" notes survive a clear, and a clear that removed something leaves
+ * one more, in the same transaction, so an emptied log cannot pass for a quiet
+ * one. The trim to AUDIT_KEEP still ages notes out like any other entry; it
+ * only bounds the table's size.
+ */
+export function clearAudit(through?: number): number {
+  const db = getDb();
+  return db.transaction(() => {
+    const removed = db
+      .prepare("DELETE FROM audit WHERE kind != 'cleared' AND id <= ?")
+      .run(through ?? Number.MAX_SAFE_INTEGER).changes;
+    if (removed > 0) recordAudit({ kind: "cleared", reason: String(removed) });
+    return removed;
+  })();
+}
+
 /** Does this routine's runs get the guard's blocking rules? Unknown means yes. */
 export function routineGuards(slug: string | null | undefined): boolean {
   if (!slug) return true;

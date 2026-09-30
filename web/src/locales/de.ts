@@ -91,6 +91,11 @@ const de: Locale = {
     "Back": "Zurück",
     "Writes SOUL.md, PrimaryUser.md and MEMORY.md into the agent's home directory. All three are handed to pi as context whenever a conversation starts, and stay editable here. An existing MEMORY.md is never overwritten.": "Schreibt SOUL.md, PrimaryUser.md und MEMORY.md in das Home-Verzeichnis des Agenten. Alle drei bekommt pi als Kontext, sobald ein Gespräch beginnt, und sie bleiben hier bearbeitbar. Eine vorhandene MEMORY.md wird nie überschrieben.",
     // components/AuditPanel.tsx
+    "Clear the audit log?": "Das Audit-Protokoll leeren?",
+    "Every recorded decision is deleted, not only the ones the filter shows. This cannot be undone.": "Jede aufgezeichnete Entscheidung wird gelöscht, nicht nur die, die der Filter zeigt. Das lässt sich nicht rückgängig machen.",
+    "Clear the audit log": "Audit-Protokoll leeren",
+    "Log cleared": "Log geleert",
+    "{n} entries were deleted.": { one: "Ein Eintrag wurde gelöscht.", other: "{n} Einträge wurden gelöscht." },
     "Refused": "Abgelehnt",
     "Allowed by rule": "Per Regel erlaubt",
     "Allowed by approval": "Per Freigabe erlaubt",
