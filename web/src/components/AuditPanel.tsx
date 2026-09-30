@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuTrash2, LuUserX } from "react-icons/lu";
 import { confirmDialog } from "./ConfirmDialog";
 import { PageHeader, Stat } from "./PageHeader";
@@ -62,13 +62,19 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
+  // Only the newest answer counts: one sent before a clear must not bring the
+  // cleared entries back when it arrives after it.
+  const asked = useRef(0);
 
-  const load = () =>
-    api
+  const load = () => {
+    const mine = ++asked.current;
+    return api
       .audit(300)
-      .then((r) => setEntries(r.entries))
+      .then((r) => { if (mine === asked.current) setEntries(r.entries); })
       .catch((e) => onError((e as Error).message))
       .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
     load();
@@ -79,17 +85,20 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
   const clear = async () => {
     const ok = await confirmDialog({
       title: t("Clear the audit log?"),
-      message: t("Every recorded decision is deleted. This cannot be undone."),
+      message: t("Every recorded decision is deleted, not only the ones the filter shows. This cannot be undone."),
       confirmLabel: t("Clear the audit log"),
       danger: true,
       deletes: true,
     });
     if (!ok) return;
+    setClearing(true);
     try {
       await api.clearAudit();
-      setEntries([]);
+      await load();
     } catch (e) {
       onError((e as Error).message);
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -151,10 +160,10 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
         <span className="ml-auto text-xs text-fg-faint">{shown.length}</span>
         <button
           onClick={clear}
-          disabled={entries.length === 0}
+          disabled={entries.length === 0 || clearing}
           className="ml-2 flex items-center gap-1 rounded-lg bg-fg/5 px-2.5 py-1 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger disabled:pointer-events-none disabled:opacity-40"
         >
-          <LuTrash2 className="h-3 w-3" /> {t("Clear")}
+          <LuTrash2 className="h-3 w-3" /> {t("Clear the log")}
         </button>
       </div>
 

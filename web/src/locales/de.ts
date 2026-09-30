@@ -91,6 +91,9 @@ const de: Locale = {
     "Back": "Zurück",
     "Writes SOUL.md, PrimaryUser.md and MEMORY.md into the agent's home directory. All three are handed to pi as context whenever a conversation starts, and stay editable here. An existing MEMORY.md is never overwritten.": "Schreibt SOUL.md, PrimaryUser.md und MEMORY.md in das Home-Verzeichnis des Agenten. Alle drei bekommt pi als Kontext, sobald ein Gespräch beginnt, und sie bleiben hier bearbeitbar. Eine vorhandene MEMORY.md wird nie überschrieben.",
     // components/AuditPanel.tsx
+    "Clear the audit log?": "Das Audit-Protokoll leeren?",
+    "Every recorded decision is deleted, not only the ones the filter shows. This cannot be undone.": "Jede aufgezeichnete Entscheidung wird gelöscht, nicht nur die, die der Filter zeigt. Das lässt sich nicht rückgängig machen.",
+    "Clear the audit log": "Audit-Protokoll leeren",
     "Refused": "Abgelehnt",
     "Allowed by rule": "Per Regel erlaubt",
     "Allowed by approval": "Per Freigabe erlaubt",
@@ -849,9 +852,6 @@ const de: Locale = {
     "Milliseconds": "Millisekunden",
     "default": "Standard",
     // components/MemoryPage.tsx
-    "Clear the audit log?": "Das Audit-Protokoll leeren?",
-    "Every recorded decision is deleted. This cannot be undone.": "Jede aufgezeichnete Entscheidung wird gelöscht. Das lässt sich nicht rückgängig machen.",
-    "Clear the audit log": "Audit-Protokoll leeren",
     "Clear the whole memory?": "Das ganze Gedächtnis leeren?",
     "Every note and folder is deleted, and the index and log start empty, as in a new memory. The agent forgets everything it kept here. This cannot be undone.": "Jede Notiz und jeder Ordner wird gelöscht, und Index und Log beginnen leer, wie bei einem neuen Gedächtnis. Der Agent vergisst alles, was er hier behalten hat. Das lässt sich nicht rückgängig machen.",
     "Clear the memory": "Das Gedächtnis leeren",

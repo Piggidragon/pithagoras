@@ -62,9 +62,15 @@ export function peopleRouter(): Router {
     });
   });
 
-  /** Wipes the whole history. The web asks first; here it is the caller's word. */
+  /**
+   * Wipes the whole history. The web asks first; here it is the caller's word.
+   * The wipe itself goes to the container log, since the table can no longer
+   * say that it happened.
+   */
   router.delete("/audit", (_req, res) => {
-    res.json({ removed: clearAudit() });
+    const removed = clearAudit();
+    console.log(`[portal] audit log cleared (${removed} entries)`);
+    res.json({ removed });
   });
 
   /** Exceptions: what a non-primary role is allowed to run despite the default. */
