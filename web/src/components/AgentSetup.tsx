@@ -53,7 +53,8 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
         </div>
       </div>
 
-      <div className="mt-6 flex items-center gap-2">
+      <p className="mt-6 text-[11px] text-fg-faint">{t("Step {n} of {total}", { n: step + 1, total: 2 })}</p>
+      <div className="mt-2 flex items-center gap-2" aria-hidden="true">
         {[0, 1].map((i) => (
           <div
             key={i}
@@ -146,6 +147,12 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setStep(0)}
+              className="rounded-lg px-3 py-2 text-sm text-fg-muted transition hover:bg-fg/5"
+            >
+              {t("Back")}
+            </button>
+            <button
               disabled={!userName.trim() || busy}
               onClick={create}
               className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
@@ -156,12 +163,6 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
                 <LuCheck className="h-4 w-4" />
               )}
               {t("Create")}
-            </button>
-            <button
-              onClick={() => setStep(0)}
-              className="rounded-lg px-3 py-2 text-sm text-fg-muted transition hover:bg-fg/5"
-            >
-              {t("Back")}
             </button>
           </div>
         </section>

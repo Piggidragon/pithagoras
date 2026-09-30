@@ -125,9 +125,9 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
           {step > 0 ? (
             <button type="button" onClick={() => go(step - 1)} className={ghostCls}><LuArrowLeft className="h-3.5 w-3.5" /> {t("Back")}</button>
           ) : (
-            <button type="button" onClick={() => { dismiss("skipped"); onClose(); }} className={ghostCls}>{t("Skip for now")}</button>
+            <button type="button" onClick={() => { dismiss("skipped"); onClose(); }} className={ghostCls} title={t("Settings → Providers opens the assistant again")}>{t("Set up later")}</button>
           )}
-          <span className="ml-auto" />
+          <span className="mx-auto hidden text-xs text-fg-faint sm:inline">{t("Step {n} of {total}", { n: step + 1, total: STEPS.length })}</span>
           {step === 0 && (
             <button type="button" disabled={!ready} onClick={() => go(1)} className={primaryCls} title={ready ? undefined : t("Add a provider with at least one model first")}>
               {t("Next")} <LuArrowRight className="h-4 w-4" />

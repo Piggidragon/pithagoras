@@ -205,6 +205,37 @@ test('an agent conversation keeps its title in place when it starts working', as
   await expect(main.locator('.status-slot > .status-working')).toHaveCount(1);
 });
 
+test('the agent setup says which of its two steps it is on, and Back comes before Create', async ({ page }) => {
+  await page.route('**/api/**', async (route) => {
+    const p = new URL(route.request().url()).pathname;
+    let reply: unknown = {};
+    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
+    else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
+    else if (p === '/api/agent/sessions') reply = { sessions: [], agentHome: '/a' };
+    else if (p === '/api/agent/setup') reply = { initialised: false, home: '/a', files: [] };
+    else if (p === '/api/models') reply = { models: [], providers: {} };
+    await route.fulfill({ json: reply });
+  });
+  await page.addInitScript(() => {
+    (window as any).EventSource = class { addEventListener() {} close() {} };
+    localStorage.setItem('pithagoras.setup', 'done');
+  });
+  await page.goto('/agent');
+  const main = page.getByRole('main');
+  await expect(main.getByText('Step 1 of 2')).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  await main.getByLabel('Name').fill('Aria');
+  await main.getByRole('button', { name: 'Next' }).click();
+  await expect(main.getByText('Step 2 of 2')).toBeVisible();
+  // Back where it is on every other step: before the way forward.
+  const back = (await main.getByRole('button', { name: 'Back' }).boundingBox())!;
+  const create = (await main.getByRole('button', { name: 'Create' }).boundingBox())!;
+  expect(back.x).toBeLessThan(create.x);
+  await main.getByRole('button', { name: 'Back' }).click();
+  await expect(main.getByText('Step 1 of 2')).toBeVisible();
+  await expect(main.getByLabel('Name')).toHaveValue('Aria');
+});
+
 test('the composer stops following the pointer when the drag is lost without a let-go', async ({ page }) => {
   await page.goto('/tests/chat.html?phase=args');
   const grip = page.getByRole('slider', { name: 'Resize message composer vertically' }).or(page.getByLabel('Resize message composer vertically'));

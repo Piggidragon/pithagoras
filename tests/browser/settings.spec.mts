@@ -182,7 +182,7 @@ test('with no model yet, the setup assistant walks through provider, model and p
   await expect(setup.getByText('pi-web-access')).toBeVisible();
 
   // Skipped, it stays away after a reload.
-  await setup.getByRole('button', { name: 'Skip for now' }).click();
+  await setup.getByRole('button', { name: 'Set up later' }).click();
   await expect(setup).toBeHidden();
   await page.reload();
   await page.waitForTimeout(2000);
@@ -208,6 +208,27 @@ test('with models, the assistant saves the model and effort, then offers package
   await expect.poll(() => api.installed()).toEqual(['npm:pi-subagents']);
   await setup.getByRole('button', { name: 'Done' }).click();
   await expect(setup).toBeHidden();
+});
+
+test('the assistant says which step it is on, and Back leads to the step before on every step after the first', async ({ page }) => {
+  await portal(page);
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Setup assistant' }).click();
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  // The first step has nothing before it: what leaves is named for what it does, not as a skip.
+  await expect(setup.getByText('Step 1 of 3')).toBeVisible();
+  await expect(setup.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  await expect(setup.getByRole('button', { name: 'Skip for now' })).toHaveCount(0);
+  await expect(setup.getByRole('button', { name: 'Set up later' })).toHaveAttribute('title', 'Settings → Providers opens the assistant again');
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.getByText('Step 2 of 3')).toBeVisible();
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.getByText('Step 3 of 3')).toBeVisible();
+  await expect(setup.getByRole('button', { name: 'Back' })).toBeVisible();
+  await setup.getByRole('button', { name: 'Back' }).click();
+  await expect(setup.getByText('Step 2 of 3')).toBeVisible();
+  await setup.getByRole('button', { name: 'Back' }).click();
+  await expect(setup.getByText('Step 1 of 3')).toBeVisible();
 });
 
 test('a stored model no one offers any more is not kept: the assistant offers one that is, and saves it', async ({ page }) => {
