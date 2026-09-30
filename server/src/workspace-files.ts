@@ -20,7 +20,7 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
-import { UNSAVED_WORK, holdsWork, unsavedIn, type Unsaved } from "./git.js";
+import { holdsWork, unsavedIn, unsavedRefusal, type Unsaved } from "./git.js";
 import { pictureType } from "./prompt-images.js";
 
 /**
@@ -425,7 +425,7 @@ function removable(base: string, rel: unknown): string {
  * it can say so.
  */
 export async function unsavedAt(base: string, rel: unknown): Promise<Unsaved | null> {
-  return unsavedIn(removable(base, rel));
+  return unsavedIn(base, removable(base, rel));
 }
 
 /**
@@ -440,8 +440,8 @@ export async function unsavedAt(base: string, rel: unknown): Promise<Unsaved | n
 export async function removeEntry(base: string, rel: unknown, discard = false): Promise<void> {
   const target = removable(base, rel);
   if (!discard) {
-    const unsaved = await unsavedIn(target);
-    if (holdsWork(unsaved)) throw new FileError("unsaved", UNSAVED_WORK, unsaved);
+    const unsaved = await unsavedIn(base, target);
+    if (unsaved && holdsWork(unsaved)) throw new FileError("unsaved", unsavedRefusal(unsaved).error, unsaved);
   }
   try {
     // A file that has gone since it was looked for is what was asked for.

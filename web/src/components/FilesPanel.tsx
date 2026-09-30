@@ -368,6 +368,9 @@ export function FilesPanel({
         fileAsk.current++;
         setFile(null);
       }
+      // Opened while it was asked, and gone now: up to the folder it was in, which the change of folder loads.
+      const shown = dirRef.current;
+      if (shown === path || shown.startsWith(path + "/")) return setDir(path.split("/").slice(0, -1).join("/"));
     } catch (e) {
       problem = (e as Error).message;
     } finally {

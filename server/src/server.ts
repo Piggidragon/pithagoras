@@ -42,7 +42,7 @@ import { channelsRouter } from "./api/channels.js";
 import { routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
 import { gitRouter } from "./api/git.js";
-import { UNSAVED_WORK, holdsWork, unsavedWork } from "./git.js";
+import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { featuresRouter } from "./api/features.js";
@@ -425,7 +425,7 @@ app.delete("/api/projects/:name", async (req, res) => {
     // asked at all once ?discard=1 says the answer does not matter.
     if (req.query.discard !== "1") {
       const unsaved = await unsavedWork(project.path);
-      if (holdsWork(unsaved)) return res.status(409).json({ error: UNSAVED_WORK, code: "unsaved-work", unsaved });
+      if (unsaved && holdsWork(unsaved)) return res.status(409).json(unsavedRefusal(unsaved));
     }
     const chats = workingIn(project.path, listSessions());
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {

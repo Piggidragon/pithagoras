@@ -14,8 +14,11 @@ async function files(page: Page, opts: { unsaved?: Unsaved | null; found?: Unsav
   const gone = new Set<string>();
   await page.route('**/api/sessions/preview/files**', (route) => {
     const at = new URL(route.request().url()).searchParams.get('path') ?? '';
+    if (gone.has(at)) return route.fulfill({ status: 404, json: { error: 'There is no such folder' } });
     const entries = at === 'other'
       ? [{ name: 'inside.txt', type: 'file', size: 1, mtime: 1 }]
+      : at === 'api'
+      ? [{ name: 'src', type: 'dir', size: 0, mtime: 1 }]
       : [{ name: 'api', type: 'dir', size: 0, mtime: 1 }, { name: 'other', type: 'dir', size: 0, mtime: 1 }, { name: 'notes.md', type: 'file', size: 3, mtime: 1 }].filter((e) => !gone.has(e.name));
     return route.fulfill({ json: { path: at, entries, truncated: false } });
   });
@@ -133,4 +136,19 @@ test('a delete still asking is not started twice, and afterwards the folder show
   // Still the folder moved to, not the one the delete started in.
   await expect(page.getByRole('button', { name: 'Delete inside.txt' })).toBeAttached();
   await expect(page.getByRole('button', { name: 'Delete notes.md' })).toHaveCount(0);
+});
+
+test('a folder opened while its delete was asked, and gone after it, is left for the one it was in', async ({ page }) => {
+  let release!: () => void;
+  const hold = new Promise<void>((r) => (release = r));
+  const { deletes } = await files(page, { unsaved: { changed: 0, unpushed: 0, stashes: 0 }, hold });
+  await deleteRow(page);
+  await page.getByRole('button', { name: 'api', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Delete src' })).toBeAttached();
+  release();
+  await dialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect.poll(() => deletes).toEqual(['?path=api']);
+  await expect(page.getByRole('button', { name: 'Delete notes.md' })).toBeAttached();
+  await expect(page.getByRole('button', { name: 'Delete api' })).toHaveCount(0);
+  await expect(page.getByText('There is no such folder')).toHaveCount(0);
 });

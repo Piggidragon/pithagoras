@@ -794,37 +794,37 @@ test("unsaved work in a delete from the Files panel: a file or a link goes as it
   mkdirSync(folder);
   const api = path.join(folder, "api");
   execFileSync("git", ["clone", "-q", repo(), api]);
-  assert.deepEqual(await g.unsavedIn(api), { changed: 0, unpushed: 0, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(home, api), { changed: 0, unpushed: 0, stashes: 0 });
   mkdirSync(path.join(api, "src"));
   writeFileSync(path.join(api, "src", "x.ts"), "x\n");
   sh(api, "add", "-A");
   sh(api, "commit", "-qm", "only here");
-  assert.deepEqual(await g.unsavedIn(api), { changed: 0, unpushed: 1, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(home, api), { changed: 0, unpushed: 1, stashes: 0 });
   // The folder that holds the clone is the same.
-  assert.deepEqual(await g.unsavedIn(folder), { changed: 0, unpushed: 1, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(home, folder), { changed: 0, unpushed: 1, stashes: 0 });
 
   // What is picked is what goes: a file with changes, a link to the clone.
   writeFileSync(path.join(api, "a.txt"), "edited again\n");
-  assert.equal(await g.unsavedIn(path.join(api, "a.txt")), null);
+  assert.equal(await g.unsavedIn(home, path.join(api, "a.txt")), null);
   symlinkSync(api, path.join(folder, "link"));
-  assert.equal(await g.unsavedIn(path.join(folder, "link")), null);
+  assert.equal(await g.unsavedIn(home, path.join(folder, "link")), null);
   // A folder in the clone: only what is changed in it, and the commits stay with the repository.
-  assert.deepEqual(await g.unsavedIn(path.join(api, "src")), { changed: 0, unpushed: 0, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(home, path.join(api, "src")), { changed: 0, unpushed: 0, stashes: 0 });
   writeFileSync(path.join(api, "src", "x.ts"), "changed\n");
-  assert.deepEqual(await g.unsavedIn(path.join(api, "src")), { changed: 1, unpushed: 0, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(home, path.join(api, "src")), { changed: 1, unpushed: 0, stashes: 0 });
   // A folder that is all new is a new folder of the repository: its files are nowhere else.
   mkdirSync(path.join(api, "fresh"));
   writeFileSync(path.join(api, "fresh", "y.ts"), "y\n");
   writeFileSync(path.join(api, "fresh", "z.ts"), "z\n");
-  assert.deepEqual(await g.unsavedIn(path.join(api, "fresh")), { changed: 1, unpushed: 0, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(home, path.join(api, "fresh")), { changed: 1, unpushed: 0, stashes: 0 });
   // Not so for a project: a repository around it that has none of it is as good as none.
   assert.equal(await g.unsavedWork(path.join(api, "fresh")), null);
 
   // Gone already, or nothing git has.
-  assert.equal(await g.unsavedIn(path.join(folder, "nothing")), null);
+  assert.equal(await g.unsavedIn(home, path.join(folder, "nothing")), null);
   const plain = path.join(folder, "plain");
   mkdirSync(plain);
-  assert.equal(await g.unsavedIn(plain), null);
+  assert.equal(await g.unsavedIn(home, plain), null);
 });
 
 test("unsaved work in a delete from the Files panel: what a tool folder holds is not looked into", async () => {
@@ -836,9 +836,9 @@ test("unsaved work in a delete from the Files panel: what a tool folder holds is
   writeFileSync(path.join(dep, "x.txt"), "x\n");
   sh(dep, "add", "-A");
   sh(dep, "commit", "-qm", "from elsewhere");
-  assert.equal(await g.unsavedIn(modules), null);
+  assert.equal(await g.unsavedIn(home, modules), null);
   // The folder around it does not look into it either.
-  assert.equal(await g.unsavedIn(folder), null);
+  assert.equal(await g.unsavedIn(home, folder), null);
 
   // One that is a repository itself is asked about, by its own name or from the folder around it.
   const venv = path.join(folder, "venv");
@@ -847,8 +847,8 @@ test("unsaved work in a delete from the Files panel: what a tool folder holds is
   writeFileSync(path.join(venv, "keep.txt"), "k\n");
   sh(venv, "add", "-A");
   sh(venv, "commit", "-qm", "made here");
-  assert.deepEqual(await g.unsavedIn(venv), { changed: 0, unpushed: 1, stashes: 0 });
-  assert.deepEqual(await g.unsavedIn(folder), { changed: 0, unpushed: 1, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(home, venv), { changed: 0, unpushed: 1, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(home, folder), { changed: 0, unpushed: 1, stashes: 0 });
 
   // And one a repository around it tracks, with changes there.
   const dir = repo();
@@ -857,7 +857,7 @@ test("unsaved work in a delete from the Files panel: what a tool folder holds is
   sh(dir, "add", "-A");
   sh(dir, "commit", "-qm", "tracked cache");
   writeFileSync(path.join(dir, ".cache", "c.txt"), "edited\n");
-  assert.deepEqual(await g.unsavedIn(path.join(dir, ".cache")), { changed: 1, unpushed: 0, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(home, path.join(dir, ".cache")), { changed: 1, unpushed: 0, stashes: 0 });
 });
 
 test("unsaved work: commits only the HEAD of a worktree elsewhere holds go with the repository's data", async () => {
@@ -872,14 +872,44 @@ test("unsaved work: commits only the HEAD of a worktree elsewhere holds go with 
   assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 2, stashes: 0 });
 });
 
+test("unsaved work in a delete from the Files panel: a new folder counts only where git tracks the folder it is in", async () => {
+  // The workspace root is a repository that has none of the chat's folder.
+  const root = repo();
+  const chat = path.join(root, "proj");
+  mkdirSync(path.join(chat, "tmp", "deep"), { recursive: true });
+  writeFileSync(path.join(chat, "tmp", "deep", "x.txt"), "x\n");
+  assert.equal(await g.unsavedIn(chat, path.join(chat, "tmp")), null);
+  assert.equal(await g.unsavedIn(chat, path.join(chat, "tmp", "deep")), null);
+  // Where git does track the folder it is in, it is the new folder it is.
+  mkdirSync(path.join(root, "lib"));
+  writeFileSync(path.join(root, "lib", "l.txt"), "l\n");
+  sh(root, "add", "lib");
+  sh(root, "commit", "-qm", "lib");
+  mkdirSync(path.join(root, "lib", "fresh"));
+  writeFileSync(path.join(root, "lib", "fresh", "f.txt"), "f\n");
+  assert.deepEqual(await g.unsavedIn(root, path.join(root, "lib", "fresh")), { changed: 1, unpushed: 0, stashes: 0 });
+  // A node_modules nobody ignored is still what a tool made.
+  const dir = repo();
+  mkdirSync(path.join(dir, "node_modules", "dep"), { recursive: true });
+  writeFileSync(path.join(dir, "node_modules", "dep", "i.js"), "i\n");
+  assert.equal(await g.unsavedIn(dir, path.join(dir, "node_modules")), null);
+});
+
+test("unsaved work in a delete from the Files panel: a .git above the chat's folder is not one of its own", async () => {
+  const base = path.join(home, `odd${++n}`, ".git", "chat");
+  mkdirSync(path.join(base, "plain"), { recursive: true });
+  writeFileSync(path.join(base, "notes.md"), "n\n");
+  assert.equal(await g.unsavedIn(base, path.join(base, "notes.md")), null);
+});
+
 test("unsaved work in a delete from the Files panel: a .git, or anything in it, is not told apart", async () => {
   const dir = repo();
   pushed(dir);
   for (const p of [".git", ".git/refs", ".git/refs/heads/main", ".git/HEAD"]) {
-    assert.equal((await g.unsavedIn(path.join(dir, p)))?.unknown, true, p);
+    assert.equal((await g.unsavedIn(home, path.join(dir, p)))?.unknown, true, p);
   }
   // A worktree's .git is a file, and the same.
   const tree = path.join(home, `tree${++n}`);
   sh(dir, "worktree", "add", "-q", "-b", "wt2", tree);
-  assert.equal((await g.unsavedIn(path.join(tree, ".git")))?.unknown, true);
+  assert.equal((await g.unsavedIn(home, path.join(tree, ".git")))?.unknown, true);
 });

@@ -40,8 +40,8 @@ that started there. Nothing outside it can be reached.
   link is removed as the link; what it points at stays. For a folder the
   confirmation first finds out whether it holds git work nothing else has —
   uncommitted changes, commits no remote has, stashes, in a repository or a
-  clone inside it; a folder the repository around it has none of yet counts as
-  one new folder — and if so names it and asks you to **Delete anyway**, even
+  clone inside it; a new folder in a part of the repository git tracks counts
+  as one change — and if so names it and asks you to **Delete anyway**, even
   when Settings says not to ask before deleting; the server refuses without it.
   It looks and stops where [deleting a project](/guide/projects#the-projects-tab)
   does. A file goes as it is. `node_modules`, `.venv`, `venv`, `__pycache__`,

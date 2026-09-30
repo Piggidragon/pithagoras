@@ -451,11 +451,21 @@ export interface Unsaved {
   unknown?: true;
 }
 
-/** What a delete is refused with, where it would take unsaved work, unless it is told that is meant. */
-export const UNSAVED_WORK = "This folder holds work that exists nowhere else. Delete it only when that is meant.";
-
 /** Whether there is anything to ask about: work only this folder has, or a folder that could not be told. */
-export const holdsWork = (u: Unsaved | null): u is Unsaved => !!u && !!(u.changed || u.unpushed || u.stashes || u.unknown);
+export const holdsWork = (u: Unsaved | null): boolean => !!u && !!(u.changed || u.unpushed || u.stashes || u.unknown);
+
+/**
+ * The 409 body a delete is refused with, where it would take unsaved work and
+ * was not told that is meant. The page asks again on its `code`, with `unsaved`.
+ */
+export const unsavedRefusal = (unsaved: Unsaved) => ({
+  error: "This folder holds work that exists nowhere else. Delete it only when that is meant.",
+  code: "unsaved-work" as const,
+  unsaved,
+});
+
+/** Not everything could be read, so there may be anything. */
+const couldNotTell = (): Unsaved => ({ changed: 0, unpushed: 0, stashes: 0, unknown: true });
 
 /** More folders than this are not searched for repositories: the answer is "could not tell". */
 const REPO_SEARCH_LIMIT = 50_000;
@@ -513,25 +523,29 @@ async function reposUnder(folder: string): Promise<string[] | null> {
  */
 export async function unsavedWork(
   folder: string,
-  opts: {
-    /** Only whether the folder is a repository, not what is under it. */
-    shallow?: boolean;
-    /** A folder the repository around it has none of is one new folder, not "no git". */
-    newCounts?: boolean;
-  } = {},
+  /**
+   * "project": the folder is looked through, and one the repository around it
+   * has none of is as good as one without git. "entry", a folder picked in the
+   * Files panel: a tool's (node_modules…) is not looked through, and a new
+   * folder in a part of that repository it does track is the one new folder
+   * git says it is, unless it is a tool's.
+   */
+  as: "project" | "entry" = "project",
 ): Promise<Unsaved | null> {
-  const unknown: Unsaved = { changed: 0, unpushed: 0, stashes: 0, unknown: true };
+  const unknown = couldNotTell();
+  const tool = as === "entry" && GENERATED.has(path.basename(folder));
   let repos: string[] | null;
   let tops: Set<string>;
   let outer: number | null;
   try {
-    repos = opts.shallow ? (existsSync(path.join(folder, ".git")) ? [folder] : []) : await reposUnder(folder);
+    // A tool's folder: only whether it is a repository itself, not what is under it.
+    repos = tool ? (existsSync(path.join(folder, ".git")) ? [folder] : []) : await reposUnder(folder);
     if (!repos) {
       console.warn(`[git] could not tell what ${folder} holds: more than ${REPO_SEARCH_LIMIT} folders to look through`);
       return unknown;
     }
     tops = new Set(repos.map((dir) => realpathSync(dir)));
-    outer = await outerChanges(folder, tops, opts.newCounts);
+    outer = await outerChanges(folder, tops, as === "entry" && !tool);
   } catch (e) {
     console.warn(`[git] could not tell what ${folder} holds: ${(e as Error).message}`);
     return unknown;
@@ -562,31 +576,27 @@ export async function unsavedWork(
 }
 
 /**
- * What deleting `target` — a file or a folder somewhere in a chat's folder, not
- * a project — would lose for good, or null when nothing git holds goes with it.
+ * What deleting `target` — a file or a folder somewhere in the chat's folder
+ * `base`, not a project — would lose for good, or null when nothing git holds
+ * goes with it.
  *
  * A file is what the person picked, and so is a link. A folder is looked at as
- * a project is (see unsavedWork), with two differences. One of a tool's
- * (node_modules, .venv…) is not looked through, as a project's own are not,
- * but it is still asked about when it is a repository itself, or has changes
- * the repository around it tracks. And a folder the repository around it has
- * none of is a new folder of that repository, which is what git says it is.
+ * an "entry" (see unsavedWork).
  *
  * A repository's `.git`, or anything in it, is not told apart here: the Files
  * panel does not list it, and what goes with it — its submodules' data, its
  * worktrees' commits — is more than a count says. It is "could not be told".
  */
-export async function unsavedIn(target: string): Promise<Unsaved | null> {
-  const unknown: Unsaved = { changed: 0, unpushed: 0, stashes: 0, unknown: true };
-  if (target.split(path.sep).includes(".git")) return unknown;
+export async function unsavedIn(base: string, target: string): Promise<Unsaved | null> {
+  if (path.relative(base, target).split(path.sep).includes(".git")) return couldNotTell();
   try {
     if (!(await lstat(target)).isDirectory()) return null;
-    return await unsavedWork(target, { shallow: GENERATED.has(path.basename(target)), newCounts: true });
+    return await unsavedWork(target, "entry");
   } catch (e) {
     // Gone since it was looked for: nothing of it is deleted either. Anything else is not "none".
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
     console.warn(`[git] could not tell what ${target} holds: ${(e as Error).message}`);
-    return unknown;
+    return couldNotTell();
   }
 }
 
@@ -625,8 +635,9 @@ async function ownChanges(repo: Repo, files: ChangedFile[], tops: Set<string>): 
 /**
  * Changes to files under `folder` that a repository around it tracks, as when
  * the workspace root is one: that repository stays, the changes go. Null when
- * no repository is around it, or git has none of the folder and `newCounts`
- * does not say to count that as the one new folder it is.
+ * no repository is around it, or git has none of the folder — unless
+ * `newCounts` and git tracks the folder it is in, when it is the one new folder
+ * it is.
  */
 async function outerChanges(folder: string, tops: Set<string>, newCounts = false): Promise<number | null> {
   let repo: Repo | null;
@@ -642,9 +653,23 @@ async function outerChanges(folder: string, tops: Set<string>, newCounts = false
   const ran = await git(repo, ["status", "--porcelain=v2", "-z", "--untracked-files=normal", "--ignore-submodules=dirty", "--", literal(repo.prefix)]);
   if (ran.cut) throw new GitError(409, "git status said more than could be read");
   const files = parseStatus(ran.stdout).files;
-  // The whole folder untracked: for a project, git has none of it, as if there were no git.
-  if (!newCounts && files.length === 1 && files[0].kind === "untracked" && files[0].path === `${repo.prefix}/`) return null;
+  // The whole folder untracked: git has none of it, as if there were no git —
+  // for a project, and for a folder whose own folder git has none of either,
+  // as when the repository is the workspace root and the chat's folder is not
+  // in it. Only in a part of the repository it tracks is it a new folder.
+  const whole = files.length === 1 && files[0].kind === "untracked" && files[0].path === `${repo.prefix}/`;
+  if (whole && !(newCounts && (await tracksAround(repo)))) return null;
   return ownChanges(repo, files, tops);
+}
+
+/** Whether git has anything of the folder `repo.prefix` is in: the top, or one it has not only as untracked. */
+async function tracksAround(repo: Repo): Promise<boolean> {
+  const parent = path.posix.dirname(repo.prefix);
+  if (parent === ".") return true;
+  const ran = await git(repo, ["status", "--porcelain=v2", "-z", "--untracked-files=normal", "--ignore-submodules=all", "--", literal(parent)]);
+  if (ran.cut) throw new GitError(409, "git status said more than could be read");
+  const files = parseStatus(ran.stdout).files;
+  return !(files.length === 1 && files[0].kind === "untracked" && files[0].path === `${parent}/`);
 }
 
 /** Where a remote's URL is on this machine, or null when it is elsewhere. */
@@ -698,9 +723,13 @@ async function repoWork(dir: string, folder: string, counted: Set<string>, tops:
   counted.add(data);
   // With the data goes what the HEAD of every worktree holds: of those here, and
   // of those elsewhere, which are left without it.
-  const list = (await git(repo, ["worktree", "list", "--porcelain"])).stdout;
-  const heads = [...list.matchAll(/^HEAD ([0-9a-f]+)$/gm)].map((m) => m[1]).filter((sha) => /[1-9a-f]/.test(sha));
-  return { changed, unpushed: (await onlyIn(heads)) + (await count(["--branches", "--not", ...saved])), stashes: now.stashes };
+  const [heldByHeads, onBranches] = await Promise.all([
+    git(repo, ["worktree", "list", "--porcelain"]).then(({ stdout }) =>
+      onlyIn([...stdout.matchAll(/^HEAD ([0-9a-f]+)$/gm)].map((m) => m[1]).filter((sha) => /[1-9a-f]/.test(sha))),
+    ),
+    count(["--branches", "--not", ...saved]),
+  ]);
+  return { changed, unpushed: heldByHeads + onBranches, stashes: now.stashes };
 }
 
 // --- remotes ------------------------------------------------------------------
