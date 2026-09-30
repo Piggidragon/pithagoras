@@ -52,6 +52,7 @@ import {
   toolDefaultsOff,
   rememberTools,
   knownTools,
+  shownTools,
   browserAllowlist,
   routineGuards,
   updateSession,
@@ -947,7 +948,7 @@ class SessionManager extends EventEmitter {
     // before you can say "off everywhere" would be the wrong way round.
     void client
       .getTools?.()
-      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source, description: t.description }))))
+      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source, description: t.description, package: t.package ?? null }))))
       .catch(() => {
         // A session that cannot list its tools still works; the catalogue
         // simply stays as it was.
@@ -2134,17 +2135,18 @@ class SessionManager extends EventEmitter {
   async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
     const client = this.live.get(sessionId)?.client;
     const listed = client?.getTools ? await client.getTools() : [];
-    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source, description: t.description })));
+    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source, description: t.description, package: t.package ?? null })));
     const defaults = toolDefaultsOff();
     const exceptions = sessionTools(sessionId);
     const servers = mcpServerNames();
-    const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : knownTools();
+    const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : shownTools(getSession(sessionId)?.workspace);
     return {
-      tools: shown.map((tool) => ({
-        ...tool,
-        source: toolSource(tool.name, tool.source, servers),
-        enabled: toolEnabled(tool.name, defaults, exceptions),
-        defaultOn: !defaults.includes(tool.name),
+      tools: shown.map(({ name, source, description }) => ({
+        name,
+        ...(description !== undefined ? { description } : {}),
+        source: toolSource(name, source, servers),
+        enabled: toolEnabled(name, defaults, exceptions),
+        defaultOn: !defaults.includes(name),
       })),
       live: Boolean(listed.length),
     };

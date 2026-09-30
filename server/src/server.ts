@@ -92,7 +92,7 @@ import {
   getSettings,
   getStoredSettings,
   shownStoredSettings,
-  knownTools,
+  shownTools,
   toolGroupNames,
   setToolGroupNames,
   setToolDefaultsOff,
@@ -811,7 +811,7 @@ app.get("/api/tools", (_req, res) => {
   const off = new Set(toolDefaultsOff());
   const servers = mcpServerNames();
   res.json({
-    tools: knownTools().map((tool) => ({
+    tools: shownTools().map((tool) => ({
       ...tool,
       source: toolSource(tool.name, tool.source, servers),
       defaultOn: !off.has(tool.name),

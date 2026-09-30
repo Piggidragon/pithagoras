@@ -261,6 +261,15 @@ function sourceLabel(info: any): string {
   return source || "built in";
 }
 
+/**
+ * The entry in pi's settings.json a tool's package is listed as. Only for the
+ * user's own packages: a project's are listed in the project, where the portal
+ * does not look.
+ */
+function packageOf(info: any): string | undefined {
+  return info?.origin === "package" && info?.scope === "user" && typeof info.source === "string" ? info.source : undefined;
+}
+
 /** Read a member that may be a getter or a method, without assuming which. */
 function callable(obj: any, key: string): any {
   const v = obj?.[key];
@@ -1180,6 +1189,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       name: String(tool.name),
       description: typeof tool.description === "string" ? tool.description : undefined,
       source: sourceLabel(tool.sourceInfo),
+      package: packageOf(tool.sourceInfo),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
   }
