@@ -39,7 +39,10 @@ has and when one last moved.
 - **Instructions** (the document icon) edits the folder's instructions.
 - **Delete** removes the project: its chats and its folder, after a confirmation
   that says how many chats and files go with it. It is refused while a chat in
-  the project is running.
+  the project is running. When the folder is a git repository, the confirmation
+  also lists what only the folder holds — files with uncommitted changes, commits
+  no remote has, stashes — and asks again in its own words; the server refuses
+  the delete without that. A repository that cannot be read is treated the same.
 
 ## Chats inside a project
 

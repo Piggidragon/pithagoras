@@ -141,6 +141,8 @@ export interface ProjectContents extends Project {
   complete: boolean;
   /** The routines that run here and are on, by name. Deleting the project switches them off. */
   routines?: string[];
+  /** Set when the folder is a git repository: what only the folder holds, and so what deleting it loses. */
+  unsaved?: { changed: number; unpushed: number; stashes: number; unknown?: true };
 }
 
 export interface CompactionSettings {
@@ -333,8 +335,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ text }),
     }),
-  deleteProject: (name: string) =>
-    json<{ ok: true; sessionsDeleted: number }>(`/api/projects/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  /** `discard` says that unsaved work in the folder (see ProjectContents) may go with it; without it the server refuses. */
+  deleteProject: (name: string, discard = false) =>
+    json<{ ok: true; sessionsDeleted: number }>(`/api/projects/${encodeURIComponent(name)}${discard ? "?discard=1" : ""}`, {
+      method: "DELETE",
+    }),
   renameSession: (id: string, title: string) =>
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),

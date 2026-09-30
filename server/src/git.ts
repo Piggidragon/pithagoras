@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -435,6 +435,40 @@ export async function status(repo: Repo): Promise<Status> {
     ...(file.y !== "." && file.y !== "?" && inTree.has(file.path) ? { unstaged: inTree.get(file.path) } : {}),
   }));
   return { ...parsed, files, truncated: parsed.files.length > MAX_FILES, operation: operationIn(repo.gitDir), remotes };
+}
+
+/** What deleting a repository's folder would lose for good: nothing else holds a copy of these. */
+export interface Unsaved {
+  /** Files with changes that are not committed, new ones included. */
+  changed: number;
+  /** Commits on a local branch that no remote has. */
+  unpushed: number;
+  /** Stashes: they live in the .git folder, so they go with it. */
+  stashes: number;
+  /** The repository could not be read, so there may be more than this says. */
+  unknown?: true;
+}
+
+/**
+ * What the folder holds that only it has, or null when it is not a repository
+ * of its own. A repository that cannot be read — "dubious ownership", a broken
+ * one, git missing — is not taken for a clean one.
+ */
+export async function unsavedWork(folder: string): Promise<Unsaved | null> {
+  // No .git of its own: nothing in it is held only by the folder, and git is not asked.
+  if (!existsSync(path.join(folder, ".git"))) return null;
+  try {
+    const repo = await findRepo(folder);
+    // A .git that git does not take for the folder's own repository is a broken one.
+    if (!repo || realpathSync(repo.root) !== realpathSync(folder)) throw new GitError(409, "not a readable repository");
+    const [now, ahead] = await Promise.all([
+      status(repo),
+      git(repo, ["rev-list", "--branches", "--not", "--remotes", "--count"]),
+    ]);
+    return { changed: now.files.length, unpushed: Number(ahead.stdout.trim()) || 0, stashes: now.stashes };
+  } catch (e) {
+    return { changed: 0, unpushed: 0, stashes: 0, unknown: true };
+  }
 }
 
 // --- remotes ------------------------------------------------------------------

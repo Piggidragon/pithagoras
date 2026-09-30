@@ -558,3 +558,43 @@ test("a branch made from a remote one follows nothing until pushed, and one that
   sh(dir, "fetch", "-q", "origin");
   assert.equal(sh(dir, "rev-parse", "origin/main").trim(), mainBefore);
 });
+
+test("unsaved work: what only a repository's folder holds, so deleting it can be refused", async () => {
+  const dir = repo();
+  const plain = path.join(home, `plain${++n}`);
+  mkdirSync(plain);
+  const inside = path.join(dir, "sub");
+  mkdirSync(inside);
+  // Not a repository of its own, or one that is only somebody else's part.
+  assert.equal(await g.unsavedWork(plain), null);
+  assert.equal(await g.unsavedWork(inside), null);
+
+  // Committed, but no remote has it: the commit exists only here.
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 1, stashes: 0 });
+
+  // Once a remote has it, a clean tree holds nothing of its own.
+  const remote = path.join(home, `remote${++n}.git`);
+  execFileSync("git", ["init", "-q", "--bare", remote]);
+  sh(dir, "remote", "add", "origin", remote);
+  sh(dir, "push", "-q", "-u", "origin", "main");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 0, stashes: 0 });
+
+  // Edits and new files count, and so does a branch that was never pushed.
+  writeFileSync(path.join(dir, "a.txt"), "changed\n");
+  writeFileSync(path.join(dir, "new.txt"), "new\n");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 2, unpushed: 0, stashes: 0 });
+  sh(dir, "stash", "-u", "-q");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 0, stashes: 1 });
+  sh(dir, "switch", "-q", "-c", "side");
+  writeFileSync(path.join(dir, "s.txt"), "s\n");
+  sh(dir, "add", "-A");
+  sh(dir, "commit", "-qm", "on a side branch");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 1, stashes: 1 });
+});
+
+test("unsaved work: a .git that cannot be read is not taken for a clean one", async () => {
+  const dir = path.join(home, `broken${++n}`);
+  mkdirSync(path.join(dir, ".git"), { recursive: true });
+  const got = await g.unsavedWork(dir);
+  assert.equal(got?.unknown, true);
+});

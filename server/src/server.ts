@@ -42,6 +42,7 @@ import { channelsRouter } from "./api/channels.js";
 import { routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
 import { gitRouter } from "./api/git.js";
+import { unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { featuresRouter } from "./api/features.js";
@@ -368,11 +369,13 @@ app.post("/api/projects", (req, res) => {
 });
 
 /** What deleting a project would take with it, for the confirmation. */
-app.get("/api/projects/:name", (req, res) => {
+app.get("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
+    const unsaved = await unsavedWork(project.path);
     res.json({
       ...project,
+      ...(unsaved ? { unsaved } : {}),
       sessions: workingIn(project.path, listSessions()).length,
       // The ones a delete would switch off: one already off is not changed by it.
       routines: routinesIn(project.path).filter((r) => r.enabled).map((r) => r.name),
@@ -404,7 +407,10 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 
 /**
  * The project, its chats and its folder. Refused while any chat or routine run
- * in it is working.
+ * in it is working, and while its folder is a repository with work that only
+ * the folder has — uncommitted changes, commits no remote has, stashes —
+ * unless `?discard=1` says that is meant. Folders here can be repositories the
+ * portal never made, and nothing brings one back.
  *
  * A routine that runs here keeps its sessions, the record of what it did, as
  * deleting the routine itself does. It is switched off once the folder is gone:
@@ -423,6 +429,14 @@ app.delete("/api/projects/:name", async (req, res) => {
     const runs = workingIn(project.path, listRoutineSessions().filter((s) => sessions.isLoaded(s.id)));
     if (routines.some((r) => routineSupervisor.isRunning(r.slug)) || runs.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A routine is running in this project. Wait for it to finish, or stop it." });
+    }
+    const unsaved = await unsavedWork(project.path);
+    if (unsaved && (unsaved.changed || unsaved.unpushed || unsaved.stashes || unsaved.unknown) && req.query.discard !== "1") {
+      return res.status(409).json({
+        error: "This folder holds work that exists nowhere else. Delete it only when that is meant.",
+        code: "unsaved-work",
+        unsaved,
+      });
     }
     // Held with nothing awaited since the check: from here no run of theirs can
     // start, by schedule or by hand, and have the folder removed from under it.

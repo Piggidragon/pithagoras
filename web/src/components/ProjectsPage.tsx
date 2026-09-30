@@ -104,15 +104,28 @@ export function ProjectsPage({
           // The verb agrees with what goes: "1 chat goes", "3 chats go", "over 1,000 files go".
           ? tp(contents.sessions || (contents.complete ? contents.files : Math.max(2, contents.files)), "{what} goes with it.", "{what} go with it.", { what: parts[0] })
           : t("It is empty.");
+      // A repository's own history, changes and stashes are in the folder and nowhere else.
+      const u = contents.unsaved;
+      const lost = u
+        ? [
+            u.changed ? tp(u.changed, "{n} file with uncommitted changes", "{n} files with uncommitted changes") : "",
+            u.unpushed ? tp(u.unpushed, "{n} commit that no remote has", "{n} commits that no remote has") : "",
+            u.stashes ? tp(u.stashes, "{n} stash", "{n} stashes") : "",
+            u.unknown ? t("whatever the repository holds, which could not be read") : "",
+          ].filter(Boolean)
+        : [];
       const ok = await confirmDialog({
-        title: t("Delete the project \"{name}\"?", { name: p.name }),
-        message: `${going} ${t("This cannot be undone.")}${stranded}`,
-        confirmLabel: t("Delete project"),
+        title: lost.length
+          ? t("Delete the project \"{name}\" and its unsaved work?", { name: p.name })
+          : t("Delete the project \"{name}\"?", { name: p.name }),
+        message: `${lost.length ? `${t("This folder is a git repository, and it holds work that exists nowhere else: {list}.", { list: lost.join(", ") })} ` : ""}${going} ${t("This cannot be undone.")}${stranded}`,
+        confirmLabel: lost.length ? t("Delete anyway") : t("Delete project"),
         danger: true,
-        deletes: true,
+        // Asked whatever Settings says: the server refuses without it, and what is lost has no copy.
+        deletes: !lost.length,
       });
       if (!ok) return;
-      await api.deleteProject(p.name);
+      await api.deleteProject(p.name, lost.length > 0);
       onChanged();
       load();
     });
