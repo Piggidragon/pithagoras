@@ -321,6 +321,9 @@ export const api = {
     if (!res.ok) throw new Error(body.error || t("Could not upload {name} ({status})", { name, status: res.status }));
     return body;
   },
+  /** What deleting `file` would lose that nothing else has (see Unsaved), null for nothing. */
+  fileUnsaved: (sessionId: string, file: string) =>
+    json<{ unsaved: Unsaved | null }>(`/api/sessions/${sessionId}/unsaved?path=${encodeURIComponent(file)}`),
   /** `discard` says that git work in a folder, which nothing else has, may go with it; without it the server refuses, with code "unsaved-work". */
   deleteFile: (sessionId: string, file: string, discard = false) =>
     json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}${discard ? "&discard=1" : ""}`, { method: "DELETE" }),

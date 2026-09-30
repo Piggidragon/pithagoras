@@ -836,6 +836,25 @@ test("unsaved work in a delete from the Files panel: what a tool folder holds is
   assert.equal(await g.unsavedIn(modules), null);
   // The folder around it does not look into it either.
   assert.equal(await g.unsavedIn(folder), null);
+
+  // One that is a repository itself is asked about, by its own name or from the folder around it.
+  const build = path.join(folder, "build");
+  mkdirSync(build);
+  sh(build, "init", "-q");
+  writeFileSync(path.join(build, "keep.txt"), "k\n");
+  sh(build, "add", "-A");
+  sh(build, "commit", "-qm", "made here");
+  assert.deepEqual(await g.unsavedIn(build), { changed: 0, unpushed: 1, stashes: 0 });
+  assert.deepEqual(await g.unsavedIn(folder), { changed: 0, unpushed: 1, stashes: 0 });
+
+  // And one a repository around it tracks, with changes there.
+  const dir = repo();
+  mkdirSync(path.join(dir, ".cache"));
+  writeFileSync(path.join(dir, ".cache", "c.txt"), "c\n");
+  sh(dir, "add", "-A");
+  sh(dir, "commit", "-qm", "tracked cache");
+  writeFileSync(path.join(dir, ".cache", "c.txt"), "edited\n");
+  assert.deepEqual(await g.unsavedIn(path.join(dir, ".cache")), { changed: 1, unpushed: 0, stashes: 0 });
 });
 
 test("unsaved work in a delete of .git: the history and the stashes go, the files beside it stay", async () => {
@@ -862,6 +881,35 @@ test("unsaved work in a delete of .git: the history and the stashes go, the file
   mkdirSync(fresh);
   sh(fresh, "init", "-q");
   assert.deepEqual(await g.unsavedIn(path.join(fresh, ".git")), { changed: 0, unpushed: 0, stashes: 0 });
+});
+
+test("unsaved work in a delete of .git: what is staged and not in the file any more is in .git alone", async () => {
+  const dir = repo();
+  pushed(dir);
+  // Staged as the file is: the file keeps it.
+  writeFileSync(path.join(dir, "a.txt"), "staged\n");
+  sh(dir, "add", "a.txt");
+  assert.deepEqual(await g.unsavedIn(path.join(dir, ".git")), { changed: 0, unpushed: 0, stashes: 0 });
+  // Changed again after staging, and a staged new file taken away: those versions are only in .git.
+  writeFileSync(path.join(dir, "a.txt"), "changed after\n");
+  writeFileSync(path.join(dir, "n.txt"), "n\n");
+  sh(dir, "add", "n.txt");
+  execFileSync("rm", [path.join(dir, "n.txt")]);
+  assert.deepEqual(await g.unsavedIn(path.join(dir, ".git")), { changed: 2, unpushed: 0, stashes: 0 });
+});
+
+test("unsaved work in a delete of .git: commits only the HEAD of a worktree elsewhere holds go with it", async () => {
+  const dir = repo();
+  pushed(dir);
+  const tree = path.join(home, `tree${++n}`);
+  sh(dir, "worktree", "add", "-q", "--detach", tree);
+  writeFileSync(path.join(tree, "w.txt"), "w\n");
+  sh(tree, "add", "-A");
+  sh(tree, "commit", "-qm", "one");
+  sh(tree, "commit", "-q", "--allow-empty", "-m", "two");
+  assert.deepEqual(await g.unsavedIn(path.join(dir, ".git")), { changed: 0, unpushed: 2, stashes: 0 });
+  // And so with the whole repository.
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 2, stashes: 0 });
 });
 
 test("unsaved work in a delete of .git: a worktree's .git is a file that only points at a repository that stays", async () => {

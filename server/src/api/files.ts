@@ -15,6 +15,7 @@ import {
   openPicture,
   readText,
   removeEntry,
+  unsavedAt,
   renameEntry,
   writeText,
 } from "../workspace-files.js";
@@ -240,6 +241,17 @@ export function filesRouter(): Router {
     if (!base) return;
     try {
       res.json({ ok: true, path: renameEntry(base, req.query.path, req.body?.name) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  /** What deleting `path` would lose that nothing else has, so the question can name it: `{ unsaved }`, null for nothing. */
+  router.get("/sessions/:id/unsaved", async (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    try {
+      res.json({ unsaved: await unsavedAt(base, req.query.path) });
     } catch (e) {
       fail(res, e);
     }

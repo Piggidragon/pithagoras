@@ -20,6 +20,7 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
+import { GENERATED_DIRS } from "./generated.js";
 import { UNSAVED_WORK, holdsWork, unsavedIn, type Unsaved } from "./git.js";
 import { pictureType } from "./prompt-images.js";
 
@@ -44,7 +45,7 @@ export const MAX_EDIT_BYTES = 1024 * 1024;
 /** A folder with more than this is cut off, and says so. */
 export const MAX_ENTRIES = 2_000;
 /** Left out of the whole-folder archive: regenerable, or huge, and not the work itself. */
-export const ARCHIVE_EXCLUDES = ["node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build"];
+export const ARCHIVE_EXCLUDES = [".git", ...GENERATED_DIRS];
 
 export type FileErrorCode = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
 
@@ -403,6 +404,32 @@ export function writeText(
 }
 
 /**
+ * The place `rel` names, for taking it away: its folder followed and checked,
+ * its last name not, so that a link there is what goes, not what it leads to.
+ * The folder itself is not something in it.
+ */
+function removable(base: string, rel: unknown): string {
+  const text = String(rel ?? "");
+  if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
+  const lexical = path.resolve(base, text.replace(/^[/\\]+/, ""));
+  if (!isWithin(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
+  if (lexical === base) throw new FileError("invalid", "The folder itself is not removed from here");
+  const parent = resolveInside(base, path.relative(base, path.dirname(lexical)));
+  const target = path.join(parent, path.basename(lexical));
+  if (!lexists(target)) throw new FileError("missing", "There is no such file or folder");
+  return target;
+}
+
+/**
+ * What deleting `rel` would lose that nothing else has — see unsavedIn — or
+ * null when nothing git holds goes with it. Asked before the question, so that
+ * it can say so.
+ */
+export async function unsavedAt(base: string, rel: unknown): Promise<Unsaved | null> {
+  return unsavedIn(removable(base, rel));
+}
+
+/**
  * Removes a file, or a folder and all that is in it. A link is removed as the
  * link it is, and what it points at stays. The folder itself is not removable
  * from here: that is the chat's place, not something in it.
@@ -412,16 +439,7 @@ export function writeText(
  * refused, with what it holds, unless `discard` says that is meant.
  */
 export async function removeEntry(base: string, rel: unknown, discard = false): Promise<void> {
-  const text = String(rel ?? "");
-  if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
-  const lexical = path.resolve(base, text.replace(/^[/\\]+/, ""));
-  if (!isWithin(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
-  if (lexical === base) throw new FileError("invalid", "The folder itself is not removed from here");
-  // The parent is followed and checked; the last name is not, so that a link
-  // there goes, not what it leads to.
-  const parent = resolveInside(base, path.relative(base, path.dirname(lexical)));
-  const target = path.join(parent, path.basename(lexical));
-  if (!lexists(target)) throw new FileError("missing", "There is no such file or folder");
+  const target = removable(base, rel);
   if (!discard) {
     const unsaved = await unsavedIn(target);
     if (holdsWork(unsaved)) throw new FileError("unsaved", UNSAVED_WORK, unsaved);

@@ -320,47 +320,47 @@ export function FilesPanel({
     if (problem) setListError(problem);
   };
 
-  /** Whether to delete a folder anyway, now that the server has said what only it holds. */
-  const askAboutUnsaved = (name: string, u: Unsaved) => {
-    const { lost, sentences } = unsavedNotes(u);
-    return confirmDialog({
-      title: lost ? t("Delete \"{name}\" and its unsaved work?", { name }) : t("Delete \"{name}\"?", { name }),
-      message: [...sentences, t("This removes the folder and everything in it. It cannot be undone.")].join(" "),
-      confirmLabel: t("Delete anyway"),
-      danger: true,
-      // Asked whatever Settings says: the server refused, and what is lost has no copy.
-      deletes: false,
-    });
-  };
-
-  const remove = async (entry: FileEntry) => {
-    const path = join(dir, entry.name);
+  /** Whether to delete, and whether git work that only it holds goes with it: null for "no". */
+  const askToRemove = async (entry: FileEntry, unsaved: Unsaved | null): Promise<boolean | null> => {
+    const { lost, risky, sentences } = unsavedNotes(unsaved ?? undefined);
     // A link to a folder is listed as a folder, but only the link goes.
-    const message = entry.link
+    const what = entry.link
       ? t("This removes the link only. What it points to is not touched.")
       : entry.type === "dir"
         ? t("This removes the folder and everything in it. It cannot be undone.")
         : t("This removes the file. It cannot be undone.");
     const ok = await confirmDialog({
-      title: t("Delete \"{name}\"?", { name: entry.name }),
-      message,
-      confirmLabel: t("Delete"),
+      title: lost
+        ? t("Delete \"{name}\" and its unsaved work?", { name: entry.name })
+        : risky
+          ? t("Delete \"{name}\" anyway?", { name: entry.name })
+          : t("Delete \"{name}\"?", { name: entry.name }),
+      message: [...sentences, what].join(" "),
+      confirmLabel: risky ? t("Delete anyway") : t("Delete"),
       danger: true,
-      deletes: true,
+      // Asked whatever Settings says when there is work to lose: the server refuses without it, and it has no copy.
+      deletes: !risky,
     });
-    if (!ok) return;
+    return ok ? risky : null;
+  };
+
+  const remove = async (entry: FileEntry) => {
+    const path = join(dir, entry.name);
     let problem: string | null = null;
     try {
-      let discard = false;
+      // Only a folder can hold git work, and it is asked first so that the one question names it.
+      // When that cannot be asked, the plain question goes first, and the server's refusal brings this one.
+      let unsaved = entry.type === "dir" && !entry.link ? await api.fileUnsaved(sessionId, path).then((r) => r.unsaved, () => null) : null;
       for (;;) {
+        const discard = await askToRemove(entry, unsaved);
+        if (discard === null) return;
         try {
           await api.deleteFile(sessionId, path, discard);
           break;
         } catch (e) {
-          // A folder with git work that nothing else has: asked about in its own words, then sent again.
+          // Work the question did not name turned up by the time of the delete: asked again, with it.
           if (discard || !(e instanceof ApiError) || e.body.code !== "unsaved-work") throw e;
-          if (!(await askAboutUnsaved(entry.name, e.body.unsaved as Unsaved))) return;
-          discard = true;
+          unsaved = e.body.unsaved as Unsaved;
         }
       }
       if (file && (file.path === path || file.path.startsWith(path + "/"))) {

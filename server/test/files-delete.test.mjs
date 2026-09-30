@@ -112,6 +112,19 @@ test("what holds nothing of its own goes without being asked: files, plain folde
   });
 });
 
+test("what a delete would lose can be asked first, so the question names it", async () => {
+  await withApi(async (base) => {
+    const dir = clone("asked");
+    commitHere(dir);
+    const ask = (p) => fetch(`${base}/unsaved?path=${encodeURIComponent(p)}`).then(async (r) => ({ status: r.status, ...(await r.json()) }));
+    assert.deepEqual(await ask("asked"), { status: 200, unsaved: { changed: 0, unpushed: 1, stashes: 0 } });
+    assert.deepEqual(await ask("asked/a.txt"), { status: 200, unsaved: null });
+    assert.equal((await ask("gone")).status, 404);
+    assert.equal((await ask("../outside")).status, 400);
+    assert.equal(existsSync(dir), true);
+  });
+});
+
 test("a refusal for another reason is not taken for unsaved work", async () => {
   await withApi(async (base) => {
     const res = await del(base, "nothing-here");
