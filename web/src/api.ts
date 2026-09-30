@@ -133,6 +133,17 @@ export interface Project {
   lastActive: string | null;
 }
 
+/** What a delete would lose that only the folder holds: nothing else has a copy of these. */
+export interface Unsaved {
+  /** Changes that are not committed. */
+  changed: number;
+  /** Commits that no remote has. */
+  unpushed: number;
+  stashes: number;
+  /** Not everything could be read, so there may be more than this says. */
+  unknown?: true;
+}
+
 /** What deleting a project would take with it. */
 export interface ProjectContents extends Project {
   files: number;
@@ -142,7 +153,7 @@ export interface ProjectContents extends Project {
   /** The routines that run here and are on, by name. Deleting the project switches them off. */
   routines?: string[];
   /** Set when the folder is a git repository: what only the folder holds, and so what deleting it loses. */
-  unsaved?: { changed: number; unpushed: number; stashes: number; unknown?: true };
+  unsaved?: Unsaved;
 }
 
 export interface CompactionSettings {
@@ -310,8 +321,12 @@ export const api = {
     if (!res.ok) throw new Error(body.error || t("Could not upload {name} ({status})", { name, status: res.status }));
     return body;
   },
-  deleteFile: (sessionId: string, file: string) =>
-    json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, { method: "DELETE" }),
+  /** What deleting `file` would lose that nothing else has (see Unsaved), null for nothing. */
+  fileUnsaved: (sessionId: string, file: string) =>
+    json<{ unsaved: Unsaved | null }>(`/api/sessions/${sessionId}/unsaved?path=${encodeURIComponent(file)}`),
+  /** `discard` says that git work in a folder, which nothing else has, may go with it; without it the server refuses, with code "unsaved-work". */
+  deleteFile: (sessionId: string, file: string, discard = false) =>
+    json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}${discard ? "&discard=1" : ""}`, { method: "DELETE" }),
   fileDownloadUrl: (sessionId: string, file: string) =>
     `/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}&download=1`,
   /** The whole folder, or a folder in it. */
