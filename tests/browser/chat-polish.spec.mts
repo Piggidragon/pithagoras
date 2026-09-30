@@ -212,6 +212,10 @@ test('the agent setup says which of its two steps it is on, and Back comes befor
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
     else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
     else if (p === '/api/agent/sessions') reply = { sessions: [], agentHome: '/a' };
+    else if (p === '/api/agent/setup' && route.request().method() === 'POST') {
+      await new Promise((r) => setTimeout(r, 400));
+      return route.fulfill({ status: 409, json: { error: 'That name is taken' } });
+    }
     else if (p === '/api/agent/setup') reply = { initialised: false, home: '/a', files: [] };
     else if (p === '/api/models') reply = { models: [], providers: {} };
     await route.fulfill({ json: reply });
@@ -231,9 +235,18 @@ test('the agent setup says which of its two steps it is on, and Back comes befor
   const back = (await main.getByRole('button', { name: 'Back' }).boundingBox())!;
   const create = (await main.getByRole('button', { name: 'Create' }).boundingBox())!;
   expect(back.x).toBeLessThan(create.x);
+  // Not while Create runs: a failure would land on the step before, which does not show it.
+  await main.getByLabel('Your name').fill('Sam');
+  await main.getByRole('button', { name: 'Create' }).click();
+  await expect(main.getByRole('button', { name: 'Back' })).toBeDisabled();
+  await expect(main.getByText('That name is taken')).toBeVisible();
   await main.getByRole('button', { name: 'Back' }).click();
   await expect(main.getByText('Step 1 of 2')).toBeVisible();
   await expect(main.getByLabel('Name')).toHaveValue('Aria');
+  // Back again, the failure is not shown for a Create not yet sent.
+  await main.getByRole('button', { name: 'Next' }).click();
+  await expect(main.getByText('Step 2 of 2')).toBeVisible();
+  await expect(main.getByText('That name is taken')).toHaveCount(0);
 });
 
 test('the composer stops following the pointer when the drag is lost without a let-go', async ({ page }) => {

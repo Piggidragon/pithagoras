@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { LuArrowRight, LuBot, LuCheck, LuRefreshCw, LuUser } from "react-icons/lu";
+import { LuArrowLeft, LuArrowRight, LuBot, LuCheck, LuRefreshCw, LuUser } from "react-icons/lu";
 import { api, type AgentSetup as Setup } from "../api";
 import { isEnter } from "../shortcuts";
-import { t } from "../i18n";
+import { ghostCls, primaryCls } from "./SettingsUi";
+import { msg, t } from "../i18n";
+
+const STEPS = [msg("Who it is"), msg("Who it works for")];
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -15,7 +18,7 @@ const inputCls =
  * starting point, and the files are editable afterwards.
  */
 export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) => void }) {
-  const [step, setStep] = useState<0 | 1>(0);
+  const [step, setStep] = useState(0);
   const [agentName, setAgentName] = useState("");
   const [vibe, setVibe] = useState("");
   const [userName, setUserName] = useState("");
@@ -23,6 +26,11 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
   const [userPrefers, setUserPrefers] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const go = (to: number) => {
+    setError(null);
+    setStep(to);
+  };
 
   const create = async () => {
     setBusy(true);
@@ -53,9 +61,9 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
         </div>
       </div>
 
-      <p className="mt-6 text-[11px] text-fg-faint">{t("Step {n} of {total}", { n: step + 1, total: 2 })}</p>
+      <p className="mt-6 text-[11px] text-fg-faint">{t("Step {n} of {total}", { n: step + 1, total: STEPS.length })}</p>
       <div className="mt-2 flex items-center gap-2" aria-hidden="true">
-        {[0, 1].map((i) => (
+        {STEPS.map((_, i) => (
           <div
             key={i}
             className={`h-0.5 flex-1 rounded-full transition ${
@@ -68,7 +76,7 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
       {step === 0 ? (
         <section className="mt-6 space-y-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            <LuBot className="h-3.5 w-3.5" /> {t("Who it is")}
+            <LuBot className="h-3.5 w-3.5" /> {t(STEPS[0])}
           </div>
 
           <label className="block">
@@ -77,7 +85,7 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
               autoFocus
               value={agentName}
               onChange={(e) => setAgentName(e.target.value)}
-              onKeyDown={(e) => isEnter(e) && agentName.trim() && setStep(1)}
+              onKeyDown={(e) => isEnter(e) && agentName.trim() && go(1)}
               placeholder="Aria"
               className={`${inputCls} mt-1`}
             />
@@ -95,18 +103,14 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
             <p className="mt-1 text-[11px] text-fg-faint">{t("Becomes SOUL.md.")}</p>
           </label>
 
-          <button
-            disabled={!agentName.trim()}
-            onClick={() => setStep(1)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
-          >
+          <button disabled={!agentName.trim()} onClick={() => go(1)} className={primaryCls}>
             {t("Next")} <LuArrowRight className="h-4 w-4" />
           </button>
         </section>
       ) : (
         <section className="mt-6 space-y-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-            <LuUser className="h-3.5 w-3.5" /> {t("Who it works for")}
+            <LuUser className="h-3.5 w-3.5" /> {t(STEPS[1])}
           </div>
 
           <label className="block">
@@ -146,17 +150,11 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
           {error && <p className="text-xs text-danger">{error}</p>}
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setStep(0)}
-              className="rounded-lg px-3 py-2 text-sm text-fg-muted transition hover:bg-fg/5"
-            >
-              {t("Back")}
+            {/* Not while Create runs: its error shows on this step only. */}
+            <button disabled={busy} onClick={() => go(0)} className={ghostCls}>
+              <LuArrowLeft className="h-3.5 w-3.5" /> {t("Back")}
             </button>
-            <button
-              disabled={!userName.trim() || busy}
-              onClick={create}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
-            >
+            <button disabled={!userName.trim() || busy} onClick={create} className={primaryCls}>
               {busy ? (
                 <LuRefreshCw className="h-4 w-4 animate-spin" />
               ) : (
