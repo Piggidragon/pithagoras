@@ -2141,11 +2141,12 @@ class SessionManager extends EventEmitter {
     const servers = mcpServerNames();
     const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : shownTools();
     return {
-      tools: shown.map((tool) => ({
-        ...tool,
-        source: toolSource(tool.name, tool.source, servers),
-        enabled: toolEnabled(tool.name, defaults, exceptions),
-        defaultOn: !defaults.includes(tool.name),
+      tools: shown.map(({ name, source, description }) => ({
+        name,
+        ...(description !== undefined ? { description } : {}),
+        source: toolSource(name, source, servers),
+        enabled: toolEnabled(name, defaults, exceptions),
+        defaultOn: !defaults.includes(name),
       })),
       live: Boolean(listed.length),
     };

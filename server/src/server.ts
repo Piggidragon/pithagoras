@@ -811,7 +811,7 @@ app.get("/api/tools", (_req, res) => {
   const off = new Set(toolDefaultsOff());
   const servers = mcpServerNames();
   res.json({
-    tools: shownTools().map(({ package: _package, ...tool }) => ({
+    tools: shownTools().map((tool) => ({
       ...tool,
       source: toolSource(tool.name, tool.source, servers),
       defaultOn: !off.has(tool.name),

@@ -11,6 +11,7 @@ process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 const settings = path.join(process.env.PI_CODING_AGENT_DIR, "settings.json");
 const listPackages = (packages) => writeFileSync(settings, JSON.stringify({ packages }));
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json"), JSON.stringify({ mcpServers: { jira: { command: "jira-mcp" } } }));
 const OFF = (source) => ({ source, extensions: [], skills: [], prompts: [], themes: [] });
 
 const { createSession, forgetPackageTools, knownTools, rememberTools, shownTools } = await import("../dist/db.js");
@@ -60,6 +61,39 @@ test("uninstalling forgets the tools, whichever version they were recorded under
     // A folder of the user's filed under the same label: recorded as no package's, so not the package's.
     { name: "todo_mine", source: "@juicesharp/rpiv-todo", package: null },
   ]);
+  // Asked for once pi has taken it out of the settings.
+  listPackages(["npm:pi-other"]);
   forgetPackageTools(`${TODO}@0.5.0`);
   assert.deepEqual(names(), ["bash", "other", "todo_mine"]);
+});
+
+test("uninstalling forgets whatever is no longer listed, however the request wrote it", () => {
+  listPackages(["../../ext/foo", "npm:pi-other"]);
+  rememberTools([{ name: "foo_tool", source: "foo", package: "../../ext/foo" }]);
+  listPackages(["npm:pi-other"]);
+  forgetPackageTools("/home/u/ext/foo");
+  assert.deepEqual(names(), ["bash", "other", "todo_mine"]);
+});
+
+test("an MCP server's tools are kept when the adapter is uninstalled", () => {
+  listPackages(["npm:pi-mcp-adapter", "npm:pi-other"]);
+  rememberTools([{ name: "jira_search", source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter" }]);
+  listPackages(["npm:pi-other"]);
+  forgetPackageTools("npm:pi-mcp-adapter");
+  assert.deepEqual(names(), ["bash", "jira_search", "other", "todo_mine"]);
+  // Hidden all the same, since nothing registers them while the adapter is gone.
+  assert.equal(shownTools().some((t) => t.name === "jira_search"), false);
+});
+
+test("a project bringing the user's package in its own settings does not take its tools from it", () => {
+  listPackages(["npm:pi-other"]);
+  rememberTools([{ name: "other", source: "pi-other", package: null }]);
+  assert.equal(knownTools().find((t) => t.name === "other").package, "npm:pi-other");
+  listPackages([OFF("npm:pi-other")]);
+  assert.equal(shownTools().some((t) => t.name === "other"), false);
+});
+
+test("what is shown carries no package", () => {
+  listPackages(["npm:pi-other"]);
+  assert.equal(shownTools().some((t) => "package" in t), false);
 });

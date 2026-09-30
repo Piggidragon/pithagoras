@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting, readPiSettings } from "./pi-settings.js";
 import { npmName, packageKey, sourceOf, toolAvailability } from "./extension-switch.js";
-import { browserTool, toolEnabled } from "./tool-policy.js";
+import { browserTool, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -1765,25 +1765,47 @@ export function knownTools(): KnownTool[] {
 /**
  * The remembered tools that can still be used: not the ones of a package that
  * is switched off or gone. What is remembered stays, for a package that comes
- * back; this is what the settings page and an idle chat show.
+ * back; this is what the settings page and an idle chat show — without the
+ * package, which is the portal's bookkeeping and not the page's business.
  */
-export function shownTools(): KnownTool[] {
-  return knownTools().filter(toolAvailability(readPiSettings().packages));
+export function shownTools(): Omit<KnownTool, "package">[] {
+  return knownTools()
+    .filter(toolAvailability(readPiSettings().packages))
+    .map(({ package: _package, ...tool }) => tool);
+}
+
+/** The keys of the packages pi's settings list, or undefined when they cannot be read. */
+function listedPackages(): Set<string> | undefined {
+  const packages = readPiSettings().packages;
+  if (!Array.isArray(packages)) return undefined;
+  return new Set(packages.map(sourceOf).filter((s) => s !== undefined).map(packageKey));
 }
 
 /**
  * A package was uninstalled: its tools are not remembered any more, whichever
- * version of it they were recorded under. Entries from before the package was
- * recorded are found by the name it is filed under. The defaults somebody set
- * are kept, as for any tool that is not loaded.
+ * version of it they were recorded under. Run once it is gone from pi's
+ * settings, so every tool whose package is no longer listed goes — which also
+ * catches a folder written one way in the request and another in the settings.
+ * Entries from before the package was recorded are found by the name it is
+ * filed under. The defaults somebody set are kept, as for any tool that is not
+ * loaded.
+ *
+ * An MCP server's tools are kept although the adapter registers them: the
+ * server is configured apart from the package and comes back with it, and a
+ * browser tool seen as new again would be given the browser's old default.
  */
 export function forgetPackageTools(spec: string): void {
+  const listed = listedPackages();
   const key = packageKey(spec);
   const name = npmName(spec);
+  const servers = mcpServerNames();
+  const gone = (t: KnownTool) => {
+    if (mcpServerOf(t.name, servers) !== undefined) return false;
+    if (typeof t.package === "string") return listed ? !listed.has(packageKey(t.package)) : packageKey(t.package) === key;
+    return t.package === undefined && name !== undefined && t.source === name;
+  };
   const all = knownTools();
-  const kept = all.filter((t) =>
-    typeof t.package === "string" ? packageKey(t.package) !== key : t.package === null || name === undefined || t.source !== name,
-  );
+  const kept = all.filter((t) => !gone(t));
   if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
 }
 
@@ -1796,20 +1818,27 @@ export function rememberTools(reported: KnownTool[]): void {
   // A session that still has a package loaded which has since been uninstalled
   // would write its tools straight back; a package no longer listed is not
   // remembered. One switched off still is, for when it comes back.
-  const packages = readPiSettings().packages;
-  const listed = Array.isArray(packages) ? new Set(packages.map(sourceOf).filter((s) => s !== undefined).map(packageKey)) : undefined;
+  const listed = listedPackages();
   const tools = reported.filter((t) => typeof t.package !== "string" || !listed || listed.has(packageKey(t.package)));
   if (!tools.length) return;
   const merged = new Map(knownTools().map((t) => [t.name, t]));
   const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
   for (const tool of tools) {
+    const before = merged.get(tool.name);
     // Kept short: it is a hint beside a checkbox, and the catalogue is one settings row.
-    const description = tool.description?.trim().slice(0, 300) || merged.get(tool.name)?.description;
+    const description = tool.description?.trim().slice(0, 300) || before?.description;
+    // A project that brings a package of the user's in its own settings reports
+    // its tools as no package of the user's. The user's package still brings
+    // them everywhere else, so they stay its while it is listed.
+    const pkg =
+      tool.package === null && typeof before?.package === "string" && listed?.has(packageKey(before.package))
+        ? before.package
+        : tool.package;
     merged.set(tool.name, {
       name: tool.name,
       source: tool.source,
       ...(description ? { description } : {}),
-      ...(tool.package !== undefined ? { package: tool.package } : {}),
+      ...(pkg !== undefined ? { package: pkg } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));

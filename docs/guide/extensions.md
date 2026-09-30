@@ -154,8 +154,12 @@ Before a chat has started, and in Settings → Tools, the list is what the porta
 has seen registered. The tools of a package that is switched off, narrowed to
 none of its extensions, or uninstalled are left out of it, since nothing
 registers them any more. A switched-off package's are remembered and come back
-with it; an uninstalled one's are forgotten. A package is the same package at
-any version, so updating one keeps its tools. A tool remembered before the
+with it; an uninstalled one's are forgotten. MCP servers' tools go with
+`pi-mcp-adapter` when it is off or gone, but are remembered even when it is
+uninstalled, since the servers are configured apart from it. A package is the
+same package at any version, so updating one keeps its tools. One narrowed to
+some of its extensions keeps all its tools listed here; a started chat shows
+only what is loaded. A tool remembered before the
 portal recorded which package it came from is left out when its npm package is
 switched off, until a conversation reports it again. If that package was
 uninstalled outside the portal, nothing says the tool was a package's, and it
