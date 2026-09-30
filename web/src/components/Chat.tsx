@@ -24,7 +24,7 @@ import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
-import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
+import { activity, buildTranscript, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
@@ -724,7 +724,6 @@ export function Chat({
     }
     return undefined;
   }, [items]);
-  const lastReply = useMemo(() => lastReplyId(items), [items]);
   // A switch to another version, by the message clicked: until the chat has
   // loaded again without it, a second click would ask about a message that is
   // on its way out, and fail after the first had worked.
@@ -1800,9 +1799,9 @@ export function Chat({
                     and only once nothing in the run follows it. One per tool
                     call in between would be a Copy button after every
                     paragraph, and one beside the words sat in the margin where
-                    the eye does not go. The last answer of each run keeps its
-                    button when another message comes. */}
-                {(item.final || item.id === lastReply) && (
+                    the eye does not go. Each answer keeps its button when
+                    another message comes. */}
+                {item.final && (
                   <div className="reply-actions -ml-1.5 mt-1 flex items-center gap-0.5">
                     <CopyAction text={assistantText(item)} />
                   </div>

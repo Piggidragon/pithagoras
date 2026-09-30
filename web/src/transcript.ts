@@ -48,7 +48,7 @@ export type Item =
       unsent?: "stopped" | "restarted" | "unsure";
     }
   /** `thinkingSince`/`thinkingUntil`: when the reasoning started and last grew, for "Thought for 12s". */
-  /** `final`: the stretch that ended an answer a later run or message came after. */
+  /** `final`: the stretch that ends an answer, where its Copy goes. */
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean; final?: true; thinkingSince?: number; thinkingUntil?: number }
   /**
    * `args`: what the tool was called with, whole. `output`: the text it gave
@@ -179,7 +179,6 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
     const last = items.at(-1);
     if (last?.kind === "assistant" && last.id === id) {
       last.done = false;
-      delete last.final;
       return last;
     }
     const reply = { kind: "assistant" as const, id, text: "", thinking: "", done: false, audio: audioReply };
@@ -194,8 +193,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
     }
   };
 
-  // Where a message or a run begins, the answer before it is over: the stretch
-  // that ended it keeps its Copy. What the last reply is, is said at the end.
+  // The answer so far is over: the stretch that ended it keeps its Copy.
   const closeAnswer = () => {
     const reply = lastReply(items);
     if (reply) reply.final = true;
@@ -227,7 +225,6 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           break;
         }
         closeCurrent();
-        closeAnswer();
         audioReply = item.audio === true;
         items.push(item);
         break;
@@ -237,7 +234,6 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         const item = placed(Number(p.seq), p.prompt);
         if (!item) break;
         closeCurrent();
-        closeAnswer();
         audioReply = item.audio === true;
         items.push(item);
         break;
@@ -270,6 +266,16 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         else if (inner.type === "text_delta") current.text += delta;
         break;
       }
+
+      // Something said to the agent — the person's words, a command's, an
+      // extension's — begins an answer to it, and so ends the one before. Here
+      // rather than where the portal sent it: pi takes some in mid-run, a
+      // queued command or an extension's follow-up, with nothing else to mark
+      // it. A retry after an error starts a run with no message, and leaves
+      // the cut-off stretch before it be.
+      case "message_start":
+        if (p.message?.role === "user" || p.message?.role === "custom") closeAnswer();
+        break;
 
       case "message_snapshot":
       case "message_end": {
@@ -427,12 +433,11 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         settle();
         break;
 
-      // A new run: a tool still open from before it can only be one whose run
-      // died without saying so (a portal restart that recorded nothing).
+      // A new run: a reply or a tool still open from before it can only be one
+      // whose run died without saying so (a portal restart that recorded
+      // nothing). Its words are not the new run's to go on with.
       case "agent_start":
-        // Not only a message starts one: a command can, and so can an extension
-        // that has something to say once a background job is done.
-        closeAnswer();
+        closeCurrent();
         for (const it of items) {
           if (it.kind === "tool" && it.status === "running") {
             it.status = "error";
@@ -453,14 +458,14 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
   // Anything still open belongs to a run in flight, and what is waiting to go
   // into it comes after.
   for (const item of waiting.values()) items.push({ ...item, queued: true });
+  // The answer being given last ends where the chat does, once it is written.
+  closeAnswer();
   return items;
 }
 
 /**
- * The bubble Copy belongs on while the answer is the last thing said: the last
- * stretch of the agent's answer that has something to read and is not still
- * changing under it. Once a message or a run comes after it, it is `final`
- * instead, and keeps Copy as the end of the answer to that one.
+ * Where an answer ends, as far as the transcript has got: the last stretch of
+ * the agent's that has something to read and is not still changing under it.
  *
  * A turn with tool calls in the middle closes the assistant item before each
  * one and opens a new one after, so a single answer can be several bubbles —
@@ -482,8 +487,6 @@ function lastReply(items: readonly Item[]): Extract<Item, { kind: "assistant" }>
   }
   return undefined;
 }
-
-export const lastReplyId = (items: readonly Item[]): string | undefined => lastReply(items)?.id;
 
 /** The call an update belongs to: by its id, or else the newest one of that name still running. */
 function findRunningTool(items: Item[], p: any): Extract<Item, { kind: "tool" }> | undefined {

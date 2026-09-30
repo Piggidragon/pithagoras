@@ -65,14 +65,15 @@ if (phase === 'args') events.push(
   ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'pgvector is enough below ten million vectors; both open issues are UI polish.' }] } }, 10),
   ev('agent_end', {}, 9),
 );
-// Two more questions, each answered: the answer to the first keeps its Copy after the second is asked.
-if (phase === 'turns') events.push(
-  ev('portal_prompt', { message: 'Which database?' }, 20),
-  ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'pgvector is enough for now.' }] } }, 19),
-  ev('portal_prompt', { message: 'And the cache?' }, 10),
-  ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Redis is fine for the cache.' }] } }, 9),
-  ev('agent_end', {}, 8),
-);
+// Two more questions, each answered in a run of its own as pi reports it: the answer to the first keeps its Copy after the second is asked.
+const asked = (message: string, answer: string, ago: number) => [
+  ev('portal_prompt', { message }, ago),
+  ev('agent_start', {}, ago),
+  ev('message_start', { message: { role: 'user', content: [{ type: 'text', text: message }] } }, ago),
+  ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: answer }] } }, ago - 1),
+  ev('agent_end', {}, ago - 1),
+];
+if (phase === 'turns') events.push(...asked('Which database?', 'pgvector is enough for now.', 20), ...asked('And the cache?', 'Redis is fine for the cache.', 10));
 // A model that thinks a few words and a model that thinks a lot, fast: `window.think(text)` adds reasoning as it streams.
 if (phase === 'brief') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'Short one.' } }, 1));
 // A reply being written under a conversation long enough to scroll: `window.say(text)` adds to it as it streams.

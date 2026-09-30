@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activity, buildTranscript, lastReplyId } from '../web/src/transcript.ts';
+import { activity, buildTranscript } from '../web/src/transcript.ts';
 import { appendLiveEvent, resetLiveEvents } from '../web/src/live-events.ts';
 const done = { seq: 12, type: 'message_end', payload: { streamId: 'reply', message: { role: 'assistant', content: [{type: 'thinking', thinking: 'Plan'}, {type: 'text', text: 'Hello world'}] } } };
 const update = {seq: -1, type: 'message_update', payload: {streamId: 'reply', assistantMessageEvent: {type: 'text_delta', delta: 'Hello'}}};
 test('completed messages replay without saved deltas', () => {
- assert.deepEqual(buildTranscript([done]), [{kind:'assistant', id:'areply', text:'Hello world', thinking:'Plan', done:true, audio:false}]);
+ assert.deepEqual(buildTranscript([done]), [{kind:'assistant', id:'areply', text:'Hello world', thinking:'Plan', done:true, audio:false, final:true}]);
 });
 test('final message replaces live deltas with a stable id and no duplicate speech', () => {
  const before=buildTranscript([update]);
@@ -37,125 +37,138 @@ test('restored live snapshots show writing activity instead of prefill', () => {
  assert.equal(activity([{seq:-4,type:'message_snapshot',payload:done.payload}]).label,'writing the reply');
 });
 
-test('Copy belongs only on the last stretch of an answer split by a tool call', () => {
-  const events = [
-    { seq: 1, type: 'message_end', payload: { streamId: 'a', message: { role: 'assistant', content: [{ type: 'text', text: 'Checking the file first.' }] } } },
-    { seq: 2, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'read' } },
-    { seq: 3, type: 'tool_execution_end', payload: { toolCallId: 't', toolName: 'read' } },
-    { seq: 4, type: 'message_end', payload: { streamId: 'b', message: { role: 'assistant', content: [{ type: 'text', text: 'It looks fine.' }] } } },
-  ];
-  const items = buildTranscript(events);
-  const replies = items.filter((i) => i.kind === 'assistant');
-  assert.equal(replies.length, 2);
-  assert.equal(lastReplyId(items), replies[1].id);
-});
-
-test('a reply still streaming after the last tool call is not offered yet', () => {
-  const events = [
-    { seq: 1, type: 'message_end', payload: { streamId: 'a', message: { role: 'assistant', content: [{ type: 'text', text: 'One.' }] } } },
-    { seq: 2, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'read' } },
-    { seq: 3, type: 'tool_execution_end', payload: { toolCallId: 't', toolName: 'read' } },
-    { seq: 4, type: 'message_update', payload: { streamId: 'b', assistantMessageEvent: { type: 'text_delta', delta: 'Still going' } } },
-  ];
-  assert.equal(lastReplyId(buildTranscript(events)), undefined);
-});
-
-test('a paragraph followed by a tool call is not offered Copy', () => {
-  const events = [
-    { seq: 1, type: 'message_end', payload: { streamId: 'a', message: { role: 'assistant', content: [{ type: 'text', text: 'Running the tests now.' }] } } },
-    { seq: 2, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'bash' } },
-  ];
-  assert.equal(lastReplyId(buildTranscript(events)), undefined);
-});
-
-const prompt = (seq: number, message: string, extra = {}) => ({ seq, type: 'portal_prompt', payload: { message, ...extra } });
-const said = (seq: number, text: string) => ({ seq, type: 'message_end', payload: { streamId: `r${seq}`, message: { role: 'assistant', content: [{ type: 'text', text }] } } });
+// What Chat offers Copy on: the stretch that ends each answer.
+const copyable = (events: any[]) => buildTranscript(events).filter((i) => i.kind === 'assistant' && i.final).map((i) => (i as any).text);
+const said = (seq: number, text: string, extra = {}) => ({ seq, type: 'message_end', payload: { streamId: `r${seq}`, message: { role: 'assistant', content: [{ type: 'text', text }], ...extra } } });
 const tool = (seq: number, id: string) => [
   { seq, type: 'tool_execution_start', payload: { toolCallId: id, toolName: 'read' } },
   { seq: seq + 1, type: 'tool_execution_end', payload: { toolCallId: id, toolName: 'read' } },
 ];
-// What Chat offers Copy on: the last answer of each run, and the one still the last thing said.
-const copyable = (events: any[]) => {
-  const items = buildTranscript(events);
-  const last = lastReplyId(items);
-  return items.filter((i) => i.kind === 'assistant' && (i.final || i.id === last)).map((i) => (i as any).text);
-};
+// A message going in, as pi says it: `role` user for the person's words and a command's, custom for an extension's.
+const taken = (seq: number, text: string, role = 'user') => ({ seq, type: 'message_start', payload: { message: { role, content: [{ type: 'text', text }] } } });
+// A question asked while nothing runs: the portal's record of it, then pi starting a run with it.
+const ask = (seq: number, message: string) => [
+  { seq, type: 'portal_prompt', payload: { message } },
+  { seq: seq + 1, type: 'agent_start', payload: {} },
+  taken(seq + 2, message),
+];
+const ended = (seq: number) => ({ seq, type: 'agent_end', payload: {} });
 
-test('the answer to an earlier question keeps Copy once another is asked', () => {
-  assert.deepEqual(copyable([prompt(1, 'One?'), said(2, 'First answer.'), prompt(3, 'Two?'), said(4, 'Second answer.')]), ['First answer.', 'Second answer.']);
+test('Copy belongs only on the last stretch of an answer split by a tool call', () => {
+  assert.deepEqual(copyable([said(1, 'Checking the file first.'), ...tool(2, 't'), said(4, 'It looks fine.')]), ['It looks fine.']);
 });
 
-test('each turn offers Copy on its last stretch only, and on none that ended in a tool call', () => {
+test('a reply still streaming after the last tool call is not offered yet', () => {
   assert.deepEqual(copyable([
-    prompt(1, 'One?'),
-    said(2, 'Checking the file first.'),
-    ...tool(3, 't'),
-    said(5, 'It looks fine.'),
-    prompt(6, 'Two?'),
-    said(7, 'Running the tests now.'),
-    ...tool(8, 'u'),
-    prompt(10, 'Three?'),
-    said(11, 'Third answer.'),
+    said(1, 'One.'),
+    ...tool(2, 't'),
+    { seq: 4, type: 'message_update', payload: { streamId: 'b', assistantMessageEvent: { type: 'text_delta', delta: 'Still going' } } },
+  ]), []);
+});
+
+test('a paragraph followed by a tool call is not offered Copy', () => {
+  assert.deepEqual(copyable([said(1, 'Running the tests now.'), { seq: 2, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'bash' } }]), []);
+});
+
+test('the answer to an earlier question keeps Copy once another is asked', () => {
+  assert.deepEqual(copyable([...ask(1, 'One?'), said(4, 'First answer.'), ended(5), ...ask(6, 'Two?'), said(9, 'Second answer.')]), ['First answer.', 'Second answer.']);
+});
+
+test('each answer offers Copy on its last stretch only, and none that ended in a tool call', () => {
+  assert.deepEqual(copyable([
+    ...ask(1, 'One?'),
+    said(4, 'Checking the file first.'),
+    ...tool(5, 't'),
+    said(7, 'It looks fine.'),
+    ended(8),
+    ...ask(9, 'Two?'),
+    said(12, 'Running the tests now.'),
+    ...tool(13, 'u'),
+    taken(15, 'Stop, three instead?'),
+    said(16, 'Third answer.'),
   ]), ['It looks fine.', 'Third answer.']);
 });
 
-test('a command that starts a run ends the turn before it, though no message was sent', () => {
+test('a command queued into a run ends the answer before it where pi takes it in', () => {
   assert.deepEqual(copyable([
-    prompt(1, 'One?'),
-    said(2, 'First answer.'),
-    { seq: 3, type: 'agent_end', payload: {} },
+    ...ask(1, 'One?'),
     { seq: 4, type: 'portal_command', payload: { text: '/review' } },
-    { seq: 5, type: 'portal_command_end', payload: { of: 4, outcome: 'started' } },
-    { seq: 6, type: 'agent_start', payload: {} },
-    said(7, 'Review answer.'),
+    { seq: 5, type: 'portal_command_end', payload: { of: 4, outcome: 'queued' } },
+    said(6, 'First answer.'),
+    taken(7, 'Review the changes on this branch.'),
+    said(8, 'Review answer.'),
   ]), ['First answer.', 'Review answer.']);
 });
 
-test('a run an extension starts, with a notice in between, ends the turn before it too', () => {
+test('a command that starts a run of its own ends the answer before it', () => {
   assert.deepEqual(copyable([
-    prompt(1, 'One?'),
-    said(2, 'Started it, will report back.'),
-    { seq: 3, type: 'agent_end', payload: {} },
-    { seq: 4, type: 'message_end', payload: { message: { role: 'custom', display: true, content: 'Subagent done: X' } } },
+    ...ask(1, 'One?'),
+    said(4, 'First answer.'),
+    ended(5),
+    { seq: 6, type: 'portal_command', payload: { text: '/review' } },
+    { seq: 7, type: 'portal_command_end', payload: { of: 6, outcome: 'started' } },
+    { seq: 8, type: 'agent_start', payload: {} },
+    taken(9, 'Review the changes on this branch.'),
+    said(10, 'Review answer.'),
+  ]), ['First answer.', 'Review answer.']);
+});
+
+test("an extension's message ends the answer before it, in the same run or a new one", () => {
+  const news = (seq: number) => [
+    taken(seq, 'Subagent done: X', 'custom'),
+    { seq: seq + 1, type: 'message_end', payload: { message: { role: 'custom', display: true, content: 'Subagent done: X' } } },
+  ];
+  const expected = ['Started it, will report back.', 'The subagent found X.'];
+  assert.deepEqual(copyable([...ask(1, 'One?'), said(4, 'Started it, will report back.'), ...news(5), said(7, 'The subagent found X.')]), expected);
+  assert.deepEqual(copyable([...ask(1, 'One?'), said(4, 'Started it, will report back.'), ended(5), { seq: 6, type: 'agent_start', payload: {} }, ...news(7), said(9, 'The subagent found X.')]), expected);
+});
+
+test('a retry after an error leaves the cut-off stretch without Copy', () => {
+  assert.deepEqual(copyable([
+    ...ask(1, 'One?'),
+    said(4, 'The answer is', { stopReason: 'error' }),
+    ended(5),
+    { seq: 6, type: 'auto_retry_start', payload: { attempt: 1 } },
+    { seq: 7, type: 'agent_start', payload: {} },
+    said(8, 'The answer is 42.'),
+  ]), ['The answer is 42.']);
+});
+
+test('a run that died mid-reply does not have the next one written into its bubble', () => {
+  const items = buildTranscript([
+    ...ask(1, 'One?'),
+    { seq: 4, type: 'message_update', payload: { streamId: 'r4', assistantMessageEvent: { type: 'text_delta', delta: 'Half an answer.' } } },
     { seq: 5, type: 'agent_start', payload: {} },
-    said(6, 'The subagent found X.'),
-  ]), ['Started it, will report back.', 'The subagent found X.']);
+    taken(6, 'Subagent done: X', 'custom'),
+    { seq: 7, type: 'message_update', payload: { streamId: 'r7', assistantMessageEvent: { type: 'text_delta', delta: 'The subagent found X.' } } },
+  ]);
+  assert.deepEqual(items.filter((i) => i.kind === 'assistant').map((i: any) => [i.text, i.done, i.final === true]), [
+    ['Half an answer.', true, true],
+    ['The subagent found X.', false, false],
+  ]);
 });
 
 test('what only prints something, and a message that has not gone in or never did, leave the answer the last thing said', () => {
-  const answered = [prompt(1, 'One?'), said(2, 'First answer.')];
+  const answered = [...ask(1, 'One?'), said(4, 'First answer.')];
   for (const after of [
-    [{ seq: 3, type: 'portal_notice', payload: { text: 'Session: x' } }],
-    [prompt(3, 'And then?', { queued: true })],
-    [prompt(3, 'Forgotten?', { queued: true }), { seq: 4, type: 'portal_unsent', payload: { seqs: [3], prompts: { 3: { message: 'Forgotten?', queued: true } } } }],
+    [{ seq: 5, type: 'portal_notice', payload: { text: 'Session: x' } }],
+    [{ seq: 5, type: 'portal_prompt', payload: { message: 'And then?', queued: true } }],
+    [{ seq: 5, type: 'portal_prompt', payload: { message: 'Forgotten?', queued: true } }, { seq: 6, type: 'portal_unsent', payload: { seqs: [5], prompts: { 5: { message: 'Forgotten?', queued: true } } } }],
   ]) {
-    const events = [...answered, ...after];
-    assert.equal(buildTranscript(events).some((i) => i.kind === 'assistant' && i.final), false);
-    assert.deepEqual(copyable(events), ['First answer.']);
+    assert.deepEqual(copyable([...answered, ...after]), ['First answer.']);
   }
 });
 
 test('reasoning for the next stretch takes Copy off the one before it until it is said', () => {
-  const events = [
-    prompt(1, 'One?'),
-    said(2, 'Let me look.'),
-    { seq: 3, type: 'message_update', payload: { streamId: 'b', assistantMessageEvent: { type: 'thinking_delta', delta: 'Hmm' } } },
-  ];
-  assert.equal(lastReplyId(buildTranscript(events)), undefined);
-});
-
-test('a reply that goes on after a new run began is not a finished answer any more', () => {
-  const items = buildTranscript([
-    prompt(1, 'One?'),
-    said(2, 'Part one.'),
-    { seq: 3, type: 'agent_start', payload: {} },
-    { seq: 4, type: 'message_update', payload: { streamId: 'r2', assistantMessageEvent: { type: 'text_delta', delta: ' and more' } } },
-  ]);
-  assert.equal(items.filter((i) => i.kind === 'assistant' && i.final).length, 0);
+  assert.deepEqual(copyable([
+    ...ask(1, 'One?'),
+    said(4, 'Let me look.'),
+    { seq: 5, type: 'message_update', payload: { streamId: 'b', assistantMessageEvent: { type: 'thinking_delta', delta: 'Hmm' } } },
+  ]), []);
 });
 
 test('nothing to copy before anything has been said', () => {
-  assert.equal(lastReplyId([]), undefined);
+  assert.deepEqual(copyable([]), []);
 });
 test('tool calls keep their arguments, output and timing; compaction shows where it happened', () => {
   const items = buildTranscript([
