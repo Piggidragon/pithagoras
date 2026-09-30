@@ -2,13 +2,12 @@ import { useState } from "react";
 import { LuArrowLeft, LuArrowRight, LuBot, LuCheck, LuRefreshCw, LuUser } from "react-icons/lu";
 import { api, type AgentSetup as Setup } from "../api";
 import { isEnter } from "../shortcuts";
-import { ghostCls, primaryCls } from "./SettingsUi";
+import { ghostCls, inputCls, primaryCls } from "./SettingsUi";
+import { SetupSteps } from "./SetupSteps";
 import { msg, t } from "../i18n";
 
 const STEPS = [msg("Who it is"), msg("Who it works for")];
-
-const inputCls =
-  "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
+type Step = 0 | 1;
 
 /**
  * First run for the agent's home directory.
@@ -18,7 +17,7 @@ const inputCls =
  * starting point, and the files are editable afterwards.
  */
 export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) => void }) {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState<Step>(0);
   const [agentName, setAgentName] = useState("");
   const [vibe, setVibe] = useState("");
   const [userName, setUserName] = useState("");
@@ -27,7 +26,7 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const go = (to: number) => {
+  const go = (to: Step) => {
     setError(null);
     setStep(to);
   };
@@ -61,16 +60,8 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
         </div>
       </div>
 
-      <p className="mt-6 text-[11px] text-fg-faint">{t("Step {n} of {total}", { n: step + 1, total: STEPS.length })}</p>
-      <div className="mt-2 flex items-center gap-2" aria-hidden="true">
-        {STEPS.map((_, i) => (
-          <div
-            key={i}
-            className={`h-0.5 flex-1 rounded-full transition ${
-              i <= step ? "bg-accent" : "bg-fg/10"
-            }`}
-          />
-        ))}
+      <div className="mt-6">
+        <SetupSteps steps={STEPS} current={step} />
       </div>
 
       {step === 0 ? (
@@ -103,12 +94,16 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
             <p className="mt-1 text-[11px] text-fg-faint">{t("Becomes SOUL.md.")}</p>
           </label>
 
-          <button disabled={!agentName.trim()} onClick={() => go(1)} className={primaryCls}>
-            {t("Next")} <LuArrowRight className="h-4 w-4" />
-          </button>
+          <div className="flex justify-end">
+            <button disabled={!agentName.trim()} onClick={() => go(1)} className={primaryCls}>
+              {t("Next")} <LuArrowRight className="h-4 w-4" />
+            </button>
+          </div>
         </section>
       ) : (
-        <section className="mt-6 space-y-4">
+        // Nothing changes while Create runs: an edit would miss what is sent,
+        // and its error shows on this step only.
+        <fieldset disabled={busy} className="mt-6 space-y-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
             <LuUser className="h-3.5 w-3.5" /> {t(STEPS[1])}
           </div>
@@ -119,6 +114,7 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
               autoFocus
               value={userName}
               onChange={(e) => setUserName(e.target.value)}
+              onKeyDown={(e) => isEnter(e) && userName.trim() && void create()}
               placeholder="Anirban"
               className={`${inputCls} mt-1`}
             />
@@ -150,11 +146,11 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
           {error && <p className="text-xs text-danger">{error}</p>}
 
           <div className="flex items-center gap-2">
-            {/* Not while Create runs: its error shows on this step only. */}
-            <button disabled={busy} onClick={() => go(0)} className={ghostCls}>
+            <button onClick={() => go(0)} className={ghostCls}>
               <LuArrowLeft className="h-3.5 w-3.5" /> {t("Back")}
             </button>
-            <button disabled={!userName.trim() || busy} onClick={create} className={primaryCls}>
+            <span className="ml-auto" />
+            <button disabled={!userName.trim()} onClick={create} className={primaryCls}>
               {busy ? (
                 <LuRefreshCw className="h-4 w-4 animate-spin" />
               ) : (
@@ -163,7 +159,7 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
               {t("Create")}
             </button>
           </div>
-        </section>
+        </fieldset>
       )}
 
       <p className="mt-8 text-[11px] leading-relaxed text-fg-faint">

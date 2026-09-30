@@ -205,7 +205,7 @@ test('an agent conversation keeps its title in place when it starts working', as
   await expect(main.locator('.status-slot > .status-working')).toHaveCount(1);
 });
 
-test('the agent setup says which of its two steps it is on, and Back comes before Create', async ({ page }) => {
+test('the agent setup shows its steps as the assistant does, Back before Create, and nothing to change while Create runs', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const p = new URL(route.request().url()).pathname;
     let reply: unknown = {};
@@ -224,28 +224,35 @@ test('the agent setup says which of its two steps it is on, and Back comes befor
     (window as any).EventSource = class { addEventListener() {} close() {} };
     localStorage.setItem('pithagoras.setup', 'done');
   });
+  await page.setViewportSize({ width: 390, height: 900 });
   await page.goto('/agent');
   const main = page.getByRole('main');
-  await expect(main.getByText('Step 1 of 2')).toBeVisible();
+  const current = main.locator('.setup-step[aria-current="step"]');
+  await expect(current).toHaveText('1. Who it is');
+  await expect(main.getByText('Step 1 of 2')).toHaveClass(/sr-only/);
   await expect(main.getByRole('button', { name: 'Back' })).toHaveCount(0);
   await main.getByLabel('Name').fill('Aria');
   await main.getByRole('button', { name: 'Next' }).click();
-  await expect(main.getByText('Step 2 of 2')).toBeVisible();
-  // Back where it is on every other step: before the way forward.
+  await expect(current).toHaveText('2. Who it works for');
+  // Back where it is in the assistant: at the left, the way forward at the right.
   const back = (await main.getByRole('button', { name: 'Back' }).boundingBox())!;
   const create = (await main.getByRole('button', { name: 'Create' }).boundingBox())!;
-  expect(back.x).toBeLessThan(create.x);
-  // Not while Create runs: a failure would land on the step before, which does not show it.
+  expect(create.x - (back.x + back.width)).toBeGreaterThan(100);
+  // Enter on the last field creates, as it moves on from the first. While it
+  // runs nothing changes: an edit would miss what is sent, and going back
+  // would leave its failure on a step that does not show it.
   await main.getByLabel('Your name').fill('Sam');
-  await main.getByRole('button', { name: 'Create' }).click();
+  await main.getByLabel('Your name').press('Enter');
   await expect(main.getByRole('button', { name: 'Back' })).toBeDisabled();
+  await expect(main.getByLabel('About you')).toBeDisabled();
   await expect(main.getByText('That name is taken')).toBeVisible();
+  await expect(main.getByLabel('About you')).toBeEnabled();
   await main.getByRole('button', { name: 'Back' }).click();
-  await expect(main.getByText('Step 1 of 2')).toBeVisible();
+  await expect(current).toHaveText('1. Who it is');
   await expect(main.getByLabel('Name')).toHaveValue('Aria');
   // Back again, the failure is not shown for a Create not yet sent.
   await main.getByRole('button', { name: 'Next' }).click();
-  await expect(main.getByText('Step 2 of 2')).toBeVisible();
+  await expect(current).toHaveText('2. Who it works for');
   await expect(main.getByText('That name is taken')).toHaveCount(0);
 });
 

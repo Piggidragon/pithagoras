@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { LuArrowLeft, LuArrowRight, LuCheck, LuPlus, LuRefreshCw, LuRocket } from "react-icons/lu";
+import { LuArrowLeft, LuArrowRight, LuPlus, LuRefreshCw, LuRocket } from "react-icons/lu";
 import { api, type AvailableModel } from "../api";
 import { forget, useCached } from "../settings-cache";
 import { formatTokens } from "../transcript";
@@ -7,6 +7,7 @@ import { Modal } from "./Modal";
 import { PackageCatalog } from "./PackageCatalog";
 import { KindIcon, ProviderEditor, StatusBadge, useInstalledPackages, useProviderStatus } from "./ProvidersPanel";
 import { Select } from "./Select";
+import { SetupSteps } from "./SetupSteps";
 import { EffortPicker, ghostCls, primaryCls } from "./SettingsUi";
 import { msg, t, tp } from "../i18n";
 
@@ -118,45 +119,44 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
   return (
     <Modal
       title={t("Set up Pithagoras")}
-      subtitle={t("Three steps. Everything here can be changed later in Settings, and Settings → Providers opens this again.")}
+      subtitle={t("Three steps. Everything here can be changed later in Settings.")}
       onClose={() => { dismiss("skipped"); onClose(); }}
       footer={
-        <div className="flex items-center gap-2">
-          {step > 0 ? (
-            <button type="button" onClick={() => go(step - 1)} className={ghostCls}><LuArrowLeft className="h-3.5 w-3.5" /> {t("Back")}</button>
-          ) : (
-            <button type="button" onClick={() => { dismiss("skipped"); onClose(); }} className={ghostCls}>{t("Set up later")}</button>
-          )}
-          <span className="ml-auto" />
-          {step === 0 && (
-            <button type="button" disabled={!ready} onClick={() => go(1)} className={primaryCls} title={ready ? undefined : t("Add a provider with at least one model first")}>
-              {t("Next")} <LuArrowRight className="h-4 w-4" />
-            </button>
-          )}
-          {step === 1 && (
-            <button type="button" disabled={saving || !settings.value} onClick={() => void saveModel()} className={primaryCls}>
-              {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : null} {t("Next")} <LuArrowRight className="h-4 w-4" />
-            </button>
-          )}
-          {step === 2 && (
-            <>
-              <button type="button" onClick={() => finish(false)} className={ghostCls}>{t("Done")}</button>
-              <button type="button" onClick={() => finish(true)} className={primaryCls}><LuRocket className="h-4 w-4" /> {t("Start a chat")}</button>
-            </>
-          )}
-        </div>
+        <>
+          <div className="flex items-center gap-2">
+            {step > 0 ? (
+              <button type="button" onClick={() => go(step - 1)} className={ghostCls}><LuArrowLeft className="h-3.5 w-3.5" /> {t("Back")}</button>
+            ) : (
+              <button type="button" onClick={() => { dismiss("skipped"); onClose(); }} className={ghostCls}>{t("Set up later")}</button>
+            )}
+            <span className="ml-auto" />
+            {step === 0 && (
+              <button type="button" disabled={!ready} onClick={() => go(1)} className={primaryCls} title={ready ? undefined : t("Add a provider with at least one model first")}>
+                {t("Next")} <LuArrowRight className="h-4 w-4" />
+              </button>
+            )}
+            {step === 1 && (
+              <button type="button" disabled={saving || !settings.value} onClick={() => void saveModel()} className={primaryCls}>
+                {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : null} {t("Next")} <LuArrowRight className="h-4 w-4" />
+              </button>
+            )}
+            {step === 2 && (
+              <>
+                <button type="button" onClick={() => finish(false)} className={ghostCls}>{t("Done")}</button>
+                <button type="button" onClick={() => finish(true)} className={primaryCls}><LuRocket className="h-4 w-4" /> {t("Start a chat")}</button>
+              </>
+            )}
+          </div>
+          {/* In the footer, which is always in sight, rather than in the one-line
+              subtitle, where it was cut off: every way out (Set up later, close,
+              Escape) leaves the assistant for good. */}
+          <p className="mt-2 text-[11px] text-fg-faint">{t("Settings → Providers opens this assistant again.")}</p>
+        </>
       }
     >
-      <ol className="setup-steps mb-5" aria-label={t("Steps")}>
-        {STEPS.map((s, i) => (
-          <li key={s.title} className={`setup-step ${i < step ? "is-done" : i === step ? "is-current" : ""}`} aria-current={i === step ? "step" : undefined}>
-            <span className="flex items-center gap-1">
-              {i < step && <LuCheck className="h-3 w-3 text-ok" />}
-              <span className="font-medium">{i + 1}. {t(s.title)}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
+      <div className="mb-5">
+        <SetupSteps steps={STEPS.map((s) => s.title)} current={step} />
+      </div>
 
       {error && <p role="alert" className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
 

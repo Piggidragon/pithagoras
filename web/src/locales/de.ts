@@ -73,7 +73,6 @@ const de: Locale = {
     "Save": "Speichern",
     // components/AgentSetup.tsx
     "Set up the agent": "Agenten einrichten",
-    "Step {n} of {total}": "Schritt {n} von {total}",
     "Every channel talks to one agent, and it keeps what it learns. Two questions and it has somewhere to start.": "Jeder Kanal spricht mit demselben Agenten, und er behält, was er lernt. Zwei Fragen, und er hat einen Anfang.",
     "Who it is": "Wer er ist",
     "Name": "Name",
@@ -1212,15 +1211,18 @@ const de: Locale = {
     "No chats yet.": "Noch keine Chats.",
     // components/SettingsUi.tsx
     "Switch": "Schalter",
+    // components/SetupSteps.tsx
+    "Steps": "Schritte",
+    "Step {n} of {total}": "Schritt {n} von {total}",
     // components/SetupAssistant.tsx
     "What new chats start with": "Womit neue Chats beginnen",
     "What it can do besides": "Was er sonst noch kann",
     "Set up Pithagoras": "Pithagoras einrichten",
-    "Three steps. Everything here can be changed later in Settings, and Settings → Providers opens this again.": "Drei Schritte. Alles hier lässt sich später in den Einstellungen ändern, und Einstellungen → Anbieter öffnet das hier wieder.",
+    "Three steps. Everything here can be changed later in Settings.": "Drei Schritte. Alles hier lässt sich später in den Einstellungen ändern.",
+    "Settings → Providers opens this assistant again.": "Einstellungen → Anbieter öffnet diesen Assistenten wieder.",
     "Set up later": "Später einrichten",
     "Add a provider with at least one model first": "Füg zuerst einen Anbieter mit mindestens einem Modell hinzu",
     "Start a chat": "Einen Chat beginnen",
-    "Steps": "Schritte",
     "A server on your network — llama.cpp, llama-swap, Ollama — or a hosted service with a key. Its models are looked up as soon as it answers.": "Ein Server in deinem Netz — llama.cpp, llama-swap, Ollama — oder ein gehosteter Dienst mit Schlüssel. Seine Modelle werden abgefragt, sobald er antwortet.",
     "{n} models": { one: "{n} Modell", other: "{n} Modelle" },
     "Hosted — every model pi knows of from it": "Gehostet — jedes Modell, das pi von dort kennt",

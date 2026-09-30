@@ -104,7 +104,7 @@
 .provider-loaded-dot { display: inline-block; width: 5px; height: 5px; border-radius: 99px; background: currentColor; }
 
 /* ── The setup assistant: where you are, as a line that fills ── */
-.setup-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.setup-steps { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
 .setup-step { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: rgb(var(--fg-faint)); transition: color .3s; }
 .setup-step::before { content: ""; height: 3px; border-radius: 99px; background: linear-gradient(90deg, rgb(var(--accent)) 50%, rgb(var(--fg) / .08) 50%) right / 200% 100%; transition: background-position .5s var(--ease-out); }
 .setup-step.is-done, .setup-step.is-current { color: rgb(var(--fg)); }

@@ -217,7 +217,7 @@ test('Back leads to the step before on every step after the first, and leaving s
   const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
   const current = setup.locator('.setup-step[aria-current="step"]');
   // Said where every device shows it, whichever way the assistant is left.
-  await expect(setup.getByText('Settings → Providers opens this again')).toBeVisible();
+  await expect(setup.getByText('Settings → Providers opens this assistant again.')).toBeInViewport({ ratio: 1 });
   // The first step has nothing before it: what leaves is named for what it does, not as a skip.
   await expect(current).toContainText('1. Provider');
   await expect(setup.getByRole('button', { name: 'Back' })).toHaveCount(0);
@@ -242,6 +242,10 @@ test('on a phone the way forward stays at the right of the assistant, away from 
   const next = (await setup.getByRole('button', { name: 'Next' }).boundingBox())!;
   const later2next = next.x - (later.x + later.width);
   expect(later2next).toBeGreaterThan(100);
+  // Where it is found again is said in full, not cut off as the one-line subtitle would.
+  const hint = setup.getByText('Settings → Providers opens this assistant again.');
+  expect(await hint.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+  await expect(hint).toBeInViewport({ ratio: 1 });
 });
 
 test('a stored model no one offers any more is not kept: the assistant offers one that is, and saves it', async ({ page }) => {
