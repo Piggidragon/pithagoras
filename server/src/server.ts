@@ -407,8 +407,9 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 
 /**
  * The project, its chats and its folder. Refused while any chat or routine run
- * in it is working, and while its folder is a repository with work that only
- * the folder has — uncommitted changes, commits no remote has, stashes —
+ * in it is working, and while its folder holds repositories — itself, submodules,
+ * clones in subfolders — with work that only the folder has — uncommitted
+ * changes, commits no remote has, stashes —
  * unless `?discard=1` says that is meant. Folders here can be repositories the
  * portal never made, and nothing brings one back.
  *
@@ -420,14 +421,17 @@ app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     // First, before the checks below: git can take seconds, and a chat or a
-    // routine may start in that time, which is what those checks are for.
-    const unsaved = await unsavedWork(project.path);
-    if (unsaved && (unsaved.changed || unsaved.unpushed || unsaved.stashes || unsaved.unknown) && req.query.discard !== "1") {
-      return res.status(409).json({
-        error: "This folder holds work that exists nowhere else. Delete it only when that is meant.",
-        code: "unsaved-work",
-        unsaved,
-      });
+    // routine may start in that time, which is what those checks are for. Not
+    // asked at all once ?discard=1 says the answer does not matter.
+    if (req.query.discard !== "1") {
+      const unsaved = await unsavedWork(project.path);
+      if (unsaved && (unsaved.changed || unsaved.unpushed || unsaved.stashes || unsaved.unknown)) {
+        return res.status(409).json({
+          error: "This folder holds work that exists nowhere else. Delete it only when that is meant.",
+          code: "unsaved-work",
+          unsaved,
+        });
+      }
     }
     const chats = workingIn(project.path, listSessions());
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {

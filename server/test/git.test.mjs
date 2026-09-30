@@ -599,7 +599,7 @@ test("unsaved work: a .git that cannot be read is not taken for a clean one", as
   assert.equal(got?.unknown, true);
 });
 
-test("unsaved work: a commit on a detached HEAD counts, and so do more files than the panel lists", async () => {
+test("unsaved work: a commit on a detached HEAD counts, and a new folder is one change", async () => {
   const dir = repo();
   const remote = path.join(home, `remote${++n}.git`);
   execFileSync("git", ["init", "-q", "--bare", remote]);
@@ -614,7 +614,8 @@ test("unsaved work: a commit on a detached HEAD counts, and so do more files tha
   const many = repo();
   mkdirSync(path.join(many, "out"));
   for (let i = 0; i < g.MAX_FILES + 100; i++) writeFileSync(path.join(many, "out", `f${i}`), "x");
-  assert.equal((await g.unsavedWork(many)).changed, g.MAX_FILES + 100);
+  // Only whether something is there matters: git does not list every file in it.
+  assert.equal((await g.unsavedWork(many)).changed, 1);
 });
 
 test("unsaved work: a linked worktree loses its own files, not the main repository's history", async () => {
@@ -640,4 +641,89 @@ test("unsaved work: a repository before its first commit is readable, and a deta
   sh(tree, "add", "-A");
   sh(tree, "commit", "-qm", "on no branch, in a worktree");
   assert.deepEqual(await g.unsavedWork(tree), { changed: 0, unpushed: 1, stashes: 0 });
+});
+
+/** A bare remote that has the repository's main. */
+function pushed(dir) {
+  const remote = path.join(home, `remote${++n}.git`);
+  execFileSync("git", ["init", "-q", "--bare", remote]);
+  sh(dir, "remote", "add", "origin", remote);
+  sh(dir, "push", "-q", "-u", "origin", "main");
+  return remote;
+}
+
+test("unsaved work: a submodule's changes, commits and stashes count, as its data is in the folder", async () => {
+  const lib = repo();
+  const dir = repo();
+  pushed(dir);
+  sh(dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "lib");
+  sh(dir, "commit", "-qm", "add lib");
+  sh(dir, "push", "-q");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 0, stashes: 0 });
+
+  const sub = path.join(dir, "lib");
+  writeFileSync(path.join(sub, "a.txt"), "edited\n");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 1, unpushed: 0, stashes: 0 });
+  // Committed in the submodule: the commit is the submodule's, the new pointer the parent's.
+  sh(sub, "commit", "-qam", "only here");
+  writeFileSync(path.join(sub, "n.txt"), "n\n");
+  sh(sub, "stash", "-u", "-q");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 1, unpushed: 1, stashes: 1 });
+});
+
+test("unsaved work: a folder that is no repository is looked through for clones", async () => {
+  const folder = path.join(home, `client${++n}`);
+  mkdirSync(folder);
+  assert.equal(await g.unsavedWork(folder), null);
+  const api = path.join(folder, "api");
+  const web = path.join(folder, "apps", "web");
+  execFileSync("git", ["clone", "-q", repo(), api]);
+  execFileSync("git", ["clone", "-q", repo(), web]);
+  assert.deepEqual(await g.unsavedWork(folder), { changed: 0, unpushed: 0, stashes: 0 });
+
+  writeFileSync(path.join(api, "a.txt"), "edited\n");
+  sh(api, "commit", "-qam", "only here");
+  writeFileSync(path.join(web, "new.txt"), "new\n");
+  // Not looked into: what is in node_modules came from elsewhere.
+  const dep = path.join(folder, "node_modules", "dep");
+  mkdirSync(dep, { recursive: true });
+  sh(dep, "init", "-q");
+  writeFileSync(path.join(dep, "x.txt"), "x\n");
+  assert.deepEqual(await g.unsavedWork(folder), { changed: 1, unpushed: 1, stashes: 0 });
+});
+
+test("unsaved work: a .git file that points inside the folder counts the branches and stashes it holds", async () => {
+  const dir = path.join(home, `split${++n}`);
+  mkdirSync(dir);
+  sh(dir, "init", "-q", "--separate-git-dir", path.join(dir, "data.git"));
+  writeFileSync(path.join(dir, ".gitignore"), "data.git/\n");
+  sh(dir, "add", "-A");
+  sh(dir, "commit", "-qm", "first");
+  sh(dir, "branch", "side");
+  writeFileSync(path.join(dir, "s.txt"), "s\n");
+  sh(dir, "stash", "-u", "-q");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 1, stashes: 1 });
+});
+
+test("unsaved work: commits a tag holds are taken for ones a remote has", async () => {
+  const dir = repo();
+  pushed(dir);
+  // A release branch that is gone, its tag left.
+  sh(dir, "switch", "-q", "-c", "release");
+  writeFileSync(path.join(dir, "r.txt"), "r\n");
+  sh(dir, "add", "-A");
+  sh(dir, "commit", "-qm", "release");
+  sh(dir, "tag", "v1");
+  sh(dir, "switch", "-q", "main");
+  sh(dir, "branch", "-q", "-D", "release");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 0, stashes: 0 });
+  sh(dir, "switch", "-q", "--detach", "v1");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 0, stashes: 0 });
+});
+
+test("unsaved work: a worktree inside the folder of its own repository does not count its branches twice", async () => {
+  const dir = repo();
+  sh(dir, "worktree", "add", "-q", "-b", "wt", path.join(dir, "wt"));
+  // The worktree is a new folder to the main one; the one commit, on main and wt, is counted once.
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 1, unpushed: 1, stashes: 0 });
 });
