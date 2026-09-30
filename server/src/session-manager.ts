@@ -2139,7 +2139,7 @@ class SessionManager extends EventEmitter {
     const defaults = toolDefaultsOff();
     const exceptions = sessionTools(sessionId);
     const servers = mcpServerNames();
-    const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : shownTools();
+    const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : shownTools(getSession(sessionId)?.workspace);
     return {
       tools: shown.map(({ name, source, description }) => ({
         name,

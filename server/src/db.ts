@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
-import { piSetting, readPiSettings } from "./pi-settings.js";
-import { npmName, packageKey, sourceOf, toolAvailability } from "./extension-switch.js";
+import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
+import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { browserTool, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
@@ -1767,18 +1767,20 @@ export function knownTools(): KnownTool[] {
  * is switched off or gone. What is remembered stays, for a package that comes
  * back; this is what the settings page and an idle chat show — without the
  * package, which is the portal's bookkeeping and not the page's business.
+ * For a chat, `folder` is where it runs, whose project may bring packages of
+ * its own.
  */
-export function shownTools(): Omit<KnownTool, "package">[] {
+export function shownTools(folder?: string): Omit<KnownTool, "package">[] {
+  const project = folder ? readProjectPiSettings(folder).packages : undefined;
   return knownTools()
-    .filter(toolAvailability(readPiSettings().packages))
+    .filter(toolAvailability(readPiSettings().packages, project))
     .map(({ package: _package, ...tool }) => tool);
 }
 
 /** The keys of the packages pi's settings list, or undefined when they cannot be read. */
 function listedPackages(): Set<string> | undefined {
-  const packages = readPiSettings().packages;
-  if (!Array.isArray(packages)) return undefined;
-  return new Set(packages.map(sourceOf).filter((s) => s !== undefined).map(packageKey));
+  const index = packageIndex(readPiSettings().packages);
+  return index && new Set(index.byKey.keys());
 }
 
 /**
@@ -1797,16 +1799,37 @@ function listedPackages(): Set<string> | undefined {
 export function forgetPackageTools(spec: string): void {
   const listed = listedPackages();
   const key = packageKey(spec);
-  const name = npmName(spec);
+  const label = packageLabel(spec);
   const servers = mcpServerNames();
   const gone = (t: KnownTool) => {
     if (mcpServerOf(t.name, servers) !== undefined) return false;
     if (typeof t.package === "string") return listed ? !listed.has(packageKey(t.package)) : packageKey(t.package) === key;
-    return t.package === undefined && name !== undefined && t.source === name;
+    // A guess, for a folder or a repository especially; one that guesses wrong
+    // costs a loaded tool its entry only until the next chat reports it.
+    return t.package === undefined && label !== undefined && t.source === label;
   };
   const all = knownTools();
   const kept = all.filter((t) => !gone(t));
   if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
+}
+
+/**
+ * What a package that has been uninstalled leaves behind: its tools, and what
+ * was kept aside for switching it back on, which has nothing left to go to —
+ * dropped in turn with the switches, which read and write it too.
+ */
+export async function packageRemoved(source: string): Promise<void> {
+  forgetPackageTools(source);
+  await updatePiSettings(
+    () => {},
+    () => {
+      const stash = extensionStash();
+      if (source in stash) {
+        delete stash[source];
+        setExtensionStash(stash);
+      }
+    },
+  );
 }
 
 /**

@@ -93,6 +93,22 @@ test("a project bringing the user's package in its own settings does not take it
   assert.equal(shownTools().some((t) => t.name === "other"), false);
 });
 
+test("uninstalling a folder forgets the entries from before by the folder's name", () => {
+  rememberTools([{ name: "subagent", source: "subagent" }]);
+  forgetPackageTools("../../extensions/subagent");
+  assert.equal(knownTools().some((t) => t.name === "subagent"), false);
+});
+
+test("an idle chat in a project that brings the package itself is offered its tools", async () => {
+  const project = path.join(home, "proj");
+  mkdirSync(path.join(project, ".pi"), { recursive: true });
+  writeFileSync(path.join(project, ".pi", "settings.json"), JSON.stringify({ packages: ["npm:pi-other"] }));
+  listPackages([OFF("npm:pi-other")]);
+  createSession({ id: "in-project", title: "p", workspace: project, executor: "host" });
+  assert.ok((await sessions.getTools("in-project")).tools.some((t) => t.name === "other"));
+  assert.ok(!(await sessions.getTools("idle")).tools.some((t) => t.name === "other"));
+});
+
 test("what is shown carries no package", () => {
   listPackages(["npm:pi-other"]);
   assert.equal(shownTools().some((t) => "package" in t), false);

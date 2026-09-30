@@ -159,11 +159,15 @@ with it; an uninstalled one's are forgotten. MCP servers' tools go with
 uninstalled, since the servers are configured apart from it. A package is the
 same package at any version, so updating one keeps its tools. One narrowed to
 some of its extensions keeps all its tools listed here; a started chat shows
-only what is loaded. A tool remembered before the
-portal recorded which package it came from is left out when its npm package is
-switched off, until a conversation reports it again. If that package was
-uninstalled outside the portal, nothing says the tool was a package's, and it
-stays listed until it is removed from `tools_seen` in the portal's database.
+only what is loaded. Before a chat in a project starts, a package the project
+lists and loads itself counts, whatever the user's entry says.
+
+A tool remembered before the portal recorded which package it came from is
+left out when its npm package is switched off, until a conversation reports it
+again, and is forgotten when its package is uninstalled here — matched by the
+npm name, or the folder or repository name, it is filed under. If that package
+was uninstalled outside the portal, nothing says the tool was a package's, and
+it stays listed until it is removed from `tools_seen` in the portal's database.
 
 The list is what the model could be offered. pi registers `grep`, `find` and
 `ls` and leaves them inactive, so they are not there to tick. A switch holds

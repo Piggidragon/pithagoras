@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isFiltered, isSwitchedOff, npmName, packageKey, setPackageEnabled, sourceOf, toolAvailability } from "../dist/extension-switch.js";
+import { isFiltered, isSwitchedOff, npmName, packageKey, packageLabel, setPackageEnabled, sourceOf, toolAvailability } from "../dist/extension-switch.js";
 
 const toolAvailable = (tool, packages) => toolAvailability(packages)(tool);
 const OFF = (source) => ({ source, extensions: [], skills: [], prompts: [], themes: [] });
@@ -147,6 +147,28 @@ test("a tool remembered before packages were recorded is found by its name when 
   assert.equal(toolAvailable(old, ["npm:@juicesharp/rpiv-todo"]), true);
   // Not listed: nothing says it was a package, so it is left alone.
   assert.equal(toolAvailable(old, []), true);
+});
+
+test("with autoload off, a package loads only the extensions it names", () => {
+  const tool = { source: "pi-foo", package: "npm:pi-foo" };
+  assert.equal(toolAvailable(tool, [{ source: "npm:pi-foo", autoload: false, skills: ["s"] }]), false);
+  assert.equal(toolAvailable(tool, [{ source: "npm:pi-foo", autoload: false, extensions: ["x.ts"] }]), true);
+});
+
+test("a project that lists the package and loads it has its tools, whatever the user's entry says", () => {
+  const tool = { source: "pi-foo", package: "npm:pi-foo" };
+  assert.equal(toolAvailability([OFF("npm:pi-foo")], ["npm:pi-foo@2.0.0"])(tool), true);
+  assert.equal(toolAvailability([OFF("npm:pi-foo")], [OFF("npm:pi-foo")])(tool), false);
+  assert.equal(toolAvailability([OFF("npm:pi-foo")], ["npm:pi-foo"])({ source: "pi-foo" }), true);
+});
+
+test("a package is labelled as its tools were filed before it was recorded", () => {
+  assert.equal(packageLabel("npm:@juicesharp/rpiv-todo@0.4.1"), "@juicesharp/rpiv-todo");
+  assert.equal(packageLabel("/opt/pithagoras/extensions/subagent/"), "subagent");
+  assert.equal(packageLabel("../../extensions/subagent"), "subagent");
+  assert.equal(packageLabel("git:github.com/user/repo@v1"), "repo");
+  assert.equal(packageLabel("https://github.com/user/repo.git#main"), "repo");
+  assert.equal(packageLabel("git:git@github.com:user/repo"), "repo");
 });
 
 test("nothing is hidden when the packages could not be read", () => {
