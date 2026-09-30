@@ -443,8 +443,8 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
 }
 
 /**
- * The bubble Copy belongs on: the last stretch of the agent's answer that has
- * something to read and is not still changing under it.
+ * The bubbles Copy belongs on: for each turn, the last stretch of the agent's
+ * answer that has something to read and is not still changing under it.
  *
  * A turn with tool calls in the middle closes the assistant item before each
  * one and opens a new one after, so a single answer can be several bubbles —
@@ -454,14 +454,24 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
  * And only when the answer ends there. A paragraph followed by a tool call is
  * the agent saying what it is about to do, not an answer — a Copy under it
  * sat between the words and the call like a stray gap.
+ *
+ * A turn ends where the next message from the person begins, so sending
+ * another question does not take Copy from the answer to the one before. One
+ * still waiting to go into the run does not end it: the agent is on the same
+ * turn until it takes that in.
  */
-export function lastReplyId(items: readonly Item[]): string | undefined {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i];
-    if (it.kind === "tool") return undefined;
-    if (it.kind === "assistant" && it.text) return it.done ? it.id : undefined;
+export function copyableReplyIds(items: readonly Item[]): Set<string> {
+  const ids = new Set<string>();
+  let last: string | undefined;
+  for (const it of items) {
+    if (it.kind === "user" && !it.queued) {
+      if (last) ids.add(last);
+      last = undefined;
+    } else if (it.kind === "tool") last = undefined;
+    else if (it.kind === "assistant" && it.text) last = it.done ? it.id : undefined;
   }
-  return undefined;
+  if (last) ids.add(last);
+  return ids;
 }
 
 /** The call an update belongs to: by its id, or else the newest one of that name still running. */

@@ -1,5 +1,5 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted to see each state,
+// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted|turns to see each state,
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -64,6 +64,14 @@ if (phase === 'args') events.push(
   ev('tool_execution_end', { toolCallId: 'lg', toolName: 'ledger', result: { content: [{ type: 'text', text: '{"balance": 0.123456789012345678901}' }] } }, 14.3),
   ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'pgvector is enough below ten million vectors; both open issues are UI polish.' }] } }, 10),
   ev('agent_end', {}, 9),
+);
+// Two more questions, each answered: the answer to the first keeps its Copy after the second is asked.
+if (phase === 'turns') events.push(
+  ev('portal_prompt', { message: 'Which database?' }, 20),
+  ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'pgvector is enough for now.' }] } }, 19),
+  ev('portal_prompt', { message: 'And the cache?' }, 10),
+  ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Redis is fine for the cache.' }] } }, 9),
+  ev('agent_end', {}, 8),
 );
 // A model that thinks a few words and a model that thinks a lot, fast: `window.think(text)` adds reasoning as it streams.
 if (phase === 'brief') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'Short one.' } }, 1));

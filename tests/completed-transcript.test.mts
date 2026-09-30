@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activity, buildTranscript, lastReplyId } from '../web/src/transcript.ts';
+import { activity, buildTranscript, copyableReplyIds } from '../web/src/transcript.ts';
 import { appendLiveEvent, resetLiveEvents } from '../web/src/live-events.ts';
 const done = { seq: 12, type: 'message_end', payload: { streamId: 'reply', message: { role: 'assistant', content: [{type: 'thinking', thinking: 'Plan'}, {type: 'text', text: 'Hello world'}] } } };
 const update = {seq: -1, type: 'message_update', payload: {streamId: 'reply', assistantMessageEvent: {type: 'text_delta', delta: 'Hello'}}};
@@ -47,7 +47,7 @@ test('Copy belongs only on the last stretch of an answer split by a tool call', 
   const items = buildTranscript(events);
   const replies = items.filter((i) => i.kind === 'assistant');
   assert.equal(replies.length, 2);
-  assert.equal(lastReplyId(items), replies[1].id);
+  assert.deepEqual([...copyableReplyIds(items)], [replies[1].id]);
 });
 
 test('a reply still streaming after the last tool call is not offered yet', () => {
@@ -57,7 +57,7 @@ test('a reply still streaming after the last tool call is not offered yet', () =
     { seq: 3, type: 'tool_execution_end', payload: { toolCallId: 't', toolName: 'read' } },
     { seq: 4, type: 'message_update', payload: { streamId: 'b', assistantMessageEvent: { type: 'text_delta', delta: 'Still going' } } },
   ];
-  assert.equal(lastReplyId(buildTranscript(events)), undefined);
+  assert.equal(copyableReplyIds(buildTranscript(events)).size, 0);
 });
 
 test('a paragraph followed by a tool call is not offered Copy', () => {
@@ -65,11 +65,56 @@ test('a paragraph followed by a tool call is not offered Copy', () => {
     { seq: 1, type: 'message_end', payload: { streamId: 'a', message: { role: 'assistant', content: [{ type: 'text', text: 'Running the tests now.' }] } } },
     { seq: 2, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'bash' } },
   ];
-  assert.equal(lastReplyId(buildTranscript(events)), undefined);
+  assert.equal(copyableReplyIds(buildTranscript(events)).size, 0);
+});
+
+const prompt = (seq: number, message: string, extra = {}) => ({ seq, type: 'portal_prompt', payload: { message, ...extra } });
+const said = (seq: number, text: string) => ({ seq, type: 'message_end', payload: { streamId: `r${seq}`, message: { role: 'assistant', content: [{ type: 'text', text }] } } });
+const textOf = (items: ReturnType<typeof buildTranscript>, ids: Set<string>) =>
+  items.filter((i) => i.kind === 'assistant' && ids.has(i.id)).map((i) => (i as any).text);
+
+test('the answer to an earlier question keeps Copy once another is asked', () => {
+  const items = buildTranscript([prompt(1, 'One?'), said(2, 'First answer.'), prompt(3, 'Two?'), said(4, 'Second answer.')]);
+  assert.deepEqual(textOf(items, copyableReplyIds(items)), ['First answer.', 'Second answer.']);
+});
+
+test('each turn offers Copy on its last stretch only, and on none that ended in a tool call', () => {
+  const items = buildTranscript([
+    prompt(1, 'One?'),
+    said(2, 'Checking the file first.'),
+    { seq: 3, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'read' } },
+    { seq: 4, type: 'tool_execution_end', payload: { toolCallId: 't', toolName: 'read' } },
+    said(5, 'It looks fine.'),
+    prompt(6, 'Two?'),
+    said(7, 'Running the tests now.'),
+    { seq: 8, type: 'tool_execution_start', payload: { toolCallId: 'u', toolName: 'bash' } },
+    { seq: 9, type: 'tool_execution_end', payload: { toolCallId: 'u', toolName: 'bash' } },
+    prompt(10, 'Three?'),
+    said(11, 'Third answer.'),
+  ]);
+  assert.deepEqual(textOf(items, copyableReplyIds(items)), ['It looks fine.', 'Third answer.']);
+});
+
+test('a question still waiting to go into the run does not take Copy from the turn it waits in', () => {
+  const items = buildTranscript([prompt(1, 'One?'), said(2, 'First answer.'), prompt(3, 'And then?', { queued: true })]);
+  assert.deepEqual(textOf(items, copyableReplyIds(items)), ['First answer.']);
+});
+
+test('a question that never reached the agent ends the turn, so the answer before it keeps Copy', () => {
+  const items = buildTranscript([
+    prompt(1, 'One?'),
+    said(2, 'First answer.'),
+    prompt(3, 'Forgotten?', { queued: true }),
+    { seq: 4, type: 'portal_unsent', payload: { seqs: [3], prompts: { 3: { message: 'Forgotten?', queued: true } } } },
+    prompt(5, 'Two?'),
+    said(6, 'Second answer.'),
+  ]);
+  assert.equal(items.filter((i) => i.kind === 'user').length, 3);
+  assert.deepEqual(textOf(items, copyableReplyIds(items)), ['First answer.', 'Second answer.']);
 });
 
 test('nothing to copy before anything has been said', () => {
-  assert.equal(lastReplyId([]), undefined);
+  assert.equal(copyableReplyIds([]).size, 0);
 });
 test('tool calls keep their arguments, output and timing; compaction shows where it happened', () => {
   const items = buildTranscript([

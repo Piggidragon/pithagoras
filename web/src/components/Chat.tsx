@@ -24,7 +24,7 @@ import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
-import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
+import { activity, buildTranscript, copyableReplyIds, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
@@ -724,7 +724,7 @@ export function Chat({
     }
     return undefined;
   }, [items]);
-  const lastReply = useMemo(() => lastReplyId(items), [items]);
+  const copyable = useMemo(() => copyableReplyIds(items), [items]);
   // A switch to another version, by the message clicked: until the chat has
   // loaded again without it, a second click would ask about a message that is
   // on its way out, and fail after the first had worked.
@@ -1796,12 +1796,12 @@ export function Chat({
                     </Streamdown>
                   </div>
                 )}
-                {/* Under the answer, where it ends: only the last bubble of the
-                    reply, and only once nothing follows it. One per tool call
-                    in between would be a Copy button after every paragraph,
-                    and one beside the words sat in the margin where the eye
-                    does not go. */}
-                {item.id === lastReply && item.text && (
+                {/* Under the answer, where it ends: only the last bubble of each
+                    reply, and only once nothing in the turn follows it. One per
+                    tool call in between would be a Copy button after every
+                    paragraph, and one beside the words sat in the margin where
+                    the eye does not go. */}
+                {copyable.has(item.id) && item.text && (
                   <div className="reply-actions -ml-1.5 mt-1 flex items-center gap-0.5">
                     <CopyAction text={assistantText(item)} />
                   </div>
