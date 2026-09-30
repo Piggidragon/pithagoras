@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const { insideReal, isWithinReal, isWithinText } = await import("../dist/within.js");
+const { insideReal, isUnderText, isWithinReal, isWithinText, pathBelow } = await import("../dist/within.js");
 
 test("the folder itself and what is under it are within it, by text", () => {
   assert.equal(isWithinText("/w/site", "/w/site"), true);
@@ -21,6 +21,15 @@ test("a trailing separator and the root folder are handled", () => {
   assert.equal(isWithinText("/w/site/", "/w/site"), true);
   assert.equal(isWithinText("/w/site/", "/w/site/a.ts"), true);
   assert.equal(isWithinText("/", "/etc/passwd"), true);
+});
+
+test("under is inside and not the folder itself; below says what is under it", () => {
+  assert.equal(isUnderText("/w/site", "/w/site/a"), true);
+  assert.equal(isUnderText("/w/site", "/w/site"), false);
+  assert.equal(isUnderText("/w/site/", "/w/site"), false);
+  assert.equal(pathBelow("/w/site/", "/w/site/docs/../a.md"), "a.md");
+  assert.equal(pathBelow("/w/site", "/w/site"), "");
+  assert.equal(pathBelow("/w/site", "/w/other"), undefined);
 });
 
 test("what is written with .. or doubled separators is judged by where it goes", () => {

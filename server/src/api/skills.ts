@@ -1,7 +1,6 @@
 import express, { type Router } from "express";
 import {
   existsSync,
-  realpathSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -16,6 +15,7 @@ import { agentHome } from "../agent.js";
 import { builtinSkillsDir } from "../pi/sdk-client.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { importFromGit, previewFromGit, readSource, type SkillSource } from "../skills/github.js";
+import { isUnderText, realPath } from "../within.js";
 
 /**
  * Skills are pi's, not the portal's: it discovers them, decides which are
@@ -76,10 +76,13 @@ async function loadFromPi(): Promise<{ skills: LoadedSkill[]; diagnostics: any[]
   return { skills: result?.skills ?? [], diagnostics: result?.diagnostics ?? [] };
 }
 
-const isEditable = (filePath: string) => {
-  const root = skillsRoot();
-  try { return realpathSync(filePath).startsWith(realpathSync(root) + path.sep); } catch { return false; }
+/** `p` really leads to somewhere inside the skills root, links followed, and is not the root itself. */
+const underRoot = (p: string) => {
+  const [real, realRoot] = [realPath(p), realPath(skillsRoot())];
+  return real !== null && realRoot !== null && isUnderText(realRoot, real);
 };
+
+const isEditable = underRoot;
 
 /** The directory that owns a skill, which is what delete removes. */
 const skillDir = (filePath: string) => path.dirname(path.resolve(filePath));
@@ -199,8 +202,8 @@ export function skillsRouter(): Router {
   const router = express.Router();
   router.param("name", (req, res, next, name) => {
     if (!isValidSlug(name)) return res.status(400).json({ error: "Invalid skill name" });
-    const root = skillsRoot(), dir = path.join(root, name);
-    if (existsSync(dir) && !realpathSync(dir).startsWith(realpathSync(root) + path.sep)) {
+    const dir = path.join(skillsRoot(), name);
+    if (existsSync(dir) && !underRoot(dir)) {
       return res.status(400).json({ error: "Skill directory escapes its root" });
     }
     next();

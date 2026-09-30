@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync 
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { isWithinText } from "../within.js";
+import { isUnderText, isWithinText } from "../within.js";
 
 const run = promisify(execFile);
 
@@ -235,7 +235,7 @@ export function channelPackageTarget(packageName: string): string {
   if (!isPackageName(packageName)) throw new Error("Invalid package name");
   const root = path.resolve(channelsDir(), "node_modules");
   const target = path.resolve(root, packageName);
-  if (!isWithinText(root, target)) throw new Error("Invalid package path");
+  if (!isUnderText(root, target)) throw new Error("Invalid package path");
   const parent = path.dirname(target);
   if (existsSync(parent) && existsSync(root)) {
     const realRoot = realpathSync(root), realParent = realpathSync(parent);

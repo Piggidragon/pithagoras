@@ -30,10 +30,9 @@ test('relative paths, as the files panel has them', () => {
   assert.equal(within('src', 'src/a.ts'), true);
   assert.equal(within('src', 'src2/a.ts'), false);
   assert.equal(within('src', ''), false);
-  // "" is the top of the tree: every relative path is in it, no absolute one.
-  assert.equal(within('', 'src/a.ts'), true);
-  assert.equal(below('', 'src/a.ts'), 'src/a.ts');
-  assert.equal(within('', '/etc'), false);
+  // "" is "/", as the hand-written copies had it: every absolute path.
+  assert.equal(within('', '/etc'), true);
+  assert.equal(within('', 'src/a.ts'), false);
 });
 
 test('below says what is under the folder', () => {

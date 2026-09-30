@@ -23,7 +23,7 @@ import {
   updateSession,
 } from "./db.js";
 import { checkWorkspace, workspaceRoot } from "./workspaces.js";
-import { insideReal, isWithinText } from "./within.js";
+import { insideReal, isUnderText, isWithinText } from "./within.js";
 import { agentHomePath } from "./agent-home.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import {
@@ -284,7 +284,7 @@ app.post("/api/workspaces", (req, res) => {
   }
 
   const target = path.join(WORKSPACE_ROOT, name);
-  if (path.resolve(target) !== target || !isWithinText(WORKSPACE_ROOT, target)) {
+  if (path.resolve(target) !== target || !isUnderText(WORKSPACE_ROOT, target)) {
     return res.status(400).json({ error: "Invalid workspace name" });
   }
   if (existsSync(target)) return res.status(409).json({ error: `Workspace "${name}" already exists` });

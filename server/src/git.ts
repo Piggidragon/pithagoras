@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
-import { isWithinReal, isWithinText } from "./within.js";
+import { isUnderText, isWithinReal, realPath } from "./within.js";
 
 /**
  * Git, and GitHub through `gh` where it is installed, for the Git panel.
@@ -602,11 +602,7 @@ export async function unsavedIn(base: string, target: string): Promise<Unsaved |
 
 /** A path's real place, or the path when it is gone. */
 function real(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
+  return realPath(p) ?? p;
 }
 
 /**
@@ -621,7 +617,7 @@ async function ownChanges(repo: Repo, files: ChangedFile[], tops: Set<string>): 
   for (const f of files) {
     if (isTop(f)) continue;
     const at = real(path.join(repo.root, f.path));
-    if (f.kind !== "untracked" || !f.path.endsWith("/") || !topList.some((top) => isWithinText(at, top))) {
+    if (f.kind !== "untracked" || !f.path.endsWith("/") || !topList.some((top) => isUnderText(at, top))) {
       n++;
       continue;
     }

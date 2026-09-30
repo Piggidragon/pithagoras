@@ -164,10 +164,11 @@ export function GitPanel({
       show: (view) => setStack((s) => [...s, view]),
       // Files shows the chat's folder; a file of the repository outside it is
       // not there to open, and is offered no button that would do nothing.
-      inFolder: (p) => within(state.prefix, p),
+      inFolder: (p) => !state.prefix || within(state.prefix, p),
       openFile: onOpenFile
         ? (p) => {
-            const rel = below(state.prefix, p);
+            // At the top of the repository every path of it is in the folder.
+            const rel = state.prefix ? below(state.prefix, p) : p;
             if (rel !== undefined) onOpenFile(rel);
           }
         : undefined,
