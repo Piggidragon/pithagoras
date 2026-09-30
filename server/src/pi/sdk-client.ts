@@ -16,7 +16,7 @@ import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
-import { contextWindowFor } from "../db.js";
+import { contextWindowFor, getVoiceInstructions } from "../db.js";
 import { configStamp } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { UNDERSTORY_RULE, understoryOn } from "../features.js";
@@ -391,7 +391,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // prompt templates — so installed packages contribute no commands at all.
     // The CLI wires this up for you; here it has to be asked for.
     const voiceFirst = new VoiceFirstTurn();
-    const audioRule = new AudioRule();
+    const audioRule = new AudioRule(getVoiceInstructions);
     const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
     let resourceLoader: any;
     try {

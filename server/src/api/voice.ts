@@ -2,6 +2,7 @@ import { addVoice, listVoices, readVoice, deleteVoice } from '../voice-presets.j
 import { spokenNumbers } from '../voice-numbers.js';
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from '../voice-languages.js';
 import { VoiceLeases } from '../extensions/voice-leases.js';
+import { DEFAULT_VOICE_INSTRUCTIONS, voiceInstructions, voiceRulesOn } from '../pi/voice-first.js';
 import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
@@ -28,7 +29,11 @@ export interface VoiceConfig {
   sttModel?: string;
   // Chatterbox emotion exaggeration; its own scale, unrelated to Breeze's CFG.
   exaggeration?: number;
+  // How the agent is told to speak in voice mode. Empty means the built-in text.
+  responseInstructions?: string;
 }
+/** Long enough for the built-in text several times over; every voice turn carries it. */
+export const MAX_RESPONSE_INSTRUCTIONS = 8000;
 function config(): VoiceConfig {
   const stored = getStoredSettings() as Record<string, string>;
   return stored.voice ? { voice: "design", language: "auto", cfgScale: 4, ...JSON.parse(stored.voice) } : {
@@ -64,6 +69,9 @@ export function validateConfig(value: any): VoiceConfig {
   const exaggeration = value.exaggeration ?? 0.5;
   if (typeof exaggeration !== "number" || !Number.isFinite(exaggeration) || exaggeration < 0 || exaggeration > 2)
     throw new Error("Expressiveness must be between 0 and 2");
+  const responseInstructions = value.responseInstructions ?? "";
+  if (typeof responseInstructions !== "string" || responseInstructions.length > MAX_RESPONSE_INSTRUCTIONS)
+    throw new Error(`Speaking instructions may be at most ${MAX_RESPONSE_INSTRUCTIONS} characters`);
   if (runtime === "chatterbox") {
     // Chatterbox is told a language or it refuses; it has no detection mode,
     // and the language also decides how numbers are written out for synthesis.
@@ -78,7 +86,20 @@ export function validateConfig(value: any): VoiceConfig {
     if (typeof vad[key] !== 'number' || !Number.isFinite(vad[key]) || vad[key] < min || vad[key] > max) throw new Error(`Invalid VAD ${key}: expected ${min}–${max}`);
   }
   if (vad.negativeSpeechThreshold >= vad.positiveSpeechThreshold) throw new Error('Speech-end threshold must be lower than speech-start threshold');
-  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, exaggeration, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
+  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, exaggeration, responseInstructions: savedInstructions(responseInstructions), enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
+}
+/** Text equal to the built-in instructions is not saved, so they follow the portal's updates. */
+function savedInstructions(text: string): string {
+  const trimmed = text.trim();
+  return trimmed === DEFAULT_VOICE_INSTRUCTIONS ? "" : trimmed;
+}
+/**
+ * The settings as the page gets them: the speaking instructions in use, whether
+ * saved or built in, and the built-in ones to go back to. `off` says the portal
+ * sends none at all (VOICE_RESPONSE_INSTRUCTIONS=false), saved or not.
+ */
+function withInstructions<T extends { responseInstructions?: string }>(value: T) {
+  return { ...value, responseInstructions: voiceInstructions(value.responseInstructions), defaultResponseInstructions: DEFAULT_VOICE_INSTRUCTIONS, responseInstructionsOff: !voiceRulesOn() };
 }
 /** The samples of a RIFF/WAVE buffer, checked to be what the player expects. */
 export function wavPcm(wav: Buffer): Buffer {
@@ -169,15 +190,15 @@ export function voiceRouter(): Router {
   router.post('/voice/connect', async (_req, res) => {
     try {
       if ((await voiceService.status()).state !== 'running') throw new Error('Wait for voice setup to finish before connecting');
-      res.json(connectManagedVoice());
+      res.json(withInstructions(connectManagedVoice()));
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
-  router.get("/voice", (_req, res) => res.json({...config(),managed:managedVoice(),comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"}));
+  router.get("/voice", (_req, res) => res.json({...withInstructions(config()),managed:managedVoice(),comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"}));
   router.put("/voice", (req, res) => {
     try {
       const saved = validateConfig(req.body);
       getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(saved));
-      res.json(saved);
+      res.json(withInstructions(saved));
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
   router.use("/sessions/:id/voice", (req, res, next) => {

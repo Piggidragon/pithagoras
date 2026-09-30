@@ -64,7 +64,14 @@ export default function (pi: any) {
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.stringify({ compaction: { keepRecentTokens: 1 } }));
 
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
-const { AUDIO_SYSTEM_RULE } = await import("../dist/pi/voice-first.js");
+const { AUDIO_SYSTEM_RULE, DEFAULT_VOICE_INSTRUCTIONS, audioSystemRule } = await import("../dist/pi/voice-first.js");
+const { getDb } = await import("../dist/db.js");
+
+/** Saves the speaking instructions as Settings → Voice does; none takes them away again. */
+function saveInstructions(text) {
+  const saved = text === undefined ? {} : { responseInstructions: text };
+  getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(saved));
+}
 
 let chats = 0;
 const open = (sessionFile) => {
@@ -329,5 +336,98 @@ test("with VOICE_RESPONSE_INSTRUCTIONS=false no conversation has the rule", asyn
   } finally {
     client.dispose();
     delete process.env.VOICE_RESPONSE_INSTRUCTIONS;
+  }
+});
+
+test("saved speaking instructions are used for voice turns instead of the built-in ones", async () => {
+  saveInstructions("Answer in one word.");
+  const client = await open();
+  try {
+    const spoken = await say(client, "Spoken", true);
+    assert.ok(spoken.includes(audioSystemRule("Answer in one word.")));
+    assert.ok(!spoken.includes(DEFAULT_VOICE_INSTRUCTIONS));
+    // The note on what the marker means is still there around them.
+    assert.match(spoken, /does not mean any request has it/);
+    assert.equal(await say(client, "Typed again"), spoken);
+  } finally {
+    client.dispose();
+    saveInstructions(undefined);
+  }
+  // Emptied, or never saved: the built-in ones.
+  for (const none of [undefined, ""]) {
+    saveInstructions(none);
+    const again = await open();
+    try {
+      assert.ok((await say(again, "Spoken", true)).includes(AUDIO_SYSTEM_RULE));
+    } finally {
+      again.dispose();
+    }
+  }
+});
+
+test("instructions saved in the middle of a conversation apply from its next spoken message", async () => {
+  saveInstructions("First wording.");
+  const client = await open();
+  try {
+    const first = await say(client, "Spoken", true);
+    assert.ok(first.includes(audioSystemRule("First wording.")));
+    saveInstructions("Second wording.");
+    // Typed messages keep the prompt the model has cached.
+    assert.equal(await say(client, "Typed"), first);
+    const second = await say(client, "Spoken again", true);
+    assert.ok(second.includes(audioSystemRule("Second wording.")));
+    assert.doesNotMatch(second, /First wording/);
+    assert.equal(second.split("Do not read the marker aloud").length, 2, "the rule once");
+    assert.equal(await say(client, "Spoken once more", true), second, "and then no change");
+  } finally {
+    client.dispose();
+    saveInstructions(undefined);
+  }
+});
+
+test("instructions saved while a run is going reach its next turn in place of the earlier ones", async () => {
+  // The prompt an extension set for the run was made with the first wording.
+  globalThis.addPolicy = true;
+  saveInstructions("First wording.");
+  const client = await open();
+  let release;
+  try {
+    assert.ok((await say(client, "Spoken", true)).includes(audioSystemRule("First wording.")));
+    hold = new Promise((resolve) => { release = resolve; });
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    saveInstructions("Second wording.");
+    await client.prompt("Spoken meanwhile", { voice: true });
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2, "one run, two answers");
+    assert.ok(sent[before].includes(audioSystemRule("First wording.")));
+    assert.match(sent[before + 1], /SHELL POLICY/);
+    assert.ok(sent[before + 1].includes(audioSystemRule("Second wording.")));
+    assert.doesNotMatch(sent[before + 1], /First wording/);
+  } finally {
+    hold = undefined;
+    release?.();
+    delete globalThis.addPolicy;
+    client.dispose();
+    saveInstructions(undefined);
+  }
+});
+
+test("with VOICE_RESPONSE_INSTRUCTIONS=false saved speaking instructions are not used either", async () => {
+  saveInstructions("Answer in one word.");
+  process.env.VOICE_RESPONSE_INSTRUCTIONS = "false";
+  const client = await open();
+  try {
+    const spoken = await say(client, "Spoken", true);
+    assert.doesNotMatch(spoken, /Audio mode/);
+    assert.doesNotMatch(spoken, /Answer in one word/);
+  } finally {
+    client.dispose();
+    delete process.env.VOICE_RESPONSE_INSTRUCTIONS;
+    saveInstructions(undefined);
   }
 });
