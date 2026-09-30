@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuUserX } from "react-icons/lu";
+import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuTrash2, LuUserX } from "react-icons/lu";
+import { confirmDialog } from "./ConfirmDialog";
 import { PageHeader, Stat } from "./PageHeader";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
@@ -74,6 +75,24 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
     return pollWhileVisible(load, 10_000);
   }, []);
 
+  /** The whole history, after asking: it is the record of what the guard decided. */
+  const clear = async () => {
+    const ok = await confirmDialog({
+      title: t("Clear the audit log?"),
+      message: t("Every recorded decision is deleted. This cannot be undone."),
+      confirmLabel: t("Clear the audit log"),
+      danger: true,
+      deletes: true,
+    });
+    if (!ok) return;
+    try {
+      await api.clearAudit();
+      setEntries([]);
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  };
+
   const shown = entries.filter((e) =>
     filter === "all"
       ? true
@@ -130,6 +149,13 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
           </button>
         ))}
         <span className="ml-auto text-xs text-fg-faint">{shown.length}</span>
+        <button
+          onClick={clear}
+          disabled={entries.length === 0}
+          className="ml-2 flex items-center gap-1 rounded-lg bg-fg/5 px-2.5 py-1 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger disabled:pointer-events-none disabled:opacity-40"
+        >
+          <LuTrash2 className="h-3 w-3" /> {t("Clear")}
+        </button>
       </div>
 
       {shown.length === 0 ? (

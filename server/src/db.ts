@@ -1417,6 +1417,9 @@ export function recordAudit(entry: {
 export const listAudit = (limit = 200): AuditRow[] =>
   getDb().prepare("SELECT * FROM audit ORDER BY id DESC LIMIT ?").all(limit) as AuditRow[];
 
+/** Empties the log, for when its history is no longer wanted; returns how many entries went. */
+export const clearAudit = (): number => getDb().prepare("DELETE FROM audit").run().changes;
+
 /** Does this routine's runs get the guard's blocking rules? Unknown means yes. */
 export function routineGuards(slug: string | null | undefined): boolean {
   if (!slug) return true;

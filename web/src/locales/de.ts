@@ -849,6 +849,9 @@ const de: Locale = {
     "Milliseconds": "Millisekunden",
     "default": "Standard",
     // components/MemoryPage.tsx
+    "Clear the audit log?": "Das Audit-Protokoll leeren?",
+    "Every recorded decision is deleted. This cannot be undone.": "Jede aufgezeichnete Entscheidung wird gelöscht. Das lässt sich nicht rückgängig machen.",
+    "Clear the audit log": "Audit-Protokoll leeren",
     "Clear the whole memory?": "Das ganze Gedächtnis leeren?",
     "Every note and folder is deleted, and the index and log start empty, as in a new memory. The agent forgets everything it kept here. This cannot be undone.": "Jede Notiz und jeder Ordner wird gelöscht, und Index und Log beginnen leer, wie bei einem neuen Gedächtnis. Der Agent vergisst alles, was er hier behalten hat. Das lässt sich nicht rückgängig machen.",
     "Clear the memory": "Das Gedächtnis leeren",

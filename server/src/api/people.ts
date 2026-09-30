@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { forgetPerson, getPerson, listPeople, setRole, type Role } from "../people.js";
-import { AUDIT_KEEP, addToolRule, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
+import { AUDIT_KEEP, addToolRule, clearAudit, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
 import { nanoid } from "nanoid";
 
 /**
@@ -60,6 +60,11 @@ export function peopleRouter(): Router {
         person_name: e.person_key ? (people.get(e.person_key) ?? e.person_key) : null,
       })),
     });
+  });
+
+  /** Wipes the whole history. The web asks first; here it is the caller's word. */
+  router.delete("/audit", (_req, res) => {
+    res.json({ removed: clearAudit() });
   });
 
   /** Exceptions: what a non-primary role is allowed to run despite the default. */

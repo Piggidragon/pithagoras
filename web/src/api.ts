@@ -601,6 +601,7 @@ export const api = {
     }),
 
   audit: (limit = 200) => json<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
+  clearAudit: () => json<{ removed: number }>("/api/audit", { method: "DELETE" }),
   toolRules: () => json<{ rules: ToolRule[] }>("/api/tool-rules"),
   addToolRule: (rule: {
     role: string;
