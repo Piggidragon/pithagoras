@@ -48,7 +48,8 @@ export type Item =
       unsent?: "stopped" | "restarted" | "unsure";
     }
   /** `thinkingSince`/`thinkingUntil`: when the reasoning started and last grew, for "Thought for 12s". */
-  | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean; thinkingSince?: number; thinkingUntil?: number }
+  /** `final`: the stretch that ended an answer a later run or message came after. */
+  | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean; final?: true; thinkingSince?: number; thinkingUntil?: number }
   /**
    * `args`: what the tool was called with, whole. `output`: the text it gave
    * back — as it streams, then as it ended — kept to the last TOOL_OUTPUT_MAX.
@@ -178,6 +179,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
     const last = items.at(-1);
     if (last?.kind === "assistant" && last.id === id) {
       last.done = false;
+      delete last.final;
       return last;
     }
     const reply = { kind: "assistant" as const, id, text: "", thinking: "", done: false, audio: audioReply };
@@ -190,6 +192,13 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
       current.done = true;
       current = null;
     }
+  };
+
+  // Where a message or a run begins, the answer before it is over: the stretch
+  // that ended it keeps its Copy. What the last reply is, is said at the end.
+  const closeAnswer = () => {
+    const reply = lastReply(items);
+    if (reply) reply.final = true;
   };
 
   // The run is over, so nothing in it is still going. A call whose end never
@@ -218,6 +227,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           break;
         }
         closeCurrent();
+        closeAnswer();
         audioReply = item.audio === true;
         items.push(item);
         break;
@@ -227,6 +237,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
         const item = placed(Number(p.seq), p.prompt);
         if (!item) break;
         closeCurrent();
+        closeAnswer();
         audioReply = item.audio === true;
         items.push(item);
         break;
@@ -419,6 +430,9 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
       // A new run: a tool still open from before it can only be one whose run
       // died without saying so (a portal restart that recorded nothing).
       case "agent_start":
+        // Not only a message starts one: a command can, and so can an extension
+        // that has something to say once a background job is done.
+        closeAnswer();
         for (const it of items) {
           if (it.kind === "tool" && it.status === "running") {
             it.status = "error";
@@ -443,8 +457,10 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
 }
 
 /**
- * The bubbles Copy belongs on: for each turn, the last stretch of the agent's
- * answer that has something to read and is not still changing under it.
+ * The bubble Copy belongs on while the answer is the last thing said: the last
+ * stretch of the agent's answer that has something to read and is not still
+ * changing under it. Once a message or a run comes after it, it is `final`
+ * instead, and keeps Copy as the end of the answer to that one.
  *
  * A turn with tool calls in the middle closes the assistant item before each
  * one and opens a new one after, so a single answer can be several bubbles —
@@ -453,26 +469,21 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
  *
  * And only when the answer ends there. A paragraph followed by a tool call is
  * the agent saying what it is about to do, not an answer — a Copy under it
- * sat between the words and the call like a stray gap.
- *
- * A turn ends where the next message from the person begins, so sending
- * another question does not take Copy from the answer to the one before. One
- * still waiting to go into the run does not end it: the agent is on the same
- * turn until it takes that in.
+ * sat between the words and the call like a stray gap. So is one with the next
+ * stretch already being written, reasoning or not.
  */
-export function copyableReplyIds(items: readonly Item[]): Set<string> {
-  const ids = new Set<string>();
-  let last: string | undefined;
-  for (const it of items) {
-    if (it.kind === "user" && !it.queued) {
-      if (last) ids.add(last);
-      last = undefined;
-    } else if (it.kind === "tool") last = undefined;
-    else if (it.kind === "assistant" && it.text) last = it.done ? it.id : undefined;
+function lastReply(items: readonly Item[]): Extract<Item, { kind: "assistant" }> | undefined {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "tool") return undefined;
+    if (it.kind !== "assistant") continue;
+    if (it.text) return it.done ? it : undefined;
+    if (!it.done) return undefined;
   }
-  if (last) ids.add(last);
-  return ids;
+  return undefined;
 }
+
+export const lastReplyId = (items: readonly Item[]): string | undefined => lastReply(items)?.id;
 
 /** The call an update belongs to: by its id, or else the newest one of that name still running. */
 function findRunningTool(items: Item[], p: any): Extract<Item, { kind: "tool" }> | undefined {
