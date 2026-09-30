@@ -1421,8 +1421,10 @@ export const listAudit = (limit = 200): AuditRow[] =>
  * Empties the log, for when its history is no longer wanted; returns how many
  * entries went. With `through`, only entries up to that id go: the ones
  * somebody saw before deciding, not whatever was recorded since. Earlier
- * "cleared" notes stay, and a clear that removed something leaves one more, in
- * the same transaction, so an emptied log cannot pass for a quiet one.
+ * "cleared" notes survive a clear, and a clear that removed something leaves
+ * one more, in the same transaction, so an emptied log cannot pass for a quiet
+ * one. The trim to AUDIT_KEEP still ages notes out like any other entry; it
+ * only bounds the table's size.
  */
 export function clearAudit(through?: number): number {
   const db = getDb();

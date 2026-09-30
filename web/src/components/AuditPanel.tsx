@@ -64,10 +64,9 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
-  // Apart, so a poll that works does not hide why a clear failed.
-  const [pollFailed, setPollFailed] = useState<string | null>(null);
+  // Shown by the button, as MemoryPage's log does, so a poll that works does
+  // not take it off the page banner before it is read.
   const [clearFailed, setClearFailed] = useState<string | null>(null);
-  useEffect(() => onError(clearFailed ?? pollFailed), [clearFailed, pollFailed]);
   // Counts clears: an answer asked for before one must not bring the cleared
   // entries back when it arrives after it. Only clears, not every poll — on a
   // slow link each answer can land after the next poll went out, and must
@@ -81,10 +80,10 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
       .then((r) => {
         if (since !== cleared.current) return;
         setEntries(r.entries);
-        setPollFailed(null);
+        onError(null);
       })
       .catch((e) => {
-        if (since === cleared.current) setPollFailed((e as Error).message);
+        if (since === cleared.current) onError((e as Error).message);
       })
       .finally(() => setLoading(false));
   };
@@ -94,12 +93,16 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
     return pollWhileVisible(load, 10_000);
   }, []);
 
+  // The "cleared" notes are housekeeping, not decisions, and a clear keeps them.
+  const decisions = entries.filter((e) => e.kind !== "cleared");
+
   /**
    * The history up to the newest entry shown, after asking. Always asking: not
    * `deletes`, which Settings can switch off — this is the record of what the
    * guard decided, and one stray click should not end it.
    */
   const clear = async () => {
+    if (decisions.length === 0) return;
     const through = Math.max(...entries.map((e) => e.id));
     const ok = await confirmDialog({
       title: t("Clear the audit log?"),
@@ -113,9 +116,9 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
     try {
       await api.clearAudit(through);
       // Gone even if the reload below fails, which would otherwise leave the
-      // deleted entries on screen.
+      // deleted entries on screen. The notes stay, as they do on the server.
       cleared.current++;
-      setEntries((now) => now.filter((e) => e.id > through));
+      setEntries((now) => now.filter((e) => e.id > through || e.kind === "cleared"));
       await load();
     } catch (e) {
       setClearFailed((e as Error).message);
@@ -124,8 +127,6 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
     }
   };
 
-  // The "cleared" notes are housekeeping, not decisions, and a clear keeps them.
-  const decisions = entries.filter((e) => e.kind !== "cleared");
   const shown = entries.filter((e) =>
     filter === "all"
       ? true
@@ -181,7 +182,7 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
             {t(f.label)}
           </button>
         ))}
-        <span className="ml-auto text-xs text-fg-faint">{shown.length}</span>
+        <span className="ml-auto text-xs text-fg-faint">{shown.filter((e) => e.kind !== "cleared").length}</span>
         <button
           onClick={clear}
           disabled={decisions.length === 0 || clearing}
@@ -190,6 +191,7 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
           <LuTrash2 className="h-3 w-3" /> {t("Clear the log")}
         </button>
       </div>
+      {clearFailed && <p className="mb-3 text-xs text-danger">{clearFailed}</p>}
 
       {shown.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-fg-faint">
