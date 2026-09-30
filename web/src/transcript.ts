@@ -119,6 +119,7 @@ export function toolOutputText(result: any): string | undefined {
 }
 
 type UserItem = Extract<Item, { kind: "user" }>;
+type AssistantItem = Extract<Item, { kind: "assistant" }>;
 
 /** A message as its portal_prompt payload describes it. */
 function userItem(seq: number, p: any): UserItem {
@@ -147,7 +148,22 @@ function userItem(seq: number, p: any): UserItem {
 export function buildTranscript(events: PortalEvent[], options: { ended?: boolean } = {}): Item[] {
   const items: Item[] = [];
   let audioReply = false;
-  let current: Extract<Item, { kind: "assistant" }> | null = null;
+  let current: AssistantItem | null = null;
+  // Where the answer being given ends so far, for its Copy: the last stretch
+  // of it that said something and was done, with no tool call after it.
+  //
+  // A turn with tool calls in the middle closes the assistant item before each
+  // one and opens a new one after, so a single answer can be several bubbles —
+  // one per paragraph around a tool. Offering Copy on all of them is a button
+  // under every paragraph; only the last has the whole of what was said.
+  //
+  // And only when the answer ends there. A paragraph that calls a tool is the
+  // agent saying what it is about to do, not an answer — a Copy under it sat
+  // between the words and the call like a stray gap — even when the call never
+  // ran. So is one with the next stretch already being written, reasoning or
+  // not. One an error cut off is not the answer either: pi drops it and tries
+  // again, and a run that died leaves its stretch without an end at all.
+  let answerEnd: AssistantItem | null = null;
   // Sent mid-run and not yet taken in. Put where pi took it in — where the
   // agent read it — rather than where it was sent, which is the middle of a
   // reply it had nothing to do with.
@@ -172,13 +188,22 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
     return prompt && typeof prompt === "object" ? userItem(seq, prompt) : undefined;
   };
 
+  // What was last shown when the run began: see openReply.
+  let sealed: Item | undefined;
+
   // A reply to write into. The one with this id when it is the last thing
   // shown: it was closed early — a status that said the run was over while it
-  // was not — and a second item with its id would split it in two.
-  const openReply = (id: string): Extract<Item, { kind: "assistant" }> => {
+  // was not — and a second item with its id would split it in two. Nor is its
+  // answer over after all.
+  //
+  // Not one from before the run: a new run is a new message, whatever id its
+  // stream has.
+  const openReply = (id: string): AssistantItem => {
+    answerEnd = null;
     const last = items.at(-1);
-    if (last?.kind === "assistant" && last.id === id) {
+    if (last?.kind === "assistant" && last.id === id && last !== sealed) {
       last.done = false;
+      delete last.final;
       return last;
     }
     const reply = { kind: "assistant" as const, id, text: "", thinking: "", done: false, audio: audioReply };
@@ -195,8 +220,8 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
 
   // The answer so far is over: the stretch that ended it keeps its Copy.
   const closeAnswer = () => {
-    const reply = lastReply(items);
-    if (reply) reply.final = true;
+    if (answerEnd) answerEnd.final = true;
+    answerEnd = null;
   };
 
   // The run is over, so nothing in it is still going. A call whose end never
@@ -295,6 +320,11 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             current.thinkingUntil = ev.at;
           }
           current.thinking = thinking;
+          if (ev.type === "message_end") {
+            const calls = message.content.some((c: any) => c?.type === "toolCall");
+            if (calls || message.stopReason === "error") answerEnd = null;
+            else if (text) answerEnd = current;
+          }
         }
         // What an extension puts in the conversation for people to read —
         // pi.sendMessage with display on. pi's TUI draws it; so does this. One
@@ -312,6 +342,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
 
       case "tool_execution_start": {
         closeCurrent();
+        answerEnd = null;
         const args = p.input ?? p.args ?? p.parameters;
         items.push({
           kind: "tool",
@@ -438,6 +469,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
       // nothing). Its words are not the new run's to go on with.
       case "agent_start":
         closeCurrent();
+        sealed = items.at(-1);
         for (const it of items) {
           if (it.kind === "tool" && it.status === "running") {
             it.status = "error";
@@ -461,31 +493,6 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
   // The answer being given last ends where the chat does, once it is written.
   closeAnswer();
   return items;
-}
-
-/**
- * Where an answer ends, as far as the transcript has got: the last stretch of
- * the agent's that has something to read and is not still changing under it.
- *
- * A turn with tool calls in the middle closes the assistant item before each
- * one and opens a new one after, so a single answer can be several bubbles —
- * one per paragraph around a tool. Offering Copy on all of them is a button
- * under every paragraph; only the last has the whole of what was said.
- *
- * And only when the answer ends there. A paragraph followed by a tool call is
- * the agent saying what it is about to do, not an answer — a Copy under it
- * sat between the words and the call like a stray gap. So is one with the next
- * stretch already being written, reasoning or not.
- */
-function lastReply(items: readonly Item[]): Extract<Item, { kind: "assistant" }> | undefined {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i];
-    if (it.kind === "tool") return undefined;
-    if (it.kind !== "assistant") continue;
-    if (it.text) return it.done ? it : undefined;
-    if (!it.done) return undefined;
-  }
-  return undefined;
 }
 
 /** The call an update belongs to: by its id, or else the newest one of that name still running. */

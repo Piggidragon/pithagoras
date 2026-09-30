@@ -70,6 +70,19 @@ test('a paragraph followed by a tool call is not offered Copy', () => {
   assert.deepEqual(copyable([said(1, 'Running the tests now.'), { seq: 2, type: 'tool_execution_start', payload: { toolCallId: 't', toolName: 'bash' } }]), []);
 });
 
+test('nor is one that calls a tool, before the call starts or when it never does', () => {
+  const calling = said(4, 'Running rm on the build dir now.', { stopReason: 'toolUse' });
+  calling.payload.message.content.push({ type: 'toolCall', id: 't', name: 'bash', arguments: {} } as any);
+  assert.deepEqual(copyable([...ask(1, 'One?'), calling]), []);
+  assert.deepEqual(copyable([
+    ...ask(1, 'One?'),
+    calling,
+    { seq: 5, type: 'portal_status', payload: { status: 'idle', aborted: true } },
+    ...ask(6, 'Two?'),
+    said(9, 'Second answer.'),
+  ]), ['Second answer.']);
+});
+
 test('the answer to an earlier question keeps Copy once another is asked', () => {
   assert.deepEqual(copyable([...ask(1, 'One?'), said(4, 'First answer.'), ended(5), ...ask(6, 'Two?'), said(9, 'Second answer.')]), ['First answer.', 'Second answer.']);
 });
@@ -123,29 +136,49 @@ test("an extension's message ends the answer before it, in the same run or a new
   assert.deepEqual(copyable([...ask(1, 'One?'), said(4, 'Started it, will report back.'), ended(5), { seq: 6, type: 'agent_start', payload: {} }, ...news(7), said(9, 'The subagent found X.')]), expected);
 });
 
-test('a retry after an error leaves the cut-off stretch without Copy', () => {
-  assert.deepEqual(copyable([
-    ...ask(1, 'One?'),
-    said(4, 'The answer is', { stopReason: 'error' }),
-    ended(5),
-    { seq: 6, type: 'auto_retry_start', payload: { attempt: 1 } },
-    { seq: 7, type: 'agent_start', payload: {} },
-    said(8, 'The answer is 42.'),
-  ]), ['The answer is 42.']);
+test('a stretch an error cut off gets no Copy: not while the retry waits, not after it, not once asked again', () => {
+  const failed = [...ask(1, 'One?'), said(4, 'The answer is', { stopReason: 'error' }), ended(5), { seq: 6, type: 'auto_retry_start', payload: { attempt: 1 } }];
+  assert.deepEqual(copyable(failed), []);
+  assert.deepEqual(copyable([...failed, { seq: 7, type: 'agent_start', payload: {} }, said(8, 'The answer is 42.')]), ['The answer is 42.']);
+  assert.deepEqual(copyable([...failed, { seq: 7, type: 'auto_retry_end', payload: { success: false } }, ...ask(8, 'Two?'), said(11, 'Second answer.')]), ['Second answer.']);
 });
 
-test('a run that died mid-reply does not have the next one written into its bubble', () => {
+test('one the person stopped keeps its Copy, as what they chose to keep', () => {
+  assert.deepEqual(copyable([
+    ...ask(1, 'One?'),
+    said(4, 'The first half', { stopReason: 'aborted' }),
+    { seq: 5, type: 'portal_status', payload: { status: 'idle', aborted: true } },
+    ...ask(6, 'Two?'),
+  ]), ['The first half']);
+});
+
+test('a run that died mid-reply does not have the next one written into its bubble, nor a Copy of its own', () => {
+  // The stream's id is the same when pi kept going and the portal's buffer of it was never ended.
+  for (const [dead, next, custom] of [['r4', 'r7', true], ['r4', 'r4', true], ['r4', 'r4', false]] as const) {
+    const items = buildTranscript([
+      ...ask(1, 'One?'),
+      { seq: 4, type: 'message_update', payload: { streamId: dead, assistantMessageEvent: { type: 'text_delta', delta: 'Half an answer.' } } },
+      { seq: 5, type: 'agent_start', payload: {} },
+      ...(custom ? [taken(6, 'Subagent done: X', 'custom')] : []),
+      { seq: 7, type: 'message_update', payload: { streamId: next, assistantMessageEvent: { type: 'text_delta', delta: 'The subagent found X.' } } },
+      { seq: 8, type: 'message_end', payload: { streamId: next, message: { role: 'assistant', content: [{ type: 'text', text: 'The subagent found X.' }] } } },
+    ]);
+    assert.deepEqual(items.filter((i) => i.kind === 'assistant').map((i: any) => [i.text, i.done, i.final === true]), [
+      ['Half an answer.', true, false],
+      ['The subagent found X.', true, true],
+    ]);
+  }
+});
+
+test('a reply that goes on after it was marked keeps writing in its bubble without a Copy under it', () => {
   const items = buildTranscript([
     ...ask(1, 'One?'),
-    { seq: 4, type: 'message_update', payload: { streamId: 'r4', assistantMessageEvent: { type: 'text_delta', delta: 'Half an answer.' } } },
-    { seq: 5, type: 'agent_start', payload: {} },
+    { seq: 4, type: 'message_update', payload: { streamId: 'r', assistantMessageEvent: { type: 'text_delta', delta: 'Part one' } } },
+    { seq: 5, type: 'message_end', payload: { streamId: 'r', message: { role: 'assistant', content: [{ type: 'text', text: 'Part one' }] } } },
     taken(6, 'Subagent done: X', 'custom'),
-    { seq: 7, type: 'message_update', payload: { streamId: 'r7', assistantMessageEvent: { type: 'text_delta', delta: 'The subagent found X.' } } },
+    { seq: 7, type: 'message_update', payload: { streamId: 'r', assistantMessageEvent: { type: 'text_delta', delta: ' and more' } } },
   ]);
-  assert.deepEqual(items.filter((i) => i.kind === 'assistant').map((i: any) => [i.text, i.done, i.final === true]), [
-    ['Half an answer.', true, true],
-    ['The subagent found X.', false, false],
-  ]);
+  assert.deepEqual(items.filter((i) => i.kind === 'assistant').map((i: any) => [i.text, i.done, i.final === true]), [['Part one and more', false, false]]);
 });
 
 test('what only prints something, and a message that has not gone in or never did, leave the answer the last thing said', () => {
