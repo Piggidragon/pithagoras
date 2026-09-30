@@ -5,7 +5,7 @@ import { RowsSkeleton } from "./Skeleton";
 import { api, type Project, type ProjectContents, type Session } from "../api";
 import { deleteAsking, unsavedNotes } from "../unsaved";
 import { bytesLabel, slugify } from "../projects";
-import { within } from "../session-folders";
+import { within } from "../paths";
 import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";

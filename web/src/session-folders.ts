@@ -10,6 +10,7 @@
  */
 
 import { msg, t } from "./i18n";
+import { within } from "./paths";
 export type FolderKind = "home" | "project" | "elsewhere";
 
 export type Folder<S> = {
@@ -34,9 +35,6 @@ export const projectKey = (name: string) => `project:${name}`;
 
 /** What the chats are gathered into: where Home is, and the projects. */
 export type Places = { home: string; projects: readonly { name: string; path: string }[] };
-
-/** `where` is the folder `dir` or inside it, by the text of the path. */
-export const within = (dir: string, where: string) => where === dir || where.startsWith(dir.endsWith("/") ? dir : dir + "/");
 
 /**
  * The projects that are folders of their own: not one that is Home itself,

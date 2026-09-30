@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
+import { realPath } from "./within.js";
 import { piAgentDir, piSettingsPath, readPiSettings } from "./pi-settings.js";
 import { mcpConfigPath, readMcpFile, type McpFile } from "./api/mcp.js";
 
@@ -39,13 +40,7 @@ export function bundledSubagentDir(): string | undefined {
   return undefined;
 }
 
-const real = (p: string) => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return path.resolve(p);
-  }
-};
+const real = (p: string) => realPath(p) ?? path.resolve(p);
 
 function packageName(dir: string): string | undefined {
   try {

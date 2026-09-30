@@ -1,4 +1,5 @@
 import type { PortalEvent } from "./api";
+import { below } from "./paths";
 
 /** A file the agent has just read or changed, as a path inside the chat's folder. */
 export interface FileActivity {
@@ -21,11 +22,11 @@ const pathOf = (p: any): string | undefined => {
  * path inside `folder`, or undefined when it is somewhere else.
  */
 export function insideFolder(folder: string, given: string): string | undefined {
-  const root = folder.replace(/\/+$/, "");
   let text = given;
   if (text.startsWith("/")) {
-    if (!text.startsWith(root + "/")) return undefined;
-    text = text.slice(root.length + 1);
+    const under = below(folder, text);
+    if (under === undefined) return undefined;
+    text = under;
   }
   const parts: string[] = [];
   for (const part of text.split("/")) {

@@ -22,7 +22,8 @@ import {
   listSessions,
   updateSession,
 } from "./db.js";
-import { checkWorkspace, isWithin, workspaceRoot } from "./workspaces.js";
+import { checkWorkspace, workspaceRoot } from "./workspaces.js";
+import { insideReal, isUnderText, isWithinText } from "./within.js";
 import { agentHomePath } from "./agent-home.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import {
@@ -283,7 +284,7 @@ app.post("/api/workspaces", (req, res) => {
   }
 
   const target = path.join(WORKSPACE_ROOT, name);
-  if (path.resolve(target) !== target || !target.startsWith(WORKSPACE_ROOT + path.sep)) {
+  if (path.resolve(target) !== target || !isUnderText(WORKSPACE_ROOT, target)) {
     return res.status(400).json({ error: "Invalid workspace name" });
   }
   if (existsSync(target)) return res.status(409).json({ error: `Workspace "${name}" already exists` });
@@ -310,7 +311,7 @@ const projectFailure = (res: express.Response, e: unknown) => {
  * in a subfolder, and it belongs to the project all the same.
  */
 const chatsIn = (dir: string, all = listSessions()) =>
-  all.filter((s) => s.workspace === dir || s.workspace.startsWith(dir + path.sep));
+  all.filter((s) => isWithinText(dir, s.workspace));
 
 /**
  * The same, and those that reach the folder through a link too: what deleting
@@ -319,9 +320,10 @@ const chatsIn = (dir: string, all = listSessions()) =>
  */
 function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[] {
   const seen = new Map<string, boolean>();
+  const reaches = insideReal(dir);
   return rows.filter((row) => {
     let inside = seen.get(row.workspace);
-    if (inside === undefined) seen.set(row.workspace, (inside = isWithin(dir, row.workspace)));
+    if (inside === undefined) seen.set(row.workspace, (inside = reaches(row.workspace)));
     return inside;
   });
 }

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
-import { isWithin } from "./workspaces.js";
+import { insideReal, isUnderText, realPath } from "./within.js";
 
 /**
  * Git, and GitHub through `gh` where it is installed, for the Git panel.
@@ -602,11 +602,7 @@ export async function unsavedIn(base: string, target: string): Promise<Unsaved |
 
 /** A path's real place, or the path when it is gone. */
 function real(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
+  return realPath(p) ?? p;
 }
 
 /**
@@ -616,11 +612,12 @@ function real(p: string): string {
  */
 async function ownChanges(repo: Repo, files: ChangedFile[], tops: Set<string>): Promise<number> {
   const isTop = (f: ChangedFile) => f.kind === "untracked" && f.path.endsWith("/") && tops.has(real(path.join(repo.root, f.path)));
+  const topList = [...tops];
   let n = 0;
   for (const f of files) {
     if (isTop(f)) continue;
     const at = real(path.join(repo.root, f.path));
-    if (f.kind !== "untracked" || !f.path.endsWith("/") || ![...tops].some((top) => top.startsWith(at + path.sep))) {
+    if (f.kind !== "untracked" || !f.path.endsWith("/") || !topList.some((top) => isUnderText(at, top))) {
       n++;
       continue;
     }
@@ -698,7 +695,7 @@ async function repoWork(dir: string, folder: string, counted: Set<string>, tops:
   const remotes = urls.map((line) => {
     const [key, ...rest] = line.split(" ");
     const where = localRemote(rest.join(" "), repo.root);
-    return { name: key.replace(/^remote\./, "").replace(/\.url$/, ""), goes: where !== null && isWithin(folder, where) };
+    return { name: key.replace(/^remote\./, "").replace(/\.url$/, ""), goes: insideReal(folder)(where) };
   });
   const saved = remotes.some((r) => r.goes) ? remotes.filter((r) => !r.goes).map((r) => `--remotes=${r.name}`) : ["--remotes"];
   const count = async (args: string[]) => {
@@ -717,7 +714,7 @@ async function repoWork(dir: string, folder: string, counted: Set<string>, tops:
   // inside the folder, loses them all.
   const common = (await git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
   const data = realpathSync(common);
-  if (!isWithin(folder, data)) return { changed, unpushed: await onlyIn(now.head ? ["HEAD"] : []), stashes: 0 };
+  if (!insideReal(folder)(data)) return { changed, unpushed: await onlyIn(now.head ? ["HEAD"] : []), stashes: 0 };
   // Counted once, with every HEAD in it, by whichever of its worktrees came first.
   if (counted.has(data)) return { changed, unpushed: 0, stashes: 0 };
   counted.add(data);

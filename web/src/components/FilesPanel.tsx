@@ -21,6 +21,7 @@ import {
 import { api, type FileEntry, type Unsaved } from "../api";
 import type { FileActivity } from "../file-activity";
 import { confirmDialog } from "./ConfirmDialog";
+import { within } from "../paths";
 import { isEnter, isEscape } from "../shortcuts";
 import { deleteAsking, unsavedNotes } from "../unsaved";
 import { t, tp } from "../i18n";
@@ -364,13 +365,13 @@ export function FilesPanel({
       if (!gone) return;
       // What is open and shown now, not when the delete was clicked: the person may have moved on while it was asked.
       const open = fileRef.current;
-      if (open && (open.path === path || open.path.startsWith(path + "/"))) {
+      if (open && within(path, open.path)) {
         fileAsk.current++;
         setFile(null);
       }
       // Opened while it was asked, and gone now: up to the folder it was in, which the change of folder loads.
       const shown = dirRef.current;
-      if (shown === path || shown.startsWith(path + "/")) return setDir(path.split("/").slice(0, -1).join("/"));
+      if (within(path, shown)) return setDir(path.split("/").slice(0, -1).join("/"));
     } catch (e) {
       problem = (e as Error).message;
     } finally {

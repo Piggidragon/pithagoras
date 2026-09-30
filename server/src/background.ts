@@ -1,7 +1,9 @@
 import { readFile, readdir, readlink, open } from "node:fs/promises";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fieldsOf, signalSession, statOf } from "./proc-stat.js";
+import { within } from "./paths.js";
+import { realPath } from "./within.js";
 
 /**
  * What the agent left running in a workspace: background shells, servers,
@@ -72,19 +74,13 @@ function bootTime(): number {
 /** Clock ticks per second; 100 on every Linux the portal runs on. */
 const HZ = 100;
 
-const inside = (dir: string, root: string) => dir === root || dir.startsWith(root.endsWith("/") ? root : root + "/");
-
 /**
  * A workspace as /proc names a process's folder: its real path. As written, a
  * workspace reached through a link never matched, and nothing ever ran there.
  */
 function rootOf(workspace: string): string {
   const resolved = path.resolve(workspace);
-  try {
-    return realpathSync(resolved);
-  } catch {
-    return resolved;
-  }
+  return realPath(resolved) ?? resolved;
 }
 
 /**
@@ -135,7 +131,7 @@ async function walk(roots: string[]): Promise<Proc[]> {
     if (pid === process.pid) return;
     try {
       const cwd = await readlink(`/proc/${pid}/cwd`);
-      if (!roots.some((root) => inside(cwd, root))) return;
+      if (!roots.some((root) => within(root, cwd))) return;
       const env = await readFile(`/proc/${pid}/environ`, "latin1");
       if (!env.split("\0").includes(MARKER)) return;
       const stat = await readFile(`/proc/${pid}/stat`, "utf8");
@@ -171,7 +167,7 @@ async function scan(root: string, fresh = false): Promise<Proc[]> {
     const roots = new Set(watched.keys());
     cached = { at: now, roots, procs: walk([...roots]) };
   }
-  return (await cached.procs).filter((p) => inside(p.cwd, root));
+  return (await cached.procs).filter((p) => within(root, p.cwd));
 }
 
 const SHELL = /(^|\/)(ba|z|da)?sh$/;

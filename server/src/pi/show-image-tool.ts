@@ -2,6 +2,7 @@ import { closeSync } from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
 import { FileError, baseDir, openPicture } from "../workspace-files.js";
+import { pathBelow } from "../within.js";
 
 /**
  * Putting a picture in front of the person: a chart the agent drew, a
@@ -18,11 +19,8 @@ import { FileError, baseDir, openPicture } from "../workspace-files.js";
  * nothing outside it. A picture anywhere else is copied in first.
  */
 
-/** Where `p` is below `root`, relative to it; null when it is not below it. */
-function below(root: string, p: string): string | null {
-  const rel = path.relative(root, p);
-  return rel && rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel) ? rel : null;
-}
+/** Where `p` is below `root`, relative to it; null when it is not below it, or is `root` itself. */
+const under = (root: string, p: string): string | null => pathBelow(root, p) || null;
 
 /** Where `given` is inside `folder`, relative to it, or an explanation why it is not. */
 export function pictureIn(folder: string, given: string): string {
@@ -30,7 +28,7 @@ export function pictureIn(folder: string, given: string): string {
   // The folder as the agent names it may reach the real one through a link:
   // an absolute path is taken inside either. openPicture then checks what the
   // path really leads to.
-  const rel = below(base, path.resolve(base, given)) ?? below(path.resolve(folder), path.resolve(folder, given));
+  const rel = under(base, path.resolve(base, given)) ?? under(path.resolve(folder), path.resolve(folder, given));
   if (!rel) {
     throw new FileError("invalid", "Only a picture in the chat's folder can be shown. Copy it there first.");
   }

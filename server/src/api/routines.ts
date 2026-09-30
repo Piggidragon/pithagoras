@@ -5,7 +5,8 @@ import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
 import { isOneOff, oneOffDone, routineSupervisor, whenNext, type RoutineRow } from "../routines/supervisor.js";
-import { isWithin, placeProblem, routinePlace } from "../workspaces.js";
+import { placeProblem, routinePlace } from "../workspaces.js";
+import { insideReal } from "../within.js";
 
 /**
  * Scheduled work: a standing instruction, a cron expression, and a record of
@@ -96,8 +97,9 @@ export function readWorkspace(body: any, current?: string | null): { workspace: 
 
 /** The routines that run in this folder, or in one below it, or through a link to either. */
 export function routinesIn(dir: string): { id: string; slug: string; name: string; enabled: boolean }[] {
+  const inside = insideReal(dir);
   return (getDb().prepare("SELECT id, slug, name, enabled, workspace FROM routines ORDER BY name").all() as Pick<RoutineRow, "id" | "slug" | "name" | "enabled" | "workspace">[])
-    .filter((r) => isWithin(dir, r.workspace))
+    .filter((r) => inside(r.workspace))
     .map((r) => ({ id: r.id, slug: r.slug, name: r.name, enabled: r.enabled === 1 }));
 }
 
