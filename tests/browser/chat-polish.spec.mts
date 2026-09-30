@@ -205,6 +205,63 @@ test('an agent conversation keeps its title in place when it starts working', as
   await expect(main.locator('.status-slot > .status-working')).toHaveCount(1);
 });
 
+test('the agent setup shows its steps as the assistant does, Back before Create, and nothing to change while Create runs', async ({ page }) => {
+  await page.route('**/api/**', async (route) => {
+    const p = new URL(route.request().url()).pathname;
+    let reply: unknown = {};
+    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
+    else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
+    else if (p === '/api/agent/sessions') reply = { sessions: [], agentHome: '/a' };
+    else if (p === '/api/agent/setup' && route.request().method() === 'POST') {
+      await new Promise((r) => setTimeout(r, 400));
+      return route.fulfill({ status: 409, json: { error: `That name is taken: /home/user/.pi/agent/${'deeply_nested_directory_'.repeat(5)}/SOUL.md` } });
+    }
+    else if (p === '/api/agent/setup') reply = { initialised: false, home: '/a', files: [] };
+    else if (p === '/api/models') reply = { models: [], providers: {} };
+    await route.fulfill({ json: reply });
+  });
+  await page.addInitScript(() => {
+    (window as any).EventSource = class { addEventListener() {} close() {} };
+    localStorage.setItem('pithagoras.setup', 'done');
+  });
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto('/agent');
+  const main = page.getByRole('main');
+  const current = main.locator('.setup-step[aria-current="step"]');
+  await expect(current).toHaveText('1. Who it is');
+  await expect(main.getByText('Step 1 of 2')).toHaveClass(/sr-only/);
+  await expect(main.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  await main.getByLabel('Name').fill('Aria');
+  await main.getByRole('button', { name: 'Next' }).click();
+  await expect(current).toHaveText('2. Who it works for');
+  // Back where it is in the assistant: at the left, the way forward at the right.
+  const back = (await main.getByRole('button', { name: 'Back' }).boundingBox())!;
+  const create = (await main.getByRole('button', { name: 'Create' }).boundingBox())!;
+  expect(create.x - (back.x + back.width)).toBeGreaterThan(100);
+  // Enter on the last field creates, as it moves on from the first. While it
+  // runs nothing changes: an edit would miss what is sent, and going back
+  // would leave its failure on a step that does not show it.
+  await main.getByLabel('Your name').fill('Sam');
+  await main.getByLabel('Your name').press('Enter');
+  await expect(main.getByRole('button', { name: 'Back' })).toBeDisabled();
+  await expect(main.getByLabel('About you')).toBeDisabled();
+  await expect(main.getByRole('alert')).toContainText('That name is taken');
+  await expect(main.getByLabel('About you')).toBeEnabled();
+  // The focus Create took is given back, where the name is fixed.
+  await expect(main.getByLabel('Your name')).toBeFocused();
+  // A long word in the error does not widen the form past the phone.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const form = (await main.getByRole('group', { name: 'Who it works for' }).boundingBox())!;
+  expect(form.x + form.width).toBeLessThanOrEqual(390);
+  await main.getByRole('button', { name: 'Back' }).click();
+  await expect(current).toHaveText('1. Who it is');
+  await expect(main.getByLabel('Name')).toHaveValue('Aria');
+  // Back again, the failure is not shown for a Create not yet sent.
+  await main.getByRole('button', { name: 'Next' }).click();
+  await expect(current).toHaveText('2. Who it works for');
+  await expect(main.getByRole('alert')).toHaveCount(0);
+});
+
 test('the composer stops following the pointer when the drag is lost without a let-go', async ({ page }) => {
   await page.goto('/tests/chat.html?phase=args');
   const grip = page.getByRole('slider', { name: 'Resize message composer vertically' }).or(page.getByLabel('Resize message composer vertically'));

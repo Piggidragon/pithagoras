@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { LuArrowLeft, LuArrowRight, LuCheck, LuPlus, LuRefreshCw, LuRocket } from "react-icons/lu";
+import { LuArrowRight, LuPlus, LuRefreshCw, LuRocket } from "react-icons/lu";
 import { api, type AvailableModel } from "../api";
 import { forget, useCached } from "../settings-cache";
 import { formatTokens } from "../transcript";
@@ -7,6 +7,7 @@ import { Modal } from "./Modal";
 import { PackageCatalog } from "./PackageCatalog";
 import { KindIcon, ProviderEditor, StatusBadge, useInstalledPackages, useProviderStatus } from "./ProvidersPanel";
 import { Select } from "./Select";
+import { SetupNav, SetupSteps } from "./SetupSteps";
 import { EffortPicker, ghostCls, primaryCls } from "./SettingsUi";
 import { msg, t, tp } from "../i18n";
 
@@ -98,6 +99,11 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
     }
   };
 
+  const later = () => {
+    dismiss("skipped");
+    onClose();
+  };
+
   const finish = (start: boolean) => {
     dismiss("done");
     onClose();
@@ -119,44 +125,41 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
     <Modal
       title={t("Set up Pithagoras")}
       subtitle={t("Three steps. Everything here can be changed later in Settings.")}
-      onClose={() => { dismiss("skipped"); onClose(); }}
+      onClose={later}
       footer={
-        <div className="flex items-center gap-2">
-          {step > 0 ? (
-            <button type="button" onClick={() => go(step - 1)} className={ghostCls}><LuArrowLeft className="h-3.5 w-3.5" /> {t("Back")}</button>
-          ) : (
-            <button type="button" onClick={() => { dismiss("skipped"); onClose(); }} className={ghostCls}>{t("Skip for now")}</button>
-          )}
-          <span className="ml-auto" />
-          {step === 0 && (
-            <button type="button" disabled={!ready} onClick={() => go(1)} className={primaryCls} title={ready ? undefined : t("Add a provider with at least one model first")}>
-              {t("Next")} <LuArrowRight className="h-4 w-4" />
-            </button>
-          )}
-          {step === 1 && (
-            <button type="button" disabled={saving || !settings.value} onClick={() => void saveModel()} className={primaryCls}>
-              {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : null} {t("Next")} <LuArrowRight className="h-4 w-4" />
-            </button>
-          )}
-          {step === 2 && (
-            <>
-              <button type="button" onClick={() => finish(false)} className={ghostCls}>{t("Done")}</button>
-              <button type="button" onClick={() => finish(true)} className={primaryCls}><LuRocket className="h-4 w-4" /> {t("Start a chat")}</button>
-            </>
-          )}
-        </div>
+        <>
+          <SetupNav
+            onBack={step > 0 ? () => go(step - 1) : undefined}
+            busy={saving}
+            leave={<button type="button" onClick={later} className={ghostCls}>{t("Set up later")}</button>}
+          >
+            {step === 0 && (
+              <button type="button" disabled={!ready} onClick={() => go(1)} className={primaryCls} title={ready ? undefined : t("Add a provider with at least one model first")}>
+                {t("Next")} <LuArrowRight className="h-4 w-4" />
+              </button>
+            )}
+            {step === 1 && (
+              <button type="button" disabled={saving || !settings.value} onClick={() => void saveModel()} className={primaryCls}>
+                {saving ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : null} {t("Next")} <LuArrowRight className="h-4 w-4" />
+              </button>
+            )}
+            {step === 2 && (
+              <>
+                <button type="button" onClick={() => finish(false)} className={ghostCls}>{t("Done")}</button>
+                <button type="button" onClick={() => finish(true)} className={primaryCls}><LuRocket className="h-4 w-4" /> {t("Start a chat")}</button>
+              </>
+            )}
+          </SetupNav>
+          {/* In the footer, which is always in sight, rather than in the one-line
+              subtitle, where it was cut off: every way out (Set up later, close,
+              Escape) leaves the assistant for good. */}
+          <p className="mt-2 text-[11px] text-fg-faint">{t("{settings} → {providers} opens this assistant again.", { settings: t("Settings"), providers: t("Providers") })}</p>
+        </>
       }
     >
-      <ol className="setup-steps mb-5" aria-label={t("Steps")}>
-        {STEPS.map((s, i) => (
-          <li key={s.title} className={`setup-step ${i < step ? "is-done" : i === step ? "is-current" : ""}`} aria-current={i === step ? "step" : undefined}>
-            <span className="flex items-center gap-1">
-              {i < step && <LuCheck className="h-3 w-3 text-ok" />}
-              <span className="font-medium">{i + 1}. {t(s.title)}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
+      <div className="mb-5">
+        <SetupSteps steps={STEPS.map((s) => s.title)} current={step} />
+      </div>
 
       {error && <p role="alert" className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
 
@@ -210,8 +213,9 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
           </div>
         )}
 
+        {/* Nothing changes while the model saves: a change would miss what is sent. */}
         {step === 1 && (
-          <div className="mt-1 space-y-4">
+          <fieldset disabled={saving} className="mt-1 min-w-0 space-y-4">
             <p className="text-sm text-fg-subtle">{t("Each chat can switch under its chat box; this is only where they start.")}</p>
             <Select className="w-full" aria-label={t("Model for new chats")} value={current} options={modelOptions} onChange={setChoice} placeholder={t("Choose a model…")} />
             {picked?.reasoning ? (
@@ -222,7 +226,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
             ) : picked ? (
               <p className="text-xs text-fg-faint">{t("This model answers straight away, without a thinking phase.")}</p>
             ) : null}
-          </div>
+          </fieldset>
         )}
 
         {step === 2 && (

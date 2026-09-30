@@ -1211,15 +1211,18 @@ const de: Locale = {
     "No chats yet.": "Noch keine Chats.",
     // components/SettingsUi.tsx
     "Switch": "Schalter",
+    // components/SetupSteps.tsx
+    "Steps": "Schritte",
+    "Step {n} of {total}": "Schritt {n} von {total}",
     // components/SetupAssistant.tsx
     "What new chats start with": "Womit neue Chats beginnen",
     "What it can do besides": "Was er sonst noch kann",
     "Set up Pithagoras": "Pithagoras einrichten",
     "Three steps. Everything here can be changed later in Settings.": "Drei Schritte. Alles hier lässt sich später in den Einstellungen ändern.",
-    "Skip for now": "Vorerst überspringen",
+    "{settings} → {providers} opens this assistant again.": "{settings} → {providers} öffnet diesen Assistenten wieder.",
+    "Set up later": "Später einrichten",
     "Add a provider with at least one model first": "Füg zuerst einen Anbieter mit mindestens einem Modell hinzu",
     "Start a chat": "Einen Chat beginnen",
-    "Steps": "Schritte",
     "A server on your network — llama.cpp, llama-swap, Ollama — or a hosted service with a key. Its models are looked up as soon as it answers.": "Ein Server in deinem Netz — llama.cpp, llama-swap, Ollama — oder ein gehosteter Dienst mit Schlüssel. Seine Modelle werden abgefragt, sobald er antwortet.",
     "{n} models": { one: "{n} Modell", other: "{n} Modelle" },
     "Hosted — every model pi knows of from it": "Gehostet — jedes Modell, das pi von dort kennt",
