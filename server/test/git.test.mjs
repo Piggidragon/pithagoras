@@ -598,3 +598,30 @@ test("unsaved work: a .git that cannot be read is not taken for a clean one", as
   const got = await g.unsavedWork(dir);
   assert.equal(got?.unknown, true);
 });
+
+test("unsaved work: a commit on a detached HEAD counts, and so do more files than the panel lists", async () => {
+  const dir = repo();
+  const remote = path.join(home, `remote${++n}.git`);
+  execFileSync("git", ["init", "-q", "--bare", remote]);
+  sh(dir, "remote", "add", "origin", remote);
+  sh(dir, "push", "-q", "-u", "origin", "main");
+  sh(dir, "switch", "-q", "--detach");
+  writeFileSync(path.join(dir, "d.txt"), "d\n");
+  sh(dir, "add", "-A");
+  sh(dir, "commit", "-qm", "on no branch");
+  assert.deepEqual(await g.unsavedWork(dir), { changed: 0, unpushed: 1, stashes: 0 });
+
+  const many = repo();
+  mkdirSync(path.join(many, "out"));
+  for (let i = 0; i < g.MAX_FILES + 100; i++) writeFileSync(path.join(many, "out", `f${i}`), "x");
+  assert.equal((await g.unsavedWork(many)).changed, g.MAX_FILES + 100);
+});
+
+test("unsaved work: a linked worktree loses its own files, not the main repository's history", async () => {
+  const dir = repo();
+  const tree = path.join(home, `tree${++n}`);
+  sh(dir, "worktree", "add", "-q", "-b", "wt", tree);
+  assert.deepEqual(await g.unsavedWork(tree), { changed: 0, unpushed: 0, stashes: 0 });
+  writeFileSync(path.join(tree, "x.txt"), "x\n");
+  assert.deepEqual(await g.unsavedWork(tree), { changed: 1, unpushed: 0, stashes: 0 });
+});

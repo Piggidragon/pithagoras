@@ -419,6 +419,16 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
+    // First, before the checks below: git can take seconds, and a chat or a
+    // routine may start in that time, which is what those checks are for.
+    const unsaved = await unsavedWork(project.path);
+    if (unsaved && (unsaved.changed || unsaved.unpushed || unsaved.stashes || unsaved.unknown) && req.query.discard !== "1") {
+      return res.status(409).json({
+        error: "This folder holds work that exists nowhere else. Delete it only when that is meant.",
+        code: "unsaved-work",
+        unsaved,
+      });
+    }
     const chats = workingIn(project.path, listSessions());
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
@@ -429,14 +439,6 @@ app.delete("/api/projects/:name", async (req, res) => {
     const runs = workingIn(project.path, listRoutineSessions().filter((s) => sessions.isLoaded(s.id)));
     if (routines.some((r) => routineSupervisor.isRunning(r.slug)) || runs.some((s) => sessions.isBusy(s.id))) {
       return res.status(409).json({ error: "A routine is running in this project. Wait for it to finish, or stop it." });
-    }
-    const unsaved = await unsavedWork(project.path);
-    if (unsaved && (unsaved.changed || unsaved.unpushed || unsaved.stashes || unsaved.unknown) && req.query.discard !== "1") {
-      return res.status(409).json({
-        error: "This folder holds work that exists nowhere else. Delete it only when that is meant.",
-        code: "unsaved-work",
-        unsaved,
-      });
     }
     // Held with nothing awaited since the check: from here no run of theirs can
     // start, by schedule or by hand, and have the folder removed from under it.

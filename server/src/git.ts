@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -461,12 +461,20 @@ export async function unsavedWork(folder: string): Promise<Unsaved | null> {
     const repo = await findRepo(folder);
     // A .git that git does not take for the folder's own repository is a broken one.
     if (!repo || realpathSync(repo.root) !== realpathSync(folder)) throw new GitError(409, "not a readable repository");
-    const [now, ahead] = await Promise.all([
-      status(repo),
-      git(repo, ["rev-list", "--branches", "--not", "--remotes", "--count"]),
-    ]);
+    // One command, and the whole list: status() cuts it at MAX_FILES and runs
+    // two diffs for line counts, and only the number is needed here.
+    const { stdout } = await git(repo, ["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=all", "--ignore-submodules=dirty"]);
+    const now = parseStatus(stdout);
+    // A linked worktree or a submodule checkout has a .git *file*: its history
+    // and stashes are the main repository's, which stay. Only its files go.
+    if (!lstatSync(path.join(folder, ".git")).isDirectory()) return { changed: now.files.length, unpushed: 0, stashes: 0 };
+    // HEAD and tags as well as branches: a commit made on a detached HEAD, or
+    // in the middle of a rebase, is on no branch and would be missed.
+    const ahead = await git(repo, ["rev-list", "--branches", "--tags", "HEAD", "--not", "--remotes", "--count"]);
     return { changed: now.files.length, unpushed: Number(ahead.stdout.trim()) || 0, stashes: now.stashes };
   } catch (e) {
+    // Said, not swallowed: the page can only say "could not be read".
+    console.warn(`[git] could not tell what ${folder} holds: ${(e as Error).message}`);
     return { changed: 0, unpushed: 0, stashes: 0, unknown: true };
   }
 }
