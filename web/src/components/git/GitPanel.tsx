@@ -9,6 +9,7 @@ import { History } from "./History";
 import { Pulls } from "./Pulls";
 import { ViewHost } from "./views";
 import { msg, t, tp } from "../../i18n";
+import { below, within } from "../../paths";
 
 export type GitTab = "changes" | "history" | "branches" | "pulls";
 export const GIT_TABS: { id: GitTab; label: string }[] = [
@@ -154,7 +155,6 @@ export function GitPanel({
 
   const ctx: GitCtx | null = useMemo(() => {
     if (!state?.repo) return null;
-    const prefix = state.prefix ? `${state.prefix}/` : "";
     return {
       id: sessionId,
       repo: { ...state, gh },
@@ -164,8 +164,13 @@ export function GitPanel({
       show: (view) => setStack((s) => [...s, view]),
       // Files shows the chat's folder; a file of the repository outside it is
       // not there to open, and is offered no button that would do nothing.
-      inFolder: (p) => p.startsWith(prefix),
-      openFile: onOpenFile ? (p) => p.startsWith(prefix) && onOpenFile(p.slice(prefix.length)) : undefined,
+      inFolder: (p) => within(state.prefix, p),
+      openFile: onOpenFile
+        ? (p) => {
+            const rel = below(state.prefix, p);
+            if (rel !== undefined) onOpenFile(rel);
+          }
+        : undefined,
     };
   }, [state, gh, sessionId, reload, act, busy, onOpenFile]);
 

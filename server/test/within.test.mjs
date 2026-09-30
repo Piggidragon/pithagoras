@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const { isWithinReal, isWithinText } = await import("../dist/workspaces.js");
+const { insideReal, isWithinReal, isWithinText } = await import("../dist/within.js");
 
 test("the folder itself and what is under it are within it, by text", () => {
   assert.equal(isWithinText("/w/site", "/w/site"), true);
@@ -23,8 +23,16 @@ test("a trailing separator and the root folder are handled", () => {
   assert.equal(isWithinText("/", "/etc/passwd"), true);
 });
 
-test("by where it leads, a link into the folder counts as inside, and an empty place does not", () => {
+test("what is written with .. or doubled separators is judged by where it goes", () => {
+  assert.equal(isWithinText("/w/site", "/w/site/../backup"), false);
+  assert.equal(isWithinText("/w/site", "/w/site/src/../a.ts"), true);
+  assert.equal(isWithinText("/w/site//", "/w/site/a"), true);
+  assert.equal(isWithinText("/w//site", "/w/site/a"), true);
+});
+
+test("by where it leads, a link into the folder counts as inside, and an empty place does not", (t) => {
   const home = mkdtempSync(path.join(tmpdir(), "pithagoras-within-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
   const project = path.join(home, "site");
   mkdirSync(path.join(project, "docs"), { recursive: true });
   symlinkSync(path.join(project, "docs"), path.join(home, "shortcut"));
@@ -32,4 +40,8 @@ test("by where it leads, a link into the folder counts as inside, and an empty p
   assert.equal(isWithinReal(project, path.join(home, "shortcut")), true);
   assert.equal(isWithinReal(project, path.join(home, "site-old")), false);
   assert.equal(isWithinReal(project, null), false);
+  // One test for many places answers each the same.
+  const inside = insideReal(project);
+  assert.deepEqual([path.join(home, "shortcut"), path.join(project, "docs"), home].map(inside), [true, true, false]);
+  assert.equal(insideReal(path.join(home, "gone"))(path.join(home, "shortcut")), false);
 });

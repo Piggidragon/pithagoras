@@ -13,7 +13,13 @@ test('a sibling that only shares the start of the name is not', () => {
   assert.equal(within('/w/site', '/w'), false);
 });
 
+test('everything is within the root folder', () => {
+  assert.equal(below('/', '/etc/passwd'), 'etc/passwd');
+  assert.equal(below('/', '/'), '');
+});
+
 test('a trailing slash on the folder makes no difference', () => {
+  assert.equal(within('/w/site//', '/w/site/a'), true);
   assert.equal(within('/w/site/', '/w/site'), true);
   assert.equal(within('/w/site/', '/w/site/a.ts'), true);
   assert.equal(within('/w/site/', '/w/site-old'), false);
@@ -24,6 +30,10 @@ test('relative paths, as the files panel has them', () => {
   assert.equal(within('src', 'src/a.ts'), true);
   assert.equal(within('src', 'src2/a.ts'), false);
   assert.equal(within('src', ''), false);
+  // "" is the top of the tree: every relative path is in it, no absolute one.
+  assert.equal(within('', 'src/a.ts'), true);
+  assert.equal(below('', 'src/a.ts'), 'src/a.ts');
+  assert.equal(within('', '/etc'), false);
 });
 
 test('below says what is under the folder', () => {

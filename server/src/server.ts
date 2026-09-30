@@ -22,7 +22,8 @@ import {
   listSessions,
   updateSession,
 } from "./db.js";
-import { checkWorkspace, isWithinReal, isWithinText, workspaceRoot } from "./workspaces.js";
+import { checkWorkspace, workspaceRoot } from "./workspaces.js";
+import { insideReal, isWithinText } from "./within.js";
 import { agentHomePath } from "./agent-home.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import {
@@ -319,9 +320,10 @@ const chatsIn = (dir: string, all = listSessions()) =>
  */
 function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[] {
   const seen = new Map<string, boolean>();
+  const reaches = insideReal(dir);
   return rows.filter((row) => {
     let inside = seen.get(row.workspace);
-    if (inside === undefined) seen.set(row.workspace, (inside = isWithinReal(dir, row.workspace)));
+    if (inside === undefined) seen.set(row.workspace, (inside = reaches(row.workspace)));
     return inside;
   });
 }

@@ -365,7 +365,7 @@ export function FilesPanel({
       if (!gone) return;
       // What is open and shown now, not when the delete was clicked: the person may have moved on while it was asked.
       const open = fileRef.current;
-      if (open && (within(path, open.path))) {
+      if (open && within(path, open.path)) {
         fileAsk.current++;
         setFile(null);
       }

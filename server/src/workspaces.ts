@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { agentHomePath } from "./agent-home.js";
+import { isWithinText } from "./within.js";
 
 /** Where projects live. WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys. */
 export function workspaceRoot(): string {
@@ -46,30 +47,6 @@ export function placeProblem(workspace: string | null): string | null {
   if (!workspace) return null;
   const where = checkWorkspace(workspace);
   return "error" in where ? where.error : null;
-}
-
-/**
- * `where` is the folder `dir` or inside it, by the text of the path alone: no
- * look at the disk, and a sibling that only shares the start of the name
- * (`/w/site-old` against `/w/site`) is not inside.
- */
-export function isWithinText(dir: string, where: string): boolean {
-  const base = dir.endsWith(path.sep) ? dir.slice(0, -1) : dir;
-  return where === base || where.startsWith(base + path.sep);
-}
-
-/**
- * The same, by the text or by where it really leads, so that a link to a
- * project counts as in the project.
- */
-export function isWithinReal(dir: string, where: string | null): boolean {
-  if (!where) return false;
-  if (isWithinText(dir, where)) return true;
-  try {
-    return isWithinText(realpathSync(dir), realpathSync(where));
-  } catch {
-    return false;
-  }
 }
 
 /**

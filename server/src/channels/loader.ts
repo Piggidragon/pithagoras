@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync 
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { isWithinText } from "../workspaces.js";
+import { isWithinText } from "../within.js";
 
 const run = promisify(execFile);
 

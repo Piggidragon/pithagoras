@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
-import { isWithinReal, isWithinText } from "./workspaces.js";
+import { isWithinReal, isWithinText } from "./within.js";
 
 /**
  * Git, and GitHub through `gh` where it is installed, for the Git panel.
@@ -616,11 +616,12 @@ function real(p: string): string {
  */
 async function ownChanges(repo: Repo, files: ChangedFile[], tops: Set<string>): Promise<number> {
   const isTop = (f: ChangedFile) => f.kind === "untracked" && f.path.endsWith("/") && tops.has(real(path.join(repo.root, f.path)));
+  const topList = [...tops];
   let n = 0;
   for (const f of files) {
     if (isTop(f)) continue;
     const at = real(path.join(repo.root, f.path));
-    if (f.kind !== "untracked" || !f.path.endsWith("/") || ![...tops].some((top) => isWithinText(at, top))) {
+    if (f.kind !== "untracked" || !f.path.endsWith("/") || !topList.some((top) => isWithinText(at, top))) {
       n++;
       continue;
     }
