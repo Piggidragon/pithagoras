@@ -20,6 +20,7 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
+import { UNSAVED_WORK, holdsWork, unsavedIn, type Unsaved } from "./git.js";
 import { pictureType } from "./prompt-images.js";
 
 /**
@@ -45,12 +46,14 @@ export const MAX_ENTRIES = 2_000;
 /** Left out of the whole-folder archive: regenerable, or huge, and not the work itself. */
 export const ARCHIVE_EXCLUDES = ["node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build"];
 
-export type FileErrorCode = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed";
+export type FileErrorCode = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
 
 export class FileError extends Error {
   constructor(
     readonly code: FileErrorCode,
     message: string,
+    /** With "unsaved": what the delete would lose. */
+    readonly unsaved?: Unsaved,
   ) {
     super(message);
   }
@@ -403,8 +406,12 @@ export function writeText(
  * Removes a file, or a folder and all that is in it. A link is removed as the
  * link it is, and what it points at stays. The folder itself is not removable
  * from here: that is the chat's place, not something in it.
+ *
+ * A folder that holds git work nothing else has — a clone with commits no
+ * remote has, changes not committed, stashes, or a repository's own .git — is
+ * refused, with what it holds, unless `discard` says that is meant.
  */
-export function removeEntry(base: string, rel: unknown): void {
+export async function removeEntry(base: string, rel: unknown, discard = false): Promise<void> {
   const text = String(rel ?? "");
   if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
   const lexical = path.resolve(base, text.replace(/^[/\\]+/, ""));
@@ -415,6 +422,10 @@ export function removeEntry(base: string, rel: unknown): void {
   const parent = resolveInside(base, path.relative(base, path.dirname(lexical)));
   const target = path.join(parent, path.basename(lexical));
   if (!lexists(target)) throw new FileError("missing", "There is no such file or folder");
+  if (!discard) {
+    const unsaved = await unsavedIn(target);
+    if (holdsWork(unsaved)) throw new FileError("unsaved", UNSAVED_WORK, unsaved);
+  }
   try {
     // A file that has gone since it was looked for is what was asked for.
     rmSync(target, { recursive: true, force: true });

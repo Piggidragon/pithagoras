@@ -788,3 +788,91 @@ test("unsaved work: a folder that cannot be listed is not taken for an empty one
     chmodSync(shut, 0o755);
   }
 });
+
+test("unsaved work in a delete from the Files panel: a file or a link goes as it is, a clone's commits are asked about", async () => {
+  const folder = path.join(home, `panel${++n}`);
+  mkdirSync(folder);
+  const api = path.join(folder, "api");
+  execFileSync("git", ["clone", "-q", repo(), api]);
+  assert.deepEqual(await g.unsavedIn(api), { changed: 0, unpushed: 0, stashes: 0 });
+  mkdirSync(path.join(api, "src"));
+  writeFileSync(path.join(api, "src", "x.ts"), "x\n");
+  sh(api, "add", "-A");
+  sh(api, "commit", "-qm", "only here");
+  assert.deepEqual(await g.unsavedIn(api), { changed: 0, unpushed: 1, stashes: 0 });
+  // The folder that holds the clone is the same.
+  assert.deepEqual(await g.unsavedIn(folder), { changed: 0, unpushed: 1, stashes: 0 });
+
+  // What is picked is what goes: a file with changes, a link to the clone.
+  writeFileSync(path.join(api, "a.txt"), "edited again\n");
+  assert.equal(await g.unsavedIn(path.join(api, "a.txt")), null);
+  symlinkSync(api, path.join(folder, "link"));
+  assert.equal(await g.unsavedIn(path.join(folder, "link")), null);
+  // A folder in the clone: only what is changed in it, and the commits stay with the repository.
+  assert.deepEqual(await g.unsavedIn(path.join(api, "src")), { changed: 0, unpushed: 0, stashes: 0 });
+  writeFileSync(path.join(api, "src", "x.ts"), "changed\n");
+  assert.deepEqual(await g.unsavedIn(path.join(api, "src")), { changed: 1, unpushed: 0, stashes: 0 });
+  // A folder that is all new is files, not git work.
+  mkdirSync(path.join(api, "fresh"));
+  writeFileSync(path.join(api, "fresh", "y.ts"), "y\n");
+  assert.equal(await g.unsavedIn(path.join(api, "fresh")), null);
+
+  // Gone already, or nothing git has.
+  assert.equal(await g.unsavedIn(path.join(folder, "nothing")), null);
+  const plain = path.join(folder, "plain");
+  mkdirSync(plain);
+  assert.equal(await g.unsavedIn(plain), null);
+});
+
+test("unsaved work in a delete from the Files panel: what a tool folder holds is not looked into", async () => {
+  const folder = path.join(home, `tools${++n}`);
+  const modules = path.join(folder, "node_modules");
+  const dep = path.join(modules, "dep");
+  mkdirSync(dep, { recursive: true });
+  sh(dep, "init", "-q");
+  writeFileSync(path.join(dep, "x.txt"), "x\n");
+  sh(dep, "add", "-A");
+  sh(dep, "commit", "-qm", "from elsewhere");
+  assert.equal(await g.unsavedIn(modules), null);
+  // The folder around it does not look into it either.
+  assert.equal(await g.unsavedIn(folder), null);
+});
+
+test("unsaved work in a delete of .git: the history and the stashes go, the files beside it stay", async () => {
+  const dir = repo();
+  const gitDir = path.join(dir, ".git");
+  // Committed, and no remote has it: the commit is all the history there is.
+  assert.deepEqual(await g.unsavedIn(gitDir), { changed: 0, unpushed: 1, stashes: 0 });
+  // Changes are in files that stay, so they are not counted.
+  writeFileSync(path.join(dir, "a.txt"), "edited\n");
+  writeFileSync(path.join(dir, "new.txt"), "n\n");
+  assert.deepEqual(await g.unsavedIn(gitDir), { changed: 0, unpushed: 1, stashes: 0 });
+  pushed(dir);
+  assert.deepEqual(await g.unsavedIn(gitDir), { changed: 0, unpushed: 0, stashes: 0 });
+  sh(dir, "stash", "-u", "-q");
+  assert.deepEqual(await g.unsavedIn(gitDir), { changed: 0, unpushed: 0, stashes: 1 });
+  sh(dir, "switch", "-q", "-c", "side");
+  writeFileSync(path.join(dir, "s.txt"), "s\n");
+  sh(dir, "add", "-A");
+  sh(dir, "commit", "-qm", "on a side branch");
+  assert.deepEqual(await g.unsavedIn(gitDir), { changed: 0, unpushed: 1, stashes: 1 });
+
+  // Before the first commit there is no history.
+  const fresh = path.join(home, `fresh${++n}`);
+  mkdirSync(fresh);
+  sh(fresh, "init", "-q");
+  assert.deepEqual(await g.unsavedIn(path.join(fresh, ".git")), { changed: 0, unpushed: 0, stashes: 0 });
+});
+
+test("unsaved work in a delete of .git: a worktree's .git is a file that only points at a repository that stays", async () => {
+  const dir = repo();
+  const tree = path.join(home, `tree${++n}`);
+  sh(dir, "worktree", "add", "-q", "-b", "wt", tree);
+  assert.equal(await g.unsavedIn(path.join(tree, ".git")), null);
+});
+
+test("unsaved work in a delete of .git: one that cannot be read is not taken for a clean one", async () => {
+  const dir = path.join(home, `emptygit${++n}`);
+  mkdirSync(path.join(dir, ".git"), { recursive: true });
+  assert.equal((await g.unsavedIn(path.join(dir, ".git")))?.unknown, true);
+});

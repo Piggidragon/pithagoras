@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 import { isWithin } from "./workspaces.js";
 
@@ -451,6 +451,12 @@ export interface Unsaved {
   unknown?: true;
 }
 
+/** What a delete is refused with, where it would take unsaved work, unless it is told that is meant. */
+export const UNSAVED_WORK = "This folder holds work that exists nowhere else. Delete it only when that is meant.";
+
+/** Whether there is anything to ask about: work only this folder has, or a folder that could not be told. */
+export const holdsWork = (u: Unsaved | null): u is Unsaved => !!u && !!(u.changed || u.unpushed || u.stashes || u.unknown);
+
 /** More folders than this are not searched for repositories: the answer is "could not tell". */
 const REPO_SEARCH_LIMIT = 50_000;
 
@@ -540,6 +546,33 @@ export async function unsavedWork(folder: string): Promise<Unsaved | null> {
   return total;
 }
 
+/**
+ * What deleting `target` — a file or a folder somewhere in a chat's folder, not
+ * a project — would lose for good, or null when nothing git holds goes with it.
+ *
+ * A file is what the person picked, and so is a link: a `.git` that is a file
+ * only points at a repository, which stays where it is. A folder is looked at as
+ * a project is (see unsavedWork), except that one called node_modules, .venv and
+ * the like is not looked into: a project's own are skipped, and clearing one out
+ * is what they are deleted for. A repository's own `.git` takes its history,
+ * branches and stashes, but not the files beside it, so what is changed in
+ * those is not counted.
+ */
+export async function unsavedIn(target: string): Promise<Unsaved | null> {
+  try {
+    if (!(await lstat(target)).isDirectory()) return null;
+    const name = path.basename(target);
+    if (GENERATED.has(name)) return null;
+    if (name !== ".git") return await unsavedWork(target);
+    return await repoWork(path.dirname(realpathSync(target)), realpathSync(target), new Set(), new Set(), true);
+  } catch (e) {
+    // Gone since it was looked for: nothing of it is deleted either. Anything else is not "none".
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    console.warn(`[git] could not tell what ${target} holds: ${(e as Error).message}`);
+    return { changed: 0, unpushed: 0, stashes: 0, unknown: true };
+  }
+}
+
 /** A path's real place, or the path when it is gone. */
 function real(p: string): string {
   try {
@@ -605,8 +638,11 @@ function localRemote(url: string, base: string): string | null {
   return path.resolve(base, url);
 }
 
-/** What the repository whose top is `dir` would lose when `folder`, which holds it, goes. */
-async function repoWork(dir: string, folder: string, counted: Set<string>, tops: Set<string>): Promise<Unsaved> {
+/**
+ * What the repository whose top is `dir` would lose when `folder`, which holds it, goes.
+ * `filesStay`: only its .git goes, so the files beside it, and what is changed in them, stay.
+ */
+async function repoWork(dir: string, folder: string, counted: Set<string>, tops: Set<string>, filesStay = false): Promise<Unsaved> {
   const repo = await findRepo(dir);
   // A .git that git does not take for the folder's own repository is a broken one.
   if (!repo || realpathSync(repo.root) !== realpathSync(dir)) throw new GitError(409, "not a readable repository");
@@ -615,7 +651,7 @@ async function repoWork(dir: string, folder: string, counted: Set<string>, tops:
   const ran = await git(repo, ["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=normal", "--ignore-submodules=dirty"]);
   if (ran.cut) throw new GitError(409, "git status said more than could be read");
   const now = parseStatus(ran.stdout);
-  const changed = await ownChanges(repo, now.files, tops);
+  const changed = filesStay ? 0 : await ownChanges(repo, now.files, tops);
   // A remote inside the folder goes with it: what only it has is not saved.
   // Then only the others count, named one by one.
   const urls = (await git(repo, ["config", "--get-regexp", "^remote\\..*\\.url$"], { ok: [1] })).stdout.split("\n").filter(Boolean);

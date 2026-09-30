@@ -32,9 +32,11 @@ import {
 /** An upload larger than this is cut off: the portal's disk is everyone's. */
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
-const STATUS = { invalid: 400, missing: 404, conflict: 409, exists: 409, too_large: 413, failed: 500 } as const;
+const STATUS = { invalid: 400, missing: 404, conflict: 409, exists: 409, too_large: 413, failed: 500, unsaved: 409 } as const;
 
 function fail(res: Response, e: unknown) {
+  // Told apart from the other 409s by its code, so that the page can ask about it instead of showing an error.
+  if (e instanceof FileError && e.unsaved) return res.status(STATUS[e.code]).json({ error: e.message, code: "unsaved-work", unsaved: e.unsaved });
   if (e instanceof FileError) return res.status(STATUS[e.code]).json({ error: e.message });
   console.error("[portal] files:", e);
   res.status(500).json({ error: "Could not read or change the files" });
@@ -243,11 +245,12 @@ export function filesRouter(): Router {
     }
   });
 
-  router.delete("/sessions/:id/file", (req, res) => {
+  /** `discard=1` says that git work the folder holds, which nothing else has, may go with it. */
+  router.delete("/sessions/:id/file", async (req, res) => {
     const base = folderOf(req.params.id, res);
     if (!base) return;
     try {
-      removeEntry(base, req.query.path);
+      await removeEntry(base, req.query.path, req.query.discard === "1");
       res.json({ ok: true });
     } catch (e) {
       fail(res, e);
