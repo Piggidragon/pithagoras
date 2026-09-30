@@ -625,3 +625,19 @@ test("unsaved work: a linked worktree loses its own files, not the main reposito
   writeFileSync(path.join(tree, "x.txt"), "x\n");
   assert.deepEqual(await g.unsavedWork(tree), { changed: 1, unpushed: 0, stashes: 0 });
 });
+
+test("unsaved work: a repository before its first commit is readable, and a detached worktree's own commits count", async () => {
+  const fresh = path.join(home, `fresh${++n}`);
+  mkdirSync(fresh);
+  sh(fresh, "init", "-q");
+  writeFileSync(path.join(fresh, "a.txt"), "a\n");
+  assert.deepEqual(await g.unsavedWork(fresh), { changed: 1, unpushed: 0, stashes: 0 });
+
+  const dir = repo();
+  const tree = path.join(home, `tree${++n}`);
+  sh(dir, "worktree", "add", "-q", "--detach", tree);
+  writeFileSync(path.join(tree, "w.txt"), "w\n");
+  sh(tree, "add", "-A");
+  sh(tree, "commit", "-qm", "on no branch, in a worktree");
+  assert.deepEqual(await g.unsavedWork(tree), { changed: 0, unpushed: 1, stashes: 0 });
+});

@@ -43,7 +43,8 @@ has and when one last moved.
   also lists what only the folder holds — files with uncommitted changes, commits
   no remote has, stashes — and asks again in its own words; the server refuses
   the delete without that. A repository that cannot be read is treated the same.
-Ignored files, submodules and repositories nested inside the folder are not looked at.
+  Ignored files, submodules and repositories nested inside the folder are not
+  looked at.
 
 ## Chats inside a project
 

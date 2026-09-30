@@ -465,13 +465,22 @@ export async function unsavedWork(folder: string): Promise<Unsaved | null> {
     // two diffs for line counts, and only the number is needed here.
     const { stdout } = await git(repo, ["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=all", "--ignore-submodules=dirty"]);
     const now = parseStatus(stdout);
-    // A linked worktree or a submodule checkout has a .git *file*: its history
-    // and stashes are the main repository's, which stay. Only its files go.
-    if (!lstatSync(path.join(folder, ".git")).isDirectory()) return { changed: now.files.length, unpushed: 0, stashes: 0 };
-    // HEAD and tags as well as branches: a commit made on a detached HEAD, or
-    // in the middle of a rebase, is on no branch and would be missed.
-    const ahead = await git(repo, ["rev-list", "--branches", "--tags", "HEAD", "--not", "--remotes", "--count"]);
-    return { changed: now.files.length, unpushed: Number(ahead.stdout.trim()) || 0, stashes: now.stashes };
+    // Commits no ref holds: HEAD itself, in a detached state or mid-rebase,
+    // and every branch and tag besides. Nothing to ask before the first commit.
+    const count = async (args: string[]) => {
+      if (!now.head) return 0;
+      const out = (await git(repo, ["rev-list", ...args, "--count"])).stdout.trim();
+      // Not `|| 0`: output that is not a number is not "none", and the guard fails closed.
+      if (!/^\d+$/.test(out)) throw new GitError(409, `rev-list said "${out.slice(0, 40)}"`);
+      return Number(out);
+    };
+    // A linked worktree or a submodule checkout has a .git *file*: the branches,
+    // tags and stashes are the main repository's, which stay. Only its files and
+    // whatever commits are on no branch go.
+    if (!lstatSync(path.join(folder, ".git")).isDirectory()) {
+      return { changed: now.files.length, unpushed: await count(["HEAD", "--not", "--branches", "--tags", "--remotes"]), stashes: 0 };
+    }
+    return { changed: now.files.length, unpushed: await count(["--branches", "--tags", "HEAD", "--not", "--remotes"]), stashes: now.stashes };
   } catch (e) {
     // Said, not swallowed: the page can only say "could not be read".
     console.warn(`[git] could not tell what ${folder} holds: ${(e as Error).message}`);
