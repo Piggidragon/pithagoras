@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
-import { piSetting } from "./pi-settings.js";
+import { piSetting, readPiSettings } from "./pi-settings.js";
+import { npmName, toolAvailable } from "./extension-switch.js";
 import { browserTool, toolEnabled } from "./tool-policy.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
@@ -1695,6 +1696,8 @@ export interface KnownTool {
   source: string;
   /** What the tool says it does, for the list shown before a chat has started. */
   description?: string;
+  /** The entry in pi's settings that brought it, so it can go when that does. */
+  package?: string;
 }
 
 /**
@@ -1748,10 +1751,33 @@ export function knownTools(): KnownTool[] {
         name: String(t.name),
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
+        ...(typeof t.package === "string" && t.package ? { package: t.package } : {}),
       }));
   } catch {
     return [];
   }
+}
+
+/**
+ * The remembered tools that can still be used: not the ones of a package that
+ * is switched off or gone. What is remembered stays, for a package that comes
+ * back; this is what the settings page and an idle chat show.
+ */
+export function shownTools(): KnownTool[] {
+  const packages = readPiSettings().packages;
+  return knownTools().filter((tool) => toolAvailable(tool, packages));
+}
+
+/**
+ * A package was uninstalled: its tools are not remembered any more. Entries
+ * from before the package was recorded are found by the name it is filed under.
+ * The defaults somebody set are kept, as for any tool that is not loaded.
+ */
+export function forgetPackageTools(spec: string): void {
+  const name = npmName(spec);
+  const all = knownTools();
+  const kept = all.filter((t) => (t.package !== undefined ? t.package !== spec : name === undefined || t.source !== name));
+  if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
 }
 
 /**
@@ -1766,7 +1792,12 @@ export function rememberTools(tools: KnownTool[]): void {
   for (const tool of tools) {
     // Kept short: it is a hint beside a checkbox, and the catalogue is one settings row.
     const description = tool.description?.trim().slice(0, 300) || merged.get(tool.name)?.description;
-    merged.set(tool.name, { name: tool.name, source: tool.source, ...(description ? { description } : {}) });
+    merged.set(tool.name, {
+      name: tool.name,
+      source: tool.source,
+      ...(description ? { description } : {}),
+      ...(tool.package ? { package: tool.package } : {}),
+    });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   putSetting("tools_seen", JSON.stringify(sorted));

@@ -42,6 +42,39 @@ export function isFiltered(entry: unknown): boolean {
   return !!entry && typeof entry === "object" && !isSwitchedOff(entry);
 }
 
+/**
+ * The name an npm package goes by, from the source it is listed as:
+ * `npm:@scope/name@1.2.0` is `@scope/name`. Undefined for a git URL or a folder.
+ */
+export function npmName(source: string): string | undefined {
+  const m = /^npm:(@[^/@]+\/[^/@]+|[^/@]+)(?:@.*)?$/.exec(source.trim());
+  return m?.[1];
+}
+
+/**
+ * Can a tool remembered from an earlier session still be offered?
+ *
+ * Not if the package that brought it has been switched off or is no longer
+ * listed. `pkg` is the source the session reported it under; an entry written
+ * before that was recorded only has the label it was filed under, which for an
+ * npm package is its name, so a switched-off package is still recognised by it.
+ * A tool that came from no user package — built in, a folder, a project's
+ * own — is always available, and so is everything when the packages cannot be
+ * read: hiding a tool on a guess is worse than showing a dead one.
+ */
+export function toolAvailable(tool: { source: string; package?: string }, packages: unknown): boolean {
+  if (!Array.isArray(packages)) return true;
+  if (tool.package !== undefined) {
+    const entry = packages.find((e) => sourceOf(e) === tool.package);
+    return entry !== undefined && !isSwitchedOff(entry);
+  }
+  const entry = packages.find((e) => {
+    const source = sourceOf(e);
+    return source !== undefined && npmName(source) === tool.source;
+  });
+  return entry === undefined || !isSwitchedOff(entry);
+}
+
 const off = (source: string): Entry => ({
   source,
   extensions: [],

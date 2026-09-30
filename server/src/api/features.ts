@@ -1,5 +1,5 @@
 import express, { type Router } from "express";
-import { extensionStash, getSession, sessionSubagentModel, setExtensionStash, setSessionSubagentModel } from "../db.js";
+import { extensionStash, forgetPackageTools, getSession, sessionSubagentModel, setExtensionStash, setSessionSubagentModel } from "../db.js";
 import {
   SUBAGENT_MAX_PARALLEL,
   UNDERSTORY,
@@ -218,6 +218,7 @@ export function featuresRouter(): Router {
         // What was kept aside for switching it back on has nothing left to go
         // to — dropped in turn with the other switches, which read and write it too.
         const source = state.source;
+        forgetPackageTools(source);
         await updatePiSettings(
           () => {},
           () => {

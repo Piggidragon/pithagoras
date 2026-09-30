@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../dist/extension-switch.js";
+import { isFiltered, isSwitchedOff, npmName, setPackageEnabled, sourceOf, toolAvailable } from "../dist/extension-switch.js";
 
 const OFF = (source) => ({ source, extensions: [], skills: [], prompts: [], themes: [] });
 
@@ -86,4 +86,46 @@ test("a filter put aside earlier is not brought back over a plain entry written 
   assert.deepEqual(off.stash, {});
   const on = setPackageEnabled(off.packages, "npm:a", true, off.stash);
   assert.deepEqual(on.packages, ["npm:a"]);
+});
+
+test("an npm package is named without its prefix and its version", () => {
+  assert.equal(npmName("npm:pi-lens"), "pi-lens");
+  assert.equal(npmName("npm:pi-lens@1.2.0"), "pi-lens");
+  assert.equal(npmName("npm:@juicesharp/rpiv-todo"), "@juicesharp/rpiv-todo");
+  assert.equal(npmName("npm:@juicesharp/rpiv-todo@0.4.1"), "@juicesharp/rpiv-todo");
+  assert.equal(npmName("git:github.com/user/repo"), undefined);
+  assert.equal(npmName("../local/folder"), undefined);
+});
+
+test("a tool stays while its package is listed and on", () => {
+  const tool = { source: "@juicesharp/rpiv-todo", package: "npm:@juicesharp/rpiv-todo" };
+  assert.equal(toolAvailable(tool, ["npm:@juicesharp/rpiv-todo"]), true);
+  assert.equal(toolAvailable(tool, [{ source: "npm:@juicesharp/rpiv-todo", extensions: ["x.ts"] }]), true);
+});
+
+test("a tool goes when its package is switched off or not listed any more", () => {
+  const tool = { source: "@juicesharp/rpiv-todo", package: "npm:@juicesharp/rpiv-todo" };
+  assert.equal(toolAvailable(tool, [OFF("npm:@juicesharp/rpiv-todo")]), false);
+  assert.equal(toolAvailable(tool, ["npm:other"]), false);
+  assert.equal(toolAvailable(tool, []), false);
+});
+
+test("a tool with no package behind it is always there", () => {
+  // A folder of the user's own, a project's extension, pi itself: not listed in the user's packages.
+  assert.equal(toolAvailable({ source: "built in" }, []), true);
+  assert.equal(toolAvailable({ source: "todo" }, ["npm:other"]), true);
+});
+
+test("a tool remembered before packages were recorded is found by its name when its package is off", () => {
+  const old = { source: "@juicesharp/rpiv-todo" };
+  assert.equal(toolAvailable(old, [OFF("npm:@juicesharp/rpiv-todo@0.4.1")]), false);
+  assert.equal(toolAvailable(old, ["npm:@juicesharp/rpiv-todo"]), true);
+  // Not listed: nothing says it was a package, so it is left alone.
+  assert.equal(toolAvailable(old, []), true);
+});
+
+test("nothing is hidden when the packages could not be read", () => {
+  const tool = { source: "x", package: "npm:x" };
+  assert.equal(toolAvailable(tool, undefined), true);
+  assert.equal(toolAvailable(tool, "garbage"), true);
 });

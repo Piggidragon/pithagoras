@@ -150,6 +150,15 @@ It takes effect from the next message — pi is told at once and there is no nee
 to restart the conversation — and it is remembered per chat, including across a
 restart.
 
+Before a chat has started, and in Settings → Tools, the list is what the portal
+has seen registered. The tools of a package that is switched off, or that was
+uninstalled, are left out of it, since nothing registers them any more. A
+switched-off package's are remembered and come back with it; an uninstalled
+one's are forgotten. A tool remembered before the portal recorded which package it came from is left
+out when its npm package is switched off. If that package was uninstalled outside
+the portal, nothing says the tool was a package's, and it stays listed until it is
+removed from `tools_seen` in the portal's database.
+
 The list is what the model could be offered. pi registers `grep`, `find` and
 `ls` and leaves them inactive, so they are not there to tick. A switch holds
 against everything that would turn a tool back on — an extension that registers

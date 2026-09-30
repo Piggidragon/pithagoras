@@ -33,6 +33,8 @@ export interface PiTool {
   description?: string;
   /** The package or file that registered it, for grouping. */
   source: string;
+  /** The entry in pi's settings that brought it, where a package of the user's did. */
+  package?: string;
   /** False when this conversation has it switched off. */
   enabled: boolean;
   /** Whether it is on by default, so the page can say where a chat disagrees. */
