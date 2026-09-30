@@ -94,6 +94,8 @@ const de: Locale = {
     "Clear the audit log?": "Das Audit-Protokoll leeren?",
     "Every recorded decision is deleted, not only the ones the filter shows. This cannot be undone.": "Jede aufgezeichnete Entscheidung wird gelöscht, nicht nur die, die der Filter zeigt. Das lässt sich nicht rückgängig machen.",
     "Clear the audit log": "Audit-Protokoll leeren",
+    "Log cleared": "Log geleert",
+    "{n} entries were deleted.": { one: "Ein Eintrag wurde gelöscht.", other: "{n} Einträge wurden gelöscht." },
     "Refused": "Abgelehnt",
     "Allowed by rule": "Per Regel erlaubt",
     "Allowed by approval": "Per Freigabe erlaubt",

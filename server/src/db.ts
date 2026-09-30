@@ -1417,8 +1417,15 @@ export function recordAudit(entry: {
 export const listAudit = (limit = 200): AuditRow[] =>
   getDb().prepare("SELECT * FROM audit ORDER BY id DESC LIMIT ?").all(limit) as AuditRow[];
 
-/** Empties the log, for when its history is no longer wanted; returns how many entries went. */
-export const clearAudit = (): number => getDb().prepare("DELETE FROM audit").run().changes;
+/**
+ * Empties the log, for when its history is no longer wanted; returns how many
+ * entries went. With `through`, only entries up to that id go: the ones
+ * somebody saw before deciding, not whatever was recorded since.
+ */
+export const clearAudit = (through?: number): number =>
+  through === undefined
+    ? getDb().prepare("DELETE FROM audit").run().changes
+    : getDb().prepare("DELETE FROM audit WHERE id <= ?").run(through).changes;
 
 /** Does this routine's runs get the guard's blocking rules? Unknown means yes. */
 export function routineGuards(slug: string | null | undefined): boolean {

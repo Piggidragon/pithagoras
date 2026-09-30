@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { forgetPerson, getPerson, listPeople, setRole, type Role } from "../people.js";
-import { AUDIT_KEEP, addToolRule, clearAudit, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
+import { AUDIT_KEEP, addToolRule, clearAudit, deleteToolRule, getDb, listAudit, listToolRules, recordAudit } from "../db.js";
 import { nanoid } from "nanoid";
 
 /**
@@ -63,13 +63,16 @@ export function peopleRouter(): Router {
   });
 
   /**
-   * Wipes the whole history. The web asks first; here it is the caller's word.
-   * The wipe itself goes to the container log, since the table can no longer
-   * say that it happened.
+   * Wipes the history, up to `?through=<id>` when given: the web sends the
+   * newest entry it showed, so a decision recorded while the question was open
+   * survives. The web asks first; here it is the caller's word. The wipe leaves
+   * one entry behind saying it happened, so an emptied log cannot pass for a
+   * quiet one.
    */
-  router.delete("/audit", (_req, res) => {
-    const removed = clearAudit();
-    console.log(`[portal] audit log cleared (${removed} entries)`);
+  router.delete("/audit", (req, res) => {
+    const through = Number(req.query.through);
+    const removed = clearAudit(req.query.through !== undefined && Number.isInteger(through) ? through : undefined);
+    recordAudit({ kind: "cleared", reason: String(removed) });
     res.json({ removed });
   });
 

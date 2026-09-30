@@ -23,6 +23,7 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   stranger: { label: msg("Turned away"), icon: <LuUserX className="h-3.5 w-3.5" />, tone: "text-warn" },
   answered: { label: msg("You answered"), icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-accent" },
   browsed: { label: msg("Page opened"), icon: <LuGlobe className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
+  cleared: { label: msg("Log cleared"), icon: <LuTrash2 className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
 };
 
 const FILTERS = [
@@ -58,20 +59,26 @@ export function AuditPage() {
   );
 }
 
-function AuditPanel({ onError }: { onError: (e: string) => void }) {
+function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
-  // Only the newest answer counts: one sent before a clear must not bring the
-  // cleared entries back when it arrives after it.
-  const asked = useRef(0);
+  // Counts clears: an answer asked for before one must not bring the cleared
+  // entries back when it arrives after it. Only clears, not every poll — on a
+  // slow link each answer can land after the next poll went out, and must
+  // still count.
+  const cleared = useRef(0);
 
   const load = () => {
-    const mine = ++asked.current;
+    const since = cleared.current;
     return api
       .audit(300)
-      .then((r) => { if (mine === asked.current) setEntries(r.entries); })
+      .then((r) => {
+        if (since !== cleared.current) return;
+        setEntries(r.entries);
+        onError(null);
+      })
       .catch((e) => onError((e as Error).message))
       .finally(() => setLoading(false));
   };
@@ -81,19 +88,27 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
     return pollWhileVisible(load, 10_000);
   }, []);
 
-  /** The whole history, after asking: it is the record of what the guard decided. */
+  /**
+   * The history up to the newest entry shown, after asking. Always asking: not
+   * `deletes`, which Settings can switch off — this is the record of what the
+   * guard decided, and one stray click should not end it.
+   */
   const clear = async () => {
+    const through = Math.max(...entries.map((e) => e.id));
     const ok = await confirmDialog({
       title: t("Clear the audit log?"),
       message: t("Every recorded decision is deleted, not only the ones the filter shows. This cannot be undone."),
       confirmLabel: t("Clear the audit log"),
       danger: true,
-      deletes: true,
     });
     if (!ok) return;
     setClearing(true);
     try {
-      await api.clearAudit();
+      await api.clearAudit(through);
+      // Gone even if the reload below fails, which would otherwise leave the
+      // deleted entries on screen.
+      cleared.current++;
+      setEntries((now) => now.filter((e) => e.id > through));
       await load();
     } catch (e) {
       onError((e as Error).message);
@@ -195,7 +210,13 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
                     {e.subject}
                   </p>
                 )}
-                {e.reason && <p className="mt-0.5 text-[11px] text-fg-faint">{e.reason}</p>}
+                {e.kind === "cleared" ? (
+                  <p className="mt-0.5 text-[11px] text-fg-faint">
+                    {tp(Number(e.reason), "One entry was deleted.", "{n} entries were deleted.")}
+                  </p>
+                ) : (
+                  e.reason && <p className="mt-0.5 text-[11px] text-fg-faint">{e.reason}</p>
+                )}
               </li>
             );
           })}

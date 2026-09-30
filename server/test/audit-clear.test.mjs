@@ -20,7 +20,7 @@ test.after(() => { server.close(); getDb().close(); rmSync(dataDir, { recursive:
 
 const entries = () => fetch(`${base}/audit`).then((r) => r.json()).then((r) => r.entries);
 
-test('DELETE /api/audit removes every entry, says how many, and they stay gone', async () => {
+test('DELETE /api/audit removes every entry, says how many, and leaves only a note that it did', async () => {
   clearAudit();
   recordAudit({ kind: 'refused', tool: 'bash', subject: 'rm -rf /' });
   recordAudit({ kind: 'stranger', reason: 'unknown sender' });
@@ -28,7 +28,20 @@ test('DELETE /api/audit removes every entry, says how many, and they stay gone',
   const r = await fetch(`${base}/audit`, { method: 'DELETE' });
   assert.equal(r.status, 200);
   assert.deepEqual(await r.json(), { removed: 2 });
-  assert.deepEqual(await entries(), []);
+  const left = await entries();
+  assert.deepEqual(left.map((e) => [e.kind, e.reason]), [['cleared', '2']]);
+});
+
+test('with ?through, entries recorded after that id survive the clear', async () => {
+  clearAudit();
+  recordAudit({ kind: 'refused', subject: 'seen' });
+  const [seen] = await entries();
+  recordAudit({ kind: 'refused', subject: 'recorded while asking' });
+  const r = await fetch(`${base}/audit?through=${seen.id}`, { method: 'DELETE' });
+  assert.deepEqual(await r.json(), { removed: 1 });
+  const left = await entries();
+  assert.deepEqual(left.map((e) => e.kind), ['cleared', 'refused']);
+  assert.equal(left[1].subject, 'recorded while asking');
 });
 
 test('clearing an empty log removes nothing', async () => {

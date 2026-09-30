@@ -601,7 +601,8 @@ export const api = {
     }),
 
   audit: (limit = 200) => json<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
-  clearAudit: () => json<{ removed: number }>("/api/audit", { method: "DELETE" }),
+  /** Up to and including `through`, the newest entry the caller has seen. */
+  clearAudit: (through: number) => json<{ removed: number }>(`/api/audit?through=${through}`, { method: "DELETE" }),
   toolRules: () => json<{ rules: ToolRule[] }>("/api/tool-rules"),
   addToolRule: (rule: {
     role: string;
@@ -1095,7 +1096,7 @@ export interface ToolRule {
 export interface AuditEntry {
   id: number;
   at: string;
-  kind: "refused" | "allowed-by-rule" | "allowed-by-approval" | "stranger" | "answered" | string;
+  kind: "refused" | "allowed-by-rule" | "allowed-by-approval" | "stranger" | "answered" | "cleared" | string;
   tool: string;
   subject: string;
   reason: string;
