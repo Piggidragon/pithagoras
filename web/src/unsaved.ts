@@ -1,4 +1,4 @@
-import type { Unsaved } from "./api";
+import { ApiError, type Unsaved } from "./api";
 import { t, tp } from "./i18n";
 
 /**
@@ -29,4 +29,28 @@ export function unsavedNotes(u: Unsaved | undefined): { lost: boolean; risky: bo
     u && (lost.length || !u.unknown) ? t("Files git ignores, such as .env, are not looked at.") : "",
   ].filter(Boolean);
   return { lost: lost.length > 0, risky: lost.length > 0 || !!u?.unknown, sentences };
+}
+
+/**
+ * A delete that asks first, and asks again when the server finds work the
+ * question did not name — made, say, while it was on screen. `ask` answers
+ * whether to go ahead and whether that work may go with it (null for "no");
+ * `del` sends it, with `?discard=1` when it may. True when it was deleted.
+ */
+export async function deleteAsking(
+  unsaved: Unsaved | null | undefined,
+  ask: (unsaved: Unsaved | undefined) => Promise<boolean | null>,
+  del: (discard: boolean) => Promise<unknown>,
+): Promise<boolean> {
+  for (;;) {
+    const discard = await ask(unsaved ?? undefined);
+    if (discard === null) return false;
+    try {
+      await del(discard);
+      return true;
+    } catch (e) {
+      if (discard || !(e instanceof ApiError) || e.body.code !== "unsaved-work") throw e;
+      unsaved = e.body.unsaved as Unsaved;
+    }
+  }
 }

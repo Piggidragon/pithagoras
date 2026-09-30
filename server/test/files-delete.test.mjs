@@ -79,15 +79,14 @@ test("a clone with commits no remote has is refused with what it holds, and goes
   });
 });
 
-test("a repository's own .git is refused when it holds history nothing else has, and the files beside it are not its loss", async () => {
+test("a repository's .git is refused as not told apart, and goes only when that is meant", async () => {
   await withApi(async (base) => {
     const dir = clone("lib");
-    commitHere(dir);
     writeFileSync(path.join(dir, "new.txt"), "not committed\n");
     const refused = await del(base, "lib/.git");
     assert.equal(refused.status, 409);
     assert.equal(refused.code, "unsaved-work");
-    assert.deepEqual(refused.unsaved, { changed: 0, unpushed: 1, stashes: 0 });
+    assert.deepEqual(refused.unsaved, { changed: 0, unpushed: 0, stashes: 0, unknown: true });
     assert.equal(existsSync(path.join(dir, ".git")), true);
 
     await del(base, "lib/.git", "&discard=1");

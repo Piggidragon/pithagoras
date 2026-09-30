@@ -49,11 +49,10 @@ has and when one last moved.
   folder is not counted as a copy, since it goes too. A project that sits inside a repository — the workspace root
   being one — counts that repository's changes under the folder. Files git
   ignores (such as `.env`) and bare repositories are not looked at, and what
-  tools fill — `node_modules`, `__pycache__`, `.venv`, `venv`, `.tox`,
-  `.mypy_cache`, `.cache`, `dist`, `build`, `target`, `.next`, `.gradle` — is
-  not looked through, though one that is a repository itself counts. With a
-  repository's data goes what the HEAD of each of its worktrees holds, those
-  elsewhere too.
+  is in `node_modules`, `.venv`, `venv`, `__pycache__`, `.tox`, `.mypy_cache`
+  or `.cache` is not looked through, though one that is a repository itself
+  counts. With a repository's data goes what the HEAD of each of its worktrees
+  holds, those elsewhere too.
 
 ## Chats inside a project
 

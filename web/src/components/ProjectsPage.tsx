@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
-import { api, ApiError, type Project, type ProjectContents, type Session } from "../api";
-import { unsavedNotes } from "../unsaved";
+import { api, type Project, type ProjectContents, type Session } from "../api";
+import { deleteAsking, unsavedNotes } from "../unsaved";
 import { bytesLabel, slugify } from "../projects";
 import { within } from "../session-folders";
 import { when } from "../time";
@@ -81,19 +81,13 @@ export function ProjectsPage({
 
   const remove = (p: Project) =>
     attempt(async () => {
-      let contents = await api.projectContents(p.name);
-      for (;;) {
-        const discard = await askToRemove(p, contents);
-        if (discard === null) return;
-        try {
-          await api.deleteProject(p.name, discard);
-          break;
-        } catch (e) {
-          // Work turned up between the question and the delete: asked again, with it.
-          if (!(e instanceof ApiError) || e.body.code !== "unsaved-work") throw e;
-          contents = { ...contents, unsaved: e.body.unsaved as ProjectContents["unsaved"] };
-        }
-      }
+      const contents = await api.projectContents(p.name);
+      const gone = await deleteAsking(
+        contents.unsaved,
+        (unsaved) => askToRemove(p, { ...contents, unsaved }),
+        (discard) => api.deleteProject(p.name, discard),
+      );
+      if (!gone) return;
       onChanged();
       load();
     });

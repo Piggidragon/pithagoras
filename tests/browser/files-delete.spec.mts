@@ -8,21 +8,20 @@ type Unsaved = { changed: number; unpushed: number; stashes: number; unknown?: t
  * finds without ?discard=1, which answers 409 while it holds any. Returns what
  * was asked and what DELETE was sent, as their queries.
  */
-async function files(page: Page, opts: { unsaved?: Unsaved | null; found?: Unsaved; asks?: boolean } = {}) {
+async function files(page: Page, opts: { unsaved?: Unsaved | null; found?: Unsaved; asks?: boolean; hold?: Promise<void> } = {}) {
   const asked: string[] = [];
   const deletes: string[] = [];
   const gone = new Set<string>();
-  await page.route('**/api/sessions/preview/files**', (route) =>
-    route.fulfill({
-      json: {
-        path: '',
-        entries: [{ name: 'api', type: 'dir', size: 0, mtime: 1 }, { name: 'notes.md', type: 'file', size: 3, mtime: 1 }].filter((e) => !gone.has(e.name)),
-        truncated: false,
-      },
-    }),
-  );
-  await page.route('**/api/sessions/preview/unsaved?**', (route) => {
+  await page.route('**/api/sessions/preview/files**', (route) => {
+    const at = new URL(route.request().url()).searchParams.get('path') ?? '';
+    const entries = at === 'other'
+      ? [{ name: 'inside.txt', type: 'file', size: 1, mtime: 1 }]
+      : [{ name: 'api', type: 'dir', size: 0, mtime: 1 }, { name: 'other', type: 'dir', size: 0, mtime: 1 }, { name: 'notes.md', type: 'file', size: 3, mtime: 1 }].filter((e) => !gone.has(e.name));
+    return route.fulfill({ json: { path: at, entries, truncated: false } });
+  });
+  await page.route('**/api/sessions/preview/unsaved?**', async (route) => {
     asked.push(new URL(route.request().url()).search);
+    await opts.hold;
     return route.fulfill({ json: { unsaved: opts.unsaved ?? null } });
   });
   await page.route('**/api/sessions/preview/file?**', (route) => {
@@ -112,4 +111,26 @@ test('a file is not asked about: it holds no repository', async ({ page }) => {
   await dialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
   await expect.poll(() => deletes).toEqual(['?path=notes.md']);
   expect(asked).toEqual([]);
+});
+
+test('a delete still asking is not started twice, and afterwards the folder shown is the one moved to', async ({ page }) => {
+  let release!: () => void;
+  const hold = new Promise<void>((r) => (release = r));
+  const { asked, deletes } = await files(page, { unsaved: { changed: 0, unpushed: 0, stashes: 0 }, hold });
+  await deleteRow(page);
+  const trash = page.getByRole('button', { name: 'Delete api' });
+  await expect(trash).toBeDisabled();
+  await expect(trash).toHaveAttribute('aria-busy', 'true');
+  await trash.click({ force: true });
+  // Moved on while it was being asked.
+  await page.getByRole('button', { name: 'other', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Delete inside.txt' })).toBeAttached();
+  release();
+  await dialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect.poll(() => deletes).toEqual(['?path=api']);
+  expect(asked).toEqual(['?path=api']);
+  await expect(dialog(page)).toHaveCount(0);
+  // Still the folder moved to, not the one the delete started in.
+  await expect(page.getByRole('button', { name: 'Delete inside.txt' })).toBeAttached();
+  await expect(page.getByRole('button', { name: 'Delete notes.md' })).toHaveCount(0);
 });

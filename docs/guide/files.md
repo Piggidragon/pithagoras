@@ -23,9 +23,7 @@ that started there. Nothing outside it can be reached.
   1 MB, is not shown; download it instead.
 - **Download** without opening: every row has a download button, for a file or,
   for a folder, as a `.tar.gz`. The button at the top downloads the folder you are
-  in, without `.git` and what tools fill: `node_modules`, `__pycache__`, `.venv`,
-  `venv`, `.tox`, `.mypy_cache`, `.cache`, `dist`, `build`, `target`, `.next`
-  and `.gradle`.
+  in (without `node_modules`, `.git`, `dist`, `build` and virtual environments).
 - **Make a file or a folder** with the two buttons at the top, in the folder
   you are in. A new file opens straight away, ready to write in. Neither ever
   takes the place of something already there.
@@ -42,12 +40,14 @@ that started there. Nothing outside it can be reached.
   link is removed as the link; what it points at stays. For a folder the
   confirmation first finds out whether it holds git work nothing else has —
   uncommitted changes, commits no remote has, stashes, in a repository or a
-  clone inside it — and if so names it and asks you to **Delete anyway**, even
+  clone inside it; a folder the repository around it has none of yet counts as
+  one new folder — and if so names it and asks you to **Delete anyway**, even
   when Settings says not to ask before deleting; the server refuses without it.
   It looks and stops where [deleting a project](/guide/projects#the-projects-tab)
-  does. A file goes as it is. What tools fill (the folders the download leaves
-  out) is not looked through, but one that is a repository itself, or has
-  changes a repository around it tracks, is asked about.
+  does. A file goes as it is. `node_modules`, `.venv`, `venv`, `__pycache__`,
+  `.tox`, `.mypy_cache` and `.cache` are not looked through, but one that is a
+  repository itself, or has changes a repository around it tracks, is asked
+  about.
 
 A save is made whole: the text is written beside the file and put in place, so a
 save that fails (a full disk, say) leaves the file as it was.

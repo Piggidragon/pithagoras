@@ -20,7 +20,6 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
-import { GENERATED_DIRS } from "./generated.js";
 import { UNSAVED_WORK, holdsWork, unsavedIn, type Unsaved } from "./git.js";
 import { pictureType } from "./prompt-images.js";
 
@@ -45,7 +44,7 @@ export const MAX_EDIT_BYTES = 1024 * 1024;
 /** A folder with more than this is cut off, and says so. */
 export const MAX_ENTRIES = 2_000;
 /** Left out of the whole-folder archive: regenerable, or huge, and not the work itself. */
-export const ARCHIVE_EXCLUDES = [".git", ...GENERATED_DIRS];
+export const ARCHIVE_EXCLUDES = ["node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build"];
 
 export type FileErrorCode = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
 
@@ -435,7 +434,7 @@ export async function unsavedAt(base: string, rel: unknown): Promise<Unsaved | n
  * from here: that is the chat's place, not something in it.
  *
  * A folder that holds git work nothing else has — a clone with commits no
- * remote has, changes not committed, stashes, or a repository's own .git — is
+ * remote has, changes not committed, stashes — or a repository's .git is
  * refused, with what it holds, unless `discard` says that is meant.
  */
 export async function removeEntry(base: string, rel: unknown, discard = false): Promise<void> {

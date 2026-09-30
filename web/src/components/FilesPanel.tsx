@@ -18,11 +18,11 @@ import {
   LuTrash2,
   LuUpload,
 } from "react-icons/lu";
-import { api, ApiError, type FileEntry, type Unsaved } from "../api";
+import { api, type FileEntry, type Unsaved } from "../api";
 import type { FileActivity } from "../file-activity";
 import { confirmDialog } from "./ConfirmDialog";
 import { isEnter, isEscape } from "../shortcuts";
-import { unsavedNotes } from "../unsaved";
+import { deleteAsking, unsavedNotes } from "../unsaved";
 import { t, tp } from "../i18n";
 
 /** What the server says when a save would put older text over newer. */
@@ -127,6 +127,13 @@ export function FilesPanel({
   const dirty = !!file && !file.binary && !file.loading && draft !== file.saved;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  // For what finishes later than it started, such as a delete that asked first.
+  const dirRef = useRef(dir);
+  dirRef.current = dir;
+  const fileRef = useRef(file);
+  fileRef.current = file;
+  /** Deletes on their way, by path: asking git first can take a moment, and a second click is not a second delete. */
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(() => new Set());
   // Answers that arrive after a newer question was asked are not the answer.
   const listAsk = useRef(0);
   const fileAsk = useRef(0);
@@ -321,8 +328,8 @@ export function FilesPanel({
   };
 
   /** Whether to delete, and whether git work that only it holds goes with it: null for "no". */
-  const askToRemove = async (entry: FileEntry, unsaved: Unsaved | null): Promise<boolean | null> => {
-    const { lost, risky, sentences } = unsavedNotes(unsaved ?? undefined);
+  const askToRemove = async (entry: FileEntry, unsaved: Unsaved | undefined): Promise<boolean | null> => {
+    const { lost, risky, sentences } = unsavedNotes(unsaved);
     // A link to a folder is listed as a folder, but only the link goes.
     const what = entry.link
       ? t("This removes the link only. What it points to is not touched.")
@@ -346,31 +353,31 @@ export function FilesPanel({
 
   const remove = async (entry: FileEntry) => {
     const path = join(dir, entry.name);
+    if (removing.has(path)) return;
+    setRemoving((now) => new Set(now).add(path));
     let problem: string | null = null;
     try {
       // Only a folder can hold git work, and it is asked first so that the one question names it.
       // When that cannot be asked, the plain question goes first, and the server's refusal brings this one.
-      let unsaved = entry.type === "dir" && !entry.link ? await api.fileUnsaved(sessionId, path).then((r) => r.unsaved, () => null) : null;
-      for (;;) {
-        const discard = await askToRemove(entry, unsaved);
-        if (discard === null) return;
-        try {
-          await api.deleteFile(sessionId, path, discard);
-          break;
-        } catch (e) {
-          // Work the question did not name turned up by the time of the delete: asked again, with it.
-          if (discard || !(e instanceof ApiError) || e.body.code !== "unsaved-work") throw e;
-          unsaved = e.body.unsaved as Unsaved;
-        }
-      }
-      if (file && (file.path === path || file.path.startsWith(path + "/"))) {
+      const unsaved = entry.type === "dir" && !entry.link ? await api.fileUnsaved(sessionId, path).then((r) => r.unsaved, () => null) : null;
+      const gone = await deleteAsking(unsaved, (u) => askToRemove(entry, u), (discard) => api.deleteFile(sessionId, path, discard));
+      if (!gone) return;
+      // What is open and shown now, not when the delete was clicked: the person may have moved on while it was asked.
+      const open = fileRef.current;
+      if (open && (open.path === path || open.path.startsWith(path + "/"))) {
         fileAsk.current++;
         setFile(null);
       }
     } catch (e) {
       problem = (e as Error).message;
+    } finally {
+      setRemoving((now) => {
+        const next = new Set(now);
+        next.delete(path);
+        return next;
+      });
     }
-    await loadDir(dir);
+    await loadDir(dirRef.current);
     if (problem) setListError(problem);
   };
 
@@ -710,11 +717,13 @@ export function FilesPanel({
                     </button>
                     <button
                       onClick={() => void remove(entry)}
+                      disabled={removing.has(join(dir, entry.name))}
+                      aria-busy={removing.has(join(dir, entry.name))}
                       title={t("Delete {name}", { name: entry.name })}
                       aria-label={t("Delete {name}", { name: entry.name })}
-                      className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger"
+                      className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger disabled:opacity-60"
                     >
-                      <LuTrash2 aria-hidden className="h-3.5 w-3.5" />
+                      {removing.has(join(dir, entry.name)) ? <LuRefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <LuTrash2 aria-hidden className="h-3.5 w-3.5" />}
                     </button>
                   </div>
                 </>
