@@ -47,6 +47,20 @@ test('Copy is under the last answer, not beside it, and only there', async ({ pa
   expect(Math.abs(c.x + 6 - a.x)).toBeLessThan(4);
 });
 
+test('the answer to an earlier question keeps its Copy when another is asked, one under each answer', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=turns');
+  // The agent's side only: the conversation before these two ended in tools, so it has none.
+  const copy = page.locator('.group:not(.items-end)').getByRole('button', { name: 'Copy', exact: true });
+  await expect(copy).toHaveCount(2);
+  const first = (await page.locator('.md', { hasText: 'pgvector is enough for now.' }).boundingBox())!;
+  const second = (await page.locator('.md', { hasText: 'Redis is fine for the cache.' }).boundingBox())!;
+  const [a, b] = [(await copy.nth(0).boundingBox())!, (await copy.nth(1).boundingBox())!];
+  // Each under its own answer, not both under the last.
+  expect(a.y).toBeGreaterThanOrEqual(first.y + first.height - 1);
+  expect(a.y).toBeLessThan(second.y);
+  expect(b.y).toBeGreaterThanOrEqual(second.y + second.height - 1);
+});
+
 test('the way back to the end steps aside for a menu opened from the composer', async ({ page }) => {
   await page.goto('/tests/chat.html?phase=args');
   for (const name of ['web_search', 'github_list_issues']) await page.locator('.chat-tool-head', { hasText: name }).click();
