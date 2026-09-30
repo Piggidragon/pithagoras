@@ -52,27 +52,72 @@ export function npmName(source: string): string | undefined {
 }
 
 /**
- * Can a tool remembered from an earlier session still be offered?
+ * Which package a source is, whatever version or ref it asks for — the way pi
+ * tells them apart, so that `npm:foo@1.0.0` and `npm:foo@1.1.0` are the one
+ * package `pi install` rewrote in place, and a git repository is the same
+ * repository at any tag.
+ */
+export function packageKey(source: string): string {
+  const s = source.trim();
+  const name = npmName(s);
+  if (name) return `npm:${name}`;
+  const git = s.startsWith("git:") ? s.slice(4).trim() : /^(https?|ssh|git):\/\//i.test(s) ? s : undefined;
+  if (git === undefined) return `local:${s}`;
+  const scp = /^git@([^:]+):(.+)$/.exec(git);
+  const [host, rest] = scp
+    ? [scp[1], scp[2]]
+    : (() => {
+        const bare = git.replace(/^[a-z+]+:\/\//i, "").replace(/^[^@/]*@/, "");
+        const slash = bare.indexOf("/");
+        return slash < 0 ? [bare, ""] : [bare.slice(0, slash), bare.slice(slash + 1)];
+      })();
+  const repo = rest.split(/[@#]/)[0].replace(/\/+$/, "").replace(/\.git$/, "");
+  return `git:${host.replace(/:\d+$/, "").toLowerCase()}/${repo}`;
+}
+
+/**
+ * Whether an entry loads any extension. Tools come from extensions only, so a
+ * package narrowed to its skills and prompts registers none, just as one
+ * switched off entirely does.
+ */
+function loadsExtensions(entry: unknown): boolean {
+  if (!entry || typeof entry !== "object") return true;
+  const o = entry as Record<string, unknown>;
+  return o.autoload === false || !(Array.isArray(o.extensions) && o.extensions.length === 0);
+}
+
+/**
+ * What decides whether a tool remembered from an earlier session can still be
+ * offered, for the packages in pi's settings.
  *
- * Not if the package that brought it has been switched off or is no longer
- * listed. `pkg` is the source the session reported it under; an entry written
- * before that was recorded only has the label it was filed under, which for an
- * npm package is its name, so a switched-off package is still recognised by it.
- * A tool that came from no user package — built in, a folder, a project's
- * own — is always available, and so is everything when the packages cannot be
+ * Not if the package that brought it loads no extensions any more or is no
+ * longer listed. `package` is the source a session reported it under, matched
+ * as the same package at any version; `null` says it came from no package of
+ * the user's — built in, a folder, a project's own — and is always available.
+ * An entry written before either was recorded only has the label it was filed
+ * under, which for an npm package is its name, so a package switched off is
+ * still recognised by it. Everything is available when the packages cannot be
  * read: hiding a tool on a guess is worse than showing a dead one.
  */
-export function toolAvailable(tool: { source: string; package?: string }, packages: unknown): boolean {
-  if (!Array.isArray(packages)) return true;
-  if (tool.package !== undefined) {
-    const entry = packages.find((e) => sourceOf(e) === tool.package);
-    return entry !== undefined && !isSwitchedOff(entry);
+export function toolAvailability(packages: unknown): (tool: { source: string; package?: string | null }) => boolean {
+  if (!Array.isArray(packages)) return () => true;
+  const byKey = new Map<string, unknown>();
+  const byName = new Map<string, unknown>();
+  for (const entry of packages) {
+    const source = sourceOf(entry);
+    if (source === undefined) continue;
+    byKey.set(packageKey(source), entry);
+    const name = npmName(source);
+    if (name) byName.set(name, entry);
   }
-  const entry = packages.find((e) => {
-    const source = sourceOf(e);
-    return source !== undefined && npmName(source) === tool.source;
-  });
-  return entry === undefined || !isSwitchedOff(entry);
+  return (tool) => {
+    if (tool.package === null) return true;
+    if (tool.package !== undefined) {
+      const key = packageKey(tool.package);
+      return byKey.has(key) && loadsExtensions(byKey.get(key));
+    }
+    return !byName.has(tool.source) || loadsExtensions(byName.get(tool.source));
+  };
 }
 
 const off = (source: string): Entry => ({

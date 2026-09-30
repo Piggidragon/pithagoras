@@ -1189,7 +1189,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       name: String(tool.name),
       description: typeof tool.description === "string" ? tool.description : undefined,
       source: sourceLabel(tool.sourceInfo),
-      ...(packageOf(tool.sourceInfo) ? { package: packageOf(tool.sourceInfo) } : {}),
+      package: packageOf(tool.sourceInfo),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
   }

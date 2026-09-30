@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { piSetting, readPiSettings } from "./pi-settings.js";
-import { npmName, toolAvailable } from "./extension-switch.js";
+import { npmName, packageKey, sourceOf, toolAvailability } from "./extension-switch.js";
 import { browserTool, toolEnabled } from "./tool-policy.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
@@ -1696,8 +1696,12 @@ export interface KnownTool {
   source: string;
   /** What the tool says it does, for the list shown before a chat has started. */
   description?: string;
-  /** The entry in pi's settings that brought it, so it can go when that does. */
-  package?: string;
+  /**
+   * The entry in pi's settings that brought it, so it can go when that does;
+   * null for a tool that came from no package of the user's. Absent only in an
+   * entry remembered before this was recorded.
+   */
+  package?: string | null;
 }
 
 /**
@@ -1751,7 +1755,7 @@ export function knownTools(): KnownTool[] {
         name: String(t.name),
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
-        ...(typeof t.package === "string" && t.package ? { package: t.package } : {}),
+        ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
       }));
   } catch {
     return [];
@@ -1764,19 +1768,22 @@ export function knownTools(): KnownTool[] {
  * back; this is what the settings page and an idle chat show.
  */
 export function shownTools(): KnownTool[] {
-  const packages = readPiSettings().packages;
-  return knownTools().filter((tool) => toolAvailable(tool, packages));
+  return knownTools().filter(toolAvailability(readPiSettings().packages));
 }
 
 /**
- * A package was uninstalled: its tools are not remembered any more. Entries
- * from before the package was recorded are found by the name it is filed under.
- * The defaults somebody set are kept, as for any tool that is not loaded.
+ * A package was uninstalled: its tools are not remembered any more, whichever
+ * version of it they were recorded under. Entries from before the package was
+ * recorded are found by the name it is filed under. The defaults somebody set
+ * are kept, as for any tool that is not loaded.
  */
 export function forgetPackageTools(spec: string): void {
+  const key = packageKey(spec);
   const name = npmName(spec);
   const all = knownTools();
-  const kept = all.filter((t) => (t.package !== undefined ? t.package !== spec : name === undefined || t.source !== name));
+  const kept = all.filter((t) =>
+    typeof t.package === "string" ? packageKey(t.package) !== key : t.package === null || name === undefined || t.source !== name,
+  );
   if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
 }
 
@@ -1785,7 +1792,13 @@ export function forgetPackageTools(spec: string): void {
  * session may have extensions this one does not, and an extension that is
  * merely not loaded today should not lose the default somebody set for it.
  */
-export function rememberTools(tools: KnownTool[]): void {
+export function rememberTools(reported: KnownTool[]): void {
+  // A session that still has a package loaded which has since been uninstalled
+  // would write its tools straight back; a package no longer listed is not
+  // remembered. One switched off still is, for when it comes back.
+  const packages = readPiSettings().packages;
+  const listed = Array.isArray(packages) ? new Set(packages.map(sourceOf).filter((s) => s !== undefined).map(packageKey)) : undefined;
+  const tools = reported.filter((t) => typeof t.package !== "string" || !listed || listed.has(packageKey(t.package)));
   if (!tools.length) return;
   const merged = new Map(knownTools().map((t) => [t.name, t]));
   const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
@@ -1796,7 +1809,7 @@ export function rememberTools(tools: KnownTool[]): void {
       name: tool.name,
       source: tool.source,
       ...(description ? { description } : {}),
-      ...(tool.package ? { package: tool.package } : {}),
+      ...(tool.package !== undefined ? { package: tool.package } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));

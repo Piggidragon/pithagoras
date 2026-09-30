@@ -948,7 +948,7 @@ class SessionManager extends EventEmitter {
     // before you can say "off everywhere" would be the wrong way round.
     void client
       .getTools?.()
-      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source, description: t.description, package: t.package }))))
+      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source, description: t.description, package: t.package ?? null }))))
       .catch(() => {
         // A session that cannot list its tools still works; the catalogue
         // simply stays as it was.
@@ -2135,7 +2135,7 @@ class SessionManager extends EventEmitter {
   async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
     const client = this.live.get(sessionId)?.client;
     const listed = client?.getTools ? await client.getTools() : [];
-    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source, description: t.description, package: t.package })));
+    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source, description: t.description, package: t.package ?? null })));
     const defaults = toolDefaultsOff();
     const exceptions = sessionTools(sessionId);
     const servers = mcpServerNames();

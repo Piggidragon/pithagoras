@@ -17,13 +17,14 @@ const { createSession, forgetPackageTools, knownTools, rememberTools, shownTools
 const { sessions } = await import("../dist/session-manager.js");
 
 const TODO = "npm:@juicesharp/rpiv-todo";
+const names = () => knownTools().map((t) => t.name).sort();
 
 test("the tools of a package that is switched off are not listed, and come back with it", async () => {
+  listPackages([TODO]);
   rememberTools([
     { name: "todo", source: "@juicesharp/rpiv-todo", package: TODO },
-    { name: "bash", source: "built in" },
+    { name: "bash", source: "built in", package: null },
   ]);
-  listPackages([TODO]);
   assert.deepEqual(shownTools().map((t) => t.name), ["bash", "todo"]);
 
   listPackages([OFF(TODO)]);
@@ -32,7 +33,7 @@ test("the tools of a package that is switched off are not listed, and come back 
   createSession({ id: "idle", title: "idle", workspace: home, executor: "host" });
   assert.deepEqual((await sessions.getTools("idle")).tools.map((t) => t.name), ["bash"]);
   // Remembered all the same, for when the package is switched on again.
-  assert.deepEqual(knownTools().map((t) => t.name), ["bash", "todo"]);
+  assert.deepEqual(names(), ["bash", "todo"]);
 
   listPackages([TODO]);
   assert.deepEqual((await sessions.getTools("idle")).tools.map((t) => t.name), ["bash", "todo"]);
@@ -43,15 +44,22 @@ test("a package that is gone from the settings takes its tools out of the list",
   assert.deepEqual(shownTools().map((t) => t.name), ["bash"]);
 });
 
-test("uninstalling forgets the tools, recorded with their package or not", () => {
+test("a session that still has an uninstalled package loaded does not bring its tools back", () => {
+  listPackages(["npm:pi-other"]);
   rememberTools([
-    { name: "todo", source: "@juicesharp/rpiv-todo", package: TODO },
-    { name: "todo_old", source: "@juicesharp/rpiv-todo" },
+    { name: "todo_late", source: "@juicesharp/rpiv-todo", package: TODO },
     { name: "other", source: "pi-other", package: "npm:pi-other" },
   ]);
-  forgetPackageTools(`${TODO}@0.4.1`);
-  // A tool recorded with its package is found by that source, one from before by the name it is filed under.
-  assert.deepEqual(knownTools().map((t) => t.name).sort(), ["bash", "other", "todo"]);
-  forgetPackageTools(TODO);
-  assert.deepEqual(knownTools().map((t) => t.name).sort(), ["bash", "other"]);
+  assert.deepEqual(names(), ["bash", "other", "todo"]);
+});
+
+test("uninstalling forgets the tools, whichever version they were recorded under, and ones from before", () => {
+  listPackages([`${TODO}@0.5.0`, "npm:pi-other"]);
+  rememberTools([
+    { name: "todo_old", source: "@juicesharp/rpiv-todo" },
+    // A folder of the user's filed under the same label: recorded as no package's, so not the package's.
+    { name: "todo_mine", source: "@juicesharp/rpiv-todo", package: null },
+  ]);
+  forgetPackageTools(`${TODO}@0.5.0`);
+  assert.deepEqual(names(), ["bash", "other", "todo_mine"]);
 });
