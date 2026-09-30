@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { LuArrowLeft, LuArrowRight, LuBot, LuCheck, LuRefreshCw, LuUser } from "react-icons/lu";
+import { useEffect, useId, useRef, useState } from "react";
+import { LuArrowRight, LuBot, LuCheck, LuRefreshCw, LuUser } from "react-icons/lu";
 import { api, type AgentSetup as Setup } from "../api";
 import { isEnter } from "../shortcuts";
-import { ghostCls, inputCls, primaryCls } from "./SettingsUi";
-import { SetupSteps } from "./SetupSteps";
+import { inputCls, primaryCls } from "./SettingsUi";
+import { SetupNav, SetupSteps } from "./SetupSteps";
 import { msg, t } from "../i18n";
 
 const STEPS = [msg("Who it is"), msg("Who it works for")];
@@ -25,6 +25,14 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
   const [userPrefers, setUserPrefers] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const userField = useRef<HTMLInputElement>(null);
+  const aboutUser = useId();
+
+  // Create took the focus with it when it disabled the form: a failure gives
+  // it back, where the name is fixed and sent again.
+  useEffect(() => {
+    if (!busy && error) userField.current?.focus();
+  }, [busy, error]);
 
   const go = (to: Step) => {
     setError(null);
@@ -94,23 +102,24 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
             <p className="mt-1 text-[11px] text-fg-faint">{t("Becomes SOUL.md.")}</p>
           </label>
 
-          <div className="flex justify-end">
+          <SetupNav>
             <button disabled={!agentName.trim()} onClick={() => go(1)} className={primaryCls}>
               {t("Next")} <LuArrowRight className="h-4 w-4" />
             </button>
-          </div>
+          </SetupNav>
         </section>
       ) : (
         // Nothing changes while Create runs: an edit would miss what is sent,
         // and its error shows on this step only.
-        <fieldset disabled={busy} className="mt-6 space-y-4">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+        <fieldset disabled={busy} aria-labelledby={aboutUser} className="mt-6 min-w-0 space-y-4">
+          <div id={aboutUser} className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
             <LuUser className="h-3.5 w-3.5" /> {t(STEPS[1])}
           </div>
 
           <label className="block">
             <span className="text-xs text-fg-muted">{t("Your name")}</span>
             <input
+              ref={userField}
               autoFocus
               value={userName}
               onChange={(e) => setUserName(e.target.value)}
@@ -143,13 +152,9 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
             <p className="mt-1 text-[11px] text-fg-faint">{t("Becomes PrimaryUser.md.")}</p>
           </label>
 
-          {error && <p className="text-xs text-danger">{error}</p>}
+          {error && <p role="alert" className="text-xs text-danger">{error}</p>}
 
-          <div className="flex items-center gap-2">
-            <button onClick={() => go(0)} className={ghostCls}>
-              <LuArrowLeft className="h-3.5 w-3.5" /> {t("Back")}
-            </button>
-            <span className="ml-auto" />
+          <SetupNav onBack={() => go(0)} busy={busy}>
             <button disabled={!userName.trim()} onClick={create} className={primaryCls}>
               {busy ? (
                 <LuRefreshCw className="h-4 w-4 animate-spin" />
@@ -158,7 +163,7 @@ export function AgentSetup({ home, onDone }: { home: string; onDone: (s: Setup) 
               )}
               {t("Create")}
             </button>
-          </div>
+          </SetupNav>
         </fieldset>
       )}
 

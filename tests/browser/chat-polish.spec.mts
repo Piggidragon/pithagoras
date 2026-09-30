@@ -214,7 +214,7 @@ test('the agent setup shows its steps as the assistant does, Back before Create,
     else if (p === '/api/agent/sessions') reply = { sessions: [], agentHome: '/a' };
     else if (p === '/api/agent/setup' && route.request().method() === 'POST') {
       await new Promise((r) => setTimeout(r, 400));
-      return route.fulfill({ status: 409, json: { error: 'That name is taken' } });
+      return route.fulfill({ status: 409, json: { error: `That name is taken: /home/user/.pi/agent/${'deeply_nested_directory_'.repeat(5)}/SOUL.md` } });
     }
     else if (p === '/api/agent/setup') reply = { initialised: false, home: '/a', files: [] };
     else if (p === '/api/models') reply = { models: [], providers: {} };
@@ -245,15 +245,21 @@ test('the agent setup shows its steps as the assistant does, Back before Create,
   await main.getByLabel('Your name').press('Enter');
   await expect(main.getByRole('button', { name: 'Back' })).toBeDisabled();
   await expect(main.getByLabel('About you')).toBeDisabled();
-  await expect(main.getByText('That name is taken')).toBeVisible();
+  await expect(main.getByRole('alert')).toContainText('That name is taken');
   await expect(main.getByLabel('About you')).toBeEnabled();
+  // The focus Create took is given back, where the name is fixed.
+  await expect(main.getByLabel('Your name')).toBeFocused();
+  // A long word in the error does not widen the form past the phone.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const form = (await main.getByRole('group', { name: 'Who it works for' }).boundingBox())!;
+  expect(form.x + form.width).toBeLessThanOrEqual(390);
   await main.getByRole('button', { name: 'Back' }).click();
   await expect(current).toHaveText('1. Who it is');
   await expect(main.getByLabel('Name')).toHaveValue('Aria');
   // Back again, the failure is not shown for a Create not yet sent.
   await main.getByRole('button', { name: 'Next' }).click();
   await expect(current).toHaveText('2. Who it works for');
-  await expect(main.getByText('That name is taken')).toHaveCount(0);
+  await expect(main.getByRole('alert')).toHaveCount(0);
 });
 
 test('the composer stops following the pointer when the drag is lost without a let-go', async ({ page }) => {

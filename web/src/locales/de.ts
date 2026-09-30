@@ -1219,7 +1219,7 @@ const de: Locale = {
     "What it can do besides": "Was er sonst noch kann",
     "Set up Pithagoras": "Pithagoras einrichten",
     "Three steps. Everything here can be changed later in Settings.": "Drei Schritte. Alles hier lässt sich später in den Einstellungen ändern.",
-    "Settings → Providers opens this assistant again.": "Einstellungen → Anbieter öffnet diesen Assistenten wieder.",
+    "{settings} → {providers} opens this assistant again.": "{settings} → {providers} öffnet diesen Assistenten wieder.",
     "Set up later": "Später einrichten",
     "Add a provider with at least one model first": "Füg zuerst einen Anbieter mit mindestens einem Modell hinzu",
     "Start a chat": "Einen Chat beginnen",

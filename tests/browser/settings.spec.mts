@@ -248,6 +248,21 @@ test('on a phone the way forward stays at the right of the assistant, away from 
   await expect(hint).toBeInViewport({ ratio: 1 });
 });
 
+test('while the model saves, Back and the choice wait: the save would land on the step before, or miss the change', async ({ page }) => {
+  const api = await portal(page, { settingsSaveDelay: () => 800 });
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Setup assistant' }).click();
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.getByLabel('Model for new chats')).toContainText('Ornith 1.5');
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.getByRole('button', { name: 'Back' })).toBeDisabled();
+  await expect(setup.getByLabel('Model for new chats')).toBeDisabled();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('3. Agent');
+  await expect(setup.getByRole('button', { name: 'Back' })).toBeEnabled();
+  expect(api.settingsSaves).toHaveLength(1);
+});
+
 test('a stored model no one offers any more is not kept: the assistant offers one that is, and saves it', async ({ page }) => {
   const api = await portal(page, { stored: { provider: 'gone', model: 'foo' } });
   await page.goto('/settings/models');
