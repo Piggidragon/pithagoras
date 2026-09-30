@@ -17,6 +17,7 @@ import { PageHeader, Stat } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
 import { api, type ReportTarget, type ReportTo, type Routine, type Workspace } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
+import { below } from "../paths";
 import { pollWhileVisible } from "../poll";
 import { formatDateTime, labelOf, msg, t, tx } from "../i18n";
 import { serverTime, sinceThen } from "../time";
@@ -340,7 +341,8 @@ function usePlaces(): Places {
 /** Home, or where under the projects' root it runs: "site", or "site/docs" for a folder in one. */
 const placeName = (workspace: string | null, root: string | null) => {
   if (!workspace) return t("Home");
-  if (root && workspace.startsWith(root + "/")) return workspace.slice(root.length + 1);
+  const under = root ? below(root, workspace) : undefined;
+  if (under) return under;
   return workspace.split("/").filter(Boolean).pop() ?? workspace;
 };
 

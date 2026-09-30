@@ -22,6 +22,7 @@ import {
 import path from "node:path";
 import { holdsWork, unsavedIn, unsavedRefusal, type Unsaved } from "./git.js";
 import { pictureType } from "./prompt-images.js";
+import { isWithinText } from "./workspaces.js";
 
 /**
  * Looking at, changing and taking away the files in a chat's folder, from the browser.
@@ -71,8 +72,6 @@ export interface FileEntry {
   size: number;
   mtime: number;
 }
-
-const isWithin = (root: string, p: string) => p === root || p.startsWith(root + path.sep);
 
 const lexists = (p: string): boolean => {
   try {
@@ -132,9 +131,9 @@ export function resolveInside(base: string, rel: unknown): string {
   const text = String(rel ?? "");
   if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
   const resolved = path.resolve(base, text.replace(/^[/\\]+/, ""));
-  if (!isWithin(base, resolved)) throw new FileError("invalid", "That path leads outside the folder");
+  if (!isWithinText(base, resolved)) throw new FileError("invalid", "That path leads outside the folder");
   const real = realThroughExisting(resolved);
-  if (!isWithin(base, real)) throw new FileError("invalid", "That path leads outside the folder");
+  if (!isWithinText(base, real)) throw new FileError("invalid", "That path leads outside the folder");
   return real;
 }
 
@@ -173,7 +172,7 @@ export function listDir(base: string, rel: unknown): { path: string; entries: Fi
         // A link that leads out, or nowhere, is listed and left alone.
         type = "link";
         const real = realpathSync(full);
-        if (isWithin(base, real)) {
+        if (isWithinText(base, real)) {
           st = statSync(real);
           type = st.isDirectory() ? "dir" : "file";
         }
@@ -411,7 +410,7 @@ function removable(base: string, rel: unknown): string {
   const text = String(rel ?? "");
   if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
   const lexical = path.resolve(base, text.replace(/^[/\\]+/, ""));
-  if (!isWithin(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
+  if (!isWithinText(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
   if (lexical === base) throw new FileError("invalid", "The folder itself is not removed from here");
   const parent = resolveInside(base, path.relative(base, path.dirname(lexical)));
   const target = path.join(parent, path.basename(lexical));
@@ -470,7 +469,7 @@ export function renameEntry(base: string, rel: unknown, newName: unknown): strin
   const text = String(rel ?? "");
   if (text.includes("\0")) throw new FileError("invalid", "That is not a valid path");
   const lexical = path.resolve(base, text.replace(/^[/\\]+/, ""));
-  if (!isWithin(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
+  if (!isWithinText(base, lexical)) throw new FileError("invalid", "That path leads outside the folder");
   if (lexical === base) throw new FileError("invalid", "The folder itself is not renamed from here");
   // The parent is followed and checked; the last name is not, so that a link
   // is renamed and not what it leads to.

@@ -18,7 +18,7 @@ export function checkWorkspace(raw: string): { path: string } | { error: string 
   const resolved = path.isAbsolute(raw) ? path.resolve(raw) : path.join(root, raw);
   if (resolved === home) return { path: home };
   // Keep pi inside the mounted workspace area — no escaping to the rest of the FS.
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+  if (!isWithinText(root, resolved)) {
     return { error: "workspace must be inside the workspace root" };
   }
   if (!existsSync(resolved)) return { error: "workspace does not exist" };
@@ -29,7 +29,7 @@ export function checkWorkspace(raw: string): { path: string } | { error: string 
     // passes it while leading anywhere. Where it really points must be inside too.
     const real = realpathSync(resolved);
     const realRoot = realpathSync(root);
-    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+    if (!isWithinText(realRoot, real)) {
       return { error: "workspace must be inside the workspace root" };
     }
     // A file would be taken as far as the launch, and every run would fail there.
@@ -49,15 +49,24 @@ export function placeProblem(workspace: string | null): string | null {
 }
 
 /**
- * `where` is the folder `dir` or inside it: by the text of the path, or by
- * where it really leads, so that a link to a project counts as in the project.
+ * `where` is the folder `dir` or inside it, by the text of the path alone: no
+ * look at the disk, and a sibling that only shares the start of the name
+ * (`/w/site-old` against `/w/site`) is not inside.
  */
-export function isWithin(dir: string, where: string | null): boolean {
+export function isWithinText(dir: string, where: string): boolean {
+  const base = dir.endsWith(path.sep) ? dir.slice(0, -1) : dir;
+  return where === base || where.startsWith(base + path.sep);
+}
+
+/**
+ * The same, by the text or by where it really leads, so that a link to a
+ * project counts as in the project.
+ */
+export function isWithinReal(dir: string, where: string | null): boolean {
   if (!where) return false;
-  const inside = (d: string, w: string) => w === d || w.startsWith(d + path.sep);
-  if (inside(dir, where)) return true;
+  if (isWithinText(dir, where)) return true;
   try {
-    return inside(realpathSync(dir), realpathSync(where));
+    return isWithinText(realpathSync(dir), realpathSync(where));
   } catch {
     return false;
   }
