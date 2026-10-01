@@ -16,6 +16,20 @@ export function validTrigger(text: string): boolean {
 }
 
 /**
+ * What was typed into a field that held `before` and now holds `after`: the
+ * last character of what was inserted, wherever the caret was or whatever was
+ * selected, and none for a deletion. The field is one character wide, so the
+ * new one lands before the old, after it, or over it.
+ */
+export function typedCharacter(before: string, after: string): string {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let end = 0;
+  while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
+  return [...after.slice(start, after.length - end)].pop() ?? "";
+}
+
+/**
  * The character a command starts with in this browser, "/" until another is
  * chosen.
  *

@@ -38,7 +38,7 @@ import { formatTokens } from "../transcript";
 import { displayName } from "../tool-groups";
 import { useAsksBeforeDeleting } from "../confirm-prefs";
 import { useNotifyState } from "../notify";
-import { setCommandTrigger, useCommandTrigger, validTrigger } from "../command-trigger";
+import { setCommandTrigger, typedCharacter, useCommandTrigger, validTrigger } from "../command-trigger";
 import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
@@ -562,7 +562,7 @@ function CommandCharacter() {
               setRefused(false);
             }}
             onChange={(e) => {
-              const next = [...e.target.value].pop() ?? "";
+              const next = typedCharacter(text, e.target.value);
               setText(next);
               setRefused(next !== "" && !validTrigger(next));
               if (validTrigger(next)) setCommandTrigger(next);
@@ -703,7 +703,7 @@ function BrowserPanel({ onError }: { onError: (e: string) => void }) {
       </Section>
       <Section
         title={t("Command character")}
-        hint={t("What a command starts with when you type it in the message box. The agent is still sent the slash form, so skills and every other command keep working.")}
+        hint={t("What a command starts with when you type it in the message box. The agent is still sent the slash form, so skills and every other command keep working. A dead key, such as ^ on a German keyboard, starts a command in the box, but cannot be used to jump to it from elsewhere on the page.")}
       >
         <CommandCharacter />
       </Section>

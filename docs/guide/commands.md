@@ -36,9 +36,12 @@ digit, which would open the list for every message you write, nor `-`, `_` or
 
 With `!` chosen, typing `!` opens the same list, `Tab` completes `!skill:review`,
 `Enter` runs the highlighted one, and the key that jumps to the message box from
-anywhere on the page is `!` as well. A message that starts with `!` and is
-not one of the chat's commands — `!important: the build is red` — is sent as it
-was written, as `/etc/hosts is wrong` is under the slash.
+anywhere on the page is `!` as well. That jump does not work for a dead key —
+`^` on a German keyboard, for one — which the browser does not report as the
+character it will type; such a character still starts a command typed in the
+message box. A message that starts with `!` and is not one of the chat's
+commands — `!important: the build is red` — is sent as it was written, as
+`/etc/hosts is wrong` is under the slash.
 
 pi is always sent the slash form. Whichever character you typed, `!skill:review
 the diff` reaches the agent as `/skill:review the diff`, so skills, prompt

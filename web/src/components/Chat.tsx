@@ -1045,23 +1045,15 @@ export function Chat({
     // page has to know it is one: the server cannot tell "!name" from a message.
     // Typed before the list has come — it starts pi for the chat, which can take
     // a while — it is waited for, rather than the command going out as words.
-    let listed = commands;
-    if (typed && !msg.startsWith("/") && !commands.length) {
-      setSending(true);
-      try {
-        listed = await loadCommands();
-      } finally {
-        setSending(false);
-      }
-    }
-    // Some builtins are UI, not prompts: /model opens the picker the pill uses,
-    // /settings opens the modal. Sending them to pi would just be a chat line.
-    const command = typed && isClientCommand(typed.name, listed) ? typed : null;
+    // The box is emptied first all the same: what is typed while waiting is for
+    // the next message, and the chat may have been left by then.
+    const waits = typed !== null && !msg.startsWith("/") && !commands.length;
+    const knownIn = (list: PiCommand[]) => (typed && isCommand(typed.name, list) ? typed : null);
     // The pictures in the box go with what came from it, and nothing else. A
     // command is run rather than said — this one here, any other by pi — so
     // they stay in the box for later rather than going where nothing shows them.
-    const known = typed && isCommand(typed.name, listed) ? typed : null;
-    const images = fromBox && !known ? attached : [];
+    let known = waits ? null : knownIn(commands);
+    let images = fromBox && !known ? attached : [];
 
     if (fromBox) {
       if (known) {
@@ -1070,6 +1062,17 @@ export function Chat({
       } else clearBox();
     }
     try {
+      let listed = commands;
+      if (waits) {
+        listed = await loadCommands();
+        known = knownIn(listed);
+        // It was a command after all: its pictures go back where they were.
+        if (known && images.length) putBack(sent, "", images);
+        if (known) images = [];
+      }
+      // Some builtins are UI, not prompts: /model opens the picker the pill uses,
+      // /settings opens the modal. Sending them to pi would just be a chat line.
+      const command = typed && isClientCommand(typed.name, listed) ? typed : null;
       if (command) {
         if (command.name === "model") setPanelRequest("model");
         else await onClientCommand(command.name, command.args);
