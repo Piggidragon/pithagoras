@@ -370,4 +370,17 @@ test.describe('in voice mode', () => {
     await expect(theirs.locator('.image-preview')).toHaveCount(0);
     await expect(theirs.locator(':scope > svg')).toHaveCount(1);
   });
+
+  test('the picture of a call that ends is fetched once in voice mode, for the chat behind the stage, the card and the picture window', async ({ page }) => {
+    // Three places draw it, and the browser shares one download between them only when they ask for the same address. On a slow link three at once is a picture three times later, and the speech requests queued behind them.
+    const asked: string[] = [];
+    page.on('request', (request) => { if (request.url().includes('picture?path=generated-images%2Fimage-20261001-101600-d4e5f6.png')) asked.push(request.url()); });
+    await page.getByRole('button', { name: 'Start generating a picture' }).click();
+    await page.getByRole('button', { name: 'Finish generating the picture' }).click();
+    const tile = page.locator('.voice-tool-float', { hasText: 'A foggy harbour at first light' }).locator('.image-preview');
+    await expect(tile.locator('.image-preview-frame')).toHaveClass(/is-loaded/);
+    // The others have had their time to ask.
+    await page.waitForTimeout(700);
+    expect(asked).toHaveLength(1);
+  });
 });

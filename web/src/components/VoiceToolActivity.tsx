@@ -15,6 +15,8 @@ type Card = ToolCall & {
   slot: number; leaving: boolean;
   /** For the portal's picture tools: what the call says of the picture, and where the picture is once it is made. */
   look?: PictureCall; picture?: string;
+  /** The seq of the end that showed it: the picture window asks for the file by the same one, so that it is fetched once. */
+  pictureSeq?: number;
 };
 
 /** How long a finished card stays: long enough to read its outcome, longer for a failure. */
@@ -88,7 +90,7 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { event
         // A card leads to the pictures once its call has shown one: a generate_image or edit_image has no picture to open before that, nor when it is another extension's tool.
         const picture = shownPicture(p);
         const target = picture ? 'pictures' as const : undefined;
-        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}), ...(picture ? { picture: picture.path } : {}) } : c);
+        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}), ...(picture ? { picture: picture.path, pictureSeq: event.seq } : {}) } : c);
         later(STAYS[status], () => leave(card.id));
       } else if (event.type === 'agent_end' || (event.type === 'portal_status' && p.status !== 'running')) {
         // The run is over: a call that never reported its end is not still going.
@@ -115,7 +117,7 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { event
       // A picture being made, made or not made is the preview the chat shows, as a tile in the place of the mark; another extension's tool of that name, which ends with no picture, has the mark.
       const tile = card.look && (card.status !== 'done' || card.picture);
       const body = <>
-        {tile ? <ImagePreview compact state={card.status === 'running' ? 'making' : card.picture ? 'done' : 'failed'} edit={card.look!.edit} src={card.picture && api.pictureUrl(sessionId, card.picture, card.id)} ratio={card.look!.ratio} />
+        {tile ? <ImagePreview compact state={card.status === 'running' ? 'making' : card.picture ? 'done' : 'failed'} edit={card.look!.edit} src={card.picture && api.pictureUrl(sessionId, card.picture, card.pictureSeq)} ratio={card.look!.ratio} />
           : card.status === 'failed' ? <LuCircleAlert aria-hidden="true" /> : card.status === 'done' ? <LuCheck aria-hidden="true" /> : took >= 3000 ? <LuLoaderCircle aria-hidden="true" className="animate-spin" /> : <LuSparkles aria-hidden="true" />}
         <div>
           <span>{card.label}</span>
