@@ -73,6 +73,20 @@ test('what is cut at the limits is cut between values, so that what stays is wha
  const many=cleanScreen({id:'a',blocks:[{type:'checklist',items:Array.from({length:199},(_,i)=>({text:`T${i}`,state:'done',detail:'x',tone:'ok',items:[{text:'sub',state:'done'}]}))},{type:'checklist',items:Array.from({length:199},(_,i)=>({text:`U${i}`,state:'done',detail:'x',tone:'ok'}))}]})!;
  for(const block of many.blocks) for(const item of block.items as any[]) assert.equal(item.state,'done',`${item.text} keeps its state`);
 });
+test('a list the limit leaves nothing of is left out, not kept empty, since the page would say there is nothing in it',()=>{
+ const empties=(blocks:any[]):any[]=>blocks.flatMap(b=>[...((b.items?.length===0||b.blocks?.length===0)?[b]:[]),...empties(b.blocks??[])]);
+ // The first task of the last list is the one that does not fit.
+ const last=cleanScreen({id:'a',blocks:[...Array.from({length:49},()=>({type:'text',text:'a'.repeat(1990)})),{type:'checklist',empty:'Nothing to do yet.',items:[{text:'Task',detail:'d'.repeat(1900),state:'todo'}]}]})!;
+ assert.equal(last.blocks.length,49,'the checklist is out whole');
+ // A screen in parts, a checklist to each, the limit falling anywhere in the last: at no length is one kept without its tasks.
+ for(let size=1500;size<=2000;size+=7){
+  const parts=cleanScreen({id:'a',blocks:Array.from({length:30},(_,n)=>({type:'group',title:`Milestone ${n}`,blocks:[{type:'checklist',empty:'No tasks.',items:Array.from({length:3},(_,i)=>({text:`Task ${i}`,detail:'d'.repeat(size),state:'done'}))}]}))})!;
+  assert.ok(parts.blocks.length>0&&parts.blocks.length<30,`cut before the end at ${size}`);
+  assert.deepEqual(empties(parts.blocks),[],`nothing kept empty at ${size}`);
+ }
+ // What was given empty stays empty, and is no reason to leave the object out.
+ assert.deepEqual(cleanScreen({id:'a',blocks:[{type:'checklist',empty:'Nothing yet.',items:[]},{type:'group',title:'Part',blocks:[]}]})!.blocks,[{type:'checklist',empty:'Nothing yet.',items:[]},{type:'group',title:'Part',blocks:[]}]);
+});
 test('what an extension shows reaches the portal as session events, and is kept as it stands',()=>{
  const b=bus();const out:any[]=[];const screens=bridgeScreens(b,e=>out.push(e));
  b.emit('screen:v1:set',{id:'nothing'});

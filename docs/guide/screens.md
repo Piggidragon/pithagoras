@@ -134,7 +134,9 @@ extension.
   200 entries, nesting at a few levels, the whole screen at a few thousand values,
   and all its text together at 100,000 characters. More is cut, not refused: at
   an entry, never inside one, so the item that does not fit is left out whole with
-  the ones after it, and what stays is as the extension said it. A long
+  the ones after it, a list that nothing of fits in goes with the block that holds
+  it (rather than say "No tasks." of tasks that were dropped), and what stays is
+  as the extension said it. A long
   description is better left out of a block than the reason the list ends early.
 - **Blocks show, they do not take input.** There is no way to click through to
   the extension.

@@ -94,6 +94,9 @@ function take(budget: Budget, nodes: number, chars: number): boolean {
   return true;
 }
 
+const spent = (budget: Budget) => budget.left <= 0 || budget.chars <= 0;
+const hasEntries = (value: unknown) => (Array.isArray(value) ? value.length > 0 : Object.keys(value as object).length > 0);
+
 /**
  * Plain data only, and bounded: strings, finite numbers, booleans, lists and
  * objects of them. Functions, symbols, `undefined` and what is deeper or
@@ -101,7 +104,7 @@ function take(budget: Budget, nodes: number, chars: number): boolean {
  * arrives as JSON the page can hold, however it was made.
  */
 function plain(value: unknown, depth: number, budget: Budget): unknown {
-  if (budget.left <= 0 || budget.chars <= 0) return undefined;
+  if (spent(budget)) return undefined;
   if (typeof value === "string") {
     const kept = value.slice(0, TEXT_MAX);
     return take(budget, 1, kept.length) ? kept : undefined;
@@ -115,15 +118,17 @@ function plain(value: unknown, depth: number, budget: Budget): unknown {
     const kept: unknown[] = [];
     for (const entry of value.slice(0, ENTRIES_MAX)) {
       // Cut between the entries: one that does not fit is left out whole, and so is what follows.
-      if (budget.left <= 0 || budget.chars <= 0) break;
+      if (spent(budget)) break;
       const one = plain(entry, depth + 1, budget);
       if (one !== undefined) kept.push(one);
     }
-    return kept;
+    // A list that had entries and keeps none for the limit is not an empty list: the page would say so.
+    return kept.length || !value.length || !spent(budget) ? kept : undefined;
   }
   // An object is all of its own fields or none: a block without its `type`, an item
   // without its `state`, would be drawn as something it is not. What it holds in lists
-  // and objects of their own is cut as they are, so the object still says what it is.
+  // and objects of their own is cut as they are, so the object still says what it is,
+  // unless one of them is cut away to nothing: a group without its blocks says it has none.
   const fields = Object.entries(value)
     .slice(0, ENTRIES_MAX)
     .map(([key, entry]): [string, unknown, boolean] => [key.slice(0, KEY_MAX), entry, typeof entry === "string" || typeof entry === "boolean" || (typeof entry === "number" && Number.isFinite(entry))])
@@ -134,6 +139,7 @@ function plain(value: unknown, depth: number, budget: Budget): unknown {
   const kept: Record<string, unknown> = {};
   for (const [name, entry, scalar] of fields) {
     const one = scalar ? (typeof entry === "string" ? entry.slice(0, TEXT_MAX) : entry) : plain(entry, depth + 1, budget);
+    if (one === undefined && !scalar && hasEntries(entry) && spent(budget)) return undefined;
     if (one !== undefined) kept[name] = one;
   }
   return kept;

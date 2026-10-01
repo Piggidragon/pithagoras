@@ -92,6 +92,8 @@ A chat has at most 12 screens. Within one, text is cut at 2000 characters, a
 list at 200 entries, nesting at a few levels, the whole screen at a few thousand
 values, and all its texts together at 100,000 characters. What goes over is cut
 between entries: the item or block that does not fit is left out whole, and so
-are the ones after it. Nothing is cut in the middle, so what stays is as you
-said it. More is cut, not refused. A screen is sent whole to every open page with each change, so say what
+are the ones after it. A list that nothing of fits in is left out as well, with
+the block that holds it, so a screen never says "No tasks." of tasks it dropped.
+Nothing is cut in the middle, so what stays is as you said it. More is cut, not
+refused. A screen is sent whole to every open page with each change, so say what
 matters, not everything: cut a long description before it goes in a block.
