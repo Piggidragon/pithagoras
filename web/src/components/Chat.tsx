@@ -39,7 +39,7 @@ import { latestFileActivity } from "../file-activity";
 import { caretFrom, drafts, withUnsent } from "../drafts";
 import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
-import { fancy, glide, launch, mark, settle, useLeaveRef, type Mark } from "../motion";
+import { fancy, glide, launch, leaveRef, mark, settle, useLeaveRef, type Mark } from "../motion";
 import { copyText } from "../clipboard";
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
@@ -527,15 +527,17 @@ export function Chat({
   // A panel carried to another place goes there itself (see `glide`), from where
   // it was let go: its old place does not also close behind it.
   const flight = useRef<{ kind: AsidePanel; from: DOMRect } | null>(null);
-  // A place whose panels are all gone drops away as a picture of itself (see motion.ts).
-  const leaveAside = useLeaveRef<HTMLElement>(() => (flight.current ? null : "panel"));
+  // A place whose panels are all gone drops away as a picture of itself (see
+  // motion.ts): each place with a ref of its own, held so that React does not
+  // put the element away and back at every draw.
   const asideRefs = useRef<Record<string, (el: HTMLElement | null) => void>>({});
-  /** Held, so that React does not put the element away and back at every draw. */
   const asideRef = (place: string) =>
-    (asideRefs.current[place] ??= (el) => {
-      asides.current[place] = el;
-      leaveAside(el);
-    });
+    (asideRefs.current[place] ??= leaveRef<HTMLElement>(
+      () => (flight.current ? null : "panel"),
+      (el) => {
+        asides.current[place] = el;
+      },
+    ));
   const zones = useRef<HTMLDivElement>(null);
   const setBox = (el: HTMLElement | null | undefined, f: Frame) => {
     if (el) Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });

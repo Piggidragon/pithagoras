@@ -158,11 +158,11 @@
 /* The chat's name slides in from the side its row was on. */
 [data-motion="fancy"] .chat-title { animation: fx-title .6s var(--spring) backwards; }
 @keyframes fx-title { from { opacity: 0; transform: translateX(-22px); } to { opacity: 1; transform: none; } }
-/* New: what comes in rises with a little overshoot, your own from the corner the send button is in. */
+/* New: what comes in rises with a little overshoot, your own growing out of the corner the send button is in. Nothing here starts to the right of its box: the scrolling boxes it is in would be made to scroll sideways while it plays. */
 [data-motion="fancy"] .chat-enter { animation: fx-chat-enter .62s var(--spring) backwards; }
 @keyframes fx-chat-enter { from { opacity: 0; transform: translateY(26px) scale(.97); filter: blur(6px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 [data-motion="fancy"] .chat-enter.is-mine { transform-origin: 100% 100%; animation-name: fx-chat-mine; }
-@keyframes fx-chat-mine { from { opacity: 0; transform: translate(34px, 54px) scale(.62); filter: blur(5px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes fx-chat-mine { from { opacity: 0; transform: translateY(54px) scale(.62); filter: blur(5px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 [data-motion="fancy"] .tool-row.chat-enter { animation-name: fx-chat-tool; }
 @keyframes fx-chat-tool { from { opacity: 0; transform: translateX(-30px); filter: blur(4px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 /* What went wrong shakes once. */
@@ -212,7 +212,7 @@
 [data-motion="fancy"] .settings-page > :nth-child(4) { animation-delay: 120ms; }
 [data-motion="fancy"] .settings-page > :nth-child(5) { animation-delay: 160ms; }
 [data-motion="fancy"] .settings-page > :nth-child(n+6) { animation-delay: 200ms; }
-@keyframes fx-settings-in { from { opacity: 0; transform: translateX(34px); filter: blur(4px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes fx-settings-in { from { opacity: 0; transform: translateX(-34px); filter: blur(4px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 /* The rail's entries come after the dialog, from the left. */
 [data-motion="fancy"] .rail-item { animation: fx-rail-item .5s var(--spring) .18s backwards; }
 [data-motion="fancy"] .rail-item:nth-child(2) { animation-delay: .22s; }

@@ -13,7 +13,7 @@ import { test, expect, type Page } from '@playwright/test';
 test.use({ storageState: { cookies: [], origins: [] } });
 
 interface Played { on: string; keys: string[]; ghost: boolean }
-interface Picture { text: string; hidden: string | null; pointer: string; roles: number }
+interface Picture { text: string; hidden: string | null; pointer: string; roles: number; dock: string | null }
 
 const at = new Date().toISOString();
 const chat = (id: string, title: string, extra: object = {}) => ({ id, title, workspace: `/w/${id}`, status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null, ...extra });
@@ -33,7 +33,7 @@ const conversation = (tag: string) => {
 };
 
 /** The portal over canned answers: chats that can be deleted, a stream that replays them, and a log of what is played. */
-async function portal(page: Page, { off = false }: { off?: boolean } = {}) {
+async function portal(page: Page, { off = false, confirms = true, places }: { off?: boolean; confirms?: boolean; places?: Record<string, string> } = {}) {
   const state = { sessions: [chat('a', 'First chat'), chat('b', 'Second chat'), chat('c', 'Third chat'), chat('d', 'Fourth chat')], events: { a: conversation('A'), b: conversation('B'), c: [] as any[], d: [] as any[] } as Record<string, any[]> };
   await page.route('**/api/**', async (route) => {
     const p = new URL(route.request().url()).pathname;
@@ -55,6 +55,7 @@ async function portal(page: Page, { off = false }: { off?: boolean } = {}) {
       reply = { ok: true };
     } else if ((m = p.match(/^\/api\/sessions\/(\w+)$/))) reply = state.sessions.find((s) => s.id === m![1]) ?? {};
     else if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) reply = { live: false, state: { model: { id: 'm', name: 'Model', provider: 'x' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
+    else if (/^\/api\/sessions\/\w+\/files$/.test(p)) reply = { path: '', entries: [], truncated: false };
     else if (p.endsWith('/canvases')) reply = [];
     else if (p.endsWith('/background')) reply = { jobs: [], statuses: [] };
     else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
@@ -65,9 +66,11 @@ async function portal(page: Page, { off = false }: { off?: boolean } = {}) {
     else if (/report/.test(p)) reply = { targets: [], default: null };
     await route.fulfill({ json: reply });
   });
-  await page.addInitScript(([events, off]) => {
+  await page.addInitScript(([events, off, confirms, places]) => {
     localStorage.setItem('pithagoras.setup', 'done');
     if (off) localStorage.setItem('animations', 'off');
+    if (!confirms) localStorage.setItem('confirmDeletes', 'off');
+    if (places) localStorage.setItem('panelPlaces', JSON.stringify(places));
     // Every animation started from script, and every picture put on the page.
     const played: Played[] = ((window as any).played = []);
     const animate = Element.prototype.animate;
@@ -81,7 +84,7 @@ async function portal(page: Page, { off = false }: { off?: boolean } = {}) {
     new MutationObserver((records) => {
       for (const r of records) for (const n of r.addedNodes) {
         if (!(n instanceof HTMLElement)) continue;
-        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length });
+        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length, dock: n.firstElementChild?.getAttribute('data-dock') ?? null });
         if (n.classList.contains('app-intro')) intro.push({ pointer: getComputedStyle(n).pointerEvents, at: performance.now() });
       }
     }).observe(document, { childList: true, subtree: true });
@@ -103,7 +106,7 @@ async function portal(page: Page, { off = false }: { off?: boolean } = {}) {
       close() { this.closed = true; }
     };
     (window as any).emit = (id: string, event: unknown) => streams.filter((s) => !s.closed && s.url.includes(`/sessions/${id}/events`)).forEach((s) => s.onmessage?.({ data: JSON.stringify(event) }));
-  }, [state.events, off] as const);
+  }, [state.events, off, confirms, places ?? null] as const);
   return state;
 }
 
@@ -318,4 +321,105 @@ test('with the switch off none of it is made: no doors, no pictures, no animatio
   expect(await played(page)).toEqual([]);
   expect(await pictures(page)).toEqual([]);
   expect(await page.evaluate(() => (window as any).intro.length)).toBe(0);
+});
+
+test('closing one of two places plays that place, not the other that stays', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  // Files at the left, the terminal at the right.
+  await portal(page, { places: { files: 'left' } });
+  await page.goto('/s/a');
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(page.locator('aside[data-dock="right"]')).toBeVisible();
+  await expect(page.locator('aside[data-dock="left"]')).toBeVisible();
+  await page.waitForTimeout(900);
+
+  await page.getByRole('button', { name: 'Close the terminal' }).click();
+  await expect(page.locator('aside[data-dock="right"]')).toHaveCount(0);
+  // What went was the terminal's place; the files stay where they are.
+  await expect.poll(async () => (await pictures(page)).map((p) => p.dock)).toEqual(['right']);
+  await expect(page.locator('aside[data-dock="left"]')).toBeVisible();
+  await page.waitForTimeout(600);
+
+  // And the one that stayed drops away in its turn when it goes.
+  await page.getByRole('button', { name: 'Close the files' }).click();
+  await expect(page.locator('aside[data-dock]')).toHaveCount(0);
+  await expect.poll(async () => (await pictures(page)).map((p) => p.dock)).toEqual(['right', 'left']);
+});
+
+test('two messages deleted close together leave the list as it was', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  // With confirmations off a delete is one press.
+  await portal(page, { confirms: false });
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await expect(page.locator('.chat-list')).not.toHaveClass(/is-opening/);
+
+  // The second while the first is still sliding what is below it up.
+  await page.evaluate(async () => {
+    const del = (text: string) => ([...document.querySelectorAll('[data-key]')].find((r) => r.textContent?.includes(text))!.querySelector('button[aria-label^="Delete this message"]') as HTMLElement).click();
+    del('A question 4');
+    await new Promise((r) => setTimeout(r, 250));
+    del('A question 3');
+  });
+  await expect(page.getByText('A question 3')).toHaveCount(0);
+  await page.waitForTimeout(1500);
+  // Cut off at its edge only while they slide: a long reply still scrolls sideways, and the next message comes in whole.
+  expect(await page.locator('.chat-list').evaluate((el: HTMLElement) => [el.style.overflow, el.style.overflowClipMargin])).toEqual(['', '']);
+  expect((await pictures(page)).filter((p) => p.text.includes('A question')).length).toBeGreaterThan(1);
+});
+
+test('nothing comes in from the right of the box that scrolls it', async ({ page }) => {
+  // A chat column narrower than the list is wide: beside the sidebar, at the width where it is still there.
+  await page.setViewportSize({ width: 800, height: 760 });
+  await portal(page);
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await expect(page.locator('.chat-list')).not.toHaveClass(/is-opening/);
+
+  /** The most a box is wider than it shows, over the next second. */
+  const watch = (selector: string) => page.evaluate((selector) => {
+    const box = document.querySelector(selector)!;
+    const seen = ((window as any).wider = { most: 0 });
+    const until = performance.now() + 1100;
+    const tick = () => {
+      seen.most = Math.max(seen.most, box.scrollWidth - box.clientWidth);
+      if (performance.now() < until) requestAnimationFrame(tick);
+    };
+    tick();
+  }, selector);
+  const widest = async () => { await page.waitForTimeout(1200); return page.evaluate(() => (window as any).wider.most as number); };
+
+  // What you say, coming in.
+  await watch('[data-transcript]');
+  await page.evaluate(() => (window as any).emit('a', { seq: 800, type: 'portal_prompt', payload: { message: 'And one thing more' } }));
+  await expect(page.getByText('And one thing more')).toBeVisible();
+  expect(await widest()).toBe(0);
+
+  // A page of Settings, coming in.
+  await sidebar(page).getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.waitForTimeout(900);
+  await watch('div:has(> .settings-page)');
+  await page.getByRole('dialog').getByRole('button', { name: 'This browser' }).click();
+  await expect(page.getByRole('switch', { name: 'Fancy animations' })).toBeVisible();
+  expect(await widest()).toBe(0);
+});
+
+test('turning the animations on or off does not play again what is on the page', async ({ page }) => {
+  await portal(page);
+  await page.goto('/s/a');
+  await sidebar(page).getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'This browser' }).click();
+  await expect(page.getByRole('switch', { name: 'Fancy animations' })).toBeVisible();
+  // Everything that was coming in has come.
+  const going = () => page.evaluate(() => new Promise<number>((done) => requestAnimationFrame(() => done(document.getAnimations().filter((a) => 'animationName' in a && Number.isFinite(a.effect!.getComputedTiming().iterations!) && a.playState === 'running').length))));
+  await expect.poll(going, { timeout: 8000 }).toBe(0);
+
+  await page.getByRole('switch', { name: 'Fancy animations' }).click();
+  await expect(motion(page)).not.toHaveAttribute('data-motion', /.+/);
+  expect(await going()).toBe(0);
+  await page.getByRole('switch', { name: 'Fancy animations' }).click();
+  await expect(motion(page)).toHaveAttribute('data-motion', 'fancy');
+  expect(await going()).toBe(0);
 });

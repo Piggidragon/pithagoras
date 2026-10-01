@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useSyncExternalStore, type MutableRefObject, type RefObject } from "react";
+import { useLayoutEffect, useMemo, useRef, useSyncExternalStore, type MutableRefObject, type RefObject } from "react";
 import { local } from "./safe-storage";
 
 /**
@@ -35,9 +35,29 @@ const listeners = new Set<() => void>();
 
 function sync(): void {
   const root = document.documentElement;
+  const was = root.dataset.motion;
   if (plays(animationsChosen(), reducedMotion())) root.dataset.motion = "fancy";
   else delete root.dataset.motion;
+  if (root.dataset.motion !== was) finishRestarted();
   listeners.forEach((fn) => fn());
+}
+
+/**
+ * Putting the attribute on or taking it off changes the animation of everything
+ * on the page that has one for it, and a changed animation starts again: the
+ * dialog the switch is in swung up once more. What has just been started that
+ * way is taken to its end, so that the change shows and nothing plays. The
+ * ones that go on for ever are left going.
+ */
+function finishRestarted(): void {
+  for (const a of document.getAnimations()) {
+    if (!("animationName" in a) || !Number.isFinite(a.effect?.getComputedTiming().iterations ?? Infinity)) continue;
+    try {
+      a.finish();
+    } catch {
+      // Already at its end.
+    }
+  }
 }
 
 /** Once, before the first draw: puts the state on the page and keeps it there. */
@@ -191,32 +211,38 @@ export function keep(el: HTMLElement | null, clip?: HTMLElement | null): (how: L
 /**
  * A ref that sees its element go. It is the element that is given back to
  * React's `ref` as it leaves — still on the page, for that moment — so a picture
- * can be taken then, and played out where it was. Stable, so React does not
- * call it with null again at every render. `into` is the ref the element
- * would have had; `how` may say "not this time" with null.
+ * can be taken then, and played out where it was. One such ref holds one
+ * element: where several places draw the same kind of thing (a panel's places),
+ * each has a ref of its own, or the picture would be of whichever came last.
+ * `into` is where the element would have gone otherwise; `how` may say "not
+ * this time" with null.
  */
+export function leaveRef<T extends HTMLElement>(how: () => Leave | null, into?: MutableRefObject<T | null> | ((el: T | null) => void)): (el: T | null) => void {
+  let held: T | null = null;
+  let since = 0;
+  return (el) => {
+    if (typeof into === "function") into(el);
+    else if (into) into.current = el;
+    if (el) {
+      held = el;
+      since = performance.now();
+      return;
+    }
+    const gone = held;
+    held = null;
+    // Development React puts an element away and back at once to see that it
+    // can: nobody saw it, so nothing leaves.
+    if (!gone || performance.now() - since < 150) return;
+    const kind = how();
+    if (kind && !swapping) out(picture(gone), kind);
+  };
+}
+
+/** `leaveRef` for the one element a component draws. Stable, so React does not call it with null again at every draw. */
 export function useLeaveRef<T extends HTMLElement>(how: Leave | (() => Leave | null), into?: MutableRefObject<T | null>) {
-  const held = useRef<{ el: T | null; since: number; how: Leave | (() => Leave | null) }>({ el: null, since: 0, how });
-  held.current.how = how;
-  return useCallback(
-    (el: T | null) => {
-      const h = held.current;
-      if (into) into.current = el;
-      if (el) {
-        h.el = el;
-        h.since = performance.now();
-        return;
-      }
-      const gone = h.el;
-      h.el = null;
-      // Development React puts an element away and back at once to see that it
-      // can: nobody saw it, so nothing leaves.
-      if (!gone || performance.now() - h.since < 150) return;
-      const kind = typeof h.how === "function" ? h.how() : h.how;
-      if (kind && !swapping) out(picture(gone), kind);
-    },
-    [into],
-  );
+  const latest = useRef(how);
+  latest.current = how;
+  return useMemo(() => leaveRef<T>(() => (typeof latest.current === "function" ? latest.current() : latest.current), into), [into]);
 }
 
 /* ── Moves ── */
@@ -379,11 +405,26 @@ export function settle(m: Mark, how: Leave = "message"): boolean {
   // than it does: a conversation that is followed at its end took that for being
   // left behind, and offered the way back to it for good. So what is below the
   // list's edge is cut off while they slide, and the scrolling box does not see it.
-  if (slid.length) {
-    const { overflow, overflowClipMargin } = m.box.style;
-    Object.assign(m.box.style, { overflow: "clip", overflowClipMargin: "8px" });
-    const restore = () => Object.assign(m.box.style, { overflow, overflowClipMargin });
-    void Promise.allSettled(slid.map((a) => a.finished)).then(restore);
-  }
+  if (slid.length) clipWhile(m.box, slid);
   return true;
+}
+
+/** Boxes that are cut off at their edge, with what they had before and how many moves they are cut off for. */
+const clipped = new WeakMap<HTMLElement, { moves: number; overflow: string; margin: string }>();
+
+/** `box` cut off at its edge until `moves` have finished: and a second set that comes while the first is still going is held by the same cut, which is let go of once, with what the box had before the first. */
+function clipWhile(box: HTMLElement, moves: Animation[]): void {
+  let c = clipped.get(box);
+  if (!c) {
+    c = { moves: 0, overflow: box.style.overflow, margin: box.style.overflowClipMargin };
+    clipped.set(box, c);
+    Object.assign(box.style, { overflow: "clip", overflowClipMargin: "8px" });
+  }
+  const cut = c;
+  cut.moves++;
+  void Promise.allSettled(moves.map((a) => a.finished)).then(() => {
+    if (--cut.moves > 0) return;
+    clipped.delete(box);
+    Object.assign(box.style, { overflow: cut.overflow, overflowClipMargin: cut.margin });
+  });
 }
