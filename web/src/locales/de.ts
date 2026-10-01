@@ -1618,7 +1618,7 @@ const de: Locale = {
     "Heard whenever you speak.": "Zu hören, sobald du sprichst.",
     "Sound effects": "Soundeffekte",
     "Fillers": "Füllgeräusche",
-    "A short sound such as “mhm” the moment you have finished, until the answer starts.": "Ein kurzes Geräusch wie „mhm“, sobald du fertig bist, bis die Antwort beginnt.",
+    "Short sounds such as “mhm” from the moment you have finished until the answer starts, again if the wait is long.": "Kurze Geräusche wie „mhm“, sobald du fertig bist, bis die Antwort beginnt, und bei langer Wartezeit immer wieder.",
     "Nothing is said until the answer starts.": "Bis die Antwort beginnt, wird nichts gesagt.",
     // components/VoiceStage.tsx
     "The browser viewer is unavailable.": "Die Browseransicht ist nicht verfügbar.",

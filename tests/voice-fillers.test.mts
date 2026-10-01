@@ -18,11 +18,11 @@ test('the clips are made once, one after another, and kept: a later start finds 
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   const made: string[] = [];
   const render = async (text: string) => { made.push(text); return seconds(1); };
-  const store = new FillerStore(() => root);
+  const store = new FillerStore(() => root, { lazy: 0 });
   assert.deepEqual(await store.status(KEY, render), { clips: [], rendering: true });
   while ((await store.status(KEY, render)).rendering) await tick(5);
   // A portal that was restarted has only the disk to go by.
-  const again = new FillerStore(() => root);
+  const again = new FillerStore(() => root, { lazy: 0 });
   assert.deepEqual(await again.status(KEY, render), { clips: FILLERS.map((_, i) => i), rendering: false });
   assert.deepEqual(made, FILLERS.map(f => f.text));
   assert.equal((await again.read(KEY, 1))?.length, seconds(1).length);
@@ -33,7 +33,7 @@ test('a clip that comes out too long or empty is the runtime saying it twice or 
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   let made = 0;
   const render = async (text: string) => { made++; return text === FILLERS[0].text ? seconds(FILLERS[0].longest * 2) : text === FILLERS[1].text ? Buffer.alloc(0) : seconds(1.2); };
-  const store = new FillerStore(() => root);
+  const store = new FillerStore(() => root, { lazy: 0 });
   await store.status(KEY, render);
   let status = await store.status(KEY, render);
   while (status.rendering) { await tick(5); status = await store.status(KEY, render); }
@@ -47,7 +47,7 @@ test('a clip that comes out too long or empty is the runtime saying it twice or 
 test('a clip is only made when nothing live is being said, and not at once after it: the answer is not over between two phrases', async () => {
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   const started: number[] = [];
-  const store = new FillerStore(() => root, undefined, undefined, 60);
+  const store = new FillerStore(() => root, { lazy: 0, quiet: 60 });
   const render = async () => { started.push(Date.now()); return seconds(1); };
   const end = store.speaking();
   await store.status(KEY, render);
@@ -72,7 +72,7 @@ test('a clip under way when speech begins is let finish and is kept, as the runt
     signal.addEventListener('abort', () => { cut++; });
     setTimeout(() => resolve(seconds(1)), 60);
   });
-  const store = new FillerStore(() => root, undefined, undefined, 80);
+  const store = new FillerStore(() => root, { lazy: 0, quiet: 80 });
   await store.status(KEY, render);
   await tick(20);
   const end = store.speaking();
@@ -94,7 +94,7 @@ test('while the page says the agent is at work no clip is started, and one is wh
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   const started: number[] = [];
   const render = async () => { started.push(Date.now()); return seconds(1); };
-  const store = new FillerStore(() => root, undefined, undefined, 300);
+  const store = new FillerStore(() => root, { lazy: 0, quiet: 300 });
   store.busy();
   await store.status(KEY, render);
   // The page keeps saying so with every look, which is more often than the wait.
@@ -107,11 +107,52 @@ test('while the page says the agent is at work no clip is started, and one is wh
   rmSync(root, { recursive: true, force: true });
 });
 
+test('the extra clips are made after the first set, in a lull: the first set is not held up by them', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'fillers-'));
+  const made: { text: string; at: number }[] = [];
+  // A first set that takes longer than the lull itself: the extras are not due from the start but from when the set is done.
+  const render = async (text: string) => { made.push({ text, at: Date.now() }); await tick(60); return seconds(1); };
+  const store = new FillerStore(() => root, { quiet: 0, lazy: 250 });
+  const extras = FILLERS.map((f, i) => ({ ...f, i })).filter(f => f.extra), core = FILLERS.filter(f => !f.extra);
+  assert.ok(extras.length >= 3, 'a few more than the first set, to vary a long wait');
+  let status = await store.status(KEY, render);
+  // The first set is there as it is made, and does not wait for the lull.
+  while (status.clips.length < core.length) { await tick(10); status = await store.status(KEY, render); }
+  assert.ok(status.rendering && status.clips.every(i => !FILLERS[i].extra));
+  assert.deepEqual(made.map(m => m.text), core.map(f => f.text));
+  while ((status = await store.status(KEY, render)).rendering) await tick(10);
+  assert.deepEqual(made.map(m => m.text), FILLERS.map(f => f.text), 'the first set first, then the extras');
+  assert.ok(made[core.length].at - made[core.length - 1].at >= 230, `the first extra came ${made[core.length].at - made[core.length - 1].at} ms after the first set`);
+  assert.deepEqual(status.clips, FILLERS.map((_, i) => i));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('an extra clip is not started while recognition or speech is being made, nor the agent at work, nor for the lull after it', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'fillers-'));
+  const made: { text: string; at: number }[] = [];
+  const render = async (text: string) => { made.push({ text, at: Date.now() }); return seconds(1); };
+  const store = new FillerStore(() => root, { quiet: 0, lazy: 250 });
+  const core = FILLERS.filter(f => !f.extra);
+  let status = await store.status(KEY, render);
+  while (status.clips.length < core.length) { await tick(10); status = await store.status(KEY, render); }
+  // Speech made for the page, then the agent at work, for longer than the lull: no extra begins.
+  const end = store.speaking();
+  await tick(400); assert.equal(made.length, core.length);
+  end();
+  let last = Date.now();
+  for (let i = 0; i < 20; i++) { await tick(30); store.busy(); last = Date.now(); }
+  assert.equal(made.length, core.length);
+  while ((status = await store.status(KEY, render)).rendering) await tick(10);
+  assert.equal(made.length, FILLERS.length);
+  assert.ok(made[core.length].at - last >= 230, `the first extra came ${made[core.length].at - last} ms after the last activity`);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test('a new voice stops the one being made: never two at once, and nothing of the old one is left', async () => {
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   let running = 0, peak = 0, first = 0;
   const render = async () => { peak = Math.max(peak, ++running); await tick(15); running--; return seconds(1); };
-  const store = new FillerStore(() => root);
+  const store = new FillerStore(() => root, { lazy: 0 });
   const other = 'b'.repeat(40), third = 'c'.repeat(40);
   await store.status(KEY, async (...args) => { first++; return render(...args); });
   await tick(40);
@@ -132,7 +173,7 @@ test('clips are only made while a page asks: once nobody does, no request goes o
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   const made: string[] = [];
   const render = async (text: string) => { made.push(text); await tick(50); return seconds(1); };
-  const store = new FillerStore(() => root, undefined, undefined, 0, 120);
+  const store = new FillerStore(() => root, { lazy: 0, quiet: 0, patience: 120 });
   await store.status(KEY, render);
   // The page does not ask again, as when voice mode ended or fillers were switched off.
   await tick(500);
@@ -157,7 +198,7 @@ test('stop drops the clip being made at the runtime, and no more are made until 
     const timer = setTimeout(() => resolve(seconds(1)), 80);
     signal.addEventListener('abort', () => { clearTimeout(timer); cut.push(text); reject(signal.reason); });
   });
-  const store = new FillerStore(() => root, message => warned.push(message));
+  const store = new FillerStore(() => root, { lazy: 0, warn: message => warned.push(message) });
   await store.status(KEY, render);
   await tick(30);
   store.stop();
@@ -176,7 +217,7 @@ test('a voice changed and changed back loses none of the clips it was told were 
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   const made: string[] = [];
   const renderFor = (voice: string) => async (text: string) => { made.push(`${voice}:${text}`); await tick(40); return seconds(1); };
-  const store = new FillerStore(() => root);
+  const store = new FillerStore(() => root, { lazy: 0 });
   const other = 'b'.repeat(40);
   await store.status(KEY, renderFor('a'));
   while (!(await store.status(KEY, renderFor('a'))).clips.length) await tick(5);
@@ -204,19 +245,19 @@ test('a runtime that does not say a text the same way each time gets it made aga
   const calls: string[] = [];
   let wrong = 2;
   const render = async (text: string) => { calls.push(text); return text === FILLERS[0].text && wrong-- > 0 ? seconds(FILLERS[0].longest * 2) : text === FILLERS[1].text ? seconds(FILLERS[1].longest * 2) : seconds(1); };
-  const store = new FillerStore(() => root);
+  const store = new FillerStore(() => root, { lazy: 0 });
   await store.status(KEY, render, false);
   while ((await store.status(KEY, render, false)).rendering) await tick(5);
   // The first came out right on the third try; the second never did.
   assert.equal(calls.filter(text => text === FILLERS[0].text).length, 3);
   assert.equal(calls.filter(text => text === FILLERS[1].text).length, 3);
-  assert.deepEqual((await store.status(KEY, render, false)).clips, [0, 2, 3, 4]);
+  assert.deepEqual((await store.status(KEY, render, false)).clips, FILLERS.map((_, i) => i).filter(i => i !== 1));
   assert.deepEqual(readdirSync(join(root, KEY)).filter(name => name.endsWith('.skip')), []);
   // Not tried again in this run, but again after a restart.
   const before = calls.length;
   await store.status(KEY, render, false); await tick(20);
   assert.equal(calls.length, before);
-  const restarted = new FillerStore(() => root);
+  const restarted = new FillerStore(() => root, { lazy: 0 });
   await restarted.status(KEY, render, false);
   while ((await restarted.status(KEY, render, false)).rendering) await tick(5);
   assert.equal(calls.length, before + 3);
@@ -226,7 +267,7 @@ test('a runtime that does not say a text the same way each time gets it made aga
 test('a failure is told once and not tried again at once; after a while it is', async () => {
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   let now = 0, calls = 0; const warned: string[] = [];
-  const store = new FillerStore(() => root, message => warned.push(message), () => now);
+  const store = new FillerStore(() => root, { lazy: 0, warn: message => warned.push(message), clock: () => now });
   const render = async () => { calls++; throw new Error('runtime down'); };
   await store.status(KEY, render); await tick(10);
   assert.deepEqual(await store.status(KEY, render), { clips: [], rendering: false });
@@ -239,7 +280,7 @@ test('a failure is told once and not tried again at once; after a while it is', 
 
 test('another voice drops the clips of the old one, and a key or number that is not one reads nothing', async () => {
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
-  const store = new FillerStore(() => root);
+  const store = new FillerStore(() => root, { lazy: 0 });
   const other = 'b'.repeat(40);
   for (const key of [KEY, other]) { while ((await store.status(key, async () => seconds(1))).rendering) await tick(5); }
   assert.deepEqual(readdirSync(root), [other]);
@@ -271,7 +312,7 @@ const port = (backend.address() as { port: number }).port;
 const app = express(); app.use(express.json()); app.use('/api', voiceRouter());
 const server = app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.once('listening', r));
 const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api`;
-shared.quiet = 30;
+shared.quiet = 30; shared.lazy = 30;
 after(async () => {
   await Promise.all([new Promise<void>(r => server.close(() => r())), new Promise<void>(r => backend.close(() => r()))]);
   getDb().close(); rmSync(dir, { recursive: true, force: true });
@@ -310,7 +351,7 @@ test('a render that comes out as a run-on is not offered', async () => {
   long = FILLERS[3].text;
   assert.equal((await save({ language: 'fr' })).status, 200);
   const status = await ready();
-  assert.deepEqual(status.clips, [0, 1, 2, 4]);
+  assert.deepEqual(status.clips, FILLERS.map((_, i) => i).filter(i => i !== 3));
   long = '';
 });
 
@@ -348,7 +389,7 @@ test('a page that says the agent is at work with its look has no clip started me
     for (let i = 0; i < 15; i++) { await fetch(`${base}/sessions/s/voice/fillers?busy=1`); await tick(30); }
     assert.deepEqual(heard, []);
     assert.equal((await ready()).clips.length, FILLERS.length);
-  } finally { shared.quiet = 30; }
+  } finally { shared.quiet = 30; shared.lazy = 30; }
 });
 
 /** Starts a render that the fake runtime holds, does `action`, and says how many requests the runtime saw hang up. */

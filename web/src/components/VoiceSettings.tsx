@@ -76,7 +76,7 @@ export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, o
         {choice(false, fillers, t("Off"), onFillers)}
         {choice(true, fillers, t("On"), onFillers)}
       </div>
-      <p>{fillers ? t("A short sound such as “mhm” the moment you have finished, until the answer starts.") : t("Nothing is said until the answer starts.")}</p>
+      <p>{fillers ? t("Short sounds such as “mhm” from the moment you have finished until the answer starts, again if the wait is long.") : t("Nothing is said until the answer starts.")}</p>
     </div>}
     <div className="voice-setting" role="group" aria-label={t("Sound effects")}>
       <span aria-hidden="true">{t("Sound effects")}</span>

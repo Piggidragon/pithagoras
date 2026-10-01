@@ -24,12 +24,16 @@ const RETRY_AFTER = 60_000;
  * clip beyond that is the runtime saying it twice or running on, and is thrown
  * away instead of kept, whatever the runtime and language.
  */
-export const FILLERS: readonly { text: string; longest: number }[] = [
+export const FILLERS: readonly { text: string; longest: number; extra?: true }[] = [
   { text: "Ah, okay.", longest: 2.6 },
   { text: "Oh, okay.", longest: 2.6 },
   { text: "Okay, ah.", longest: 2.6 },
   { text: "Ah, mhm.", longest: 2.6 },
   { text: "Okay, mhm.", longest: 2.6 },
+  // More of the same kind, for a long wait, where five would come round too soon. Made in a lull after the others: nothing waits for them.
+  { text: "Mhm, okay.", longest: 2.6, extra: true },
+  { text: "Oh, mhm.", longest: 2.6, extra: true },
+  { text: "Okay, oh.", longest: 2.6, extra: true },
 ];
 
 /** Makes one text as 24 kHz PCM. */
@@ -40,6 +44,8 @@ const KEY = /^[0-9a-f]{40}$/;
 const TRIES = 3;
 /** After live speech, how long before a clip is started: a moment between two phrases of an answer is not the answer being over. */
 const QUIET_MS = 8000;
+/** The same for the extra clips, which nothing waits for: they are made in a lull, not at once. */
+const LAZY_MS = 30_000;
 /**
  * How long a page may go without asking before nobody is taken to be waiting for
  * the clips: the page asks every three seconds while they are being made. A page
@@ -82,15 +88,24 @@ export class FillerStore {
   private endedAt = -Infinity;
   private askedAt = -Infinity;
   private wake = new Set<() => void>();
+  private warn: (message: string) => void;
+  private clock: () => number;
+  /** How long after live speech the clips wait. */
+  public quiet: number;
+  /** How long after live speech, and after the first set was made, the extra clips wait. */
+  public lazy: number;
+  /** How long without a question before nobody is taken to be waiting. */
+  public patience: number;
   constructor(
     private root: () => string,
-    private warn: (message: string) => void = message => console.error("[voice] fillers:", message),
-    private clock: () => number = Date.now,
-    /** How long after live speech the clips wait. */
-    public quiet = QUIET_MS,
-    /** How long without a question before nobody is taken to be waiting. */
-    public patience = ASKED_MS,
-  ) {}
+    options: { warn?: (message: string) => void; clock?: () => number; quiet?: number; lazy?: number; patience?: number } = {},
+  ) {
+    this.warn = options.warn ?? (message => console.error("[voice] fillers:", message));
+    this.clock = options.clock ?? Date.now;
+    this.quiet = options.quiet ?? QUIET_MS;
+    this.lazy = options.lazy ?? LAZY_MS;
+    this.patience = options.patience ?? ASKED_MS;
+  }
   private dir(key: string) { return path.join(this.root(), key); }
 
   /**
@@ -111,10 +126,10 @@ export class FillerStore {
   /** The page says the agent is at work, so an answer is on its way: the wait before a clip starts begins anew. */
   busy() { this.endedAt = Date.now(); }
 
-  /** Resolves when no live speech is being made nor was just now, or when `signal` stops the wait. */
-  private async idle(signal: AbortSignal) {
+  /** Resolves when no live speech is being made nor was just now (nor since `since`, for as long as `quiet`), or when `signal` stops the wait. */
+  private async idle(signal: AbortSignal, quiet = this.quiet, since = -Infinity) {
     while (!signal.aborted) {
-      const wait = this.live ? undefined : this.endedAt + this.quiet - Date.now();
+      const wait = this.live ? undefined : Math.max(this.endedAt, since) + quiet - Date.now();
       if (wait !== undefined && wait <= 0) return;
       await new Promise<void>(resolve => {
         const done = () => { clearTimeout(timer); this.wake.delete(done); signal.removeEventListener("abort", done); resolve(); };
@@ -170,9 +185,9 @@ export class FillerStore {
     return readFile(path.join(this.dir(key), `${n}.pcm`)).catch(() => undefined);
   }
 
-  /** One clip, made when no answer is near. Nothing once `run` is stopped. */
-  private async render(text: string, render: Render, run: AbortSignal): Promise<Buffer | undefined> {
-    await this.idle(run);
+  /** One clip, made when no answer is near, an extra one when it has been quiet for long. Nothing once `run` is stopped. */
+  private async render(text: string, render: Render, run: AbortSignal, calm?: number): Promise<Buffer | undefined> {
+    await (calm === undefined ? this.idle(run) : this.idle(run, this.lazy, calm));
     // Not started for nobody: the page that asked has gone, and a request now would use the runtime, and load its model, for nothing.
     if (run.aborted || Date.now() - this.askedAt > this.patience) return undefined;
     try {
@@ -191,9 +206,11 @@ export class FillerStore {
       // What is to be made is looked up now, not when it was asked for: the one before may have made some.
       const { todo } = await this.kept(key);
       let cleared = false;
+      // Since when it has been calm: the first set is what is waited for, and the extras come after it, in a lull.
+      let calm = Date.now();
       for (const i of todo) {
         for (let tries = 1; ; tries++) {
-          const pcm = await this.render(FILLERS[i].text, render, run);
+          const pcm = await this.render(FILLERS[i].text, render, run, FILLERS[i].extra ? calm : undefined);
           if (!pcm || run.aborted) return;
           const seconds = pcm.length / 2 / RATE;
           // The other voices are cleared away once there is something of this one to keep, not before: a voice changed back again while its first clip is being made has lost nothing.
@@ -207,6 +224,7 @@ export class FillerStore {
             // Whole or not at all: a listing never sees half a clip.
             await writeFile(path.join(dir, `${i}.tmp`), pcm);
             await rename(path.join(dir, `${i}.tmp`), path.join(dir, `${i}.pcm`));
+            if (!FILLERS[i].extra) calm = Date.now();
             break;
           }
           // A runtime that says it the same way each time would say this again: kept as nothing, so that voice start does not make it every time.

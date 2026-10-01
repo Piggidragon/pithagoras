@@ -6,6 +6,19 @@ import { notice, type Notice } from "./voice-notices";
 
 /** The longest the answer waits for a filler to stop: a fade-out takes a few milliseconds, and this is for a player that never reports back. */
 const FILLER_STOP_MS = 150;
+/** How the silence after a turn is filled over a long wait. */
+export interface FillerPacing {
+  /** After a filler has ended (or one could not be played), how long before the next, growing; the last is kept for any beyond. */
+  gaps: readonly number[];
+  /** At most this many tries in one wait: a wait longer than that is a long task, which the agent says what it is at itself. */
+  max: number;
+  /** The fraction by which each gap varies at random, so that it does not come like a clock. */
+  jitter: number;
+}
+/** A filler at once, then 3, 4.5, 6.5, 9.5 and 14 seconds after the one before ended: six in a wait of about a minute, and then no more. */
+export const FILLER_PACING: FillerPacing = { gaps: [3000, 4500, 6500, 9500, 14000], max: 6, jitter: 0.2 };
+/** The silence after a turn, while it is being filled: how many fillers have been tried, whether one was played, and the timer of the next. */
+interface Silence { tries: number; played: boolean; timer?: ReturnType<typeof setTimeout> }
 export type VoicePhase = "Listening" | "Hearing you" | "Transcribing" | "Thinking" | "Compacting context" | "Speaking";
 export interface VoiceIO {
   sequential?: boolean;
@@ -31,6 +44,8 @@ export interface VoiceIO {
    * clip ready) is returning nothing; that is no error.
    */
   filler?: (signal: AbortSignal) => Promise<void> | undefined;
+  /** How the silence is filled over a long wait: `FILLER_PACING`, unless a test wants it quicker. */
+  fillerPacing?: FillerPacing;
   trace?: (name:string)=>void;
   phase: (phase: VoicePhase) => void;
   error: (message: string) => void;
@@ -67,8 +82,9 @@ export class HandsFreeVoice {
   private stopped = false;
   /** The filler being played, while it plays. */
   private filler?: { controller: AbortController; done: Promise<void> };
-  /** A filler was the last thing said: the next waits until something has been said that is not one. */
+  /** A filler was the last thing said: the first one of the next wait is not at once. */
   private filled = false;
+  private silence?: Silence;
 
   constructor(private io: VoiceIO, initial: Item[]) {
     const afterSeq = initial.reduce((n, item) => Math.max(n, Number(item.id.slice(1)) || 0), 0);
@@ -98,6 +114,8 @@ export class HandsFreeVoice {
   private async prepare(text: string, signal: AbortSignal, kind?: 'reply' | 'status'): Promise<PreparedSpeech> {
     const prepared = await this.io.synthesize(text, signal, kind);
     return Object.assign(async (playback: AbortSignal) => {
+      // Audible now: the silence is over, and no filler is to come after the answer has started.
+      this.endSilence();
       await this.endFiller();
       playback.throwIfAborted();
       this.filled = false;
@@ -105,30 +123,67 @@ export class HandsFreeVoice {
     }, { completed: prepared.completed });
   }
   /**
-   * A filler, now: the turn has been taken, and until the agent has something to
-   * say there is silence. Once per turn, and not after another filler with nothing
-   * said in between. Not while anything else is going to be heard: the user is
-   * speaking, a notice is, or the answer already is.
+   * The turn has been taken, and until the agent has something to say there is
+   * silence: this fills it, with a filler at once, and then further ones with
+   * growing gaps between them (`FILLER_PACING`) until something else is heard.
+   * Not while anything else is going to be heard: the user is speaking, a notice
+   * is, or the answer already is. Returns what was begun, for the turn to take
+   * back if it is not sent after all.
    */
   private startFiller() {
-    if (!this.alive || !this.io.filler || this.io.statusSpeech === false || this.io.sequential || this.filled || this.filler) return;
+    if (!this.alive || !this.io.filler || this.io.statusSpeech === false || this.io.sequential || this.filler) return;
     if (this.hearing || this.compacting || this.pipeline.busy || this.output.length) return;
+    this.endSilence();
+    const silence = this.silence = { tries: 0, played: false };
+    // After a filler that nothing has followed, not at once either: two turns in a row do not get two at the same moment.
+    if (this.filled) this.later(silence); else this.fill(silence);
+    return silence;
+  }
+  /** One filler, now, or when there is none to play, the next try after a gap. */
+  private fill(silence: Silence) {
+    silence.tries++;
     const controller = new AbortController();
     let playing: Promise<void> | undefined;
-    try { playing = this.io.filler(controller.signal); } catch { return; }
-    if (!playing) return;
+    try { playing = this.io.filler!(controller.signal); } catch { playing = undefined; }
+    // Nothing to play yet (no clip is ready): clips may be, by the next try.
+    if (!playing) return this.later(silence);
+    silence.played = true;
     this.filled = true;
     // A filler that fails is a filler not heard, not an error shown.
-    const filler = { controller, done: playing.catch(() => {}).then(() => { if (this.filler === filler) { this.filler = undefined; this.state(); } }) };
+    const filler = { controller, done: playing.catch(() => {}).then(() => {
+      if (this.filler === filler) { this.filler = undefined; this.state(); }
+      // Played to its end, not cut off by what ended the silence: the next comes after a gap.
+      if (this.silence === silence && !controller.signal.aborted) this.later(silence);
+    }) };
     this.filler = filler;
     this.state();
-    return filler;
   }
-  /** The turn that started this filler is not going to be sent after all: the filler is cut, and the next turn may have one. */
-  private dropFiller(filler: { controller: AbortController } | undefined) {
-    if (!filler) return;
-    filler.controller.abort();
-    this.filled = false;
+  /** The next try, after a gap that grows with the tries made; none once there have been as many as a wait is to have. */
+  private later(silence: Silence) {
+    const pacing = this.io.fillerPacing ?? FILLER_PACING;
+    if (silence.tries >= pacing.max) return this.endSilence(silence);
+    const gap = pacing.gaps[Math.min(Math.max(silence.tries - 1, 0), pacing.gaps.length - 1)] * (1 + pacing.jitter * (Math.random() * 2 - 1));
+    silence.timer = setTimeout(() => {
+      silence.timer = undefined;
+      if (this.silence !== silence) return;
+      // There is nothing left to wait for: the user is speaking or a notice is being said, or the agent has finished without a word.
+      // An answer that is being made into speech is not that: until it is audible (see `prepare`) the silence goes on, and a first sentence can take seconds.
+      if (!this.alive || this.hearing || this.compacting || this.filler || !this.io.filler || this.io.statusSpeech === false || !(this.io.agentRunning() || this.sending)) return this.endSilence(silence);
+      this.fill(silence);
+    }, gap);
+  }
+  /** The silence is over, or not to be filled any more: no filler is started for it again. */
+  private endSilence(silence?: Silence | undefined) {
+    if (silence && this.silence !== silence) return;
+    clearTimeout(this.silence?.timer);
+    this.silence = undefined;
+  }
+  /** The turn that began this is not going to be sent after all: its fillers are cut and not to come, and the next turn may have one at once. */
+  private dropFiller(silence: Silence | undefined) {
+    if (!silence) return;
+    this.endSilence(silence);
+    this.filler?.controller.abort();
+    if (silence.played) this.filled = false;
   }
   /** Tells the filler to stop, and returns once it has: a player that does not answer is not waited for, as the answer is worth more than a filler. */
   private async endFiller() {
@@ -147,6 +202,7 @@ export class HandsFreeVoice {
   setCompacting(active: boolean, completed = true) {
     if (!this.alive || active === this.compacting) return;
     this.compacting = active;
+    this.endSilence();
     this.filler?.controller.abort();
     if (this.io.statusSpeech === false || this.io.sequential) { this.state(); return; }
     if (active) {
@@ -178,7 +234,8 @@ export class HandsFreeVoice {
     this.acceptingReplies = false;
     this.held = [...(this.held ?? []), ...this.pipeline.cancel(), ...this.output];
     this.output = [];
-    // Talking over a filler is no turn for it to finish.
+    // Talking over a filler is no turn for it to finish, nor for the ones after it.
+    this.endSilence();
     this.filler?.controller.abort();
     // The run is stopped only once what was said turns out to be for the agent:
     // not a tap, not noise, not a command the page handles. See heard().
@@ -257,17 +314,17 @@ export class HandsFreeVoice {
       // The turn is taken, and for the agent: from here on there is silence until
       // it speaks, and the filler is what fills it, from the clip already in hand.
       // Not after the run this turn interrupts has wound down: that is the gap it is for.
-      const filler = this.startFiller();
+      const silence = this.startFiller();
       // Serialize abort behind an in-flight send so it cannot miss that new run.
       // When steering, the run goes on and what is said is added to it. When it
       // was already stopped while this was being said, that is not done twice —
       // but whether it was is only known once that stop has settled.
       const busy = (this.io.agentRunning() || this.sending) && !this.io.steering?.();
       const send = this.operations.then(async () => {
-        if (!valid() || this.hearing || this.recordings.length) return this.dropFiller(filler);
+        if (!valid() || this.hearing || this.recordings.length) return this.dropFiller(silence);
         if (busy && !this.stopped) {
-          try { await this.io.abort(); } catch (error) { this.dropFiller(filler); throw error; }
-          if (!valid() || this.hearing || this.recordings.length) return this.dropFiller(filler);
+          try { await this.io.abort(); } catch (error) { this.dropFiller(silence); throw error; }
+          if (!valid() || this.hearing || this.recordings.length) return this.dropFiller(silence);
         }
         this.held = null;
         this.ignoreCurrent();
@@ -281,7 +338,7 @@ export class HandsFreeVoice {
           this.acceptingReplies = false;
           // The turn did not happen: the one said again may have a filler.
           this.filler?.controller.abort();
-          this.dropFiller(filler);
+          this.dropFiller(silence);
           throw new Error(t("Could not send “{text}”: {error}", { text, error: error instanceof Error ? error.message : String(error) }));
         } finally { this.sending = false; }
       });
@@ -322,6 +379,7 @@ export class HandsFreeVoice {
   }
   stop() {
     this.alive = false;
+    this.endSilence();
     this.filler?.controller.abort();
     this.pipeline.cancel();
     this.transcription.abort();

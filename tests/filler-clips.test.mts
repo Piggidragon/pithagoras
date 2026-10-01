@@ -71,6 +71,23 @@ test('a filler is never the one played last, and none comes round twice before t
   }
 });
 
+test('with enough clips none of the last two comes again, so that a long wait does not feel like a loop, and a clip that arrives later joins in', () => {
+  for (const size of [4, 5, 8]) for (let seed = 0; seed < 50; seed++) {
+    let state = seed + 1;
+    const random = () => (state = (state * 48271) % 2147483647) / 2147483647;
+    const clips = new FillerClips({ list: async () => ({ key: 'a', clips: [], rendering: false }), clip: async () => clip(0) }, random);
+    const all = Array.from({ length: size }, (_, n) => n);
+    for (const n of all) (clips as any).clips.set(n, clip(n));
+    const played = take(clips, size * 3) as number[];
+    for (let i = 0; i < played.length; i++) assert.ok(!played.slice(Math.max(0, i - 2), i).includes(played[i]), `repeated within two: ${played}`);
+    for (let round = 0; round < 3; round++) assert.deepEqual(played.slice(round * size, (round + 1) * size).sort(), all, `round ${round}: ${played}`);
+    // Two more clips made while the wait goes on: heard before any of the others come round again.
+    (clips as any).clips.set(size, clip(size)); (clips as any).clips.set(size + 1, clip(size + 1));
+    const more = take(clips, 2) as number[];
+    assert.deepEqual([...more].sort(), [size, size + 1].sort(), `new ones first: ${more}`);
+  }
+});
+
 test('with a single clip, it is played once and then silence beats saying it again', () => {
   const clips = new FillerClips({ list: async () => ({ key: 'a', clips: [], rendering: false }), clip: async () => clip(0) });
   (clips as any).clips.set(7, clip(7));

@@ -7,9 +7,9 @@ export interface FillerSource {
   release?(): Promise<void>;
 }
 
-/** How often to look again while the portal is still making clips, and how many times at most: a few minutes. */
+/** How often to look again while the portal is still making clips, and how many times at most: twenty minutes, as the extra clips are made in a lull and may take a while to come. */
 const POLL_MS = 3000;
-const POLLS = 100;
+const POLLS = 400;
 
 /**
  * The fillers, downloaded and held as samples so that one starts the moment it
@@ -24,7 +24,8 @@ export class FillerClips {
   private timer?: ReturnType<typeof setTimeout>;
   /** The clips played since every one of them was, so that none comes round twice before the others have. */
   private heard = new Set<number>();
-  private last = -1;
+  /** The last ones played, newest last: not heard again for a while, so that it does not feel like a loop. */
+  private recent: number[] = [];
   constructor(
     private source: FillerSource,
     private random: () => number = Math.random,
@@ -43,7 +44,7 @@ export class FillerClips {
   }
   /** Voice mode ended, or fillers are off: no more looking, and the portal is told, which would otherwise make the rest of the clips for nobody. */
   stop() {
-    this.run++; clearTimeout(this.timer); this.clips.clear(); this.heard.clear(); this.last = -1;
+    this.run++; clearTimeout(this.timer); this.clips.clear(); this.heard.clear(); this.recent = [];
     void this.source.release?.().catch(() => {});
   }
 
@@ -52,7 +53,7 @@ export class FillerClips {
       const { key, clips, rendering } = await this.source.list(this.busy());
       if (run !== this.run) return;
       // Another voice: what was held is not it.
-      if (key !== this.key) { this.key = key; this.clips.clear(); this.heard.clear(); this.last = -1; }
+      if (key !== this.key) { this.key = key; this.clips.clear(); this.heard.clear(); this.recent = []; }
       await Promise.all(clips.filter(n => !this.clips.has(n)).map(async n => {
         try {
           const samples = await this.source.clip(key, n);
@@ -67,19 +68,21 @@ export class FillerClips {
   }
 
   /**
-   * The next filler, or none. Never the one played last, and none again until
-   * all the others have been: a filler does not come back to back, nor twice
-   * while another is still unheard. With only the one just played, silence
-   * is better than saying it again.
+   * The next filler, or none. Never the one played last, nor (with enough to
+   * choose from) the one before it, and none again until all the others have
+   * been: a filler does not come back to back, nor twice while another is still
+   * unheard. With only the one just played, silence is better than saying it
+   * again.
    */
   next(): Float32Array | undefined {
     const all = [...this.clips.keys()];
-    let pool = all.filter(n => !this.heard.has(n));
-    if (!pool.length) { this.heard.clear(); pool = all; }
-    pool = pool.filter(n => n !== this.last);
+    const window = all.length > 3 ? 2 : 1;
+    const away = this.recent.slice(-window);
+    let pool = all.filter(n => !this.heard.has(n) && !away.includes(n));
+    if (!pool.length) { this.heard.clear(); pool = all.filter(n => !away.includes(n)); }
     if (!pool.length) return undefined;
     const n = pool[Math.floor(this.random() * pool.length)];
-    this.heard.add(n); this.last = n;
+    this.heard.add(n); this.recent.push(n); if (this.recent.length > 2) this.recent.shift();
     return this.clips.get(n);
   }
 }

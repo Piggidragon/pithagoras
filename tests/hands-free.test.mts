@@ -1,6 +1,6 @@
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { HandsFreeVoice, type VoiceIO } from '../web/src/hands-free.js';
+import { HandsFreeVoice, FILLER_PACING, type FillerPacing, type VoiceIO } from '../web/src/hands-free.js';
 import { samplesWav } from '../web/src/voice.js';
 import { notice } from '../web/src/voice-notices.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -491,18 +491,18 @@ test('a filler whose player does not answer is not waited for', async () => {
   assert.deepEqual(log, ['answer']); voice.stop();
 });
 
-test('talking over a filler cuts it at once, and a turn that follows gets none until something else has been said', async () => {
+test('talking over a filler cuts it at once, and the turn that follows does not get one at the same moment', async () => {
   const { filler, log } = fillers();
   const { voice } = setup({ filler });
   turn(voice); await tick();
   voice.speechStart();
   assert.deepEqual(log, ['filler:start', 'filler:cut']);
   voice.speechEnd(new Float32Array(16000)); await tick();
-  // The last thing heard was a filler: not another one on top of it.
+  // The last thing heard was a filler: the next turn's first comes after a gap, not on top of it.
   assert.deepEqual(log, ['filler:start', 'filler:cut']); voice.stop();
 });
 
-test('a filler is not repeated back to back, and comes again once an answer has been heard', async () => {
+test('the first filler of a turn that follows another is not at once, and is again once an answer has been heard', async () => {
   const { filler, log } = fillers(); const spoken: string[] = [];
   const { voice } = setup({ filler, speak: async text => { spoken.push(text); } });
   turn(voice); await tick();
@@ -514,14 +514,12 @@ test('a filler is not repeated back to back, and comes again once an answer has 
   assert.equal(log.filter(entry => entry === 'filler:start').length, 2); voice.stop();
 });
 
-test('the late "let me think" line is gone: a long silence is not filled a second time, in any words', async () => {
-  const { filler, log } = fillers();
+test('there is no spoken "let me think" line any more, in any words: what fills a long silence is fillers', async () => {
+  const { filler } = fillers();
   const { voice, spoken } = setup({ filler, agentRunning: () => true });
   turn(voice); await tick();
   voice.observe([reply('a10')]); await tick();
-  // The line it replaces came after about two seconds.
   await new Promise(resolve => setTimeout(resolve, 2100));
-  assert.equal(log.filter(entry => entry === 'filler:start').length, 1);
   assert.deepEqual(spoken, []); voice.stop();
 });
 
@@ -550,4 +548,171 @@ test('ending voice cuts a filler, and the phase says speaking only while it play
   assert.equal(phases.at(-1), 'Speaking');
   voice.stop();
   assert.deepEqual(log, ['filler:start', 'filler:cut']);
+});
+
+// A long wait: the silence is filled again and again, on a clock that only moves when told to.
+const pacing: FillerPacing = { gaps: [1000, 2000, 4000], max: 4, jitter: 0 };
+/** Fillers that play for `length` ms of that clock, and what happened to them when. */
+function timeline(t: TestContext, length = 500) {
+  t.mock.timers.reset(); t.mock.timers.enable({ apis: ['setTimeout'] });
+  const log: { at: number; e: string }[] = []; let now = 0;
+  const filler = (signal: AbortSignal) => {
+    log.push({ at: now, e: 'start' });
+    return new Promise<void>(resolve => {
+      const timer = setTimeout(() => { log.push({ at: now, e: 'end' }); resolve(); }, length);
+      signal.addEventListener('abort', () => { clearTimeout(timer); log.push({ at: now, e: 'cut' }); resolve(); }, { once: true });
+    });
+  };
+  const advance = async (ms: number) => { for (let done = 0; done < ms; done += 100) { now += 100; t.mock.timers.tick(100); await tick(); await tick(); } };
+  const starts = () => log.filter(entry => entry.e === 'start').map(entry => entry.at);
+  return { filler, log, advance, starts };
+}
+
+test('a long wait is filled again and again, with growing gaps after each filler has ended, and no more after the last', async t => {
+  const { filler, advance, starts } = timeline(t);
+  const { voice } = setup({ filler, agentRunning: () => true, fillerPacing: pacing });
+  turn(voice); await tick();
+  await advance(60_000);
+  // Each filler lasts 500 ms; the gaps after it are 1, 2 and 4 seconds; four are the most.
+  assert.deepEqual(starts(), [0, 1500, 4000, 8500]);
+  voice.stop();
+});
+
+test('the fillers of a long wait stop when the answer is heard, whether one is playing or the wait is between two', async t => {
+  // Heard while one is playing: it is cut, and no more come.
+  const playing = timeline(t, 5000);
+  const a = setup({ filler: playing.filler, agentRunning: () => true, fillerPacing: pacing });
+  turn(a.voice); await tick();
+  await playing.advance(1000);
+  a.voice.observe([reply('a20')]); await tick(); await tick();
+  assert.deepEqual(playing.log.map(entry => entry.e), ['start', 'cut']);
+  assert.deepEqual(a.spoken, ['A spoken answer.']);
+  await playing.advance(60_000);
+  assert.deepEqual(playing.starts(), [0]);
+  a.voice.stop();
+  // Heard in the gap after the first: the second never comes.
+  const gap = timeline(t, 500);
+  const b = setup({ filler: gap.filler, agentRunning: () => true, fillerPacing: pacing });
+  turn(b.voice); await tick();
+  await gap.advance(800);
+  b.voice.observe([reply('a20')]); await tick(); await tick();
+  await gap.advance(60_000);
+  assert.deepEqual(gap.starts(), [0]);
+  assert.deepEqual(b.spoken, ['A spoken answer.']);
+  b.voice.stop();
+});
+
+test('the answer is never heard over a filler of a long wait: it starts once the one playing has been cut', async t => {
+  const { filler, log, advance } = timeline(t, 5000);
+  const events: string[] = [];
+  const { voice } = setup({ filler, agentRunning: () => true, fillerPacing: pacing, speak: async () => { events.push(`answer after ${log.map(entry => entry.e).join(',')}`); } });
+  turn(voice); await tick();
+  await advance(1000);
+  voice.observe([reply('a20')]); await tick(); await tick();
+  assert.deepEqual(events, ['answer after start,cut']);
+  voice.stop();
+});
+
+test('speech, compaction, an agent that has finished, or the end of voice mode stop the fillers of a wait', async t => {
+  for (const [name, end] of [
+    ['speech', (voice: HandsFreeVoice) => voice.speechStart()],
+    ['compaction', (voice: HandsFreeVoice) => voice.setCompacting(true)],
+    ['stop', (voice: HandsFreeVoice) => voice.stop()],
+  ] as const) {
+    const line = timeline(t, 300);
+    let running = true;
+    const { voice } = setup({ filler: line.filler, agentRunning: () => running, fillerPacing: pacing });
+    turn(voice); await tick();
+    await line.advance(1500);
+    assert.deepEqual(line.starts(), [0, 1300], name);
+    end(voice); await tick();
+    await line.advance(60_000);
+    assert.deepEqual(line.starts(), [0, 1300], name);
+    voice.stop();
+  }
+  // An agent that has finished without a word has nothing left to wait for.
+  const line = timeline(t, 300); let running = true;
+  const { voice } = setup({ filler: line.filler, agentRunning: () => running, fillerPacing: pacing });
+  turn(voice); await tick();
+  await line.advance(1500);
+  running = false;
+  await line.advance(60_000);
+  assert.deepEqual(line.starts(), [0, 1300]);
+  voice.stop();
+});
+
+test('a wait where no clip is ready yet tries again after a gap, and the tries count towards the most', async t => {
+  t.mock.timers.reset(); t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = 0, asked: number[] = [];
+  const advance = async (ms: number) => { for (let done = 0; done < ms; done += 100) { now += 100; t.mock.timers.tick(100); await tick(); await tick(); } };
+  const { voice, errors } = setup({ agentRunning: () => true, fillerPacing: pacing, filler: () => { asked.push(now); return undefined; } });
+  turn(voice); await tick();
+  await advance(60_000);
+  assert.deepEqual(asked, [0, 1000, 3000, 7000]); assert.deepEqual(errors, []);
+  voice.stop();
+});
+
+test('the gaps are not a clock: each varies at random within the pacing, and the default pacing grows and ends', async t => {
+  assert.ok(FILLER_PACING.gaps.every((gap, i) => i === 0 || gap > FILLER_PACING.gaps[i - 1]), 'the gaps grow');
+  assert.ok(FILLER_PACING.max >= 3 && FILLER_PACING.max <= 8, 'a few, and not for ever');
+  for (const [random, gap] of [[0, 500], [1, 1500]] as const) {
+    t.mock.method(Math, 'random', () => random);
+    const { filler, advance, starts } = timeline(t, 100);
+    const { voice } = setup({ filler, agentRunning: () => true, fillerPacing: { gaps: [1000], max: 2, jitter: 0.5 } });
+    turn(voice); await tick();
+    await advance(5000);
+    assert.deepEqual(starts(), [0, 100 + gap]);
+    voice.stop();
+    t.mock.restoreAll();
+  }
+  // With the pacing it ships with, a minute of waiting is filled with several fillers, further and further apart.
+  t.mock.method(Math, 'random', () => 0.5);
+  const { filler, advance, starts } = timeline(t, 1500);
+  const { voice } = setup({ filler, agentRunning: () => true });
+  turn(voice); await tick();
+  await advance(120_000);
+  const at = starts();
+  assert.equal(at.length, FILLER_PACING.max);
+  const spacing = at.slice(1).map((time, i) => time - at[i]);
+  assert.ok(spacing.every((gap, i) => i === 0 || gap > spacing[i - 1]), `spacing ${spacing}`);
+  voice.stop();
+});
+
+test('after a filler that nothing followed the next turn waits the first gap for its own, and after an answer it does not', async t => {
+  const first = timeline(t, 300);
+  const a = setup({ filler: first.filler, agentRunning: () => true, fillerPacing: pacing });
+  turn(a.voice); await tick();
+  await first.advance(500);
+  turn(a.voice); await tick();
+  await first.advance(900);
+  // Not at once, as the one before was the last thing heard.
+  assert.deepEqual(first.starts(), [0]);
+  await first.advance(300);
+  assert.deepEqual(first.starts(), [0, 1500]);
+  a.voice.stop();
+  const second = timeline(t, 300);
+  const b = setup({ filler: second.filler, agentRunning: () => true, fillerPacing: pacing });
+  turn(b.voice); await tick();
+  await second.advance(500);
+  b.voice.observe([reply('a20')]); await tick(); await tick();
+  assert.deepEqual(b.spoken, ['A spoken answer.']);
+  turn(b.voice); await tick();
+  assert.deepEqual(second.starts(), [0, 500]);
+  b.voice.stop();
+});
+
+test('an answer that is being made into speech does not end the fillers: they go on until it is audible', async t => {
+  const line = timeline(t, 300); const gate = deferred<void>(); const spoken: string[] = [];
+  const { voice } = setup({ filler: line.filler, agentRunning: () => true, fillerPacing: pacing, synthesize: async text => { await gate.promise; return async () => { spoken.push(text); }; } });
+  turn(voice); await tick();
+  // The text of the answer is there, its audio is not: a long first sentence, or a speech runtime that is busy.
+  voice.observe([reply('a20')]); await tick();
+  await line.advance(3700);
+  assert.deepEqual(line.starts(), [0, 1300, 3600]);
+  gate.resolve(); await tick(); await tick();
+  assert.deepEqual(spoken, ['A spoken answer.']);
+  assert.equal(line.log.at(-1)?.e, 'cut');
+  await line.advance(60_000);
+  assert.deepEqual(line.starts(), [0, 1300, 3600]);
+  voice.stop();
 });

@@ -433,6 +433,53 @@ test('a filler plays right after the turn, is not the same one twice running, an
   expect(failures).toEqual([]);
 });
 
+test('a long wait is filled again, with a different filler after a pause, and stops once the answer is audible', async ({ page }) => {
+  test.setTimeout(60000);
+  const failures: string[] = []; page.on('pageerror', e => failures.push(e.message));
+  const tone = (seconds: number) => {
+    const bytes = Buffer.alloc(Math.round(24000 * seconds) * 2);
+    for (let i = 0; i < bytes.length / 2; i++) bytes.writeInt16LE(Math.round(Math.sin(i * 2 * Math.PI * 330 / 24000) * 3000), i * 2);
+    return bytes;
+  };
+  // Told apart by length: three fillers and a reply.
+  const clips = [tone(0.7), tone(0.9), tone(1.1)];
+  await page.addInitScript(() => {
+    const log: { e: string; duration?: number; at: number }[] = []; (window as any).audioLog = log;
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...args) { log.push({ e: 'start', duration: this.buffer?.duration, at: performance.now() }); return start.apply(this, args); };
+  });
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'A test voice turn.' } }));
+  await page.route(/\/voice\/fillers(\?.*)?$/, route => route.fulfill({ json: { key: 'k', clips: [0, 1, 2], rendering: false } }));
+  await page.route('**/voice/fillers/k/*', route => route.fulfill({ body: clips[Number(new URL(route.request().url()).pathname.split('/').pop())], headers: { 'content-type': 'audio/pcm' } }));
+  // The answer takes long: the first filler, a pause of about three seconds, a second, and then the answer comes before a third is due.
+  await page.route('**/voice/speech', async route => {
+    await new Promise(resolve => setTimeout(resolve, 6500));
+    await route.fulfill({ body: tone(3), headers: { 'content-type': 'audio/pcm', 'x-sample-rate': '24000' } });
+  });
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+  type Entry = { e: string; duration?: number; at: number };
+  const starts = async () => (await page.evaluate(() => (window as any).audioLog as Entry[])).filter(x => x.e === 'start' && [0.7, 0.9, 1.1, 3].includes(Math.round((x.duration ?? 0) * 10) / 10));
+  await page.getByRole('button', { name: 'Inject speech' }).click();
+  await expect(page.getByTestId('sent')).toHaveText('1', { timeout: 12000 });
+  await expect.poll(async () => (await starts()).length, { timeout: 15000 }).toBe(3);
+  const [first, second, answer] = await starts();
+  expect(first.duration).not.toBe(second.duration);
+  // After the first has ended, a pause of three seconds, give or take a fifth: not a second on top of it, not silence for good.
+  const pause = second.at - (first.at + first.duration! * 1000);
+  expect(pause).toBeGreaterThan(2000); expect(pause).toBeLessThan(4200);
+  expect(answer.duration).toBe(3);
+  // The answer does not start over a filler, and no filler follows it, although the next would be due while it plays.
+  expect(answer.at).toBeGreaterThanOrEqual(second.at + second.duration! * 1000 - 15);
+  await page.waitForTimeout(6000);
+  expect((await starts()).length).toBe(3);
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  expect(failures).toEqual([]);
+});
+
 test('fillers are switched off in the voice settings or with Shift+F, and are not offered where the portal has none', async ({ page }) => {
   let listed = 0; let config: object = { enabled: true };
   await page.route('**/api/voice', route => route.fulfill({ json: config }));

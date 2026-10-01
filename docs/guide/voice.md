@@ -114,7 +114,7 @@ settings**:
 | **Speaking speed** | 1×, 1.25×, 1.5× or 1.75×. Speech is made faster in the browser without raising the voice (WSOLA time stretching), so it works with every speech runtime and a streamed reply starts as early as before. |
 | **Talking while the agent works** | **Stops it** (default): speaking interrupts the task, as before. **Adds to the task**: what you say goes into the running task after its current step, and the task carries on; use Stop to stop it. |
 | **Push to talk** | Only what you say while holding <kbd>Space</kbd> (outside a text field) or the microphone button is heard. A tap, or a press with no speech in it, is not sent. Useful with background noise or other people talking. |
-| **Fillers** | **On** (default) or **Off**: a short sound the moment you have finished, until the answer starts. See [Fillers](#fillers). Not shown where the portal has them switched off. |
+| **Fillers** | **On** (default) or **Off**: short sounds from the moment you have finished until the answer starts, again and again if the wait is long. See [Fillers](#fillers). Not shown where the portal has them switched off. |
 | **Sound effects** | The cues for connection, sending, mute and panels. |
 
 Each setting is remembered in this browser.
@@ -156,18 +156,23 @@ recognised, the model starts, and the first sentence has to be turned into speec
 A **filler** is a short sound the voice makes in that gap, the "ah, okay" of someone
 who has heard you and is picking it up, so that voice mode does not go quiet. It
 replaces the spoken "let me think about that" line that used to come after about
-two seconds, in English only.
+two seconds, in English only. The gap can be long: a model that has to read a lot
+before it starts, or an agent that thinks and works for a minute before its first
+sentence. One "oh, okay" and then silence is not much better than none, so the wait
+is filled again and again, further apart each time, until the answer is heard (see
+[A long wait](#a-long-wait)).
 
-**What it says.** One of five two-sound forms: "Ah, okay.", "Oh, okay.", "Okay,
-ah.", "Ah, mhm." and "Okay, mhm." They are the sounds people make while
+**What it says.** One of eight two-sound forms: "Ah, okay.", "Oh, okay.", "Okay,
+ah.", "Ah, mhm." and "Okay, mhm.", and for a long wait "Mhm, okay.", "Oh, mhm."
+and "Okay, oh." They are the sounds people make while
 listening and the one word every language has taken over, so nothing is written
 out per language and no language has to be guessed. They are made in your voice
 and with the language set under **Settings → Add-ons → Voice**, and said as that
 language says them (a German voice says "okay" the German way, a Korean one the
 Korean way). It is always two sounds, never one: with Chatterbox a lone "Okay."
 or a wordless "Hmm." was said twice, ran on for seconds, or came out as other
-words (Polish turned "Mhm." into a sentence). The five were rendered in all 19
-languages Chatterbox speaks and came out once, at 0.9 to 2 seconds, each time.
+words (Polish turned "Mhm." into a sentence). All eight were rendered in all 19
+languages Chatterbox speaks and came out once, at 0.9 to 2.3 seconds, each time.
 A clip that still comes out far longer than its text takes, which is the same
 fault, is thrown away when it is made and never played, whichever speech
 runtime and language is set. Chatterbox and audio.cpp are seeded and would say it
@@ -175,13 +180,24 @@ the same way again, so such a clip is not made again for that voice. The classic
 Breeze server is not seeded: there it is made again, up to three times, and only
 after that left alone, until the portal is restarted and not for good.
 
-**Made once, not at play time.** The portal makes the five clips the first time
+**Made once, not at play time.** The portal makes the first five clips the first time
 voice mode starts with a voice, in the background (about ten seconds on a fast
 GPU with Chatterbox, well over twenty on a shared one: a clip takes as long as a
 sentence of an answer does), keeps them in its data folder under `voice-fillers`,
 and the page downloads them when voice mode starts. A filler is therefore a sound
 already in the browser's memory: no synthesis stands between the end of your turn
 and the sound.
+
+**The other three are made in a lull.** More clips mean a longer wait for the
+first ones and more time with the speech runtime busy, so the extra three, which
+only a long wait needs, are made after the first five and only once it has been
+quiet for 30 seconds since: no recognition, no speech being made, no agent at
+work. Any of those pushes them back by another 30 seconds, so they never compete
+with a conversation, and the first set takes what it always did. They are kept
+like the others, so this happens once per voice, and the page, which asks every
+three seconds while the portal is making clips, keeps asking for up to twenty
+minutes for them to arrive. Until they have, a long wait is filled from the five
+there are.
 
 The speech runtime has one slot, and it does not give up a request it has begun:
 audio.cpp runs it to the end whatever the portal does, so a clip cannot be cut off
@@ -223,9 +239,31 @@ stopped. The budget:
 
 So a filler is heard as soon as your turn has ended where recognition was
 ready, which is the usual case, and one recognition request later where it was
-not. Nothing is played late to make up for a filler that was not there: there is
-one per turn and no second one in a long wait, as while the agent works it says
-what it is about to do itself, as the speaking instructions ask.
+not. A first filler that could not be played because no clip was ready is not made
+up for with a late one at once, but the long-wait timing below carries on.
+
+**A long wait.** After the first filler the voice waits for it to have ended, then
+stays silent for three seconds, and plays the next; after that the silence grows,
+4.5, 6.5, 9.5 and then 14 seconds, each varied by a fifth either way so that it
+is not a metronome. At most six fillers are played in one wait, which is a little
+over a minute: a wait that long is an agent doing real work, and an endless
+"mhm" would be worse than the quiet, which is where the agent's own announcements
+of what it is about to do, as the speaking instructions ask, take over. The timeline
+stops at once when:
+
+- the answer's audio being ready (see below), whether a filler is playing or the
+  wait is between two. Not before: while the first sentence of the answer is still
+  being made into speech, which on a busy speech runtime takes seconds, the wait
+  is filled all the same;
+- you speaking, or the conversation being compacted (which has its own spoken
+  notice);
+- the agent finishing without anything to say, voice mode ending, or fillers being
+  switched off.
+
+If no clip is ready at a moment when one is due, it is tried again after the next
+gap, and counts towards the six. After a wait whose last sound was a filler, the
+first filler of your next turn waits the first three seconds too, so that two
+turns without an answer between them do not start with two fillers back to back.
 
 **It gives way to the answer.** The answer is never heard over a filler. The
 filler stops when the answer's audio is ready to play, not when its text arrives,
@@ -234,11 +272,12 @@ so it is not cut off while the answer is still being made. It fades out within
 player that does not report back is not waited for longer than 150 ms. If you
 start talking, it stops at once. Talking over it is not a turn for it to finish.
 
-**It does not repeat itself.** A filler is never the one played last, and none
-comes round again before the other four have been heard. After a filler the next
-one waits until something else has been said, so two turns without an answer
-between them do not get two fillers back to back. With only one clip ready, it
-is played once and then silence beats saying it again.
+**It does not repeat itself.** Of the clips ready, none of the last two played is
+chosen again (with three or fewer clips ready, not the last one), and none comes
+round again before all the others have been heard, so six fillers in a minute are
+six different ones from eight, in an order that changes each round. A clip that
+turns up in the middle of a wait is heard before the ones heard already. With only
+one clip ready, it is played once and then silence beats saying it again.
 
 **Switching them off.** **Voice settings → Fillers → Off**, or
 <kbd>Shift</kbd>+<kbd>F</kbd>. The choice is remembered in this browser, and while
