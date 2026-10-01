@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
+import { LuBlocks, LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
 import { api, type Project, type ProjectContents, type Session } from "../api";
@@ -9,6 +9,7 @@ import { within } from "../paths";
 import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
+import { ToolSwitches } from "./ToolSwitches";
 import { isEnter } from "../shortcuts";
 import { t, tp, tx } from "../i18n";
 
@@ -16,8 +17,9 @@ import { t, tp, tx } from "../i18n";
  * The folders chats work in.
  *
  * Projects are folders made on purpose, each with instructions of its own that
- * end up as the folder's AGENTS.md. Opening one opens its latest chat, or starts
- * one. Home, where "New" starts a chat, is not a project and is not listed.
+ * end up as the folder's AGENTS.md, and tools of its own: which of them its
+ * chats start with. Opening one opens its latest chat, or starts one. Home,
+ * where "New" starts a chat, is not a project and is not listed.
  */
 export function ProjectsPage({
   sessions,
@@ -37,6 +39,7 @@ export function ProjectsPage({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
+  const [toolsOf, setToolsOf] = useState<Project | null>(null);
 
   const load = useCallback(() => {
     api
@@ -180,6 +183,11 @@ export function ProjectsPage({
                       {p.hasInstructions && (
                         <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">{t("instructions")}</span>
                       )}
+                      {p.hasTools && (
+                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent" title={t("Switches tools differently from the portal-wide default")}>
+                          {t("tools")}
+                        </span>
+                      )}
                     </div>
                     <p className="truncate font-mono text-[11px] text-fg-faint" title={p.path}>
                       {p.path}
@@ -211,6 +219,17 @@ export function ProjectsPage({
                       aria-label={t("Instructions for {name}", { name: p.name })}
                     >
                       <LuFileText className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setToolsOf(p);
+                      }}
+                      className="rounded p-1.5 text-fg-subtle hover:text-accent"
+                      title={t("Tools for this project's chats")}
+                      aria-label={t("Tools for {name}", { name: p.name })}
+                    >
+                      <LuBlocks className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={(e) => {
@@ -257,6 +276,16 @@ export function ProjectsPage({
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
+            load();
+          }}
+        />
+      )}
+      {toolsOf && (
+        <ProjectTools
+          project={toolsOf}
+          onClose={() => {
+            setToolsOf(null);
+            // The "tools" mark on the row is what these switches decided.
             load();
           }}
         />
@@ -422,6 +451,22 @@ function Instructions({
           </p>
         </>
       )}
+    </Modal>
+  );
+}
+
+/**
+ * Which tools the chats of a project start with. Saved as each switch is flipped,
+ * as in a chat, so there is nothing to confirm and no button to save.
+ */
+function ProjectTools({ project, onClose }: { project: Project; onClose: () => void }) {
+  return (
+    <Modal
+      title={t("Tools · {name}", { name: project.name })}
+      subtitle={t("What chats in this project start with — a chat can still switch tools for itself")}
+      onClose={onClose}
+    >
+      <ToolSwitches project={project.name} />
     </Modal>
   );
 }

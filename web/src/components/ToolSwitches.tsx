@@ -20,8 +20,14 @@ import { t, tp } from "../i18n";
  * The browser is one of those servers and nothing more — having its tools is
  * having the browser, which is why the switch it used to have of its own is
  * gone. Nothing here knows what any of them are.
+ *
+ * The same list is a project's, from the Projects page: what its chats start
+ * with, between the portal-wide default and what one chat switches for itself.
+ * The two answer in the same shape, so only where they ask and write differs.
  */
-export function ToolSwitches({ sessionId }: { sessionId: string }) {
+export function ToolSwitches(props: { sessionId: string } | { project: string }) {
+  const project = "project" in props ? props.project : undefined;
+  const sessionId = "sessionId" in props ? props.sessionId : "";
   const [tools, setTools] = useState<PortalTool[] | null>(null);
   const [off, setOff] = useState<string[]>([]);
   const [live, setLive] = useState(true);
@@ -32,8 +38,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .tools(sessionId)
+    (project !== undefined ? api.projectTools(project) : api.tools(sessionId))
       .then((r) => {
         if (cancelled) return;
         setTools(r.tools);
@@ -51,7 +56,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [project, sessionId]);
 
   const flip = async (names: string[], enabled: boolean) => {
     const wanted = nextOff(off, names, enabled);
@@ -62,7 +67,7 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
     );
     setBusy(true);
     try {
-      const r = await api.setTools(sessionId, wanted);
+      const r = await (project !== undefined ? api.setProjectTools(project, wanted) : api.setTools(sessionId, wanted));
       setOff(r.off);
     } catch {
       // Put it back rather than showing a switch that did not take.
@@ -98,7 +103,9 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
           from its start — the default is not touched. */}
       {!live && (
         <p className="px-3 pb-1.5 text-[10px] text-fg-faint">
-          {t("Not started yet — these are the tools earlier chats had. What you switch here holds for this chat from its first message; the defaults stay as they are.")}
+          {project !== undefined
+            ? t("These are the tools earlier chats had. What you switch here is what every chat in this project starts with; the portal-wide defaults stay as they are.")
+            : t("Not started yet — these are the tools earlier chats had. What you switch here holds for this chat from its first message; the defaults stay as they are.")}
         </p>
       )}
       {groupTools(tools).map((group) => {
@@ -172,6 +179,11 @@ export function ToolSwitches({ sessionId }: { sessionId: string }) {
       {live && (
         <p className="px-3 py-1.5 text-[10px] text-fg-faint">
           {t("Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with.")}
+        </p>
+      )}
+      {project !== undefined && (
+        <p className="px-3 py-1.5 text-[10px] text-fg-faint">
+          {t("Chats already running here have it from their next message. A chat that switched a tool for itself keeps its own choice.")}
         </p>
       )}
     </div>

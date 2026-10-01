@@ -65,6 +65,8 @@ in two places:
   conversation has run, because that is when pi builds the list of what its
   extensions registered. A group can be switched off as a whole, and each
   package can be given a name of your own — *Rename* — for the list.
+- **Projects → Tools** on a project's row sets what every chat in that project starts
+  with, against the portal-wide default; see [Projects](/guide/projects#tools).
 - The **tools** control of a chat switches them for that chat only, from its
   next message. It is there before the first message too, so a tool can be
   kept away from a chat from the start.

@@ -34,7 +34,7 @@ import {
 } from "./agent-setup.js";
 import { sessions, CommandFailed, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
-import { toolSource } from "./tool-policy.js";
+import { defaultsFor, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
 import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth, signOut } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
@@ -94,6 +94,10 @@ import {
   getStoredSettings,
   shownStoredSettings,
   shownTools,
+  clearProjectTools,
+  projectTools,
+  projectsWithTools,
+  setProjectTools,
   toolGroupNames,
   setToolGroupNames,
   setToolDefaultsOff,
@@ -294,6 +298,7 @@ app.post("/api/workspaces", (req, res) => {
   } catch (e) {
     return res.status(500).json({ error: (e as Error).message });
   }
+  clearProjectTools(name);
   res.json({ name, path: target, isGit: false });
 });
 
@@ -343,10 +348,12 @@ app.get("/api/projects", (req, res) => {
     }
     // Read once, not once per project.
     const all = listSessions();
+    const withTools = projectsWithTools();
     const projects = listProjects(WORKSPACE_ROOT).map((p) => {
       const chats = chatsIn(p.path, all);
       return {
         ...p,
+        hasTools: withTools.has(p.name),
         sessions: chats.length,
         lastActive: chats.reduce((latest, s) => (s.updated_at > latest ? s.updated_at : latest), "") || null,
       };
@@ -364,7 +371,11 @@ app.post("/api/projects", (req, res) => {
     return res.status(400).json({ error: "instructions must be text" });
   }
   try {
-    res.json(createProject(WORKSPACE_ROOT, name, instructions));
+    const project = createProject(WORKSPACE_ROOT, name, instructions);
+    // A new project says nothing about tools: whatever an earlier folder of this
+    // name left behind, such as one removed outside the portal, is not its.
+    clearProjectTools(project.name);
+    res.json(project);
   } catch (e) {
     projectFailure(res, e);
   }
@@ -402,6 +413,64 @@ app.put("/api/projects/:name/instructions", (req, res) => {
   try {
     writeInstructions(WORKSPACE_ROOT, req.params.name, text);
     res.json({ ok: true });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/**
+ * The tools a chat in this project starts with, and whether each is on: the
+ * portal-wide default, bent by what the project says. Shaped like a chat's own
+ * list, so the page draws both the same way; `defaultOn` is the portal-wide
+ * default, which is what the project disagrees with. No pi is running for a
+ * project, so what is listed is what the portal has seen registered.
+ */
+app.get("/api/projects/:name/tools", (req, res) => {
+  try {
+    const project = getProject(WORKSPACE_ROOT, req.params.name);
+    if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+    const defaults = toolDefaultsOff();
+    const exceptions = projectTools(project.name);
+    const servers = mcpServerNames();
+    res.json({
+      tools: shownTools(project.path).map((tool) => ({
+        ...tool,
+        source: toolSource(tool.name, tool.source, servers),
+        enabled: toolEnabled(tool.name, defaults, exceptions),
+        defaultOn: !defaults.includes(tool.name),
+      })),
+      live: false,
+      names: toolGroupNames(),
+      // The whole picture, as for a chat: the page sends it back on the next flip.
+      off: defaultsFor(defaults, exceptions),
+    });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/**
+ * Say which tools chats in this project start with: what is not named is on.
+ * What is stored is the difference from the portal-wide default, as for a chat,
+ * so a change to that default still reaches every tool the project never
+ * disagreed about. Chats running in the project are told at once; what a chat
+ * itself switched stays as it was.
+ */
+app.put("/api/projects/:name/tools", async (req, res) => {
+  const off = req.body?.off;
+  if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
+    return res.status(400).json({ error: "off must be a list of tool names" });
+  }
+  try {
+    const project = getProject(WORKSPACE_ROOT, req.params.name);
+    if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+    const defaults = toolDefaultsOff();
+    const held = projectTools(project.name);
+    // What the page was shown, and what the project already holds an exception for.
+    const answered = [...shownTools(project.path).map((t) => t.name), ...held.off, ...held.on];
+    const stored = setProjectTools(project.name, exceptionsFor(off, defaults, answered, held));
+    const applied = await sessions.applyToolDefaults(project.name);
+    res.json({ off: defaultsFor(defaults, stored), applied });
   } catch (e) {
     projectFailure(res, e);
   }
@@ -460,6 +529,7 @@ app.delete("/api/projects/:name", async (req, res) => {
         return res.status(409).json({ error: "A routine started running in this project meanwhile. Wait for it to finish, or stop it." });
       }
       deleteProjectFolder(WORKSPACE_ROOT, project.name);
+      clearProjectTools(project.name);
       const switchedOff = switchOffRoutines([...routines, ...late]);
       getDb().transaction(() => {
         for (const chat of chats) deleteSession(chat.id);

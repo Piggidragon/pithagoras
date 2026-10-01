@@ -1,7 +1,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { agentHomePath } from "./agent-home.js";
-import { isWithinText } from "./within.js";
+import { isWithinText, pathBelow, realPath } from "./within.js";
 
 /** Where projects live. WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys. */
 export function workspaceRoot(): string {
@@ -40,6 +40,28 @@ export function checkWorkspace(raw: string): { path: string } | { error: string 
     return { error: code === "ENOENT" ? "workspace does not exist" : `workspace cannot be read (${code ?? (e as Error).message})` };
   }
   return { path: resolved };
+}
+
+/**
+ * The project a chat or a routine works in, by its folder's name: the one
+ * directly under the root that `workspace` is, or is inside — a chat may run in
+ * a subfolder, and it belongs to the project all the same. Home, and anywhere
+ * else outside the root, is none.
+ *
+ * Judged by where the path really leads, as checkWorkspace does, so that a link
+ * in one project to another does not borrow the first one's settings while
+ * working in the second. The text of the path decides only where that cannot be
+ * followed, such as a folder that is gone.
+ */
+export function projectOf(workspace: string | null | undefined): string | undefined {
+  if (!workspace) return undefined;
+  const root = workspaceRoot();
+  const realRoot = realPath(root);
+  const real = realRoot && realPath(workspace);
+  const inside = realRoot && real ? pathBelow(realRoot, real) : pathBelow(root, workspace);
+  const name = inside?.split("/")[0];
+  // Not one resolveProject would accept either: a project's name is never a dot-name.
+  return name && !name.startsWith(".") ? name : undefined;
 }
 
 /** Why a routine's place cannot be used now, such as a project that was deleted; null when it can. Home always can. */

@@ -128,6 +128,8 @@ export interface Project {
   isGit: boolean;
   /** Whether the folder has an AGENTS.md — the project's instructions. */
   hasInstructions: boolean;
+  /** Whether the project switches tools differently from the portal-wide default. */
+  hasTools?: boolean;
   /** How many chats work in it, and when one last moved. */
   sessions: number;
   lastActive: string | null;
@@ -367,6 +369,17 @@ export const api = {
     json<{ ok: true }>(`/api/projects/${encodeURIComponent(name)}/instructions`, {
       method: "PUT",
       body: JSON.stringify({ text }),
+    }),
+  /** What chats in the project start with: the same list as a chat's, `live` always false. */
+  projectTools: (name: string) =>
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+      `/api/projects/${encodeURIComponent(name)}/tools`
+    ),
+  /** Switch tools off for the project's chats by name; everything not named is on. */
+  setProjectTools: (name: string, off: string[]) =>
+    json<{ off: string[]; applied: number }>(`/api/projects/${encodeURIComponent(name)}/tools`, {
+      method: "PUT",
+      body: JSON.stringify({ off }),
     }),
   /** `discard` says that unsaved work in the folder (see ProjectContents) may go with it; without it the server refuses. */
   deleteProject: (name: string, discard = false) =>
