@@ -758,9 +758,12 @@ export function Chat({
   // for, played when the server says it has done it.
   const taken = useRef<Mark | null>(null);
   const takeOut = () => {
+    taken.current?.stop();
     const m = (taken.current = mark(list.current, scroller.ref.current));
     window.setTimeout(() => {
-      if (taken.current === m) taken.current = null;
+      if (taken.current !== m) return;
+      m?.stop();
+      taken.current = null;
     }, 5000);
   };
   useLayoutEffect(() => {

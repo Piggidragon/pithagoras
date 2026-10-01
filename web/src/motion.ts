@@ -142,11 +142,22 @@ const LEAVES: Record<Leave, (el: HTMLElement, delay: number) => Animation[]> = {
 };
 
 /**
- * How high each is laid. A page that is left, or a row, a message or a panel,
- * is under the dialogs, which may open in the same moment (Settings from the
- * Sessions page): a dialog's own picture and a menu's are over everything.
+ * How high a picture is laid: just over what it came from, wherever that was
+ * drawn — the phone's drawer is at 50, a dialog at 50 or 60, a list that opens
+ * at 200 — and under whatever opens above that, which a fixed number for each
+ * kind could not know. Where the source is not drawn in a layer of its own
+ * (a page, a row in the sidebar of a wide window) it is under the dialogs.
  */
-const LAYER: Record<Leave, number> = { dialog: 1000, menu: 1000, panel: 25, row: 25, message: 25, page: 25, gone: 25 };
+const BELOW_DIALOGS = 25;
+function layerOf(source: HTMLElement): number {
+  let z: number | null = null;
+  for (let el: HTMLElement | null = source; el; el = el.parentElement) {
+    const at = Number.parseInt(getComputedStyle(el).zIndex, 10);
+    // The outermost: what the rest is drawn inside of.
+    if (Number.isFinite(at)) z = at;
+  }
+  return z === null ? BELOW_DIALOGS : z + 1;
+}
 
 const MAX_GHOSTS = 8;
 const ghosts = new Set<HTMLElement>();
@@ -171,6 +182,8 @@ function scrub(copy: HTMLElement): void {
 export interface Picture {
   frame: HTMLElement;
   el: HTMLElement;
+  /** How high it is laid (see `layerOf`). */
+  layer: number;
   /** Where the boxes in the copy that scroll were scrolled to: a copy starts at the top, and cannot be moved before it is on the page. */
   scrolled: [HTMLElement, number, number][];
 }
@@ -207,14 +220,14 @@ export function picture(source: HTMLElement | null, clip?: HTMLElement | null): 
     animation: "none", transition: "none", pointerEvents: "none",
   });
   frame.append(el);
-  return { frame, el, scrolled };
+  return { frame, el, scrolled, layer: layerOf(source) };
 }
 
 /** Puts a picture on the page and plays it out. */
 export function out(shot: Picture | null, how: Leave, delay = 0): void {
   if (!shot || !fancy() || swapping) return;
   const { frame, el } = shot;
-  frame.style.zIndex = String(LAYER[how]);
+  frame.style.zIndex = String(shot.layer);
   for (const old of ghosts) if (ghosts.size >= MAX_GHOSTS) { old.remove(); ghosts.delete(old); }
   document.body.append(frame);
   ghosts.add(frame);
@@ -416,19 +429,28 @@ export function useFlip<T extends HTMLElement>(order: string, quiet = false, ent
  * Where a list's rows are, and a picture of each that is on screen, taken
  * before something is done to them. `settle` then plays out those that are gone
  * and slides the others — for a message deleted, whose row goes when the
- * server says so, a moment after it was asked.
+ * server says so, which may be a while after it was asked (it stops the chat's
+ * agent first). The rows are kept where they are in the box that scrolls, and
+ * the box is followed while the mark is open: scrolled, or made shorter, in
+ * between, what is drawn moves, and where the rows were drawn moves with it.
  */
 export interface Mark {
   box: HTMLElement;
   clip: HTMLElement | null;
+  /** In the scrolling box's own content. */
   spots: Map<string, number>;
   shots: Map<string, Picture>;
-  at: number;
+  /** Where the box was scrolled to when the rows were marked, and where it was last seen. */
+  scrolled: number;
+  seen: number;
+  /** Stops following the box. */
+  stop: () => void;
 }
 
 export function mark(box: HTMLElement | null, clip: HTMLElement | null): Mark | null {
   if (!box || !fancy()) return null;
-  const spots = spotsOf(box, "data-key");
+  const scrolled = clip?.scrollTop ?? 0;
+  const spots = new Map([...spotsOf(box, "data-key")].map(([key, y]) => [key, y + scrolled]));
   const shots = new Map<string, Picture>();
   const view = (clip ?? box).getBoundingClientRect();
   for (const el of box.querySelectorAll<HTMLElement>(":scope > [data-key]")) {
@@ -437,22 +459,32 @@ export function mark(box: HTMLElement | null, clip: HTMLElement | null): Mark | 
     const shot = picture(el, clip);
     if (shot) shots.set(el.getAttribute("data-key")!, shot);
   }
-  return { box, clip, spots, shots, at: performance.now() };
+  const m: Mark = { box, clip, spots, shots, scrolled, seen: scrolled, stop: () => {} };
+  if (clip) {
+    const on = () => (m.seen = clip.scrollTop);
+    clip.addEventListener("scroll", on, { passive: true });
+    m.stop = () => clip.removeEventListener("scroll", on);
+  }
+  return m;
 }
 
 /** Whether the list has changed from what was marked, and so the mark is done with. */
 export function settle(m: Mark, how: Leave = "message"): boolean {
   const now = spotsOf(m.box, "data-key");
+  // What was drawn at the press has been moved by what was scrolled since.
+  const moved = m.scrolled - m.seen;
   let changed = false;
   let n = 0;
   for (const [key, shot] of m.shots) {
     if (now.has(key)) continue;
+    shot.el.style.top = `${Number.parseFloat(shot.el.style.top) + moved}px`;
     // One after another, the way they were said.
     out(shot, how, Math.min(n++ * 45, 400));
     changed = true;
   }
   if (!changed) return false;
-  const slid = reflow(m.box, "data-key", m.spots, now, false);
+  m.stop();
+  const slid = reflow(m.box, "data-key", new Map([...m.spots].map(([key, y]) => [key, y - m.seen])), now, false);
   // Rows that start from below the end of the list would make it scroll further
   // than it does: a conversation that is followed at its end took that for being
   // left behind, and offered the way back to it for good. So what is below the

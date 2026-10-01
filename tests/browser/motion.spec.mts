@@ -36,7 +36,7 @@ const conversation = (tag: string) => {
 async function portal(page: Page, { off = false, confirms = true, places, many = 0 }: { off?: boolean; confirms?: boolean; places?: Record<string, string>; many?: boolean | number } = {}) {
   // More than the sidebar lists without a search box, when asked.
   const extra = many ? Array.from({ length: many === true ? 10 : many }, (_, i) => chat(`x${i}`, `Extra chat ${i}`)) : [];
-  const state = { sessions: [chat('a', 'First chat'), chat('b', 'Second chat'), chat('c', 'Third chat'), chat('d', 'Fourth chat'), ...extra], events: { a: conversation('A'), b: conversation('B'), c: [] as any[], d: [] as any[], r: conversation('R') } as Record<string, any[]> };
+  const state = { removeDelay: 80, sessions: [chat('a', 'First chat'), chat('b', 'Second chat'), chat('c', 'Third chat'), chat('d', 'Fourth chat'), ...extra], events: { a: conversation('A'), b: conversation('B'), c: [] as any[], d: [] as any[], r: conversation('R') } as Record<string, any[]> };
   // A routine's chat: opened by its address, and not in the list of chats.
   const routine = chat('r', 'Routine chat', { kind: 'routine' });
   await page.route('**/api/**', async (route) => {
@@ -58,7 +58,7 @@ async function portal(page: Page, { off = false, confirms = true, places, many =
       const to = next?.seq ?? null;
       state.events[id] = state.events[id].filter((e) => !(e.seq >= seq && (to === null || e.seq < to)));
       // The server says so a moment after it has answered.
-      setTimeout(() => page.evaluate(([id, from, to]) => (window as any).emit(id, { seq: 9000 + from, type: 'portal_removed', payload: { from, to } }), [id, seq, to] as const).catch(() => {}), 80);
+      setTimeout(() => page.evaluate(([id, from, to]) => (window as any).emit(id, { seq: 9000 + from, type: 'portal_removed', payload: { from, to } }), [id, seq, to] as const).catch(() => {}), state.removeDelay);
       reply = { ok: true };
     } else if ((m = p.match(/^\/api\/sessions\/(\w+)$/)) && method === 'DELETE') {
       state.sessions = state.sessions.filter((s) => s.id !== m![1]);
@@ -776,4 +776,64 @@ test("deleting in the sidebar's list, scrolled to its end, slides the rows above
   const first = drawn.above[0], last = drawn.above.at(-1)!;
   expect(last - first).toBeGreaterThan(20);
   expect(Math.max(...drawn.above.slice(1).map((y, i) => y - drawn.above[i]))).toBeLessThan((last - first) * 0.7);
+});
+
+test('a message deleted while the conversation is scrolled before the server answers slides from where it is drawn then', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  const state = await portal(page, { confirms: false });
+  // The server stops the chat's agent first, which takes a while.
+  state.removeDelay = 800;
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await expect(page.locator('main .chat-list')).not.toHaveClass(/is-opening/);
+
+  const above = await page.evaluate(() => new Promise<{ t: number; y: number }[]>((done) => {
+    const find = (text: string) => [...document.querySelectorAll('main .chat-list > [data-key]')].find((r) => r.textContent?.includes(text))!;
+    const box = document.querySelector('[data-transcript]')!;
+    const seen: { t: number; y: number }[] = [];
+    (find('A question 4').querySelector('button[aria-label^="Delete this message"]') as HTMLElement).click();
+    const from = performance.now();
+    let scrolled = false;
+    const tick = () => {
+      const t = performance.now() - from;
+      // Reading back a little, while it is being asked.
+      if (!scrolled && t > 250) { scrolled = true; box.scrollTop -= 120; }
+      seen.push({ t, y: find('A answer 3').getBoundingClientRect().top });
+      if (t < 2400) requestAnimationFrame(tick);
+      else done(seen);
+    };
+    tick();
+  }));
+  // From the moment it was scrolled: the row above the gap only comes down, as it does without the animations. It is not put back to where it was at the press first.
+  const after = above.filter((p) => p.t > 400).map((p) => p.y);
+  expect(Math.min(...after.slice(1).map((y, i) => y - after[i]))).toBeGreaterThanOrEqual(-1);
+  expect(after.at(-1)! - after[0]).toBeGreaterThan(20);
+});
+
+test('a row deleted in the phone\'s drawer breaks apart over the drawer', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await portal(page, { confirms: false });
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  await expect(row(page, 'Fourth chat')).toBeVisible();
+  await page.waitForTimeout(600);
+  await page.evaluate(() => ([...document.querySelectorAll('aside .session-row')].find((r) => r.textContent?.includes('Fourth chat'))!.querySelector('button[title="Delete session"]') as HTMLElement).click());
+  await expect.poll(async () => (await pictures(page)).filter((p) => p.text.includes('Fourth chat')).length).toBeGreaterThan(0);
+  // The drawer is at 50: the picture of what was in it is over it, or it is not to be seen.
+  expect((await pictures(page)).find((p) => p.text.includes('Fourth chat'))!.z).toBeGreaterThan(50);
+});
+
+test('a menu that opens Settings as it closes drops away under the dialog', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  await portal(page);
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await page.waitForTimeout(1200);
+  await page.locator('.composer-settings button').first().click();
+  await page.getByRole('button', { name: 'Add or change providers…' }).click();
+  // Settings' own page is not drawn here: what is asked is where the menu's picture lies, over the page and under what opens.
+  await page.waitForURL(/\/settings\/models$/);
+  await expect.poll(async () => (await pictures(page)).filter((p) => p.text.includes('Add or change providers')).length).toBeGreaterThan(0);
+  expect((await pictures(page)).find((p) => p.text.includes('Add or change providers'))!.z).toBeLessThan(50);
 });
