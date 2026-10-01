@@ -27,9 +27,13 @@ export function VoiceLibrary({value,onChange,onError,onPending}:{value:string;on
  const [name,setName]=useState(''),[kind,setKind]=useState<'design'|'clone'>('clone'),[instruction,setInstruction]=useState('Speak clearly and naturally.'),[transcript,setTranscript]=useState(''),[file,setFile]=useState<File|null>(null);
  useEffect(()=>{void request().then(setVoices).catch(e=>onError(e.message));},[]);
  const selected=voices.find(v=>v.id===value);
- const saveDescription=async(id:string,instruction:string)=>{const row=await request('/'+id,'PATCH',{instruction});setVoices(v=>v.map(p=>p.id===row.id?row:p));setDrafts(({[id]:_,...rest})=>rest);};
+ // The draft goes only if it is still what was sent: more may have been typed while the request was out.
+ const saveDescription=async(id:string,instruction:string)=>{const row=await request('/'+id,'PATCH',{instruction});setVoices(v=>v.map(p=>p.id===row.id?row:p));setDrafts(d=>d[id]===instruction?(({[id]:_,...rest})=>rest)(d):d);};
  const edited=voices.filter(v=>v.id in drafts&&drafts[v.id].trim()!==v.instruction);
- useEffect(()=>{onPending(edited.length?async()=>{for(const v of edited)await saveDescription(v.id,drafts[v.id]);}:null);return()=>onPending(null);},[voices,drafts]);
+ // What the page's save button stores along with the settings. A voice that is not selected and was emptied is
+ // an edit given up, not one to be refused with an error about a field that is not on screen.
+ const toSave=edited.filter(v=>v.id===value||drafts[v.id].trim());
+ useEffect(()=>{onPending(toSave.length?async()=>{for(const v of toSave)await saveDescription(v.id,drafts[v.id]);}:null);return()=>onPending(null);},[voices,drafts,value]);
  const field='mt-1 w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs';
  return <div className="space-y-2">
   <div className="block text-xs text-fg-muted">{t("Speaking voice")}<Select aria-label={t("Speaking voice")} className="mt-1.5 w-full" value={value} onChange={onChange} options={[{value:'design',label:t('Designed voice')},{value:'aria',label:'Aria',hint:t('Reference clone')},...voices.map(v=>({value:v.id,label:v.name,text:v.name,hint:v.kind==='clone'?t('Reference clone'):t('Designed')}))]}/></div>
