@@ -55,3 +55,64 @@ test('change the description of a saved voice after it was created',async({page}
  await expect(page.locator('#error')).toHaveText(refuse);
  await expect(description).toHaveValue('Another voice.');await expect(save).toBeEnabled();
 });
+test('Save voice settings also saves an edited voice description, and does not claim to when it cannot',async({page})=>{
+ let voice={id:'voice-test',name:'Night narrator',kind:'design',instruction:'Warm delivery',transcript:''};
+ const calls:string[]=[];let refuse='';
+ await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
+ await page.route('**/api/voice',r=>{
+  const config={enabled:true,voice:'voice-test',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4};
+  if(r.request().method()==='PUT'){calls.push('PUT');return r.fulfill({json:r.request().postDataJSON()});}
+  return r.fulfill({json:config});
+ });
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[voice]}));
+ await page.route('**/api/voice/presets/voice-test',r=>{
+  const {instruction}=r.request().postDataJSON();calls.push('PATCH '+instruction);
+  if(refuse)return r.fulfill({status:400,json:{error:refuse}});
+  voice={...voice,instruction:instruction.trim()};return r.fulfill({json:voice});
+ });
+ await page.goto('/tests/voice-addon.html');
+ const description=page.getByLabel('Voice description');const saveSettings=page.getByRole('button',{name:/^(Save voice settings|Saved)$/});
+ await expect(description).toHaveValue('Warm delivery');
+ // Nothing edited: the settings are saved as before, without touching the voice.
+ await saveSettings.click();await expect(saveSettings).toHaveText('Saved');
+ expect(calls).toEqual(['PUT']);
+ // An edit is not saved yet, and the button no longer says it is.
+ await description.fill('A slow, low voice.');
+ await expect(saveSettings).toHaveText('Save voice settings');
+ await saveSettings.click();
+ await expect(saveSettings).toHaveText('Saved');
+ expect(calls).toEqual(['PUT','PATCH A slow, low voice.','PUT']);
+ await expect(description).toHaveValue('A slow, low voice.');
+ await expect(page.getByRole('button',{name:'Save description',exact:true})).toBeDisabled();
+ await expect(page.locator('#error')).toBeEmpty();
+ // A description the server refuses stops the save: the error is shown, the settings are not claimed as saved.
+ refuse='Describe the voice in 1–1000 characters';
+ await description.fill('');
+ await expect(saveSettings).toHaveText('Save voice settings');
+ await saveSettings.click();
+ await expect(page.locator('#error')).toHaveText(refuse);
+ await expect(saveSettings).toHaveText('Save voice settings');
+ expect(calls).toEqual(['PUT','PATCH A slow, low voice.','PUT','PATCH ']);
+});
+test('a description edited on one voice survives looking at another voice',async({page})=>{
+ let voices=[{id:'voice-a',name:'Anna',kind:'design',instruction:'Warm delivery',transcript:''},{id:'voice-b',name:'Bruno',kind:'design',instruction:'Dry delivery',transcript:''}];
+ const patches:string[]=[];
+ await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
+ await page.route('**/api/voice',r=>r.fulfill({json:r.request().method()==='PUT'?r.request().postDataJSON():{enabled:true,voice:'voice-a',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4}}));
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:voices}));
+ await page.route('**/api/voice/presets/*',r=>{
+  const id=r.request().url().split('/').pop()!;const {instruction}=r.request().postDataJSON();patches.push(`${id} ${instruction}`);
+  const row={...voices.find(v=>v.id===id)!,instruction};voices=voices.map(v=>v.id===id?row:v);return r.fulfill({json:row});
+ });
+ await page.goto('/tests/voice-addon.html');
+ const description=page.getByLabel('Voice description');const picker=page.getByRole('combobox',{name:'Speaking voice',exact:true});
+ await expect(description).toHaveValue('Warm delivery');
+ await description.fill('A bright voice.');
+ await picker.click();await page.getByRole('option',{name:/Bruno/}).click();
+ await expect(description).toHaveValue('Dry delivery');
+ await picker.click();await page.getByRole('option',{name:/Anna/}).click();
+ await expect(description).toHaveValue('A bright voice.');
+ await page.getByRole('button',{name:'Save voice settings',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Saved',exact:true})).toBeVisible();
+ expect(patches).toEqual(['voice-a A bright voice.']);
+});

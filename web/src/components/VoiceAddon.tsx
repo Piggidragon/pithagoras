@@ -1,6 +1,6 @@
 import { VoiceLibrary } from './VoiceLibrary';
 import { Select } from "./Select";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
@@ -27,6 +27,8 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const manage=async(action:'install'|'start'|'stop')=>{setActionBusy(true);try{await api.voiceAction(action);setInstall(await api.voiceInstallStatus());}catch(e){onError((e as Error).message);}finally{setActionBusy(false);}};
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  // A saved voice's description is stored on its own; this saves the edited ones along with the settings.
+  const pendingDescriptions = useRef<(() => Promise<void>) | null>(null);
   useEffect(() => { api.voice().then(setConfig).catch(e => onError(e.message)); }, []);
   if (!config) return null;
   const update = (patch: Partial<VoiceConfig>) => { setConfig({ ...config, ...patch }); setSaved(false); };
@@ -40,7 +42,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.enabled} onChange={e => update({ enabled: e.target.checked })} />{t("Enable voice controls in sessions")}</label>
     <section className="rounded-xl border border-line bg-surface/50 p-4 space-y-4">
       <div><h3 className="text-sm font-medium">{t("Your voice")}</h3><p className="mt-1 text-xs text-fg-muted">{t("Choose how your assistant sounds.")}</p></div>
-    <VoiceLibrary value={config.voice || "design"} onChange={voice=>update({voice})} onError={onError}/>
+    <VoiceLibrary value={config.voice || "design"} onChange={voice=>update({voice})} onError={onError} onPending={save=>{pendingDescriptions.current=save;if(save)setSaved(false);}}/>
       {["design","aria"].includes(config.voice||"design") && <label className="block text-xs text-fg-muted">{t("Describe the speaking voice")}<input className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs" value={config.instruction} onChange={e=>update({instruction:e.target.value})}/></label>}
     </section>
     <section className="rounded-xl border border-line bg-surface/50 p-4 space-y-4">
@@ -99,7 +101,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     </details>
     <div className="sticky -bottom-4 z-10 -mx-5 !-mb-4 flex justify-end border-t border-line bg-raised px-5 pt-3 pb-7">
     <button disabled={busy} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-black disabled:opacity-40" onClick={async () => {
-      setBusy(true); try { setConfig(await api.setVoice(config)); setSaved(true); window.dispatchEvent(new Event('voice-config-changed')); } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+      setBusy(true); try { await pendingDescriptions.current?.(); setConfig(await api.setVoice(config)); setSaved(true); window.dispatchEvent(new Event('voice-config-changed')); } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
     }}>{busy ? t("Saving…") : saved ? t("Saved") : t("Save voice settings")}</button>
     </div>
   </div>;

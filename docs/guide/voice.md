@@ -680,8 +680,9 @@ reference preview and transcript.
 To change a saved voice's description later, select the voice, edit **Voice
 description** and click **Save description**. The change is stored at once and
 applies from the next phrase spoken, for a clone as well as a designed voice;
-the recording and its transcript stay as they are, and **Save voice settings**
-is not needed. Breeze is the engine that reads the description. Chatterbox takes
+the recording and its transcript stay as they are. **Save voice settings** also
+saves a description you edited and have not saved yet, and stops with an error,
+without saving the other settings, if the description cannot be saved. Breeze is the engine that reads the description. Chatterbox takes
 no description: it speaks from the recording alone, so editing the description of
 a voice used with Chatterbox changes nothing you can hear.
 

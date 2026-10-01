@@ -16,24 +16,24 @@ async function reference(file:File){
  const rendered=await renderer.startRendering();const blob=samplesWav(rendered.getChannelData(0));
  return new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error(t('Could not read the recording')));reader.readAsDataURL(blob);});
 }
-/** A saved voice's description, saved on its own: changing it needs no new recording. */
-function Description({voice,onSaved,onError}:{voice:Preset;onSaved:(row:Preset)=>void;onError:(message:string)=>void}){
- const [text,setText]=useState(voice.instruction),[busy,setBusy]=useState(false);
- const save=async()=>{setBusy(true);try{const row=await request('/'+voice.id,'PATCH',{instruction:text});setText(row.instruction);onSaved(row);}catch(e){onError((e as Error).message);}finally{setBusy(false);}};
- return <div className="space-y-2">
-  <label className="block text-xs text-fg-muted">{t("Voice description")}<textarea className="mt-1 w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs" value={text} maxLength={1000} onChange={e=>setText(e.target.value)}/></label>
-  <button type="button" disabled={busy||!text.trim()||text.trim()===voice.instruction} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>{void save();}}>{busy?t("Saving voice…"):t("Save description")}</button>
- </div>;
-}
-export function VoiceLibrary({value,onChange,onError}:{value:string;onChange:(id:string)=>void;onError:(message:string)=>void}){
+/**
+ * `onPending` hands the page a function that saves the descriptions edited and not yet saved, or null
+ * when there are none, so that the page's own save button cannot report "Saved" over them.
+ */
+export function VoiceLibrary({value,onChange,onError,onPending}:{value:string;onChange:(id:string)=>void;onError:(message:string)=>void;onPending:(save:(()=>Promise<void>)|null)=>void}){
  const [voices,setVoices]=useState<Preset[]>([]),[adding,setAdding]=useState(false),[busy,setBusy]=useState(false);
+ // Edited descriptions by voice id, kept while another voice is selected; a voice's description is saved on its own, not with the settings.
+ const [drafts,setDrafts]=useState<Record<string,string>>({});
  const [name,setName]=useState(''),[kind,setKind]=useState<'design'|'clone'>('clone'),[instruction,setInstruction]=useState('Speak clearly and naturally.'),[transcript,setTranscript]=useState(''),[file,setFile]=useState<File|null>(null);
  useEffect(()=>{void request().then(setVoices).catch(e=>onError(e.message));},[]);
  const selected=voices.find(v=>v.id===value);
+ const saveDescription=async(id:string,instruction:string)=>{const row=await request('/'+id,'PATCH',{instruction});setVoices(v=>v.map(p=>p.id===row.id?row:p));setDrafts(({[id]:_,...rest})=>rest);};
+ const edited=voices.filter(v=>v.id in drafts&&drafts[v.id].trim()!==v.instruction);
+ useEffect(()=>{onPending(edited.length?async()=>{for(const v of edited)await saveDescription(v.id,drafts[v.id]);}:null);return()=>onPending(null);},[voices,drafts]);
  const field='mt-1 w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs';
  return <div className="space-y-2">
   <div className="block text-xs text-fg-muted">{t("Speaking voice")}<Select aria-label={t("Speaking voice")} className="mt-1.5 w-full" value={value} onChange={onChange} options={[{value:'design',label:t('Designed voice')},{value:'aria',label:'Aria',hint:t('Reference clone')},...voices.map(v=>({value:v.id,label:v.name,text:v.name,hint:v.kind==='clone'?t('Reference clone'):t('Designed')}))]}/></div>
-  {selected&&<div className="rounded-lg border border-line p-3 space-y-2"><Description key={selected.id} voice={selected} onSaved={row=>setVoices(v=>v.map(p=>p.id===row.id?row:p))} onError={onError}/>{selected.kind==='clone'&&<><audio aria-label={t("Voice reference preview")} controls preload="none" className="w-full h-9" src={`/api/voice/presets/${selected.id}/audio`}/><p className="text-xs text-fg-faint">{selected.transcript}</p></>}<button type="button" disabled={busy} className="inline-flex items-center gap-1 text-xs text-danger" onClick={async()=>{if(!await confirmDialog({title:t('Delete voice “{name}”?',{name:selected.name}),confirmLabel:t('Delete'),danger:true,deletes:true}))return;setBusy(true);try{await request('/'+selected.id,'DELETE');setVoices(v=>v.filter(p=>p.id!==selected.id));onChange('design');window.dispatchEvent(new Event('voice-config-changed'));}catch(e){onError((e as Error).message);}finally{setBusy(false);}}}><LuTrash2/>{t("Delete voice")}</button></div>}
+  {selected&&<div className="rounded-lg border border-line p-3 space-y-2"><div className="space-y-2"><label className="block text-xs text-fg-muted">{t("Voice description")}<textarea className={field} value={drafts[selected.id]??selected.instruction} maxLength={1000} onChange={e=>setDrafts(d=>({...d,[selected.id]:e.target.value}))}/></label><button type="button" disabled={busy||!(drafts[selected.id]??'').trim()||!edited.includes(selected)} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={async()=>{setBusy(true);try{await saveDescription(selected.id,drafts[selected.id]);}catch(e){onError((e as Error).message);}finally{setBusy(false);}}}>{busy?t("Saving voice…"):t("Save description")}</button></div>{selected.kind==='clone'&&<><audio aria-label={t("Voice reference preview")} controls preload="none" className="w-full h-9" src={`/api/voice/presets/${selected.id}/audio`}/><p className="text-xs text-fg-faint">{selected.transcript}</p></>}<button type="button" disabled={busy} className="inline-flex items-center gap-1 text-xs text-danger" onClick={async()=>{if(!await confirmDialog({title:t('Delete voice “{name}”?',{name:selected.name}),confirmLabel:t('Delete'),danger:true,deletes:true}))return;setBusy(true);try{await request('/'+selected.id,'DELETE');setVoices(v=>v.filter(p=>p.id!==selected.id));onChange('design');window.dispatchEvent(new Event('voice-config-changed'));}catch(e){onError((e as Error).message);}finally{setBusy(false);}}}><LuTrash2/>{t("Delete voice")}</button></div>}
   <button type="button" className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent" onClick={()=>setAdding(v=>!v)}><LuPlus/>{adding?t("Close new voice"):t("Add voice")}</button>
   {adding&&<div className="rounded-lg border border-line bg-surface p-3 space-y-3">
    <label className="block text-xs">{t("Voice name")}<input className={field} value={name} maxLength={100} onChange={e=>setName(e.target.value)}/></label>
