@@ -184,3 +184,93 @@ test("a loose extension that pi's settings switch off is not offered, and a path
   // Not lists: nothing is guessed from them.
   assert.equal(names("-extensions/old-todo.ts", { x: 1 }).includes("old-todo"), true);
 });
+
+// What pi does with the same settings was compared by running its own package manager over them; these are the cases it gave.
+test("a package both settings list is decided by the project's entry alone, as in pi", () => {
+  const chosen = (user, projectList, extra = {}) =>
+    installedExtensions({ agentDir, userPackages: user, projectDir, projectPackages: projectList, tools: [], off: new Set(), ...extra });
+  const has = (list, value) => list.some((c) => c.value === value);
+  // The project switches the user's package off for itself: it is not loaded in the chat.
+  assert.ok(has(chosen(["npm:pi-board"], []), "pi-board"));
+  assert.ok(!has(chosen(["npm:pi-board"], [{ source: "npm:pi-board", extensions: [] }]), "pi-board"));
+  assert.ok(!has(chosen(["npm:pi-board@1.0.0"], [{ source: "npm:pi-board@2.0.0", extensions: [] }]), "pi-board"), "the same package at another version");
+  assert.ok(!has(chosen([], [{ source: "npm:pi-board", extensions: [] }]), "pi-board"));
+  assert.ok(has(chosen(["npm:pi-board"], ["npm:pi-board"]), "pi-board"));
+  // The other way round: the user's is off and the project's is on, which is the project's package.
+  assert.deepEqual(noteOf(chosen([OFF("npm:pi-board")], ["npm:pi-board"]), "pi-board"), ["project"]);
+  // One entry that changes the user's by file (autoload false) is not followed: the user's entry decides, and with no list it changes nothing.
+  assert.ok(has(chosen(["npm:pi-board"], [{ source: "npm:pi-board", autoload: false, extensions: [] }]), "pi-board"));
+  assert.ok(has(chosen(["npm:pi-board"], [{ source: "npm:pi-board", autoload: false, extensions: ["-extensions/board.ts"] }]), "pi-board"));
+  assert.ok(!has(chosen([OFF("npm:pi-board")], [{ source: "npm:pi-board", autoload: false, extensions: [] }]), "pi-board"));
+  // A folder is the package where it is: the same text in the two settings is two folders, and one is switched off apart from the other.
+  write(path.join(projectDir, ".pi", "local-ext", "package.json"), JSON.stringify({ name: "project-local" }));
+  const both = chosen(["./local-ext"], [{ source: "./local-ext", extensions: [] }]);
+  assert.ok(has(both, "my-local"), "the user's folder");
+  assert.ok(!has(both, "project-local"), "the project's, which it switched off");
+  // Its tools are those of either entry.
+  const tools = [{ name: "board_add", package: "npm:pi-board" }];
+  assert.ok(!has(chosen([], ["npm:pi-board"], { tools, off: new Set(["board_add"]) }), "pi-board"));
+  assert.ok(!has(chosen(["npm:pi-board"], [], { tools, off: new Set(["board_add"]) }), "pi-board"));
+});
+
+test("the project can switch off an extension of the user's, as pi config writes it for a project", () => {
+  const agent = path.join(home, "agent-project-scope");
+  const proj = path.join(home, "ws", "project-scope");
+  for (const f of ["a.ts", "b.ts", "f/index.ts"]) write(path.join(agent, "extensions", f));
+  write(path.join(proj, ".pi", "extensions", "p.ts"));
+  const a = path.join(agent, "extensions", "a.ts");
+  const names = (projectSetting, userSetting) =>
+    installedExtensions({ agentDir: agent, userPackages: [], userExtensions: userSetting, projectDir: proj, projectPackages: [], projectExtensions: projectSetting, tools: [], off: new Set() }).map((c) => c.value);
+
+  assert.deepEqual(names(undefined), ["a", "b", "f", "p"]);
+  // The path, and a minus for it: what pi config writes in the project's settings for an inherited extension.
+  assert.deepEqual(names([a, `-${a}`]), ["b", "f", "p"]);
+  // The user's folder listed by the project, with a pattern that takes one of them off.
+  assert.deepEqual(names([path.join(agent, "extensions"), "!b.ts"]), ["a", "f", "p"]);
+  // A pattern of the project's alone is for what the project's setting adds and for its own folder, not for the user's.
+  assert.deepEqual(names(["!a.ts"]), ["a", "b", "f", "p"]);
+  assert.deepEqual(names(["!p.ts"]), ["a", "b", "f"]);
+  // A file keeps the first state it is given, and the project's entries come before the user's.
+  assert.deepEqual(names([a], ["!a.ts"]), ["a", "b", "f", "p"], "listed by the project, so on, whatever the user's pattern says");
+  assert.deepEqual(names([a, `-${a}`], ["+extensions/a.ts"]), ["b", "f", "p"]);
+  assert.deepEqual(names(undefined, ["-extensions/a.ts"]), ["b", "f", "p"], "and the user's own, as before");
+  // The user's extension that the project brings back by name is the user's, and not marked as the project's.
+  assert.deepEqual(installedExtensions({ agentDir: agent, userPackages: [], projectDir: proj, projectPackages: [], projectExtensions: [path.join(agent, "extensions")], tools: [], off: new Set() }).find((c) => c.value === "a").notes, []);
+});
+
+test("what the ignore files of the extensions folder leave out is not loaded by pi, and not offered", () => {
+  const agent = path.join(home, "agent-ignore");
+  for (const f of ["a.ts", "b.ts", "ext-c.ts", "keep.tmp.ts", "scratch.tmp.ts", "old/index.ts", "deep/index.ts"]) write(path.join(agent, "extensions", f));
+  const names = (files) => {
+    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(agent, "extensions", name), text);
+    return installedExtensions({ agentDir: agent, userPackages: [], tools: [], off: new Set() }).map((c) => c.value);
+  };
+  assert.deepEqual(names({ ".gitignore": "" }), ["a", "b", "deep", "ext-c", "keep.tmp", "old", "scratch.tmp"]);
+  // A name, a pattern, a folder with a slash, a line taken back, a comment, and trailing spaces.
+  assert.deepEqual(names({ ".gitignore": "# scratch\n*.tmp.ts\n!keep.tmp.ts\nb.ts   \nold/\n" }), ["a", "deep", "ext-c", "keep.tmp"]);
+  // A name with a slash after it is for a folder only: no folder is called b.ts, so the script stays.
+  assert.ok(names({ ".gitignore": "b.ts/\n" }).includes("b"));
+  // The other two files count, in order, and the last line that matches decides.
+  assert.deepEqual(names({ ".gitignore": "*.ts\n", ".ignore": "!a.ts\n", ".fdignore": "" }), ["a", "deep", "old"], "the folders are not .ts");
+  assert.deepEqual(names({ ".gitignore": "*\n", ".ignore": "", ".fdignore": "!ext-c.ts\n" }), ["ext-c"]);
+  // A line about what is deeper does not hide the folder, which pi loads by its entry.
+  assert.ok(names({ ".gitignore": "deep/index.ts\n/old/index.ts\n", ".ignore": "", ".fdignore": "" }).includes("deep"));
+});
+
+test("a pattern's ** is a globstar only as a whole segment, and a wildcard does not take a dot", () => {
+  const agent = path.join(home, "agent-dots", ".cfg", "agent");
+  for (const f of ["a.ts", "ext-c.ts", "f/index.ts"]) write(path.join(agent, "extensions", f));
+  const names = (...patterns) => installedExtensions({ agentDir: agent, userPackages: [], userExtensions: patterns, tools: [], off: new Set() }).map((c) => c.value);
+  assert.deepEqual(names("!ext**"), ["a", "f"], "ext** is ext*, which does not cross a slash: it takes ext-c.ts by its name, not everything in extensions/");
+  assert.deepEqual(names("!**ext-c.ts"), ["a", "f"], "against the name, whose ** is a *");
+  assert.deepEqual(names("!**/ext-c.ts"), ["a", "f"]);
+  assert.deepEqual(names("!extensions/**"), [], "a segment of its own is any number of them");
+  assert.deepEqual(names("!**/index.ts"), ["a", "ext-c"]);
+  assert.deepEqual(names("!extensions//a.ts"), ["ext-c", "f"], "a doubled slash is one");
+  assert.deepEqual(names("!./extensions/a.ts"), ["a", "ext-c", "f"], "and a leading ./ is not dropped, for a ! pattern");
+  // The whole path has a folder that starts with a dot, which a wildcard does not match and a pattern that names it does.
+  assert.deepEqual(names(`!${path.dirname(path.dirname(agent))}/**/a.ts`), ["a", "ext-c", "f"], "** does not go through .cfg");
+  assert.deepEqual(names(`!${path.dirname(path.dirname(agent))}/*/agent/extensions/a.ts`), ["a", "ext-c", "f"], "nor does a * take .cfg");
+  assert.deepEqual(names(`!${path.dirname(path.dirname(agent))}/.c*/agent/extensions/a.ts`), ["ext-c", "f"], "unless the pattern starts it with a dot");
+  assert.deepEqual(names(`!${path.dirname(path.dirname(agent))}/.cfg/**/a.ts`), ["ext-c", "f"]);
+});

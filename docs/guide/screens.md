@@ -52,8 +52,14 @@ What is listed is what is **on** in this chat, the same as in
 - A package of your settings counts unless it is switched off there, or narrowed
   to none of its extensions. An extension you only filtered by hand still counts.
 - A package of the chat's [project](/guide/projects) counts too, and says so
-  (*this project*). A package the project lists and loads counts even if your
-  own settings have it off.
+  (*this project*). Where both list a package, the project's entry decides, as in
+  pi: a package the project lists and loads counts even if your own settings have
+  it off, and one the project lists switched off, or narrowed to none of its
+  extensions, does not count even if yours has it on. A project entry that only
+  changes yours file by file (`autoload: false`, which `pi config` writes when
+  you unload one extension of a package for a project) is not followed: your
+  entry decides. Nor is a list of patterns that happens to match none of
+  its extensions: only an empty list counts as none.
 - A package is not listed in a chat where all of its tools are switched off in
   the chat's tools menu, whether by default, by the project or by the chat. That
   goes for a project's package as for yours. Turn one of its tools back on and it
@@ -61,11 +67,22 @@ What is listed is what is **on** in this chat, the same as in
   until then nothing says they are off.
 - Extensions you keep as files count as on: a script, or a folder with an
   `index.ts` or `index.js` (or a `package.json` that names its extensions under
-  `pi.extensions`), in `extensions` in pi's agent folder or in the project's
-  `.pi` folder, and the paths that the `extensions` setting of pi adds. One that
-  `pi config` switched off is not listed: the setting holds it as `-` and `!`
-  entries, and `+` brings one back. In a `!` pattern only `*`, `**` and `?` are
-  followed; one that uses brackets or braces is not, and takes nothing off.
+  `pi.extensions`), one level down in `extensions` in pi's agent folder or in the
+  project's `.pi` folder, and the paths that the `extensions` setting of pi adds.
+  What pi leaves out of them is left out here:
+  - A `.gitignore`, `.ignore` or `.fdignore` in the `extensions` folder. Plain
+    names, `*` and `?`, `dir/` for a folder and `!` to take one back are
+    followed, the last matching line deciding; a line with a path or brackets in
+    it is not.
+  - What `pi config` switched off. The setting holds it as `-` and `!` entries,
+    and `+` brings one back. A file has the first state it is given, and the
+    project's entries come before yours, so a project can switch off one of your
+    extensions for itself (pi config writes its path and a `-` for it into the
+    project's settings).
+  - In a `!` pattern only `*`, `**` (as a whole segment) and `?` are followed,
+    and a wildcard does not match a name that starts with a dot, as in pi. A
+    pattern with brackets, braces or groups is not followed, and takes nothing
+    off.
 
 Left out are the portal's own extensions (the subagent tool it can install, say)
 and the connections `/screen` made earlier, the `screen-…` folders: those are

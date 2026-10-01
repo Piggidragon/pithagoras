@@ -90,14 +90,28 @@ function hasGlue(value: string, connections: { slug: string; against: string }[]
   return connections.some((c) => (c.slug !== "" && slugs.has(c.slug)) || (c.against !== "" && word.test(c.against)));
 }
 
+/** A package as one side of the settings lists it. */
+interface Listing {
+  entry: unknown;
+  source: string;
+  /** The folder of a package kept in one. */
+  dir?: string;
+}
+
 /**
  * The extensions that are on in a chat: the packages of the user's settings and
  * of the chat's project that load extensions, and the loose ones in the two
- * `extensions` folders and those the `extensions` settings add. As in Settings → Extensions and the chat's tools menu:
- * a package switched off, or narrowed to none of its extensions, is not there,
- * and one whose tools are all off in this chat is not either. A project that
- * lists a package and loads it has it, whatever the user's entry says. A loose
- * one that `pi config` switched off (or the setting's `!`, `-` leave off) is not.
+ * `extensions` folders and those the `extensions` settings add. As in
+ * Settings → Extensions and the chat's tools menu: a package switched off, or
+ * narrowed to none of its extensions, is not there, and one whose tools are all
+ * off in this chat is not either.
+ *
+ * Where both settings list a package, the project's entry decides alone, as in
+ * pi: a project that lists it and loads it has it, whatever the user's entry
+ * says, and one that lists it switched off does not, whatever the user's says.
+ * Not so for an entry with `autoload: false`, which changes the user's by file
+ * and is not followed: the user's entry decides. A loose extension that
+ * `pi config` switched off, or the project's setting switches off, is not there.
  *
  * Left out: the portal's own extensions, and the connections to screens
  * (`screen-…`), which are the agent's and not what is connected.
@@ -106,42 +120,51 @@ export function installedExtensions(seen: ExtensionsSeen): ExtensionChoice[] {
   const bundled = seen.bundled ? real(seen.bundled) : undefined;
   const projectBase = seen.projectDir ? path.join(seen.projectDir, ".pi") : undefined;
 
-  const byKey = new Map<string, { source: string; dir?: string; user: boolean; project: boolean }>();
-  const list = (packages: unknown, base: string | undefined, scope: "user" | "project") => {
-    if (!Array.isArray(packages) || base === undefined) return;
+  // By what pi takes a package for: a folder by where it is, the rest by what `packageKey` says.
+  const listings = (packages: unknown, base: string | undefined, last: boolean) => {
+    const found = new Map<string, Listing>();
+    if (!Array.isArray(packages) || base === undefined) return found;
     for (const entry of packages) {
       const source = sourceOf(entry);
-      if (source === undefined || !loadsExtensions(entry)) continue;
+      if (source === undefined) continue;
       const key = packageKey(source);
       const dir = key.startsWith("local:") ? localPackagePath(source, base) : undefined;
       // The subagent tool the portal installs from its own folder is the portal's.
       if (dir && ((bundled && real(dir) === bundled) || packageJson(dir)?.name === SUBAGENT_PACKAGE)) continue;
-      const had = byKey.get(key) ?? { source, dir, user: false, project: false };
-      had[scope] = true;
-      byKey.set(key, had);
+      const id = dir ? `local:${dir}` : key;
+      if (last || !found.has(id)) found.set(id, { entry, source, dir });
     }
+    return found;
   };
-  list(seen.userPackages, seen.agentDir, "user");
-  list(seen.projectPackages, projectBase, "project");
+  const user = listings(seen.userPackages, seen.agentDir, false);
+  const project = listings(seen.projectPackages, projectBase, true);
 
-  // The loose ones, as pi's `extensions` setting leaves them: one switched off in `pi config` is not on, and a path the setting adds is.
-  const user = looseExtensions(path.join(seen.agentDir, "extensions"), seen.agentDir, seen.userExtensions);
-  const project = projectBase ? looseExtensions(path.join(projectBase, "extensions"), projectBase, seen.projectExtensions) : [];
-  const connections = [...glues(user), ...glues(project)];
+  const loose = looseExtensions(
+    { dir: path.join(seen.agentDir, "extensions"), base: seen.agentDir, setting: seen.userExtensions },
+    projectBase ? { dir: path.join(projectBase, "extensions"), base: projectBase, setting: seen.projectExtensions } : undefined,
+  );
+  const connections = glues(loose);
   const choices = new Map<string, ExtensionChoice>();
   const add = (value: string, detail: string, projectOnly: boolean) => {
     if (choices.has(value)) return;
     choices.set(value, { value, detail, notes: [...(hasGlue(value, connections) ? ["screen"] : []), ...(projectOnly ? ["project"] : [])] });
   };
 
-  for (const [key, one] of byKey) {
+  for (const id of new Set([...user.keys(), ...project.keys()])) {
+    const u = user.get(id);
+    const p = project.get(id);
+    const userOn = !!u && loadsExtensions(u.entry);
+    const projectOn = !!p && loadsExtensions(p.entry);
+    const delta = !!p && typeof p.entry === "object" && (p.entry as Record<string, unknown>).autoload === false;
+    if (!(p && !delta ? projectOn : userOn || projectOn)) continue;
+    const one = (userOn ? u : p) as Listing;
     // Off in this chat as a whole: the group of its tools in the chat's menu is switched off.
-    const own = seen.tools.filter((t) => [t.package, t.projectPackage].some((p) => typeof p === "string" && packageKey(p) === key));
+    const keys = new Set([u, p].filter((l): l is Listing => l !== undefined).map((l) => packageKey(l.source)));
+    const own = seen.tools.filter((t) => [t.package, t.projectPackage].some((x) => typeof x === "string" && keys.has(packageKey(x))));
     if (own.length > 0 && own.every((t) => seen.off.has(t.name))) continue;
-    add(nameOf(one.source, one.dir), one.dir ?? one.source, !one.user);
+    add(nameOf(one.source, one.dir), one.dir ?? one.source, !userOn);
   }
-  for (const e of user) if (!GLUE.test(e.name)) add(e.name, e.path, false);
-  for (const e of project) if (!GLUE.test(e.name)) add(e.name, e.path, true);
+  for (const e of loose) if (!GLUE.test(e.name)) add(e.name, e.path, e.project);
 
   return [...choices.values()].sort((a, b) => a.value.localeCompare(b.value, "en", { sensitivity: "base" }));
 }

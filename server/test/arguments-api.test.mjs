@@ -20,6 +20,11 @@ const OFF = (source) => ({ source, extensions: [], skills: [], prompts: [], them
 writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages: ["npm:pi-board@1.0.0", "npm:pi-search", OFF("npm:pi-lens")] }));
 writeFileSync(path.join(ws, "research", ".pi", "settings.json"), JSON.stringify({ packages: ["npm:pi-research-only"] }));
 
+// A project that switches off for itself a package and an extension of the user's.
+mkdirSync(path.join(ws, "office", ".pi"), { recursive: true });
+const todoFile = path.join(agent, "extensions", "todo", "index.ts");
+writeFileSync(path.join(ws, "office", ".pi", "settings.json"), JSON.stringify({ packages: [{ source: "npm:pi-search", extensions: [] }], extensions: [todoFile, `-${todoFile}`] }));
+
 // The server's database, to say which tools were seen and where from.
 process.env.DATA_DIR = home;
 const db = await import("../dist/db.js");
@@ -97,4 +102,13 @@ test("a loose extension that pi's own settings switch off is not offered", async
   assert.ok(!(await names(chat.id)).includes("todo"));
   writeFileSync(path.join(agent, "settings.json"), JSON.stringify(settings));
   assert.ok((await names(chat.id)).includes("todo"));
+});
+
+test("a project that switches off the user's package, or the user's extension, for itself has it off in its chats", async () => {
+  const inside = await json("/api/sessions", "POST", { workspace: "office" });
+  const inList = await names(inside.id);
+  assert.ok(inList.includes("pi-board"));
+  assert.ok(!inList.includes("pi-search") && !inList.includes("todo"), "the user's, and this project has them off");
+  const outList = await names((await json("/api/sessions", "POST", {})).id);
+  assert.ok(outList.includes("pi-search") && outList.includes("todo"));
 });
