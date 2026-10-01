@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
 import os from "node:os";
 import { LEAN_CHOICE, asrDevice, choiceLabel, cpuSlow, fitOn, fitRam, pickGpu, ramNeeded, sameChoice, suggestChoice, suggestCpuChoice, usesGpu, vramNeeded, type Gpu, type Host, type VoiceChoice } from "./voice-engines.js";
 
@@ -27,16 +26,23 @@ export interface Probe { name: string; run(): Promise<string> }
 /**
  * The one sentence for a host where Docker cannot give a container a GPU, however Docker or the
  * driver says so: no NVIDIA runtime, no driver loaded, no device. It is what the person reads.
+ * The card may well be there (the portal can see it), so it does not say that none was found.
  */
-export const NO_GPU_MESSAGE = "Docker cannot give the voice container a GPU, and none was found: install the NVIDIA Container Toolkit and restart Docker, or install speech recognition only, which needs no GPU.";
+export const NO_GPU_MESSAGE = "Docker cannot give the voice container a GPU: its NVIDIA runtime is missing or has no device to hand out. Install the NVIDIA Container Toolkit and restart Docker, or install speech recognition only, which needs no GPU.";
+/** The toolkit refusing a container whose image needs a newer driver than the host has. */
+export const DRIVER_TOO_OLD_MESSAGE = "The NVIDIA driver on this host is too old for the CUDA image the voice container runs in: update the driver, then try again.";
 /** What a choice with speech synthesis is told on a host that was found to have no GPU. */
 export const NO_GPU_FOR_SPEECH = "Speech synthesis needs a GPU, and none was found: install speech recognition only, or add an NVIDIA GPU that Docker can use.";
-/** Docker's, nvidia-container-cli's and nvidia-smi's own words for there being no GPU to use. */
-const NO_GPU = /could not select device driver|nvidia-container-cli|nvidia-container-runtime|nvml error|driver not loaded|no devices were found|couldn't communicate with the nvidia driver|unknown or invalid runtime name: nvidia|no known gpu vendor/i;
+/**
+ * Docker's, nvidia-container-cli's and nvidia-smi's own words for there being no GPU to use. Only those: the toolkit
+ * has other errors (a driver that is too old, a failed mount) that are not this, and their words say what to do.
+ */
+const NO_GPU = /could not select device driver|unknown or invalid runtime name: nvidia|nvml error|driver not loaded|no devices were found|couldn't communicate with the nvidia driver|load library failed: libnvidia-ml/i;
+const DRIVER_TOO_OLD = /requirement error|unsatisfied condition|please update your driver/i;
 /** Does this error from Docker or nvidia-smi only say that there is no GPU? */
 export const isNoGpu = (message: string) => NO_GPU.test(message);
-/** What a person reads of an error out of Docker: the plain sentence when it only says there is no GPU, else as it came. */
-export const explain = (message: string) => isNoGpu(message) ? NO_GPU_MESSAGE : message;
+/** What a person reads of an error out of Docker: a plain sentence where it only says there is no GPU or the driver is too old, else as it came. */
+export const explain = (message: string) => isNoGpu(message) ? NO_GPU_MESSAGE : DRIVER_TOO_OLD.test(message) ? DRIVER_TOO_OLD_MESSAGE : message;
 
 /** A probe's way of saying that it ran and found there is no GPU to use, as opposed to not being able to tell. */
 export class NoGpu extends Error {}
@@ -56,7 +62,11 @@ export const hostProbe: Probe = {
  * `checked` is whether the check could tell: GPUs were found, or a probe ran and found there are
  * none. It is false while nothing could be asked yet, such as before the CUDA image is downloaded.
  */
-export interface Detected { gpus: Gpu[]; source: string; error: string; checked: boolean }
+export interface Detected {
+  gpus: Gpu[]; source: string; error: string; checked: boolean;
+  /** Cards the host lists that Docker cannot hand to a container, such as for want of the NVIDIA Container Toolkit. Then there are no GPUs for voice. */
+  unusable?: string[];
+}
 
 /** The first probe that finds a GPU wins. No GPU, no tool and no NVIDIA runtime are answers too, not failures. */
 export async function detectGpus(probes: readonly Probe[]): Promise<Detected> {
@@ -80,16 +90,12 @@ export async function detectGpus(probes: readonly Probe[]): Promise<Detected> {
 const gib = (mib: number | null) => mib === null ? "unknown" : `${(mib / 1024).toFixed(1)} GiB`;
 
 /**
- * The memory and threads of the host the portal runs on, which is what recognition on the CPU has. In a container
- * with a memory limit the limit is the total, and what is left under it the free memory.
+ * The memory and threads of the host. Recognition runs in a container of its own, which has no limit of the portal's:
+ * a memory limit or a CPU set on the portal's container is not what it has, so the host's figures are read, which are
+ * the ones a container sees of /proc.
  */
 export function readHost(): Host {
-  const number = (path: string) => { try { const n = Number(readFileSync(path, "utf8").trim()); return Number.isFinite(n) && n > 0 ? n : undefined; } catch { return undefined; } };
-  const limit = number("/sys/fs/cgroup/memory.max");
-  const used = number("/sys/fs/cgroup/memory.current");
-  const total = Math.min(os.totalmem(), limit ?? Infinity);
-  const free = Math.min(os.freemem(), limit !== undefined && used !== undefined ? Math.max(limit - used, 0) : Infinity);
-  return { totalMiB: Math.round(total / 1048576), freeMiB: Math.round(free / 1048576), threads: os.availableParallelism() };
+  return { totalMiB: Math.round(os.totalmem() / 1048576), freeMiB: Math.round(os.freemem() / 1048576), threads: os.cpus().length || os.availableParallelism() };
 }
 
 export interface Decision { choice: VoiceChoice; gpu: Gpu | undefined; summary: string }

@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import os from 'node:os';
 import {
   ASR_CPU_PORT, ASR_MODELS, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, asrDevice, asrDevices, choiceFromKey, choiceKey, choiceLabel, cpuRealtime, cpuServerConfig, cpuSlow, cpuThreads, endpoints, fitOn, fitRam, healthUrls, parseChoice, pickGpu,
   ramNeeded, sameChoice, serverConfig, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, vramNeeded,
   type Gpu, type Host, type VoiceChoice,
 } from '../server/src/voice-engines.js';
-import { NO_GPU_FOR_SPEECH, NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, readHost, type Probe } from '../server/src/voice-gpu.js';
+import { DRIVER_TOO_OLD_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, readHost, type Probe } from '../server/src/voice-gpu.js';
 
 // Neutral cards: only the sizes matter.
 const card = (totalMiB: number | null, freeMiB: number | null = totalMiB, index = 0): Gpu => ({ index, name: `Test GPU ${index}`, totalMiB, freeMiB });
@@ -58,6 +59,18 @@ test('Docker and the driver saying there is no GPU is "no GPU", in whatever word
     assert.equal(explain(message), NO_GPU_MESSAGE);
   }
   assert.match(NO_GPU_MESSAGE, /NVIDIA Container Toolkit.*restart Docker/);
+  // The card may be there: the sentence is about what Docker can hand out, not about what was found.
+  assert.doesNotMatch(NO_GPU_MESSAGE, /none was found/);
+  // The toolkit's other refusals are not "no GPU": a driver too old for the image is told as that, the rest as it was worded.
+  const tooOld = 'error running hook #0: nvidia-container-cli: requirement error: unsatisfied condition: cuda>=12.4, please update your driver to a newer version, or use an earlier cuda container: unknown';
+  assert.equal(isNoGpu(tooOld), false);
+  assert.equal(explain(tooOld), DRIVER_TOO_OLD_MESSAGE);
+  assert.deepEqual([(await detectGpus([says(tooOld)])).checked, (await detectGpus([says(tooOld)])).error.startsWith('docker: ')], [false, true]);
+  for (const message of ['nvidia-container-cli: mount error: failed to add device rules', 'nvidia-container-cli: ldcache error: process /sbin/ldconfig failed', 'nvidia-container-cli: device error: unknown device id: 7']) {
+    assert.equal(isNoGpu(message), false, message);
+    assert.equal(explain(message), message);
+  }
+  assert.equal(isNoGpu('nvidia-container-cli: initialization error: load library failed: libnvidia-ml.so.1: cannot open shared object file'), true);
   // A probe can say it outright, as when Docker does not answer.
   assert.equal((await detectGpus([{ name: 'docker', run: async () => { throw new NoGpu('Docker did not answer'); } }])).checked, true);
   // Anything else is left as it is, and is not an answer.
@@ -141,15 +154,15 @@ test('the original combination makes the server config the setup script has alwa
 });
 
 test('Chatterbox and Qwen3-ASR run in the one audio.cpp process, loaded together, and Whisper then has no process', () => {
-  const config = serverConfig({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '0.6b' });
+  const config = serverConfig({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '0.6b' })!;
   assert.equal(config.max_loaded_models, 2);
   assert.deepEqual(config.models.map(m => m.id), ['chatterbox', 'qwen3-asr']);
   assert.deepEqual(config.models.map(m => m.path), ['/voice/models/chatterbox-q8_0.gguf', '/voice/models/qwen3-asr-0.6b-q8_0.gguf']);
   // audio.cpp's own name for voice cloning.
   assert.equal(config.models[0].task, 'clon');
-  assert.equal(serverConfig({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' }).models[1].path, '/voice/models/qwen3-asr-1.7b-q8_0.gguf');
+  assert.equal(serverConfig({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' })!.models[1].path, '/voice/models/qwen3-asr-1.7b-q8_0.gguf');
   // A choice with Whisper has one audio.cpp model, so one is loaded at a time, as before.
-  assert.equal(serverConfig({ tts: 'chatterbox', asr: 'whisper', asrModel: 'small' }).max_loaded_models, 1);
+  assert.equal(serverConfig({ tts: 'chatterbox', asr: 'whisper', asrModel: 'small' })!.max_loaded_models, 1);
   assert.deepEqual(endpoints({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' }), {
     runtime: 'chatterbox', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech', whisperUrl: 'http://127.0.0.1:7862/v1/audio/transcriptions', sttModel: 'qwen3-asr',
   });
@@ -316,8 +329,12 @@ test('on a host that was found to have no GPU, recognition alone is chosen, spee
   assert.equal(decide(DEFAULT_CHOICE, [card(12288)], { host }).summary, 'Detected Test GPU 0 (12.0 GiB, 12.0 GiB free): Breeze speech with Whisper base needs about 4.5 GiB, which fits.');
 });
 
-test('the host is read as it is, and within the limit of a container where it has one', () => {
+test('the host is read as it is: the memory and the CPUs of the machine, not the limits of the portal\'s own container', () => {
+  // Recognition runs in a container of its own that has no limit of the portal's, so a limit on the portal's is not what it has.
   const host = readHost();
-  assert.ok(host.totalMiB! > 0 && host.freeMiB! >= 0 && host.freeMiB! <= host.totalMiB!, JSON.stringify(host));
+  assert.equal(host.totalMiB, Math.round(os.totalmem() / 1048576));
+  assert.ok(host.freeMiB! >= 0 && host.freeMiB! <= host.totalMiB!, JSON.stringify(host));
+  assert.equal(host.threads, os.cpus().length);
   assert.ok(Number.isInteger(host.threads) && host.threads >= 1);
+  assert.equal(readFileSync('server/src/voice-gpu.ts', 'utf8').includes('/sys/fs/cgroup'), false, 'no cgroup of the portal is read');
 });

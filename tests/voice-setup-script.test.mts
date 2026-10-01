@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ASR_MODELS, DEFAULT_CHOICE, TTS_ENGINES, asrDevice, asrDevices, cpuServerConfig, parseChoice, serverConfig, usesGpu, type VoiceChoice } from '../server/src/voice-engines.js';
+import { ASR_MODELS, DEFAULT_CHOICE, asrDevice, asrDevices, cpuServerConfig, parseChoice, serverConfig, usesGpu, type VoiceChoice } from '../server/src/voice-engines.js';
 import { containerSpec } from '../server/src/extensions/voice-service.js';
 
 // The setup script run for real, with every command that would build, download or

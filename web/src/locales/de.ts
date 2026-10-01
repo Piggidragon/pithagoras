@@ -1384,6 +1384,7 @@ const de: Locale = {
     "Installation, GPU memory and service controls": "Installation, GPU-Speicher und Steuerung des Dienstes",
     "Install once on your Docker host. Setup builds and downloads the engines you choose: speech synthesis needs an NVIDIA GPU, speech recognition does not. Allow 30 GB of disk space during setup.": "Einmal auf deinem Docker-Host installieren. Die Einrichtung baut und lädt die Engines, die du wählst: Sprachsynthese braucht eine NVIDIA-GPU, Spracherkennung nicht. Plane währenddessen 30 GB Speicherplatz ein.",
     "No GPU detected. Only speech recognition works: you can dictate, but replies are not spoken.": "Keine GPU erkannt. Es funktioniert nur die Spracherkennung: Du kannst diktieren, aber Antworten werden nicht vorgelesen.",
+    "GPU detected: {name}, but Docker cannot use it. Install the NVIDIA Container Toolkit and restart Docker. Until then only speech recognition works: you can dictate, but replies are not spoken.": "GPU erkannt: {name}, aber Docker kann sie nicht nutzen. Installiere das NVIDIA Container Toolkit und starte Docker neu. Bis dahin funktioniert nur die Spracherkennung: Du kannst diktieren, aber Antworten werden nicht vorgelesen.",
     "No speech synthesis": "Keine Sprachsynthese",
     "no speech synthesis": "keine Sprachsynthese",
     "Too slow on a CPU for conversation": "Auf einer CPU zu langsam für ein Gespräch",

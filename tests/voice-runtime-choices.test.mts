@@ -83,14 +83,16 @@ after(async () => {
 });
 const voice = await import('../server/src/extensions/voice-service.js');
 const { DEFAULT_CHOICE } = await import('../server/src/voice-engines.js');
-const { NO_GPU_MESSAGE, NO_GPU_FOR_SPEECH } = await import('../server/src/voice-gpu.js');
+const { NO_GPU_MESSAGE, NO_GPU_FOR_SPEECH, DRIVER_TOO_OLD_MESSAGE } = await import('../server/src/voice-gpu.js');
 
 // What the host has to run recognition on: sixteen GiB and eight threads, unless a test says otherwise.
 const host = (patch = {}) => { voice.hostReader.read = () => ({ totalMiB: 16384, freeMiB: 12000, threads: 8, ...patch }); };
-const reset = () => { host(); portalId = 'portal-one'; container = null; dockerGpus = null; images = new Set([CUDA, BASE]); pullFails = false; noGpuRuntime = false; probeError = null; hangUp = false; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
+const reset = () => { host(); portalId = 'portal-one'; container = null; dockerGpus = ''; images = new Set([CUDA, BASE]); pullFails = false; noGpuRuntime = false; probeError = null; hangUp = false; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
 const settle = async () => { for (let n = 0; n < 200 && (await voice.status()).busy; n++) await new Promise(r => setTimeout(r, 10)); };
 const created = () => calls.filter(c => c.url === '/containers/create?name=pithagoras-voice');
-const GPU = (index: number, total: number, free: number) => `${index}, Test GPU ${index}, ${total}, ${free}\n`;
+/** The voice container was deleted, not the throwaway one that reads nvidia-smi. */
+const gone = () => calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice');
+const GPU = (index: number, total: number, free: number, name = `Test GPU ${index}`) => `${index}, ${name}, ${total}, ${free}\n`;
 const env = (spec: any) => Object.fromEntries(spec.Env.map((e: string) => [e.slice(0, e.indexOf('=')), e.slice(e.indexOf('=') + 1)]));
 
 test('a first install without a choice takes what the GPU check suggests, and says so in the setup log', async () => {
@@ -105,7 +107,7 @@ test('a first install without a choice takes what the GPU check suggests, and sa
   assert.match(env(spec).VOICE_PLAN, /^Detected Test GPU 0 \(12\.0 GiB, 10\.7 GiB free\): Breeze speech with Qwen3-ASR 1\.7B needs about 7\.0 GiB, which fits\.$/);
   // One card: Docker's own pick, as it has always been.
   assert.deepEqual(spec.HostConfig.DeviceRequests, [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }]);
-  assert.equal(calls.some(c => c.url === '/containers/create'), false, 'the host had nvidia-smi: no probe container');
+  assert.equal((await voice.hardware()).source, 'host', 'the cards are the host\'s word, which Docker was then asked to confirm');
   assert.deepEqual(JSON.parse(env(spec).VOICE_SERVER_CONFIG).models.map((m: any) => m.id), ['breeze', 'qwen3-asr']);
   // Ready needs only the audio.cpp process: there is no Whisper.
   unhealthy = [':8188'];
@@ -268,7 +270,7 @@ test('a CPU-only container is ready when its own services answer, and keeps its 
   process.env.VOICE_GPU = '1';
   await voice.start();
   await settle();
-  assert.equal(calls.some(c => c.method === 'DELETE' || c.url.startsWith('/containers/create?')), false);
+  assert.equal(gone() || created().length > 0, false);
   assert.equal(container.State.Running, true);
 });
 
@@ -300,14 +302,16 @@ test('a GPU host can put recognition on the CPU, to keep its memory: one image, 
 });
 
 test('a GPU that Docker cannot hand on is told in one plain sentence, not as the daemon words it', async () => {
-  // The host sees a card, but Docker has no NVIDIA runtime: the container is made and cannot start.
-  reset(); hostGpus(GPU(0, 12288, 11000)); noGpuRuntime = true;
+  // The host sees a card and Docker could not be asked (the check itself failed): the container is made, and cannot start.
+  reset(); hostGpus(GPU(0, 12288, 11000)); probeError = 'no space left on device'; noGpuRuntime = true;
   await voice.install();
   await settle();
   assert.equal(created().length, 1);
   const state = await voice.status();
   assert.equal(state.error, NO_GPU_MESSAGE);
   assert.doesNotMatch(JSON.stringify(state), /could not select device driver/);
+  // The card is there, so the sentence does not say that none was found.
+  assert.doesNotMatch(state.error, /none was found/);
   // A container that was made and exited with Docker's own words is shown the same way.
   reset(); hostGpus(GPU(0, 12288, 11000));
   container = { Config: { Labels: { 'pithagoras.addon': 'voice' } }, HostConfig: { NetworkMode: 'container:portal-one' }, State: { Running: false, ExitCode: 128, Error: `failed to create task for container: ${NO_RUNTIME}` } };
@@ -321,6 +325,54 @@ test('a GPU that Docker cannot hand on is told in one plain sentence, not as the
   assert.equal((await voice.status()).error, 'port is already allocated');
 });
 
+test('a driver too old for the CUDA image is told as that, and the toolkit\'s other errors are left as they are', async () => {
+  const requirement = 'failed to create task for container: OCI runtime create failed: runc create failed: unable to start container process: error during container init: error running hook #0: error running hook: exit status 1, stdout: , stderr: Auto-detected mode as \'legacy\'\nnvidia-container-cli: requirement error: unsatisfied condition: cuda>=12.4, please update your driver to a newer version, or use an earlier cuda container: unknown';
+  reset(); hostGpus(GPU(0, 12288, 11000));
+  container = { Config: { Labels: { 'pithagoras.addon': 'voice' } }, HostConfig: { NetworkMode: 'container:portal-one' }, State: { Running: false, ExitCode: 128, Error: requirement } };
+  await voice.stop();
+  container.State.Running = false;
+  const old = await voice.status();
+  assert.equal(old.error, DRIVER_TOO_OLD_MESSAGE);
+  assert.match(old.error, /driver.*too old.*update the driver/);
+  assert.doesNotMatch(old.error, /NVIDIA Container Toolkit|no GPU|none was found/, 'the toolkit is there; saying it is missing would send the person the wrong way');
+  // Other errors of the toolkit say what is wrong in their own words.
+  for (const message of ['nvidia-container-cli: mount error: failed to add device rules: unable to find any existing device filters', 'nvidia-container-cli: ldcache error: process /sbin/ldconfig failed with error code: 127']) {
+    container.State.Error = `error running hook: ${message}`;
+    assert.equal((await voice.status()).error, `error running hook: ${message}`);
+  }
+});
+
+test('a host with the driver but without the toolkit has no GPU for voice: the card is said to be unusable, and recognition alone is installed', async () => {
+  // nvidia-smi on the host lists a card; Docker, asked to hand it to a container, has no runtime for it.
+  reset(); hostGpus(GPU(0, 12288, 11000, 'Test GPU 0')); dockerGpus = null; images.delete(CUDA);
+  const found = await voice.hardware();
+  assert.deepEqual([found.gpus, found.checked, found.cpuOnly, found.selected, found.unusable], [[], true, true, null, ['Test GPU 0']]);
+  assert.deepEqual(found.suggestion, { tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' });
+  assert.doesNotMatch(JSON.stringify(found), /could not select device driver/);
+  // Left to the check, the install does not pick Breeze to fail on it: it is recognition alone, in the small image.
+  await voice.install();
+  await settle();
+  const state = await voice.status();
+  assert.equal(state.error, '');
+  assert.equal(created().length, 1);
+  assert.equal(created()[0].body.Image, BASE);
+  assert.equal('DeviceRequests' in created()[0].body.HostConfig, false);
+  assert.deepEqual(state.choice, { tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' });
+  assert.ok(!calls.some(c => c.url.startsWith('/images/create') && c.url.includes('nvidia')), 'no CUDA image');
+  // A request for speech is told what is missing.
+  reset(); hostGpus(GPU(0, 12288, 11000)); dockerGpus = null;
+  await voice.install({ tts: 'breeze', asr: 'whisper', asrModel: 'base' });
+  await settle();
+  assert.equal((await voice.status()).error, NO_GPU_FOR_SPEECH);
+  // Docker that cannot be asked leaves the host's word, and Docker that works confirms it.
+  reset(); hostGpus(GPU(0, 12288, 11000)); probeError = 'no space left on device';
+  assert.deepEqual([(await voice.hardware()).gpus.length, (await voice.hardware()).cpuOnly], [1, false]);
+  reset(); hostGpus(GPU(0, 12288, 11000));
+  const fine = await voice.hardware();
+  assert.deepEqual([fine.gpus.length, fine.cpuOnly, fine.unusable], [1, false, undefined]);
+  assert.ok(calls.some(c => c.method === 'DELETE' && c.url.startsWith('/containers/probe-1')), 'the throwaway container is removed');
+});
+
 test('a container made before engines could be chosen keeps its engines through start and through a restating of the same choice', async () => {
   reset(); hostGpus(GPU(0, 1024, 1000));   // far too small: a restart must not be refused on that
   container = { Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1' } }, HostConfig: { NetworkMode: 'container:portal-one' }, State: { Running: false } };
@@ -330,7 +382,7 @@ test('a container made before engines could be chosen keeps its engines through 
   assert.equal(container.State.Running, true);
   await voice.install(DEFAULT_CHOICE);
   await settle();
-  assert.equal(calls.some(c => c.method === 'DELETE' || c.url.startsWith('/containers/create')), false, 'nothing recreated');
+  assert.equal(gone() || created().length > 0, false, 'nothing recreated');
   assert.equal((await voice.status()).error, '');
   assert.deepEqual((await voice.status()).state, 'running');
 });
@@ -417,7 +469,7 @@ test('Start moves a container to the card VOICE_GPU names, and leaves one that i
     process.env.VOICE_GPU = asked;
     await voice.start();
     await settle();
-    assert.equal(calls.some(c => c.method === 'DELETE' || c.url.startsWith('/containers/create?')), false, `on card ${asked} already`);
+    assert.equal(gone() || created().length > 0, false, `on card ${asked} already`);
     assert.equal(container.State.Running, true);
   }
   // No setting: whatever card it has is kept.
@@ -425,7 +477,7 @@ test('Start moves a container to the card VOICE_GPU names, and leaves one that i
   container = stopped({ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] });
   await voice.start();
   await settle();
-  assert.equal(calls.some(c => c.method === 'DELETE'), false);
+  assert.equal(gone(), false);
 });
 
 test('the page is told the card the installed service is on, not the one with the most room', async () => {
@@ -478,7 +530,7 @@ test('another choice recreates the container, keeps the volume and is not mistak
   calls = [];
   await voice.start();
   await settle();
-  assert.equal(calls.some(c => c.method === 'DELETE'), false);
+  assert.equal(gone(), false);
   assert.equal(container.Config.Labels['pithagoras.voice-recipe'], 'chatterbox+qwen3-asr:1.7b');
 });
 

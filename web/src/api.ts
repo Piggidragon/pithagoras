@@ -285,7 +285,7 @@ export interface VoiceConfig {
 
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; }
 /** The GPUs the voice container can use, as nvidia-smi reports them, and the combination that fits the one it would take. */
-export interface VoiceHardware { gpus: { index: number; name: string; totalMiB: number | null; freeMiB: number | null }[]; source: string; error: string; /** False while nothing could be asked yet, so that no GPU is not yet the same as none. */ checked: boolean; /** The check found there is no GPU: what is suggested is speech recognition alone, on the CPU. */ cpuOnly: boolean; /** What recognition on the CPU has to run on. */ host: Host; selected: number | null; reserveMiB: number; suggestion: VoiceChoice; }
+export interface VoiceHardware { gpus: { index: number; name: string; totalMiB: number | null; freeMiB: number | null }[]; source: string; error: string; /** False while nothing could be asked yet, so that no GPU is not yet the same as none. */ checked: boolean; /** The check found there is no GPU: what is suggested is speech recognition alone, on the CPU. */ cpuOnly: boolean; /** Cards the host lists that Docker cannot hand to a container: for voice there are none. */ unusable?: string[]; /** What recognition on the CPU has to run on. */ host: Host; selected: number | null; reserveMiB: number; suggestion: VoiceChoice; }
 export const api = {
   listFiles: (sessionId: string, dir: string) =>
     json<{ path: string; entries: FileEntry[]; truncated: boolean }>(

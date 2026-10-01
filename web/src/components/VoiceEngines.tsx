@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Select } from "./Select";
 import { ASR_MODELS, DEFAULT_CHOICE, TTS_ENGINES, asrDevice, asrDevices, asrOption, canonicalChoice, cpuSlow, fitOn, fitRam, ramNeeded, sameChoice, usesGpu, vramNeeded, type AsrDevice, type Fit, type TtsChoice, type VoiceChoice } from "../../../server/src/voice-engines";
 import type { VoiceHardware } from "../api";
@@ -15,7 +16,7 @@ const tone = (level: Fit) => level === "fits" ? "text-fg-faint" : level === "tig
  *
  * Without a GPU only recognition works, and on the CPU: the speech engine is off, and says why.
  */
-export function VoiceEngines({ installed, fresh, busy, hardware, picked, onPick }: {
+export function VoiceEngines({ installed, fresh, busy, hardware, picked: pickedNow, onPick }: {
   installed: VoiceChoice | undefined; fresh: boolean; busy: boolean; hardware: VoiceHardware | null;
   picked: VoiceChoice | null; onPick: (choice: VoiceChoice | null) => void;
 }) {
@@ -23,6 +24,10 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked, onPick 
   const cpuOnly = hardware?.cpuOnly === true;
   // No GPU, and nothing installed that uses one: there is no speech engine to choose.
   const speechOff = cpuOnly && (!installed || installed.tts === "none");
+  // A pick made before the check answered may name a speech engine that a host without a GPU has none of: it is recognition alone.
+  const stale = speechOff && pickedNow !== null && pickedNow.tts !== "none";
+  const picked = stale ? canonicalChoice({ ...pickedNow!, tts: "none" }) : pickedNow;
+  useEffect(() => { if (stale) onPick(installed && sameChoice(picked!, installed) ? null : picked); }, [stale]);
   const host = hardware?.host;
   const shown = picked ?? installed ?? hardware?.suggestion ?? DEFAULT_CHOICE;
   const auto = fresh && picked === null;
@@ -39,16 +44,21 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked, onPick 
     // Back to what is installed is no change at all.
     onPick(installed && sameChoice(next, installed) ? null : next);
   };
+  const noSpeech = { value: "none" as const, label: t("No speech synthesis"), hint: t("Too slow on a CPU for conversation") };
+  // With no GPU recognition alone can always be chosen, also where a speech engine is installed that has lost its GPU.
   const ttsOptions: { value: TtsChoice; label: string; hint: string }[] = speechOff
-    ? [{ value: "none", label: t("No speech synthesis"), hint: t("Too slow on a CPU for conversation") }]
+    ? [noSpeech]
     : [
       { value: "breeze", label: TTS_ENGINES.breeze.label, hint: t("English and Chinese, streams while it speaks") },
       { value: "chatterbox", label: TTS_ENGINES.chatterbox.label, hint: t("Nineteen languages, clones a reference voice") },
+      ...(cpuOnly ? [noSpeech] : []),
     ];
   const suggest = suggestion && !sameChoice(suggestion, shown) && <> <button type="button" className={btnCls} onClick={() => onPick(installed && sameChoice(suggestion, installed) ? null : suggestion)}>{t("Use the suggestion")}</button></>;
   return <div className="space-y-3 rounded-lg border border-line p-3">
     <div><p className="text-xs font-medium">{t("Speech engines")}</p><p className="mt-1 text-xs text-fg-faint">{t("Pick how the voice speaks and listens. Pithagoras checks your GPU and tells you what fits.")}</p></div>
-    {cpuOnly && <p role="alert" className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">{t("No GPU detected. Only speech recognition works: you can dictate, but replies are not spoken.")}</p>}
+    {cpuOnly && <p role="alert" className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">{hardware?.unusable?.length
+      ? t("GPU detected: {name}, but Docker cannot use it. Install the NVIDIA Container Toolkit and restart Docker. Until then only speech recognition works: you can dictate, but replies are not spoken.", { name: hardware.unusable[0] })
+      : t("No GPU detected. Only speech recognition works: you can dictate, but replies are not spoken.")}</p>}
     {fresh && <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={auto} disabled={busy} onChange={(e) => onPick(e.target.checked ? null : shown)} />{t("Choose for me, based on my GPU")}</label>}
     <div className="block text-xs text-fg-muted">{t("Speech synthesis engine")}
       <Select<TtsChoice> aria-label={t("Speech synthesis engine")} size="sm" className="mt-1.5 w-full" disabled={auto || busy || speechOff} value={speechOff ? "none" : shown.tts}

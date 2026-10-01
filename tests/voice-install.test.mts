@@ -5,7 +5,7 @@ import { BASE_IMAGE, IMAGE, containerSpec, imageFor } from '../server/src/extens
 test('voice container shares portal networking without publishing host ports',()=>{
  const spec=containerSpec('echo test', 'container:portal-id');
  assert.equal(spec.HostConfig.RestartPolicy.Name,'no');
- assert.deepEqual(spec.HostConfig.DeviceRequests[0].Capabilities,[['gpu']]);
+ assert.deepEqual(spec.HostConfig.DeviceRequests![0].Capabilities,[['gpu']]);
  assert.ok(spec.HostConfig.Binds.includes('pithagoras_voice-models:/voice'));
  assert.equal(spec.HostConfig.NetworkMode,'container:portal-id');
  assert.equal('PortBindings' in spec.HostConfig,false);

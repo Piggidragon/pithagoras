@@ -414,3 +414,65 @@ test('a service without speech synthesis is a listening one: the settings say so
  await expect(page.getByLabel('Speech synthesis URL')).toHaveCount(0);
  await expect(page.getByRole('combobox',{name:'Speech runtime'})).toContainText('No speech synthesis');
 });
+
+test('engine choice: a pick made before the GPU check answers is recognition alone once it says there is no GPU',async({page})=>{
+ const posts:any[]=[];let release!:()=>void;const gate=new Promise<void>(r=>{release=r;});
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ // The first answer is slow: the image of the throwaway container has to be downloaded.
+ await page.route('**/api/voice/hardware',async r=>{await gate;return r.fulfill({json:noGpu()});});
+ await page.route('**/api/voice',r=>r.fulfill({json:config}));
+ await page.route('**/api/voice/install',r=>{
+  if(r.request().method()==='POST'){posts.push(r.request().postDataJSON());return r.fulfill({json:{ok:true}});}
+  return r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}});
+ });
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ // Before the answer the page knows nothing of the GPU: Breeze is shown, and a pick is made on it.
+ await expect(page.getByRole('combobox',{name:'Speech synthesis engine'})).toContainText('Breeze');
+ await page.getByRole('checkbox',{name:'Choose for me, based on my GPU'}).uncheck();
+ await page.getByRole('combobox',{name:'Speech recognition engine'}).click();
+ await page.getByRole('option',{name:/Whisper small/}).click();
+ release();
+ await expect(page.getByRole('combobox',{name:'Speech synthesis engine'})).toContainText('No speech synthesis');
+ await page.getByRole('button',{name:'Install voice',exact:true}).click();
+ await expect.poll(()=>posts.length).toBe(1);
+ // What is sent is what the page shows, not the Breeze it was picked with.
+ expect(posts[0]).toEqual({tts:'none',asr:'whisper',asrModel:'small'});
+});
+
+test('engine choice: a speech engine installed on a host that has lost its GPU can be switched to recognition alone',async({page})=>{
+ const posts:any[]=[];
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/hardware',r=>r.fulfill({json:noGpu()}));
+ await page.route('**/api/voice',r=>r.fulfill({json:{...config,enabled:true}}));
+ await page.route('**/api/voice/install',r=>{
+  if(r.request().method()==='POST'){posts.push(r.request().postDataJSON());return r.fulfill({json:{ok:true}});}
+  return r.fulfill({json:{available:true,state:'stopped',busy:false,progress:'',error:'',choice:{tts:'breeze',asr:'whisper',asrModel:'base'}}});
+ });
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ await expect(page.getByRole('alert').filter({hasText:'No GPU detected.'})).toBeVisible();
+ // The installed engine is shown and can be left: recognition alone is offered beside it.
+ const synthesis=page.getByRole('combobox',{name:'Speech synthesis engine'});
+ await expect(synthesis).toBeEnabled();
+ await expect(synthesis).toContainText('Breeze');
+ await synthesis.click();
+ await expect(page.getByRole('option',{name:/Chatterbox/})).toBeVisible();
+ await page.getByRole('option',{name:/No speech synthesis/}).click();
+ await expect(page.getByText('Switching engines recreates the voice container.')).toBeVisible();
+ await page.getByRole('button',{name:'Rebuild with these engines'}).click();
+ await expect.poll(()=>posts.length).toBe(1);
+ expect(posts[0]).toEqual({tts:'none',asr:'whisper',asrModel:'base'});
+});
+
+test('engine choice: a card that Docker cannot use is named, with what to install, and only recognition is offered',async({page})=>{
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/hardware',r=>r.fulfill({json:noGpu({unusable:['Test GPU']})}));
+ await page.route('**/api/voice',r=>r.fulfill({json:config}));
+ await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ await expect(page.getByRole('alert').filter({hasText:'GPU detected: Test GPU, but Docker cannot use it. Install the NVIDIA Container Toolkit and restart Docker. Until then only speech recognition works: you can dictate, but replies are not spoken.'})).toBeVisible();
+ await expect(page.getByRole('combobox',{name:'Speech synthesis engine'})).toBeDisabled();
+ await expect(page.getByRole('combobox',{name:'Speech synthesis engine'})).toContainText('No speech synthesis');
+});

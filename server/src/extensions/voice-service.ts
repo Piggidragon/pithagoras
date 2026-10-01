@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { containerState, dockerAvailable, imagePresent, pullImage, request } from './docker.js';
 import { asrDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, speechUrl, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, whisperUrl as managedWhisperUrl, type Host, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
-import { NoGpu, decide, detectGpus, explain, hostProbe, readHost, SMI_ARGS, type Detected, type Probe } from '../voice-gpu.js';
+import { NoGpu, decide, detectGpus, explain, hostProbe, isNoGpu, readHost, SMI_ARGS, type Detected, type Probe } from '../voice-gpu.js';
 
 export const CONTAINER = 'pithagoras-voice';
 export const IMAGE = 'nvidia/cuda:12.4.1-devel-ubuntu22.04';
@@ -158,9 +158,24 @@ const dockerProbe: Probe = {
 /** A Docker that does not answer at all, a socket error rather than a refusal, is no GPU either. */
 const unanswered = (e: unknown): never => { throw typeof (e as NodeJS.ErrnoException).code === 'string' ? new NoGpu('Docker did not answer') : e; };
 let probing: Promise<Detected> | undefined;
+/**
+ * The GPUs, and whether Docker can hand them to a container: the first probe that lists a card wins, but the
+ * host listing a card is not Docker having a runtime for it, as on a desktop with the driver and without the
+ * NVIDIA Container Toolkit. Where Docker refuses, those cards are no GPU for voice, and are said to be unusable.
+ */
+async function detectGpuUse(): Promise<Detected> {
+  const found = await detectGpus([hostProbe, dockerProbe]);
+  if (found.source !== 'host' || !dockerAvailable()) return found;
+  try { await dockerProbe.run(); }
+  catch (e) {
+    // Only Docker saying there is no GPU for it counts; not being able to ask leaves the host's word.
+    if (isNoGpu((e as Error).message)) return { gpus: [], source: 'none', error: 'docker: no GPU available', checked: true, unusable: found.gpus.map(g => g.name) };
+  }
+  return found;
+}
 /** One probe at a time: the page asks as it opens, and an install asks too. */
 function detect(): Promise<Detected> {
-  probing ??= detectGpus([hostProbe, dockerProbe]).finally(() => { probing = undefined; });
+  probing ??= detectGpuUse().finally(() => { probing = undefined; });
   return probing;
 }
 /** `VOICE_GPU` picks the card, as it does for the Compose service; `VOICE_VRAM_RESERVE_MIB` keeps memory on it free for something else. */
