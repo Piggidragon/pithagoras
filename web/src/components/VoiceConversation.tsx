@@ -18,9 +18,9 @@ const SHOWN = 30;
  * interrupted before it was spoken.
  *
  * A reply is markdown, as in the chat, so a list or a code block is not a flat
- * string beside the orb. With `bubbles` it also sits in a speech bubble.
+ * string beside the orb, and sits in a speech bubble like what you said.
  */
-export function VoiceConversation({ sessionId, items, bubbles }: { sessionId: string; items: Item[]; bubbles: boolean }) {
+export function VoiceConversation({ sessionId, items }: { sessionId: string; items: Item[] }) {
   const list = items.filter(item => item.kind === "user" || (item.kind === "assistant" && item.text.trim())).slice(-SHOWN);
   const viewport = useRef<HTMLDivElement>(null);
   const last = list.at(-1);
@@ -37,7 +37,7 @@ export function VoiceConversation({ sessionId, items, bubbles }: { sessionId: st
             {item.images?.length ? <div className="voice-said-pictures">{item.images.map(image => <img key={image.name} src={api.imageUrl(sessionId, image.name)} alt="" loading="lazy" />)}</div> : null}
           </div>
         : item.kind === "assistant"
-          ? <div key={item.id} className={`voice-said is-agent md ${bubbles ? "is-bubble" : ""}`}>
+          ? <div key={item.id} className="voice-said is-agent md">
               {/* Streamdown, as in the chat: a reply is shown while it is
                   written, so its unclosed fence or half-written link has to
                   render as what it is about to be, not flicker. */}

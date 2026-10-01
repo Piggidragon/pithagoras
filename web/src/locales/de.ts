@@ -1468,8 +1468,6 @@ const de: Locale = {
     "Only heard while you hold the push-to-talk key (Space unless changed) or the microphone button.": "Nur zu hören, solange du die Push-to-Talk-Taste (Leertaste, sofern nicht geändert) oder den Mikrofonknopf hältst.",
     "Heard whenever you speak.": "Zu hören, sobald du sprichst.",
     "Sound effects": "Soundeffekte",
-    "Speech bubbles": "Sprechblasen",
-    "Puts the agent's replies in the conversation window in speech bubbles.": "Setzt die Antworten des Agenten im Gesprächsfenster in Sprechblasen.",
     // components/VoiceStage.tsx
     "The browser viewer is unavailable.": "Die Browseransicht ist nicht verfügbar.",
     "Could not connect to the browser viewer.": "Verbindung zur Browseransicht fehlgeschlagen.",
