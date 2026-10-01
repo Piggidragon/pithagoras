@@ -38,6 +38,8 @@ import { formatTokens } from "../transcript";
 import { displayName } from "../tool-groups";
 import { useAsksBeforeDeleting } from "../confirm-prefs";
 import { useNotifyState } from "../notify";
+import { setCommandTrigger, useCommandTrigger, validTrigger } from "../command-trigger";
+import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
@@ -528,6 +530,62 @@ function Confirmations() {
   );
 }
 
+/**
+ * What a command starts with in the message box: "/" until another is picked.
+ *
+ * Kept as soon as it is typed, over the old one. A character that cannot be
+ * one is said so and not kept, and the field shows the one in use again once
+ * it is left.
+ */
+function CommandCharacter() {
+  const trigger = useCommandTrigger();
+  const [text, setText] = useState(trigger);
+  const [refused, setRefused] = useState(false);
+  // A change made elsewhere — Reset, another tab — is what the field shows.
+  useEffect(() => {
+    setText(trigger);
+    setRefused(false);
+  }, [trigger]);
+  return (
+    <div className="rounded-xl border border-line bg-raised/40 p-3">
+      <div className="flex items-center gap-3">
+        <div className="w-16">
+          <input
+            value={text}
+            aria-label={t("Command character")}
+            aria-invalid={refused}
+            autoComplete="off"
+            spellCheck={false}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={() => {
+              setText(trigger);
+              setRefused(false);
+            }}
+            onChange={(e) => {
+              const next = [...e.target.value].pop() ?? "";
+              setText(next);
+              setRefused(next !== "" && !validTrigger(next));
+              if (validTrigger(next)) setCommandTrigger(next);
+            }}
+            className={`${inputCls} text-center font-mono`}
+          />
+        </div>
+        <button onClick={() => setCommandTrigger(DEFAULT_TRIGGER)} disabled={trigger === DEFAULT_TRIGGER} className={btnCls}>
+          {t("Reset")}
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-fg-faint">
+        {t("Type {command} in the message box to see the commands, or {skill} to run a skill.", { command: trigger, skill: `${trigger}skill:name` })}
+      </p>
+      {refused && (
+        <p role="alert" className="mt-1 text-xs text-warn">
+          {t("That cannot be it. Use one punctuation mark or symbol: a letter or digit would open the list for every message, and - _ : are part of a command's name.")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Only where there is a password: without one there is nothing to sign out of. */
 function SignOut({ onError }: { onError: (e: string) => void }) {
   const [required, setRequired] = useState(false);
@@ -642,6 +700,12 @@ function BrowserPanel({ onError }: { onError: (e: string) => void }) {
       </Section>
       <Section title={t("Notifications")}>
         <Notifications />
+      </Section>
+      <Section
+        title={t("Command character")}
+        hint={t("What a command starts with when you type it in the message box. The agent is still sent the slash form, so skills and every other command keep working.")}
+      >
+        <CommandCharacter />
       </Section>
       <Section title={t("Confirmations")}>
         <Confirmations />

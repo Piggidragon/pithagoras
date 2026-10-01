@@ -4,6 +4,10 @@ Type `/` in the composer and the palette lists everything available in that
 session. Commands are matched against the real list, so a message that merely
 begins with a path — `/etc/hosts is wrong` — is still sent as a message.
 
+The `/` is only how you type a command, and it can be another character: see
+[The command character](#the-command-character). This page writes `/`
+throughout.
+
 The list is all of them — a lone `/` scrolls rather than stopping at the first
 few — narrowing as you type, by prefix, and it is driven from the keyboard:
 
@@ -21,6 +25,32 @@ somewhere to type the name.
 
 A command that opens a dialog does not appear in the transcript. Its menu is the
 feedback; a chat bubble saying `/models` would be noise.
+
+## The command character
+
+**Settings → This browser → Command character** sets what a command starts
+with in the message box. It is `/` until you change it, and it can be any one
+punctuation mark or symbol — `!`, `.`, `;`, `#`, `§` — but not a letter or a
+digit, which would open the list for every message you write, nor `-`, `_` or
+`:`, which are part of a command's own name.
+
+With `!` chosen, typing `!` opens the same list, `Tab` completes `!skill:review`,
+`Enter` runs the highlighted one, and the key that jumps to the message box from
+anywhere on the page is `!` as well. A message that starts with `!` and is
+not one of the chat's commands — `!important: the build is red` — is sent as it
+was written, as `/etc/hosts is wrong` is under the slash.
+
+pi is always sent the slash form. Whichever character you typed, `!skill:review
+the diff` reaches the agent as `/skill:review the diff`, so skills, prompt
+templates and every extension command keep working, and so do channels and
+routines, which know nothing of this setting. That is also why the chat's own
+line for a command, and the commands the agent suggests in a status line, still
+show a `/`. A command typed out in full with the slash — `/compact` — still
+runs as one after the character has been changed.
+
+The choice is kept in this browser, like the theme and the keyboard shortcuts:
+what is convenient to type depends on the keyboard (a German one reaches `/`
+with Shift), and a phone may want another character than the laptop.
 
 ## Where they come from
 

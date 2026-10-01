@@ -77,9 +77,17 @@ export const ACTIONS: Action[] = [
   { id: "voice.sounds", label: msg("Turn sound effects on or off"), scope: "Voice mode", default: { code: "KeyM", shift: true } },
 ];
 
+export interface FixedShortcut {
+  label: string;
+  keys: Binding;
+  scope: string;
+  /** The command character, whichever one is in use: `keys` is only what it is until another is chosen. */
+  command?: true;
+}
+
 /** Shortcuts that are part of how text fields work, listed so they can be found, not changed. */
-export const FIXED: { label: string; keys: Binding; scope: string }[] = [
-  { label: msg("Jump to the message box"), keys: { code: "Slash" }, scope: "Chat" },
+export const FIXED: FixedShortcut[] = [
+  { label: msg("Jump to the message box"), keys: { code: "Slash" }, scope: "Chat", command: true },
   { label: msg("Send the message"), keys: { code: "Enter" }, scope: "Chat" },
   { label: msg("New line in the message"), keys: { code: "Enter", shift: true }, scope: "Chat" },
   { label: msg("Stop the run (with the message box empty)"), keys: { code: "Escape" }, scope: "Chat" },

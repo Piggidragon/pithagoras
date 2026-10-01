@@ -29,7 +29,8 @@ import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { confirmDialog } from "./ConfirmDialog";
-import { moveHighlight, paletteMatches, slashToken } from "../slash-palette";
+import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
+import { useCommandTrigger } from "../command-trigger";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
 import { GIT_TABS, GitPanel, type GitTab } from "./git/GitPanel";
@@ -905,9 +906,9 @@ export function Chat({
   // Commands come from pi at runtime, so anything a newly installed package
   // registers shows up here without the portal knowing about it in advance.
   //
-  // Asked for only once a "/" is typed. Listing them starts pi for the chat,
-  // and it stays up — so fetching them on open started a runtime for every chat
-  // looked at, which the config route goes out of its way not to do.
+  // Asked for only once the command character is typed. Listing them starts pi
+  // for the chat, and it stays up — so fetching them on open started a runtime
+  // for every chat looked at, which the config route goes out of its way not to do.
   const [commands, setCommands] = useState<PiCommand[]>([]);
   const commandList = useRef<{ key: string; list: Promise<PiCommand[]> } | null>(null);
   /** The commands for this chat, fetched once per chat and again after each run. */
@@ -958,8 +959,10 @@ export function Chat({
   }, [statusNamesCommand, session.id, turns]);
   const commandNames = useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
 
-  // Show the palette while the composer holds a bare "/name" prefix.
-  const slashText = slashToken(input);
+  // Show the palette while the composer holds a bare "/name" prefix — with
+  // whatever character commands start with in this browser.
+  const trigger = useCommandTrigger();
+  const slashText = slashToken(input, trigger);
   const wantsCommands = slashText !== null;
   useEffect(() => {
     if (wantsCommands) void loadCommands();
@@ -984,7 +987,7 @@ export function Chat({
   /** What is left in the box once a command is chosen: its name, ready for arguments. */
   const complete = (c: PiCommand) => {
     caret.current = null;
-    changeInput(`/${c.name} `);
+    changeInput(`${trigger}${c.name} `);
   };
 
   useEffect(() => {
@@ -1037,26 +1040,39 @@ export function Chat({
    */
   const submit = async (msg: string, fromBox: boolean) => {
     const sent = session.id;
+    const typed = typedCommand(msg, trigger);
+    // pi is told "/name" whatever character the command was typed with, so the
+    // page has to know it is one: the server cannot tell "!name" from a message.
+    // Typed before the list has come — it starts pi for the chat, which can take
+    // a while — it is waited for, rather than the command going out as words.
+    let listed = commands;
+    if (typed && !msg.startsWith("/") && !commands.length) {
+      setSending(true);
+      try {
+        listed = await loadCommands();
+      } finally {
+        setSending(false);
+      }
+    }
     // Some builtins are UI, not prompts: /model opens the picker the pill uses,
     // /settings opens the modal. Sending them to pi would just be a chat line.
-    const parsed = /^\/([\w:-]+)\s*(.*)$/.exec(msg);
-    const command = parsed && isClientCommand(parsed[1], commands) ? parsed : null;
+    const command = typed && isClientCommand(typed.name, listed) ? typed : null;
     // The pictures in the box go with what came from it, and nothing else. A
     // command is run rather than said — this one here, any other by pi — so
     // they stay in the box for later rather than going where nothing shows them.
-    const keepsPictures = parsed !== null && isCommand(parsed[1], commands);
-    const images = fromBox && !keepsPictures ? attached : [];
+    const known = typed && isCommand(typed.name, listed) ? typed : null;
+    const images = fromBox && !known ? attached : [];
 
     if (fromBox) {
-      if (keepsPictures) {
+      if (known) {
         caret.current = null;
         changeInput("");
       } else clearBox();
     }
     try {
       if (command) {
-        if (command[1] === "model") setPanelRequest("model");
-        else await onClientCommand(command[1], command[2]);
+        if (command.name === "model") setPanelRequest("model");
+        else await onClientCommand(command.name, command.args);
         return;
       }
       setSending(true);
@@ -1066,7 +1082,7 @@ export function Chat({
         // like the message had gone nowhere. Voice mode has its own switch.
         const steer = running && !voiceMode;
         await onSend(
-          msg,
+          known ? known.wire : msg,
           voiceMode || images.length || steer
             ? { voice: voiceMode || undefined, images: images.length ? images : undefined, steer: steer || undefined }
             : undefined,
@@ -1208,20 +1224,21 @@ export function Chat({
     caretTo.current = null;
   }, [input]);
 
-  // "/" from anywhere on the page: the box, with the command list open.
+  // The command character from anywhere on the page: the box, with the command list open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       // Not behind a dialog: the box is not what is being talked to.
       if (voiceMode || document.querySelector('[aria-modal="true"]')) return;
-      if (!opensComposer({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, target })) return;
+      const altGraph = e.getModifierState?.("AltGraph");
+      if (!opensComposer({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, altGraph, target }, trigger)) return;
       e.preventDefault();
       box.current?.focus();
-      if (!draft.current.trim()) changeInput("/");
+      if (!draft.current.trim()) changeInput(trigger);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [voiceMode, session.id]);
+  }, [voiceMode, session.id, trigger]);
 
   // Phrases sent as they are said go one at a time: a second must not overtake
   // the first, and one that fails goes back in the box rather than being lost.
@@ -1933,7 +1950,7 @@ export function Chat({
                   i === picked ? "bg-fg/5" : ""
                 }`}
               >
-                <span className="font-mono text-xs text-accent">/{c.name}</span>
+                <span className="font-mono text-xs text-accent">{trigger}{c.name}</span>
                 <span className="truncate text-xs text-fg-subtle">{c.description}</span>
                 <span className="ml-auto shrink-0 text-[10px] text-fg-faint">{c.source}</span>
               </button>
@@ -2051,7 +2068,7 @@ export function Chat({
                 e.preventDefault();
                 if (sending) return;
                 if (chosen.needsArgument) complete(chosen);
-                else void attempt(() => submit(`/${chosen.name}`, true));
+                else void attempt(() => submit(`${trigger}${chosen.name}`, true));
                 return;
               }
             }

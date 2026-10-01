@@ -25,6 +25,22 @@ test("other keys open nothing", () => {
   assert.equal(opensComposer({ key: "a" }), false);
 });
 
+test("the command character chosen is the one that opens it, and the slash is not", () => {
+  assert.equal(opensComposer({ key: "!", target: { tagName: "BODY" } }, "!"), true);
+  assert.equal(opensComposer({ key: "/", target: { tagName: "BODY" } }, "!"), false);
+  assert.equal(opensComposer({ key: "!" }), false);
+  assert.equal(opensComposer({ key: "!", target: { tagName: "TEXTAREA" } }, "!"), false);
+  assert.equal(opensComposer({ key: "!", ctrlKey: true }, "!"), false);
+});
+
+test("AltGr is how some keyboards type a character, and is not a modifier of the browser's", () => {
+  // Windows reports it as Ctrl and Alt together: "@" on a German keyboard.
+  const altGr = { key: "@", ctrlKey: true, altKey: true, altGraph: true };
+  assert.equal(opensComposer(altGr, "@"), true);
+  assert.equal(opensComposer({ ...altGr, metaKey: true }, "@"), false);
+  assert.equal(opensComposer({ key: "@", ctrlKey: true, altKey: true }, "@"), false);
+});
+
 const base = { key: "Escape", running: true, composing: false, paletteOpen: false };
 
 test("Escape stops a run", () => {
