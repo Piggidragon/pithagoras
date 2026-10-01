@@ -132,7 +132,9 @@ extension.
 - **At most 12 screens a chat**, and each is bounded, since a screen is sent whole
   to every open page with each change: text is cut at 2,000 characters, a list at
   200 entries, nesting at a few levels, the whole screen at a few thousand values,
-  and all its text together at 100,000 characters. More is cut, not refused, so a
-  long description is better left out of a block than cut by it.
+  and all its text together at 100,000 characters. More is cut, not refused: at
+  an entry, never inside one, so the item that does not fit is left out whole with
+  the ones after it, and what stays is as the extension said it. A long
+  description is better left out of a block than the reason the list ends early.
 - **Blocks show, they do not take input.** There is no way to click through to
   the extension.

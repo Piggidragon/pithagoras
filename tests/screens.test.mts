@@ -44,14 +44,34 @@ test('a screen is held to a size however long its texts are, since it is sent wh
  const huge=cleanScreen({id:'a',blocks:Array.from({length:30},()=>({type:'list',items:Array.from({length:200},()=>'x'.repeat(5000))}))})!;
  assert.ok(JSON.stringify(huge).length<250_000,'cut, not sent');
  assert.ok(huge.blocks.length>0&&(huge.blocks[0].items as unknown[]).length>0,'what comes first is kept');
- // A text that is cut at the budget keeps its start, and the ones after it are left out.
+ // It is cut between the blocks: the one that does not fit is left out whole, and so are the ones after it.
  const texts=cleanScreen({id:'a',blocks:Array.from({length:100},(_,i)=>({type:'text',text:`${i}:`+'y'.repeat(1990)}))})!;
  assert.ok(texts.blocks.length>=45&&texts.blocks.length<100);
- assert.ok((texts.blocks[0].text as string).startsWith('0:'));
+ assert.ok(texts.blocks.every((b,i)=>b.type==='text'&&(b.text as string).length===(i<10?1992:i<100?1993:1994)),'none of them cut');
  // Short texts are not touched: a long todo list is well inside.
  const todos=cleanScreen({id:'a',blocks:[{type:'checklist',items:Array.from({length:200},(_,i)=>({text:`Task ${i}`,detail:'d'.repeat(300),state:'todo'}))}]})!;
  assert.equal((todos.blocks[0].items as unknown[]).length,200);
  assert.equal(((todos.blocks[0].items as any[])[199]).detail.length,300);
+});
+test('what is cut at the limits is cut between values, so that what stays is what was said',()=>{
+ // A task of a long list that is done is done on the page, or it is not there: not shown as to do for a missing `state`.
+ const tasks=cleanScreen({id:'a',blocks:[{type:'checklist',items:Array.from({length:60},(_,i)=>({text:`Task ${i}`,detail:'d'.repeat(1700),state:'done'}))}]})!;
+ const items=tasks.blocks[0].items as any[];
+ assert.ok(items.length>40&&items.length<60,'cut before the end');
+ items.forEach((item,i)=>assert.deepEqual(item,{text:`Task ${i}`,detail:'d'.repeat(1700),state:'done'}));
+ assert.equal(tasks.blocks[0].type,'checklist');
+ // Nor does a block lose its type to the limit, or a group keep blocks that are empty.
+ const rest=cleanScreen({id:'a',blocks:[{type:'text',text:'a'.repeat(1990)},...Array.from({length:60},()=>({type:'text',text:'b'.repeat(1990)})),{type:'checklist',items:['one']}]})!;
+ assert.ok(rest.blocks.every(b=>b.type==='text'&&typeof b.text==='string'&&(b.text as string).length===1990),'whole or not there');
+ const groups=cleanScreen({id:'a',blocks:Array.from({length:4},()=>({type:'group',title:'Part',blocks:Array.from({length:30},()=>({type:'text',text:'t'.repeat(1200)}))}))})!;
+ assert.ok(groups.blocks.length>=2&&groups.blocks.length<=4);
+ for(const group of groups.blocks){
+  assert.equal(group.type,'group');assert.equal(group.title,'Part');
+  for(const block of group.blocks as any[]) assert.deepEqual(block,{type:'text',text:'t'.repeat(1200)});
+ }
+ // The same at the count of values: an item of a long list is whole, or it is not there.
+ const many=cleanScreen({id:'a',blocks:[{type:'checklist',items:Array.from({length:199},(_,i)=>({text:`T${i}`,state:'done',detail:'x',tone:'ok',items:[{text:'sub',state:'done'}]}))},{type:'checklist',items:Array.from({length:199},(_,i)=>({text:`U${i}`,state:'done',detail:'x',tone:'ok'}))}]})!;
+ for(const block of many.blocks) for(const item of block.items as any[]) assert.equal(item.state,'done',`${item.text} keeps its state`);
 });
 test('what an extension shows reaches the portal as session events, and is kept as it stands',()=>{
  const b=bus();const out:any[]=[];const screens=bridgeScreens(b,e=>out.push(e));

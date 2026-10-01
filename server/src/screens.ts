@@ -56,7 +56,8 @@ const NODES_MAX = 4000;
  * The characters of all the texts and keys in one screen. The counts above bound
  * how many values there are, not how long: a screen is sent whole on every
  * change and with every poll of the page, so it has to stay a few hundred
- * kilobytes however long the strings are that a glue puts in it.
+ * kilobytes however long the strings are that a glue puts in it. What does not
+ * fit is left out whole, with what follows it, and never cut in the middle.
  */
 const CHARS_MAX = 100_000;
 
@@ -72,42 +73,67 @@ export type ScreenBridge = (() => void) & {
 const text = (value: unknown, max: number): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined;
 
+/** What is left of the limits of one screen. */
+interface Budget {
+  left: number;
+  chars: number;
+}
+
+/**
+ * Spends `nodes` values and `chars` characters, if they are there. If not,
+ * nothing more is let through: what is cut is cut at a whole value, never in it.
+ */
+function take(budget: Budget, nodes: number, chars: number): boolean {
+  if (nodes > budget.left || chars > budget.chars) {
+    budget.left = 0;
+    budget.chars = 0;
+    return false;
+  }
+  budget.left -= nodes;
+  budget.chars -= chars;
+  return true;
+}
+
 /**
  * Plain data only, and bounded: strings, finite numbers, booleans, lists and
  * objects of them. Functions, symbols, `undefined` and what is deeper or
  * further than the limits are left out, so whatever a glue puts together
  * arrives as JSON the page can hold, however it was made.
  */
-function plain(value: unknown, depth: number, budget: { left: number; chars: number }): unknown {
-  if (budget.left <= 0) return undefined;
+function plain(value: unknown, depth: number, budget: Budget): unknown {
+  if (budget.left <= 0 || budget.chars <= 0) return undefined;
   if (typeof value === "string") {
-    // What does not fit of the last text is cut; the texts after it are left out.
-    if (budget.chars <= 0) return undefined;
-    budget.left--;
-    const kept = value.slice(0, Math.min(TEXT_MAX, budget.chars));
-    budget.chars -= kept.length;
-    return kept;
+    const kept = value.slice(0, TEXT_MAX);
+    return take(budget, 1, kept.length) ? kept : undefined;
   }
   if (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
-    budget.left--;
-    return value;
+    return take(budget, 1, 0) ? value : undefined;
   }
   if (!value || typeof value !== "object" || depth > DEPTH_MAX) return undefined;
-  budget.left--;
   if (Array.isArray(value)) {
+    if (!take(budget, 1, 0)) return undefined;
     const kept: unknown[] = [];
     for (const entry of value.slice(0, ENTRIES_MAX)) {
+      // Cut between the entries: one that does not fit is left out whole, and so is what follows.
+      if (budget.left <= 0 || budget.chars <= 0) break;
       const one = plain(entry, depth + 1, budget);
       if (one !== undefined) kept.push(one);
     }
     return kept;
   }
+  // An object is all of its own fields or none: a block without its `type`, an item
+  // without its `state`, would be drawn as something it is not. What it holds in lists
+  // and objects of their own is cut as they are, so the object still says what it is.
+  const fields = Object.entries(value)
+    .slice(0, ENTRIES_MAX)
+    .map(([key, entry]): [string, unknown, boolean] => [key.slice(0, KEY_MAX), entry, typeof entry === "string" || typeof entry === "boolean" || (typeof entry === "number" && Number.isFinite(entry))])
+    .filter(([, entry, scalar]) => scalar || (!!entry && typeof entry === "object"));
+  const own = fields.filter(([, , scalar]) => scalar);
+  const chars = fields.reduce((sum, [name, entry, scalar]) => sum + name.length + (scalar && typeof entry === "string" ? Math.min(entry.length, TEXT_MAX) : 0), 0);
+  if (!take(budget, 1 + own.length, chars)) return undefined;
   const kept: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value).slice(0, ENTRIES_MAX)) {
-    const name = key.slice(0, KEY_MAX);
-    if (budget.chars < name.length) break;
-    budget.chars -= name.length;
-    const one = plain(entry, depth + 1, budget);
+  for (const [name, entry, scalar] of fields) {
+    const one = scalar ? (typeof entry === "string" ? entry.slice(0, TEXT_MAX) : entry) : plain(entry, depth + 1, budget);
     if (one !== undefined) kept[name] = one;
   }
   return kept;
