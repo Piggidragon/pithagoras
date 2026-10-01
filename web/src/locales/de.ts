@@ -1604,6 +1604,9 @@ const de: Locale = {
     "Only heard while you hold the push-to-talk key (Space unless changed) or the microphone button.": "Nur zu hören, solange du die Push-to-Talk-Taste (Leertaste, sofern nicht geändert) oder den Mikrofonknopf hältst.",
     "Heard whenever you speak.": "Zu hören, sobald du sprichst.",
     "Sound effects": "Soundeffekte",
+    "Fillers": "Füllgeräusche",
+    "A short sound such as “mhm” the moment you have finished, until the answer starts.": "Ein kurzes Geräusch wie „mhm“, sobald du fertig bist, bis die Antwort beginnt.",
+    "Nothing is said until the answer starts.": "Bis die Antwort beginnt, wird nichts gesagt.",
     // components/VoiceStage.tsx
     "The browser viewer is unavailable.": "Die Browseransicht ist nicht verfügbar.",
     "Could not connect to the browser viewer.": "Verbindung zur Browseransicht fehlgeschlagen.",
@@ -1880,6 +1883,10 @@ const de: Locale = {
     "A binary file — not shown": "Eine Binärdatei — nicht gezeigt",
     // hands-free.ts
     "Could not send “{text}”: {error}": "„{text}“ konnte nicht gesendet werden: {error}",
+    "My context is getting full. Let me quickly compact our conversation before I continue.": "Mein Kontext wird voll. Ich komprimiere kurz unser Gespräch, bevor ich weitermache.",
+    "Context compaction is done. I'm ready to continue.": "Die Komprimierung ist fertig. Ich bin bereit weiterzumachen.",
+    "Context compaction stopped before it finished.": "Die Komprimierung wurde abgebrochen, bevor sie fertig war.",
+    "I'm still compacting our conversation. Please wait a moment; I'll let you know when I'm ready.": "Ich komprimiere unser Gespräch noch. Bitte warte einen Moment; ich sage dir, wenn ich bereit bin.",
     // keybindings.ts
     "Start or end voice mode": "Sprachmodus starten oder beenden",
     "Mute or unmute the microphone": "Mikrofon stumm- oder einschalten",
@@ -1897,6 +1904,7 @@ const de: Locale = {
     "Switch between stopping and adding to the task": "Zwischen Stoppen und Ergänzen der Aufgabe wechseln",
     "Turn push-to-talk on or off": "Push-to-Talk ein- oder ausschalten",
     "Turn sound effects on or off": "Soundeffekte ein- oder ausschalten",
+    "Turn fillers on or off": "Füllgeräusche ein- oder ausschalten",
     "Jump to the message box": "Zum Eingabefeld springen",
     "Send the message": "Die Nachricht senden",
     "New line in the message": "Neue Zeile in der Nachricht",

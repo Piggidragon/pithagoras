@@ -14,6 +14,15 @@ function setup(patch: Partial<VoiceIO> & { speak?: (text: string, signal: AbortS
   };
   return { voice: new HandsFreeVoice(io, [reply('a10')]), sent, spoken, errors };
 }
+/** A filler that plays until it is cut, and what happened to it. */
+function fillers() {
+  const log: string[] = [];
+  const filler = (signal: AbortSignal) => {
+    log.push('filler:start');
+    return new Promise<void>(resolve => signal.addEventListener('abort', () => { log.push('filler:cut'); resolve(); }, { once: true }));
+  };
+  return { filler, log };
+}
 test('successive automatic turns work without another mic toggle; history stays silent', async () => {
   const { voice, sent, spoken } = setup();
   voice.observe([reply('a1'), reply('a10')]);
@@ -152,30 +161,13 @@ test('response audio plays while the send acknowledgement is still pending', asy
   accepted.resolve(); await tick(); voice.stop();
 });
 
-test('thinking gets one short queued phrase; fast replies suppress it', async () => {
-  const { voice, spoken } = setup({ agentRunning: () => true });
-  voice.observe([reply('a10')]);
-  await new Promise(r => setTimeout(r, 1900)); await tick();
-  assert.equal(spoken.length, 1);
-  assert.match(spoken[0], /think|consider|moment/i);
-  voice.observe([reply('a10')]); await tick();
-  assert.equal(spoken.length, 1);
-  voice.stop();
-  const fast = setup({ agentRunning: () => true });
-  fast.voice.observe([reply('a10')]);
-  fast.voice.observe([reply('a20')]); await tick();
-  fast.voice.stop();
-  assert.deepEqual(fast.spoken, ['A spoken answer.']);
-});
-
-test('compaction replaces thinking cues once and returns to normal status after ending', async () => {
+test('compaction is announced once and again when it ends, and the phase follows it', async () => {
   const phases: string[] = [];
   const { voice, spoken } = setup({ agentRunning: () => true, phase: phase => phases.push(phase) });
   voice.observe([reply('a10')]);
   voice.setCompacting(true);
   voice.setCompacting(true);
   await tick();
-  await new Promise(r => setTimeout(r, 1900));
   assert.equal(spoken.length, 1);
   assert.match(spoken[0], /context/i);
   assert.equal(phases.at(-1), 'Compacting context');
@@ -186,20 +178,13 @@ test('compaction replaces thinking cues once and returns to normal status after 
   voice.stop();
 });
 
-test('compaction aborts an in-flight thinking cue', async () => {
-  let cueSignal: AbortSignal | undefined;
-  const { voice } = setup({ agentRunning: () => true, synthesize: async (text, signal) => {
-    if (!text.includes('context')) {
-      cueSignal = signal;
-      await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
-    }
-    return async () => {};
-  } });
-  voice.observe([reply('a10')]);
-  await new Promise(r => setTimeout(r, 1900));
-  assert.ok(cueSignal);
+test('compaction ends a filler that is playing', async () => {
+  const { filler, log } = fillers();
+  const { voice } = setup({ agentRunning: () => true, filler });
+  voice.speechStart(); voice.speechEnd(new Float32Array(16000)); await tick();
+  assert.deepEqual(log, ['filler:start']);
   voice.setCompacting(true);
-  assert.equal(cueSignal.aborted, true);
+  assert.deepEqual(log, ['filler:start', 'filler:cut']);
   await tick();
   voice.stop();
 });
@@ -369,4 +354,129 @@ test('a stop that failed while speaking is tried again before what was said is s
   assert.deepEqual(calls, ['abort']);
   firstAbort.resolve(); await tick(); await tick(); await tick();
   assert.deepEqual(calls, ['abort', 'abort', 'send']); assert.deepEqual(sent, ['hello']); voice.stop();
+});
+
+// Fillers: a short sound the moment a turn is taken, until the answer starts.
+const turn = (voice: HandsFreeVoice) => { voice.speechStart(); voice.speechEnd(new Float32Array(16000)); };
+
+test('a filler plays the moment the turn is taken, while the agent has not yet answered the send', async () => {
+  const { filler, log } = fillers(); const accepted = deferred<void>();
+  const { voice, sent } = setup({ filler, send: () => accepted.promise });
+  turn(voice); await tick();
+  // No timer in between: not after seconds of silence, but with the send still open.
+  assert.deepEqual(log, ['filler:start']); assert.deepEqual(sent, []);
+  accepted.resolve(); await tick(); voice.stop();
+});
+
+test('a filler waits for what was said to be known, and then comes with nothing in front of it', async () => {
+  const { filler, log } = fillers(); const transcript = deferred<string>();
+  const { voice } = setup({ filler, transcribe: () => transcript.promise });
+  turn(voice); await tick();
+  assert.deepEqual(log, []);
+  transcript.resolve('hello'); await tick();
+  assert.deepEqual(log, ['filler:start']); voice.stop();
+});
+
+test('no filler for a noise that is no words, for what is for the page, or for a send that is refused', async () => {
+  const noise = fillers();
+  const a = setup({ filler: noise.filler, transcribe: async () => '' });
+  turn(a.voice); await tick(); a.voice.stop();
+  const page = fillers();
+  const b = setup({ filler: page.filler, command: () => true });
+  turn(b.voice); await tick(); b.voice.stop();
+  const refused = fillers();
+  const c = setup({ filler: refused.filler, send: async () => { throw new Error('offline'); } });
+  turn(c.voice); await tick();
+  assert.deepEqual([noise.log, page.log], [[], []]);
+  // Started with the send, and cut when it failed: the turn did not happen.
+  assert.deepEqual(refused.log, ['filler:start', 'filler:cut']); c.voice.stop();
+});
+
+test('a filler yields to the answer: it is cut before the answer is heard, and the two never play together', async () => {
+  const { filler, log } = fillers();
+  const { voice } = setup({ filler, speak: async text => { log.push('answer:' + text); } });
+  turn(voice); await tick();
+  voice.observe([reply('a20')]); await tick();
+  assert.deepEqual(log, ['filler:start', 'filler:cut', 'answer:A spoken answer.']); voice.stop();
+});
+
+test('a filler plays on while the answer is made, and yields when the answer can be heard, not when its text arrives', async () => {
+  const { filler, log } = fillers(); const made = deferred<void>();
+  const { voice } = setup({ filler, synthesize: async () => { await made.promise; return async () => { log.push('answer'); }; } });
+  turn(voice); await tick();
+  voice.observe([reply('a20')]); await tick();
+  assert.deepEqual(log, ['filler:start']);
+  made.resolve(); await tick();
+  assert.deepEqual(log, ['filler:start', 'filler:cut', 'answer']); voice.stop();
+});
+
+test('a filler whose player does not answer is not waited for', async () => {
+  const log: string[] = [];
+  const { voice } = setup({ filler: () => new Promise<void>(() => {}), speak: async () => { log.push('answer'); } });
+  turn(voice); await tick();
+  voice.observe([reply('a20')]); await tick();
+  assert.deepEqual(log, []);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.deepEqual(log, ['answer']); voice.stop();
+});
+
+test('talking over a filler cuts it at once, and a turn that follows gets none until something else has been said', async () => {
+  const { filler, log } = fillers();
+  const { voice } = setup({ filler });
+  turn(voice); await tick();
+  voice.speechStart();
+  assert.deepEqual(log, ['filler:start', 'filler:cut']);
+  voice.speechEnd(new Float32Array(16000)); await tick();
+  // The last thing heard was a filler: not another one on top of it.
+  assert.deepEqual(log, ['filler:start', 'filler:cut']); voice.stop();
+});
+
+test('a filler is not repeated back to back, and comes again once an answer has been heard', async () => {
+  const { filler, log } = fillers(); const spoken: string[] = [];
+  const { voice } = setup({ filler, speak: async text => { spoken.push(text); } });
+  turn(voice); await tick();
+  turn(voice); await tick();
+  assert.equal(log.filter(entry => entry === 'filler:start').length, 1);
+  voice.observe([reply('a20')]); await tick();
+  assert.deepEqual(spoken, ['A spoken answer.']);
+  turn(voice); await tick();
+  assert.equal(log.filter(entry => entry === 'filler:start').length, 2); voice.stop();
+});
+
+test('the late "let me think" line is gone: a long silence is not filled a second time, in any words', async () => {
+  const { filler, log } = fillers();
+  const { voice, spoken } = setup({ filler, agentRunning: () => true });
+  turn(voice); await tick();
+  voice.observe([reply('a10')]); await tick();
+  // The line it replaces came after about two seconds.
+  await new Promise(resolve => setTimeout(resolve, 2100));
+  assert.equal(log.filter(entry => entry === 'filler:start').length, 1);
+  assert.deepEqual(spoken, []); voice.stop();
+});
+
+test('with status speech off, or in the sequential baseline, there are no fillers', async () => {
+  for (const patch of [{ statusSpeech: false }, { sequential: true }]) {
+    const { filler, log } = fillers();
+    const { voice, sent } = setup({ filler, ...patch });
+    turn(voice); await tick();
+    assert.deepEqual(sent, ['hello']); assert.deepEqual(log, [], JSON.stringify(patch)); voice.stop();
+  }
+});
+
+test('nothing to play is not an error, and the next turn tries again; a filler that fails is not reported', async () => {
+  let ready = false, asked = 0;
+  const { voice, errors } = setup({ filler: () => { asked++; return ready ? Promise.reject(new Error('no audio')) : undefined; } });
+  turn(voice); await tick();
+  ready = true;
+  turn(voice); await tick(); await tick();
+  assert.equal(asked, 2); assert.deepEqual(errors, []); voice.stop();
+});
+
+test('ending voice cuts a filler, and the phase says speaking only while it plays', async () => {
+  const { filler, log } = fillers(); const phases: string[] = [];
+  const { voice } = setup({ filler, phase: phase => phases.push(phase), agentRunning: () => true });
+  turn(voice); await tick();
+  assert.equal(phases.at(-1), 'Speaking');
+  voice.stop();
+  assert.deepEqual(log, ['filler:start', 'filler:cut']);
 });

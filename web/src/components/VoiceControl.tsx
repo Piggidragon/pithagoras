@@ -12,7 +12,8 @@ import type { MicVAD } from "@ricky0123/vad-web";
 import { api, type PortalEvent, type PromptOptions } from "../api";
 import type { Item } from "../transcript";
 import { LiveTranscription } from "../live-transcription";
-import { preparePcmSpeech, readPcmStream, playAudioBuffer, bufferOf } from "../pcm-stream";
+import { preparePcmSpeech, readPcmStream, playAudioBuffer, playFading, bufferOf } from "../pcm-stream";
+import { FillerClips, fillerSource } from "../voice-fillers";
 import { stretch, stretchInSteps } from "../time-stretch";
 import { joinSamples } from "../samples";
 import { asksToRepeat, couldAskToRepeat } from "../voice-commands";
@@ -99,6 +100,13 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const soundContext = useRef<AudioContext | null>(null);
   const cue = useCallback((kind: VoiceCue) => { if (soundsEnabled.current && soundContext.current) voiceCue(soundContext.current, kind); }, []);
   const toggleSounds = () => setSounds(value => { local.set('voiceSounds', value ? 'off' : 'on'); return !value; });
+  // Fillers: a short sound in the silence after a turn. Offered unless the portal
+  // switched status speech off or runs the sequential baseline, and then this
+  // browser's choice decides.
+  const [fillers, setFillers] = useState(() => local.get('voiceFillers') !== 'off');
+  const fillersOn = useRef(fillers); fillersOn.current = fillers;
+  const [fillersOffered, setFillersOffered] = useState(false);
+  const fillerClips = useRef<FillerClips | null>(null);
   const [available, setAvailable] = useState(false);
   // After a reload voice mode comes back, but audio may not start until the
   // page has been touched: the stage is shown and waits for that.
@@ -172,6 +180,12 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     if(!response.ok)throw new Error((await response.json()).error||t('Could not connect voice service'));
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
+  /** Fetches the fillers, or looks again for them, while voice mode is on and they are wanted: asking is what has the portal make them. */
+  const loadFillers = () => {
+    if (!voice.current || !statusSpeech.current || sequential.current || !fillersOn.current) return;
+    (fillerClips.current ??= new FillerClips(fillerSource(sessionId))).load();
+  };
+  const chooseFillers = (on: boolean) => { local.set('voiceFillers', on ? 'on' : 'off'); setFillers(on); fillersOn.current = on; if (on) loadFillers(); };
 
   const stop = () => {
     profiler.current?.close('stopped');
@@ -190,6 +204,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     clearTimeout(holdLimit.current); clearTimeout(held.current?.timer); held.current = null;
     replay.current?.abort(); replay.current = null;
     voice.current?.stop(); voice.current = null;
+    fillerClips.current?.stop(); fillerClips.current = null;
     transcription.current?.reset(); transcription.current = null;
     const detector = vad.current; vad.current = null;
     void detector?.destroy().catch(() => {});
@@ -207,6 +222,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       setComparison(config.comparison === true);
       sequential.current = config.pipelineMode === "sequential";
       setSequentialMode(sequential.current);
+      setFillersOffered(statusSpeech.current && !sequential.current);
+      // The voice may have changed: its fillers are another set.
+      loadFillers();
       sentenceChunks.current = config.sentenceChunks === true;
       setSentenceMode(sentenceChunks.current);
       ttsPrefetch.current = config.ttsPrefetch === true;
@@ -542,12 +560,20 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         steering: () => steering.current,
         agentRunning: () => latest.current.running,
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
+        filler: signal => {
+          const samples = fillersOn.current ? fillerClips.current?.next() : undefined;
+          if (!samples) return undefined;
+          // At the speed replies are spoken at, like the rest of the voice.
+          const buffer = bufferOf(audio, speed.current === 1 ? samples : stretch(samples, speed.current), 24000);
+          return buffer && playThrough(audio, signal, (analyser, started) => playFading(buffer, audio, analyser, signal, started));
+        },
         trace: profileMark,
         phase: value => { if (current()) setPhase(value); },
         error: message => { if (current()) {setError(message);profiler.current?.close('error');} },
       }, latest.current.items);
       voice.current = controller;
       controller.setCompacting(latest.current.compacting);
+      loadFillers();
       const detector = await detectorModule.MicVAD.new({
         model: "v5", audioContext: audio, startOnLoad: false,
         baseAssetPath: "/voice-assets/", onnxWASMBasePath: "/voice-assets/",
@@ -644,6 +670,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         canRepeat={canRepeat} onRepeat={() => { repeatReply(); }}
         rate={rate} onRate={value => { local.set('voiceRate', String(value)); setRate(value); }}
         steer={steer} onSteer={value => { local.set('voiceSteer', value ? 'on' : 'off'); setSteer(value); }}
+        fillers={fillersOffered ? fillers : null} onFillers={chooseFillers}
         ptt={ptt} onPtt={value => { void choosePtt(value); }} holding={holding} onHold={hold} />, stageTarget,
     )}
     <div className="relative flex items-center gap-1">

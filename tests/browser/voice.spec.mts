@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
 const sample = readFileSync(new URL('../fixtures/jfk.wav', import.meta.url));
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/browser', route => route.fulfill({ json: { running: false, sessions: [], install: { container: 'stopped' } } }));
@@ -369,4 +370,110 @@ test('without speech synthesis voice mode is not offered, because it speaks its 
   await page.reload();
   await expect(page.getByRole('button', { name: 'Dictate a message' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toBeVisible();
+});
+
+test('a filler plays right after the turn, is not the same one twice running, and gives way to the answer without overlap', async ({ page }) => {
+  const failures: string[] = []; page.on('pageerror', e => failures.push(e.message));
+  const tone = (seconds: number) => {
+    const bytes = Buffer.alloc(Math.round(24000 * seconds) * 2);
+    for (let i = 0; i < bytes.length / 2; i++) bytes.writeInt16LE(Math.round(Math.sin(i * 2 * Math.PI * 330 / 24000) * 3000), i * 2);
+    return bytes;
+  };
+  // Told apart by length: two fillers and a reply.
+  const clips = [tone(0.7), tone(0.9)];
+  let answerAfter = 1500;
+  await page.addInitScript(() => {
+    const log: { e: string; duration?: number; at: number }[] = []; (window as any).audioLog = log;
+    const start = AudioBufferSourceNode.prototype.start, stop = AudioBufferSourceNode.prototype.stop;
+    AudioBufferSourceNode.prototype.start = function (...args) { log.push({ e: 'start', duration: this.buffer?.duration, at: performance.now() }); return start.apply(this, args); };
+    // When it ends, not when it was told to: a stop is scheduled on the audio clock.
+    AudioBufferSourceNode.prototype.stop = function (when?: number) { log.push({ e: 'stop', duration: this.buffer?.duration, at: performance.now() + Math.max(0, ((when ?? 0) - this.context.currentTime) * 1000) }); return stop.call(this, when); };
+  });
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'A test voice turn.' } }));
+  await page.route('**/voice/fillers', route => route.fulfill({ json: { key: 'k', clips: [0, 1], rendering: false } }));
+  await page.route('**/voice/fillers/k/*', route => route.fulfill({ body: clips[Number(new URL(route.request().url()).pathname.split('/').pop())], headers: { 'content-type': 'audio/pcm' } }));
+  await page.route('**/voice/speech', async route => {
+    await new Promise(resolve => setTimeout(resolve, answerAfter));
+    await route.fulfill({ body: tone(3), headers: { 'content-type': 'audio/pcm', 'x-sample-rate': '24000' } });
+  });
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+  const sounds = () => page.evaluate(() => ((window as any).audioLog as { e: string; duration?: number; at: number }[]).filter(x => x.e === 'send' || [0.7, 0.9, 3].includes(Math.round((x.duration ?? 0) * 10) / 10)));
+  type Entry = { e: string; duration?: number; at: number };
+  const starts = async () => (await sounds()).filter(x => x.e === 'start');
+  // Turn one: the answer takes a while, and the filler plays out in front of it.
+  await page.getByRole('button', { name: 'Inject speech' }).click();
+  await expect(page.getByTestId('sent')).toHaveText('1', { timeout: 12000 });
+  await expect.poll(async () => (await starts()).length, { timeout: 8000 }).toBe(2);
+  let log = await sounds() as Entry[];
+  const [first, answer] = log.filter(x => x.e === 'start');
+  assert(first.duration! < 1 && answer.duration === 3);
+  // Played the moment the turn is taken, with the send not yet through and the answer some time off.
+  const sent = log.find(x => x.e === 'send')!;
+  expect(Math.abs(first.at - sent.at)).toBeLessThan(250);
+  expect(answer.at - first.at).toBeGreaterThan(first.duration! * 1000);
+  expect(log.some(x => x.e === 'stop' && x.duration === first.duration)).toBe(false);
+  // Turn two: said over the answer, which is ready almost at once, while the next filler is still playing.
+  answerAfter = 100;
+  await page.getByRole('button', { name: 'Inject speech' }).click();
+  await expect(page.getByTestId('sent')).toHaveText('2', { timeout: 12000 });
+  await expect.poll(async () => (await starts()).length, { timeout: 8000 }).toBe(4);
+  log = await sounds() as Entry[];
+  const [, , second, answerTwo] = log.filter(x => x.e === 'start');
+  expect(second.duration).not.toBe(first.duration);
+  const cut = log.find(x => x.e === 'stop' && x.duration === second.duration);
+  expect(cut, 'the filler was cut when the answer came').toBeTruthy();
+  // The answer starts once the filler has faded out, never over it.
+  expect(cut!.at).toBeLessThan(second.at + second.duration! * 1000);
+  expect(answerTwo.at).toBeGreaterThanOrEqual(cut!.at - 15);
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  expect(failures).toEqual([]);
+});
+
+test('fillers are switched off in the voice settings or with Shift+F, and are not offered where the portal has none', async ({ page }) => {
+  let listed = 0; let config: object = { enabled: true };
+  await page.route('**/api/voice', route => route.fulfill({ json: config }));
+  await page.route('**/voice/fillers', route => { listed++; return route.fulfill({ json: { key: '', clips: [], rendering: false } }); });
+  const open = async () => {
+    await page.goto('/tests/voice.html');
+    await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+    await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+    await page.getByRole('button', { name: 'Voice settings' }).click();
+    return page.getByRole('dialog', { name: 'Voice settings' });
+  };
+  // Voice mode is left on a page that is reloaded, and would come back by itself.
+  const close = async () => { await page.keyboard.press('Escape'); await page.getByRole('button', { name: 'End voice mode' }).click(); };
+  let card = await open();
+  const fillers = card.getByRole('group', { name: 'Fillers' });
+  await expect(fillers.getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+  expect(listed).toBe(1);
+  await fillers.getByRole('button', { name: 'Off' }).click();
+  expect(await page.evaluate(() => localStorage.getItem('voiceFillers'))).toBe('off');
+  await expect(card.getByText('Nothing is said until the answer starts.')).toBeVisible();
+  await page.keyboard.press('Escape');
+  // On again, from the keyboard: the portal is asked for them again.
+  await page.keyboard.press('Shift+F');
+  await expect.poll(() => listed).toBe(2);
+  expect(await page.evaluate(() => localStorage.getItem('voiceFillers'))).toBe('on');
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  // Kept off, nothing is asked for at all.
+  await page.evaluate(() => localStorage.setItem('voiceFillers', 'off'));
+  listed = 0;
+  card = await open();
+  await expect(card.getByRole('group', { name: 'Fillers' }).getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
+  expect(listed).toBe(0);
+  await close();
+  await page.evaluate(() => localStorage.removeItem('voiceFillers'));
+  // Status speech off on the portal, or the sequential baseline: no such setting, and nothing asked for.
+  for (const off of [{ statusSpeech: false }, { pipelineMode: 'sequential' }]) {
+    config = { enabled: true, ...off }; listed = 0;
+    card = await open();
+    await expect(card.getByRole('group', { name: 'Sound effects' })).toBeVisible();
+    await expect(card.getByRole('group', { name: 'Fillers' })).toHaveCount(0);
+    expect(listed, JSON.stringify(off)).toBe(0);
+    await close();
+  }
 });

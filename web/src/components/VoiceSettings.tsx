@@ -6,7 +6,7 @@ import { t } from "../i18n";
 export const VOICE_RATES = [1, 1.25, 1.5, 1.75];
 
 /**
- * How voice mode behaves, in a small card by its buttons: sound effects, how
+ * How voice mode behaves, in a small card by its buttons: sound effects, fillers, how
  * fast the agent speaks, what talking mid-run does, and push-to-talk. Each is
  * remembered in this browser.
  *
@@ -14,10 +14,12 @@ export const VOICE_RATES = [1, 1.25, 1.5, 1.75];
  * layer, and the canvas panel beside it would otherwise cover the card. It is
  * placed above the button that opens it, and follows it when the window changes.
  */
-export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, onSteer, ptt, onPtt, onClose }: {
+export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, onSteer, fillers, onFillers, ptt, onPtt, onClose }: {
   sounds: boolean; onSounds: () => void;
   rate: number; onRate: (rate: number) => void;
   steer: boolean; onSteer: (steer: boolean) => void;
+  /** Null where the portal does not offer them. */
+  fillers: boolean | null; onFillers: (on: boolean) => void;
   ptt: boolean; onPtt: (ptt: boolean) => void;
   onClose: () => void;
   anchor: RefObject<HTMLElement>;
@@ -68,6 +70,14 @@ export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, o
       </div>
       <p>{ptt ? t("Only heard while you hold the push-to-talk key (Space unless changed) or the microphone button.") : t("Heard whenever you speak.")}</p>
     </div>
+    {fillers !== null && <div className="voice-setting" role="group" aria-label={t("Fillers")}>
+      <span aria-hidden="true">{t("Fillers")}</span>
+      <div className="voice-segments">
+        {choice(false, fillers, t("Off"), onFillers)}
+        {choice(true, fillers, t("On"), onFillers)}
+      </div>
+      <p>{fillers ? t("A short sound such as “mhm” the moment you have finished, until the answer starts.") : t("Nothing is said until the answer starts.")}</p>
+    </div>}
     <div className="voice-setting" role="group" aria-label={t("Sound effects")}>
       <span aria-hidden="true">{t("Sound effects")}</span>
       <div className="voice-segments">

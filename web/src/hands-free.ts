@@ -3,19 +3,8 @@ import type { Item } from "./transcript";
 import { StreamingSpeech } from "./voice";
 import { t } from "./i18n";
 
-export const THINKING_PHRASES = [
-  "Let me think about that for a moment.",
-  "Give me a moment to think this through.",
-  "Let me consider that.",
-  "I’m thinking through your request.",
-  "Let me take a moment with that.",
-];
-
-export const COMPACTION_PHRASES = [
-  "My context is getting full. Let me quickly compact our conversation before I continue.",
-  "I need a little room in my context. Let me summarize our conversation, then I'll carry on.",
-  "Let me do a quick context compaction so I can keep going.",
-];
+/** The longest the answer waits for a filler to stop: a fade-out takes a few milliseconds, and this is for a player that never reports back. */
+const FILLER_STOP_MS = 150;
 export type VoicePhase = "Listening" | "Hearing you" | "Transcribing" | "Thinking" | "Compacting context" | "Speaking";
 export interface VoiceIO {
   sequential?: boolean;
@@ -33,6 +22,12 @@ export interface VoiceIO {
   steering?: () => boolean;
   agentRunning: () => boolean;
   synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status') => Promise<PreparedSpeech>;
+  /**
+   * Plays a filler: a short sound for the silence after a turn is sent. Resolves
+   * when it has ended or `signal` cut it off. Nothing to play (switched off, no
+   * clip ready) is returning nothing; that is no error.
+   */
+  filler?: (signal: AbortSignal) => Promise<void> | undefined;
   trace?: (name:string)=>void;
   phase: (phase: VoicePhase) => void;
   error: (message: string) => void;
@@ -59,7 +54,6 @@ export class HandsFreeVoice {
   private processing = false;
   private output: string[] = [];
   private pipeline: SpeechPipeline;
-  private thinkingPipeline: SpeechPipeline;
   private compacting = false;
   private compactionSpeech = false;
   private lastCompactionWaitAt = -Infinity;
@@ -68,17 +62,14 @@ export class HandsFreeVoice {
   private sending = false;
   /** The run going when this utterance began has already been told to stop. */
   private stopped = false;
-  private thinkingTimer?: ReturnType<typeof setTimeout>;
-  private thinkingAnnounced = false;
-  private lastThinkingAt = -Infinity;
-  private lastThinkingPhrase = -1;
-  private clearThinkingTimer() { clearTimeout(this.thinkingTimer); this.thinkingTimer = undefined; }
-
+  /** The filler being played, while it plays. */
+  private filler?: { controller: AbortController; done: Promise<void> };
+  /** A filler was the last thing said: the next waits until something has been said that is not one. */
+  private filled = false;
 
   constructor(private io: VoiceIO, initial: Item[]) {
     const afterSeq = initial.reduce((n, item) => Math.max(n, Number(item.id.slice(1)) || 0), 0);
-    this.pipeline = new SpeechPipeline(io.synthesize, () => this.state(), error => this.report(error), io.sequential, io.sentenceChunks, io.ttsPrefetch);
-    this.thinkingPipeline = new SpeechPipeline(io.synthesize, () => this.state(), error => this.report(error));
+    this.pipeline = new SpeechPipeline((text, signal, kind) => this.prepare(text, signal, kind), () => this.state(), error => this.report(error), io.sequential, io.sentenceChunks, io.ttsPrefetch);
     this.speech = new StreamingSpeech(afterSeq);
     this.items = initial;
     this.ignoreCurrent();
@@ -92,30 +83,61 @@ export class HandsFreeVoice {
   }
   private state() {
     if (!this.alive) return;
-    const phase = this.hearing ? "Hearing you" : this.compacting ? "Compacting context" : this.processing && !this.sending ? "Transcribing" : this.pipeline.busy || this.thinkingPipeline.busy ? "Speaking" : this.io.agentRunning() || this.sending ? "Thinking" : "Listening";
+    const phase = this.hearing ? "Hearing you" : this.compacting ? "Compacting context" : this.processing && !this.sending ? "Transcribing" : this.pipeline.busy || this.filler ? "Speaking" : this.io.agentRunning() || this.sending ? "Thinking" : "Listening";
     this.io.phase(phase);
-    if (this.io.statusSpeech === false || this.io.sequential || phase !== "Thinking" || !this.acceptingReplies || this.output.length) this.clearThinkingTimer();
-    else if (!this.thinkingAnnounced && !this.thinkingTimer && Date.now() - this.lastThinkingAt >= 20000) {
-      this.thinkingTimer = setTimeout(() => {
-        this.thinkingTimer = undefined;
-        if (!this.alive || this.compacting || this.hearing || !this.acceptingReplies || this.pipeline.busy || this.output.length || !(this.io.agentRunning() || this.sending)) return;
-        this.thinkingAnnounced = true; this.lastThinkingAt = Date.now();
-        const candidates = THINKING_PHRASES.map((_, i) => i).filter(i => i !== this.lastThinkingPhrase);
-        this.lastThinkingPhrase = candidates[Math.floor(Math.random() * candidates.length)];
-        this.thinkingPipeline.enqueue([THINKING_PHRASES[this.lastThinkingPhrase]],'status');
-      }, 1800);
-    }
+  }
+  /**
+   * Whatever is spoken next ends a filler first, and is what the next filler
+   * waits for. The answer does not start until the filler has stopped, so the two
+   * are never heard together, and it does not wait for it to finish either: a
+   * filler stops within a few milliseconds of being told to.
+   */
+  private async prepare(text: string, signal: AbortSignal, kind?: 'reply' | 'status'): Promise<PreparedSpeech> {
+    const prepared = await this.io.synthesize(text, signal, kind);
+    return Object.assign(async (playback: AbortSignal) => {
+      await this.endFiller();
+      playback.throwIfAborted();
+      this.filled = false;
+      await prepared(playback);
+    }, { completed: prepared.completed });
+  }
+  /**
+   * A filler, now: the turn has been taken, and until the agent has something to
+   * say there is silence. Once per turn, and not after another filler with nothing
+   * said in between. Not while anything else is going to be heard: the user is
+   * speaking, a notice is, or the answer already is.
+   */
+  private startFiller() {
+    if (!this.alive || !this.io.filler || this.io.statusSpeech === false || this.io.sequential || this.filled || this.filler) return;
+    if (this.hearing || this.compacting || !this.acceptingReplies || this.pipeline.busy || this.output.length) return;
+    const controller = new AbortController();
+    let playing: Promise<void> | undefined;
+    try { playing = this.io.filler(controller.signal); } catch { return; }
+    if (!playing) return;
+    this.filled = true;
+    // A filler that fails is a filler not heard, not an error shown.
+    const filler = { controller, done: playing.catch(() => {}).then(() => { if (this.filler === filler) { this.filler = undefined; this.state(); } }) };
+    this.filler = filler;
+    this.state();
+  }
+  /** Tells the filler to stop, and returns once it has: a player that does not answer is not waited for, as the answer is worth more than a filler. */
+  private async endFiller() {
+    const filler = this.filler;
+    if (!filler) return;
+    filler.controller.abort();
+    let timer!: ReturnType<typeof setTimeout>;
+    await Promise.race([filler.done, new Promise<void>(resolve => { timer = setTimeout(resolve, FILLER_STOP_MS); })]);
+    clearTimeout(timer);
   }
   setCompacting(active: boolean, completed = true) {
     if (!this.alive || active === this.compacting) return;
     this.compacting = active;
-    this.clearThinkingTimer();
+    this.filler?.controller.abort();
     if (this.io.statusSpeech === false || this.io.sequential) { this.state(); return; }
     if (active) {
       this.lastCompactionWaitAt = -Infinity;
-      this.thinkingPipeline.cancel();
-      if (!this.hearing && this.acceptingReplies) this.pipeline.enqueue([COMPACTION_PHRASES[Math.floor(Math.random() * COMPACTION_PHRASES.length)]],'status');
-    } else this.pipeline.enqueue([completed ? "Context compaction is done. I'm ready to continue." : "Context compaction stopped before it finished."],'status');
+      if (!this.hearing && this.acceptingReplies) this.pipeline.enqueue([t("My context is getting full. Let me quickly compact our conversation before I continue.")],'status');
+    } else this.pipeline.enqueue([completed ? t("Context compaction is done. I'm ready to continue.") : t("Context compaction stopped before it finished.")],'status');
     this.state();
   }
   observe(items: Item[]) {
@@ -133,16 +155,16 @@ export class HandsFreeVoice {
       this.compactionSpeech = true;
       if (this.io.statusSpeech !== false && !this.io.sequential && Date.now() - this.lastCompactionWaitAt >= 8000) {
         this.lastCompactionWaitAt = Date.now();
-        this.pipeline.enqueue(["I'm still compacting our conversation. Please wait a moment; I'll let you know when I'm ready."],'status');
+        this.pipeline.enqueue([t("I'm still compacting our conversation. Please wait a moment; I'll let you know when I'm ready.")],'status');
       }
       return;
     }
-    this.clearThinkingTimer();
     this.hearing = true;
     this.acceptingReplies = false;
     this.held = [...(this.held ?? []), ...this.pipeline.cancel(), ...this.output];
     this.output = [];
-    this.thinkingPipeline.cancel();
+    // Talking over a filler is no turn for it to finish.
+    this.filler?.controller.abort();
     // The run is stopped only once what was said turns out to be for the agent:
     // not a tap, not noise, not a command the page handles. See heard().
     this.state();
@@ -232,13 +254,16 @@ export class HandsFreeVoice {
         this.ignoreCurrent();
         this.acceptingReplies = true;
         this.sending = true;
-        this.thinkingAnnounced = false;
+        // The turn is taken: from here on there is silence until the agent speaks, and the
+        // filler is what fills it, from the clip already in hand, not after the send.
+        this.startFiller();
         this.state();
         try {
           await this.io.send(text);
           if (valid()) { this.text = []; this.stopped = false; }
         } catch (error) {
           this.acceptingReplies = false;
+          this.filler?.controller.abort();
           throw new Error(t("Could not send “{text}”: {error}", { text, error: error instanceof Error ? error.message : String(error) }));
         } finally { this.sending = false; }
       });
@@ -258,7 +283,6 @@ export class HandsFreeVoice {
   private play() {
     if (!this.alive || this.hearing || !this.acceptingReplies || !this.output.length || (this.io.sequential && !this.io.sentenceChunks && this.io.agentRunning())) return;
     const text = this.output; this.output = [];
-    this.thinkingPipeline.cancel();
     this.io.trace?.('reply_chunk');
     this.pipeline.enqueue(text);
   }
@@ -280,9 +304,8 @@ export class HandsFreeVoice {
   }
   stop() {
     this.alive = false;
-    this.clearThinkingTimer();
+    this.filler?.controller.abort();
     this.pipeline.cancel();
-    this.thinkingPipeline.cancel();
     this.transcription.abort();
     this.output = [];
     this.held = null;
