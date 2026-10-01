@@ -256,3 +256,64 @@ test('windows can be resized by their edges, until the windows are arranged anew
   await page.waitForTimeout(900);
   expect(await terminal.evaluate(el => el.style.width)).toBe('');
 });
+
+test('the conversation window renders a reply as markdown, also while it is written, and puts it in a speech bubble apart from what the user said', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Show the conversation' }).click();
+  const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
+  // Half a reply: the list is a list and the open fence is already a code block.
+  await page.getByRole('button', { name: 'Stream markdown' }).click();
+  await expect(conversation.locator('.voice-said.is-agent li')).toHaveCount(2);
+  await expect(conversation.locator('.voice-said.is-agent [data-streamdown="strong"]')).toHaveText('bold');
+  // A link is a button that asks before it leaves, as in the chat.
+  await expect(conversation.getByRole('button', { name: 'the docs' })).toBeVisible();
+  await expect(conversation.locator('.voice-said.is-agent [data-streamdown="code-block"]')).toHaveCount(1);
+  await expect(conversation).not.toContainText('**bold**');
+  await expect(conversation).not.toContainText('```');
+  await page.getByRole('button', { name: 'Finish markdown' }).click();
+  await expect(conversation.locator('.voice-said.is-agent [data-streamdown="code-block"]')).toContainText('const answer = 42;');
+  await expect(conversation.locator('.voice-said.is-agent li')).toHaveCount(2);
+
+  // The reply sits in a speech bubble, as what the user said does.
+  const agent = conversation.locator('.voice-said.is-agent').last(), user = conversation.locator('.voice-said.is-user').first();
+  const style = (el: import('@playwright/test').Locator) => el.evaluate(e => { const s = getComputedStyle(e); return { background: s.backgroundColor, border: s.borderTopWidth }; });
+  // Apart from the user's bubble, in the light theme and in the dark.
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, scheme);
+    const [said, asked] = [await style(agent), await style(user)];
+    expect(said.background).not.toBe('rgba(0, 0, 0, 0)');
+    expect(said.border).toBe('1px');
+    expect(said.background).not.toBe(asked.background);
+    const [a, u] = [(await agent.boundingBox())!, (await user.boundingBox())!];
+    expect(a.x).toBeLessThan(u.x);
+    await page.getByTestId('workspace').screenshot({ path: `/tmp/pithagoras-voice-bubbles-${scheme}.png` });
+  }
+});
+
+test('Escape in the confirmation of a link in a reply closes it and neither stops the agent nor ends voice mode', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Show the conversation' }).click();
+  const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
+  // Still being written: the agent is running.
+  await page.getByRole('button', { name: 'Stream markdown' }).click();
+  await conversation.getByRole('button', { name: 'the docs' }).click();
+  const confirmation = page.locator('[data-streamdown="link-safety-modal"]');
+  await expect(confirmation).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(confirmation).toBeHidden();
+  await expect(page.getByTestId('aborted')).toHaveText('0');
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
+});
+
+test('the voice settings card stays inside a short screen and scrolls', async ({ page }) => {
+  await page.setViewportSize({ width: 844, height: 390 });
+  await start(page);
+  await page.getByRole('button', { name: 'Voice settings' }).click();
+  const card = page.getByRole('dialog', { name: 'Voice settings' });
+  await expect(card).toBeVisible();
+  expect((await card.boundingBox())!.y).toBeGreaterThanOrEqual(0);
+  expect(await card.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+  // The first row can be reached.
+  await card.getByRole('group', { name: 'Speaking speed' }).scrollIntoViewIfNeeded();
+  await expect(card.getByRole('group', { name: 'Speaking speed' })).toBeInViewport();
+});

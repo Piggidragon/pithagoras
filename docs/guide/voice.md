@@ -92,7 +92,8 @@ file in Files, the terminal, the browser, the document or the picture.
 | **Stop** | Shown while the agent works. Stops the task without ending voice mode. |
 
 The buttons at the bottom right open the **conversation** — a window like Files,
-with what you said as it was transcribed and what came back as written — the
+with what you said as it was transcribed and what came back as written, with
+its markdown (lists, code, links) rendered as in the chat, each in a speech bubble — the
 canvases, Files, pictures, the browser and the terminal, and the **voice
 settings**:
 
