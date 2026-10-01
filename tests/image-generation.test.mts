@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -323,6 +323,24 @@ test("an error from the endpoint is passed on without the key, even where it rep
   await assert.rejects(gen.generateImage(config("http://127.0.0.1:1"), { prompt: "p" }), (e: Error) => /Could not reach the image endpoint/.test(e.message) && !e.message.includes(KEY));
 });
 
+test("a key repeated across the cut of a long error message is scrubbed before the cut, not found by neither", async () => {
+  // The key starts before character 300 of the message and ends after it, so cut first it would be found whole by no one.
+  const message = `${"Rejected by the gateway after a long explanation. ".repeat(6).slice(0, 266)}Invalid API key: ${KEY} for model image-model`;
+  assert.ok(message.indexOf(KEY) < 300 && message.indexOf(KEY) + KEY.length > 300, "the key straddles the cut");
+  const { origin, server } = await fake((_req, res) => json(res, { error: { message } }, 401));
+  try {
+    await assert.rejects(gen.generateImage(config(origin), { prompt: "p" }), (e: Error) => {
+      assert.match(e.message, /answered 401: Rejected by the gateway/);
+      // Nothing of the key is left, not even its start.
+      assert.ok(!e.message.includes(KEY.slice(0, 8)), e.message);
+      assert.match(e.message, /Invalid API key: \[key\]/);
+      return true;
+    });
+  } finally {
+    server.close();
+  }
+});
+
 /** The tool as pi gets it, and a way to call it. */
 function load(folder: string) {
   const tool = new GenerateImageTool(folder);
@@ -499,6 +517,31 @@ test("the tool menus do not offer generate_image while the add-on is off, though
   // The portal's own again, as the next chat that has it reports it.
   rememberTools([remembered({ name: "generate_image", source: "image-generation", inline: true })]);
   assert.deepEqual(names(), ["show_image"]);
+});
+
+test("the portal's tool is not filed under an image package that was switched off to make way for it", async () => {
+  const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
+  const settings = path.join(process.env.PI_CODING_AGENT_DIR!, "settings.json");
+  const names = () => shownTools().map((t) => t.name).filter((n) => n === "generate_image");
+  try {
+    mkdirSync(path.dirname(settings), { recursive: true });
+    // A package of the user's with a tool of that name, as the docs say to switch it off for the add-on.
+    writeFileSync(settings, JSON.stringify({ packages: ["npm:pi-image-tools"] }));
+    rememberTools([remembered({ name: "generate_image", source: "pi-image-tools", package: "npm:pi-image-tools" })]);
+    gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", enabled: true });
+    assert.deepEqual(names(), ["generate_image"]);
+
+    // Switched off, as setPackageEnabled writes it: still listed, loading nothing. A chat now reports the portal's own.
+    writeFileSync(settings, JSON.stringify({ packages: [{ source: "npm:pi-image-tools", extensions: [], skills: [], prompts: [], themes: [] }] }));
+    rememberTools([remembered({ name: "generate_image", source: "image-generation", inline: true })]);
+    assert.equal(knownTools().find((t) => t.name === "generate_image")?.package, null, "it comes from no package");
+    assert.deepEqual(names(), ["generate_image"], "offered while the add-on is on");
+    gen.saveImageGeneration({ enabled: false });
+    assert.deepEqual(names(), [], "and not while it is off");
+  } finally {
+    rmSync(settings, { force: true });
+    gen.saveImageGeneration({ enabled: false });
+  }
 });
 
 test("an extension's tool of the same name is the one pi keeps, so the portal's is not counted as there", () => {

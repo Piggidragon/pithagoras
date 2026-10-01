@@ -1980,9 +1980,11 @@ export function rememberTools(reported: KnownTool[]): void {
     const description = tool.description?.trim().slice(0, 300) || before?.description;
     // A project that brings a package of the user's in its own settings reports
     // its tools as no package of the user's. The user's package still brings
-    // them everywhere else, so they stay its while it is listed.
+    // them everywhere else, so they stay its while it is listed. Not for the
+    // portal's own inline tool: it comes from no package, and one of the same
+    // name that has been switched off (still listed) must not take it with it.
     const pkg =
-      tool.package === null && typeof before?.package === "string" && listed?.has(packageKey(before.package))
+      tool.package === null && !tool.inline && typeof before?.package === "string" && listed?.has(packageKey(before.package))
         ? before.package
         : tool.package;
     merged.set(tool.name, {

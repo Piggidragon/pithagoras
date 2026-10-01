@@ -209,7 +209,9 @@ export async function generateImage(
     }
     if (!res.ok) {
       const said = text(parsed?.error?.message) || text(parsed?.error) || text(parsed?.message);
-      throw new ImageGenerationError(without(`The image endpoint answered ${res.status}${said ? `: ${said.replace(/\s+/g, " ").slice(0, 300)}` : ""}`, config.apiKey));
+      // The key out first, then the cut: one that starts before the cut and ends after it would be found by neither.
+      const shown = without(said, config.apiKey).replace(/\s+/g, " ").slice(0, 300);
+      throw new ImageGenerationError(`The image endpoint answered ${res.status}${shown ? `: ${shown}` : ""}`);
     }
     const first = Array.isArray(parsed?.data) ? parsed.data[0] : undefined;
     let bytes: Buffer;
@@ -382,7 +384,7 @@ function download(address: string, endpoint: URL, key: string, signal: AbortSign
     );
     req.on("error", (e: NodeJS.ErrnoException) => {
       if (e instanceof ImageGenerationError || signal.aborted) return reject(e);
-      reject(new ImageGenerationError(`Could not download the picture from ${url.host} (${e.code ?? e.message})`));
+      reject(new ImageGenerationError(without(`Could not download the picture from ${url.host} (${e.code ?? e.message})`, key)));
     });
   });
 }
