@@ -1,0 +1,144 @@
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { LuImage, LuImageOff } from "react-icons/lu";
+import { fancy } from "../motion";
+import { shapeOf } from "../picture-call";
+import { formatElapsed } from "../transcript";
+import { t } from "../i18n";
+
+export type PreviewState = "making" | "done" | "failed";
+
+export interface ImagePreviewProps {
+  state: PreviewState;
+  /** An edit of a picture rather than a new one: what the label says, and what is shown under the wait. */
+  edit?: boolean;
+  /** The picture, once there. */
+  src?: string;
+  /** An edit's original: shown under the wait, and the picture arrives over it. */
+  before?: string;
+  /** Width over height of the picture to come, as far as it is known; a square until the picture itself says. */
+  ratio?: number;
+  /** What the picture is of: under it, and what a screen reader says of it. */
+  title?: string;
+  /** Why it was not made, for `failed`. */
+  reason?: string;
+  /** Seconds the making has taken so far, for `making`. */
+  elapsed?: number;
+  /** Where a click on the picture goes. */
+  href?: string;
+  /** Only the frame, small, for where a label and a caption have no room (the cards of voice mode). */
+  compact?: boolean;
+  /** Beside the title under the picture. */
+  actions?: ReactNode;
+}
+
+/**
+ * A picture that is being made, is there, or was not made, in one place.
+ *
+ * While it is made the frame is the shape of the picture to come — the size
+ * asked for, the original's shape for an edit — and says what is going on,
+ * with an animation that only runs while Settings → This browser has the
+ * animations on (see motion.css); with them off it is the same frame and the
+ * same words, still. The picture then takes the frame's place: it fades in
+ * over the wait, and the frame takes the picture's own shape once that is
+ * known, so nothing under it moves when the guess was right. Not made, the
+ * frame says so and why, quietly.
+ *
+ * Only a picture that was watched being made arrives with a transition: one
+ * drawn from the history just is there, and costs nothing while it is not.
+ * It knows nothing of chats or tools, so that the Images page can use it as
+ * well; what goes in `actions` and around it is the caller's.
+ */
+export function ImagePreview({ state, edit = false, src, before, ratio, title, reason, elapsed, href, compact = false, actions }: ImagePreviewProps) {
+  // Taken once: whether it was being made when it first appeared here.
+  const arriving = useRef(state === "making").current;
+  // What has loaded, and what has not, by the address: another picture in the same place starts over.
+  const [loaded, setLoaded] = useState<{ src: string; shape?: number }>();
+  const [gone, setGone] = useState<string>();
+  const [original, setOriginal] = useState<{ shape?: number; gone?: boolean }>({});
+  const [settled, setSettled] = useState(false);
+  const img = useRef<HTMLImageElement>(null);
+
+  const ready = !!src && loaded?.src === src;
+  const missing = !!src && gone === src;
+  const shown: PreviewState = missing ? "failed" : state;
+  // The wait stays over the frame until the picture has come and faded in, which is only worth a place for one that was being made.
+  const waiting = state === "making" || (arriving && state === "done" && !settled && !missing);
+  const withOriginal = !!before && !compact && waiting && !original.gone;
+  const shape = (ready ? loaded?.shape : undefined) ?? (withOriginal ? original.shape : undefined) ?? ratio ?? 1;
+
+  const loadedNow = (el: HTMLImageElement) => src && setLoaded({ src, shape: shapeOf(el.naturalWidth, el.naturalHeight) });
+  // A picture that was there already may have loaded before this saw it.
+  useEffect(() => {
+    const el = img.current;
+    if (el?.complete && el.naturalWidth) loadedNow(el);
+  }, [src]);
+  useEffect(() => {
+    if (!arriving || !ready) return;
+    // Long enough for the fade, and at once where there is none.
+    const timer = setTimeout(() => setSettled(true), fancy() ? 900 : 0);
+    return () => clearTimeout(timer);
+  }, [arriving, ready]);
+
+  const picture = state === "done" && src && !missing && (
+    <img
+      key={src}
+      ref={img}
+      className="image-preview-img"
+      src={src}
+      alt={compact ? "" : title ?? ""}
+      loading="lazy"
+      decoding="async"
+      onLoad={(e) => loadedNow(e.currentTarget)}
+      onError={() => setGone(src)}
+    />
+  );
+  const headline = missing ? t("This picture is no longer in the folder.") : edit ? t("The picture was not changed") : t("No picture was made");
+  const frame = (
+    <div className={`image-preview-frame is-${shown}${arriving ? " is-arriving" : ""}${ready ? " is-loaded" : ""}${withOriginal ? " has-before" : ""}`}>
+      {withOriginal && (
+        <img
+          className="image-preview-before"
+          src={before}
+          alt=""
+          decoding="async"
+          onLoad={(e) => setOriginal({ shape: shapeOf(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight) })}
+          onError={() => setOriginal({ gone: true })}
+        />
+      )}
+      {waiting && (
+        // The seconds are not read out each time they change: they are not part of the status.
+        <div className="image-preview-making" role={compact ? undefined : "status"} aria-hidden={compact || undefined}>
+          <LuImage aria-hidden />
+          {!compact && <span>{edit ? t("Editing a picture") : t("Making a picture")}</span>}
+          {!compact && elapsed !== undefined && elapsed >= 3 && <small aria-hidden className="tabular-nums">{formatElapsed(elapsed)}</small>}
+        </div>
+      )}
+      {picture && (href && !compact ? <a className="image-preview-link" href={href} target="_blank" rel="noreferrer" title={title}>{picture}</a> : picture)}
+      {shown === "failed" && (
+        <div className="image-preview-failed" role={compact ? undefined : "status"} aria-hidden={compact || undefined}>
+          <LuImageOff aria-hidden />
+          {!compact && (
+            <div>
+              <b>{headline}</b>
+              {!missing && reason && <p>{reason}</p>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const style = { "--ratio": shape } as CSSProperties;
+  if (compact) return <div className={`image-preview is-compact is-${shown}`} style={style}>{frame}</div>;
+  return (
+    <figure className={`image-preview is-${shown}`} style={style} aria-busy={shown === "making"}>
+      {frame}
+      {(title || actions) && (
+        <figcaption className="image-preview-caption">
+          <span className="image-preview-title" title={title}>{title}</span>
+          {actions}
+        </figcaption>
+      )}
+    </figure>
+  );
+}

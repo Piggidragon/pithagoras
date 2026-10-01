@@ -239,7 +239,7 @@ function ToolIcon({ name }: { name: string }) {
 }
 
 /** A clock that ticks once a second while `on`. */
-function useNow(on: boolean) {
+export function useNow(on: boolean) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!on) return;

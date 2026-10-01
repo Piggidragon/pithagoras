@@ -1587,6 +1587,10 @@ const de: Locale = {
     // components/VoicePictures.tsx
     "No pictures yet. Ask the agent to show you one.": "Noch keine Bilder. Bitte den Agenten, dir eines zu zeigen.",
     "This picture is no longer in the folder.": "Dieses Bild ist nicht mehr im Ordner.",
+    "No picture was made": "Es wurde kein Bild erstellt",
+    "The picture was not changed": "Das Bild wurde nicht geändert",
+    "Interrupted before the picture arrived": "Unterbrochen, bevor das Bild ankam",
+    "Details": "Details",
     "Fit the picture": "Bild einpassen",
     "Show the picture at full size": "Bild in voller Größe zeigen",
     "Previous picture": "Vorheriges Bild",

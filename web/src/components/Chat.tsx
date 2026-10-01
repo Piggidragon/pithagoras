@@ -1,4 +1,6 @@
 import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
+import { PictureCall } from "./PictureCall";
+import { isPictureCall } from "../picture-call";
 import { workingText } from "./StatusDot";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
@@ -1932,6 +1934,14 @@ export function Chat({
             );
           }
           if (item.kind === "tool") {
+            // The portal's picture tools are a preview of the picture, not a tool card.
+            if (isPictureCall(item)) {
+              return (
+                <div key={item.id} className={`tool-row${enter}`}>
+                  <PictureCall item={item} sessionId={session.id} folder={session.workspace} />
+                </div>
+              );
+            }
             return (
               <div key={item.id} className={`tool-row${enter}`}>
               <ToolCall item={item} onOpenTerminal={showInTerminal} onOpenAgent={agentFor(item.callId) ? () => openAgent(agentFor(item.callId)!.id) : undefined} />
