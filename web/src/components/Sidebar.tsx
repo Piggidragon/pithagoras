@@ -26,7 +26,7 @@ import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
-import { keep, useFlip } from "../motion";
+import { keep, pick, useFlip } from "../motion";
 import { HOME, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t } from "../i18n";
@@ -152,6 +152,13 @@ export function Sidebar({
   // while a search is typed, which moves them with every key.
   const rowsOrder = [byFolder ? "folders" : "recents", ...pinned.map((s) => s.id), "|", ...(byFolder ? folders.flatMap((f) => listed.get(f.key)!) : shownRecents).map((s) => s.id)].join();
   const list = useFlip<HTMLDivElement>(rowsOrder, searching);
+  // The chat that is picked lights up: when the open chat changes, not each time its row is shown again.
+  const opened = useRef(activeId);
+  useEffect(() => {
+    if (opened.current === activeId) return;
+    opened.current = activeId;
+    if (activeId) pick(list.current?.querySelector(`[data-flip="${CSS.escape(activeId)}"]`));
+  }, [activeId]);
 
   const item = (s: Session) => (
     <SessionItem

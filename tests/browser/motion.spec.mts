@@ -13,7 +13,7 @@ import { test, expect, type Page } from '@playwright/test';
 test.use({ storageState: { cookies: [], origins: [] } });
 
 interface Played { on: string; keys: string[]; ghost: boolean; duration: number }
-interface Picture { text: string; hidden: string | null; pointer: string; roles: number; dock: string | null; scrollTop: number; z: number; lived: number | null }
+interface Picture { text: string; hidden: string | null; pointer: string; roles: number; dock: string | null; scrollTop: number; z: number; lived: number | null; before: boolean }
 
 const at = new Date().toISOString();
 const chat = (id: string, title: string, extra: object = {}) => ({ id, title, workspace: `/w/${id}`, status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null, ...extra });
@@ -105,7 +105,7 @@ async function portal(page: Page, { off = false, confirms = true, places, many =
       }
       for (const r of records) for (const n of r.addedNodes) {
         if (!(n instanceof HTMLElement)) continue;
-        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length, dock: n.firstElementChild?.getAttribute('data-dock') ?? null, scrollTop: (n.firstElementChild as HTMLElement | null)?.scrollTop ?? 0, z: Number(getComputedStyle(n).zIndex), lived: null });
+        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length, dock: n.firstElementChild?.getAttribute('data-dock') ?? null, scrollTop: (n.firstElementChild as HTMLElement | null)?.scrollTop ?? 0, z: Number(getComputedStyle(n).zIndex), lived: null, before: !!(n.compareDocumentPosition(document.getElementById('root')!) & Node.DOCUMENT_POSITION_FOLLOWING) });
         if (n.hasAttribute('data-ghost')) entries.set(n, { at: now, entry: pictures[pictures.length - 1] });
         if (n.classList.contains('app-intro')) intro.push({ pointer: getComputedStyle(n).pointerEvents, at: performance.now() });
       }
@@ -887,4 +887,58 @@ test('deleting a message with many rows in its turn still breaks the message its
   expect(question.lived).toBeGreaterThan(150);
   // So was the sinking of the dialog that asked.
   expect(all.find((p) => p.text.includes('Delete this message?'))!.lived).toBeGreaterThan(150);
+});
+
+test('closing the window at the back of two does not bring it in front of the other', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  await portal(page, { places: { terminal: 'float', files: 'float' } });
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(page.locator('aside[data-dock="float"]')).toHaveCount(2);
+  await page.waitForTimeout(900);
+  const files = page.locator('aside[data-dock="float"]', { hasText: 'Files' });
+  const z = Number(await files.evaluate((el) => getComputedStyle(el).zIndex));
+
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(page.locator('aside[data-dock="float"]')).toHaveCount(1);
+  await expect.poll(async () => (await pictures(page)).filter((p) => p.dock === 'float').length).toBeGreaterThan(0);
+  const seen = (await pictures(page)).find((p) => p.dock === 'float')!;
+  // At the height the window had, and before the app in the page: a window at the same height that stays is in front of it.
+  expect(seen.z).toBe(z);
+  expect(seen.before).toBe(true);
+});
+
+test("Settings' picture is not over a dialog that opens as it goes", async ({ page }) => {
+  await portal(page);
+  await page.goto('/s/a');
+  await sidebar(page).getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await pictures(page)).filter((p) => p.text.includes('Settings')).length).toBeGreaterThan(0);
+  const seen = (await pictures(page)).find((p) => p.text.includes('Settings'))!;
+  // The assistant it can open is a dialog at 50 too: that one is in front.
+  expect(seen.z).toBe(50);
+  expect(seen.before).toBe(true);
+});
+
+test('the chat that is picked lights up, and the open one does not each time the sidebar is shown', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await portal(page);
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  await row(page, 'Second chat').click();
+  await expect(page).toHaveURL(/\/s\/b$/);
+  // Picked: it lit up.
+  await expect.poll(async () => (await played(page)).some((p) => p.on.includes('session-row') && p.keys.includes('boxShadow'))).toBe(true);
+  await page.waitForTimeout(1200);
+
+  // The drawer shown again, a while after: the open chat's row is just there.
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  await expect(row(page, 'Second chat')).toBeVisible();
+  await page.waitForTimeout(150);
+  expect(await row(page, 'Second chat').evaluate((el) => el.getAnimations().length)).toBe(0);
 });

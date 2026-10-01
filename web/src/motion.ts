@@ -150,16 +150,27 @@ const LEAVES: Record<Leave, (el: HTMLElement, delay: number) => Animation[]> = {
  * window) it is under every layer there is: appended to the page last, it
  * is still over what is drawn in the flow, and under the windows and panels
  * that lie over the conversation, which stay open as it goes.
+ *
+ * A source that is the layer itself (a window, a dialog, a menu) goes with
+ * its picture, so the picture lies at the layer's own height, and is put in
+ * the page before the app: a layer of the same height that stays, or opens as
+ * it goes (a second window; the setup assistant, opened from Settings) is
+ * drawn over it. Appended after, it would have been in front of them.
  */
 const UNDER_LAYERS = 0;
-function layerOf(source: HTMLElement): number {
+function layerOf(source: HTMLElement): { layer: number; own: boolean } {
   let z: number | null = null;
+  let owner: HTMLElement | null = null;
   for (let el: HTMLElement | null = source; el; el = el.parentElement) {
     const at = Number.parseInt(getComputedStyle(el).zIndex, 10);
     // The outermost: what the rest is drawn inside of.
-    if (Number.isFinite(at)) z = at;
+    if (Number.isFinite(at)) {
+      z = at;
+      owner = el;
+    }
   }
-  return z === null ? UNDER_LAYERS : z + 1;
+  if (z === null) return { layer: UNDER_LAYERS, own: false };
+  return owner === source ? { layer: z, own: true } : { layer: z + 1, own: false };
 }
 
 /** At most this many pictures are on the page at once; the oldest give way. */
@@ -188,8 +199,9 @@ function scrub(copy: HTMLElement): void {
 export interface Picture {
   frame: HTMLElement;
   el: HTMLElement;
-  /** How high it is laid (see `layerOf`). */
+  /** How high it is laid, and whether it goes with the layer it came from (see `layerOf`). */
   layer: number;
+  own: boolean;
   /** Where the boxes in the copy that scroll were scrolled to: a copy starts at the top, and cannot be moved before it is on the page. */
   scrolled: [HTMLElement, number, number][];
 }
@@ -226,7 +238,7 @@ export function picture(source: HTMLElement | null, clip?: HTMLElement | null): 
     animation: "none", transition: "none", pointerEvents: "none",
   });
   frame.append(el);
-  return { frame, el, scrolled, layer: layerOf(source) };
+  return { frame, el, scrolled, ...layerOf(source) };
 }
 
 /** Puts a picture on the page and plays it out. */
@@ -235,7 +247,10 @@ export function out(shot: Picture | null, how: Leave, delay = 0): void {
   const { frame, el } = shot;
   frame.style.zIndex = String(shot.layer);
   for (const old of ghosts) if (ghosts.size >= MAX_GHOSTS) { old.remove(); ghosts.delete(old); }
-  document.body.append(frame);
+  // Before the app when it goes with its layer: what stays at the same height is in front of it.
+  const app = shot.own ? document.getElementById("root") : null;
+  if (app?.parentElement === document.body) app.before(frame);
+  else document.body.append(frame);
   ghosts.add(frame);
   // Where what scrolls was: the end of a conversation, not its start.
   for (const [box, top, left] of shot.scrolled) {
@@ -316,6 +331,12 @@ export function glide(el: HTMLElement, from: DOMRect, hold: HTMLElement[] = []):
   if (to.width < 1 || to.height < 1 || from.width < 1 || from.height < 1) return done();
   const at = (transform: string) => ({ transformOrigin: "0 0", transform });
   el.animate([at(`translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`), at("none")], { duration: 620, easing: SPRING }).finished.then(done, done);
+}
+
+/** The chat that was picked lights up for a moment. */
+export function pick(row: Element | null | undefined): void {
+  if (!row || !fancy()) return;
+  row.animate([{ boxShadow: "inset 0 0 0 999px rgb(var(--accent) / .26)" }, { boxShadow: "inset 0 0 0 999px rgb(var(--accent) / 0)" }], { duration: 800, easing: OUT });
 }
 
 /** Sent: the arrow goes up and out, a new one rises where it was, and a ring leaves the button. */

@@ -120,11 +120,9 @@
 /* The mark at the left edge of the page you are on grows out of the middle. */
 [data-motion="fancy"] .nav-bar { transform-origin: 0 50%; transition: opacity .2s, scale .5s var(--spring); scale: 1 0; }
 [data-motion="fancy"] .nav-bar.is-on { scale: 1 1; }
-/* A chat's row leans toward you under the pointer; the open one lights up as it is picked. */
+/* A chat's row leans toward you under the pointer; the one that is picked lights up (motion.ts `pick`, when the open chat changes: an animation tied to the row being the open one would play again each time the sidebar is shown). */
 [data-motion="fancy"] .session-row { position: relative; transition: background-color .18s, translate .4s var(--spring); }
 [data-motion="fancy"] .session-row:hover { translate: 3px 0; }
-[data-motion="fancy"] .session-row[aria-current="page"] { animation: fx-pick .8s var(--ease-out); }
-@keyframes fx-pick { 0% { box-shadow: inset 0 0 0 999px rgb(var(--accent) / .26); } 100% { box-shadow: inset 0 0 0 999px rgb(var(--accent) / 0); } }
 [data-motion="fancy"] .session-row::before { content: ""; position: absolute; left: 0; top: 22%; width: 2px; height: 56%; border-radius: 0 2px 2px 0; background: rgb(var(--accent)); scale: 1 0; transition: scale .45s var(--spring); }
 [data-motion="fancy"] .session-row[aria-current="page"]::before { scale: 1 1; }
 /* Folded to a rail, its buttons come one after another. */
