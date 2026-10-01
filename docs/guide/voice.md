@@ -36,11 +36,19 @@ transcription rather than a token-streaming ASR model. Long turns are segmented
 at 60 seconds and listening resumes automatically.
 
 Microphone access needs HTTPS or localhost. Voice mode replaces the chat and
-composer with an audio-reactive orb: teal for your voice and violet for spoken
-replies. The screen keeps only status, the controls and live words while you
+composer with an audio-reactive orb: by default teal for your voice and violet
+for spoken replies. The screen keeps only status, the controls and live words while you
 speak. Quiet synthesized sound cues mark connection, submission, mute and tool
 focus; they can be turned off in the voice settings. Reduced-motion
 preferences disable panel transitions.
+
+The orb's look is set on the **Agent** page under **Avatar**: **Customize** opens
+a dialog with a live preview. Choose a personality (how it moves), a colour
+palette and a colour for each state, the motion speed, reactivity and glow, eyes,
+a hat and a prop. **Save avatar** stores it for the whole portal, and every
+device shows it the next time voice mode starts. **Reset to default** puts the
+plain orb back in the dialog; it only becomes the saved avatar once you press
+**Save avatar**.
 
 Browser tool calls bring the live browser into a floating window and dock the
 orb. Terminal calls show the agent’s actual command and streamed output on the
