@@ -109,7 +109,9 @@ Advanced to edit `settings.json` directly when that happens.
 ## This browser, Add-ons and About
 
 **This browser** holds what is kept per browser: theme, language,
-notifications, confirmations and sign-out — see [The interface](/guide/interface).
+notifications, the command character, confirmations and sign-out — see
+[The interface](/guide/interface) and
+[Slash commands](/guide/commands#the-command-character).
 **Add-ons** installs the optional parts of the portal itself: Browser, Voice,
 Subagents and Memory, see [Docker add-ons](/guide/add-ons) and
 [Opt-in features](/guide/features). **About** shows where this portal runs the
@@ -125,8 +127,9 @@ and the list says which action lost it. Shortcuts are kept in this browser.
 
 A shortcut is the physical key, so it stays the same key whatever the keyboard
 layout, and it is shown with the label on this keyboard where the browser can
-tell (Chromium can). The chat's own keys — `/`, Enter, Shift+Enter and Escape
-in the message box — are listed there too, and are fixed.
+tell (Chromium can). The chat's own keys — the command character (`/` unless
+you chose another, under **This browser**), Enter, Shift+Enter and Escape in
+the message box — are listed there too, and are fixed.
 
 ## Advanced
 
