@@ -36,11 +36,13 @@ them. See [Projects](/guide/projects).
 
 | | |
 | --- | --- |
-| `GET /api/projects` | `{ root, projects: [{ name, path, isGit, hasInstructions, sessions, lastActive }] }` |
-| `POST /api/projects` | `{ name, instructions? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home` |
+| `GET /api/projects` | `{ root, projects: [{ name, path, isGit, hasInstructions, hasTools, sessions, lastActive }] }`; `hasTools` is whether the project switches tools differently from the portal-wide default |
+| `POST /api/projects` | `{ name, instructions?, toolsOff? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home`. `toolsOff` is the tools its chats start with off, as for `PUT /api/projects/:name/tools`, checked before the folder is made. If the folder is made and the tools cannot be stored, the answer is the project with a `toolsError` |
 | `GET /api/projects/:name` | The project plus `{ files, bytes, complete }` — what deleting it would remove |
 | `GET /api/projects/:name/instructions` | `{ text }` |
 | `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it. |
+| `GET /api/projects/:name/tools` | `{ tools, live, off, names }`, shaped like a conversation's list: every tool the portal has seen and whether it is on for chats in this project, with `defaultOn` the portal-wide default. `live` is always false |
+| `PUT /api/projects/:name/tools` | `{ off: string[] }` — the tools chats in this project start with; what is not named is on. Stored as the difference from the portal-wide default, and told to the running chats in the project. Answers `{ off, applied }` |
 | `DELETE /api/projects/:name` | Deletes its chats (with their conversation files) and its folder; 409 while one is running |
 
 ## Sessions
@@ -104,7 +106,7 @@ out of it, by `..` or by a link, is refused with 400.
 | `POST /api/sessions/:id/abort` | Stop the current run |
 | `POST /api/sessions/:id/ui-response` | `{ id, value?, cancelled? }` — answer an extension dialog |
 | `GET /api/tools` | `{ tools, off }` — every tool the portal has seen, and which are off by default |
-| `PUT /api/tools` | `{ off: string[] }` — the default for every conversation; applied to the running ones too |
+| `PUT /api/tools` | `{ off: string[] }` — the default for every conversation; applied to the running ones too. A [project](#projects) can bend it with `PUT /api/projects/:name/tools`, and a conversation then holds its exceptions against that |
 | `GET /api/sessions/:id/tools` | `{ tools, live, off }` — every tool the conversation could use and whether it is on. `live` is false when pi is not running to be asked |
 | `PUT /api/sessions/:id/tools` | `{ off: string[] }` — switch tools off by name; everything not named is on |
 | `GET /api/tool-names` | What each package is called here; everything unnamed keeps its own name |

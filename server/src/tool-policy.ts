@@ -4,6 +4,12 @@
  * Kept apart from the database and from pi so the rule can be read in one
  * place and tested without either: a default that applies everywhere, and a
  * conversation that may disagree about any tool in either direction.
+ *
+ * There are three layers, each an exception to the one before it: the
+ * portal-wide default, a project's exceptions to it, and a conversation's
+ * exceptions to what the project leaves. The project's layer is folded into
+ * the default with `defaultsFor`, so a conversation is judged against "what its
+ * project starts it with" and nothing else here has to know projects exist.
  */
 
 /**
@@ -81,6 +87,20 @@ export function toolEnabled(
   if (exceptions.off.includes(name)) return false;
   if (exceptions.on.includes(name)) return true;
   return ![...defaultsOff].includes(name);
+}
+
+/**
+ * The tools that are off by default for a project: the portal-wide default,
+ * bent by the project's own exceptions.
+ *
+ * A conversation in the project holds its exceptions against this, not against
+ * the portal-wide default. What it stored before the project said anything is
+ * kept as it is — an exception is a decision about one tool, and stays one
+ * whatever the default under it becomes — while a tool it never mentioned
+ * follows the project.
+ */
+export function defaultsFor(defaultsOff: string[], projectExceptions: ToolExceptions): string[] {
+  return effectiveOff([], defaultsOff, projectExceptions);
 }
 
 /** Everything off for this conversation, which is what pi has to be told. */
