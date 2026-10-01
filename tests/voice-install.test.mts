@@ -26,3 +26,16 @@ test('services listen on the portal loopback endpoints',()=>{
  assert.match(script,/"host":"127\.0\.0\.1","port":7862/);
  assert.equal(containerSpec('', 'host').HostConfig.NetworkMode, 'host');
 });
+
+test('the portal settings the voice installer reads reach a portal run with the shipped Compose files',()=>{
+ // Compose passes the portal only what it lists: a variable left out is never set in the portal, whatever .env says.
+ for(const file of ['docker-compose.yml','docker-compose.portainer.yml']){
+  const text=readFileSync(file,'utf8');
+  const portal=text.slice(text.indexOf('environment:'),text.lastIndexOf('\nvolumes:'));
+  assert.match(portal,/^ {6}VOICE_GPU: \$\{VOICE_GPU:-\}$/m,file);
+  assert.match(portal,/^ {6}VOICE_VRAM_RESERVE_MIB: \$\{VOICE_VRAM_RESERVE_MIB:-\}$/m,file);
+ }
+ const env=readFileSync('.env.example','utf8');
+ assert.match(env,/^# VOICE_GPU=\d+$/m);
+ assert.match(env,/^# VOICE_VRAM_RESERVE_MIB=\d+$/m);
+});

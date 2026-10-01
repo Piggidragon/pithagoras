@@ -209,11 +209,11 @@ Before installing, Pithagoras reads the GPU with `nvidia-smi`. A portal in a con
 - With your own pick, it keeps it, and refuses one the card cannot hold at all, naming the combination that would fit. A tight pick installs, with that noted in the log.
 - If it cannot read a GPU at all, it installs your pick unchecked and Docker has the last word.
 
-With several GPUs it uses the one with the most memory free and gives the container that one. When the container is recreated later with the engines it has, for instance after a portal update, it stays on that card. Settings on the portal change this, as in the multilingual Compose service:
+With several GPUs it uses the one with the most memory free and gives the container that one. When the container is recreated later with the engines it has, for instance after a portal update, it stays on that card. Settings on the portal change this, as in the multilingual Compose service. Put them in `.env` (the shipped Compose files and the Portainer stack pass both on to the portal) or set them in the portal's environment:
 
 | Variable | Meaning |
 | --- | --- |
-| `VOICE_GPU` | The GPU index (as `nvidia-smi` lists it) the voice container uses, also when no GPU can be read. |
+| `VOICE_GPU` | The GPU index (as `nvidia-smi` lists it) the voice container uses. An index that no GPU has is ignored where the GPUs can be read; where they cannot, it is used as given. **Start voice** moves an existing container to it. |
 | `VOICE_VRAM_RESERVE_MIB` | GPU memory, in MiB, to keep free for something else on the same card, such as a model you run in the container later. Counted against every combination. |
 | `NVIDIA_SMI` | The `nvidia-smi` binary to run, when it is not on the portal's `PATH`. |
 

@@ -253,3 +253,24 @@ test('engine choice: a first install with a pick of its own is no rebuild while 
  await expect(page.getByRole('combobox',{name:'Speech synthesis engine'})).toContainText('Chatterbox');
  await expect(page.getByRole('combobox',{name:'Speech synthesis engine'})).toBeDisabled();
 });
+
+test('engine choice: an installed service is shown on its own card and is not judged by the memory it holds itself',async({page})=>{
+ // GPU 1 runs the service (Breeze with the large model, lazy loading off) and so has little free; GPU 0 is idle and small.
+ const gpus=[{index:0,name:'Test GPU A',totalMiB:6144,freeMiB:6000},{index:1,name:'Test GPU B',totalMiB:12288,freeMiB:5000}];
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/hardware',r=>r.fulfill({json:{...hardware(gpus),selected:1}}));
+ await page.route('**/api/voice',r=>r.fulfill({json:{...config,enabled:true}}));
+ await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'running',busy:false,progress:'',error:'',choice:{tts:'breeze',asr:'qwen3-asr',asrModel:'1.7b'}}}));
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ await expect(page.getByText('GPU: Test GPU B, 12 GB, 4.9 GB free')).toBeVisible();
+ await expect(page.getByRole('combobox',{name:'Speech recognition engine'})).toContainText('Qwen3-ASR 1.7B');
+ // Running there: no warning that other programs use the card, and no red alert about its size.
+ await expect(page.getByText('other programs use part of it')).toHaveCount(0);
+ await expect(page.getByText('more than this GPU has')).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Use the suggestion'})).toHaveCount(0);
+ // Another pick is judged as soon as there is one.
+ await page.getByRole('combobox',{name:'Speech synthesis engine'}).click();
+ await page.getByRole('option',{name:/Chatterbox/}).click();
+ await expect(page.getByText('Needs about 5.5 GB of GPU memory. The card is big enough, but other programs use part of it right now.')).toBeVisible();
+});

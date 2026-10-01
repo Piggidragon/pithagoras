@@ -19,6 +19,8 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked, onPick 
   const gpu = hardware?.gpus.find((g) => g.index === hardware.selected);
   const shown = picked ?? installed ?? hardware?.suggestion ?? DEFAULT_CHOICE;
   const auto = fresh && picked === null;
+  // The installed choice is running there: the memory it holds is what the card shows as taken, so a verdict on it would blame the service itself, and it is what the card is already used for.
+  const kept = !!installed && picked === null;
   const fit = fitOn(shown, gpu, hardware?.reserveMiB ?? 0);
   const need = gb(vramNeeded(shown));
   const suggestion = hardware?.suggestion;
@@ -49,7 +51,7 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked, onPick 
       ? <p className="text-xs text-fg-faint">{gpu && suggestion
         ? t("Suggested for this GPU: {tts} with {asr}.", { tts: TTS_ENGINES[suggestion.tts].label, asr: asrOption(suggestion)?.label ?? suggestion.asrModel })
         : t("The install picks what fits your GPU.")}</p>
-      : gpu && <p role={fit === "too-large" ? "alert" : "status"} className={`text-xs ${fit === "fits" ? "text-fg-faint" : fit === "tight" ? "text-warn" : "text-red-400"}`}>
+      : gpu && !kept && <p role={fit === "too-large" ? "alert" : "status"} className={`text-xs ${fit === "fits" ? "text-fg-faint" : fit === "tight" ? "text-warn" : "text-red-400"}`}>
         {fit === "too-large" ? t("Needs about {gb} GB of GPU memory, more than this GPU has.", { gb: need })
           : fit === "tight" ? t("Needs about {gb} GB of GPU memory. The card is big enough, but other programs use part of it right now.", { gb: need })
             : t("Needs about {gb} GB of GPU memory. Fits.", { gb: need })}

@@ -195,7 +195,7 @@ test('a container recreated for a new portal namespace stays on the card it was 
 });
 
 test('VOICE_GPU decides the card of a recreated container, and of one installed without a GPU reading', async () => {
-  reset(); hostGpus(GPU(0, 12288, 12000));
+  reset(); hostGpus(GPU(0, 12288, 12000) + GPU(1, 12288, 3000));
   container = { Config: { Labels: { 'pithagoras.addon': 'voice' } }, HostConfig: { NetworkMode: 'bridge' }, State: { Running: true } };
   process.env.VOICE_GPU = '1';
   assert.equal((await voice.status()).state, 'installing');
@@ -206,6 +206,71 @@ test('VOICE_GPU decides the card of a recreated container, and of one installed 
   await voice.install({ tts: 'chatterbox', asr: 'whisper', asrModel: 'base' });
   await settle();
   assert.deepEqual(created()[0].body.HostConfig.DeviceRequests, [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }]);
+});
+
+test('a VOICE_GPU that no card has is ignored when the cards can be read, at install and at recreation alike', async () => {
+  reset(); hostGpus(GPU(0, 12288, 2000) + GPU(1, 12288, 12000));
+  process.env.VOICE_GPU = '2';
+  await voice.install({ tts: 'breeze', asr: 'whisper', asrModel: 'base' });
+  await settle();
+  const card = (spec: any) => spec.HostConfig.DeviceRequests[0];
+  assert.deepEqual(card(created()[0].body).DeviceIDs, ['1'], 'the card with the most room');
+  // A portal update: the container is made again, on the card it has, not on one that is not there.
+  portalId = 'portal-two'; calls = [];
+  assert.equal((await voice.status()).state, 'installing');
+  await settle();
+  assert.deepEqual(card(created()[0].body).DeviceIDs, ['1']);
+  assert.equal((await voice.status()).error, '');
+  // One card, and a setting that names a second: Docker's own pick, as an install makes it.
+  reset(); hostGpus(GPU(0, 12288, 12000));
+  container = { Config: { Labels: { 'pithagoras.addon': 'voice' } }, HostConfig: { NetworkMode: 'bridge' }, State: { Running: true } };
+  process.env.VOICE_GPU = '1';
+  assert.equal((await voice.status()).state, 'installing');
+  await settle();
+  assert.deepEqual(card(created()[0].body), { Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] });
+});
+
+test('Start moves a container to the card VOICE_GPU names, and leaves one that is on it alone', async () => {
+  const stopped = (devices: any) => ({ Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1', 'pithagoras.voice-recipe': 'breeze+whisper:base' } }, HostConfig: { NetworkMode: 'container:portal-one', DeviceRequests: [devices] }, State: { Running: false } });
+  const cards = GPU(0, 12288, 12000) + GPU(1, 12288, 12000);
+  reset(); hostGpus(cards);
+  container = stopped({ Driver: 'nvidia', DeviceIDs: ['0'], Capabilities: [['gpu']] });
+  process.env.VOICE_GPU = '1';
+  await voice.start();
+  await settle();
+  assert.deepEqual(created()[0].body.HostConfig.DeviceRequests[0].DeviceIDs, ['1']);
+  assert.equal(container.Config.Labels['pithagoras.voice-recipe'], 'breeze+whisper:base');
+  // Already there: started as it is. So is one that asked Docker for any one GPU, which is the first.
+  for (const [devices, asked] of [[{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }, '1'], [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }, '0']] as const) {
+    reset(); hostGpus(cards);
+    container = stopped(devices);
+    process.env.VOICE_GPU = asked;
+    await voice.start();
+    await settle();
+    assert.equal(calls.some(c => c.method === 'DELETE' || c.url.startsWith('/containers/create?')), false, `on card ${asked} already`);
+    assert.equal(container.State.Running, true);
+  }
+  // No setting: whatever card it has is kept.
+  reset(); hostGpus(cards);
+  container = stopped({ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] });
+  await voice.start();
+  await settle();
+  assert.equal(calls.some(c => c.method === 'DELETE'), false);
+});
+
+test('the page is told the card the installed service is on, not the one with the most room', async () => {
+  const cards = GPU(0, 6144, 6000) + GPU(1, 12288, 5000);
+  reset(); hostGpus(cards);
+  assert.equal((await voice.hardware()).selected, 0, 'nothing installed: the card with the most room');
+  container = { Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-recipe': 'breeze+qwen3-asr:1.7b' } }, HostConfig: { DeviceRequests: [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }] }, State: { Running: true } };
+  assert.equal((await voice.hardware()).selected, 1, 'the service holds memory there, which is why it has less free');
+  // One made before the card was chosen has Docker's first.
+  container = { Config: { Labels: { 'pithagoras.addon': 'voice' } }, HostConfig: { DeviceRequests: [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }] }, State: { Running: true } };
+  hostGpus(GPU(0, 6144, 1000) + GPU(1, 12288, 12000));
+  assert.equal((await voice.hardware()).selected, 0);
+  container = null;
+  process.env.VOICE_GPU = '0';
+  assert.equal((await voice.hardware()).selected, 0, 'VOICE_GPU for a first install');
 });
 
 test('a rebuild reads the GPU after the running service is stopped, and starts it again when the choice is refused', async () => {
