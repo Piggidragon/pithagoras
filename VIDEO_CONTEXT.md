@@ -145,7 +145,7 @@ A custom Qwen chat-template experiment was explicitly reverted. The final setup 
 
 ### 8. Add useful waiting cues
 
-Normal thinking can trigger one short randomly selected phrase after about 1.8 seconds, such as “Let me think about that for a moment.” Immediate repeat selection is avoided, with a 20-second cooldown. Fast replies suppress the cue.
+The end of a turn plays one short filler sound such as “Ah, okay.” at once, from a clip made earlier, instead of the spoken thinking phrase that used to come after about 1.8 seconds. It gives way to the answer, is never the one played last, and does not come twice in a row.
 
 Compaction was initially misrepresented as ordinary thinking. This was fixed using the SDK's `compaction_start` and `compaction_end` events:
 
@@ -277,7 +277,7 @@ Native TTS uses Breeze Q8, Aria reference audio, CUDA, guidance scale 1, one ref
 
 ## Where to look in the code
 
-- `web/src/hands-free.ts`: turn coordination, barge-in, thinking and compaction cues.
+- `web/src/hands-free.ts`: turn coordination, barge-in, fillers and compaction notices.
 - `web/src/live-transcription.ts`: incremental STT.
 - `web/src/speech-pipeline.ts`: ordered generation/playback queues.
 - `web/src/pcm-stream.ts`: streaming PCM buffering and playback.
