@@ -63,15 +63,17 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     const removeData = { current: false };
     if (!await confirmDialog({ title: t("Uninstall voice?"), message: <UninstallQuestion removeData={removeData} />, confirmLabel: t("Uninstall"), danger: true, deletes: true })) return;
     setActionBusy(true);
+    // Whatever the answer, the portal may have gone as far as removing the container: what the page shows is read again either way.
+    try { await api.uninstallVoice(removeData.current); } catch (e) { onError((e as Error).message); }
     try {
-      await api.uninstallVoice(removeData.current);
       setInstall(await api.voiceInstallStatus());
       setPicked(null);
       // The portal put the settings back. Taken over here, so that a save does not write the managed ones again; the rest of the page, edits not yet saved among it, stays.
       const back = await api.voice();
       setConfig(current => current && { ...current, enabled: back.enabled, runtime: back.runtime, whisperUrl: back.whisperUrl, breezeUrl: back.breezeUrl, sttModel: back.sttModel });
       window.dispatchEvent(new Event('voice-config-changed'));
-    } catch (e) { onError((e as Error).message); } finally { setActionBusy(false); }
+    } catch { /* the next poll shows it */ }
+    setActionBusy(false);
   };
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -148,7 +150,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
         {install?.available && rebuild && <button disabled={actionBusy || install.busy} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage('install',picked)}>{t("Rebuild with these engines")}</button>}
         {install?.available && !rebuild && <button disabled={actionBusy || install.busy || ['starting','running'].includes(install.state)} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage(install.state==='absent'?'install':'start',install.state==='absent'?picked??undefined:undefined)}>{install.state==='absent'?t("Install voice"):install.state==='failed'?t("Retry setup"):t("Start voice")}</button>}
         {install?.available && ['starting','running'].includes(install.state) && <button disabled={actionBusy} className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={()=>manage('stop')}>{t("Stop · release VRAM")}</button>}
-        {install?.available && install.state!=='absent' && <button disabled={actionBusy || install.busy} className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger disabled:opacity-40" onClick={()=>void uninstall()}>{t("Uninstall")}</button>}
+        {install?.available && (install.state!=='absent' || install.connected) && <button disabled={actionBusy || install.busy} className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger disabled:opacity-40" onClick={()=>void uninstall()}>{t("Uninstall")}</button>}
         {install?.state==='running' && <button disabled={busy} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent" onClick={async()=>{setBusy(true);try{setConfig(await api.connectVoice());window.dispatchEvent(new Event('voice-config-changed'));}catch(e){onError((e as Error).message);}finally{setBusy(false);}}}>{t("Use installed voice")}</button>}
       </div>
       {install?.error && <p role="alert" className="text-xs text-red-400">{install.error}</p>}

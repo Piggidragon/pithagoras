@@ -164,28 +164,57 @@ leaseTimer.unref();
 // Wait until module initialization finishes before accessing configuration.
 setImmediate(maintain);
 
-/** The settings a connect overwrites, as they were before it: the endpoints, the runtime, the recognition model and whether voice was on. */
-interface Before { runtime: NonNullable<VoiceConfig["runtime"]>; whisperUrl: string; breezeUrl: string; sttModel: string; enabled: boolean }
-const BEFORE_KEY = "voice_before_managed";
+/**
+ * What the portal keeps of the settings a connect overwrites, for the uninstall to put back. Kept for each side on its own, so
+ * that an address the user sets up after the install is remembered as well: `listening` is the recognition address with its
+ * model, `speaking` the speech address with its runtime. A side is there once it held something that was not the managed
+ * service's; `enabled` is whether voice was on then. `noSpeech`: the last connect saved no speech address, which is how
+ * recognition alone leaves the speech side, and which is then the managed service's and not the user's.
+ */
+interface Remembered {
+  listening?: { whisperUrl: string; sttModel: string };
+  speaking?: { breezeUrl: string; runtime: NonNullable<VoiceConfig["runtime"]> };
+  enabled?: boolean;
+  noSpeech?: boolean;
+}
+const REMEMBERED_KEY = "voice_before_managed";
 function saveVoice(value: VoiceConfig) {
   getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(value));
 }
-function remembered(): Before | undefined {
+function remembered(): Remembered {
   try {
-    const value = JSON.parse((getStoredSettings() as Record<string, string>)[BEFORE_KEY] ?? "null");
-    return typeof value?.whisperUrl === "string" && typeof value.breezeUrl === "string" && typeof value.runtime === "string" ? { sttModel: "", enabled: false, ...value } : undefined;
-  } catch { return undefined; }
+    const value = JSON.parse((getStoredSettings() as Record<string, string>)[REMEMBERED_KEY] ?? "{}");
+    const { listening, speaking } = value;
+    return {
+      ...(typeof listening?.whisperUrl === "string" ? { listening: { whisperUrl: listening.whisperUrl, sttModel: typeof listening.sttModel === "string" ? listening.sttModel : "" } } : {}),
+      ...(typeof speaking?.breezeUrl === "string" && typeof speaking.runtime === "string" ? { speaking: { breezeUrl: speaking.breezeUrl, runtime: speaking.runtime } } : {}),
+      ...(typeof value.enabled === "boolean" ? { enabled: value.enabled } : {}),
+      ...(typeof value.noSpeech === "boolean" ? { noSpeech: value.noSpeech } : {}),
+    };
+  } catch { return {}; }
 }
+/** Which sides of the saved settings are the managed service's, as far as the portal can tell. */
+function managedSides(c: VoiceConfig, noSpeech: boolean | undefined) {
+  const listening = isManagedUrl(c.whisperUrl);
+  // No speech address and the runtime none is the service's where a connect saved it. Where nothing says (a service connected by an older portal), it is when the recognition is.
+  const speaking = isManagedUrl(c.breezeUrl) || (c.runtime === "none" && !c.breezeUrl && (noSpeech ?? listening));
+  return { listening, speaking };
+}
+/** Do the saved settings still point at the managed service, in either side? */
+export const pointsAtManagedVoice = () => { const { listening, speaking } = managedSides(config(), remembered().noSpeech); return listening || speaking; };
 /** Point the saved config at the managed services, for the engines they were built with. */
 export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
   const { runtime, ...urls } = endpoints(choice);
   const current = config();
-  // What is about to be overwritten is kept for the uninstall, unless it is already the managed service's: a rebuild or a second
-  // connect would otherwise remember the service as what there was before it. Only the user's own are worth putting back.
-  if (!isManagedUrl(current.whisperUrl) && !isManagedUrl(current.breezeUrl)) {
-    const before: Before = { runtime: current.runtime ?? "breeze", whisperUrl: current.whisperUrl, breezeUrl: current.breezeUrl, sttModel: current.sttModel ?? "", enabled: current.enabled };
-    getDb().prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(BEFORE_KEY, JSON.stringify(before));
-  }
+  // What is about to be overwritten is kept for the uninstall, side by side: a side that is the managed service's already (a
+  // rebuild, a second connect) keeps what was remembered of it, as the service is not what there was before it.
+  const kept = remembered();
+  const { listening, speaking } = managedSides(current, kept.noSpeech);
+  const next: Remembered = { ...kept, noSpeech: runtime === "none" };
+  if (!listening) next.listening = { whisperUrl: current.whisperUrl, sttModel: current.sttModel ?? "" };
+  if (!speaking) next.speaking = { breezeUrl: current.breezeUrl, runtime: current.runtime ?? "breeze" };
+  if (!listening || !speaking) next.enabled = current.enabled;
+  getDb().prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(REMEMBERED_KEY, JSON.stringify(next));
   // Chatterbox is told a language and has no detection mode; keep one it speaks rather than save a setting it refuses.
   const language = runtime === 'chatterbox' && !CHATTERBOX_LANGUAGES.includes(current.language) ? 'en' : current.language;
   // Whisper.cpp serves one model and is sent no model field: an id left over
@@ -196,25 +225,24 @@ export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
 }
 /**
  * Takes the managed service out of the saved settings after it has been uninstalled: what the connect overwrote is put back, or,
- * where nothing was remembered (the service was connected before the portal did), what points at it is reset to a portal with
- * nothing set up. Only what points at the managed service is touched: an address the user set up themselves stays as it is, and so
- * do the voice, the language and the speech detection.
+ * where nothing was remembered of a side (the service was connected before the portal did), what points at it is reset to a portal
+ * with nothing set up. Only what points at the managed service is touched: an address the user set up themselves stays as it is,
+ * and so do the voice, the speech detection and the rest.
  */
 export function disconnectManagedVoice() {
   const current = config();
-  const before = remembered();
-  getDb().prepare("DELETE FROM settings WHERE key = ?").run(BEFORE_KEY);
-  const listening = isManagedUrl(current.whisperUrl);
-  // Recognition alone has no speech address; it is the managed service's when the recognition is.
-  const speaking = isManagedUrl(current.breezeUrl) || (listening && current.runtime === "none" && !current.breezeUrl);
+  const kept = remembered();
+  getDb().prepare("DELETE FROM settings WHERE key = ?").run(REMEMBERED_KEY);
+  const { listening, speaking } = managedSides(current, kept.noSpeech);
   if (!listening && !speaking) return current;
   const back = {
-    ...(listening ? { whisperUrl: before?.whisperUrl ?? DEFAULT_WHISPER_URL, sttModel: before?.sttModel ?? "" } : {}),
-    ...(speaking ? { breezeUrl: before?.breezeUrl ?? DEFAULT_BREEZE_URL, runtime: before?.runtime ?? "breeze" } : {}),
+    ...(listening ? { whisperUrl: kept.listening?.whisperUrl ?? DEFAULT_WHISPER_URL, sttModel: kept.listening?.sttModel ?? "" } : {}),
+    ...(speaking ? { breezeUrl: kept.speaking?.breezeUrl ?? DEFAULT_BREEZE_URL, runtime: kept.speaking?.runtime ?? "breeze" } : {}),
   };
-  // Voice was switched on by the connect, and is left on only where it was on before and has not been turned off since; with
-  // nothing remembered there is no knowing, and an address set to nothing is no use switched on.
-  const saved: VoiceConfig = { ...current, ...back, enabled: !!before?.enabled && current.enabled };
+  // Voice was switched on by the connect, and is left on only where everything put back is what the user had, it was on then, and it
+  // has not been turned off since; an address that is only a default is no use switched on.
+  const known = (!listening || kept.listening) && (!speaking || kept.speaking);
+  const saved: VoiceConfig = { ...current, ...back, enabled: !!known && !!kept.enabled && current.enabled };
   saveVoice(saved);
   return saved;
 }
@@ -253,7 +281,8 @@ export function voiceRouter(): Router {
         connectManagedVoice(state.choice);
         getDb().prepare("DELETE FROM settings WHERE key = 'voice_setup_pending'").run();
       }
-      res.json(state);
+      // `connected`: the saved settings point at the service, whether or not it is there, so that they can be put right after the container was removed by hand.
+      res.json({ ...state, connected: pointsAtManagedVoice() });
     } catch (e) { res.status(503).json({ error: (e as Error).message }); }
   });
   router.get('/voice/hardware', async (_req, res) => {
@@ -274,9 +303,13 @@ export function voiceRouter(): Router {
     try {
       const removeData = req.body?.removeData ?? false;
       if (typeof removeData !== 'boolean') throw new Error('removeData must be true or false');
-      await voiceService.uninstall(removeData);
+      // The container being gone is what the settings follow, whether or not the downloads could be deleted after it.
+      let kept: Error | undefined;
+      try { await voiceService.uninstall(removeData); }
+      catch (e) { if (!(e instanceof voiceService.DataNotRemoved)) throw e; kept = e; }
       getDb().prepare("DELETE FROM settings WHERE key = 'voice_setup_pending'").run();
       disconnectManagedVoice();
+      if (kept) return res.status(409).json({ error: kept.message });
       res.json({ ok: true });
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });

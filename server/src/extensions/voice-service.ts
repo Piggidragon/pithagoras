@@ -318,10 +318,13 @@ export async function stop() {
   error = '';
 }
 
+/** The container is gone, and the volume with the downloads is not: what the caller has to go on with is the same, and what it says is not. */
+export class DataNotRemoved extends Error {}
 /**
  * Removes the managed container, and with `removeData` the volume that holds its downloads and builds (the engines and
  * models), which a reinstall would otherwise reuse. Nothing there is not an error: the container may have been removed by hand.
- * The image is left, as other containers may be made from it.
+ * The image is left, as other containers may be made from it. A volume that cannot be removed is a `DataNotRemoved`, thrown
+ * when the container is already gone.
  */
 export async function uninstall(removeData = false) {
   if (pending) throw new Error('Wait for voice setup to finish before uninstalling');
@@ -339,7 +342,7 @@ export async function uninstall(removeData = false) {
     if (removeData) {
       progress = 'Removing the downloaded engines and models';
       const volume = await request<{ message?: string }>('DELETE', `/volumes/${VOLUME}`);
-      if (volume.status >= 400 && volume.status !== 404) throw new Error(volume.body?.message || `Docker returned ${volume.status}`);
+      if (volume.status >= 400 && volume.status !== 404) throw new DataNotRemoved(`The voice container is removed, but its downloaded engines and models could not be deleted: ${volume.body?.message || `Docker returned ${volume.status}`}`);
     }
   } finally { pending = false; }
 }

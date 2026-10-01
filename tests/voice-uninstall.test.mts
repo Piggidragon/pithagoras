@@ -23,6 +23,8 @@ let volumes = new Set<string>();
 let images = new Set<string>(['ubuntu:22.04']);
 // While set, a download of an image does not end: a setup that is under way.
 let pullGate: Promise<void> | null = null;
+// While set, Docker refuses to delete a volume, as it does when another container has it.
+let volumeFails = false;
 let calls: { method: string; url: string }[] = [];
 const server = http.createServer(async (req, res) => {
   let raw = ''; for await (const c of req) raw += c;
@@ -45,6 +47,7 @@ const server = http.createServer(async (req, res) => {
   if (method === 'DELETE' && url.startsWith('/volumes/')) {
     const name = url.slice('/volumes/'.length);
     if (!volumes.has(name)) { res.statusCode = 404; return res.end(JSON.stringify({ message: `get ${name}: no such volume` })); }
+    if (volumeFails) { res.statusCode = 409; return res.end(JSON.stringify({ message: 'volume is in use - [another-container]' })); }
     // As Docker refuses it: a container still has it.
     if (container) { res.statusCode = 409; return res.end(JSON.stringify({ message: `volume is in use - [${CONTAINER}]` })); }
     volumes.delete(name); res.statusCode = 204; return res.end();
@@ -78,7 +81,7 @@ const post = (p: string, body?: unknown) => oldFetch(`${base}${p}`, { method: 'P
 const put = (body: object) => oldFetch(`${base}/voice`, { method: 'PUT', headers: json, body: JSON.stringify(body) });
 const stored = (key: string) => (getDb().prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value;
 const reset = () => {
-  container = null; volumes = new Set(); images = new Set(['ubuntu:22.04']); pullGate = null; calls = [];
+  container = null; volumes = new Set(); images = new Set(['ubuntu:22.04']); pullGate = null; volumeFails = false; calls = [];
   getDb().prepare("DELETE FROM settings WHERE key IN ('voice', 'voice_before_managed', 'voice_setup_pending')").run();
 };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -133,6 +136,43 @@ test('what was remembered is what there was before the first connect: a second c
   assert.equal((await get('/voice')).whisperUrl, 'http://127.0.0.1:7863/v1/audio/transcriptions');
   assert.equal((await post('/voice/uninstall')).status, 200);
   assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'breeze', whisperUrl: OWN.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: 'my-model' });
+});
+
+test('an address set up after the install and connected over comes back, beside what was there on the other side', async () => {
+  // Recognition alone leaves no speech address and the runtime none, which the install saved and which is not the user's own.
+  reset();
+  assert.equal((await put(OWN)).status, 200);
+  await install();
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'none', whisperUrl: MANAGED.whisper, breezeUrl: '', sttModel: '' });
+  // Their own second recognition server, saved over the managed one (the page hides the speech address while there is none), then Stop and Start, which connect again.
+  const other = { ...OWN, whisperUrl: 'http://stt2.example.test:9000/inference', runtime: 'none', breezeUrl: '', sttModel: '' };
+  assert.equal((await put(other)).status, 200);
+  assert.equal((await post('/voice/stop')).status, 200);
+  assert.equal((await post('/voice/start')).status, 200);
+  assert.equal((await settle()).state, 'running');
+  assert.equal((await get('/voice')).whisperUrl, MANAGED.whisper);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  // The second server is the one the connect overwrote last, and the speech server and runtime from before the install are not lost to it.
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'breeze', whisperUrl: other.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: '' });
+  // The same where the speech side is the service's by its address: a container of the original engines, Breeze with Whisper, which are the ones with speech.
+  const connected = async (own: object) => {
+    reset(); seedContainer();
+    assert.equal((await put(own)).status, 200);
+    assert.equal((await post('/voice/connect')).status, 200);
+    return get('/voice');
+  };
+  const up = await connected(OWN);
+  assert.deepEqual(fields(up), { enabled: true, runtime: 'audio-cpp', whisperUrl: MANAGED.whisper, breezeUrl: MANAGED.speech, sttModel: '' });
+  assert.equal((await put({ ...up, whisperUrl: other.whisperUrl, sttModel: 'other-model' })).status, 200);
+  assert.equal((await post('/voice/connect')).status, 200);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'breeze', whisperUrl: other.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: 'other-model' });
+  // Their own recognition-only setup after the install is theirs as well: the empty speech address is the service's only where the service wrote it.
+  const again = await connected(OWN);
+  assert.equal((await put({ ...again, whisperUrl: other.whisperUrl, breezeUrl: '', runtime: 'none', sttModel: '' })).status, 200);
+  assert.equal((await post('/voice/connect')).status, 200);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'none', whisperUrl: other.whisperUrl, breezeUrl: '', sttModel: '' });
 });
 
 test('what was set up after the install is the user\'s own and stays, and so is a service that was switched off', async () => {
@@ -267,4 +307,42 @@ test('nothing is uninstalled while a setup is under way, and a choice that is no
   }
   assert.ok(container);
   assert.equal((await post('/voice/uninstall')).status, 200);
+});
+
+test('where the volume cannot be deleted the container is still removed and the settings are still put back, and the error says why the downloads stay', async () => {
+  reset();
+  assert.equal((await put(OWN)).status, 200);
+  await install();
+  volumeFails = true;
+  const answer = await post('/voice/uninstall', { removeData: true });
+  assert.equal(answer.status, 409);
+  assert.match((await answer.json()).error, /^The voice container is removed, but its downloaded engines and models could not be deleted: volume is in use/);
+  assert.equal(container, null);
+  assert.ok(volumes.has(VOLUME));
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'breeze', whisperUrl: OWN.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: 'my-model' });
+  assert.equal(stored('voice_before_managed'), undefined);
+  assert.equal(stored('voice_setup_pending'), undefined);
+  const state = await get('/voice/install');
+  assert.deepEqual([state.state, state.connected], ['absent', false]);
+});
+
+test('the status says whether the saved settings point at the service, also after its container was removed by hand', async () => {
+  reset();
+  assert.equal((await put(OWN)).status, 200);
+  assert.equal((await get('/voice/install')).connected, false);
+  await install();
+  const up = await get('/voice/install');
+  assert.deepEqual([up.state, up.connected], ['running', true]);
+  // The container is removed with Docker, and the page still has to be able to put the settings right.
+  container = null;
+  const gone = await get('/voice/install');
+  assert.deepEqual([gone.state, gone.connected], ['absent', true]);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  assert.equal((await get('/voice/install')).connected, false);
+  // Recognition alone, as a service of an older portal leaves it, counts as well; their own dictation-only setup does not.
+  reset();
+  assert.equal((await put({ ...OWN, runtime: 'none', whisperUrl: MANAGED.whisper, breezeUrl: '', sttModel: '' })).status, 200);
+  assert.equal((await get('/voice/install')).connected, true);
+  assert.equal((await put({ ...OWN, runtime: 'none', breezeUrl: '', sttModel: '' })).status, 200);
+  assert.equal((await get('/voice/install')).connected, false);
 });
