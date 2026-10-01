@@ -364,17 +364,48 @@ app.get("/api/projects", (req, res) => {
   }
 });
 
+/**
+ * Stores what a project's chats start with, given the tools it wants off: the
+ * difference from the portal-wide default, which is all that is kept. What the
+ * page was shown is what the portal has seen registered, and what the project
+ * already holds an exception for.
+ */
+function saveProjectTools(project: { name: string; path: string }, off: string[]) {
+  const held = projectTools(project.name);
+  const answered = [...shownTools(project.path).map((t) => t.name), ...held.off, ...held.on];
+  return setProjectTools(project.name, exceptionsFor(off, toolDefaultsOff(), answered, held));
+}
+
+/**
+ * `toolsOff`, when given, is the tools the new project's chats start with off,
+ * as for PUT .../tools. It is checked before the folder is made, like the
+ * instructions, so that a refusal leaves no project behind.
+ */
 app.post("/api/projects", (req, res) => {
-  const { name, instructions } = req.body ?? {};
+  const { name, instructions, toolsOff } = req.body ?? {};
   if (typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "name required" });
   if (instructions !== undefined && typeof instructions !== "string") {
     return res.status(400).json({ error: "instructions must be text" });
+  }
+  if (toolsOff !== undefined) {
+    if (!Array.isArray(toolsOff) || toolsOff.some((tool) => typeof tool !== "string")) {
+      return res.status(400).json({ error: "toolsOff must be a list of tool names" });
+    }
+    if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   }
   try {
     const project = createProject(WORKSPACE_ROOT, name, instructions);
     // A new project says nothing about tools: whatever an earlier folder of this
     // name left behind, such as one removed outside the portal, is not its.
-    clearProjectTools(project.name);
+    // The folder exists by now, and it stays whatever happens to its tools: the
+    // project is made, only its tools are not. Said in the answer rather than as
+    // a failure, so that the page can tell the two apart and offer them again.
+    try {
+      clearProjectTools(project.name);
+      if (toolsOff !== undefined) saveProjectTools(project, toolsOff);
+    } catch (e) {
+      return res.json({ ...project, toolsError: (e as Error).message });
+    }
     res.json(project);
   } catch (e) {
     projectFailure(res, e);
@@ -464,13 +495,9 @@ app.put("/api/projects/:name/tools", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
-    const defaults = toolDefaultsOff();
-    const held = projectTools(project.name);
-    // What the page was shown, and what the project already holds an exception for.
-    const answered = [...shownTools(project.path).map((t) => t.name), ...held.off, ...held.on];
-    const stored = setProjectTools(project.name, exceptionsFor(off, defaults, answered, held));
+    const stored = saveProjectTools(project, off);
     const applied = await sessions.applyToolDefaults(project.name);
-    res.json({ off: defaultsFor(defaults, stored), applied });
+    res.json({ off: defaultsFor(toolDefaultsOff(), stored), applied });
   } catch (e) {
     projectFailure(res, e);
   }

@@ -24,10 +24,18 @@ import { t, tp } from "../i18n";
  * The same list is a project's, from the Projects page: what its chats start
  * with, between the portal-wide default and what one chat switches for itself.
  * The two answer in the same shape, so only where they ask and write differs.
+ *
+ * And a project's that does not exist yet, in the dialog that makes it: there is
+ * nothing to ask or to save, so it starts from the portal-wide default and hands
+ * each choice to the dialog, which sends them along with the project.
  */
-export function ToolSwitches(props: { sessionId: string } | { project: string }) {
+export function ToolSwitches(props: { sessionId: string } | { project: string } | { onDraft: (off: string[]) => void }) {
   const project = "project" in props ? props.project : undefined;
   const sessionId = "sessionId" in props ? props.sessionId : "";
+  const onDraft = "onDraft" in props ? props.onDraft : undefined;
+  const drafting = onDraft !== undefined;
+  // What the chats of a project, made or about to be, start with.
+  const forProject = project !== undefined || drafting;
   const [tools, setTools] = useState<PortalTool[] | null>(null);
   const [off, setOff] = useState<string[]>([]);
   const [live, setLive] = useState(true);
@@ -38,7 +46,16 @@ export function ToolSwitches(props: { sessionId: string } | { project: string })
 
   useEffect(() => {
     let cancelled = false;
-    (project !== undefined ? api.projectTools(project) : api.tools(sessionId))
+    (drafting
+      ? api.toolDefaults().then((r) => ({
+          ...r,
+          live: false,
+          tools: r.tools.map((tool) => ({ ...tool, enabled: !r.off.includes(tool.name) })),
+        }))
+      : project !== undefined
+        ? api.projectTools(project)
+        : api.tools(sessionId)
+    )
       .then((r) => {
         if (cancelled) return;
         setTools(r.tools);
@@ -56,7 +73,7 @@ export function ToolSwitches(props: { sessionId: string } | { project: string })
     return () => {
       cancelled = true;
     };
-  }, [project, sessionId]);
+  }, [project, sessionId, drafting]);
 
   const flip = async (names: string[], enabled: boolean) => {
     const wanted = nextOff(off, names, enabled);
@@ -65,6 +82,8 @@ export function ToolSwitches(props: { sessionId: string } | { project: string })
     setTools((prev) =>
       prev?.map((t) => (names.includes(t.name) ? { ...t, enabled } : t)) ?? prev
     );
+    // Nothing to save yet: the dialog keeps it until the project is made.
+    if (onDraft) return onDraft(wanted);
     setBusy(true);
     try {
       const r = await (project !== undefined ? api.setProjectTools(project, wanted) : api.setTools(sessionId, wanted));
@@ -103,7 +122,7 @@ export function ToolSwitches(props: { sessionId: string } | { project: string })
           from its start — the default is not touched. */}
       {!live && (
         <p className="px-3 pb-1.5 text-[10px] text-fg-faint">
-          {project !== undefined
+          {forProject
             ? t("These are the tools earlier chats had. What you switch here is what every chat in this project starts with; the portal-wide defaults stay as they are.")
             : t("Not started yet — these are the tools earlier chats had. What you switch here holds for this chat from its first message; the defaults stay as they are.")}
         </p>

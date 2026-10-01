@@ -37,7 +37,7 @@ them. See [Projects](/guide/projects).
 | | |
 | --- | --- |
 | `GET /api/projects` | `{ root, projects: [{ name, path, isGit, hasInstructions, hasTools, sessions, lastActive }] }`; `hasTools` is whether the project switches tools differently from the portal-wide default |
-| `POST /api/projects` | `{ name, instructions? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home` |
+| `POST /api/projects` | `{ name, instructions?, toolsOff? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home`. `toolsOff` is the tools its chats start with off, as for `PUT /api/projects/:name/tools`, checked before the folder is made. If the folder is made and the tools cannot be stored, the answer is the project with a `toolsError` |
 | `GET /api/projects/:name` | The project plus `{ files, bytes, complete }` — what deleting it would remove |
 | `GET /api/projects/:name/instructions` | `{ text }` |
 | `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it. |

@@ -32,8 +32,8 @@ chats start without them.
 has and when one last moved.
 
 - **Click a project** to open its latest chat, or start one if it has none.
-- **New project** asks for a name and, optionally, instructions, then creates the
-  folder and opens a chat in it. "Cool Project" becomes the folder `cool-project`.
+- **New project** asks for a name and, optionally, instructions and tools, then creates
+  the folder and opens a chat in it. "Cool Project" becomes the folder `cool-project`.
   A name that is taken, or `home`, is refused.
 - **New chat here** (the plus on a row) starts another chat in that folder.
 - **Instructions** (the document icon) edits the folder's instructions.
@@ -101,6 +101,14 @@ they are**: a tool it switched on or off is its decision, and stays so whatever 
 project says. The tools it never mentioned follow the project from then on. A chat that
 was running is told at once and has it from its next message. A routine that runs in a
 project gets the project's tools like a chat does.
+
+The tools can be chosen as the project is made: **New project** has the same list under
+the instructions, starting from the portal-wide default, and what is switched there is
+stored with the project. Left alone, the project says nothing about tools. If the folder is
+made and its tools cannot be stored, the page says so and stays where it is, rather than
+opening the chat over the message; **Tools** on the project's row is where to choose them
+again. Over the API, `POST /api/projects` takes the same `toolsOff` list as the tools
+endpoint, and checks it before any folder is made.
 
 The settings are kept in the portal's database, by the project's name, and not as a file
 in the folder: the agent works in that folder and can write to it, and which tools it

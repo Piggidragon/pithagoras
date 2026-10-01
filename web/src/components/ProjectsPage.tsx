@@ -254,12 +254,19 @@ export function ProjectsPage({
         <NewProject
           root={root}
           onClose={() => setCreating(false)}
-          onCreate={async (name, instructions) => {
-            const project = await api.createProject(name, instructions);
+          onCreate={async (name, instructions, toolsOff) => {
+            const project = await api.createProject(name, instructions, toolsOff);
             setCreating(false);
             load();
             // The chats' folders have one more, even if its chat does not open.
             onChanged();
+            // The project is there, without the tools that were chosen. Said on the
+            // page, which stays: opening its chat would take the message away, and
+            // the Tools button on its row is where to choose them again.
+            if (project.toolsError) {
+              setError(t("\"{name}\" was created, but its tools could not be set: {error}", { name: project.name, error: project.toolsError }));
+              return;
+            }
             // The dialog is gone by now, so a failure here is shown on the page:
             // the project exists, only its first chat did not open.
             try {
@@ -304,10 +311,12 @@ function NewProject({
   /** Where the folder will be made, so the preview is the whole path. */
   root: string;
   onClose: () => void;
-  onCreate: (name: string, instructions: string) => Promise<void>;
+  onCreate: (name: string, instructions: string, toolsOff?: string[]) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
+  /** The tools wanted off, once somebody has switched any; untouched, the project says nothing about tools. */
+  const [toolsOff, setToolsOff] = useState<string[] | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const slug = slugify(name);
@@ -317,7 +326,7 @@ function NewProject({
     setBusy(true);
     setError(null);
     try {
-      await onCreate(name.trim(), instructions);
+      await onCreate(name.trim(), instructions, toolsOff);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -371,6 +380,14 @@ function NewProject({
           className={`${FIELD} mt-1 resize-y font-mono text-xs`}
         />
       </label>
+      <div className="mt-4">
+        <p className="text-xs text-fg-muted">
+          {t("Tools")} <span className="text-fg-faint">{t("(optional — what chats in this project start with)")}</span>
+        </p>
+        <div className="mt-1 overflow-hidden rounded-lg border border-line bg-raised/40">
+          <ToolSwitches onDraft={setToolsOff} />
+        </div>
+      </div>
     </Modal>
   );
 }

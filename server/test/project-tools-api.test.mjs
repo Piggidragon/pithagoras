@@ -106,3 +106,42 @@ test("deleting a project, or making one of the same name, leaves no settings beh
   assert.ok(!db.projectsWithTools().has("ghost"));
   assert.deepEqual(states(await json("/api/projects/ghost/tools")), { todo: true, web_fetch: false, web_search: true });
 });
+
+test("a project made with tools starts with them, and nothing an older folder of its name left", async () => {
+  await json("/api/tools", "PUT", { off: ["web_fetch"] });
+  db.setProjectTools("fresh", { off: ["todo"], on: ["web_fetch"] });
+  // The page's whole picture, as for the PUT: the portal-wide default's off tool stays in it.
+  const made = await json("/api/projects", "POST", { name: "fresh", toolsOff: ["web_fetch", "web_search"] });
+  assert.equal(made.toolsError, undefined);
+  assert.deepEqual(db.projectTools("fresh"), { off: ["web_search"], on: [] });
+  assert.deepEqual(states(await json("/api/projects/fresh/tools")), { todo: true, web_fetch: false, web_search: false });
+
+  const chat = await json("/api/sessions", "POST", { workspace: "fresh" });
+  assert.deepEqual(states(await json(`/api/sessions/${chat.id}/tools`)), { todo: true, web_fetch: false, web_search: false });
+});
+
+test("a project made with tools that match the default stores nothing, and one made without them has none", async () => {
+  await json("/api/projects", "POST", { name: "same", toolsOff: ["web_fetch"] });
+  assert.ok(!db.projectsWithTools().has("same"));
+  await json("/api/projects", "POST", { name: "plain" });
+  assert.ok(!db.projectsWithTools().has("plain"));
+});
+
+test("tools that cannot be a list are refused before any folder is made", async () => {
+  for (const toolsOff of ["web_search", [1], {}, null]) {
+    const res = await send("/api/projects", "POST", { name: "never", toolsOff });
+    assert.equal(res.status, 400, JSON.stringify(toolsOff));
+  }
+  assert.ok(!existsSync(path.join(ws, "never")));
+  assert.ok(!db.projectsWithTools().has("never"));
+});
+
+test("a project whose tools could not be saved is made, and says so", async () => {
+  // The portal's table for them is gone, as when its database cannot be written to.
+  db.getDb().exec("DROP TABLE project_tools");
+  const res = await json("/api/projects", "POST", { name: "halfway", toolsOff: ["web_search"] });
+  assert.equal(res.name, "halfway");
+  assert.match(res.toolsError, /project_tools/);
+  assert.ok(existsSync(path.join(ws, "halfway")));
+  assert.ok((await json("/api/projects?bare=1")).projects.some((p) => p.name === "halfway"));
+});

@@ -5,17 +5,38 @@ import { test, expect, type Page } from '@playwright/test';
  * project has off (the portal-wide default has web_fetch off, which the
  * project's answer includes); `puts` is what the page sent.
  */
-async function portal(page: Page, opts: { off?: string[]; refuse?: string } = {}) {
+async function portal(page: Page, opts: { off?: string[]; refuse?: string; toolsError?: string } = {}) {
   let off = opts.off ?? ['web_fetch'];
   const puts: string[][] = [];
+  /** What the page asked to have made, and the chats it then started. */
+  const made: { body: any }[] = [];
+  const chats: string[] = [];
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
     const method = route.request().method();
     let reply: unknown = {};
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
-    else if (p === '/api/projects') {
+    else if (p === '/api/sessions' && method === 'POST') {
+      chats.push(route.request().postData() ?? '');
+      reply = { id: 'c1', title: 'New chat', workspace: '/w/fresh', executor: 'host', status: 'idle', created_at: '', updated_at: '', last_error: null, pinned: false };
+    } else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
+    else if (p === '/api/projects' && method === 'POST') {
+      const body = route.request().postDataJSON();
+      made.push({ body });
+      reply = { name: 'fresh', path: '/w/fresh', isGit: false, hasInstructions: false, ...(opts.toolsError ? { toolsError: opts.toolsError } : {}) };
+    } else if (p === '/api/tools') {
+      // What the portal-wide default says: web_fetch off.
+      reply = {
+        tools: [
+          { name: 'web_search', source: 'pi-web-access', defaultOn: true },
+          { name: 'web_fetch', source: 'pi-web-access', defaultOn: false },
+          { name: 'todo', source: 'pi-todo', defaultOn: true },
+        ],
+        off: ['web_fetch'],
+        names: {},
+      };
+    } else if (p === '/api/projects') {
       reply = { root: '/w', home: '/h', projects: [{ name: 'demo', path: '/w/demo', isGit: false, hasInstructions: false, hasTools: off.length !== 1 || off[0] !== 'web_fetch', sessions: 0, lastActive: null }] };
     } else if (p === '/api/projects/demo/tools' && opts.refuse) {
       return route.fulfill({ status: 400, json: { error: opts.refuse } });
@@ -43,13 +64,13 @@ async function portal(page: Page, opts: { off?: string[]; refuse?: string } = {}
     localStorage.removeItem('toolGroupsOpen');
   });
   await page.goto('/projects');
-  return puts;
+  return { puts, made, chats };
 }
 
 const dialog = (page: Page) => page.getByRole('dialog');
 
 test('a project has its own tool switches, saved as each is flipped', async ({ page }) => {
-  const puts = await portal(page);
+  const { puts } = await portal(page);
   await page.getByRole('button', { name: 'Tools for demo' }).click();
   await expect(dialog(page)).toContainText('Tools · demo');
   await expect(dialog(page)).toContainText('what every chat in this project starts with');
@@ -89,4 +110,40 @@ test('a deployment that cannot switch tools says why in place of the list', asyn
   await page.getByRole('button', { name: 'Tools for demo' }).click();
   await expect(dialog(page)).toContainText('Tools cannot be switched with EXECUTOR=container');
   await expect(dialog(page).getByRole('checkbox')).toHaveCount(0);
+});
+
+test('the tools are chosen while the project is made, and go with it', async ({ page }) => {
+  const { made } = await portal(page);
+  await page.getByRole('button', { name: 'New project' }).click();
+  await dialog(page).getByRole('textbox', { name: 'Name' }).fill('fresh');
+  await dialog(page).getByRole('button', { name: /pi-web-access/ }).click();
+  const search = dialog(page).getByRole('checkbox', { name: 'web_search' });
+  // It starts from the portal-wide default: web_fetch is off there.
+  await expect(search).toBeChecked();
+  await expect(dialog(page).getByRole('checkbox', { name: 'web_fetch' })).not.toBeChecked();
+  await expect(dialog(page)).toContainText('what every chat in this project starts with');
+  await search.uncheck();
+  await dialog(page).getByRole('button', { name: 'Create and open' }).click();
+  await expect.poll(() => made.map((m) => m.body)).toEqual([{ name: 'fresh', instructions: '', toolsOff: ['web_fetch', 'web_search'] }]);
+});
+
+test('a project made without touching the tools says nothing about them', async ({ page }) => {
+  const { made } = await portal(page);
+  await page.getByRole('button', { name: 'New project' }).click();
+  await dialog(page).getByRole('textbox', { name: 'Name' }).fill('fresh');
+  await dialog(page).getByRole('button', { name: 'Create and open' }).click();
+  await expect.poll(() => made.map((m) => m.body)).toEqual([{ name: 'fresh', instructions: '' }]);
+});
+
+test('a project that was made without its tools says so, and stays on the page', async ({ page }) => {
+  const { chats } = await portal(page, { toolsError: 'database is locked' });
+  await page.getByRole('button', { name: 'New project' }).click();
+  await dialog(page).getByRole('textbox', { name: 'Name' }).fill('fresh');
+  await dialog(page).getByRole('button', { name: /pi-web-access/ }).click();
+  await dialog(page).getByRole('checkbox', { name: 'web_search' }).uncheck();
+  await dialog(page).getByRole('button', { name: 'Create and open' }).click();
+  await expect(page.getByText('"fresh" was created, but its tools could not be set: database is locked')).toBeVisible();
+  await expect(dialog(page)).toHaveCount(0);
+  // Its chat is not opened over the message.
+  expect(chats).toEqual([]);
 });
