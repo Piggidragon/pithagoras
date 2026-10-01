@@ -73,6 +73,9 @@ function Fixture() {
         { seq: previous.length + 1, type: 'tool_execution_start', payload: { toolName: 'generate_image', toolCallId: 'gen-slow', input: { prompt: 'A foggy harbour at first light' } } }]); }}>Start generating a picture</button>
       <button onClick={() => { setRunning(false); setEvents(previous => [...previous,
         { seq: previous.length + 1, type: 'tool_execution_end', payload: { toolName: 'generate_image', toolCallId: 'gen-slow', result: { content: [{ type: 'text', text: 'Generated and shown to the user: generated-images/image-20261001-101600-d4e5f6.png' }], details: { path: 'generated-images/image-20261001-101600-d4e5f6.png', title: 'A foggy harbour', portalImage: true } } } }]); }}>Finish generating the picture</button>
+      <button onClick={() => { setRunning(false); setEvents(previous => [...previous,
+        { seq: previous.length + 1, type: 'tool_execution_start', payload: { toolName: 'generate_image', toolCallId: 'gen-failed', input: { prompt: 'A castle in the clouds' } } },
+        { seq: previous.length + 2, type: 'tool_execution_end', payload: { toolName: 'generate_image', toolCallId: 'gen-failed', isError: true, result: { content: [{ type: 'text', text: 'The image endpoint answered 401: the key was refused' }] } } }]); }}>Fail generating a picture</button>
       <button onClick={() => setEvents(previous => [...previous,
         { seq: previous.length + 1, type: 'tool_execution_start', payload: { toolName: 'generate_image', toolCallId: `other-${previous.length}`, input: { prompt: 'A cat on a sofa' } } },
         { seq: previous.length + 2, type: 'tool_execution_end', payload: { toolName: 'generate_image', toolCallId: `other-${previous.length}`, result: { content: [{ type: 'text', text: 'Saved /workspaces/pithagoras/out/cat.png' }], details: { path: '/workspaces/pithagoras/out/cat.png' } } } }])}>Call an extension's generate_image</button>

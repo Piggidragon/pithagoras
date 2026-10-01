@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSparkles } from 'react-icons/lu';
-import type { PortalEvent } from '../api';
-import { describeCall, describeOutcome, elapsed, type ToolCall, type ToolTarget } from '../tool-activity';
+import { api, type PortalEvent } from '../api';
+import { describeCall, describeOutcome, elapsed, unwrap, type ToolCall, type ToolTarget } from '../tool-activity';
+import { isPictureTool, pictureCall, type PictureCall } from '../picture-call';
 import { shownPicture } from '../transcript';
 import { msg, t } from "../i18n";
+import { ImagePreview } from './ImagePreview';
 
 /** A card for one tool call, in one of four places around the orb. */
 type Card = ToolCall & {
   id: number; callId: string; start: unknown; startedAt: number;
   status: 'running' | 'done' | 'failed'; outcome: string;
   slot: number; leaving: boolean;
+  /** For the portal's picture tools: what the call says of the picture, and where the picture is once it is made. */
+  look?: PictureCall; picture?: string;
 };
 
 /** How long a finished card stays: long enough to read its outcome, longer for a failure. */
@@ -37,7 +41,7 @@ const TARGET: Record<ToolTarget, string> = {
   pictures: msg("the picture"),
 };
 
-export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEvent[]; folder: string; onOpen: (call: ToolCall) => void }) {
+export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { events: PortalEvent[]; sessionId: string; folder: string; onOpen: (call: ToolCall) => void }) {
   const seen = useRef(events.reduce((n, e) => Math.max(n, e.seq), 0));
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const cards = useRef<Card[]>([]);
@@ -73,14 +77,17 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
         const leavingFrom = new Set(next.filter(c => c.leaving).map(c => c.slot));
         const slot = [0, 1, 2, 3].find(s => !taken.has(s) && !leavingFrom.has(s)) ?? [0, 1, 2, 3].find(s => !taken.has(s)) ?? 0;
         next = next.filter(c => !(c.leaving && c.slot === slot));
-        next = [...next, { ...describeCall(p, folder), id: event.seq, callId: String(p.toolCallId ?? ''), start: p, startedAt: Date.now(), status: 'running', outcome: '', slot, leaving: false }];
+        const call = unwrap(p);
+        const look = isPictureTool(call.name) ? pictureCall(call.name, call.input, folder) : undefined;
+        next = [...next, { ...describeCall(p, folder), id: event.seq, callId: String(p.toolCallId ?? ''), start: p, startedAt: Date.now(), status: 'running', outcome: '', slot, leaving: false, ...(look ? { look } : {}) }];
       } else if (event.type === 'tool_execution_end') {
         const card = next.find(c => c.callId && c.callId === String(p.toolCallId ?? '') && c.status === 'running');
         if (!card) continue;
         const status = p.isError ? 'failed' as const : 'done' as const;
         // A card leads to the pictures once its call has shown one: a generate_image or edit_image has no picture to open before that, nor when it is another extension's tool.
-        const target = shownPicture(p) ? 'pictures' as const : undefined;
-        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}) } : c);
+        const picture = shownPicture(p);
+        const target = picture ? 'pictures' as const : undefined;
+        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}), ...(picture ? { picture: picture.path } : {}) } : c);
         later(STAYS[status], () => leave(card.id));
       } else if (event.type === 'agent_end' || (event.type === 'portal_status' && p.status !== 'running')) {
         // The run is over: a call that never reported its end is not still going.
@@ -104,8 +111,11 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
       const took = Date.now() - card.startedAt;
       const note = card.status === 'running' ? (took >= 3000 ? elapsed(took) : '') : card.outcome;
       const className = `voice-tool-float flies-${card.slot % 2 ? 'right' : 'left'} flight-lane-${Math.floor(card.slot / 2)} is-${card.status}${card.leaving ? ' is-leaving' : ''}`;
+      // A picture being made, made or not made is the preview the chat shows, as a tile in the place of the mark; another extension's tool of that name, which ends with no picture, has the mark.
+      const tile = card.look && (card.status !== 'done' || card.picture);
       const body = <>
-        {card.status === 'failed' ? <LuCircleAlert aria-hidden="true" /> : card.status === 'done' ? <LuCheck aria-hidden="true" /> : took >= 3000 ? <LuLoaderCircle aria-hidden="true" className="animate-spin" /> : <LuSparkles aria-hidden="true" />}
+        {tile ? <ImagePreview compact state={card.status === 'running' ? 'making' : card.picture ? 'done' : 'failed'} edit={card.look!.edit} src={card.picture && api.pictureUrl(sessionId, card.picture, card.id)} ratio={card.look!.ratio} />
+          : card.status === 'failed' ? <LuCircleAlert aria-hidden="true" /> : card.status === 'done' ? <LuCheck aria-hidden="true" /> : took >= 3000 ? <LuLoaderCircle aria-hidden="true" className="animate-spin" /> : <LuSparkles aria-hidden="true" />}
         <div>
           <span>{card.label}</span>
           {card.detail && <p>{card.detail}</p>}

@@ -2,8 +2,8 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import zlib from 'node:zlib';
 
 /**
- * A picture being made, made and not made (ImagePreview.tsx), in the chat, from
- * web/tests/pictures.tsx.
+ * A picture being made, made and not made (ImagePreview.tsx): in the chat, from
+ * web/tests/pictures.tsx, and as the tile on a card in voice mode.
  */
 
 /** A plain picture of this size, as the chat's folder would serve one. */
@@ -202,5 +202,55 @@ test.describe('in the chat', () => {
     await expect(making).toHaveClass(/is-loaded/);
     // The wait stays under it for the fade, and then goes.
     await expect(making.locator('.image-preview-making')).toHaveCount(0);
+  });
+});
+
+test.describe('in voice mode', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/browser', (route) => route.fulfill({ json: { running: false, sessions: [], install: { container: 'stopped' } } }));
+    await page.route('**/api/sessions/test/commands', (route) => route.fulfill({ json: { commands: [] } }));
+    await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
+    await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
+    await page.route('**/voice/speech', (route) => route.fulfill({ status: 204 }));
+    await folder(page, 'test');
+    await page.route('**/api/sessions/test/files?**', (route) => route.fulfill({ json: { path: '', entries: [], truncated: false } }));
+    await page.goto('/tests/voice.html');
+    await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+    await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
+  });
+
+  test('the card of a picture shows the same preview as a tile: being made, made, not made', async ({ page }) => {
+    await page.getByRole('button', { name: 'Start generating a picture' }).click();
+    const card = page.locator('.voice-tool-float', { hasText: 'A foggy harbour at first light' });
+    const tile = card.locator('.image-preview');
+    await expect(tile).toHaveClass(/is-compact/);
+    await expect(tile).toHaveClass(/is-making/);
+    // The tile is where the card's mark was; with the animations off it is still.
+    await expect(card.locator(':scope > svg')).toHaveCount(0);
+    const light = () => tile.locator('.image-preview-making').evaluate((wait) => getComputedStyle(wait, '::before').animationName);
+    expect(await light()).toBe('none');
+    // As high as the card's text, not a picture's size: the card does not grow with it.
+    expect((await tile.boundingBox())!.height).toBeLessThanOrEqual(48);
+    // And it moves when the animations are on, as the one in the chat.
+    await page.evaluate(() => { document.documentElement.dataset.motion = 'fancy'; });
+    expect(await light()).toBe('fx-preview-drift');
+
+    await page.getByRole('button', { name: 'Finish generating the picture' }).click();
+    await expect(tile).toHaveClass(/is-done/);
+    await expect(tile.locator('.image-preview-frame')).toHaveClass(/is-loaded/);
+    // The card is the same card, and a tap on it still shows the picture.
+    await expect(card).toHaveAttribute('title', 'Show the picture');
+
+    await page.getByRole('button', { name: 'Fail generating a picture' }).click();
+    const failed = page.locator('.voice-tool-float', { hasText: 'A castle in the clouds' });
+    await expect(failed.locator('.image-preview')).toHaveClass(/is-failed/);
+    await expect(failed).toContainText('Failed: The image endpoint answered 401');
+
+    // Another extension's tool of that name ends with no picture of the portal's: the card has its mark, as it had.
+    await page.getByRole('button', { name: "Call an extension's generate_image" }).click();
+    const theirs = page.locator('.voice-tool-float', { hasText: 'A cat on a sofa' });
+    await expect(theirs).toContainText('Making a picture');
+    await expect(theirs.locator('.image-preview')).toHaveCount(0);
+    await expect(theirs.locator(':scope > svg')).toHaveCount(1);
   });
 });
