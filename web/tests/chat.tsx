@@ -9,6 +9,7 @@ import { ConfirmHost } from '../src/components/ConfirmDialog';
 import { fillFrom } from '../src/editor-fills';
 import { Select } from '../src/components/Select';
 import type { PortalEvent, Session } from '../src/api';
+import { appendLiveEvent } from '../src/live-events';
 import '../src/styles';
 import { installTooltips } from '../src/tooltips';
 installTooltips();
@@ -16,6 +17,7 @@ installTooltips();
 const phase = new URLSearchParams(location.search).get('phase') ?? 'tools';
 const now = Date.now();
 let seq = 0;
+let liveSeq = 0;
 const ev = (type: string, payload: any = {}, ago = 0): PortalEvent => ({ seq: ++seq, type, at: now - ago * 1000, payload });
 const bash = (id: string, command: string, output: string, end?: { error?: boolean; text?: string }, ago = 30) => [
   ev('tool_execution_start', { toolCallId: id, toolName: 'bash', args: { command } }, ago),
@@ -237,6 +239,8 @@ function Fixture() {
   // More of the running command's output, all of it so far.
   (window as any).bashOut = (text: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'tool_execution_update', at: Date.now(), payload: { toolCallId: 'b3', partialResult: { content: [{ type: 'text', text }] } } }]);
   (window as any).say = (delta: string) => setShownEvents((list) => [...list, { seq: ++seq, type: 'message_update', at: Date.now(), payload: { streamId: 's', assistantMessageEvent: { type: 'text_delta', delta } } }]);
+  // A live event, as the stream delivers one: not stored, so numbered below zero, and taken in the way the page takes in its own (a screen said again replaces the last).
+  (window as any).emitLive = (type: string, payload: any) => setShownEvents((list) => appendLiveEvent(list, { seq: -(++liveSeq), type, at: Date.now(), payload }));
   // Any event, as the server would send it: a tool call starting is a message of its own.
   (window as any).emit = (type: string, payload: any) => setShownEvents((list) => [...list, { seq: ++seq, type, at: Date.now(), payload }]);
   (window as any).fillBox = (text: string) => fillFrom(session.id, { seq: -now * 1000 - 20, type: 'extension_ui_request', at: now, payload: { method: 'setEditorText', text } });

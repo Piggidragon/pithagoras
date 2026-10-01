@@ -19,6 +19,8 @@ export function appendLiveEvent(events: PortalEvent[], event: PortalEvent): Port
       if (inner.type === 'message_end' && was.type === 'message_update') return false;
       if ((inner.type === 'tool_execution_end' || inner.type === 'tool_execution_update') && was.type === 'tool_execution_update' && was.toolCallId === inner.toolCallId) return false;
     }
+    // A screen is said whole each time, so the last said of its id is all there is to keep.
+    if (e.type === 'portal_screen' && event.type === 'portal_screen' && e.payload?.id === p.id) return false;
     return true;
   });
   return [...kept, event];

@@ -265,6 +265,8 @@ const de: Locale = {
     "Close the browser": "Browser schließen",
     "Subagents": "Subagents",
     "Close the subagents": "Subagents schließen",
+    "Screens": "Ansichten",
+    "Close the screens": "Ansichten schließen",
     "Files": "Dateien",
     "Close the files": "Dateien schließen",
     "Git": "Git",
@@ -297,6 +299,8 @@ const de: Locale = {
     "interrupted — send a message to resume": "unterbrochen — schick eine Nachricht, um fortzufahren",
     "Hide the subagents": "Subagents ausblenden",
     "The agents working beside this one": "Die Agenten, die neben diesem arbeiten",
+    "Hide the screens": "Ansichten ausblenden",
+    "What the extensions of this chat show": "Was die Erweiterungen dieses Chats zeigen",
     "Hide the browser": "Browser ausblenden",
     "Watch the browser the agent is driving": "Den Browser beobachten, den der Agent steuert",
     "Hide the terminal": "Terminal ausblenden",
@@ -1317,6 +1321,13 @@ const de: Locale = {
     "Default — {model}": "Standard — {model}",
     "This chat's model": "Das Modell dieses Chats",
     "The one it is on when it starts one": "Das Modell, das er hat, wenn er einen startet",
+    // components/ScreensPanel.tsx
+    "Nothing is shown here. An extension's data appears while its chat runs, once it is connected — /screen does that.": "Hier wird nichts angezeigt. Die Daten einer Erweiterung erscheinen, solange ihr Chat läuft und sobald sie verbunden ist — das erledigt /screen.",
+    // components/ScreenBlocks.tsx
+    "To do": "Zu erledigen",
+    "In progress": "In Arbeit",
+    "Waiting": "Wartet",
+    "Not a block this page knows: {type}": "Kein Baustein, den diese Seite kennt: {type}",
     // components/SubagentPanel.tsx
     "No subagents in this chat yet. An extension's agent shows up here while it works — and takes messages if the extension speaks the subagent protocol.": "In diesem Chat gibt es noch keine Subagents. Der Agent einer Erweiterung erscheint hier, während er arbeitet — und nimmt Nachrichten an, wenn die Erweiterung das Subagent-Protokoll spricht.",
     "Stopped": "Gestoppt",

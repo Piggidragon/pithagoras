@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type BackgroundState, type PortalEvent } from "./api";
+import { screensOf, withScreen } from "./screens";
 import { stripAnsi } from "./transcript";
 import { piRunning } from "./drafts";
 
-const EMPTY: BackgroundState = { supported: false, jobs: [], statuses: [], widgets: [] };
+const EMPTY: BackgroundState = { supported: false, jobs: [], statuses: [], widgets: [], screens: [] };
 
 /** Where a page was in its events when it asked: the newest live and stored seqs it held. */
 export type Mark = { live: number; stored: number };
@@ -25,6 +26,7 @@ export function markOf(events: PortalEvent[]): Mark {
  * the portal again for each — with a walk of /proc for the jobs — was a
  * request a moment, for text the page already had. Read back from the end of
  * the events to where the page was when it asked: new ones are appended.
+ * Their screens are said the same way, whole each time.
  */
 export function withLiveUi(state: BackgroundState, events: PortalEvent[], since: Mark): BackgroundState {
   let from = events.length;
@@ -33,12 +35,17 @@ export function withLiveUi(state: BackgroundState, events: PortalEvent[], since:
     if (e.seq < 0 ? e.seq >= since.live : e.seq <= since.stored) break;
     from--;
   }
-  const said = events.slice(from).filter((e) => e.type === "extension_ui_request" && (e.payload?.method === "setStatus" || e.payload?.method === "setWidget"));
+  const said = events.slice(from).filter((e) => e.type === "portal_screen" || (e.type === "extension_ui_request" && (e.payload?.method === "setStatus" || e.payload?.method === "setWidget")));
   if (!said.length) return state;
   const statuses = new Map(state.statuses.map((s) => [s.key, s.text]));
   const widgets = new Map(state.widgets.map((w) => [w.key, w.lines]));
+  let screens = state.screens;
   const plain = (t: unknown) => stripAnsi(String(t ?? "")).trim();
-  for (const { payload: p } of said) {
+  for (const { type, payload: p } of said) {
+    if (type === "portal_screen") {
+      screens = withScreen(screens, p);
+      continue;
+    }
     if (p.method === "setStatus" && typeof p.statusKey === "string") {
       const text = plain(p.statusText);
       if (text) statuses.set(p.statusKey, text);
@@ -54,6 +61,7 @@ export function withLiveUi(state: BackgroundState, events: PortalEvent[], since:
     ...state,
     statuses: [...statuses].map(([key, text]) => ({ key, text })),
     widgets: [...widgets].map(([key, lines]) => ({ key, lines })),
+    screens,
   };
 }
 
@@ -115,5 +123,5 @@ export function useBackground(sessionId: string, busy: boolean, events: PortalEv
  */
 function normalize(s: Partial<BackgroundState> | null | undefined): BackgroundState {
   const list = <T,>(v: T[] | undefined): T[] => (Array.isArray(v) ? v : []);
-  return { supported: s?.supported === true, jobs: list(s?.jobs), statuses: list(s?.statuses), widgets: list(s?.widgets), piRunning: s?.piRunning === true };
+  return { supported: s?.supported === true, jobs: list(s?.jobs), statuses: list(s?.statuses), widgets: list(s?.widgets), screens: screensOf(s?.screens), piRunning: s?.piRunning === true };
 }

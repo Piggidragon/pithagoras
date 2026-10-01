@@ -219,11 +219,22 @@ export interface BackgroundJob {
   attached: boolean;
 }
 
+/** One of the building blocks of a screen: what the page draws is by its `type` (see screens.ts). */
+export type ScreenBlock = { type: string; [key: string]: unknown };
+
+/** What an extension shows in the Screens panel, as it said it. */
+export interface Screen {
+  id: string;
+  title?: string;
+  blocks: ScreenBlock[];
+}
+
 export interface BackgroundState {
   supported: boolean;
   jobs: BackgroundJob[];
   statuses: { key: string; text: string }[];
   widgets: { key: string; lines: string[] }[];
+  screens: Screen[];
   /** Whether the chat's pi is up, for the chat box's text to be worth telling it. */
   piRunning?: boolean;
 }

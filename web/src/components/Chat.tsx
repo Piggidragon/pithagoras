@@ -5,6 +5,7 @@ import { RunningTray } from "./RunningTray";
 import { CommandLine } from "./CommandLine";
 import { mentionsCommand } from "../status-commands";
 import { SubagentPanel } from "./SubagentPanel";
+import { ScreensPanel } from "./ScreensPanel";
 import { BackgroundJobs } from "./BackgroundJobs";
 import { stableSubagents, subagents, type Subagent } from "../subagents";
 import { useBackground } from "../use-background";
@@ -21,7 +22,7 @@ import { createPortal } from "react-dom";
 import { Fragment, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuLayoutDashboard, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, type Item, type SentImage } from "../transcript";
@@ -69,11 +70,12 @@ const ASIDE: Record<Dock, string> = {
 };
 
 /** The panels that sit beside the conversation, each in a place of its own. */
-type AsidePanel = "browser" | "agents" | "files" | "git" | "terminal";
+type AsidePanel = "browser" | "agents" | "screens" | "files" | "git" | "terminal";
 /** What each panel is called: in its header, and on its close button. */
 const PANEL: Record<AsidePanel, { label: string; close: string }> = {
   browser: { label: msg("Browser"), close: msg("Close the browser") },
   agents: { label: msg("Subagents"), close: msg("Close the subagents") },
+  screens: { label: msg("Screens"), close: msg("Close the screens") },
   files: { label: msg("Files"), close: msg("Close the files") },
   git: { label: msg("Git"), close: msg("Close the git panel") },
   terminal: { label: msg("Terminal"), close: msg("Close the terminal") },
@@ -312,6 +314,7 @@ export function Chat({
   const [terminalTab, setTerminalTab] = useState<"agent" | "jobs" | "shell">("agent");
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const [screensOpen, setScreensOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [shellStarted, setShellStarted] = useState(false);
   const [terminalFocus, setTerminalFocus] = useState<{ id: string; at: number } | null>(null);
@@ -362,8 +365,8 @@ export function Chat({
   const fileAnswered = useCallback(() => setFileAsked(null), []);
   useEffect(() => setFileAsked(null), [session.id]);
   useWorkPanels(
-    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else setCanvasOpen(false); },
+    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen, screens: !voiceMode && screensOpen },
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else if (panel === "screens") setScreensOpen(false); else setCanvasOpen(false); },
     // A third panel closes another one instead, while Files has an edit in it.
     // An edit not saved outweighs keeping Git in view: with both kept nothing
     // could go, and the fallback closed Files — edit and all — unasked.
@@ -379,7 +382,7 @@ export function Chat({
     setFiles(false);
   };
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", terminal && "terminal"].filter(Boolean) as AsidePanel[];
+  const asidePanels = [watching && "browser", agentsOpen && "agents", screensOpen && "screens", files && "files", git && "git", terminal && "terminal"].filter(Boolean) as AsidePanel[];
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where each panel goes, the
@@ -1349,6 +1352,7 @@ export function Chat({
   const closePanel: Record<AsidePanel, () => void> = {
     browser: () => setWatching(false),
     agents: () => setAgentsOpen(false),
+    screens: () => setScreensOpen(false),
     files: () => void closeFiles(),
     git: () => setGit(false),
     terminal: () => setTerminal(false),
@@ -1425,6 +1429,11 @@ export function Chat({
       {kind === "agents" && (
         <div className="min-h-0 flex-1 bg-surface">
           <SubagentPanel sessionId={session.id} agents={agents} items={items} selected={selectedAgent} onSelect={setSelectedAgent} />
+        </div>
+      )}
+      {kind === "screens" && (
+        <div className="min-h-0 flex-1 bg-surface">
+          <ScreensPanel screens={background.screens} />
         </div>
       )}
       {kind === "files" && (
@@ -1583,6 +1592,16 @@ export function Chat({
               live={agents.some((a) => a.status === "running")}
             >
               <LuBot />
+            </PanelToggle>
+          )}
+          {(background.screens.length > 0 || screensOpen) && (
+            <PanelToggle
+              open={screensOpen}
+              onClick={() => setScreensOpen((v) => !v)}
+              label={t("Screens")}
+              title={screensOpen ? t("Hide the screens") : t("What the extensions of this chat show")}
+            >
+              <LuLayoutDashboard />
             </PanelToggle>
           )}
           {browserUp && (
