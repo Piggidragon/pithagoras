@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AudioRule, VoiceFirstTurn, AUDIO_SYSTEM_RULE, voiceRulesOn, audioMessage, spokenIn } from '../server/src/pi/voice-first.js';
+import { AudioRule, VoiceFirstTurn, AUDIO_SYSTEM_RULE, DEFAULT_VOICE_INSTRUCTIONS, audioSystemRule, voiceInstructions, voiceRulesOn, audioMessage, spokenIn } from '../server/src/pi/voice-first.js';
 function setup() {
  const turn = new VoiceFirstTurn(), handlers = new Map<string, (...args: any[]) => any>();
  turn.extension({ on: (name: string, fn: any) => handlers.set(name, fn) });
@@ -96,4 +96,81 @@ test('unoptimized voice baseline omits voice instructions and the audio marker',
   if(previous === undefined)delete process.env.VOICE_RESPONSE_INSTRUCTIONS;
   else process.env.VOICE_RESPONSE_INSTRUCTIONS=previous;
  }
+});
+
+test('saved speaking instructions replace the built-in ones, and blank means the built-in ones', () => {
+ assert.equal(voiceInstructions(undefined), DEFAULT_VOICE_INSTRUCTIONS);
+ assert.equal(voiceInstructions(''), DEFAULT_VOICE_INSTRUCTIONS);
+ assert.equal(voiceInstructions(' \n '), DEFAULT_VOICE_INSTRUCTIONS);
+ assert.equal(voiceInstructions(42), DEFAULT_VOICE_INSTRUCTIONS);
+ assert.equal(voiceInstructions('  Answer in one word.\n'), 'Answer in one word.');
+ assert.equal(audioSystemRule(), AUDIO_SYSTEM_RULE, 'built in unless told otherwise');
+ const custom = audioSystemRule('Answer in one word.');
+ assert.ok(custom.includes(' Answer in one word. Do not read the marker aloud.'));
+ assert.ok(!custom.includes(DEFAULT_VOICE_INSTRUCTIONS));
+ // What the marker means, and what to do without it, is not the instructions' to change.
+ for (const kept of [/latest user request only/, /does not mean any request has it/, /normal chat formatting/]) assert.match(custom, kept);
+});
+test('the rule is made from the saved instructions when a spoken message turns it on', () => {
+ let saved = '';
+ const rule = new AudioRule(() => saved);
+ assert.equal(rule.set(true), true);
+ assert.deepEqual(rule.lines(), [AUDIO_SYSTEM_RULE], 'nothing saved: the built-in instructions');
+ assert.equal(rule.set(true), false, 'same instructions: not a change');
+ saved = 'Answer in one word.';
+ assert.deepEqual(rule.lines(), [AUDIO_SYSTEM_RULE], 'not before a spoken message asks');
+ assert.equal(rule.set(true), true, 'other instructions: the prompt is built again');
+ assert.deepEqual(rule.lines(), [audioSystemRule('Answer in one word.')]);
+ assert.equal(rule.set(true), false);
+ assert.equal(rule.set(false), true);
+ assert.deepEqual(rule.lines(), []);
+});
+test('a prompt that still has the earlier instructions gets the new ones where they stood', () => {
+ let saved = 'First wording.';
+ const rule = new AudioRule(() => saved);
+ rule.set(true);
+ const first = audioSystemRule('First wording.');
+ const before = `Base\n\nAppended\n\n${first}\n\nPolicy`;
+ saved = 'Second wording.';
+ rule.set(true);
+ const second = audioSystemRule('Second wording.');
+ assert.equal(rule.into(before, 'Appended'), `Base\n\nAppended\n\n${second}\n\nPolicy`);
+ assert.equal(rule.into(`Base\n\nAppended\n\n${second}`, 'Appended'), `Base\n\nAppended\n\n${second}`, 'the new ones there already');
+ rule.set(false);
+ assert.equal(rule.into(before, 'Appended'), 'Base\n\nAppended\n\nPolicy', 'out again, whichever it had');
+});
+test('VOICE_RESPONSE_INSTRUCTIONS=false switches the rule off whatever is saved', () => {
+ const previous = process.env.VOICE_RESPONSE_INSTRUCTIONS;
+ try {
+  process.env.VOICE_RESPONSE_INSTRUCTIONS = 'false';
+  const rule = new AudioRule(() => 'Answer in one word.');
+  assert.equal(rule.set(true), false);
+  assert.deepEqual(rule.lines(), []);
+  // Any other value leaves them on, and saved instructions are then used.
+  process.env.VOICE_RESPONSE_INSTRUCTIONS = 'true';
+  assert.equal(rule.set(true), true);
+  assert.deepEqual(rule.lines(), [audioSystemRule('Answer in one word.')]);
+ } finally {
+  if(previous === undefined)delete process.env.VOICE_RESPONSE_INSTRUCTIONS;
+  else process.env.VOICE_RESPONSE_INSTRUCTIONS=previous;
+ }
+});
+test('a change the prompt could not be built with goes back to what the rule said, not to off', () => {
+ let saved = 'First wording.';
+ const rule = new AudioRule(() => saved);
+ rule.set(true);
+ const first = audioSystemRule('First wording.');
+ saved = 'Second wording.';
+ assert.equal(rule.set(true), true);
+ rule.undo();
+ assert.deepEqual(rule.lines(), [first], 'pi\'s prompt still has the first wording');
+ assert.equal(rule.into(`Base\n\nAppended\n\n${first}`, 'Appended'), `Base\n\nAppended\n\n${first}`);
+ assert.equal(rule.set(true), true, 'the next spoken message tries again');
+ assert.deepEqual(rule.lines(), [audioSystemRule('Second wording.')]);
+ // Turned on for the first time, it goes back to off.
+ const fresh = new AudioRule();
+ fresh.set(true);
+ fresh.undo();
+ assert.deepEqual(fresh.lines(), []);
+ assert.equal(fresh.set(true), true);
 });

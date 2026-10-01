@@ -5,6 +5,7 @@ import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig } from "../
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
 import { labelOf, languageName, msg, t } from "../i18n";
+import { btnCls, inputCls } from "./SettingsUi";
 
 /** What the voice service is doing, as its badge says it. */
 const INSTALL_STATE: Record<string, string> = {
@@ -30,6 +31,10 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   useEffect(() => { api.voice().then(setConfig).catch(e => onError(e.message)); }, []);
   if (!config) return null;
   const update = (patch: Partial<VoiceConfig>) => { setConfig({ ...config, ...patch }); setSaved(false); };
+  const instructions = config.responseInstructions ?? "";
+  const builtIn = config.defaultResponseInstructions ?? "";
+  // Text that is still the built-in one this page was given is sent as nothing: the portal may have been updated since, and its newer text is then the one to follow.
+  const toSave = () => instructions.trim() === builtIn.trim() ? { ...config, responseInstructions: "" } : config;
   const chatterbox = config.runtime === "chatterbox";
   const languages = chatterbox ? INPUT_LANGUAGES.filter(([code]) => CHATTERBOX_LANGUAGES.includes(code)) : INPUT_LANGUAGES;
   // Switching runtime must not leave a language the runtime will refuse on save.
@@ -53,6 +58,15 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     {chatterbox && <p className="text-xs text-fg-faint">{t("Chatterbox speaks your input language and clones the selected reference voice; it has no designed voice.")} {NUMBER_PACK_LANGUAGES.includes(config.language ?? "") ? t("Numbers are written out before synthesis so they are spoken correctly.") : t("Numbers stay as digits in this language, which Chatterbox reads unreliably.")}</p>}
     {chatterbox && (config.voice || "design") === "design" && <p role="alert" className="text-xs text-red-400">{t("Choose Aria or a voice with a recording above: Chatterbox cannot speak with a designed voice.")}</p>}
     </section>
+    <details className="rounded-xl border border-line p-4">
+      <summary className="cursor-pointer text-sm font-medium">{t("Speaking instructions")}<span className="mt-1 block text-xs font-normal text-fg-muted">{t("What the assistant is told about how to reply in voice mode")}</span></summary>
+      <div className="mt-4 space-y-3">
+        <p className="text-xs text-fg-faint">{t("Sent with every spoken message, after a fixed note on what the [Audio mode] marker means. Save to apply them from the next spoken message. Empty text uses the built-in instructions.")}</p>
+        {config.responseInstructionsOff && <p role="status" className="text-xs text-warn">{t("This portal is set to send no speaking instructions (VOICE_RESPONSE_INSTRUCTIONS=false). Your text is kept and is not used.")}</p>}
+        <textarea aria-label={t("Speaking instructions")} rows={12} className={inputCls} value={instructions} onChange={e => update({ responseInstructions: e.target.value })} />
+        <button type="button" className={btnCls} disabled={instructions.trim() === builtIn.trim()} onClick={() => update({ responseInstructions: builtIn })}>{t("Reset to default")}</button>
+      </div>
+    </details>
     <details className="rounded-xl border border-line p-4">
       <summary className="cursor-pointer text-sm font-medium">{t("Speech detection")}<span className="mt-1 block text-xs font-normal text-fg-muted">{t("Turn timing and microphone sensitivity · Silero VAD")}</span></summary>
       <div className="mt-4 space-y-4">
@@ -99,7 +113,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     </details>
     <div className="sticky -bottom-4 z-10 -mx-5 !-mb-4 flex justify-end border-t border-line bg-raised px-5 pt-3 pb-7">
     <button disabled={busy} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-black disabled:opacity-40" onClick={async () => {
-      setBusy(true); try { setConfig(await api.setVoice(config)); setSaved(true); window.dispatchEvent(new Event('voice-config-changed')); } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+      setBusy(true); try { setConfig(await api.setVoice(toSave())); setSaved(true); window.dispatchEvent(new Event('voice-config-changed')); } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
     }}>{busy ? t("Saving…") : saved ? t("Saved") : t("Save voice settings")}</button>
     </div>
   </div>;
