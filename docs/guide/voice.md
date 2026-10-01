@@ -114,6 +114,7 @@ settings**:
 | **Speaking speed** | 1×, 1.25×, 1.5× or 1.75×. Speech is made faster in the browser without raising the voice (WSOLA time stretching), so it works with every speech runtime and a streamed reply starts as early as before. |
 | **Talking while the agent works** | **Stops it** (default): speaking interrupts the task, as before. **Adds to the task**: what you say goes into the running task after its current step, and the task carries on; use Stop to stop it. |
 | **Push to talk** | Only what you say while holding <kbd>Space</kbd> (outside a text field) or the microphone button is heard. A tap, or a press with no speech in it, is not sent. Useful with background noise or other people talking. |
+| **Fillers** | **On** (default) or **Off**: a short sound the moment you have finished, until the answer starts. See [Fillers](#fillers). Not shown where the portal has them switched off. |
 | **Sound effects** | The cues for connection, sending, mute and panels. |
 
 Each setting is remembered in this browser.
@@ -146,6 +147,106 @@ can be changed under **Settings → Shortcuts**.
 | <kbd>A</kbd> | Switch between stopping and adding to the task |
 | <kbd>H</kbd> | Push-to-talk on or off |
 | <kbd>Shift</kbd>+<kbd>M</kbd> | Sound effects on or off |
+| <kbd>Shift</kbd>+<kbd>F</kbd> | Fillers on or off |
+
+## Fillers
+
+After you stop talking there is a silence before the answer: your words are
+recognised, the model starts, and the first sentence has to be turned into speech.
+A **filler** is a short sound the voice makes in that gap, the "ah, okay" of someone
+who has heard you and is picking it up, so that voice mode does not go quiet. It
+replaces the spoken "let me think about that" line that used to come after about
+two seconds, in English only.
+
+**What it says.** One of five two-sound forms: "Ah, okay.", "Oh, okay.", "Okay,
+ah.", "Ah, mhm." and "Okay, mhm." They are the sounds people make while
+listening and the one word every language has taken over, so nothing is written
+out per language and no language has to be guessed. They are made in your voice
+and with the language set under **Settings → Add-ons → Voice**, and said as that
+language says them (a German voice says "okay" the German way, a Korean one the
+Korean way). It is always two sounds, never one: with Chatterbox a lone "Okay."
+or a wordless "Hmm." was said twice, ran on for seconds, or came out as other
+words (Polish turned "Mhm." into a sentence). The five were rendered in all 19
+languages Chatterbox speaks and came out once, at 0.9 to 2 seconds, each time.
+A clip that still comes out far longer than its text takes, which is the same
+fault, is thrown away when it is made and never played, whichever speech
+runtime and language is set. Chatterbox and audio.cpp are seeded and would say it
+the same way again, so such a clip is not made again for that voice. The classic
+Breeze server is not seeded: there it is made again, up to three times, and only
+after that left alone, until the portal is restarted and not for good.
+
+**Made once, not at play time.** The portal makes the five clips the first time
+voice mode starts with a voice (about ten seconds with Chatterbox, in the
+background), keeps them in its data folder under `voice-fillers`, and the page
+downloads them when voice mode starts. A filler is therefore a sound already in
+the browser's memory: no synthesis stands between the end of your turn and the
+sound. The speech runtime has one slot, so the answer comes before the clips: a
+clip is only started when no speech for you is being synthesized and none was in
+the last eight seconds (the gap between two phrases of an answer is not the end
+of it), and a clip under way when speech for an answer begins is cancelled at the
+runtime and made again afterwards. They are made only while a page is asking for
+them: ending voice mode, or switching fillers off, stops it (the clips still
+missing are made the next time voice mode starts), so the speech model is not
+loaded back onto the GPU for clips nobody is waiting for. Only one voice is made
+at a time. Another
+voice, language, speech runtime, expressiveness or reference recording stops
+the one being made, makes a new set, and the old one is deleted once the first
+clip of the new one is made (a setting changed and changed back loses nothing).
+Until the first clip is ready there is no filler; one never waits for them.
+
+**When it plays.** The moment your turn is taken: what you said has been
+recognised, it is not a noise and not a request to the page ("say that again"),
+and it is on its way to the agent. This is before the agent has taken the message
+up, not after a timer. The budget:
+
+| | |
+| --- | --- |
+| The end of your turn | Detected by the silence window after your last word, one second by default; that part is unchanged. |
+| The transcript | Usually there already when the turn ends, since recognition runs while you speak; otherwise one recognition request. |
+| The filler | Within 150 ms of the transcript, with nothing to fetch and nothing to synthesize: it is played from memory. Measured against a local portal with Chatterbox: 0 to 93 ms. |
+
+So a filler is heard as soon as your turn has ended where recognition was
+ready, which is the usual case, and one recognition request later where it was
+not. Nothing is played late to make up for a filler that was not there: there is
+one per turn and no second one in a long wait, as while the agent works it says
+what it is about to do itself, as the speaking instructions ask.
+
+**It gives way to the answer.** The answer is never heard over a filler. The
+filler stops when the answer's audio is ready to play, not when its text arrives,
+so it is not cut off while the answer is still being made. It fades out within
+40 ms instead of being cut mid-wave, and the answer starts as it has gone; a
+player that does not report back is not waited for longer than 150 ms. If you
+start talking, it stops at once. Talking over it is not a turn for it to finish.
+
+**It does not repeat itself.** A filler is never the one played last, and none
+comes round again before the other four have been heard. After a filler the next
+one waits until something else has been said, so two turns without an answer
+between them do not get two fillers back to back. With only one clip ready, it
+is played once and then silence beats saying it again.
+
+**Switching them off.** **Voice settings → Fillers → Off**, or
+<kbd>Shift</kbd>+<kbd>F</kbd>. The choice is remembered in this browser, and while
+it is off the page asks the portal for nothing and fetches nothing; the portal
+makes clips only while a page asks, so it stops within a few seconds. Two things
+switch them off for the whole portal, and then the setting is not shown:
+
+- `VOICE_STATUS_SPEECH=false`, which also switches off the spoken compaction
+  notices below. The portal makes none of the clips either.
+- `VOICE_PIPELINE_MODE=sequential`, the [comparison](/guide/voice-comparison)
+  baseline: it runs the stages strictly one after the other so that they can be
+  measured, and a sound during the agent's work would be a stage of its own. It
+  speaks nothing but the answer.
+
+**Compaction.** While the conversation is being compacted (which takes long
+enough to matter) the voice says so, once when it starts, again when you speak
+meanwhile, and when it is done. Those are sentences, not fillers, and they are
+said in the language the voice speaks (the input language set under **Settings →
+Add-ons → Voice**), not the interface language: a German page with an English
+voice gets the English sentence. The portal has wording for English and German.
+With **Auto-detect** the interface language is used where it has wording. For any
+other language the voice says nothing about compaction, since reading it another
+language's text is worse than silence; the stage shows "Compacting context" all
+the same. They follow the same two switches as the fillers.
 
 ## Dictation
 
@@ -487,8 +588,8 @@ and the system-prompt rule is never sent, which is what the
 your text for when the variable is removed. Any other value leaves them on.
 `VOICE_SKIP_FIRST_THINKING=false` keeps thinking on for the first call. The
 remaining `VOICE_*` variables (`VOICE_PIPELINE_MODE`, `VOICE_SENTENCE_CHUNKS`,
-`VOICE_TTS_PREFETCH`, `VOICE_STATUS_SPEECH`, `VOICE_COMPARISON`) are described in
-the comparison guide.
+`VOICE_TTS_PREFETCH`, `VOICE_COMPARISON`) are described in the comparison guide;
+`VOICE_STATUS_SPEECH` is described under [Fillers](#fillers).
 
 ## Speech runtimes
 
