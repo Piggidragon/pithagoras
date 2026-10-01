@@ -27,6 +27,9 @@ db.rememberTools([
   { name: "board_add", source: "pi-board", package: "npm:pi-board@1.0.0" },
   { name: "board_move", source: "pi-board", package: "npm:pi-board@1.0.0" },
   { name: "web_search", source: "pi-search", package: "npm:pi-search" },
+  // The project's own package brings its tools as no package of the user's: its entry in the project's settings says whose they are.
+  { name: "research_ask", source: "pi-research-only", projectPackage: "npm:pi-research-only" },
+  { name: "research_cite", source: "pi-research-only", projectPackage: "npm:pi-research-only" },
 ]);
 
 let base;
@@ -60,6 +63,12 @@ test("a chat in a project is offered what the project brings, and a chat that sw
   // One tool on again is the package on.
   await json(`/api/sessions/${inside.id}/tools`, "PUT", { off: ["board_add"] });
   assert.ok((await names(inside.id)).includes("pi-board"));
+  // The project's own package is a group in the menu as well, and goes the same way.
+  await json(`/api/sessions/${inside.id}/tools`, "PUT", { off: ["research_ask", "research_cite"] });
+  assert.deepEqual(await names(inside.id), ["pi-board", "pi-search", "todo"]);
+  await json(`/api/sessions/${inside.id}/tools`, "PUT", { off: ["research_cite"] });
+  assert.ok((await names(inside.id)).includes("pi-research-only"));
+  await json(`/api/sessions/${inside.id}/tools`, "PUT", { off: ["board_add"] });
   // Another chat, outside the project, never had it off.
   const other = await json("/api/sessions", "POST", {});
   assert.deepEqual(await names(other.id), ["pi-board", "pi-search", "todo"]);
@@ -77,4 +86,15 @@ test("a source there is none of, and a chat that is not there, have nothing to o
   assert.equal((await send(`/api/sessions/${chat.id}/arguments/nope`)).status, 404);
   assert.equal((await send(`/api/sessions/${chat.id}/arguments/constructor`)).status, 404);
   assert.equal((await send(`/api/sessions/missing/arguments/extensions`)).status, 404);
+});
+
+test("a loose extension that pi's own settings switch off is not offered", async () => {
+  const chat = await json("/api/sessions", "POST", {});
+  const settings = { packages: ["npm:pi-board@1.0.0", "npm:pi-search", "npm:pi-lens"] };
+  assert.ok((await names(chat.id)).includes("todo"));
+  // What `pi config` writes for a script or folder of pi's folder turned off.
+  writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ ...settings, extensions: ["-extensions/todo/index.ts"] }));
+  assert.ok(!(await names(chat.id)).includes("todo"));
+  writeFileSync(path.join(agent, "settings.json"), JSON.stringify(settings));
+  assert.ok((await names(chat.id)).includes("todo"));
 });

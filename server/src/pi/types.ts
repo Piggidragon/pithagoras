@@ -36,6 +36,8 @@ export interface PiTool {
   source: string;
   /** The entry in pi's settings that brought it, where a package of the user's did. */
   package?: string;
+  /** The entry in the chat's project settings that brought it, where a package of the project's did (and so no `package`). */
+  projectPackage?: string;
   /** One of the portal's own, from an inline extension: no file or package of anyone's has a path like that, so it is not mistaken for an extension's of the same name. */
   inline?: true;
   /** False when this conversation has it switched off. */

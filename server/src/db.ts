@@ -1811,16 +1811,23 @@ export interface KnownTool {
    * entry remembered before this was recorded.
    */
   package?: string | null;
+  /**
+   * The entry in a project's settings that brought it, when a project's package
+   * did: such a tool has no `package`, as nothing of the user's brought it, and
+   * this is what says which package it is of.
+   */
+  projectPackage?: string;
   /** Registered by one of the portal's own inline extensions, which nothing of anyone's can be mistaken for. */
   inline?: true;
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; projectPackage?: string; inline?: true }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
   package: t.package ?? null,
+  ...(t.projectPackage ? { projectPackage: t.projectPackage } : {}),
   ...(t.inline ? { inline: true as const } : {}),
 });
 
@@ -1876,6 +1883,7 @@ export function knownTools(): KnownTool[] {
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
         ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
+        ...(typeof t.projectPackage === "string" && t.projectPackage ? { projectPackage: t.projectPackage } : {}),
         ...(t.inline === true ? { inline: true as const } : {}),
       }));
   } catch {
@@ -1891,7 +1899,7 @@ export function knownTools(): KnownTool[] {
  * For a chat, `folder` is where it runs, whose project may bring packages of
  * its own.
  */
-export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline">[] {
+export function shownTools(folder?: string): Omit<KnownTool, "package" | "projectPackage" | "inline">[] {
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
   // The portal's own tools belong to no package, so the packages cannot say
   // that one is not offered: image generation and image editing say so
@@ -1905,7 +1913,7 @@ export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline
     .filter(toolAvailability(readPiSettings().packages, project))
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
     .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))
-    .map(({ package: _package, inline: _inline, ...tool }) => tool);
+    .map(({ package: _package, projectPackage: _projectPackage, inline: _inline, ...tool }) => tool);
 }
 
 /** The keys of the packages pi's settings list, or undefined when they cannot be read. */
@@ -1995,6 +2003,7 @@ export function rememberTools(reported: KnownTool[]): void {
       source: tool.source,
       ...(description ? { description } : {}),
       ...(pkg !== undefined ? { package: pkg } : {}),
+      ...(tool.projectPackage ? { projectPackage: tool.projectPackage } : {}),
       ...(tool.inline ? { inline: true as const } : {}),
     });
   }

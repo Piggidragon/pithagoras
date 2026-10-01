@@ -33,12 +33,15 @@ const SOURCES = new Map<string, (context: ArgumentContext) => ArgumentChoice[]>(
   [
     "extensions",
     ({ workspace, off }) => {
+      const user = readPiSettings();
       const project = readProjectPiSettings(workspace);
       return installedExtensions({
         agentDir: piAgentDir(),
-        userPackages: readPiSettings().packages,
+        userPackages: user.packages,
+        userExtensions: user.extensions,
         projectDir: workspace,
         projectPackages: project.packages,
+        projectExtensions: project.extensions,
         tools: knownTools(),
         off,
         bundled: bundledSubagentDir(),

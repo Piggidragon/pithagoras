@@ -1,7 +1,8 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { loadsExtensions, npmName, packageKey, sourceOf } from "./extension-switch.js";
 import { localPackagePath, SUBAGENT_PACKAGE } from "./features.js";
+import { looseExtensions, type LooseExtension } from "./loose-extensions.js";
 import { realPath } from "./within.js";
 
 /**
@@ -23,13 +24,15 @@ export interface ExtensionChoice {
 export interface ExtensionsSeen {
   /** pi's own folder: the user's loose extensions are in `extensions` beneath it, and a package's local path is relative to it. */
   agentDir: string;
-  /** What the user's settings list as `packages`. */
+  /** What the user's settings list as `packages`, and as `extensions`: paths of extensions, and what switches them off. */
   userPackages: unknown;
+  userExtensions?: unknown;
   /** The folder the chat runs in, whose `.pi` holds what its project brings; none for a chat outside any. */
   projectDir?: string;
   projectPackages?: unknown;
-  /** The tools the portal has seen registered, by the package that brought them. */
-  tools: { name: string; package?: string | null }[];
+  projectExtensions?: unknown;
+  /** The tools the portal has seen registered, by the package that brought them: one of the user's settings, or one of a project's. */
+  tools: { name: string; package?: string | null; projectPackage?: string }[];
   /** The tools off in this chat, whatever switched them: the default, its project, the chat itself. */
   off: ReadonlySet<string>;
   /** The extensions the portal ships (not one the user installed). */
@@ -55,48 +58,17 @@ function nameOf(source: string, dir: string | undefined): string {
   return typeof name === "string" && name ? name : path.basename(dir ?? source);
 }
 
-/** How pi finds an extension in a folder of them: a script, or a folder with an entry or a manifest, one level down. */
-function looseExtensions(dir: string): { name: string; path: string }[] {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const found: { name: string; path: string }[] = [];
-  for (const entry of entries) {
-    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-    const full = path.join(dir, entry.name);
-    const isDir = entry.isDirectory() || (entry.isSymbolicLink() && safeIsDir(full));
-    if (isDir) {
-      if (["index.ts", "index.js", "package.json"].some((f) => existsSync(path.join(full, f)))) found.push({ name: entry.name, path: full });
-    } else if (/\.(ts|js)$/.test(entry.name)) {
-      found.push({ name: entry.name.replace(/\.(ts|js)$/, ""), path: full });
-    }
-  }
-  return found;
-}
-
-const safeIsDir = (p: string) => {
-  try {
-    return statSync(p).isDirectory();
-  } catch {
-    return false;
-  }
-};
-
 /** The folders the agent's connections to screens are kept in (`screen-<slug>`, see the skill `extension-screens`). */
 const GLUE = /^screen-/;
 
-/** A connection to a screen that is there: its slug, and the extension it says it was written against. */
-function glues(dir: string): { slug: string; against: string }[] {
-  return looseExtensions(dir)
+/** A connection to a screen that is on: its slug, and the extension it says it was written against. */
+function glues(found: LooseExtension[]): { slug: string; against: string }[] {
+  return found
     .filter((e) => GLUE.test(e.name))
     .map((e) => {
       let head = "";
       try {
-        const file = statSync(e.path).isDirectory() ? ["index.ts", "index.js"].map((f) => path.join(e.path, f)).find(existsSync) : e.path;
-        if (file) head = readFileSync(file, "utf8").slice(0, 4000);
+        head = readFileSync(e.files[0], "utf8").slice(0, 4000);
       } catch {
         /* a folder with nothing to read says only its name */
       }
@@ -121,10 +93,11 @@ function hasGlue(value: string, connections: { slug: string; against: string }[]
 /**
  * The extensions that are on in a chat: the packages of the user's settings and
  * of the chat's project that load extensions, and the loose ones in the two
- * `extensions` folders. As in Settings → Extensions and the chat's tools menu:
+ * `extensions` folders and those the `extensions` settings add. As in Settings → Extensions and the chat's tools menu:
  * a package switched off, or narrowed to none of its extensions, is not there,
  * and one whose tools are all off in this chat is not either. A project that
- * lists a package and loads it has it, whatever the user's entry says.
+ * lists a package and loads it has it, whatever the user's entry says. A loose
+ * one that `pi config` switched off (or the setting's `!`, `-` leave off) is not.
  *
  * Left out: the portal's own extensions, and the connections to screens
  * (`screen-…`), which are the agent's and not what is connected.
@@ -151,7 +124,10 @@ export function installedExtensions(seen: ExtensionsSeen): ExtensionChoice[] {
   list(seen.userPackages, seen.agentDir, "user");
   list(seen.projectPackages, projectBase, "project");
 
-  const connections = [...glues(path.join(seen.agentDir, "extensions")), ...(projectBase ? glues(path.join(projectBase, "extensions")) : [])];
+  // The loose ones, as pi's `extensions` setting leaves them: one switched off in `pi config` is not on, and a path the setting adds is.
+  const user = looseExtensions(path.join(seen.agentDir, "extensions"), seen.agentDir, seen.userExtensions);
+  const project = projectBase ? looseExtensions(path.join(projectBase, "extensions"), projectBase, seen.projectExtensions) : [];
+  const connections = [...glues(user), ...glues(project)];
   const choices = new Map<string, ExtensionChoice>();
   const add = (value: string, detail: string, projectOnly: boolean) => {
     if (choices.has(value)) return;
@@ -160,16 +136,12 @@ export function installedExtensions(seen: ExtensionsSeen): ExtensionChoice[] {
 
   for (const [key, one] of byKey) {
     // Off in this chat as a whole: the group of its tools in the chat's menu is switched off.
-    const own = seen.tools.filter((t) => typeof t.package === "string" && packageKey(t.package) === key);
+    const own = seen.tools.filter((t) => [t.package, t.projectPackage].some((p) => typeof p === "string" && packageKey(p) === key));
     if (own.length > 0 && own.every((t) => seen.off.has(t.name))) continue;
     add(nameOf(one.source, one.dir), one.dir ?? one.source, !one.user);
   }
-  const loose = (dir: string | undefined, project: boolean) => {
-    if (dir === undefined) return;
-    for (const e of looseExtensions(dir)) if (!GLUE.test(e.name)) add(e.name, e.path, project);
-  };
-  loose(path.join(seen.agentDir, "extensions"), false);
-  loose(projectBase && path.join(projectBase, "extensions"), true);
+  for (const e of user) if (!GLUE.test(e.name)) add(e.name, e.path, false);
+  for (const e of project) if (!GLUE.test(e.name)) add(e.name, e.path, true);
 
   return [...choices.values()].sort((a, b) => a.value.localeCompare(b.value, "en", { sensitivity: "base" }));
 }

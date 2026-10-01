@@ -286,6 +286,15 @@ function packageOf(info: any): string | undefined {
   return info?.origin === "package" && info?.scope === "user" && typeof info.source === "string" ? info.source : undefined;
 }
 
+/**
+ * The same for a project's own packages, kept apart from `packageOf`: a tool
+ * with a `package` is one the user's settings list, which is what the lists of
+ * known tools are cleaned by, and a project's must not be taken for that.
+ */
+function projectPackageOf(info: any): string | undefined {
+  return info?.origin === "package" && info?.scope === "project" && typeof info.source === "string" ? info.source : undefined;
+}
+
 /** Whether the portal's own inline extension registered it: pi names those <inline:name>, which no file's path is. */
 function isInline(info: any): boolean {
   return typeof info?.path === "string" && /^<inline:[^>]+>$/.test(info.path);
@@ -1238,6 +1247,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       description: typeof tool.description === "string" ? tool.description : undefined,
       source: sourceLabel(tool.sourceInfo),
       package: packageOf(tool.sourceInfo),
+      projectPackage: projectPackageOf(tool.sourceInfo),
       ...(isInline(tool.sourceInfo) ? { inline: true as const } : {}),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));

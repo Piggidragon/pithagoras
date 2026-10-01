@@ -67,7 +67,8 @@ const seen = {
 };
 const choices = installedExtensions(seen);
 const values = choices.map((c) => c.value);
-const noted = (value) => choices.find((c) => c.value === value)?.notes;
+const noteOf = (list, value) => list.find((c) => c.value === value)?.notes;
+const noted = (value) => noteOf(choices, value);
 
 test("the packages that are on, and the loose extensions, are offered by the names a person uses", () => {
   assert.deepEqual(values, [
@@ -115,4 +116,71 @@ test("a chat outside any project, and settings that are not a list, offer what t
   assert.ok(!plain.some((c) => c.value === "project-only" || c.value === "mine"));
   assert.ok(plain.some((c) => c.value === "lone"));
   assert.deepEqual(installedExtensions({ agentDir: path.join(home, "nowhere"), userPackages: "npm:x", tools: [], off: new Set() }), []);
+});
+
+test("a package of the project's is off in a chat where all its tools are, as the user's are", () => {
+  // A project's package brings its tools as no package of the user's: the project's entry is what says whose they are.
+  const board = (extra = {}) => ({ ...seen, projectPackages: ["npm:pi-board@2.0.0"], userPackages: [], tools: [{ name: "board_add", package: null, projectPackage: "npm:pi-board@2.0.0" }, { name: "board_move", package: null, projectPackage: "npm:pi-board" }], ...extra });
+  const has = (s) => installedExtensions(s).some((c) => c.value === "pi-board");
+  assert.ok(has(board()), "on, while no tool of it is off");
+  assert.ok(!has(board({ off: new Set(["board_add", "board_move"]) })), "the group of its tools is off for this chat");
+  assert.ok(has(board({ off: new Set(["board_add"]) })), "one tool on is the package on");
+  // The user's package that the project lists as well comes with the project's entry, and the same holds.
+  assert.ok(!has(board({ userPackages: ["npm:pi-board"], off: new Set(["board_add", "board_move"]) })));
+  // A tool remembered before the project's package was recorded says nothing, and the package stays on.
+  assert.ok(has(board({ tools: [{ name: "board_add", package: null }, { name: "board_move", package: null }], off: new Set(["board_add", "board_move"]) })));
+});
+
+test("a loose extension that pi's settings switch off is not offered, and a path they add is", () => {
+  const agent = path.join(home, "agent-loose");
+  const proj = path.join(home, "ws", "loose-project");
+  write(path.join(agent, "extensions", "old-todo.ts"));
+  write(path.join(agent, "extensions", "scratch-a.ts"));
+  write(path.join(agent, "extensions", "scratch-b.ts"));
+  write(path.join(agent, "extensions", "legacy", "index.ts"));
+  write(path.join(agent, "extensions", "kept", "index.ts"));
+  write(path.join(agent, "extensions", "manifest-only", "package.json"), JSON.stringify({ name: "no-entry" }));
+  write(path.join(agent, "extensions", "manifest-named", "main.ts"));
+  write(path.join(agent, "extensions", "manifest-named", "package.json"), JSON.stringify({ pi: { extensions: ["main.ts"] } }));
+  write(path.join(agent, "extensions", "screen-old-todo", "index.ts"), "// Written against: old-todo\n");
+  write(path.join(proj, ".pi", "extensions", "mine.ts"));
+  write(path.join(proj, ".pi", "extensions", "also.ts"));
+  const elsewhere = path.join(home, "elsewhere");
+  write(path.join(elsewhere, "my-ext", "index.ts"));
+  write(path.join(elsewhere, "single.ts"));
+  write(path.join(elsewhere, "folder-of", "one.ts"));
+  write(path.join(elsewhere, "folder-of", "two.ts"));
+  const choose = (user, projectSetting) =>
+    installedExtensions({ agentDir: agent, userPackages: [], userExtensions: user, projectDir: proj, projectPackages: [], projectExtensions: projectSetting, tools: [], off: new Set() });
+  const names = (user, projectSetting) => choose(user, projectSetting).map((c) => c.value);
+
+  assert.deepEqual(names(undefined, undefined), ["also", "kept", "legacy", "manifest-named", "mine", "old-todo", "scratch-a", "scratch-b"], "all of them, as found; no folder that is not loaded for want of an entry");
+  // What `pi config` writes for a switch: the path from pi's folder, with a minus.
+  assert.ok(!names(["-extensions/old-todo.ts"]).includes("old-todo"));
+  assert.ok(!names(["-extensions/legacy/index.ts"]).includes("legacy"), "a folder is switched by its entry");
+  assert.ok(names(["+extensions/old-todo.ts"]).includes("old-todo"), "what pi config writes for one switched on again");
+  assert.ok(!names(["+extensions/old-todo.ts", "-extensions/old-todo.ts"]).includes("old-todo"), "and a minus beats a plus");
+  assert.ok(!names([`-${path.join(agent, "extensions", "old-todo.ts")}`]).includes("old-todo"), "or by the whole path");
+  assert.ok(names(["-extensions/other.ts"]).includes("old-todo"), "another path is another file");
+  // A `!` takes what its pattern matches, with `*`; a plus brings one back.
+  assert.deepEqual(names(["!scratch-*.ts"]).filter((n) => n.startsWith("scratch")), []);
+  assert.deepEqual(names(["!extensions/scratch-*", "+extensions/scratch-b.ts"]).filter((n) => n.startsWith("scratch")), ["scratch-b"]);
+  assert.ok(!names(["!index.ts"]).includes("kept"), "a pattern is held against the file's name too, and a folder's file is index.ts");
+  assert.ok(names(["!index.ts"]).includes("old-todo"));
+  // A pattern that is more than pi's globs are here is not followed: nothing is taken off by a guess.
+  assert.ok(names(["!extensions/{old-todo,legacy}*"]).includes("old-todo"));
+  // The connection of an extension that is switched off is no connection that is there.
+  assert.deepEqual(noteOf(choose(undefined, undefined), "old-todo"), ["screen"]);
+  assert.deepEqual(noteOf(choose(["-extensions/screen-old-todo/index.ts"], undefined), "old-todo"), []);
+  // The project's, with its own settings and its own `.pi` for a base.
+  assert.ok(!names(undefined, ["-extensions/mine.ts"]).includes("mine"));
+  assert.ok(names(["-extensions/mine.ts"], undefined).includes("mine"), "the user's setting is the user's");
+  // A path the setting adds is loaded: a script, a folder with an entry, a folder of scripts; one that is not there is not.
+  const added = names([path.join(elsewhere, "single.ts"), path.join(elsewhere, "my-ext"), path.join(elsewhere, "folder-of"), "../nowhere"]);
+  assert.deepEqual(added.filter((n) => ["single", "my-ext", "one", "two", "nowhere"].includes(n)), ["my-ext", "one", "single", "two"]);
+  assert.ok(!names([path.join(elsewhere, "single.ts"), `-${path.join(elsewhere, "single.ts")}`]).includes("single"), "and can be switched off like the rest");
+  assert.ok(!names([path.join(elsewhere, "folder-of"), "!*one.ts"]).includes("one"), "a pattern narrows what the paths add");
+  assert.deepEqual(names([path.join(elsewhere, "folder-of"), "*two.ts"]).filter((n) => ["one", "two"].includes(n)), ["two"], "and one that is plain is a filter on them");
+  // Not lists: nothing is guessed from them.
+  assert.equal(names("-extensions/old-todo.ts", { x: 1 }).includes("old-todo"), true);
 });

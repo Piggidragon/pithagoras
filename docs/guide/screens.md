@@ -55,11 +55,17 @@ What is listed is what is **on** in this chat, the same as in
   (*this project*). A package the project lists and loads counts even if your
   own settings have it off.
 - A package is not listed in a chat where all of its tools are switched off in
-  the chat's tools menu, whether by default, by the project or by the chat. Turn
-  one of its tools back on and it is listed again.
-- Extensions you keep as files, a script or a folder with an `index.ts` or a
-  `package.json` in `extensions` in pi's agent folder or in the project's `.pi`
-  folder, count as on.
+  the chat's tools menu, whether by default, by the project or by the chat. That
+  goes for a project's package as for yours. Turn one of its tools back on and it
+  is listed again. Which tools a package has is learned when a chat has run it, so
+  until then nothing says they are off.
+- Extensions you keep as files count as on: a script, or a folder with an
+  `index.ts` or `index.js` (or a `package.json` that names its extensions under
+  `pi.extensions`), in `extensions` in pi's agent folder or in the project's
+  `.pi` folder, and the paths that the `extensions` setting of pi adds. One that
+  `pi config` switched off is not listed: the setting holds it as `-` and `!`
+  entries, and `+` brings one back. In a `!` pattern only `*`, `**` and `?` are
+  followed; one that uses brackets or braces is not, and takes nothing off.
 
 Left out are the portal's own extensions (the subagent tool it can install, say)
 and the connections `/screen` made earlier, the `screen-…` folders: those are
