@@ -11,7 +11,7 @@ import { useBackground } from "../use-background";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
-import { displaySpeechText } from "../voice";
+import { assistantText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
 import { DictationButton, DictationStrip } from "./Dictation";
@@ -2202,10 +2202,6 @@ export function Chat({
     </div>
   );
 }
-
-/** What the agent said, as it is read — without the reasoning model's stray tags. */
-const assistantText = (item: Extract<Item, { kind: "assistant" }>) =>
-  (item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "");
 
 /**
  * The shape of a conversation while it is fetched: a question, an answer,

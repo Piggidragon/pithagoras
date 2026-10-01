@@ -1,7 +1,9 @@
 import { useLayoutEffect, useRef } from "react";
+import { Streamdown } from "streamdown";
 import { api } from "../api";
 import type { Item } from "../transcript";
 import { t } from "../i18n";
+import { assistantText } from "../voice";
 
 /** How much of the conversation the window shows: enough to find what was just said. */
 const SHOWN = 30;
@@ -14,6 +16,9 @@ const SHOWN = 30;
  * without ending voice mode: what was said, as transcribed, and what
  * came back, as written — which is also the only way to see a reply that was
  * interrupted before it was spoken.
+ *
+ * A reply is markdown, as in the chat, so a list or a code block is not a flat
+ * string beside the orb, and sits in a speech bubble like what you said.
  */
 export function VoiceConversation({ sessionId, items }: { sessionId: string; items: Item[] }) {
   const list = items.filter(item => item.kind === "user" || (item.kind === "assistant" && item.text.trim())).slice(-SHOWN);
@@ -32,7 +37,12 @@ export function VoiceConversation({ sessionId, items }: { sessionId: string; ite
             {item.images?.length ? <div className="voice-said-pictures">{item.images.map(image => <img key={image.name} src={api.imageUrl(sessionId, image.name)} alt="" loading="lazy" />)}</div> : null}
           </div>
         : item.kind === "assistant"
-          ? <div key={item.id} className="voice-said is-agent"><p>{item.text}</p></div>
+          ? <div key={item.id} className="voice-said is-agent md">
+              {/* Streamdown, as in the chat: a reply is shown while it is
+                  written, so its unclosed fence or half-written link has to
+                  render as what it is about to be, not flicker. */}
+              <Streamdown parseIncompleteMarkdown isAnimating={!item.done} shikiTheme={["github-light", "github-dark"]}>{assistantText(item)}</Streamdown>
+            </div>
           : null)}
   </div>;
 }

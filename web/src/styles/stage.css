@@ -412,15 +412,20 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
 /* The conversation, in a window like Files: what was said, and what came back. */
 .voice-conversation-list { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.55; }
 .voice-conversation-empty { margin: auto; color: rgb(var(--fg-muted)); font-size: 12px; }
-.voice-said { max-width: 88%; }
-.voice-said p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.voice-said { max-width: 88%; min-width: 0; overflow-wrap: anywhere; }
+.voice-said.is-user p { white-space: pre-wrap; }
 .voice-said.is-user { align-self: flex-end; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: rgb(var(--accent) / .14); }
-.voice-said.is-agent { align-self: flex-start; color: rgb(var(--fg)); }
+/* A bubble in the raised colour and a line, where the user's is tinted with the accent and its tail is at the other side: apart in light and dark. */
+.voice-said.is-agent { align-self: flex-start; padding: 8px 12px; border-radius: 14px 14px 14px 4px; background: rgb(var(--raised)); border: 1px solid rgb(var(--line)); color: rgb(var(--fg)); }
+/* The markdown stays inside the window: a wide code block or table scrolls itself. */
+.voice-said.is-agent > :first-child > :first-child { margin-top: 0; }
+.voice-said.is-agent > :last-child > :last-child { margin-bottom: 0; }
+.voice-said.is-agent :is(pre, table) { max-width: 100%; overflow-x: auto; }
 .voice-said-pictures { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .voice-said-pictures img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; }
 
 /* Voice settings, in a card above the buttons that open it. */
-.voice-settings { position: fixed; z-index: 55; width: min(320px, calc(100vw - 16px)); display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid #62718a; border-radius: 16px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 20px 60px #0006; }
+.voice-settings { position: fixed; z-index: 55; overflow-y: auto; width: min(320px, calc(100vw - 16px)); display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid #62718a; border-radius: 16px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 20px 60px #0006; }
 .voice-setting > span { display: block; font-size: 12px; font-weight: 500; margin-bottom: 6px; }
 .voice-setting > p { margin-top: 6px; font-size: 11px; line-height: 1.45; color: rgb(var(--fg-muted)); }
 .voice-segments { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: rgb(var(--fg) / .07); }
