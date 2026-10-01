@@ -169,18 +169,24 @@ words (Polish turned "Mhm." into a sentence). The five were rendered in all 19
 languages Chatterbox speaks and came out once, at 0.9 to 2 seconds, each time.
 A clip that still comes out far longer than its text takes, which is the same
 fault, is thrown away when it is made and never played, whichever speech
-runtime and language is set.
+runtime and language is set. Chatterbox and audio.cpp are seeded and would say it
+the same way again, so such a clip is not made again for that voice. The classic
+Breeze server is not seeded: there it is made again, up to three times, and only
+after that left alone, until the portal is restarted and not for good.
 
 **Made once, not at play time.** The portal makes the five clips the first time
 voice mode starts with a voice (about ten seconds with Chatterbox, in the
-background, and only while nothing live is being synthesized), keeps them in its
-data folder under `voice-fillers`, and the page downloads them when voice mode
-starts. A filler is therefore a sound already in the browser's memory: no
-synthesis stands between the end of your turn and the sound, and none can hold
-the speech runtime's single slot against the answer. Another voice, language,
-speech runtime, expressiveness or reference recording makes a new set, and the
-old one is deleted. Until the first clip is ready there is no filler; one never
-waits for them.
+background), keeps them in its data folder under `voice-fillers`, and the page
+downloads them when voice mode starts. A filler is therefore a sound already in
+the browser's memory: no synthesis stands between the end of your turn and the
+sound. The speech runtime has one slot, so the answer comes before the clips: a
+clip is only started when no speech for you is being synthesized and none was in
+the last eight seconds (the gap between two phrases of an answer is not the end
+of it), and a clip under way when speech for an answer begins is cancelled at the
+runtime and made again afterwards. Only one voice is made at a time. Another
+voice, language, speech runtime, expressiveness or reference recording stops
+the one being made, makes a new set, and the old one is deleted. Until the first
+clip is ready there is no filler; one never waits for them.
 
 **When it plays.** The moment your turn is taken: what you said has been
 recognised, it is not a noise and not a request to the page ("say that again"),
@@ -226,10 +232,14 @@ switch them off for the whole portal, and then the setting is not shown:
 
 **Compaction.** While the conversation is being compacted (which takes long
 enough to matter) the voice says so, once when it starts, again when you speak
-meanwhile, and when it is done. Those are sentences, not fillers, and are
-translated with the interface language (English and German) instead of being
-spoken in English whatever the voice. They follow the same two switches as the
-fillers.
+meanwhile, and when it is done. Those are sentences, not fillers, and they are
+said in the language the voice speaks (the input language set under **Settings →
+Add-ons → Voice**), not the interface language: a German page with an English
+voice gets the English sentence. The portal has wording for English and German.
+With **Auto-detect** the interface language is used where it has wording. For any
+other language the voice says nothing about compaction, since reading it another
+language's text is worse than silence; the stage shows "Compacting context" all
+the same. They follow the same two switches as the fillers.
 
 ## Dictation
 

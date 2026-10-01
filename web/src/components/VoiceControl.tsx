@@ -164,6 +164,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const vadSettings = useRef(DEFAULT_VAD);
   const sequential = useRef(false);
   const statusSpeech = useRef(true);
+  const speechLanguage = useRef<string | undefined>(undefined);
   const [comparison, setComparison] = useState(false);
   const sentenceChunks = useRef(false);
   const ttsPrefetch = useRef(false);
@@ -219,6 +220,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (!mounted.current) return;
       managed.current=config.managed===true;
       statusSpeech.current = config.statusSpeech !== false;
+      speechLanguage.current = config.language;
       setComparison(config.comparison === true);
       sequential.current = config.pipelineMode === "sequential";
       setSequentialMode(sequential.current);
@@ -531,6 +533,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       transcription.current = live;
       const controller = new HandsFreeVoice({
         statusSpeech: statusSpeech.current,
+        speechLanguage: () => speechLanguage.current,
         sequential: sequential.current,
         sentenceChunks: sentenceChunks.current,
         ttsPrefetch: ttsPrefetch.current,

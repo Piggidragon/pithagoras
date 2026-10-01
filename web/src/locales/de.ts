@@ -1883,10 +1883,6 @@ const de: Locale = {
     "A binary file — not shown": "Eine Binärdatei — nicht gezeigt",
     // hands-free.ts
     "Could not send “{text}”: {error}": "„{text}“ konnte nicht gesendet werden: {error}",
-    "My context is getting full. Let me quickly compact our conversation before I continue.": "Mein Kontext wird voll. Ich komprimiere kurz unser Gespräch, bevor ich weitermache.",
-    "Context compaction is done. I'm ready to continue.": "Die Komprimierung ist fertig. Ich bin bereit weiterzumachen.",
-    "Context compaction stopped before it finished.": "Die Komprimierung wurde abgebrochen, bevor sie fertig war.",
-    "I'm still compacting our conversation. Please wait a moment; I'll let you know when I'm ready.": "Ich komprimiere unser Gespräch noch. Bitte warte einen Moment; ich sage dir, wenn ich bereit bin.",
     // keybindings.ts
     "Start or end voice mode": "Sprachmodus starten oder beenden",
     "Mute or unmute the microphone": "Mikrofon stumm- oder einschalten",

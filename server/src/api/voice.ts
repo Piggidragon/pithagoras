@@ -339,9 +339,8 @@ function fillerKey(settings: VoiceConfig, { instruction, reference }: SpeakingVo
   const hash = (data: Buffer | string) => createHash("sha1").update(data).digest("hex");
   return hash(JSON.stringify([settings.runtime, settings.breezeUrl, settings.language, settings.cfgScale, settings.exaggeration ?? 0.5, instruction, reference && [hash(reference.audio), reference.transcript]]));
 }
-/** How many speech requests of a page are being made: the fillers wait for none. */
-let liveSpeech = 0;
-const fillers = new FillerStore(() => path.join(process.env.DATA_DIR || "./data", "voice-fillers"), async () => { while (liveSpeech) await delay(250); });
+/** The fillers wait for the speech requests of a page, and give way to them. */
+export const fillers = new FillerStore(() => path.join(process.env.DATA_DIR || "./data", "voice-fillers"));
 export function voiceRouter(): Router {
   const router = express.Router();
   // The stored GPU choice, in place before anything asks the service to start.
@@ -472,8 +471,8 @@ export function voiceRouter(): Router {
       return res.status(400).json({ error: "Speech text must contain 1–600 characters" });
     const settings = config();
     const controller = new AbortController();
-    liveSpeech++;
-    res.on("close", () => { liveSpeech--; controller.abort(); });
+    const done = fillers.speaking();
+    res.on("close", () => { done(); controller.abort(); });
     try {
       const request = speechRequest(settings, await speakingVoice(settings), text);
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]);
@@ -529,7 +528,8 @@ export function voiceRouter(): Router {
     try {
       const voice = await speakingVoice(settings);
       const key = fillerKey(settings, voice);
-      res.json({ key, ...await fillers.status(key, (text, signal) => speechPcm(settings, voice, text, signal)) });
+      // Chatterbox and audio.cpp are seeded and say a text the same way each time; the classic Breeze server is not.
+      res.json({ key, ...await fillers.status(key, (text, signal) => speechPcm(settings, voice, text, signal), settings.runtime !== "breeze") });
     } catch (e) {
       // A voice that cannot speak has no fillers either; the page just has none.
       res.json({ key: "", clips: [], rendering: false, error: (e as Error).message });

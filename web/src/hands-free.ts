@@ -1,7 +1,8 @@
 import { SpeechPipeline, type PreparedSpeech } from "./speech-pipeline";
 import type { Item } from "./transcript";
 import { StreamingSpeech } from "./voice";
-import { t } from "./i18n";
+import { language, t } from "./i18n";
+import { notice, type Notice } from "./voice-notices";
 
 /** The longest the answer waits for a filler to stop: a fade-out takes a few milliseconds, and this is for a player that never reports back. */
 const FILLER_STOP_MS = 150;
@@ -11,6 +12,8 @@ export interface VoiceIO {
   sentenceChunks?: boolean;
   ttsPrefetch?: boolean;
   statusSpeech?: boolean;
+  /** The language the voice speaks, as its setting names it ("de"), or "auto": what the spoken notices are in. */
+  speechLanguage?: () => string | undefined;
   transcribe: (samples: Float32Array, signal: AbortSignal) => Promise<string>;
   send: (text: string) => Promise<void>;
   abort: () => Promise<void>;
@@ -129,6 +132,11 @@ export class HandsFreeVoice {
     await Promise.race([filler.done, new Promise<void>(resolve => { timer = setTimeout(resolve, FILLER_STOP_MS); })]);
     clearTimeout(timer);
   }
+  /** A notice, in the language of the voice. */
+  private say(kind: Notice) {
+    const text = notice(kind, this.io.speechLanguage?.(), language());
+    if (text) this.pipeline.enqueue([text], 'status');
+  }
   setCompacting(active: boolean, completed = true) {
     if (!this.alive || active === this.compacting) return;
     this.compacting = active;
@@ -136,8 +144,8 @@ export class HandsFreeVoice {
     if (this.io.statusSpeech === false || this.io.sequential) { this.state(); return; }
     if (active) {
       this.lastCompactionWaitAt = -Infinity;
-      if (!this.hearing && this.acceptingReplies) this.pipeline.enqueue([t("My context is getting full. Let me quickly compact our conversation before I continue.")],'status');
-    } else this.pipeline.enqueue([completed ? t("Context compaction is done. I'm ready to continue.") : t("Context compaction stopped before it finished.")],'status');
+      if (!this.hearing && this.acceptingReplies) this.say("compacting");
+    } else this.say(completed ? "done" : "stopped");
     this.state();
   }
   observe(items: Item[]) {
@@ -155,7 +163,7 @@ export class HandsFreeVoice {
       this.compactionSpeech = true;
       if (this.io.statusSpeech !== false && !this.io.sequential && Date.now() - this.lastCompactionWaitAt >= 8000) {
         this.lastCompactionWaitAt = Date.now();
-        this.pipeline.enqueue([t("I'm still compacting our conversation. Please wait a moment; I'll let you know when I'm ready.")],'status');
+        this.say("waiting");
       }
       return;
     }

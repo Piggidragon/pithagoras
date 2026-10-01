@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { HandsFreeVoice, type VoiceIO } from '../web/src/hands-free.js';
 import { samplesWav } from '../web/src/voice.js';
+import { notice } from '../web/src/voice-notices.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 const reply = (id: string, done = true) => ({ kind: 'assistant' as const, id, text: 'A spoken answer.', thinking: '', done });
@@ -176,6 +177,35 @@ test('compaction is announced once and again when it ends, and the phase follows
   assert.ok(spoken.some(text => text.includes('compaction is done')));
   assert.equal(phases.at(-1), 'Thinking');
   voice.stop();
+});
+
+test('the compaction notices are in the language the voice speaks, whatever language the page is in', async () => {
+  const say = async (speechLanguage?: string) => {
+    const { voice, spoken } = setup({ agentRunning: () => true, speechLanguage: () => speechLanguage });
+    voice.setCompacting(true); await tick(); voice.speechStart(); await tick(); voice.setCompacting(false); await tick(); voice.stop();
+    return spoken;
+  };
+  const german = await say('de');
+  assert.equal(german.length, 3);
+  assert.ok(german.every(text => /komprimier|kontext/i.test(text)), german.join(' | '));
+  assert.ok((await say('en')).every(text => /compact/i.test(text)));
+  // The same with the page in another language: the voice's is what counts.
+  assert.equal(notice('done', 'en', 'de'), "Context compaction is done. I'm ready to continue.");
+  assert.match(notice('done', 'de-AT', 'en')!, /Komprimierung/);
+});
+
+test('a voice in a language the notices have no wording for says nothing about compaction, and the phase still follows it', async () => {
+  const phases: string[] = [];
+  const { voice, spoken } = setup({ agentRunning: () => true, speechLanguage: () => 'fr', phase: phase => phases.push(phase) });
+  voice.setCompacting(true); await tick(); voice.speechStart(); await tick();
+  assert.equal(phases.at(-1), 'Compacting context');
+  voice.setCompacting(false); await tick(); voice.setCompacting(true, false); await tick(); voice.setCompacting(false, false); await tick();
+  assert.deepEqual(spoken, []);
+  voice.stop();
+  // Detected language: the voice speaks what it is given, so the page's wording is used where there is one.
+  assert.match(notice('compacting', 'auto', 'de')!, /Kontext/);
+  assert.match(notice('compacting', undefined, 'en')!, /context/);
+  assert.equal(notice('compacting', 'auto', 'fr'), undefined);
 });
 
 test('compaction ends a filler that is playing', async () => {
