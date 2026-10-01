@@ -3,10 +3,12 @@ import { spokenNumbers } from '../voice-numbers.js';
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from '../voice-languages.js';
 import { DEFAULT_CHOICE, endpoints, isManagedUrl, parseChoice, type VoiceChoice } from '../voice-engines.js';
 import { VoiceLeases } from '../extensions/voice-leases.js';
+import { FillerStore } from '../voice-fillers.js';
 import { DEFAULT_VOICE_INSTRUCTIONS, voiceInstructions, voiceRulesOn } from '../pi/voice-first.js';
 import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import express, { type Router } from "express";
@@ -244,6 +246,102 @@ export function disconnectManagedVoice() {
   saveVoice(saved);
   return saved;
 }
+/** The voice the saved settings speak with: how it is described, and the recording it clones where it has one. */
+interface SpeakingVoice { instruction: string; reference?: { audio: Buffer; transcript: string; filename: string } }
+async function speakingVoice(settings: VoiceConfig): Promise<SpeakingVoice> {
+  // Resolve the voice once: a reference clip is up to a megabyte, and only
+  // the runtime that is about to be called should pay to carry it.
+  let instruction = settings.instruction;
+  let reference: SpeakingVoice["reference"];
+  if (!['design','aria'].includes(settings.voice)) {
+    const preset = readVoice(settings.voice);
+    instruction = preset.instruction;
+    if (preset.audio) reference = { audio: preset.audio, transcript: preset.transcript, filename: "reference.wav" };
+  }
+  if (settings.voice === "aria") {
+    const directory = path.join(process.env.DATA_DIR || "./data", "voices");
+    const [audio, transcript] = await Promise.all([
+      readFile(path.join(directory, "aria.wav")),
+      readFile(path.join(directory, "aria.txt"), "utf8"),
+    ]).catch(() => { throw new Error("Install the Aria reference audio and transcript in the portal voices directory"); });
+    if (!audio.length || !transcript.trim()) throw new Error("Aria reference audio and transcript must not be empty");
+    reference = { audio, transcript: transcript.trim(), filename: "aria.wav" };
+  }
+  // Chatterbox clones a speaker; it has no designed or built-in voice.
+  // validateConfig refuses this combination on save; a config written before
+  // that check, or by the managed connect, still reaches here.
+  if (settings.runtime === "chatterbox" && !reference)
+    throw new Error("Chatterbox speaks with a reference clone: choose Aria or a voice with a recording");
+  return { instruction, reference };
+}
+/** What goes to the speech runtime to have it say `text` in that voice. */
+function speechRequest(settings: VoiceConfig, { instruction, reference }: SpeakingVoice, text: string): { body: string | FormData; headers?: Record<string, string> } {
+  let json: Record<string, unknown> | undefined;
+  if (settings.runtime === "chatterbox") {
+    // Chatterbox has no streaming mode in audio.cpp: one phrase, one WAV.
+    // The browser buffers each phrase before playing it either way.
+    json = { model: "chatterbox", input: spokenNumbers(text, settings.language), language: settings.language,
+      response_format: "wav", options: { exaggeration: String(settings.exaggeration ?? 0.5), seed: "42" },
+      voice_ref: { type: "base64", data: reference!.audio.toString("base64") } };
+  } else if (settings.runtime === "audio-cpp") {
+    json = { model: "breeze", input: text, stream: true, stream_format: "audio", response_format: "pcm", options: { instruction, guidance_scale: String(settings.cfgScale), seed: "42", stream_frames_per_event: "8", stream_lookahead_margin: "4" } };
+    if (reference) { json.voice_ref = { type: "base64", data: reference.audio.toString("base64") }; json.reference_text = reference.transcript; }
+  }
+  if (json) return { body: JSON.stringify(json), headers: { "Content-Type": "application/json" } };
+  const form = new FormData();
+  form.set("text", text); form.set("instruction", instruction); form.set("cfg_scale", String(settings.cfgScale));
+  if (reference) {
+    form.set("ref_audio", new Blob([new Uint8Array(reference.audio)], { type: "audio/wav" }), reference.filename);
+    form.set("ref_text", reference.transcript);
+  }
+  return { body: form };
+}
+/**
+ * Posts it to the speech runtime. Cancellation may leave Breeze finishing its
+ * current GPU operation: keep one request pending instead of exposing normal
+ * contention. `busyMs` is how long that took.
+ */
+async function callSpeech(settings: VoiceConfig, request: { body: string | FormData; headers?: Record<string, string> }, signal: AbortSignal) {
+  let busyMs = 0;
+  do {
+    const attemptStarted = performance.now();
+    const upstream = await fetch(settings.breezeUrl, { method: "POST", body: request.body, headers: request.headers, redirect: "error", signal });
+    if (upstream.status !== 409) return { upstream, busyMs };
+    await upstream.body?.cancel();
+    await delay(750, undefined, { signal });
+    busyMs += performance.now() - attemptStarted;
+  } while (true);
+}
+const runtimeName = (settings: VoiceConfig) => settings.runtime === "chatterbox" ? "Chatterbox" : "Breeze";
+/** That the runtime answered with the audio it was asked for. */
+function expectAudio(settings: VoiceConfig, upstream: Response) {
+  const type = upstream.headers.get("content-type") ?? "";
+  if (settings.runtime === "chatterbox") {
+    if (!/^audio\/(wav|x-wav|wave|vnd\.wave)\b/.test(type)) throw new Error("Expected WAV audio from the Chatterbox API");
+    return;
+  }
+  if (!type.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && type.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
+  const rate = upstream.headers.get("x-sample-rate");
+  if (rate && rate !== "24000") throw new Error(`Unsupported Breeze sample rate: ${rate}`);
+}
+/** `text` as one piece of 24 kHz PCM: for what is made once and kept, not streamed to a page. */
+async function speechPcm(settings: VoiceConfig, voice: SpeakingVoice, text: string, signal: AbortSignal): Promise<Buffer> {
+  const { upstream } = await callSpeech(settings, speechRequest(settings, voice, text), AbortSignal.any([signal, AbortSignal.timeout(120000)]));
+  if (!upstream.ok) throw new Error(`${runtimeName(settings)} returned HTTP ${upstream.status}`);
+  expectAudio(settings, upstream);
+  const body = Buffer.from(await upstream.arrayBuffer());
+  if (settings.runtime === "chatterbox") return wavPcm(body);
+  if (!body.length || body.length % 2) throw new Error("Breeze returned invalid PCM audio");
+  return body;
+}
+/** What makes the fillers sound as they do: another of it is another set of clips. */
+function fillerKey(settings: VoiceConfig, { instruction, reference }: SpeakingVoice): string {
+  const hash = (data: Buffer | string) => createHash("sha1").update(data).digest("hex");
+  return hash(JSON.stringify([settings.runtime, settings.breezeUrl, settings.language, settings.cfgScale, settings.exaggeration ?? 0.5, instruction, reference && [hash(reference.audio), reference.transcript]]));
+}
+/** How many speech requests of a page are being made: the fillers wait for none. */
+let liveSpeech = 0;
+const fillers = new FillerStore(() => path.join(process.env.DATA_DIR || "./data", "voice-fillers"), async () => { while (liveSpeech) await delay(250); });
 export function voiceRouter(): Router {
   const router = express.Router();
   // The stored GPU choice, in place before anything asks the service to start.
@@ -369,72 +467,20 @@ export function voiceRouter(): Router {
     // Recognition alone has nothing to speak with: say so, rather than send the text to an address that is not there.
     if (config().runtime === "none") return res.status(409).json({ error: "Speech synthesis is not installed: replies are not spoken" });
     const speechStarted=performance.now();
-    let busyMs=0;
     const text = req.body?.text;
     if (typeof text !== "string" || !text.trim() || text.length > 600)
       return res.status(400).json({ error: "Speech text must contain 1–600 characters" });
     const settings = config();
     const controller = new AbortController();
-    res.on("close", () => controller.abort());
+    liveSpeech++;
+    res.on("close", () => { liveSpeech--; controller.abort(); });
     try {
-      // Resolve the voice once: a reference clip is up to a megabyte, and only
-      // the runtime that is about to be called should pay to carry it.
-      let instruction = settings.instruction;
-      let reference: { audio: Buffer; transcript: string; filename: string } | undefined;
-      if (!['design','aria'].includes(settings.voice)) {
-        const preset = readVoice(settings.voice);
-        instruction = preset.instruction;
-        if (preset.audio) reference = { audio: preset.audio, transcript: preset.transcript, filename: "reference.wav" };
-      }
-      if (settings.voice === "aria") {
-        const directory = path.join(process.env.DATA_DIR || "./data", "voices");
-        const [audio, transcript] = await Promise.all([
-          readFile(path.join(directory, "aria.wav")),
-          readFile(path.join(directory, "aria.txt"), "utf8"),
-        ]).catch(() => { throw new Error("Install the Aria reference audio and transcript in the portal voices directory"); });
-        if (!audio.length || !transcript.trim()) throw new Error("Aria reference audio and transcript must not be empty");
-        reference = { audio, transcript: transcript.trim(), filename: "aria.wav" };
-      }
-      // Chatterbox clones a speaker; it has no designed or built-in voice.
-      // validateConfig refuses this combination on save; a config written before
-      // that check, or by the managed connect, still reaches here.
-      if (settings.runtime === "chatterbox" && !reference)
-        throw new Error("Chatterbox speaks with a reference clone: choose Aria or a voice with a recording");
-      let form: FormData | undefined;
-      let json: Record<string, unknown> | undefined;
-      if (settings.runtime === "chatterbox") {
-        // Chatterbox has no streaming mode in audio.cpp: one phrase, one WAV.
-        // The browser buffers each phrase before playing it either way.
-        json = { model: "chatterbox", input: spokenNumbers(text, settings.language), language: settings.language,
-          response_format: "wav", options: { exaggeration: String(settings.exaggeration ?? 0.5), seed: "42" },
-          voice_ref: { type: "base64", data: reference!.audio.toString("base64") } };
-      } else if (settings.runtime === "audio-cpp") {
-        json = { model: "breeze", input: text, stream: true, stream_format: "audio", response_format: "pcm", options: { instruction, guidance_scale: String(settings.cfgScale), seed: "42", stream_frames_per_event: "8", stream_lookahead_margin: "4" } };
-        if (reference) { json.voice_ref = { type: "base64", data: reference.audio.toString("base64") }; json.reference_text = reference.transcript; }
-      } else {
-        form = new FormData();
-        form.set("text", text); form.set("instruction", instruction); form.set("cfg_scale", String(settings.cfgScale));
-        if (reference) {
-          form.set("ref_audio", new Blob([new Uint8Array(reference.audio)], { type: "audio/wav" }), reference.filename);
-          form.set("ref_text", reference.transcript);
-        }
-      }
+      const request = speechRequest(settings, await speakingVoice(settings), text);
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]);
-      let upstream: Response;
-      // Cancellation may leave Breeze finishing its current GPU operation.
-      // Keep one browser request pending instead of exposing normal contention.
-      do {
-        const attemptStarted=performance.now();
-        upstream = await fetch(settings.breezeUrl, { method: "POST", body: json ? JSON.stringify(json) : form!, headers: json ? { "Content-Type": "application/json" } : undefined, redirect: "error", signal });
-        if (upstream.status !== 409) break;
-        await upstream.body?.cancel();
-        await delay(750, undefined, { signal });
-        busyMs+=performance.now()-attemptStarted;
-      } while (true);
-      const runtimeName = settings.runtime === "chatterbox" ? "Chatterbox" : "Breeze";
-      if (!upstream.ok) throw new Error(`${runtimeName} returned HTTP ${upstream.status}`);
+      const { upstream, busyMs } = await callSpeech(settings, request, signal);
+      if (!upstream.ok) throw new Error(`${runtimeName(settings)} returned HTTP ${upstream.status}`);
+      expectAudio(settings, upstream);
       if (settings.runtime === "chatterbox") {
-        if (!/^audio\/(wav|x-wav|wave|vnd\.wave)\b/.test(upstream.headers.get("content-type") ?? "")) throw new Error("Expected WAV audio from the Chatterbox API");
         const wav = Buffer.from(await upstream.arrayBuffer());
         // Validate before either branch, so a malformed WAV is never passed on.
         const pcm = wavPcm(wav);
@@ -442,9 +488,6 @@ export function voiceRouter(): Router {
         if (req.get("accept") !== "audio/pcm") return res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);
         return res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store" }).send(pcm);
       }
-      if (!upstream.headers.get("content-type")?.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && upstream.headers.get("content-type")?.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
-      const rate = upstream.headers.get("x-sample-rate");
-      if (rate && rate !== "24000") throw new Error(`Unsupported Breeze sample rate: ${rate}`);
       if (req.get("accept") === "audio/pcm") {
         if (!upstream.body) throw new Error("Breeze returned no audio stream");
         res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
@@ -473,6 +516,29 @@ export function voiceRouter(): Router {
         else res.status(502).json({ error: (e as Error).message });
       }
     }
+  });
+  /**
+   * The fillers of the voice as it is set up now: which clips are ready, and a
+   * `key` that names them. Asking starts the making of the ones that are not;
+   * the page asks again while `rendering` says more are coming. Nothing is made
+   * where the portal has switched status speech off.
+   */
+  router.get("/sessions/:id/voice/fillers", async (_req, res) => {
+    const settings = config();
+    if (process.env.VOICE_STATUS_SPEECH === "false" || settings.runtime === "none") return res.json({ key: "", clips: [], rendering: false });
+    try {
+      const voice = await speakingVoice(settings);
+      const key = fillerKey(settings, voice);
+      res.json({ key, ...await fillers.status(key, (text, signal) => speechPcm(settings, voice, text, signal)) });
+    } catch (e) {
+      // A voice that cannot speak has no fillers either; the page just has none.
+      res.json({ key: "", clips: [], rendering: false, error: (e as Error).message });
+    }
+  });
+  router.get("/sessions/:id/voice/fillers/:key/:n", async (req, res) => {
+    const clip = await fillers.read(String(req.params.key), Number(req.params.n));
+    if (!clip) return res.sendStatus(404);
+    res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "private, max-age=31536000, immutable" }).send(clip);
   });
   return router;
 }
