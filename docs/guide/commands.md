@@ -111,6 +111,15 @@ Dialog events are deliberately never persisted. A stored one would be replayed
 to every future reader, so reloading the page reopened a menu whose extension
 had long since stopped waiting.
 
+## Portal commands that are a prompt
+
+The portal ships a few commands of its own that are prompt templates, listed as
+`prompt` like any you write yourself.
+
+| Command | Does |
+| --- | --- |
+| `/screen <extension>` | Has the agent connect an installed extension to the [Screens panel](/guide/screens), so its data (a todo list, say) is shown beside the chat |
+
 ## Adding more
 
 Install a pi package from [Settings → Extensions](/guide/extensions). Its

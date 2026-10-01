@@ -135,14 +135,14 @@ Each data message is one event:
 Track the highest `seq` you have seen and pass it as `since` when reconnecting.
 
 ::: warning Negative seq
-Live-only events — streaming message/tool updates, queue updates, prefill progress and extension dialogs — carry a negative `seq`. They are never
+Live-only events — streaming message/tool updates, queue updates, prefill progress, extension dialogs and extension screens — carry a negative `seq`. They are never
 persisted, so they must not move your cursor. Ignore anything `<= 0` when
 tracking position, or reconnecting will skip real history.
 :::
 
 Types worth knowing: `portal_prompt`, `portal_status`, `portal_notice`,
 `agent_end`, `extension_ui_request`, `extension_ui_cancel`, `extension_error`,
-`stderr`, `queue_update`, `portal_prefill`, `message_update`, `message_end`, `tool_execution_update`, and `tool_execution_end`, plus other pi lifecycle events.
+`stderr`, `queue_update`, `portal_prefill`, `message_update`, `message_end`, `tool_execution_update`, `tool_execution_end` and `portal_screen` (`{ op: "set", id, title?, blocks }` or `{ op: "clear", id }`: what an extension shows in the [Screens panel](/guide/screens)), plus other pi lifecycle events.
 
 Completed assistant messages and tool results are saved; their streaming updates stay in memory. On connection, the named `live-reset` event tells a client to discard stale in-memory updates before replay. A `message_snapshot` restores the current assistant message; tool updates restore current tool output. The named `caught-up` event carries the last durable sequence. Render completed `message_end.message` content even when no deltas were replayed.
 
@@ -224,7 +224,7 @@ the folder is not a repository, except `init`. See [Git](/guide/git).
 | `GET /api/terminal/:id/stream` | Server-sent events: its output |
 | `POST /api/terminal/:id/input` · `/resize` | Keystrokes; the size of the panel |
 | `DELETE /api/terminal/:id` | Ends the shell |
-| `GET /api/sessions/:id/background` | `{ supported, jobs, …extension status, piRunning }` — background jobs are listed on the host executor on Linux only |
+| `GET /api/sessions/:id/background` | `{ supported, jobs, statuses, widgets, screens, piRunning }` — background jobs are listed on the host executor on Linux only; `screens` is what the chat's extensions show now, as `{ id, title?, blocks }`, empty on the container executor |
 | `GET /api/sessions/:id/background/:key/output` | A job's output; 404 when it is not in a file the portal can follow |
 | `POST /api/sessions/:id/background/:key/stop` · `/background/clear` | Stop one; clear the finished ones |
 | `POST /api/sessions/:id/subagents/:agent/input` | `{ text }` — say something to a running subagent. 409 when it cannot be reached |

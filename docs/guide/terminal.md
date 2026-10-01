@@ -56,6 +56,9 @@ characters on screen; the file has the rest. **Stop** ends a running job, and
 What an extension shows in pi's footer — its status lines and widgets — is listed
 above the jobs.
 
+What an extension shows of its own data, a todo list say, is not here but in the
+[Screens panel](/guide/screens).
+
 Some limits:
 
 - Jobs are followed only when pi runs **on the host** (`EXECUTOR=host`) on Linux.
