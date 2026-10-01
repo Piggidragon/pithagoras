@@ -16,24 +16,25 @@ const sentImages = (raw: unknown): SentImage[] | undefined => {
   return list.length ? list : undefined;
 };
 
-/** A picture the agent put in front of the person with show_image, or made for them with generate_image: its path in the chat's folder. */
+/** A picture the agent put in front of the person with show_image, or made or changed for them with generate_image or edit_image: its path in the chat's folder. */
 export interface ShownPicture {
   path: string;
   title?: string;
 }
 
 /**
- * The picture a show_image or generate_image call ended with, when it succeeded.
+ * The picture a show_image, generate_image or edit_image call ended with, when it succeeded.
  *
- * Both answer with a path in the chat's folder and a title. generate_image is
- * taken only with the mark the portal's own tool sets: an extension may bring
- * a tool of that name, whose path is not one in the chat's folder.
+ * All answer with a path in the chat's folder and a title. generate_image and
+ * edit_image are taken only with the mark the portal's own tool sets: an
+ * extension may bring a tool of that name, whose path is not one in the
+ * chat's folder.
  */
 export function shownPicture(payload: any): ShownPicture | undefined {
   if (payload?.isError) return undefined;
   const name = String(payload?.toolName ?? payload?.name ?? "");
   const details = payload?.result?.details;
-  if (name === "generate_image" ? details?.[GENERATED_PICTURE_MARK] !== true : name !== "show_image") return undefined;
+  if (name === "generate_image" || name === "edit_image" ? details?.[GENERATED_PICTURE_MARK] !== true : name !== "show_image") return undefined;
   if (typeof details?.path !== "string" || !details.path) return undefined;
   return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };
 }

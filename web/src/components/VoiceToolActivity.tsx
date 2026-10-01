@@ -78,7 +78,7 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
         const card = next.find(c => c.callId && c.callId === String(p.toolCallId ?? '') && c.status === 'running');
         if (!card) continue;
         const status = p.isError ? 'failed' as const : 'done' as const;
-        // A card leads to the pictures once its call has shown one: a generate_image has no picture to open before that, nor when it is another extension's tool.
+        // A card leads to the pictures once its call has shown one: a generate_image or edit_image has no picture to open before that, nor when it is another extension's tool.
         const target = shownPicture(p) ? 'pictures' as const : undefined;
         next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}) } : c);
         later(STAYS[status], () => leave(card.id));
