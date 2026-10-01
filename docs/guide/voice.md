@@ -185,8 +185,9 @@ the last eight seconds (the gap between two phrases of an answer is not the end
 of it), and a clip under way when speech for an answer begins is cancelled at the
 runtime and made again afterwards. Only one voice is made at a time. Another
 voice, language, speech runtime, expressiveness or reference recording stops
-the one being made, makes a new set, and the old one is deleted. Until the first
-clip is ready there is no filler; one never waits for them.
+the one being made, makes a new set, and the old one is deleted once the first
+clip of the new one is made (a setting changed and changed back loses nothing).
+Until the first clip is ready there is no filler; one never waits for them.
 
 **When it plays.** The moment your turn is taken: what you said has been
 recognised, it is not a noise and not a request to the page ("say that again"),

@@ -111,6 +111,33 @@ test('a new voice stops the one being made: never two at once, and nothing of th
   rmSync(root, { recursive: true, force: true });
 });
 
+test('a voice changed and changed back loses none of the clips it was told were ready', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'fillers-'));
+  const made: string[] = [];
+  const renderFor = (voice: string) => async (text: string) => { made.push(`${voice}:${text}`); await tick(40); return seconds(1); };
+  const store = new FillerStore(() => root);
+  const other = 'b'.repeat(40);
+  await store.status(KEY, renderFor('a'));
+  while (!(await store.status(KEY, renderFor('a'))).clips.length) await tick(5);
+  await tick(60);
+  const before = (await store.status(KEY, renderFor('a'))).clips;
+  assert.ok(before.length > 0 && before.length < FILLERS.length, `${before.length} clips`);
+  // Away and back at once, as with a setting moved and moved back.
+  const away = store.status(other, renderFor('b'));
+  const back = await store.status(KEY, renderFor('a'));
+  await away;
+  // What was listed is still there, whatever happens next.
+  await tick(30);
+  for (const n of back.clips) assert.ok(await store.read(KEY, n), `clip ${n} of the voice is gone`);
+  while ((await store.status(KEY, renderFor('a'))).rendering) await tick(5);
+  assert.deepEqual((await store.status(KEY, renderFor('a'))).clips, FILLERS.map((_, i) => i));
+  // What the voice had was kept, not made again (only the clip under way when it was let go of is); the other voice was never begun.
+  for (const n of before) assert.equal(made.filter(text => text === `a:${FILLERS[n].text}`).length, 1, `clip ${n} was made again`);
+  assert.deepEqual(made.filter(text => text.startsWith('b:')), []);
+  assert.deepEqual(readdirSync(root), [KEY]);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test('a runtime that does not say a text the same way each time gets it made again, and is given up on only for a while, not on disk', async () => {
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   const calls: string[] = [];

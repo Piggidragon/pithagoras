@@ -51,14 +51,16 @@ const QUIET_MS = 8000;
  * given up on and made again afterwards.
  *
  * A voice is a `key`: whatever decides how it sounds. Only one voice is made at a
- * time: a new key stops the one being made, and its clips are dropped when the new
- * one is made, so changing the voice never leaves a pile behind.
+ * time: a new key stops the one being made, and the clips of the others are dropped
+ * once the first clip of the new one is made, so changing the voice never leaves a
+ * pile behind, nor loses what a voice changed back to had already.
  */
 export class FillerStore {
   /** The voice being made, and what stops it. */
   private current?: { key: string; run: AbortController; done: Promise<void> };
   /** The clip being made, for live speech to cut off. */
   private attempt?: AbortController;
+  private asking: Promise<unknown> = Promise.resolve();
   private failed = new Map<string, number>();
   /** Clips of a runtime that does not say the same thing each time, which came out wrong too often: left alone until the portal is restarted. */
   private gaveUp = new Set<string>();
@@ -107,23 +109,36 @@ export class FillerStore {
    * The clips there are for this voice, and whether more are on their way. Asking is what starts the making of the missing ones.
    * `steady` is whether the runtime says the same thing each time: what it got wrong once it gets wrong again, so that is not tried again.
    */
-  async status(key: string, render: Render, steady = true): Promise<{ clips: number[]; rendering: boolean }> {
-    if (!KEY.test(key)) throw new Error("Not a voice key");
-    const files = await readdir(this.dir(key)).catch(() => [] as string[]);
-    const clips = FILLERS.map((_, i) => i).filter(i => files.includes(`${i}.pcm`));
-    const todo = FILLERS.map((_, i) => i).filter(i => !files.includes(`${i}.pcm`) && !files.includes(`${i}.skip`) && !this.gaveUp.has(`${key}/${i}`));
-    // Another voice than the one being made: that is not wanted any more.
+  status(key: string, render: Render, steady = true): Promise<{ clips: number[]; rendering: boolean }> {
+    if (!KEY.test(key)) return Promise.reject(new Error("Not a voice key"));
+    // One question at a time and in the order asked, so that the voice asked about last is the one that is made.
+    const answer = this.asking.then(() => this.look(key, render, steady));
+    this.asking = answer.catch(() => {});
+    return answer;
+  }
+  private async look(key: string, render: Render, steady: boolean) {
+    // Another voice than the one being made: that is not wanted any more. It is let go of before the disk is looked at, as it may be clearing what is there, and what is listed as ready has to stay.
+    while (this.current && this.current.key !== key) { this.current.run.abort(); await this.current.done; }
+    const { clips, todo } = await this.kept(key);
     if (this.current && this.current.key !== key) this.current.run.abort();
     let rendering = !!this.current && this.current.key === key && !this.current.run.signal.aborted;
     if (todo.length && !rendering && this.clock() - (this.failed.get(key) ?? -Infinity) >= RETRY_AFTER) {
       const run = new AbortController(), before = this.current?.done;
-      // After the one before has let go, so that two never make clips at once, and the old one cannot write into what the new one cleared.
-      const done = (async () => { await before; await this.make(key, todo, render, run.signal, steady); })()
+      // After the one before has let go, so that two never make clips at once, and the old one cannot write into what the new one has cleared.
+      const done = (async () => { await before; await this.make(key, render, run.signal, steady); })()
         .finally(() => { if (this.current?.run === run) this.current = undefined; });
       this.current = { key, run, done };
       rendering = true;
     }
     return { clips, rendering };
+  }
+
+  /** What is on disk for this voice: the clips there are, and the ones still to make. */
+  private async kept(key: string) {
+    const files = await readdir(this.dir(key)).catch(() => [] as string[]);
+    const clips = FILLERS.map((_, i) => i).filter(i => files.includes(`${i}.pcm`));
+    const todo = FILLERS.map((_, i) => i).filter(i => !files.includes(`${i}.pcm`) && !files.includes(`${i}.skip`) && !this.gaveUp.has(`${key}/${i}`));
+    return { clips, todo };
   }
 
   /** One clip as it was kept, or none for a key or a number that is not one. */
@@ -152,16 +167,23 @@ export class FillerStore {
   }
 
   /** Makes the clips one after the other. A failure is remembered and not retried for a while. */
-  private async make(key: string, todo: number[], render: Render, run: AbortSignal, steady: boolean) {
+  private async make(key: string, render: Render, run: AbortSignal, steady: boolean) {
     const dir = this.dir(key);
     try {
-      for (const name of await readdir(this.root()).catch(() => [] as string[]))
-        if (name !== key) await rm(path.join(this.root(), name), { recursive: true, force: true });
+      // What is to be made is looked up now, not when it was asked for: the one before may have made some.
+      const { todo } = await this.kept(key);
+      let cleared = false;
       for (const i of todo) {
         for (let tries = 1; ; tries++) {
           const pcm = await this.render(FILLERS[i].text, render, run);
           if (!pcm || run.aborted) return;
           const seconds = pcm.length / 2 / RATE;
+          // The other voices are cleared away once there is something of this one to keep, not before: a voice changed back again while its first clip is being made has lost nothing.
+          if (!cleared) {
+            cleared = true;
+            for (const name of await readdir(this.root()).catch(() => [] as string[]))
+              if (name !== key) await rm(path.join(this.root(), name), { recursive: true, force: true });
+          }
           await mkdir(dir, { recursive: true });
           if (seconds >= SHORTEST && seconds <= FILLERS[i].longest) {
             // Whole or not at all: a listing never sees half a clip.
