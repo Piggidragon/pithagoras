@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import {
-  ASR_CPU_PORT, ASR_MODELS, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, asrDevice, asrDevices, choiceFromKey, choiceKey, choiceLabel, cpuRealtime, cpuServerConfig, cpuSlow, cpuThreads, endpoints, fitOn, fitRam, healthUrls, parseChoice, pickGpu,
+  ASR_CPU_PORT, ASR_MODELS, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, asrDevice, asrDevices, choiceFromKey, choiceKey, choiceLabel, cpuRealtime, cpuServerConfig, cpuSlow, cpuThreads, endpoints, fitOn, fitRam, healthUrls, isManagedUrl, parseChoice, pickGpu,
   ramNeeded, sameChoice, serverConfig, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, vramNeeded,
   type Gpu, type Host, type VoiceChoice,
 } from '../server/src/voice-engines.js';
@@ -342,4 +342,13 @@ test('the host is read as it is: the memory and the CPUs of the machine, not the
   assert.equal(host.threads, os.cpus().length);
   assert.ok(Number.isInteger(host.threads) && host.threads >= 1);
   assert.equal(readFileSync('server/src/voice-gpu.ts', 'utf8').includes('/sys/fs/cgroup'), false, 'no cgroup of the portal is read');
+});
+
+test('an address is the managed service\'s when it leads to a port the managed container listens on, however it is written', () => {
+  // Every address the managed choices save.
+  for (const c of combos) for (const url of [endpoints(c).whisperUrl, endpoints(c).breezeUrl].filter(Boolean)) assert.equal(isManagedUrl(url), true, url);
+  for (const url of ['http://localhost:8188/inference', 'http://127.0.0.1:8188/inference/', ' http://127.0.0.1:7862/v1/audio/speech ', 'http://localhost:7863/v1/audio/transcriptions']) assert.equal(isManagedUrl(url), true, url);
+  // The Compose overlay's services, another host on the same port, another path and nothing at all are not.
+  for (const url of ['http://127.0.0.1:8178/inference', 'http://127.0.0.1:7860/v1/audio/speech', 'http://stt.example.test:8188/inference', 'http://127.0.0.1:8188/other', 'https://127.0.0.1:8188/inference', 'http://127.0.0.1/inference', 'not a url', '']) assert.equal(isManagedUrl(url), false, url);
+  assert.equal(isManagedUrl(undefined), false);
 });

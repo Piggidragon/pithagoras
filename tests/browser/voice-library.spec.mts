@@ -23,7 +23,9 @@ test('upload a voice reference, select it, save settings, and delete it',async({
  await page.getByRole('button',{name:'Save voice settings',exact:true}).click();
  expect(config.voice).toBe('voice-test');
  await page.screenshot({path:'/tmp/pithagoras-voice-library.png',fullPage:true});
- page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Delete voice',exact:true}).click();
+ // The page draws the portal's own dialog, as the app does, not the browser's.
+ await page.getByRole('button',{name:'Delete voice',exact:true}).click();
+ await page.getByRole('alertdialog').getByRole('button',{name:'Delete',exact:true}).click();
  await expect(page.getByRole('combobox',{name:'Speaking voice',exact:true})).toHaveText('Designed voice');
  await expect(page.locator('#error')).toBeEmpty();
 });

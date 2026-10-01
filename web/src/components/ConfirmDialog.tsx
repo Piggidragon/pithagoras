@@ -74,10 +74,15 @@ export function ConfirmHost() {
         e.stopPropagation();
         answer(false);
       } else if (e.key === "Tab") {
-        // Two buttons; Tab moves between them rather than out into the page
-        // behind the backdrop.
+        // Tab goes round the dialog, the buttons and whatever the message offers
+        // (a checkbox, say), rather than out into the page behind the backdrop.
         e.preventDefault();
-        (document.activeElement === cancel.current ? confirm : cancel).current?.focus();
+        const items = [...(cancel.current?.closest('[role="alertdialog"]')?.querySelectorAll<HTMLElement>("input, select, textarea, button, a[href]") ?? [])].filter(
+          (el) => !(el as HTMLInputElement).disabled,
+        );
+        if (!items.length) return;
+        const at = items.indexOf(document.activeElement as HTMLElement);
+        items[at < 0 ? (e.shiftKey ? items.length - 1 : 0) : (at + (e.shiftKey ? -1 : 1) + items.length) % items.length].focus();
       }
     };
     window.addEventListener("keydown", onKey, true);
