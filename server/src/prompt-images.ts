@@ -62,6 +62,9 @@ export const mimeOf = (name: string): string | undefined => KINDS.find((k) => na
 /** What picture `head` is the start of, by its bytes alone, or undefined for anything else. Twelve bytes are enough. */
 export const pictureType = (head: Buffer): string | undefined => KINDS.find((k) => k.is(head))?.mimeType;
 
+/** The file extension a picture is kept under, by its first bytes as pictureType reads them. */
+export const pictureExt = (head: Buffer): string | undefined => KINDS.find((k) => k.is(head))?.ext;
+
 /**
  * The pictures in a request body, checked, or an empty list when there are none.
  * `data` may be plain base64 or a data: URL, which is what a browser has to hand.

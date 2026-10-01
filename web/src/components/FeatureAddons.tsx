@@ -1,10 +1,10 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { LuBot, LuBrain, LuCheck, LuDownload, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert } from "react-icons/lu";
-import { api, type AvailableModel, type Features, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
+import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert } from "react-icons/lu";
+import { api, type AvailableModel, type Features, type ImagesFeature, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
-import { SwitchRow, inputCls } from "./SettingsUi";
+import { SwitchRow, inputCls, primaryCls } from "./SettingsUi";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
 
 /**
@@ -675,6 +675,151 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
       {busy && (
         <p className="flex items-center gap-2 text-xs text-fg-subtle">
           <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t(busy)}
+        </p>
+      )}
+      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+    </div>
+  );
+}
+
+/** The form's copy of the image endpoint's settings, before they are saved. */
+interface ImagesDraft {
+  baseUrl: string;
+  model: string;
+  size: string;
+  /** Typed anew; empty keeps the one saved. */
+  apiKey: string;
+}
+
+export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
+  // Its own, not with Understory's: a Docker that cannot be reached is not this tab's to wait on.
+  const [images, setImages] = useState<ImagesFeature | null>(null);
+  const [draft, setDraft] = useState<ImagesDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Said in the language shown, whenever it is drawn.
+  const [note, setNote] = useState<(() => string) | null>(null);
+  useEffect(() => {
+    api.imagesFeature().then((r) => setImages(r.images), (e: Error) => onError(e.message));
+  }, []);
+
+  if (!images) return <Loading />;
+  const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, apiKey: "" };
+  const edit = (patch: Partial<ImagesDraft>) => setDraft({ ...form, ...patch });
+
+  const change = async (patch: Parameters<typeof api.setImagesFeature>[0]) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const { images: saved, changed, waiting } = await api.setImagesFeature(patch);
+      setImages(saved);
+      // The form's settings are saved now, so it shows them as the server has them; the key typed is not shown again.
+      if (patch.baseUrl !== undefined) setDraft(null);
+      if (changed) setNote(() => () => reloadNote(waiting));
+      return true;
+    } catch (e) {
+      onError((e as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="rounded-xl border border-line bg-raised/40 p-3">
+        <Header Icon={LuImage} title={t("Image generation")}>
+          {tx("A {tool} tool: the agent describes a picture and an image model you set up makes it. It appears in the chat, and in voice mode's picture window, as one shown with {show} does.", { tool: <code>generate_image</code>, show: <code>show_image</code> })}
+        </Header>
+      </div>
+
+      <fieldset disabled={busy} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
+        <legend className="px-1 text-xs text-fg-muted">{t("The image endpoint")}</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="text-xs text-fg-muted sm:col-span-2">
+            {t("API address")}
+            <input
+              value={form.baseUrl}
+              onChange={(e) => edit({ baseUrl: e.target.value })}
+              placeholder="https://images.example.com/v1"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("API key")}
+            <input
+              type="password"
+              value={form.apiKey}
+              onChange={(e) => edit({ apiKey: e.target.value })}
+              placeholder={images.keySet ? t("saved — type to replace") : t("none needed for a local server")}
+              autoComplete="off"
+              className={`${inputCls} mt-1 text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Model")}
+            <input
+              value={form.model}
+              onChange={(e) => edit({ model: e.target.value })}
+              placeholder="image-model"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Picture size")}
+            <input
+              value={form.size}
+              onChange={(e) => edit({ size: e.target.value })}
+              placeholder="1024x1024"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+        </div>
+        <p className="text-[11px] text-fg-faint">
+          {tx("Any server with an OpenAI-style {route}: the portal sends the model, the prompt and the size, and takes a picture back as base64 or as an address. The key goes only to this address. Leave the model and the size empty for the server's own.", { route: <code>images/generations</code> })}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {draft && (
+            <button
+              type="button"
+              className={primaryCls}
+              onClick={() => void change({ baseUrl: form.baseUrl, model: form.model, size: form.size, ...(form.apiKey ? { apiKey: form.apiKey } : {}) })}
+            >
+              {t("Save")}
+            </button>
+          )}
+          {draft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-fg" onClick={() => setDraft(null)}>
+              {t("Discard")}
+            </button>
+          )}
+          {images.keySet && !draft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-danger" onClick={() => void change({ apiKey: "" })}>
+              {t("Remove the saved key")}
+            </button>
+          )}
+        </div>
+      </fieldset>
+
+      <SwitchRow
+        title={t("Image generation tool")}
+        detail={images.enabled ? t("On: the agent has a generate_image tool.") : t("Off: the agent has no image tool.")}
+        on={images.enabled}
+        onChange={(enabled) => void change({ enabled })}
+        disabled={busy || !!draft || (!images.baseUrl && !images.enabled)}
+        note={draft ? t("Save or discard the changes first.") : !images.baseUrl && !images.enabled ? t("Save the address of an image endpoint first.") : undefined}
+      />
+      <p className="text-[11px] text-fg-faint">
+        {t("Pictures are made in a generated-images folder inside the chat's folder. Making one can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it.")}
+      </p>
+      {busy && (
+        <p className="flex items-center gap-2 text-xs text-fg-subtle">
+          <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
         </p>
       )}
       {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}

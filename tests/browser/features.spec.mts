@@ -15,6 +15,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       },
     },
   };
+  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -34,7 +35,17 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
     else if (p === '/api/features/subagent' && method === 'GET') body = { subagent: state.subagent };
     else if (p === '/api/features/flags') body = { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled } };
-    else if (p === '/api/features') body = state;
+    else if (p === '/api/features/images' && method === 'GET') body = { images };
+    else if (p === '/api/features/images' && method === 'PUT') {
+      const patch = route.request().postDataJSON();
+      sent.push({ path: p, body: patch });
+      const changed = patch.enabled !== undefined && patch.enabled !== images.enabled;
+      const { apiKey, ...rest } = patch;
+      Object.assign(images, rest);
+      if (apiKey !== undefined) images.keySet = apiKey !== '';
+      body = { images, changed, reloaded: 1, waiting: 1 };
+    }
+    else if (p === '/api/features') body = { ...state, images };
     else if (p === '/api/features/subagent' && method === 'PUT') {
       const patch = route.request().postDataJSON();
       sent.push({ path: p, body: patch });
@@ -272,15 +283,15 @@ test('forgetting the memory asks first', async ({ page }) => {
   expect(sent.at(-1)!.path).toBe('/api/features/understory/install?memory=forget');
 });
 
-test('the four add-on tabs fit a phone', async ({ page }) => {
+test('the five add-on tabs fit a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await portal(page);
   await page.goto('/settings/add-ons');
   const tabs = addons(page).getByRole('tab');
-  await expect(tabs).toHaveCount(4);
+  await expect(tabs).toHaveCount(5);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
-  for (const name of ['Browser', 'Voice', 'Subagents', 'Memory']) await expect(addons(page).getByRole('tab', { name })).toBeVisible();
+  for (const name of ['Browser', 'Voice', 'Subagents', 'Memory', 'Images']) await expect(addons(page).getByRole('tab', { name })).toBeVisible();
 });
 
 test("a tidy-up that fails says why, not the status it came with", async ({ page }) => {
@@ -310,4 +321,45 @@ test("the Subagents tab opens whatever Docker's state: it asks nothing of it", a
   await page.goto('/settings/add-ons');
   await addons(page).getByRole('tab', { name: 'Subagents' }).click();
   await expect(addons(page).getByRole('switch', { name: 'Subagent tool' })).toBeVisible();
+});
+
+test('image generation needs an endpoint before it can be switched on, and the key is sent once and never shown again', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Images' }).click();
+  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  const tool = panel.getByRole('switch', { name: 'Image generation tool' });
+  await expect(tool).toHaveAttribute('aria-checked', 'false');
+  await expect(tool).toBeDisabled();
+  await expect(panel.getByText('Save the address of an image endpoint first.')).toBeVisible();
+  await expect(panel.getByText('Off: the agent has no image tool.')).toBeVisible();
+
+  await panel.getByLabel('API address').fill('https://images.example.com/v1');
+  await panel.getByLabel('API key').fill('sk-test-123');
+  await panel.getByLabel('Model').fill('image-model');
+  await expect(tool).toBeDisabled();
+  await expect(panel.getByText('Save or discard the changes first.')).toBeVisible();
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  expect(sent).toEqual([{ path: '/api/features/images', body: { baseUrl: 'https://images.example.com/v1', model: 'image-model', size: '', apiKey: 'sk-test-123' } }]);
+  // The page is told only that a key is set: the field is empty and says so.
+  await expect(panel.getByLabel('API key')).toHaveValue('');
+  await expect(panel.getByLabel('API key')).toHaveAttribute('placeholder', 'saved — type to replace');
+
+  await expect(tool).toBeEnabled();
+  await tool.click();
+  await expect(tool).toHaveAttribute('aria-checked', 'true');
+  await expect(panel.getByText('On: the agent has a generate_image tool.')).toBeVisible();
+  await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
+  expect(sent.at(-1)!.body).toEqual({ enabled: true });
+
+  // Changing only the model keeps the key: it is not sent again.
+  await panel.getByLabel('Model').fill('another-model');
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: 'https://images.example.com/v1', model: 'another-model', size: '' });
+
+  await panel.getByRole('button', { name: 'Remove the saved key' }).click();
+  await expect(panel.getByLabel('API key')).toHaveAttribute('placeholder', 'none needed for a local server');
+  expect(sent.at(-1)!.body).toEqual({ apiKey: '' });
 });
