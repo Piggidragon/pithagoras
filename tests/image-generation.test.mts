@@ -1385,6 +1385,81 @@ test("the API says whether several pictures are taken, and reloads chats when th
   }
 });
 
+test("a tool rule for edit_image is matched on each picture, whether it is named by path or by a list, never on the list's JSON", async () => {
+  const { ruleAllows, guardExtension } = await import("../server/src/pi/guard.ts");
+  const { addGrant, addToolRule, deleteToolRule, listToolRules } = await import("../server/src/db.ts");
+  const rule = (pattern: string, more: Record<string, unknown> = {}) =>
+    ({ id: `r-${pattern}`, role: "colleague", tool: "edit_image", pattern, note: "", created_at: "", person_key: null, ...more }) as Parameters<typeof ruleAllows>[0][number];
+  const allows = (rules: ReturnType<typeof rule>[], input: Record<string, unknown>, role = "colleague") => ruleAllows(rules, role, "edit_image", input);
+
+  const folder = [rule("shared/*")];
+  assert.equal(allows(folder, { path: "shared/a.png", prompt: "p" }), true, "one picture, as ever");
+  assert.equal(allows(folder, { path: "private.png", prompt: "p" }), false);
+  // A list is the same pictures one by one: a folder rule that allowed each still does, and one that did not allow one does not allow the call.
+  assert.equal(allows(folder, { paths: ["shared/a.png"], prompt: "p" }), true, "a list of one is the one picture");
+  assert.equal(allows(folder, { paths: ["shared/a.png", "shared/b.jpg"], prompt: "p" }), true);
+  assert.equal(allows(folder, { paths: ["shared/a.png", "private.png"], prompt: "p" }), false, "one that is not allowed is enough");
+  assert.equal(allows(folder, { paths: ["private.png", "shared/a.png"], prompt: "p" }), false, "wherever it is in the list");
+
+  // A rule for a word is not met by the prompt or by another picture of the list, which the call's JSON would have let through.
+  const word = [rule("*shared/*")];
+  assert.equal(allows(word, { path: "private.png", prompt: "like shared/x" }), false);
+  assert.equal(allows(word, { paths: ["private.png"], prompt: "like shared/x" }), false, "the prompt is no picture");
+  assert.equal(allows(word, { paths: ["private.png", "shared/a.png"], prompt: "p" }), false, "nor is another picture of the list");
+  assert.equal(allows(word, { paths: ["x/shared/a.png", "y/shared/b.png"], prompt: "p" }), true);
+
+  // Each picture needs a rule, not the same one: two folders, two rules.
+  assert.equal(allows([rule("shared/*"), rule("pictures/*")], { paths: ["shared/a.png", "pictures/b.png"], prompt: "p" }), true);
+  assert.equal(allows([rule("shared/*"), rule("pictures/*")], { paths: ["shared/a.png", "other/b.png"], prompt: "p" }), false);
+
+  // Whichever name the tool would use is checked: a path that is allowed does not carry a list that is not, nor the other way round.
+  assert.equal(allows(folder, { path: "shared/a.png", paths: ["private.png"], prompt: "p" }), false);
+  assert.equal(allows(folder, { path: "private.png", paths: ["shared/a.png"], prompt: "p" }), false);
+  assert.equal(allows(folder, { paths: "private.png", prompt: "p" }), false, "a list given as text, as pi may coerce it");
+  // A call that names no picture, an empty list, or something that is no name is allowed by nothing, even by a rule for everything.
+  const anything = [rule("*")];
+  for (const input of [{ prompt: "p" }, { paths: [], prompt: "p" }, { paths: [""], prompt: "p" }, { paths: ["a.png", 5], prompt: "p" }, { path: 5, prompt: "p" }]) {
+    assert.equal(allows(anything, input), false, JSON.stringify(input));
+  }
+  assert.equal(allows(anything, { paths: ["a.png", "b.png"], prompt: "p" }), true);
+
+  // The rule's role, person and tool count as for any call.
+  assert.equal(allows(folder, { paths: ["shared/a.png"], prompt: "p" }, "stranger"), false);
+  assert.equal(allows([rule("shared/*", { role: "all" })], { paths: ["shared/a.png"], prompt: "p" }, "stranger"), true);
+  assert.equal(allows([rule("shared/*", { tool: "show_image" })], { paths: ["shared/a.png"], prompt: "p" }), false);
+  assert.equal(ruleAllows([rule("shared/*", { person_key: "priya" })], "colleague", "edit_image", { paths: ["shared/a.png"] }, "priya"), true);
+  assert.equal(ruleAllows([rule("shared/*", { person_key: "priya" })], "colleague", "edit_image", { paths: ["shared/a.png"] }, "sam"), false);
+
+  // Other tools are matched as they were: a command, a path, or the call's own arguments.
+  const bash = (pattern: string) => rule(pattern, { tool: "bash" });
+  assert.equal(ruleAllows([bash("ls*")], "colleague", "bash", { command: "ls -l 2>&1" }), true);
+  assert.equal(ruleAllows([bash("ls*")], "colleague", "bash", { command: "ls; rm x" }), false);
+  assert.equal(ruleAllows([rule("docs/*", { tool: "write" })], "colleague", "write", { path: "docs/a.md", content: "x" }), true);
+  assert.equal(ruleAllows([rule("*shared*", { tool: "other_tool" })], "colleague", "other_tool", { paths: ["a"], note: "shared" }), true, "a tool of another name keeps its arguments' JSON");
+
+  // As the guard asks it, with the rules in the portal's own table: the call goes through for the pictures the rule allows and is refused for the rest.
+  const added = [{ id: "issue90-a", pattern: "shared/*" }];
+  for (const r of added) addToolRule({ id: r.id, role: "colleague", tool: "edit_image", pattern: r.pattern, note: "", person_key: null });
+  try {
+    assert.equal(listToolRules().filter((r) => r.id === "issue90-a").length, 1);
+    let handler: ((event: any) => any) | undefined;
+    guardExtension("/tmp/none", () => ({ role: "colleague" }), "chat-issue90")({ on: (name: string, fn: (event: any) => any) => { if (name === "tool_call") handler = fn; } });
+    const asked = (input: Record<string, unknown>) => handler!({ toolName: "edit_image", input });
+    assert.equal(asked({ paths: ["shared/a.png", "shared/b.png"], prompt: "p" }), undefined, "allowed");
+    assert.equal(asked({ paths: ["shared/a.png"], prompt: "like shared/x" }), undefined);
+    assert.equal(asked({ paths: ["private.png"], prompt: "like shared/x" })?.block, true, "refused: the prompt is not a rule's business");
+    assert.equal(asked({ paths: ["shared/a.png", "private.png"], prompt: "p" })?.block, true);
+    // A one-off approval is for the call as it was shown, arguments and all, and is spent by it.
+    const approved = { paths: ["private.png", "shared/a.png"], prompt: "p" };
+    addGrant("issue90-grant", "chat-issue90", "edit_image", JSON.stringify(approved));
+    assert.equal(asked({ ...approved, prompt: "another" })?.block, true, "not for another call");
+    assert.equal(asked(approved), undefined);
+    assert.equal(asked(approved)?.block, true, "and once");
+  } finally {
+    for (const r of added) deleteToolRule(r.id);
+  }
+});
+
 test("the tool menus do not offer edit_image while editing is off, though it is remembered for when it is on", async () => {
   const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
   rememberTools([

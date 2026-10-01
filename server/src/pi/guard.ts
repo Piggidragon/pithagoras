@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { inlineBrowserScreenshot } from "./browser-screenshot.js";
 import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-format.js";
 import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
+import { EDIT_IMAGE_TOOL } from "../image-generation.js";
 
 /**
  * A blast-radius limiter for prompt injection.
@@ -284,6 +285,22 @@ const subjectOf = (toolName: string, input: Record<string, unknown>) =>
   toolName === "bash" ? cmd(input) : target(input) || JSON.stringify(input);
 
 /**
+ * What a rule must allow for a call: one subject, or one for each picture of an
+ * edit_image given a list. A list has no `path`, so matched like any other
+ * tool's arguments it would be matched on their JSON — a rule for a folder
+ * would match nothing, and one for a word would match the prompt or another
+ * picture of the list. Each picture is a subject instead, as if the pictures
+ * were asked for one at a time. Every name the call carries is one, `path` and
+ * `paths` alike, so that the one the tool uses is never the one left unchecked;
+ * a call that names no picture is allowed by nothing, and fails in the tool.
+ */
+function subjectsOf(toolName: string, input: Record<string, unknown>): string[] {
+  if (toolName !== EDIT_IMAGE_TOOL) return [subjectOf(toolName, input)];
+  const named = (value: unknown): unknown[] => (Array.isArray(value) ? value : value === undefined ? [] : [value]);
+  return [...named(input.path), ...named(input.paths)].map((name) => (typeof name === "string" ? name : ""));
+}
+
+/**
  * Folding stderr in is a fixed idiom, not redirection.
  *
  * Models write it by reflex on almost every command. Refusing it means an
@@ -299,18 +316,23 @@ export function ruleAllows(
   input: Record<string, unknown>,
   personKey?: string
 ): boolean {
-  let subject = subjectOf(toolName, input).trim();
-  if (!subject) return false;
-  if (toolName === "bash") subject = subject.replace(STDERR_IDIOM, "").trim();
-  if (toolName === "bash" && CHAINING.test(subject)) return false;
-  return rules.some(
-    (r) =>
-      (r.role === role || r.role === "all") &&
-      // A rule naming somebody applies to them alone: approving Priya's request
-      // must not quietly permit the same command for every colleague.
-      (!r.person_key || r.person_key === personKey) &&
-      r.tool === toolName &&
-      globToRegExp(r.pattern).test(subject)
+  const subjects = subjectsOf(toolName, input).map((s) => s.trim());
+  if (!subjects.length || subjects.some((s) => !s)) return false;
+  if (toolName === "bash") {
+    subjects[0] = subjects[0].replace(STDERR_IDIOM, "").trim();
+    if (CHAINING.test(subjects[0])) return false;
+  }
+  // Each subject by some rule of its own, as the same calls one by one would be.
+  return subjects.every((subject) =>
+    rules.some(
+      (r) =>
+        (r.role === role || r.role === "all") &&
+        // A rule naming somebody applies to them alone: approving Priya's request
+        // must not quietly permit the same command for every colleague.
+        (!r.person_key || r.person_key === personKey) &&
+        r.tool === toolName &&
+        globToRegExp(r.pattern).test(subject)
+    )
   );
 }
 

@@ -299,6 +299,13 @@ What was decided for it:
   an edit's: `person.png` and `style.jpg` give `person-edited.webp`. The answer to
   the agent lists all the originals, in order, and the page shows the result as it
   does an edit's, in the chat and in voice mode.
+- **Tool rules see each picture.** For a person the agent talks to for you, a
+  [tool rule](/people/rules) for `edit_image` is matched against the path of the
+  picture, as ever. With a list, **each picture's path** is matched, and the call
+  is allowed only if every one is: a rule for `shared/*` allows a list of pictures
+  in `shared/` and nothing with another picture in it, and neither the prompt nor
+  another picture of the list can satisfy a rule meant for one. A one-off approval
+  is for the call as it was shown to you, arguments and all, and is spent by it.
 - **A mask goes with the first picture** where a caller gives one, as for one
   picture; the agent's tool still has none.
 - **The setting is read at each call.** A list is refused when the endpoint is no
