@@ -68,6 +68,9 @@ async function portal(page: Page, opts: { off?: string[]; refuse?: string; tools
 }
 
 const dialog = (page: Page) => page.getByRole('dialog');
+/** The Tools section of the New project dialog, which starts shut. */
+const toolsSection = (page: Page) => dialog(page).locator('details', { has: page.locator('summary', { hasText: 'Tools' }) });
+const openTools = (page: Page) => dialog(page).locator('summary', { hasText: 'Tools' }).click();
 
 test('a project has its own tool switches, saved as each is flipped', async ({ page }) => {
   const { puts } = await portal(page);
@@ -116,6 +119,7 @@ test('the tools are chosen while the project is made, and go with it', async ({ 
   const { made } = await portal(page);
   await page.getByRole('button', { name: 'New project' }).click();
   await dialog(page).getByRole('textbox', { name: 'Name' }).fill('fresh');
+  await openTools(page);
   await dialog(page).getByRole('button', { name: /pi-web-access/ }).click();
   const search = dialog(page).getByRole('checkbox', { name: 'web_search' });
   // It starts from the portal-wide default: web_fetch is off there.
@@ -139,6 +143,7 @@ test('a project that was made without its tools says so, and stays on the page',
   const { chats } = await portal(page, { toolsError: 'database is locked' });
   await page.getByRole('button', { name: 'New project' }).click();
   await dialog(page).getByRole('textbox', { name: 'Name' }).fill('fresh');
+  await openTools(page);
   await dialog(page).getByRole('button', { name: /pi-web-access/ }).click();
   await dialog(page).getByRole('checkbox', { name: 'web_search' }).uncheck();
   await dialog(page).getByRole('button', { name: 'Create and open' }).click();
@@ -146,4 +151,32 @@ test('a project that was made without its tools says so, and stays on the page',
   await expect(dialog(page)).toHaveCount(0);
   // Its chat is not opened over the message.
   expect(chats).toEqual([]);
+});
+
+test('the tools in the New project dialog are shut until asked for, and keep what was switched', async ({ page }) => {
+  await portal(page);
+  await page.getByRole('button', { name: 'New project' }).click();
+  // Shut, so the dialog stays short: nothing of the list is on show.
+  await expect(toolsSection(page)).toBeVisible();
+  await expect(toolsSection(page)).not.toHaveAttribute('open', '');
+  await expect(dialog(page).getByText('pi-web-access')).toBeHidden();
+
+  await openTools(page);
+  await expect(toolsSection(page)).toHaveAttribute('open', '');
+  await dialog(page).getByRole('button', { name: /pi-web-access/ }).click();
+  await dialog(page).getByRole('checkbox', { name: 'web_search' }).uncheck();
+
+  // Shut and opened again, the switch is where it was left.
+  await openTools(page);
+  await expect(dialog(page).getByText('pi-web-access')).toBeHidden();
+  await openTools(page);
+  await expect(dialog(page).getByRole('checkbox', { name: 'web_search' })).not.toBeChecked();
+});
+
+test('the hint above the tools has room above it', async ({ page }) => {
+  await portal(page);
+  await page.getByRole('button', { name: 'Tools for demo' }).click();
+  const hint = dialog(page).getByText('These are the tools earlier chats had.');
+  await expect(hint).toBeVisible();
+  expect(await hint.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('8px');
 });

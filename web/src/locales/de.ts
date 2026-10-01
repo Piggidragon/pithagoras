@@ -1020,7 +1020,6 @@ const de: Locale = {
     "Switches tools differently from the portal-wide default": "Schaltet Tools anders als der portalweite Standard",
     "Tools for this project's chats": "Tools für die Chats dieses Projekts",
     "Tools for {name}": "Tools für {name}",
-    "(optional — what chats in this project start with)": "(optional — womit Chats in diesem Projekt beginnen)",
     "\"{name}\" was created, but its tools could not be set: {error}": "„{name}“ wurde angelegt, aber seine Tools ließen sich nicht festlegen: {error}",
     "Tools · {name}": "Tools · {name}",
     "What chats in this project start with — a chat can still switch tools for itself": "Womit Chats in diesem Projekt beginnen — ein Chat kann Tools trotzdem für sich umschalten",

@@ -102,9 +102,9 @@ project says. The tools it never mentioned follow the project from then on. A ch
 was running is told at once and has it from its next message. A routine that runs in a
 project gets the project's tools like a chat does.
 
-The tools can be chosen as the project is made: **New project** has the same list under
-the instructions, starting from the portal-wide default, and what is switched there is
-stored with the project. Left alone, the project says nothing about tools. If the folder is
+The tools can be chosen as the project is made: **New project** has the same list in a
+**Tools** section under the instructions, shut until you open it and starting from the
+portal-wide default, and what is switched there is stored with the project. Left alone, the project says nothing about tools. If the folder is
 made and its tools cannot be stored, the page says so and stays where it is, rather than
 opening the chat over the message; **Tools** on the project's row is where to choose them
 again. Over the API, `POST /api/projects` takes the same `toolsOff` list as the tools

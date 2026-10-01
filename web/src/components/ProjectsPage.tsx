@@ -380,14 +380,18 @@ function NewProject({
           className={`${FIELD} mt-1 resize-y font-mono text-xs`}
         />
       </label>
-      <div className="mt-4">
-        <p className="text-xs text-fg-muted">
-          {t("Tools")} <span className="text-fg-faint">{t("(optional — what chats in this project start with)")}</span>
-        </p>
-        <div className="mt-1 overflow-hidden rounded-lg border border-line bg-raised/40">
+      {/* Shut, like the sections of the voice settings: most projects start with
+          the default, and sixty checkboxes would push the dialog off the screen.
+          Mounted all the same, so what was loaded and switched is kept. */}
+      <details className="mt-4 rounded-xl border border-line p-4">
+        <summary className="cursor-pointer text-sm font-medium">
+          {t("Tools")}
+          <span className="mt-1 block text-xs font-normal text-fg-muted">{t("What chats in this project start with — a chat can still switch tools for itself")}</span>
+        </summary>
+        <div className="mt-4">
           <ToolSwitches onDraft={setToolsOff} />
         </div>
-      </div>
+      </details>
     </Modal>
   );
 }

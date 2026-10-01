@@ -121,7 +121,7 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
           earlier chats registered, and what is switched here is this chat's
           from its start — the default is not touched. */}
       {!live && (
-        <p className="px-3 pb-1.5 text-[10px] text-fg-faint">
+        <p className="px-3 pb-1.5 pt-2 text-[10px] text-fg-faint">
           {forProject
             ? t("These are the tools earlier chats had. What you switch here is what every chat in this project starts with; the portal-wide defaults stay as they are.")
             : t("Not started yet — these are the tools earlier chats had. What you switch here holds for this chat from its first message; the defaults stay as they are.")}
