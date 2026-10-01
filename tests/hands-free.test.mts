@@ -945,3 +945,158 @@ test('one wait is told apart from the next, so that the clips of a wait can diff
   assert.ok(next && next !== fourth, 'the next turn is another wait');
   voice.stop();
 });
+
+/** Random numbers that come as told, then `rest`. */
+const draws = (t: TestContext, values: number[], rest = 0.5) => t.mock.method(Math, 'random', () => values.length ? values.shift()! : rest);
+
+test('a gap is drawn once: a change to the most or to the first-filler time leaves it where it was, and a longer time does not bring it earlier', async t => {
+  // A gap of 30 s at full randomness, drawn at 0.9: 53.2 s. A later draw would be a short one.
+  draws(t, [0.5, 0.9], 0.1);
+  const line = timeline(t, 300);
+  const pacing: FillerPacing = { first: 0, every: 30, randomness: 1, max: 8 };
+  const a = setup({ filler: line.filler, agentRunning: () => true, fillerPacing: pacing });
+  turn(a.voice); await tick();
+  await line.advance(10_000);
+  pacing.max = 9; pacing.first = 3; a.voice.pacingChanged();
+  await line.advance(40_000);
+  assert.deepEqual(line.starts(), [0]);
+  await line.advance(4000);
+  assert.deepEqual(line.starts(), [0, 53_500]);
+  a.voice.stop(); t.mock.restoreAll();
+  // 5 s at full randomness, drawn at 0.5: 5 s. Raised to 10 s at 3 s: the filler is due at the new time, counting what has passed.
+  draws(t, [0.5, 0.5], 0.1);
+  const slower = timeline(t, 300);
+  const slow: FillerPacing = { first: 0, every: 5, randomness: 1, max: 8 };
+  const b = setup({ filler: slower.filler, agentRunning: () => true, fillerPacing: slow });
+  turn(b.voice); await tick();
+  await slower.advance(3000);
+  slow.every = 10; b.voice.pacingChanged();
+  await slower.advance(7000);
+  assert.deepEqual(slower.starts(), [0]);
+  await slower.advance(500);
+  assert.deepEqual(slower.starts(), [0, 10_300]);
+  b.voice.stop();
+});
+
+test('the first filler after a recent one is decided and waited by one draw, not two', async t => {
+  // 1 to 9 s around 5; drawn at 0.9 it is 8.2 s, of which 3 s have gone since the last filler ended.
+  draws(t, [0.5, 0.9], 0.1);
+  const line = timeline(t, 300);
+  const { voice } = setup({ filler: line.filler, agentRunning: () => true, fillerPacing: { first: 0, every: 5, randomness: 1, max: 1 } });
+  turn(voice); await tick();
+  await line.advance(3300);
+  turn(voice); await tick();
+  await line.advance(5000);
+  assert.deepEqual(line.starts(), [0]);
+  await line.advance(400);
+  assert.deepEqual(line.starts(), [0, 8500]);
+  voice.stop();
+});
+
+test('a setting changed while a filler plays moves nothing and ends nothing: the wait goes on', async t => {
+  const line = timeline(t, 1000);
+  const pacing: FillerPacing = { first: 0, every: 1, randomness: 0, max: 8 };
+  const { voice } = setup({ filler: line.filler, agentRunning: () => true, fillerPacing: pacing });
+  turn(voice); await tick();
+  await line.advance(2500);
+  // The second filler (2000 to 3000) is playing, and the gap before it has fired: slowed to two seconds.
+  assert.deepEqual(line.starts(), [0, 2000]);
+  pacing.every = 2; voice.pacingChanged();
+  await line.advance(10_000);
+  assert.deepEqual(line.starts().slice(0, 4), [0, 2000, 5000, 8000]);
+  voice.stop();
+});
+
+test('speech that was no turn does not end a long wait: a noise, a press taken back or a page command, and the fillers go on after a gap', async t => {
+  const waits: [string, (voice: HandsFreeVoice) => void | Promise<void>, Partial<VoiceIO>][] = [
+    ['noise', voice => { voice.speechStart(); voice.speechEnd(new Float32Array(16000)); }, { transcribe: () => Promise.resolve('') }],
+    ['press taken back', voice => { voice.speechStart(); voice.speechCancel(); }, {}],
+    ['page command', voice => { voice.speechStart(); voice.speechEnd(new Float32Array(16000)); }, { transcribe: () => Promise.resolve('say that again'), command: text => text === 'say that again' }],
+  ];
+  for (const [name, speak, patch] of waits) {
+    const line = timeline(t, 300); let calls = 0;
+    const pacing: FillerPacing = { first: 0, every: 2, randomness: 0, max: 4 };
+    const { voice } = setup({ filler: line.filler, agentRunning: () => true, fillerPacing: pacing, ...patch, transcribe: (...args) => calls++ ? (patch.transcribe ?? (async () => 'hello'))(...args) : Promise.resolve('hello') });
+    turn(voice); await tick();
+    await line.advance(3000);
+    assert.deepEqual(line.starts(), [0, 2300], name);
+    // The sound at 3 s, and then the wait goes on: a gap after it, not at once.
+    speak(voice); await tick(); await tick();
+    await line.advance(1800);
+    assert.deepEqual(line.starts(), [0, 2300], name);
+    await line.advance(300);
+    assert.deepEqual(line.starts(), [0, 2300, 5000], name);
+    // The tries before it count: four at most over the whole wait.
+    await line.advance(60_000);
+    assert.equal(line.starts().length, 4, name);
+    voice.stop();
+  }
+});
+
+test('a wait is not resumed after speech where there is nothing to wait for, where the speech was a turn, or once the answer is audible', async t => {
+  // The agent has finished.
+  let running = true;
+  const a = timeline(t, 300);
+  let calls = 0;
+  const one = setup({ filler: a.filler, agentRunning: () => running, fillerPacing: { first: 0, every: 2, randomness: 0, max: 5 }, transcribe: () => calls++ ? Promise.resolve('') : Promise.resolve('hello') });
+  turn(one.voice); await tick();
+  await a.advance(1000);
+  running = false;
+  turn(one.voice); await tick(); await tick();
+  await a.advance(60_000);
+  assert.deepEqual(a.starts(), [0]);
+  one.voice.stop();
+  // A turn: the noise-free speech is sent, and the fillers are its own, not the old wait's.
+  const b = timeline(t, 300);
+  const two = setup({ filler: b.filler, agentRunning: () => true, fillerPacing: { first: 0, every: 2, randomness: 0, max: 3 } });
+  turn(two.voice); await tick();
+  await b.advance(3000);
+  turn(two.voice); await tick(); await tick();
+  assert.deepEqual(two.sent, ['hello', 'hello']);
+  await b.advance(60_000);
+  // The old wait had its two (0 and 2300), and the new turn's wait three of its own: three, not the one left of the old.
+  assert.equal(b.starts().length, 2 + 3);
+  two.voice.stop();
+  // The answer is audible: the wait is over, and speech after it brings nothing back.
+  const c = timeline(t, 300); calls = 0;
+  const three = setup({ filler: c.filler, agentRunning: () => true, fillerPacing: { first: 0, every: 2, randomness: 0, max: 5 }, speak: async () => {}, transcribe: () => calls++ ? Promise.resolve('') : Promise.resolve('hello') });
+  turn(three.voice); await tick();
+  await c.advance(500);
+  three.voice.observe([reply('a20')]); await tick(); await tick();
+  assert.deepEqual(three.spoken, []);
+  turn(three.voice); await tick(); await tick();
+  await c.advance(60_000);
+  assert.deepEqual(c.starts(), [0]);
+  three.voice.stop();
+});
+
+test('a filler that comes due while something else plays on the page, a repeat of the last reply, waits another gap', async t => {
+  const line = timeline(t, 300); let playing = false;
+  const { voice } = setup({ filler: line.filler, agentRunning: () => true, fillerPacing: { first: 0, every: 2, randomness: 0, max: 8 }, playing: () => playing });
+  turn(voice); await tick();
+  playing = true;
+  await line.advance(7000);
+  assert.deepEqual(line.starts(), [0]);
+  playing = false;
+  await line.advance(2000);
+  assert.deepEqual(line.starts().length, 2);
+  voice.stop();
+});
+
+test('speech that became a turn leaves nothing of the wait it cut short to be brought back by a later noise', async t => {
+  const line = timeline(t, 300); let running = true; let calls = 0;
+  const { voice, sent } = setup({ filler: line.filler, agentRunning: () => running, fillerPacing: { first: 0, every: 2, randomness: 0, max: 8 }, transcribe: () => calls++ < 2 ? Promise.resolve('hello') : Promise.resolve('') });
+  turn(voice); await tick();
+  await line.advance(1000);
+  turn(voice); await tick(); await tick();
+  assert.deepEqual(sent, ['hello', 'hello']);
+  // The agent finishes without a word, and the wait of the second turn is over; some other run then goes on, and a noise comes.
+  running = false;
+  await line.advance(10_000);
+  const before = line.starts().length;
+  running = true;
+  voice.speechStart(); voice.speechEnd(new Float32Array(16000)); await tick(); await tick();
+  await line.advance(60_000);
+  assert.equal(line.starts().length, before);
+  voice.stop();
+});

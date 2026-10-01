@@ -257,7 +257,10 @@ else. A change applies at once, also in the middle of a call and to a gap that i
 already running: the filler that was due is due by the new time, counting what has
 passed since the last one ended (so a gap shortened below what has passed brings it
 at once, and a lengthened one pushes it back), and a most that has been reached
-ends the wait. Values are kept as numbers within the limits above, in steps (half
+ends the wait. Where in its spread a gap falls is drawn once, when it starts: a
+change of the randomness or of the time moves the gap along with it, and a change of
+the most or of the first filler's time leaves it where it was, instead of rolling
+it again. Values are kept as numbers within the limits above, in steps (half
 seconds, 5 %, whole fillers): what was typed in or changed in the browser's
 storage that is not a number is the default, and one out of range is the nearest
 limit. The shortest gap is one second, so a wide randomness cannot put two fillers
@@ -283,14 +286,19 @@ The timeline stops at once when:
   wait is between two. Not before: while the first sentence of the answer is still
   being made into speech, which on a busy speech runtime takes seconds, the wait
   is filled all the same;
-- you speak, or the conversation is being compacted (which has its own spoken
-  notice);
+- you say something for the agent, or the conversation is being compacted (which
+  has its own spoken notice). Speech that turns out to be none, a noise, a press
+  of the talk key taken back, or a request to the page ("say that again"), does not
+  end the wait: it goes on one gap after that sound, not at once, and the fillers
+  already played still count towards the most;
 - the agent has finished with no answer on its way (an answer that is still
   being made into speech is one, also after the run has ended), voice mode ends,
   or fillers are switched off.
 
 If no clip is ready at a moment when one is due, it is tried again after the next
-gap, and counts towards the most. If the last sound before your next turn was a
+gap, and counts towards the most. When the page is playing something else at that
+moment, such as the repeat of the last reply, a filler does not come on top of it
+either: it is due one gap later, and that does not count. If the last sound before your next turn was a
 filler (no answer or notice since), its first filler does not come on top of it:
 it waits what is left of one gap since that filler ended, or the time to the first
 filler if that is longer. A turn more than a gap later, such as one that interrupts

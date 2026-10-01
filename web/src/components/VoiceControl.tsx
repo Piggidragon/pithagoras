@@ -577,6 +577,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
         // Read at the moment it matters: a setting changed during the call applies to the next filler.
         get fillerPacing() { return fillerTiming.current; },
+        playing: () => replay.current !== null,
         filler: (signal, wait) => {
           const samples = fillersOn.current ? fillerClips.current?.next(wait) : undefined;
           if (!samples) return undefined;
