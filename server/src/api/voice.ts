@@ -432,6 +432,8 @@ export function voiceRouter(): Router {
   router.post('/sessions/:id/voice/connection', async (req,res)=>{
     const {client,active}=req.body??{};
     if(typeof client!=='string'||client.length>100||!client||typeof active!=='boolean')return res.status(400).json({error:'A client ID and active flag are required'});
+    // Voice mode ends: the speech model may be unloaded now, and no clip is to load it back.
+    if(!active)fillers.stop();
     if(!managedVoice())return res.json({managed:false});
     try {
       const key=String(req.params.id)+':'+client;

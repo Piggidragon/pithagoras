@@ -477,3 +477,22 @@ test('fillers are switched off in the voice settings or with Shift+F, and are no
     await close();
   }
 });
+
+test('switching fillers off stops asking the portal for them, which is what has it stop making them', async ({ page }) => {
+  let listed = 0;
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  // The portal is still making them: the page looks again every few seconds.
+  await page.route('**/voice/fillers', route => { listed++; return route.fulfill({ json: { key: 'a'.repeat(40), clips: [], rendering: true } }); });
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+  await expect.poll(() => listed, { timeout: 8000 }).toBeGreaterThanOrEqual(2);
+  await page.getByRole('button', { name: 'Voice settings' }).click();
+  await page.getByRole('dialog', { name: 'Voice settings' }).getByRole('group', { name: 'Fillers' }).getByRole('button', { name: 'Off' }).click();
+  await page.waitForTimeout(200);
+  const asked = listed;
+  await page.waitForTimeout(3800);
+  expect(listed).toBe(asked);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+});

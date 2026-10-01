@@ -186,7 +186,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     if (!voice.current || !statusSpeech.current || sequential.current || !fillersOn.current) return;
     (fillerClips.current ??= new FillerClips(fillerSource(sessionId))).load();
   };
-  const chooseFillers = (on: boolean) => { local.set('voiceFillers', on ? 'on' : 'off'); setFillers(on); fillersOn.current = on; if (on) loadFillers(); };
+  // Off is not asking any more: the portal leaves off making them once nobody asks.
+  const chooseFillers = (on: boolean) => { local.set('voiceFillers', on ? 'on' : 'off'); setFillers(on); fillersOn.current = on; if (on) loadFillers(); else fillerClips.current?.stop(); };
 
   const stop = () => {
     profiler.current?.close('stopped');

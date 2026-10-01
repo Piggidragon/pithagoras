@@ -40,6 +40,14 @@ const KEY = /^[0-9a-f]{40}$/;
 const TRIES = 3;
 /** After live speech, how long before a clip is started: a moment between two phrases of an answer is not the answer being over. */
 const QUIET_MS = 8000;
+/**
+ * How long a page may go without asking before nobody is taken to be waiting for
+ * the clips: the page asks every three seconds while they are being made, and a
+ * page that has left, or has switched fillers off, does not. It is what keeps the
+ * speech runtime from being used, and a model loaded back onto the GPU, for clips
+ * that nobody wants.
+ */
+const ASKED_MS = 15_000;
 
 /**
  * The fillers of the voice that is set up, made once and kept on disk. They are
@@ -51,7 +59,8 @@ const QUIET_MS = 8000;
  * given up on and made again afterwards.
  *
  * A voice is a `key`: whatever decides how it sounds. Only one voice is made at a
- * time: a new key stops the one being made, and the clips of the others are dropped
+ * time, and only while a page asks for it: it ends when nobody has asked for a while,
+ * and the next question starts it again. A new key stops the one being made, and the clips of the others are dropped
  * once the first clip of the new one is made, so changing the voice never leaves a
  * pile behind, nor loses what a voice changed back to had already.
  */
@@ -66,6 +75,7 @@ export class FillerStore {
   private gaveUp = new Set<string>();
   private live = 0;
   private endedAt = -Infinity;
+  private askedAt = -Infinity;
   private wake = new Set<() => void>();
   constructor(
     private root: () => string,
@@ -73,6 +83,8 @@ export class FillerStore {
     private clock: () => number = Date.now,
     /** How long after live speech the clips wait. */
     public quiet = QUIET_MS,
+    /** How long without a question before nobody is taken to be waiting. */
+    public patience = ASKED_MS,
   ) {}
   private dir(key: string) { return path.join(this.root(), key); }
 
@@ -111,6 +123,7 @@ export class FillerStore {
    */
   status(key: string, render: Render, steady = true): Promise<{ clips: number[]; rendering: boolean }> {
     if (!KEY.test(key)) return Promise.reject(new Error("Not a voice key"));
+    this.askedAt = Date.now();
     // One question at a time and in the order asked, so that the voice asked about last is the one that is made.
     const answer = this.asking.then(() => this.look(key, render, steady));
     this.asking = answer.catch(() => {});
@@ -133,6 +146,9 @@ export class FillerStore {
     return { clips, rendering };
   }
 
+  /** Nobody is waiting for the clips any more, for instance as voice mode ended: the one being made is dropped, and the next question makes the rest. */
+  stop() { this.current?.run.abort(); }
+
   /** What is on disk for this voice: the clips there are, and the ones still to make. */
   private async kept(key: string) {
     const files = await readdir(this.dir(key)).catch(() => [] as string[]);
@@ -151,7 +167,8 @@ export class FillerStore {
   private async render(text: string, render: Render, run: AbortSignal): Promise<Buffer | undefined> {
     while (true) {
       await this.idle(run);
-      if (run.aborted) return undefined;
+      // Not started for nobody: the page that asked has gone, and a request now would use the runtime, and load its model, for nothing.
+      if (run.aborted || Date.now() - this.askedAt > this.patience) return undefined;
       const attempt = this.attempt = new AbortController();
       try {
         const pcm = await render(text, AbortSignal.any([attempt.signal, run, AbortSignal.timeout(60_000)]));

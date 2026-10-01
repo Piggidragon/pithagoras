@@ -23,7 +23,8 @@ test('clips are downloaded once, and more are fetched while the portal is still 
   const clips = new FillerClips(source, Math.random, 5);
   clips.load(); await tick();
   assert.equal(clips.ready, 1);
-  await new Promise(resolve => setTimeout(resolve, 30)); await tick();
+  // Looked again after a few milliseconds; a loaded machine may take longer.
+  for (let i = 0; i < 100 && clips.ready < 3; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(clips.ready, 3);
   assert.deepEqual(fetched, ['a/0', 'a/1', 'a/2']);
   clips.stop();

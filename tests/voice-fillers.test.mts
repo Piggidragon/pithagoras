@@ -111,6 +111,50 @@ test('a new voice stops the one being made: never two at once, and nothing of th
   rmSync(root, { recursive: true, force: true });
 });
 
+test('clips are only made while a page asks: once nobody does, no request goes out, and the next question makes the rest', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'fillers-'));
+  const made: string[] = [];
+  const render = async (text: string) => { made.push(text); await tick(50); return seconds(1); };
+  const store = new FillerStore(() => root, undefined, undefined, 0, 120);
+  await store.status(KEY, render);
+  // The page does not ask again, as when voice mode ended or fillers were switched off.
+  await tick(500);
+  const stopped = made.length;
+  assert.ok(stopped > 0 && stopped < FILLERS.length, `${stopped} clips`);
+  await tick(250);
+  assert.equal(made.length, stopped);
+  // Asked again, it makes what is missing and nothing twice.
+  let status = await store.status(KEY, render);
+  assert.equal(status.clips.length, stopped); assert.equal(status.rendering, true);
+  while ((status = await store.status(KEY, render)).rendering) await tick(10);
+  assert.deepEqual(made, FILLERS.map(f => f.text));
+  assert.equal(status.clips.length, FILLERS.length);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('stop drops the clip being made at the runtime, and no more are made until the next question', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'fillers-'));
+  const made: string[] = [], cut: string[] = [], warned: string[] = [];
+  const render = (text: string, signal: AbortSignal) => new Promise<Buffer>((resolve, reject) => {
+    made.push(text);
+    const timer = setTimeout(() => resolve(seconds(1)), 80);
+    signal.addEventListener('abort', () => { clearTimeout(timer); cut.push(text); reject(signal.reason); });
+  });
+  const store = new FillerStore(() => root, message => warned.push(message));
+  await store.status(KEY, render);
+  await tick(30);
+  store.stop();
+  await tick(250);
+  assert.deepEqual(made, [FILLERS[0].text]); assert.deepEqual(cut, [FILLERS[0].text]);
+  assert.deepEqual(warned, []);
+  // Not asking is not a failure either: the next question carries on.
+  let status = await store.status(KEY, render);
+  assert.equal(status.rendering, true);
+  while ((status = await store.status(KEY, render)).rendering) await tick(10);
+  assert.equal(status.clips.length, FILLERS.length);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test('a voice changed and changed back loses none of the clips it was told were ready', async () => {
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
   const made: string[] = [];
