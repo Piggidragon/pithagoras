@@ -125,7 +125,8 @@ export const vramNeeded = (c: VoiceChoice) => (c.tts === "none" ? 0 : TTS_ENGINE
 /** Memory of the host the choice holds while it is in use: what recognition takes on the CPU. */
 export const ramNeeded = (c: VoiceChoice) => (asrDevice(c) === "cpu" ? asrOption(c)?.ramMiB ?? 0 : 0);
 
-export interface Gpu { index: number; name: string; totalMiB: number | null; freeMiB: number | null }
+/** `uuid` names the card for good: the index is the driver's order, which a reboot or a card added beside it changes. A reading without one has the index only. */
+export interface Gpu { index: number; uuid?: string; name: string; totalMiB: number | null; freeMiB: number | null }
 /** What there is to run on: memory of the host, and how many CPU threads it has. */
 export interface Host { totalMiB: number | null; freeMiB: number | null; threads: number }
 /** `fits`: there is room now. `tight`: the card is big enough, but other programs hold part of it now. */

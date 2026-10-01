@@ -34,6 +34,14 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const [picked, setPicked] = useState<VoiceChoice | null>(null);
   // Once the container is built for what was picked, the pick is what is installed.
   useEffect(() => { if (picked && install?.choice && sameChoice(picked, install.choice)) setPicked(null); }, [install?.choice, picked]);
+  // The card is chosen on its own and at once: a running service moves to it, any other is on it from its next start.
+  const chooseGpu = async (gpu: string) => {
+    setActionBusy(true);
+    // Saved even where the restart is refused, so what the page shows is read again either way.
+    try { await api.setVoiceGpu(gpu); } catch (e) { onError((e as Error).message); }
+    try { setHardware(await api.voiceHardware()); setInstall(await api.voiceInstallStatus()); } catch { /* the next poll shows it */ }
+    setActionBusy(false);
+  };
   const manage=async(action:'install'|'start'|'stop',choice?:VoiceChoice)=>{setActionBusy(true);try{await api.voiceAction(action,choice);setInstall(await api.voiceInstallStatus());}catch(e){onError((e as Error).message);}finally{setActionBusy(false);}};
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -105,7 +113,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
       <summary className="cursor-pointer text-sm font-medium">{t("Voice service")} <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-normal text-accent">{install?.state === 'absent' ? t("Not installed") : install?.state === 'running' ? t("Ready") : install?.state ? labelOf(INSTALL_STATE, install.state) : t("Checking…")}</span><span className="mt-1 block text-xs font-normal text-fg-muted">{t("Installation, GPU memory and service controls")}</span></summary>
     <div className="mt-4 space-y-3">
       <p className="text-xs text-fg-faint">{t("Install once on your Docker host. Setup builds and downloads the engines you choose: speech synthesis needs an NVIDIA GPU, speech recognition does not. Allow 30 GB of disk space during setup.")}</p>
-      {install?.available && <VoiceEngines installed={install.choice} fresh={install.state==='absent'} busy={actionBusy||install.busy} hardware={hardware} picked={picked} onPick={setPicked} />}
+      {install?.available && <VoiceEngines installed={install.choice} fresh={install.state==='absent'} busy={actionBusy||install.busy} hardware={hardware} picked={picked} onPick={setPicked} onGpu={chooseGpu} />}
       <div className="flex gap-2 flex-wrap">
         {install?.available && rebuild && <button disabled={actionBusy || install.busy} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage('install',picked)}>{t("Rebuild with these engines")}</button>}
         {install?.available && !rebuild && <button disabled={actionBusy || install.busy || ['starting','running'].includes(install.state)} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage(install.state==='absent'?'install':'start',install.state==='absent'?picked??undefined:undefined)}>{install.state==='absent'?t("Install voice"):install.state==='failed'?t("Retry setup"):t("Start voice")}</button>}

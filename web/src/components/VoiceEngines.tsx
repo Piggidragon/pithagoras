@@ -16,9 +16,11 @@ const tone = (level: Fit) => level === "fits" ? "text-fg-faint" : level === "tig
  *
  * Without a GPU only recognition works, and on the CPU: the speech engine is off, and says why.
  */
-export function VoiceEngines({ installed, fresh, busy, hardware, picked: pickedNow, onPick }: {
+export function VoiceEngines({ installed, fresh, busy, hardware, picked: pickedNow, onPick, onGpu }: {
   installed: VoiceChoice | undefined; fresh: boolean; busy: boolean; hardware: VoiceHardware | null;
   picked: VoiceChoice | null; onPick: (choice: VoiceChoice | null) => void;
+  /** The GPU chosen by UUID, or "" to leave it to the portal. Not part of the engines picked: it takes effect at once. */
+  onGpu: (uuid: string) => void;
 }) {
   const gpu = hardware?.gpus.find((g) => g.index === hardware.selected);
   const cpuOnly = hardware?.cpuOnly === true;
@@ -36,6 +38,8 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked: pickedN
   const fit = fitOn(shown, gpu, hardware?.reserveMiB ?? 0);
   const ramFit = fitRam(shown, host);
   const suggestion = hardware?.suggestion;
+  // Only a card with a UUID can be chosen: that is what names it for good.
+  const choosable = hardware?.gpus.filter((g) => g.uuid) ?? [];
   const device = asrDevice(shown);
   const deviceChoices = asrDevices(shown);
   const pick = (patch: Partial<VoiceChoice>) => {
@@ -78,6 +82,13 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked: pickedN
           { value: "cpu", label: t("CPU"), hint: shown.asr === "whisper" ? t("Whisper always runs on the CPU") : t("Saves GPU memory, uses CPU threads") },
           { value: "gpu", label: t("GPU"), hint: t("Faster, uses GPU memory"), disabled: !deviceChoices.includes("gpu") },
         ]} /></div>
+    {choosable.length > 1 && usesGpu(shown) && <div className="block text-xs text-fg-muted">{t("GPU")}
+      <Select aria-label={t("GPU")} size="sm" className="mt-1.5 w-full" disabled={busy} value={hardware!.chosen} onChange={onGpu}
+        options={[{ value: "", label: t("Automatic"), hint: t("VOICE_GPU if set, else the most free memory when installing or rebuilding; a restart keeps the card") },
+          ...choosable.map((g) => ({ value: g.uuid!, label: `GPU ${g.index} · ${g.name}`,
+            hint: g.totalMiB === null || g.freeMiB === null ? undefined : t("{free} of {total} GiB free", { free: gib(g.freeMiB), total: gib(g.totalMiB) }) }))]} />
+      {installed && <p className="mt-1.5 text-fg-faint">{t("Changing the GPU restarts voice and keeps your models.")}</p>}
+    </div>}
     {hardware && (gpu
       ? <p className="text-xs text-fg-faint">{gpu.totalMiB === null ? t("GPU detected: {name}", { name: gpu.name }) : t("GPU detected: {name}, {total} GiB, {free} GiB free", { name: gpu.name, total: gib(gpu.totalMiB), free: gib(gpu.freeMiB ?? 0) })}</p>
       : !cpuOnly && fresh && <p className="text-xs text-fg-faint">{t("GPU not checked yet. It is checked while installing, and you are told if your choice does not fit.")}</p>)}

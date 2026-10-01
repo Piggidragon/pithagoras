@@ -184,7 +184,7 @@ Everything here is optional except the password.
 | `PI_IMAGE` | `pithagoras-runner:latest` | Container executor's image. |
 | `TASK_MEMORY_MB` / `TASK_CPUS` / `TASK_PIDS_LIMIT` | `2048` / `2` / `512` | Container executor limits. |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the add-ons and container executor talk to. |
-| `VOICE_GPU` / `VOICE_VRAM_RESERVE_MIB` | — | Managed voice: the GPU it uses, and memory in MiB to keep free on it. Both Compose files pass them from `.env`; see [Docker add-ons](/guide/add-ons#engines-and-gpu-memory). |
+| `VOICE_GPU` / `VOICE_VRAM_RESERVE_MIB` | — | Managed voice: the GPU it uses where none is chosen on the voice page, and memory in MiB to keep free on it. Both Compose files pass them from `.env`; see [Docker add-ons](/guide/add-ons#engines-and-gpu-memory). |
 | `NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the package catalogue searches. |
 | `CHANNELS_DIR` | `/data/channels` | Where third-party channel packages install. |
 | `AGENT_HOME` | `/data/agent-home` | The agent session's working directory. |

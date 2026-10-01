@@ -3,7 +3,7 @@ import os from "node:os";
 import { LEAN_CHOICE, asrDevice, choiceLabel, cpuSlow, fitOn, fitRam, pickGpu, ramNeeded, sameChoice, suggestChoice, suggestCpuChoice, usesGpu, vramNeeded, type Gpu, type Host, type VoiceChoice } from "./voice-engines.js";
 
 /** The query every probe runs. Not `compute_cap`: older drivers refuse the whole query over it. */
-export const SMI_ARGS = ["--query-gpu=index,name,memory.total,memory.free", "--format=csv,noheader,nounits"];
+export const SMI_ARGS = ["--query-gpu=index,uuid,name,memory.total,memory.free", "--format=csv,noheader,nounits"];
 
 /** What nvidia-smi printed for SMI_ARGS, one GPU a line. A line that does not fit the shape is skipped. */
 export function parseGpus(output: string): Gpu[] {
@@ -13,11 +13,35 @@ export function parseGpus(output: string): Gpu[] {
     if (fields.length < 4) continue;
     const index = Number(fields[0]);
     if (!/^\d+$/.test(fields[0])) continue;
+    // A reading without the UUID, such as a wrapper that prints the older columns, still lists the card.
+    const uuid = fields[1].startsWith("GPU-") ? fields[1] : undefined;
     // A name with a comma in it keeps them: the memory figures are the last two fields.
     const memory = (value: string) => (/^\d+$/.test(value) ? Number(value) : null);
-    gpus.push({ index, name: fields.slice(1, -2).join(", "), totalMiB: memory(fields.at(-2)!), freeMiB: memory(fields.at(-1)!) });
+    gpus.push({ index, ...(uuid ? { uuid } : {}), name: fields.slice(uuid ? 2 : 1, -2).join(", "), totalMiB: memory(fields.at(-2)!), freeMiB: memory(fields.at(-1)!) });
   }
   return gpus;
+}
+
+/** A card as a container is told of it: the UUID where it is known, else the index. A GPU as read is one; so is a card only named, where nothing could be read. */
+export type Card = { index?: number; uuid?: string };
+/** What `DeviceIDs` of a container names the card by: the UUID, which names the same card after a reboot, else its index. */
+export const deviceId = (card: Card) => card.uuid ?? String(card.index);
+/** The card a container's `DeviceIDs` entry names. Docker takes either form; one made before UUIDs were used has an index. */
+export const cardOf = (id: string): Card => /^\d+$/.test(id) ? { index: Number(id) } : { uuid: id };
+/**
+ * Is this card the one a container was given? Compared by whichever of UUID and index both have, as a container made before
+ * UUIDs were used names its card by index. One made without naming a card asked Docker for any one GPU, which is the first.
+ */
+export const holds = (held: Card | undefined, card: Card) => !held ? card.index === 0 : (held.uuid !== undefined && held.uuid === card.uuid) || (held.index !== undefined && held.index === card.index);
+
+/**
+ * The card that was asked for, if one was: the one chosen on the page, by UUID, else the one `VOICE_GPU` names, by index.
+ * Where the cards could be read, one that is not there was not asked for, so the next is tried and then the automatic pick
+ * stays. Where they could not, it is taken as it is, and Docker has the last word.
+ */
+export function askedCard(gpus: readonly Gpu[], chosen: string, index: number | undefined): Card | undefined {
+  if (!gpus.length) return chosen ? { uuid: chosen } : index === undefined ? undefined : { index };
+  return gpus.find((g) => chosen && g.uuid === chosen) ?? gpus.find((g) => index !== undefined && g.index === index);
 }
 
 /** A way to read what nvidia-smi says. The portal may sit in a container without the tool, so there is more than one. */
