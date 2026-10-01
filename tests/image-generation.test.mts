@@ -470,27 +470,35 @@ test("the API holds the settings, never gives the key back, and reloads chats on
 });
 
 test("the tool menus do not offer generate_image while the add-on is off, though it is remembered for when it is on", async () => {
-  const { rememberTools, shownTools } = await import("../server/src/db.ts");
-  // As a chat that had the tool reports it: no package of the user's brings it.
+  const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
+  // As a chat that had the tool reports it: no package of the user's brings it, and pi names its extension <inline:…>.
   rememberTools([
-    { name: "generate_image", source: "image-generation", package: null },
-    { name: "show_image", source: "pictures", package: null },
+    remembered({ name: "generate_image", source: "image-generation", inline: true }),
+    remembered({ name: "show_image", source: "pictures", inline: true }),
   ]);
-  const names = () => shownTools().map((t) => t.name);
+  const names = () => shownTools().map((t) => t.name).filter((n) => /image/.test(n));
   gen.saveImageGeneration({ enabled: false, baseUrl: "", apiKey: "" });
-  assert.deepEqual(names().filter((n) => /image/.test(n)), ["show_image"]);
+  assert.deepEqual(names(), ["show_image"]);
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1" });
-  assert.deepEqual(names().filter((n) => /image/.test(n)), ["show_image"], "an address alone does not make the tool");
+  assert.deepEqual(names(), ["show_image"], "an address alone does not make the tool");
   gen.saveImageGeneration({ enabled: true });
-  assert.deepEqual(names().filter((n) => /image/.test(n)).sort(), ["generate_image", "show_image"]);
+  assert.deepEqual(names().sort(), ["generate_image", "show_image"]);
   gen.saveImageGeneration({ enabled: false });
-  assert.deepEqual(names().filter((n) => /image/.test(n)), ["show_image"]);
+  assert.deepEqual(names(), ["show_image"]);
+  assert.equal(knownTools().find((t) => t.name === "generate_image")?.inline, true, "remembered for when it is on");
+  assert.ok(!("inline" in shownTools()[0]), "the page is not told how it is kept");
 
-  // An extension's tool of the same name is not the portal's: it is loaded, so it is offered, whatever the add-on says.
-  rememberTools([{ name: "generate_image", source: "image-package", package: "npm:image-package" }]);
-  assert.deepEqual(names().filter((n) => /image/.test(n)).sort(), ["generate_image", "show_image"]);
-  rememberTools([{ name: "generate_image", source: "image-generation", package: null }]);
-  assert.deepEqual(names().filter((n) => /image/.test(n)), ["show_image"], "the portal's own again");
+  // An extension's tool of the same name is loaded whatever the add-on says, so it is offered — also from a
+  // file or a folder called image-generation, which has the same label the portal's extension has.
+  for (const source of ["image-package", "image-generation"]) {
+    rememberTools([remembered({ name: "generate_image", source })]);
+    assert.deepEqual(names().sort(), ["generate_image", "show_image"], source);
+    rememberTools([remembered({ name: "generate_image", source: "image-generation", package: "npm:image-package" })]);
+    assert.deepEqual(names().sort(), ["generate_image", "show_image"], `${source}, from a package`);
+  }
+  // The portal's own again, as the next chat that has it reports it.
+  rememberTools([remembered({ name: "generate_image", source: "image-generation", inline: true })]);
+  assert.deepEqual(names(), ["show_image"]);
 });
 
 test("an extension's tool of the same name is the one pi keeps, so the portal's is not counted as there", () => {

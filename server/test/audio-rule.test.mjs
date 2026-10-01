@@ -585,3 +585,50 @@ export default function (pi: any) {
     saveImageGeneration({ enabled: false });
   }
 });
+
+test("image generation: only the portal's own generate_image is told from an extension's, whatever the extension is called", async () => {
+  const { saveImageGeneration } = await import("../dist/image-generation.js");
+  const { remembered, rememberTools, shownTools } = await import("../dist/db.js");
+  const folder = path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "image-generation");
+  const listed = async (client) => (await client.getTools()).find((t) => t.name === "generate_image");
+  const menu = () => shownTools().some((t) => t.name === "generate_image");
+  saveImageGeneration({ enabled: false, baseUrl: "", apiKey: "" });
+
+  // A user's own extension in a folder named as the portal's is, with a tool of the same name, and the add-on never touched.
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(path.join(folder, "index.ts"), `
+export default function (pi: any) {
+  pi.registerTool({ name: "generate_image", label: "generate image", description: "MY OWN generate_image", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "ok" }] }) });
+}
+`);
+  try {
+    const theirs = await open(undefined, { sessionId: "image-generation-own-extension" });
+    try {
+      const tool = await listed(theirs);
+      assert.equal(tool.source, "image-generation", "the label is the same as the portal's tool has");
+      assert.equal(tool.inline, undefined);
+      rememberTools((await theirs.getTools()).map(remembered));
+      assert.equal(menu(), true, "their tool stays in the menus while the add-on is off");
+    } finally {
+      theirs.dispose();
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+
+  // The portal's own, as a chat with the add-on on reports it: marked, and gone from the menus once it is off.
+  saveImageGeneration({ baseUrl: "http://127.0.0.1:9/v1", enabled: true });
+  const ours = await open(undefined, { sessionId: "image-generation-portal-tool" });
+  try {
+    const tool = await listed(ours);
+    assert.equal(tool.source, "image-generation");
+    assert.equal(tool.inline, true);
+    rememberTools((await ours.getTools()).map(remembered));
+    assert.equal(menu(), true);
+    saveImageGeneration({ enabled: false });
+    assert.equal(menu(), false);
+  } finally {
+    ours.dispose();
+    saveImageGeneration({ enabled: false });
+  }
+});

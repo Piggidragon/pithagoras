@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
-import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, imageGenerationReady } from "./image-generation.js";
+import { GENERATE_IMAGE_TOOL, imageGenerationReady } from "./image-generation.js";
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
@@ -1811,7 +1811,18 @@ export interface KnownTool {
    * entry remembered before this was recorded.
    */
   package?: string | null;
+  /** Registered by one of the portal's own inline extensions, which nothing of anyone's can be mistaken for. */
+  inline?: true;
 }
+
+/** A tool a session reported, as it is remembered. */
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true }): KnownTool => ({
+  name: t.name,
+  source: t.source,
+  description: t.description,
+  package: t.package ?? null,
+  ...(t.inline ? { inline: true as const } : {}),
+});
 
 /**
  * What each package is called here, where somebody has said.
@@ -1865,6 +1876,7 @@ export function knownTools(): KnownTool[] {
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
         ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
+        ...(t.inline === true ? { inline: true as const } : {}),
       }));
   } catch {
     return [];
@@ -1879,16 +1891,18 @@ export function knownTools(): KnownTool[] {
  * For a chat, `folder` is where it runs, whose project may bring packages of
  * its own.
  */
-export function shownTools(folder?: string): Omit<KnownTool, "package">[] {
+export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline">[] {
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
   // The portal's own tools belong to no package, so the packages cannot say
   // that one is not offered: image generation says so itself, while it is off.
-  // Only its own tool: an extension's of the same name is loaded whatever it says.
+  // Only its own tool, which is known by being inline, as no label can say: an
+  // extension of the same name is loaded whatever the add-on says, and a file
+  // called image-generation.ts has the label the portal's factory has.
   const images = imageGenerationReady();
   return knownTools()
     .filter(toolAvailability(readPiSettings().packages, project))
-    .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.source === GENERATE_IMAGE_SOURCE))
-    .map(({ package: _package, ...tool }) => tool);
+    .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
+    .map(({ package: _package, inline: _inline, ...tool }) => tool);
 }
 
 /** The keys of the packages pi's settings list, or undefined when they cannot be read. */
@@ -1976,6 +1990,7 @@ export function rememberTools(reported: KnownTool[]): void {
       source: tool.source,
       ...(description ? { description } : {}),
       ...(pkg !== undefined ? { package: pkg } : {}),
+      ...(tool.inline ? { inline: true as const } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));

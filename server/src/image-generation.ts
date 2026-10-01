@@ -22,7 +22,10 @@ const KEY = "image_generation";
 
 /** The agent's tool: it exists only while the add-on is ready (see imageGenerationReady). */
 export const GENERATE_IMAGE_TOOL = "generate_image";
-/** What pi reports as the source of that tool: the name of the portal's inline extension. Another extension's tool of the same name has its own. */
+/**
+ * The name of the portal's inline extension for it, which pi lists as `<inline:image-generation>`.
+ * Also the label the tool is shown under, which a file of that name has too: only the path says whose it is.
+ */
 export const GENERATE_IMAGE_SOURCE = "image-generation";
 
 export interface ImageGenerationConfig {
