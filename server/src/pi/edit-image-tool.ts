@@ -10,7 +10,7 @@ import {
   imageEditingTarget,
   imageGenerationConfig,
 } from "../image-generation.js";
-import { baseDir, readPicture } from "../workspace-files.js";
+import { baseDir, fitBytes, readPicture } from "../workspace-files.js";
 import { saveGenerated, takenByAnother } from "./generate-image-tool.js";
 import { pictureIn } from "./show-image-tool.js";
 
@@ -32,6 +32,9 @@ import { pictureIn } from "./show-image-tool.js";
 export const EDIT_IMAGE_VOICE_LINE =
   "To change a picture in the chat folder, call edit_image: it saves the result as a new picture and shows it, so do not call show_image on it afterwards.";
 
+/** How much of the original's name a result keeps. */
+const MAX_STEM_BYTES = 200;
+
 /**
  * What a result is called: the original's name with "-edited" before the
  * extension, so that the two sort together. An edit of an edit is not
@@ -40,8 +43,8 @@ export const EDIT_IMAGE_VOICE_LINE =
  */
 export function editedName(original: string, ext: string): string {
   const stem = path.basename(original, path.extname(original)).replace(/-edited(?: \(\d+\))?$/, "");
-  // Room is left for the rest of the name, and for a number, within the 255 bytes a name may have.
-  return `${Array.from(stem || "image").slice(0, 80).join("")}-edited.${ext}`;
+  // Cut by bytes, not by letters (one can be four): what is left of the 255 a name may have is room for "-edited", the extension and a number.
+  return `${fitBytes(stem || "image", MAX_STEM_BYTES)}-edited.${ext}`;
 }
 
 /**

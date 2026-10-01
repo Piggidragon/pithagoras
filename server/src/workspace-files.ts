@@ -539,7 +539,7 @@ export function makeFolder(base: string, dirRel: unknown, name: unknown): string
 }
 
 /** The start of a name that fits in `max` bytes, cut between letters, not inside one. */
-function fitBytes(name: string, max: number): string {
+export function fitBytes(name: string, max: number): string {
   let start = "";
   for (const ch of name) {
     if (Buffer.byteLength(start + ch) > max) break;

@@ -920,6 +920,33 @@ test("what an edit is called: the original's name, with the mark once, within wh
   assert.equal(editedName(".hidden.png", "png"), ".hidden-edited.png");
   assert.ok(Buffer.byteLength(editedName(`${"x".repeat(300)}.png`, "png")) <= 255 - 10);
   assert.ok(Buffer.byteLength(editedName(`${"é".repeat(300)}.png`, "png")) <= 255 - 10, "by bytes, not by letters");
+  // Four bytes a letter: a name of 62 of them (248 bytes) is a valid name, and the result's must be one too, with room for a number.
+  const emoji = editedName(`${"😀".repeat(62)}.png`, "webp");
+  assert.ok(Buffer.byteLength(emoji) <= 255 - 10, `${Buffer.byteLength(emoji)} bytes`);
+  assert.ok(emoji.endsWith("-edited.webp") && !emoji.includes("\uFFFD"), "cut between letters, not inside one");
+});
+
+test("an original with a long name of four-byte letters is edited as any other, and a failed save is not what finds out", async () => {
+  const name = `${"😀".repeat(62)}.png`;
+  assert.equal(Buffer.byteLength(name), 252, "a valid name");
+  const folder = chatWith({ [name]: PNG });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(WEBP) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true });
+    const { call } = loadEdit(folder);
+    const first = await call({ path: name, prompt: "p" });
+    const second = await call({ path: name, prompt: "p" });
+    assert.notEqual(first.details.path, second.details.path);
+    for (const result of [first, second]) {
+      assert.ok(existsSync(path.join(folder, result.details.path)));
+      assert.ok(Buffer.byteLength(path.basename(result.details.path)) <= 255);
+    }
+    assert.equal(seen.length, 2);
+  } finally {
+    server.close();
+    reset();
+  }
 });
 
 test("the tool reads only what is in the chat's folder, and only a picture: nothing is sent for anything else", async () => {
