@@ -31,6 +31,10 @@ test('a call says what the preview needs of it: the shape, the original of an ed
   assert.deepEqual(pictureCall('edit_image', { path: 'photos/dog.png', prompt: 'Make it snow', size: '1024x1536' }, '/work'), { edit: true, title: 'Make it snow', original: 'photos/dog.png' });
   assert.equal(pictureCall('edit_image', { path: '/work/photos/dog.png', prompt: 'x' }, '/work').original, 'photos/dog.png');
   assert.equal(pictureCall('edit_image', { path: '/elsewhere/dog.png', prompt: 'x' }, '/work').original, undefined, 'one outside the folder is not fetched');
+  // Several pictures: the first is the one shown, as the result is named after it.
+  assert.equal(pictureCall('edit_image', { paths: ['photos/dog.png', 'styles/snow.png'], prompt: 'x' }, '/work').original, 'photos/dog.png');
+  assert.equal(pictureCall('edit_image', { paths: [], prompt: 'x' }, '/work').original, undefined);
+  assert.equal(pictureCall('edit_image', { paths: [3, 'a.png'], prompt: 'x' }, '/work').original, undefined);
   // Whatever the agent sent, it does not break the page.
   for (const args of [undefined, null, 'text', 3, [], {}]) assert.doesNotThrow(() => pictureCall('edit_image', args, '/work'), String(args));
 });

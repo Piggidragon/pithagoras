@@ -132,7 +132,8 @@ the moment it is asked for:
 
 - **While it is made**, a frame in the shape of the coming picture holds its
   place: the size the agent asked for, or, for an edit, the shape of the picture
-  being changed, which is shown under the wait; a square when nothing says. It
+  being changed (the first, when it was given several), which is shown under the
+  wait; a square when nothing says. It
   says "Making a picture" or "Editing a picture" and, after a few seconds, how
   long it has taken. Image endpoints do not report how far they are, so the
   animation does not pretend to: a soft light drifts over the frame and a sheen

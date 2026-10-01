@@ -22,17 +22,20 @@ mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64)]);
+const GIF = Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(64)]);
 
 /** What the model does at its next request: the arguments of a call to edit_image. */
 let call;
-/** The tools each request offered. */
+/** The tools each request offered, by name, and as the model got them. */
 const offered = [];
+const definitions = [];
 const model = createServer((req, res) => {
   let body = "";
   req.on("data", (d) => { body += d; });
   req.on("end", () => {
     const request = JSON.parse(body);
     offered.push((request.tools ?? []).map((t) => t.function?.name));
+    definitions.push(request.tools ?? []);
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const chunk = (delta, finish = null) =>
       `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
@@ -160,5 +163,64 @@ test("with editing off there is no tool for the model to call", async () => {
     assert.ok(!existsSync(path.join(folder, "generated-images")));
   } finally {
     saveImageGeneration({ baseUrl: "" });
+  }
+});
+
+test("with several pictures switched on the model gets a list, pi holds it to its bounds, and the endpoint gets them all in order", async () => {
+  const folder = chat();
+  writeFileSync(path.join(folder, "style.jpg"), JPEG);
+  writeFileSync(path.join(folder, "pattern.gif"), GIF);
+  saveImageGeneration({ baseUrl: `http://127.0.0.1:${endpoint.address().port}/v1`, editEnabled: true, editMultiple: true });
+  try {
+    call = { paths: ["photo.png", "style.jpg", "pattern.gif"], prompt: "the first, painted like the second, on the third", title: "Painted" };
+    const before = asked.length;
+    const [result, ...more] = await run(folder);
+    assert.equal(more.length, 0);
+    const tool = definitions.at(-1).find((t) => t.function?.name === "edit_image").function;
+    assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["paths", "prompt", "title"], "the model is given a list, not a path");
+    assert.equal(tool.parameters.properties.paths.type, "array");
+    assert.equal(result.isError, false);
+    assert.deepEqual(result.result.details, { path: "generated-images/photo-edited.jpg", title: "Painted", portalImage: true });
+    assert.deepEqual(readFileSync(path.join(folder, "generated-images", "photo-edited.jpg")), JPEG);
+    assert.equal(asked.length, before + 1, "one request");
+    const body = asked.at(-1).body;
+    const at = (bytes) => body.indexOf(bytes);
+    assert.ok(at(PNG) >= 0 && at(PNG) < at(JPEG) && at(JPEG) < at(GIF), "the three pictures, in the order of the list");
+    assert.equal(body.toString("latin1").split('name="image[]"').length - 1, 3, "each as image[]");
+    assert.ok(body.includes("the first, painted like the second, on the third"));
+
+    // pi holds the call to the list's bounds before the tool sees it: none, or more than an edit takes, never reach the endpoint.
+    for (const paths of [[], Array(9).fill("photo.png")]) {
+      call = { paths, prompt: "x" };
+      const [bad] = await run(chat());
+      assert.equal(bad.isError, true, JSON.stringify(paths));
+      assert.equal(asked.length, before + 1, "nothing was sent");
+    }
+    // And a path alone is not the shape that was offered.
+    call = { path: "photo.png", prompt: "x" };
+    assert.equal((await run(chat()))[0].isError, true);
+    assert.equal(asked.length, before + 1);
+  } finally {
+    saveImageGeneration({ baseUrl: "", apiKey: "", editEnabled: false, editMultiple: false });
+  }
+});
+
+test("with it off the model gets one path, and a list of several is not something it can send", async () => {
+  const folder = chat();
+  writeFileSync(path.join(folder, "style.jpg"), JPEG);
+  saveImageGeneration({ baseUrl: `http://127.0.0.1:${endpoint.address().port}/v1`, editEnabled: true, editMultiple: false });
+  try {
+    call = { paths: ["photo.png", "style.jpg"], prompt: "x" };
+    const before = asked.length;
+    const [result] = await run(folder);
+    const tool = definitions.at(-1).find((t) => t.function?.name === "edit_image").function;
+    assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["path", "prompt", "title"]);
+    assert.equal(result.isError, true, "no path: pi refuses it");
+    assert.equal(asked.length, before, "nothing was sent");
+    assert.deepEqual(readdirSync(folder).sort(), ["photo.png", "style.jpg"]);
+    call = { path: "photo.png", prompt: "x" };
+    assert.equal((await run(folder))[0].isError, false, "one picture is as it was");
+  } finally {
+    saveImageGeneration({ baseUrl: "", apiKey: "", editEnabled: false });
   }
 });

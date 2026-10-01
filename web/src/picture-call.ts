@@ -44,7 +44,7 @@ export interface PictureCall {
   title: string;
   /** Width over height, when the call says what shape the picture will have: the size asked for. */
   ratio?: number;
-  /** An edit's original, as a path in the chat's folder, for the page to show while the edit is made. */
+  /** An edit's original — the first of several — as a path in the chat's folder, for the page to show while the edit is made. */
   original?: string;
 }
 
@@ -58,7 +58,9 @@ const oneLine = (s: string, n: number): string => {
 export function pictureCall(name: string, args: unknown, folder: string): PictureCall {
   const input = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const edit = name === "edit_image";
-  const original = edit && text(input.path) ? insideFolder(folder, text(input.path)) : undefined;
+  // With the endpoint taking several, `paths` is a list, in the order the prompt refers to them; the result is named after the first, which is the one shown.
+  const first = Array.isArray(input.paths) ? input.paths[0] : input.path;
+  const original = edit && text(first) ? insideFolder(folder, text(first)) : undefined;
   const ratio = edit ? undefined : sizeRatio(input.size);
   return { edit, title: oneLine(text(input.title) || text(input.prompt), 120), ...(ratio ? { ratio } : {}), ...(original ? { original } : {}) };
 }

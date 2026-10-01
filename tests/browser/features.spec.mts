@@ -15,7 +15,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       },
     },
   };
-  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editKeySet: false, editReady: false };
+  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, editReady: false };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -39,7 +39,9 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     else if (p === '/api/features/images' && method === 'PUT') {
       const patch = route.request().postDataJSON();
       sent.push({ path: p, body: patch });
-      const changed = (patch.enabled !== undefined && patch.enabled !== images.enabled) || (patch.editEnabled !== undefined && patch.editEnabled !== images.editEnabled);
+      // The shape of the edit tool counts as a change only while there is an edit tool.
+      const changed = (patch.enabled !== undefined && patch.enabled !== images.enabled) || (patch.editEnabled !== undefined && patch.editEnabled !== images.editEnabled)
+        || (patch.editMultiple !== undefined && patch.editMultiple !== images.editMultiple && images.editReady);
       const { apiKey, editApiKey, ...rest } = patch;
       Object.assign(images, rest);
       if (apiKey !== undefined) images.keySet = apiKey !== '';
@@ -420,4 +422,38 @@ test('image editing has a switch and an endpoint of its own: it needs an address
   expect(sent.at(-1)!.body).toEqual({ editApiKey: '' });
   // Generation's key is still there to remove on its own.
   await expect(panel.getByRole('button', { name: 'Remove the saved key' })).toBeVisible();
+});
+
+test('several pictures per edit is a switch of its own that waits for the editing address, and says what the tool takes', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Images' }).click();
+  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  const several = panel.getByRole('switch', { name: 'Several pictures per edit' });
+  await expect(several).toHaveAttribute('aria-checked', 'false');
+  await expect(panel.getByText('Off: edit_image takes one picture.')).toBeVisible();
+  await expect(panel.getByText(/Switch on several pictures only if the editing endpoint takes more than one/)).toBeVisible();
+
+  await panel.getByLabel('API address').fill('https://images.example.com/v1');
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  await panel.getByRole('switch', { name: 'Image editing tool' }).click();
+  await expect(panel.getByRole('switch', { name: 'Image editing tool' })).toHaveAttribute('aria-checked', 'true');
+
+  // Typing in the editing form waits for its save, as the switch above it does.
+  await panel.getByLabel('Editing model').fill('image-edit-model');
+  await expect(several).toBeDisabled();
+  await expect(panel.getByText('Save or discard the changes first.')).toBeVisible();
+  await panel.getByRole('button', { name: 'Discard' }).click();
+  await expect(several).toBeEnabled();
+
+  await several.click();
+  await expect(several).toHaveAttribute('aria-checked', 'true');
+  await expect(panel.getByText('On: edit_image takes a list of pictures.')).toBeVisible();
+  // The tool has another shape from now on, so the chats are reloaded like for a tool that came.
+  await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
+  expect(sent.at(-1)!.body).toEqual({ editMultiple: true });
+  await several.click();
+  await expect(several).toHaveAttribute('aria-checked', 'false');
+  expect(sent.at(-1)!.body).toEqual({ editMultiple: false });
 });
