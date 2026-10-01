@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
+import { LuBlocks, LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
 import { api, type Project, type ProjectContents, type Session } from "../api";
@@ -9,6 +9,7 @@ import { within } from "../paths";
 import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
+import { ToolSwitches } from "./ToolSwitches";
 import { isEnter } from "../shortcuts";
 import { t, tp, tx } from "../i18n";
 
@@ -16,8 +17,9 @@ import { t, tp, tx } from "../i18n";
  * The folders chats work in.
  *
  * Projects are folders made on purpose, each with instructions of its own that
- * end up as the folder's AGENTS.md. Opening one opens its latest chat, or starts
- * one. Home, where "New" starts a chat, is not a project and is not listed.
+ * end up as the folder's AGENTS.md, and tools of its own: which of them its
+ * chats start with. Opening one opens its latest chat, or starts one. Home,
+ * where "New" starts a chat, is not a project and is not listed.
  */
 export function ProjectsPage({
   sessions,
@@ -37,6 +39,7 @@ export function ProjectsPage({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
+  const [toolsOf, setToolsOf] = useState<Project | null>(null);
 
   const load = useCallback(() => {
     api
@@ -180,6 +183,11 @@ export function ProjectsPage({
                       {p.hasInstructions && (
                         <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">{t("instructions")}</span>
                       )}
+                      {p.hasTools && (
+                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent" title={t("Switches tools differently from the portal-wide default")}>
+                          {t("tools")}
+                        </span>
+                      )}
                     </div>
                     <p className="truncate font-mono text-[11px] text-fg-faint" title={p.path}>
                       {p.path}
@@ -215,6 +223,17 @@ export function ProjectsPage({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        setToolsOf(p);
+                      }}
+                      className="rounded p-1.5 text-fg-subtle hover:text-accent"
+                      title={t("Tools for this project's chats")}
+                      aria-label={t("Tools for {name}", { name: p.name })}
+                    >
+                      <LuBlocks className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
                         remove(p);
                       }}
                       className="rounded p-1.5 text-fg-subtle hover:text-danger"
@@ -235,12 +254,19 @@ export function ProjectsPage({
         <NewProject
           root={root}
           onClose={() => setCreating(false)}
-          onCreate={async (name, instructions) => {
-            const project = await api.createProject(name, instructions);
+          onCreate={async (name, instructions, toolsOff) => {
+            const project = await api.createProject(name, instructions, toolsOff);
             setCreating(false);
             load();
             // The chats' folders have one more, even if its chat does not open.
             onChanged();
+            // The project is there, without the tools that were chosen. Said on the
+            // page, which stays: opening its chat would take the message away, and
+            // the Tools button on its row is where to choose them again.
+            if (project.toolsError) {
+              setError(t("\"{name}\" was created, but its tools could not be set: {error}", { name: project.name, error: project.toolsError }));
+              return;
+            }
             // The dialog is gone by now, so a failure here is shown on the page:
             // the project exists, only its first chat did not open.
             try {
@@ -261,6 +287,16 @@ export function ProjectsPage({
           }}
         />
       )}
+      {toolsOf && (
+        <ProjectTools
+          project={toolsOf}
+          onClose={() => {
+            setToolsOf(null);
+            // The "tools" mark on the row is what these switches decided.
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -275,10 +311,12 @@ function NewProject({
   /** Where the folder will be made, so the preview is the whole path. */
   root: string;
   onClose: () => void;
-  onCreate: (name: string, instructions: string) => Promise<void>;
+  onCreate: (name: string, instructions: string, toolsOff?: string[]) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
+  /** The tools wanted off, once somebody has switched any; untouched, the project says nothing about tools. */
+  const [toolsOff, setToolsOff] = useState<string[] | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const slug = slugify(name);
@@ -288,7 +326,7 @@ function NewProject({
     setBusy(true);
     setError(null);
     try {
-      await onCreate(name.trim(), instructions);
+      await onCreate(name.trim(), instructions, toolsOff);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -342,6 +380,18 @@ function NewProject({
           className={`${FIELD} mt-1 resize-y font-mono text-xs`}
         />
       </label>
+      {/* Shut, like the sections of the voice settings: most projects start with
+          the default, and sixty checkboxes would push the dialog off the screen.
+          Mounted all the same, so what was loaded and switched is kept. */}
+      <details className="mt-4 rounded-xl border border-line p-4">
+        <summary className="cursor-pointer text-sm font-medium">
+          {t("Tools")}
+          <span className="mt-1 block text-xs font-normal text-fg-muted">{t("What chats in this project start with — a chat can still switch tools for itself")}</span>
+        </summary>
+        <div className="mt-4">
+          <ToolSwitches onDraft={setToolsOff} />
+        </div>
+      </details>
     </Modal>
   );
 }
@@ -422,6 +472,22 @@ function Instructions({
           </p>
         </>
       )}
+    </Modal>
+  );
+}
+
+/**
+ * Which tools the chats of a project start with. Saved as each switch is flipped,
+ * as in a chat, so there is nothing to confirm and no button to save.
+ */
+function ProjectTools({ project, onClose }: { project: Project; onClose: () => void }) {
+  return (
+    <Modal
+      title={t("Tools · {name}", { name: project.name })}
+      subtitle={t("What chats in this project start with — a chat can still switch tools for itself")}
+      onClose={onClose}
+    >
+      <ToolSwitches project={project.name} />
     </Modal>
   );
 }

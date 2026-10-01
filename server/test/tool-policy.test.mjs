@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   toolEnabled,
+  defaultsFor,
   effectiveOff,
   exceptionsFor,
   browserTool,
@@ -145,4 +146,23 @@ test("a browser can be called anything, given which servers are it", () => {
   assert.equal(browserTool("chrome_browser_click", ["chrome"]), false);
   // And a server that is not one of them is still not.
   assert.equal(browserTool("scratch_browser_click", ["chrome", "scratch"], ["chrome"]), false);
+});
+
+test("a project bends the default, in both directions", () => {
+  assert.deepEqual(defaultsFor(["a", "b"], { off: ["c"], on: ["a"] }), ["b", "c"]);
+});
+
+test("a project that says nothing leaves the default as it is", () => {
+  assert.deepEqual(defaultsFor(["b", "a"], none), ["a", "b"]);
+  assert.deepEqual(defaultsFor([], none), []);
+});
+
+test("a conversation holds its exceptions against what its project leaves", () => {
+  const project = defaultsFor(["a"], { off: ["b"], on: ["a"] });
+  // Nothing said in the conversation: the project's picture.
+  assert.deepEqual(effectiveOff(["a", "b", "c"], project, none), ["b"]);
+  // Its own word beats the project's, either way.
+  assert.deepEqual(effectiveOff(["a", "b", "c"], project, { off: ["a"], on: ["b"] }), ["a"]);
+  // And wanting what the project says writes nothing down.
+  assert.deepEqual(exceptionsFor(["b"], project, ["a", "b", "c"]), { off: [], on: [] });
 });

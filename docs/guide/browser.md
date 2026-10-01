@@ -111,9 +111,10 @@ its own browser, no profile, no allowlist. If you have one, remove it.
 
 The browser reaches the agent as an MCP server, so it is switched where every
 other package is: the blocks icon beside the composer for one conversation,
-**Settings → Tools** for all of them. Having its tools is having the browser —
-a conversation with them all off is not offered them and does not reach the
-container. A routine still has its own switch on its own page.
+**Settings → Tools** for all of them, and **Projects → Tools** for the chats of one
+project. Having its tools is having the browser — a conversation with them all off
+is not offered them and does not reach the container. A routine still has its own
+switch on its own page.
 
 Which server that is comes from where it connects, not from what it is called:
 the one whose `--cdp-endpoint` points at this browser. The portal writes it as

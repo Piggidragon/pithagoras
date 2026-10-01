@@ -129,6 +129,8 @@ export interface Project {
   isGit: boolean;
   /** Whether the folder has an AGENTS.md — the project's instructions. */
   hasInstructions: boolean;
+  /** Whether the project switches tools differently from the portal-wide default. */
+  hasTools?: boolean;
   /** How many chats work in it, and when one last moved. */
   sessions: number;
   lastActive: string | null;
@@ -363,8 +365,12 @@ export const api = {
   projects: () => json<{ root: string; home: string; projects: Project[] }>("/api/projects"),
   /** Only where Home is and which projects there are, without their counts: see /api/projects. */
   places: () => json<{ root: string; home: string; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
-  createProject: (name: string, instructions?: string) =>
-    json<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name, instructions }) }),
+  /** `toolsOff`: the tools its chats start with off, as for setProjectTools. `toolsError` says the project was made without them. */
+  createProject: (name: string, instructions?: string, toolsOff?: string[]) =>
+    json<Project & { toolsError?: string }>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ name, instructions, toolsOff }),
+    }),
   projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),
   projectInstructions: (name: string) =>
     json<{ text: string }>(`/api/projects/${encodeURIComponent(name)}/instructions`),
@@ -372,6 +378,17 @@ export const api = {
     json<{ ok: true }>(`/api/projects/${encodeURIComponent(name)}/instructions`, {
       method: "PUT",
       body: JSON.stringify({ text }),
+    }),
+  /** What chats in the project start with: the same list as a chat's, `live` always false. */
+  projectTools: (name: string) =>
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+      `/api/projects/${encodeURIComponent(name)}/tools`
+    ),
+  /** Switch tools off for the project's chats by name; everything not named is on. */
+  setProjectTools: (name: string, off: string[]) =>
+    json<{ off: string[]; applied: number }>(`/api/projects/${encodeURIComponent(name)}/tools`, {
+      method: "PUT",
+      body: JSON.stringify({ off }),
     }),
   /** `discard` says that unsaved work in the folder (see ProjectContents) may go with it; without it the server refuses. */
   deleteProject: (name: string, discard = false) =>

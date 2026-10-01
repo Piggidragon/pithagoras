@@ -1,7 +1,8 @@
 import Database from "better-sqlite3";
 import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
-import { browserTool, mcpServerOf, toolEnabled } from "./tool-policy.js";
+import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
+import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -317,6 +318,18 @@ export function getDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+
+    -- A project's exceptions to the portal-wide tool default, between that and
+    -- a chat's own. Kept here and not as a file in the folder: the agent works
+    -- in the folder and can write to it, and which tools it has is not
+    -- something it should be able to give itself back. A project is only a
+    -- folder, so it is known by its name; a row exists only while it says
+    -- something, and goes with the project.
+    CREATE TABLE IF NOT EXISTS project_tools (
+      project TEXT PRIMARY KEY,
+      tools_off TEXT NOT NULL DEFAULT '',
+      tools_on TEXT NOT NULL DEFAULT ''
     );
 
     -- Background subagents started and not yet ended, kept as their events
@@ -1554,7 +1567,7 @@ export function browserAllowed(session: SessionRow): boolean {
   }
   const browserNames = seenBrowserTools();
   if (!browserNames.length) return session.browser === 1 || !browserColumnDecides();
-  const defaults = toolDefaultsOff();
+  const defaults = toolDefaultsFor(session.workspace);
   const exceptions = sessionTools(session.id);
   return browserNames.some((name) => toolEnabled(name, defaults, exceptions));
 }
@@ -1605,6 +1618,20 @@ export function browserExceptions(): SessionRow[] {
        ORDER BY updated_at DESC`
     )
     .all() as SessionRow[];
+  // And the chats of a project that says something about tools, which differ
+  // from the default through it without having said anything themselves. Not
+  // routines: they answer for their own runs, project or not.
+  const projects = projectsWithTools();
+  if (projects.size) {
+    const own = new Set(rows.map((row) => row.id));
+    const all = getDb().prepare("SELECT * FROM sessions WHERE kind != 'routine' ORDER BY updated_at DESC").all() as SessionRow[];
+    for (const row of all) {
+      if (own.has(row.id)) continue;
+      const project = projectOf(row.workspace);
+      if (project && projects.has(project)) rows.push(row);
+    }
+    rows.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
+  }
   const byDefault = browserByDefault();
   return rows.filter((row) => browserAllowed(row) !== byDefault);
 }
@@ -1655,6 +1682,54 @@ export function setSessionTools(sessionId: string, tools: SessionTools): Session
     .prepare("UPDATE sessions SET tools_off = ?, tools_on = ? WHERE id = ?")
     .run(stored.off.join("\n"), stored.on.join("\n"), sessionId);
   return stored;
+}
+
+/**
+ * What a project says about tools, as exceptions to the portal-wide default —
+ * the same two lists a chat keeps, one layer up. Nothing for a project that
+ * never said anything, which is every project there was.
+ */
+export function projectTools(project: string): SessionTools {
+  const row = getDb().prepare("SELECT tools_off, tools_on FROM project_tools WHERE project = ?").get(
+    project
+  ) as { tools_off: string; tools_on: string } | undefined;
+  return { off: parseToolsOff(row?.tools_off), on: parseToolsOff(row?.tools_on) };
+}
+
+export function setProjectTools(project: string, tools: SessionTools): SessionTools {
+  const stored = { off: clean(tools.off), on: clean(tools.on) };
+  if (!stored.off.length && !stored.on.length) clearProjectTools(project);
+  else
+    getDb()
+      .prepare(
+        `INSERT INTO project_tools (project, tools_off, tools_on) VALUES (?, ?, ?)
+         ON CONFLICT(project) DO UPDATE SET tools_off = excluded.tools_off, tools_on = excluded.tools_on`
+      )
+      .run(project, stored.off.join("\n"), stored.on.join("\n"));
+  return stored;
+}
+
+/** Forgets what a project said about tools, as when it is deleted or made again. */
+export function clearProjectTools(project: string): void {
+  getDb().prepare("DELETE FROM project_tools WHERE project = ?").run(project);
+}
+
+/** The projects that say something about tools, by name. */
+export function projectsWithTools(): Set<string> {
+  return new Set(
+    (getDb().prepare("SELECT project FROM project_tools").all() as { project: string }[]).map((r) => r.project)
+  );
+}
+
+/**
+ * The tools that are off by default for a chat in `workspace`: the portal-wide
+ * default, bent by its project's exceptions where it is in a project. A chat's
+ * own exceptions are held against this.
+ */
+export function toolDefaultsFor(workspace: string | null | undefined): string[] {
+  const off = toolDefaultsOff();
+  const project = projectOf(workspace);
+  return project ? defaultsFor(off, projectTools(project)) : off;
 }
 
 /**

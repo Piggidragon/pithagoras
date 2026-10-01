@@ -207,6 +207,11 @@ says so where it does. What a chat stores is only its disagreement, so changing
 a default reaches every conversation that never said anything about that tool —
 including the ones open right now.
 
+A [project](/guide/projects#tools) can sit between the two: it switches tools
+against this default for all of its chats, and a chat then disagrees with what
+its project leaves, not with this default. The row in a chat says "default on"
+or "default off" against that.
+
 The list there is what the portal has seen a session register, not what is
 loaded this second: pi builds its registry when a conversation starts, and
 having to open a chat before you could say "off everywhere" would be the wrong
