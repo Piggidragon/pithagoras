@@ -4,6 +4,7 @@ import { api, type PortalEvent } from '../api';
 import { describeCall, describeOutcome, elapsed, unwrap, type ToolCall, type ToolTarget } from '../tool-activity';
 import { isPictureTool, pictureCall, type PictureCall } from '../picture-call';
 import { shownPicture } from '../transcript';
+import { GENERATED_PICTURE_MARK } from '../../../server/src/generated-picture';
 import { msg, t } from "../i18n";
 import { ImagePreview } from './ImagePreview';
 
@@ -78,7 +79,7 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { event
         const slot = [0, 1, 2, 3].find(s => !taken.has(s) && !leavingFrom.has(s)) ?? [0, 1, 2, 3].find(s => !taken.has(s)) ?? 0;
         next = next.filter(c => !(c.leaving && c.slot === slot));
         const call = unwrap(p);
-        const look = isPictureTool(call.name) ? pictureCall(call.name, call.input, folder) : undefined;
+        const look = isPictureTool(call.name) && p[GENERATED_PICTURE_MARK] === true ? pictureCall(call.name, call.input, folder) : undefined;
         next = [...next, { ...describeCall(p, folder), id: event.seq, callId: String(p.toolCallId ?? ''), start: p, startedAt: Date.now(), status: 'running', outcome: '', slot, leaving: false, ...(look ? { look } : {}) }];
       } else if (event.type === 'tool_execution_end') {
         const card = next.find(c => c.callId && c.callId === String(p.toolCallId ?? '') && c.status === 'running');

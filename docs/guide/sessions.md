@@ -138,9 +138,13 @@ the moment it is asked for:
   long it has taken. Image endpoints do not report how far they are, so the
   animation does not pretend to: a soft light drifts over the frame and a sheen
   passes, and that is all.
-- **When it is there**, the picture fades in over the wait, in the same place.
+- **When the call is over**, the wait is over too: the frame says "Loading the
+  picture", still, until the file has come, however long a large picture over a
+  slow connection takes, and the picture is fetched at once rather than when
+  the browser sees fit. The picture then fades in over it, in the same place.
   Where the shape was right nothing under it moves; where it was not, the frame
-  takes the picture's own shape. A click opens the picture in a new tab.
+  takes the picture's own shape. A click opens the picture in a new tab. If the
+  file cannot be fetched, it says so, and not that the picture is gone.
 - **When it fails**, the frame says so quietly, with the reason in a line or
   two — the endpoint's answer, a setting that was switched off — and the whole of
   it under **Details**. A call that was cut off, because the run was stopped or
@@ -149,7 +153,11 @@ the moment it is asked for:
   the title, the size, the picture to change — is under **Details**, below the
   picture.
 - **Opening a chat again** draws the pictures that were made at once, with no
-  fade, in the shape asked for; one whose file is gone from the folder says so.
+  fade, in the shape asked for when the agent asked for one and otherwise
+  taking their own as they load; one whose file is gone from the folder says so.
+- **A tool of the same name** that another extension brings, and which pi may
+  keep in the portal's place, is the plain tool line it always was, whatever
+  state it is in: only the portal's own calls are drawn as pictures.
 
 The movement is one of the [animations](/guide/interface#animations): with them
 switched off, or when your system asks for reduced motion, the frame is the same

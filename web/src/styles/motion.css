@@ -193,7 +193,7 @@
 /* It arrives over the wait: fading in as it settles, the wait and the original under it fading out. Only a picture that was watched being made does: one drawn from the history is just there. */
 [data-motion="fancy"] .image-preview-frame.is-arriving .image-preview-img { transform: scale(1.035); transition: opacity .7s var(--ease-out), transform .9s var(--ease-out); }
 [data-motion="fancy"] .image-preview-frame.is-arriving.is-loaded .image-preview-img { transform: none; }
-[data-motion="fancy"] .image-preview-frame.is-arriving :is(.image-preview-before, .image-preview-making) { transition: opacity .7s var(--ease-out); }
+[data-motion="fancy"] .image-preview-frame.is-arriving :is(.image-preview-before, .image-preview-making, .image-preview-loading) { transition: opacity .7s var(--ease-out); }
 
 /* ── Panels beside the chat: they come in from the side they are docked at, and settle ──
  * Slid and wiped, not faded, as in chat.css. Moved from one place to another

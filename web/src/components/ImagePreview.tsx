@@ -43,6 +43,11 @@ export interface ImagePreviewProps {
  * known, so nothing under it moves when the guess was right. Not made, the
  * frame says so and why, quietly.
  *
+ * Being made ends with the call, not with the picture's download: from then on
+ * the frame says it is loading, still, however long the file takes to come —
+ * a large one over a slow link, a request queued behind others. The wait over
+ * the frame is a thing to look at, not a thing that can be stuck.
+ *
  * Only a picture that was watched being made arrives with a transition: one
  * drawn from the history just is there, and costs nothing while it is not.
  * It knows nothing of chats or tools, so that the Images page can use it as
@@ -61,8 +66,10 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
   const ready = !!src && loaded?.src === src;
   const missing = !!src && gone === src;
   const shown: PreviewState = missing ? "failed" : state;
-  // The wait stays over the frame until the picture has come and faded in, which is only worth a place for one that was being made.
-  const waiting = state === "making" || (arriving && state === "done" && !settled && !missing);
+  const making = state === "making";
+  // The call is over, and the picture is on its way, or fading in over what was there: only worth a place for one that was being made.
+  const loading = arriving && state === "done" && !settled && !missing;
+  const waiting = making || loading;
   const withOriginal = !!before && !compact && waiting && !original.gone;
   const shape = (ready ? loaded?.shape : undefined) ?? (withOriginal ? original.shape : undefined) ?? ratio ?? 1;
 
@@ -86,13 +93,19 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
       className="image-preview-img"
       src={src}
       alt={compact ? "" : title ?? ""}
-      loading="lazy"
+      // One that was waited for is fetched now, wherever the page is scrolled to and whether or not it is on show: the browser decides when a lazy one is, and a picture the chat is waiting on cannot wait for that.
+      loading={arriving ? "eager" : "lazy"}
       decoding="async"
       onLoad={(e) => loadedNow(e.currentTarget)}
       onError={() => setGone(src)}
     />
   );
-  const headline = missing ? t("This picture is no longer in the folder.") : edit ? t("The picture was not changed") : t("No picture was made");
+  // One that was just made is not gone from the folder: what failed was getting it here.
+  const headline = missing ? (arriving ? t("The picture could not be loaded.") : t("This picture is no longer in the folder.")) : edit ? t("The picture was not changed") : t("No picture was made");
+  const label = edit ? t("Editing a picture") : t("Making a picture");
+  // What a screen reader is told, in one place that stays: a live region that appears with its words is not read, one whose words change is.
+  const said = making ? label : shown === "failed" ? [headline, !missing && reason].filter(Boolean).join(". ") : arriving && ready ? t("The picture is ready") : "";
+  const busy = making || (shown === "done" && !!src && !ready);
   const frame = (
     <div className={`image-preview-frame is-${shown}${arriving ? " is-arriving" : ""}${ready ? " is-loaded" : ""}${withOriginal ? " has-before" : ""}`}>
       {withOriginal && (
@@ -106,16 +119,16 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
         />
       )}
       {waiting && (
-        // The seconds are not read out each time they change: they are not part of the status.
-        <div className="image-preview-making" role={compact ? undefined : "status"} aria-hidden={compact || undefined}>
+        // Looked at, not read: what is said is the status below the picture. The seconds are not part of it.
+        <div className={making ? "image-preview-making" : "image-preview-loading"} aria-hidden>
           <LuImage aria-hidden />
-          {!compact && <span>{edit ? t("Editing a picture") : t("Making a picture")}</span>}
-          {!compact && elapsed !== undefined && elapsed >= 3 && <small aria-hidden className="tabular-nums">{formatElapsed(elapsed)}</small>}
+          {!compact && <span>{making ? label : t("Loading the picture")}</span>}
+          {!compact && making && elapsed !== undefined && elapsed >= 3 && <small className="tabular-nums">{formatElapsed(elapsed)}</small>}
         </div>
       )}
       {picture && (href && !compact ? <a className="image-preview-link" href={href} target="_blank" rel="noreferrer" title={title}>{picture}</a> : picture)}
       {shown === "failed" && (
-        <div className="image-preview-failed" role={compact ? undefined : "status"} aria-hidden={compact || undefined}>
+        <div className="image-preview-failed" aria-hidden>
           <LuImageOff aria-hidden />
           {!compact && (
             <div>
@@ -131,8 +144,9 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
   const style = { "--ratio": shape } as CSSProperties;
   if (compact) return <div className={`image-preview is-compact is-${shown}`} style={style}>{frame}</div>;
   return (
-    <figure className={`image-preview is-${shown}`} style={style} aria-busy={shown === "making"}>
+    <figure className={`image-preview is-${shown}`} style={style} aria-busy={busy}>
       {frame}
+      <span className="sr-only" role="status">{said}</span>
       {(title || actions) && (
         <figcaption className="image-preview-caption">
           <span className="image-preview-title" title={title}>{title}</span>

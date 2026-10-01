@@ -69,7 +69,7 @@ test.describe('in the chat', () => {
     await expect.poll(() => shapeOf(editing.locator('.image-preview-frame'))).toBeCloseTo(2, 1);
 
     // In place of the card, whose call is a click away: its name and what it was given.
-    await expect(page.locator('.chat-tool', { hasText: /generate_image|edit_image/ })).toHaveCount(0);
+    await expect(call(page, making)).toHaveCount(1);
     await making.getByRole('button', { name: 'Details' }).click();
     await expect(call(page, making).locator('.chat-tool-body')).toContainText('generate_image');
     await expect(call(page, making).locator('.chat-tool-body')).toContainText('A foggy harbour at first light');
@@ -108,7 +108,6 @@ test.describe('in the chat', () => {
     const cut = preview(page, 'A castle in the clouds');
     await expect(cut).toHaveClass(/is-failed/);
     await expect(cut).toContainText('Interrupted before the picture arrived');
-    await expect(page.locator('.chat-tool', { hasText: /generate_image/ })).toHaveCount(0);
 
     // What was said is whole under Details.
     await failed.getByRole('button', { name: 'Details' }).click();
@@ -134,7 +133,125 @@ test.describe('in the chat', () => {
     await expect(making.getByRole('img', { name: 'A foggy harbour' })).toBeVisible();
     expect(await apart()).toBeCloseTo(was, 0);
     // The wait is taken away once the picture is there.
+    await expect(making.locator('.image-preview-making, .image-preview-loading')).toHaveCount(0);
+  });
+
+  test('a picture whose call has ended is loading, not being made, however long the file takes to come', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('animations', 'on'));
+    let release!: () => void;
+    await folder(page, 'preview', new Promise<void>((resolve) => (release = resolve)));
+    const asked = page.waitForRequest(/picture\?path=generated-images%2Fharbour\.png/);
+    await page.goto('/tests/pictures.html');
+    await expect(page.locator('html')).toHaveAttribute('data-motion', 'fancy');
+    const making = preview(page, 'A foggy harbour');
+    await expect(making).toHaveClass(/is-making/);
+    await expect(making.locator('.image-preview-making')).toHaveCount(1);
+
+    // The call ends, as pi's does, and the turn does not: no agent_end comes, the file is held back.
+    await page.evaluate(() => (window as any).emit('tool_execution_end', (window as any).madePayload('making', 'generated-images/harbour.png', 'A foggy harbour')));
+    await expect(making).toHaveClass(/is-done/, { timeout: 1500 });
+    // From that moment the wait is not "being made" any more, and nothing moves in it.
     await expect(making.locator('.image-preview-making')).toHaveCount(0);
+    await expect(making.getByText('Making a picture')).toHaveCount(0);
+    const loading = making.locator('.image-preview-loading');
+    await expect(loading).toContainText('Loading the picture');
+    await expect(making).toHaveAttribute('aria-busy', 'true');
+    expect(await loading.evaluate((el) => getComputedStyle(el, '::before').animationName)).toBe('none');
+    expect(await making.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length)).toBe(0);
+    expect(await shapeOf(making.locator('.image-preview-frame'))).toBeCloseTo(2 / 3, 1);
+    // The picture is asked for at once, not when the browser sees fit: the chat is waiting on it.
+    await asked;
+    await expect(making.locator('.image-preview-img')).toHaveAttribute('loading', 'eager');
+
+    release();
+    await expect(making.locator('.image-preview-frame')).toHaveClass(/is-loaded/);
+    await expect(making.getByRole('img', { name: 'A foggy harbour' })).toBeVisible();
+    await expect(making).toHaveAttribute('aria-busy', 'false');
+    await expect(making.locator('.image-preview-loading')).toHaveCount(0);
+    // One out of the history is not waited for: the browser may fetch it when it is near.
+    await expect(preview(page, 'A lighthouse at dusk').locator('.image-preview-img')).toHaveAttribute('loading', 'lazy');
+  });
+
+  test('a picture that cannot be fetched after the call says so, and is not called gone from the folder', async ({ page }) => {
+    await page.route('**/api/sessions/preview/picture?path=generated-images%2Fbroken.png**', (route) => route.abort());
+    await page.route('**/api/sessions/preview/picture?path=generated-images%2Flighthouse.png**', (route) => route.abort());
+    await page.goto('/tests/pictures.html');
+    const making = preview(page, 'A foggy harbour');
+    await expect(making).toHaveClass(/is-making/);
+    await page.evaluate(() => (window as any).emit('tool_execution_end', (window as any).madePayload('making', 'generated-images/broken.png', 'A foggy harbour')));
+    await expect(making).toHaveClass(/is-failed/);
+    await expect(making.getByRole('status')).toHaveText('The picture could not be loaded.');
+    await expect(making).not.toContainText('no longer in the folder');
+    await expect(making.locator('.image-preview-loading')).toHaveCount(0);
+
+    // A picture from the history that is not there any more is gone from the folder.
+    const old = preview(page, 'A lighthouse at dusk');
+    await expect(old).toHaveClass(/is-failed/);
+    await expect(old.getByRole('status')).toHaveText('This picture is no longer in the folder.');
+  });
+
+  test('what a screen reader is told is one status that stays, and changes with the picture', async ({ page }) => {
+    let release!: () => void;
+    await folder(page, 'preview', new Promise<void>((resolve) => (release = resolve)));
+    await page.goto('/tests/pictures.html');
+    const making = preview(page, 'A foggy harbour');
+    const status = making.locator('[role=status]');
+    await expect(status).toHaveCount(1);
+    await expect(status).toHaveText('Making a picture');
+    await status.evaluate((el) => el.setAttribute('data-first', 'yes'));
+
+    await page.evaluate(() => (window as any).emit('tool_execution_end', (window as any).madePayload('making', 'generated-images/harbour.png', 'A foggy harbour')));
+    await expect(making).toHaveClass(/is-done/);
+    release();
+    // The same node, so that the change is read out: a status that comes with its words is not.
+    await expect(status).toHaveText('The picture is ready');
+    await expect(status).toHaveAttribute('data-first', 'yes');
+    await expect(making.locator('[role=status]')).toHaveCount(1);
+    // What the eye sees in the frame is not read twice.
+    await expect(making.locator('.image-preview-frame [role=status]')).toHaveCount(0);
+  });
+
+  test('the way to a call\'s details is readable in both themes', async ({ page }) => {
+    await page.goto('/tests/pictures.html');
+    const more = preview(page, 'A lighthouse at dusk').getByRole('button', { name: 'Details' });
+    await expect(more).toBeVisible();
+    // The colour against what it is drawn on, as WCAG measures them.
+    const contrast = () => more.evaluate((el) => {
+      const rgb = (css: string) => (css.match(/[\d.]+/g) ?? []).map(Number);
+      const luminance = ([r, g, b]: number[]) => [r, g, b].map((c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+      let back: number[] = [];
+      for (let node: Element | null = el; node; node = node.parentElement) {
+        const color = rgb(getComputedStyle(node).backgroundColor);
+        if (color.length >= 3 && (color[3] ?? 1) > 0.99) { back = color; break; }
+      }
+      const a = luminance(rgb(getComputedStyle(el).color));
+      const b = luminance(back);
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    });
+    for (const theme of ['dark', 'light']) {
+      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      // The colours ease over from the other theme's.
+      await expect.poll(contrast, { message: theme }).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test('a tool of the same name from an extension stays its plain card, running and failed, and the portal\'s own is the preview', async ({ page }) => {
+    await page.goto('/tests/pictures.html');
+    const cards = page.locator('.chat-tool', { hasText: 'generate_image' });
+    await expect(cards).toHaveCount(2);
+    for (const prompt of ['A dragon over the sea', 'A robot in a garden']) await expect(preview(page, prompt)).toHaveCount(0);
+    // Its card is the one pi's own tools have: running, then an error with what was said.
+    await expect(cards.first()).toContainText('A dragon over the sea');
+    await expect(cards.nth(1)).toContainText('A robot in a garden');
+    // The portal's calls, in the same chat, are previews: made, not made, cut off, being made.
+    await expect(page.locator('.image-preview')).toHaveCount(5);
+
+    // And a call of the portal's, which says so when it starts, is a preview from that moment, on the page's way of it.
+    await page.evaluate(() => (window as any).emit('tool_execution_start', (window as any).startPayload('late', 'generate_image', { prompt: 'A river at noon' })));
+    await expect(preview(page, 'A river at noon')).toHaveClass(/is-making/);
+    await page.evaluate(() => (window as any).emit('tool_execution_start', (window as any).startPayload('late-theirs', 'generate_image', { prompt: 'A moon over the hills' }, false)));
+    await expect(cards).toHaveCount(3);
+    await expect(preview(page, 'A moon over the hills')).toHaveCount(0);
   });
 
   test('a picture of another shape than was asked for takes its own shape when it arrives', async ({ page }) => {
@@ -201,7 +318,7 @@ test.describe('in the chat', () => {
     expect(await fade(making)).toBe('0.7s, 0.9s');
     await expect(making).toHaveClass(/is-loaded/);
     // The wait stays under it for the fade, and then goes.
-    await expect(making.locator('.image-preview-making')).toHaveCount(0);
+    await expect(making.locator('.image-preview-making, .image-preview-loading')).toHaveCount(0);
   });
 });
 

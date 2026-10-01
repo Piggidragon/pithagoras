@@ -11,12 +11,13 @@ import type { Item } from "./transcript";
 export const isPictureTool = (name: string): boolean => name === "generate_image" || name === "edit_image";
 
 /**
- * Whether a call is drawn as a picture preview rather than as a tool card: one
- * of the portal's picture tools, while it runs, when it failed, and when it
- * ended with a picture. One that ended without the portal's mark is another
- * extension's tool of that name, and stays the plain card it always was.
+ * Whether a call is drawn as a picture preview rather than as a tool card: a
+ * call of the portal's own picture tools, which says so when it starts, and
+ * one from before that, which says so when it ends with a picture. A tool of
+ * that name that an extension brings is the plain card it always was, in every
+ * state: pi keeps one tool of a name, and the portal's is not always it.
  */
-export const isPictureCall = (item: Extract<Item, { kind: "tool" }>): boolean => isPictureTool(item.name) && (item.status !== "done" || !!item.picture);
+export const isPictureCall = (item: Extract<Item, { kind: "tool" }>): boolean => isPictureTool(item.name) && (item.portalPicture === true || !!item.picture);
 
 /**
  * Narrowest and widest a preview is drawn: past that a picture is shown whole in a

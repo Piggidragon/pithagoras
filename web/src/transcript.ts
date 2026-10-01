@@ -72,6 +72,8 @@ export type Item =
       status: "running" | "done" | "error";
       detail?: string;
       picture?: ShownPicture;
+      /** A call of the portal's own generate_image or edit_image, as its start says (see generated-picture.ts), not of a tool of that name an extension brings. */
+      portalPicture?: true;
       args?: unknown;
       output?: string;
       /** How many lines `output` had before it was cut to its end. */
@@ -361,6 +363,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           name: String(p.toolName ?? p.name ?? "tool"),
           status: "running",
           detail: summarizeToolInput(p),
+          ...(p[GENERATED_PICTURE_MARK] === true ? { portalPicture: true as const } : {}),
           ...(args !== undefined ? { args } : {}),
           ...(ev.at !== undefined ? { since: ev.at } : {}),
         });

@@ -6,7 +6,8 @@ import { buildTranscript } from '../web/src/transcript.ts';
 import { failureReason, isPictureCall, isPictureTool, pictureCall, shapeOf, sizeRatio } from '../web/src/picture-call.ts';
 import { GENERATED_PICTURE_MARK } from '../server/src/generated-picture.ts';
 
-const start = (toolName: string, input: any, toolCallId = 'c1') => ({ seq: 1, type: 'tool_execution_start', payload: { toolName, toolCallId, input } });
+/** The start of a call as the portal's SDK client passes it on: a call of the portal's own picture tools has the mark, an extension's tool of that name does not. */
+const start = (toolName: string, input: any, own = true, toolCallId = 'c1') => ({ seq: 1, type: 'tool_execution_start', payload: { toolName, toolCallId, input, ...(own ? { [GENERATED_PICTURE_MARK]: true } : {}) } });
 const end = (toolName: string, details: any, extra: any = {}, toolCallId = 'c1') => ({ seq: 2, type: 'tool_execution_end', payload: { toolName, toolCallId, result: { content: [{ type: 'text', text: 'Generated and shown to the user' }], details }, ...extra } });
 const tool = (events: any[]) => buildTranscript(events).find((i) => i.kind === 'tool') as Extract<ReturnType<typeof buildTranscript>[number], { kind: 'tool' }>;
 
@@ -45,7 +46,7 @@ test('what went wrong is the first of it, on one line', () => {
   assert.equal(failureReason('x'.repeat(1000)).length, 240);
 });
 
-test('a picture tool is a preview while it runs, when it failed and when it brought a picture; another extension’s of that name is a card once it ends with none', () => {
+test('a call of the portal’s picture tools is a preview in every state; another extension’s tool of that name is always its plain card', () => {
   const mark = { path: 'generated-images/a.png', title: 'A', [GENERATED_PICTURE_MARK]: true };
   assert.equal(isPictureTool('generate_image'), true);
   assert.equal(isPictureTool('edit_image'), true);
@@ -54,6 +55,7 @@ test('a picture tool is a preview while it runs, when it failed and when it brou
 
   const running = tool([start('generate_image', { prompt: 'a' })]);
   assert.equal(running.status, 'running');
+  assert.equal(running.portalPicture, true, 'its start says whose it is');
   assert.equal(isPictureCall(running), true);
   assert.equal(isPictureCall(tool([start('edit_image', { path: 'a.png', prompt: 'a' })])), true);
 
@@ -70,14 +72,23 @@ test('a picture tool is a preview while it runs, when it failed and when it brou
   assert.equal(cut.interrupted, true);
   assert.equal(isPictureCall(cut), true);
 
-  // Another extension's tool of the name, which answers with a path of its own kind and no mark: its plain card.
-  assert.equal(isPictureCall(tool([start('generate_image', { prompt: 'a' }), end('generate_image', { path: '/out/cat.png' })])), false);
-  assert.equal(isPictureCall(tool([start('bash', { command: 'ls' })])), false);
+  // A picture made before the start said so: its end does.
+  assert.equal(isPictureCall(tool([start('generate_image', { prompt: 'a' }, false), end('generate_image', mark)])), true);
+
+  // Another extension's tool of the name, which pi may keep in the portal's place: no mark at its start, and in no state a preview.
+  const theirs = (events: any[]) => tool([start('generate_image', { prompt: 'a' }, false), ...events]);
+  assert.equal(theirs([]).portalPicture, undefined);
+  assert.equal(isPictureCall(theirs([])), false, 'while it runs');
+  assert.equal(isPictureCall(theirs([end('generate_image', undefined, { isError: true })])), false, 'when it failed');
+  assert.equal(isPictureCall(theirs([{ seq: 2, type: 'agent_start', payload: {} }])), false, 'when it was cut off');
+  assert.equal(isPictureCall(theirs([end('generate_image', { path: '/out/cat.png' })])), false, 'when it answered with a path of its own kind');
+  assert.equal(isPictureCall(tool([start('bash', { command: 'ls' }, false)])), false);
 });
 
 test('the look of a picture being made is still in its own sheet, and moves only in the one the animations switch', () => {
   const css = fs.readFileSync(path.resolve(import.meta.dirname, '../web/src/styles/preview.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(css.includes('.image-preview-making'));
+  assert.ok(css.includes('.image-preview-loading'), 'a picture on its way after the call is over has its own, still, look');
   assert.doesNotMatch(css, /animation|@keyframes/, 'with the animations off, the placeholder is still');
   const motion = fs.readFileSync(path.resolve(import.meta.dirname, '../web/src/styles/motion.css'), 'utf8');
   for (const name of ['fx-preview-drift', 'fx-preview-sheen', 'fx-preview-breathe']) assert.match(motion, new RegExp(`@keyframes ${name}\\b`));
