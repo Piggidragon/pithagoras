@@ -13,30 +13,34 @@ import { test, expect, type Page } from '@playwright/test';
 test.use({ storageState: { cookies: [], origins: [] } });
 
 interface Played { on: string; keys: string[]; ghost: boolean; duration: number }
-interface Picture { text: string; hidden: string | null; pointer: string; roles: number; dock: string | null; scrollTop: number; z: number }
+interface Picture { text: string; hidden: string | null; pointer: string; roles: number; dock: string | null; scrollTop: number; z: number; lived: number | null }
 
 const at = new Date().toISOString();
 const chat = (id: string, title: string, extra: object = {}) => ({ id, title, workspace: `/w/${id}`, status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null, ...extra });
 
 /** Five questions, each answered with a command and a reply: more than a window holds. */
-const conversation = (tag: string) => {
+const conversation = (tag: string, bigTurn = 1) => {
   let seq = 0;
   const ev = (type: string, payload: object = {}) => ({ seq: ++seq, type, at: Date.now() - 100_000 + seq * 1000, payload });
   const out: ReturnType<typeof ev>[] = [];
   for (let i = 1; i <= 5; i++) {
     out.push(ev('portal_prompt', { message: `${tag} question ${i}` }), ev('agent_start'));
-    out.push(ev('tool_execution_start', { toolCallId: `${tag}${i}`, toolName: 'bash', args: { command: `npm test ${i}` } }));
-    out.push(ev('tool_execution_end', { toolCallId: `${tag}${i}`, toolName: 'bash', result: { content: [{ type: 'text', text: 'ok\n' }] } }));
+    // One command a turn, or many for the fourth, when asked.
+    for (let c = 0; c < (i === 4 ? bigTurn : 1); c++) {
+      const id = `${tag}${i}.${c}`;
+      out.push(ev('tool_execution_start', { toolCallId: id, toolName: 'bash', args: { command: `npm test ${i}.${c}` } }));
+      out.push(ev('tool_execution_end', { toolCallId: id, toolName: 'bash', result: { content: [{ type: 'text', text: 'ok\n' }] } }));
+    }
     out.push(ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: `${tag} answer ${i}: nothing else to fix here.` }] } }), ev('agent_end'));
   }
   return out;
 };
 
 /** The portal over canned answers: chats that can be deleted, a stream that replays them, and a log of what is played. */
-async function portal(page: Page, { off = false, confirms = true, places, many = 0 }: { off?: boolean; confirms?: boolean; places?: Record<string, string>; many?: boolean | number } = {}) {
+async function portal(page: Page, { off = false, confirms = true, places, many = 0, bigTurn = 1 }: { off?: boolean; confirms?: boolean; places?: Record<string, string>; many?: boolean | number; bigTurn?: number } = {}) {
   // More than the sidebar lists without a search box, when asked.
   const extra = many ? Array.from({ length: many === true ? 10 : many }, (_, i) => chat(`x${i}`, `Extra chat ${i}`)) : [];
-  const state = { removeDelay: 80, sessions: [chat('a', 'First chat'), chat('b', 'Second chat'), chat('c', 'Third chat'), chat('d', 'Fourth chat'), ...extra], events: { a: conversation('A'), b: conversation('B'), c: [] as any[], d: [] as any[], r: conversation('R') } as Record<string, any[]> };
+  const state = { removeDelay: 80, sessions: [chat('a', 'First chat'), chat('b', 'Second chat'), chat('c', 'Third chat'), chat('d', 'Fourth chat'), ...extra], events: { a: conversation('A', bigTurn), b: conversation('B'), c: [] as any[], d: [] as any[], r: conversation('R') } as Record<string, any[]> };
   // A routine's chat: opened by its address, and not in the list of chats.
   const routine = chat('r', 'Routine chat', { kind: 'routine' });
   await page.route('**/api/**', async (route) => {
@@ -92,10 +96,17 @@ async function portal(page: Page, { off = false, confirms = true, places, many =
     };
     const pictures: Picture[] = ((window as any).pictures = []);
     const intro: { pointer: string; at: number }[] = ((window as any).intro = []);
+    const entries = new Map<Node, { at: number; entry: any }>();
     new MutationObserver((records) => {
+      const now = performance.now();
+      for (const r of records) for (const n of r.removedNodes) {
+        const was = entries.get(n);
+        if (was) was.entry.lived = now - was.at;
+      }
       for (const r of records) for (const n of r.addedNodes) {
         if (!(n instanceof HTMLElement)) continue;
-        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length, dock: n.firstElementChild?.getAttribute('data-dock') ?? null, scrollTop: (n.firstElementChild as HTMLElement | null)?.scrollTop ?? 0, z: Number(getComputedStyle(n).zIndex) });
+        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length, dock: n.firstElementChild?.getAttribute('data-dock') ?? null, scrollTop: (n.firstElementChild as HTMLElement | null)?.scrollTop ?? 0, z: Number(getComputedStyle(n).zIndex), lived: null });
+        if (n.hasAttribute('data-ghost')) entries.set(n, { at: now, entry: pictures[pictures.length - 1] });
         if (n.classList.contains('app-intro')) intro.push({ pointer: getComputedStyle(n).pointerEvents, at: performance.now() });
       }
     }).observe(document, { childList: true, subtree: true });
@@ -174,6 +185,8 @@ test('a system that asks for reduced motion wins over the switch, and the switch
   await expect(page.getByRole('switch', { name: 'Fancy animations' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByText('Your system asks for reduced motion')).toBeVisible();
   await page.keyboard.press('Escape');
+  // Gone while the system still asks for less: it is not what is switched on next that sees it go.
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 
   // Changed while the page is open, it follows.
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -836,4 +849,42 @@ test('a menu that opens Settings as it closes drops away under the dialog', asyn
   await page.waitForURL(/\/settings\/models$/);
   await expect.poll(async () => (await pictures(page)).filter((p) => p.text.includes('Add or change providers')).length).toBeGreaterThan(0);
   expect((await pictures(page)).find((p) => p.text.includes('Add or change providers'))!.z).toBeLessThan(50);
+});
+
+test('a conversation that is left is under the floating window that lies over it', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  await portal(page, { places: { terminal: 'float' } });
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await expect(page.locator('aside[data-dock="float"]')).toBeVisible();
+  await page.waitForTimeout(900);
+
+  await row(page, 'Second chat').click();
+  await expect.poll(async () => (await pictures(page)).filter((p) => p.text.includes('A answer 5')).length).toBeGreaterThan(0);
+  // The window is at 20, and stays open across the switch: what is left of the chat does not lie over it.
+  const left = (await pictures(page)).find((p) => p.text.includes('A answer 5'))!;
+  expect(left.z).toBeLessThan(20);
+});
+
+test('deleting a message with many rows in its turn still breaks the message itself apart', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 1100 });
+  // Ten commands answering the fourth question.
+  await portal(page, { bigTurn: 10 });
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await expect(page.locator('main .chat-list')).not.toHaveClass(/is-opening/);
+  const message = page.locator('[data-key]', { hasText: 'A question 4' });
+  await message.hover();
+  await message.getByRole('button', { name: /Delete this message/ }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByText('A question 4')).toHaveCount(0);
+  await page.waitForTimeout(1500);
+
+  const all = await pictures(page);
+  // The one that was deleted was seen, for as long as the others, and not taken off the page before it was drawn.
+  const question = all.find((p) => p.text.includes('A question 4'))!;
+  expect(question.lived).toBeGreaterThan(150);
+  // So was the sinking of the dialog that asked.
+  expect(all.find((p) => p.text.includes('Delete this message?'))!.lived).toBeGreaterThan(150);
 });

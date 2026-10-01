@@ -144,11 +144,14 @@ const LEAVES: Record<Leave, (el: HTMLElement, delay: number) => Animation[]> = {
 /**
  * How high a picture is laid: just over what it came from, wherever that was
  * drawn — the phone's drawer is at 50, a dialog at 50 or 60, a list that opens
- * at 200 — and under whatever opens above that, which a fixed number for each
- * kind could not know. Where the source is not drawn in a layer of its own
- * (a page, a row in the sidebar of a wide window) it is under the dialogs.
+ * at 200, a floating window at 20 — and under whatever opens above that, which a
+ * fixed number for each kind could not know. Where the source is not drawn in a
+ * layer of its own (a page, the conversation, a row in the sidebar of a wide
+ * window) it is under every layer there is: appended to the page last, it
+ * is still over what is drawn in the flow, and under the windows and panels
+ * that lie over the conversation, which stay open as it goes.
  */
-const BELOW_DIALOGS = 25;
+const UNDER_LAYERS = 0;
 function layerOf(source: HTMLElement): number {
   let z: number | null = null;
   for (let el: HTMLElement | null = source; el; el = el.parentElement) {
@@ -156,10 +159,13 @@ function layerOf(source: HTMLElement): number {
     // The outermost: what the rest is drawn inside of.
     if (Number.isFinite(at)) z = at;
   }
-  return z === null ? BELOW_DIALOGS : z + 1;
+  return z === null ? UNDER_LAYERS : z + 1;
 }
 
-const MAX_GHOSTS = 8;
+/** At most this many pictures are on the page at once; the oldest give way. */
+const MAX_GHOSTS = 10;
+/** The most a deletion plays out: its rows, from the message that was deleted, spread over what went. */
+const MAX_BATCH = 6;
 const ghosts = new Set<HTMLElement>();
 /** Set while a page is being swapped for another, whose own picture covers everything in it. */
 let swapping = false;
@@ -473,16 +479,16 @@ export function settle(m: Mark, how: Leave = "message"): boolean {
   const now = spotsOf(m.box, "data-key");
   // What was drawn at the press has been moved by what was scrolled since.
   const moved = m.scrolled - m.seen;
-  let changed = false;
-  let n = 0;
-  for (const [key, shot] of m.shots) {
-    if (now.has(key)) continue;
+  const gone = [...m.shots].filter(([key]) => !now.has(key));
+  if (!gone.length) return false;
+  // A turn can have more rows than there is room for pictures, and those first in are the ones that give way: the message that was deleted is what is
+  // pictured first, and the rest of what went is spread from it to the last.
+  const played = gone.length <= MAX_BATCH ? gone : Array.from({ length: MAX_BATCH }, (_, i) => gone[Math.round((i * (gone.length - 1)) / (MAX_BATCH - 1))]);
+  played.forEach(([, shot], n) => {
     shot.el.style.top = `${Number.parseFloat(shot.el.style.top) + moved}px`;
     // One after another, the way they were said.
-    out(shot, how, Math.min(n++ * 45, 400));
-    changed = true;
-  }
-  if (!changed) return false;
+    out(shot, how, Math.min(n * 45, 400));
+  });
   m.stop();
   const slid = reflow(m.box, "data-key", new Map([...m.spots].map(([key, y]) => [key, y - m.seen])), now, false);
   // Rows that start from below the end of the list would make it scroll further
