@@ -313,7 +313,9 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 
 | | |
 | --- | --- |
-| `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode, maxParallel }, understory: { enabled, url, tokenSet, adapterInstalled, reachable, managed: { available, image, container, pulling, url, config, providers } } }` — `config` never holds a key |
+| `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode, maxParallel }, understory: { enabled, url, tokenSet, adapterInstalled, reachable, managed: { available, image, container, pulling, url, config, providers } }, images: { enabled, baseUrl, model, size, keySet } }` — `config` never holds a key, and `images` only whether one is set |
+| `GET /api/features/images` | `{ images: { enabled, baseUrl, model, size, keySet } }` — the image endpoint alone; the key is never returned |
+| `PUT /api/features/images` | `{ enabled?, baseUrl?, model?, size?, apiKey? }` — `baseUrl` is an http(s) base with no login, query or fragment (empty clears it), `size` is `WIDTHxHEIGHT` or `auto` (empty clears it), `apiKey` left out keeps the saved one and `""` removes it; a new origin without a key drops the saved one. 400 for anything else, and for `enabled: true` with no address. Answers `{ images, changed, reloaded, waiting }`; idle open sessions are reloaded only when the tool came or went (`changed`) |
 | `PUT /api/features/subagent` | `{ enabled?, mode?: "interrupt" \| "background", maxParallel?: 1–16, model?: "auto" \| "provider/model" }` — installs or removes the bundled subagent tool, writes `subagentMode`, `subagentMaxParallel` and `subagentModel`; reloads idle open sessions |
 | `GET /api/sessions/:id/subagent-model` | `{ model, default }` — what this chat's subagents run on: its own choice (`null` follows `default`) |
 | `PUT /api/sessions/:id/subagent-model` | `{ model: null \| "auto" \| "provider/model" }` |

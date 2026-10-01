@@ -1,5 +1,6 @@
 import { CanvasTools } from "./canvas-tools.js";
 import { showImageTool } from "./show-image-tool.js";
+import { GENERATE_IMAGE_VOICE_LINE, GenerateImageTool } from "./generate-image-tool.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
@@ -391,7 +392,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // prompt templates — so installed packages contribute no commands at all.
     // The CLI wires this up for you; here it has to be asked for.
     const voiceFirst = new VoiceFirstTurn();
-    const audioRule = new AudioRule(getVoiceInstructions);
+    // Whether it has the tool is settled each time pi loads it: the rule says so only while it does.
+    const imageTool = opts.sessionId ? new GenerateImageTool(opts.cwd) : undefined;
+    const audioRule = new AudioRule(getVoiceInstructions, () => (imageTool?.registered() ? GENERATE_IMAGE_VOICE_LINE : ""));
     const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
     let resourceLoader: any;
     try {
@@ -413,6 +416,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       if (canvases) factories.push({ name: "canvases", factory: canvases.extension });
       // Beside the canvases: both are how the agent puts something on the screen.
       if (opts.sessionId) factories.push({ name: "pictures", factory: showImageTool(opts.cwd) });
+      // Registers nothing while the add-on is off or has no address: see GenerateImageTool.
+      if (imageTool) factories.push({ name: "image-generation", factory: imageTool.extension });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       // Only where it means something: a conversation with the primary user has

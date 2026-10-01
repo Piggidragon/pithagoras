@@ -105,6 +105,7 @@ export function describeCall(payload: any, folder: string): ToolCall {
   if (name === "grep") return { label: t("Searching for “{pattern}”", { pattern: flat(text(input.pattern), 40) }), detail: flat([text(input.path), text(input.glob)].filter(Boolean).join(" · ")) };
   if (name === "find") return { label: t("Looking for “{pattern}”", { pattern: flat(text(input.pattern), 40) }), detail: flat(text(input.path)) };
   if (name === "ls") return { label: t("Listing {folder}", { folder: path ? base(path) : t("the folder") }), detail: "" };
+  if (name === "generate_image") return { label: t("Making a picture"), detail: flat(text(input.title) || text(input.prompt)), target: "pictures" };
   if (name === "show_image") return { label: t("Showing a picture"), detail: flat(text(input.title) || text(input.path)), target: "pictures" };
   if (name.startsWith("canvas_")) {
     const verb: Record<string, string> = { canvas_create: t("Starting a document"), canvas_write: t("Writing in a document"), canvas_read: t("Reading a document"), canvas_list: t("Looking at the documents"), canvas_delete: t("Deleting a document") };

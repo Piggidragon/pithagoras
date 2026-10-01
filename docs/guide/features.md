@@ -1,14 +1,17 @@
 # Opt-in features
 
-Two capabilities ship with Pithagoras and are **off** until you switch them on
-in **Settings → Add-ons**: a **subagent tool** and **Understory** as the agent's
-memory. A fresh install has neither. (The same tab holds the Docker-based
-[Browser and Voice](/guide/add-ons).) Switching one on writes it into pi's own
-configuration — a package, an MCP server — so it can also be seen, and undone,
-from Settings → Extensions and Settings → MCP. Switching it off removes it.
+Three capabilities ship with Pithagoras and are **off** until you switch them on
+in **Settings → Add-ons**: a **subagent tool**, **Understory** as the agent's
+memory, and **image generation**. A fresh install has none of them. (The same
+tab holds the Docker-based [Browser and Voice](/guide/add-ons).) Switching on
+the first two writes them into pi's own configuration — a package, an MCP
+server — so they can also be seen, and undone, from Settings → Extensions and
+Settings → MCP. Switching one off removes it. Image generation is the portal's
+own tool and keeps its settings in the portal.
 
-Each is a reference implementation behind a seam the portal already has, so a
-third-party equivalent can take its place without changing the portal:
+The first two are reference implementations behind a seam the portal already
+has, so a third-party equivalent can take their place without changing the
+portal:
 
 - the subagent tool speaks the [subagent protocol](/guide/extensions#the-subagent-protocol);
   any extension that does is shown and steered the same way;
@@ -71,6 +74,83 @@ portal. `PI_SUBAGENT_BIN` picks the `pi` it starts (default: `pi` on `PATH`).
 
 Subagents need the host executor (`EXECUTOR=host`): only there does the portal
 share pi's event bus with the tool.
+
+## Image generation
+
+**Settings → Add-ons → Images.** A `generate_image` tool: the agent describes a
+picture, an image model you set up makes it, and it appears in the chat — and
+in voice mode's picture window — just like one the agent showed with
+`show_image`. It is off until you have saved an address and switched it on;
+until then the agent has no such tool at all, and the voice instructions say
+nothing of one.
+
+### The endpoint
+
+Any server with an OpenAI-style `images/generations` route: hosted providers,
+and local servers that offer it. Nothing about one provider or model is built
+in.
+
+| Field | Meaning |
+| --- | --- |
+| **API address** | The API's base, such as `https://images.example.com/v1`. The portal adds `/images/generations` unless the address already ends with it. No login, query or `#` in it: the key has its own field. |
+| **API key** | Sent as `Authorization: Bearer …` to this address, and nowhere else. Left empty for a server that needs none. A saved key is never shown again — the page is only told that one is set — so leave the field empty to keep it, or choose **Remove the saved key**. Giving another address without a key drops the saved one: a key belongs to the server it was given for. |
+| **Model** | Sent as `model`. Empty sends none, for a server that has only one. |
+| **Picture size** | Sent as `size`, such as `1024x1024`. Empty sends none. The agent can ask for another size in a call. |
+
+The request is `{ model?, prompt, n: 1, size? }`. The answer's first picture is
+taken from `data[0].b64_json`, or from `data[0].url` — an address, or a `data:`
+URL. Other request and answer shapes are not translated; an endpoint that
+speaks one needs a small adapter in front.
+
+The address, model, size and key are read at each call, so changing them needs
+no restart. Switching the tool on or off, though, is decided when a chat loads:
+like the other features, a switch reloads the idle open chats, and a busy one
+has it after it is idle and reloaded (`/reload`). The tool belongs to the
+in-process agent (`EXECUTOR=host`), as `show_image` does.
+
+### What the agent gets
+
+`generate_image(prompt, title?, size?)` makes one picture, saves it, and shows
+it. The picture is written to a `generated-images` folder inside the chat's
+folder — the one place the page serves pictures from — under a name the portal
+makes (`image-20261001-101500-a1b2c3.png`), never one the agent or the endpoint
+chose, and never over an existing file. Its answer is the picture's path and a
+title, the same as `show_image`'s, so the chat draws a thumbnail under the tool
+line and voice mode opens the Pictures window through the path `show_image`
+already has. A failure — nothing configured, the endpoint's error, a reply that is
+no picture — is an error result the agent sees and can pass on, never a
+silent success.
+
+Only the primary user's conversations can have the agent make a picture: like
+any tool that is not a plain read, it is refused in a conversation with a
+teammate unless a [tool rule](/people/rules) allows it. Each picture can cost
+money at a hosted endpoint.
+
+### What is accepted
+
+- **A real picture.** What the endpoint sends must be a PNG, JPEG, GIF or WebP
+  by its first bytes, whatever it is called or served as. Anything else —
+  an SVG, an HTML page — is refused and not kept.
+- **A size and a time.** At most 20 MB per picture, and three minutes in all
+  for the endpoint to answer and the picture to arrive. Stopping the chat stops
+  the request.
+- **Where an address may lead.** When the endpoint answers with an address, the
+  portal fetches the picture from it, which means fetching from a place the
+  endpoint picked. Two kinds of place are allowed: the endpoint's **own host**
+  (same scheme, name and port — it is the one you chose to trust, and a local
+  server hands out its pictures itself, with the key if it needs one), and any
+  host on the **public internet over https**, which is what a hosted provider's
+  storage links are. Everything else is refused: another place on this machine
+  or its network (`localhost`, `10.…`, `192.168.…`, `169.254.169.254` and the
+  like), including through a name that resolves to one — checked where the
+  connection is made — and including through a redirect, of which three are
+  followed, each judged the same way. The key is never sent to a host other than
+  the endpoint's own, and the endpoint itself is never followed to another place.
+
+| | |
+| --- | --- |
+| Stored as | The portal's own settings (`image_generation`), not pi's `settings.json`, which the Advanced tab shows in full. |
+| API | [`/api/features/images`](/reference/api#opt-in-features) |
 
 ## Memory: Understory
 

@@ -15,15 +15,18 @@ const sentImages = (raw: unknown): SentImage[] | undefined => {
   return list.length ? list : undefined;
 };
 
-/** A picture the agent put in front of the person with show_image: its path in the chat's folder. */
+/** A picture the agent put in front of the person with show_image, or made for them with generate_image: its path in the chat's folder. */
 export interface ShownPicture {
   path: string;
   title?: string;
 }
 
-/** The picture a show_image call ended with, when it succeeded. */
+/** The tools that end with a picture in the chat's folder to show: both answer with its path and a title. */
+const PICTURE_TOOLS = ["show_image", "generate_image"];
+
+/** The picture a show_image or generate_image call ended with, when it succeeded. */
 export function shownPicture(payload: any): ShownPicture | undefined {
-  if (String(payload?.toolName ?? payload?.name ?? "") !== "show_image" || payload?.isError) return undefined;
+  if (!PICTURE_TOOLS.includes(String(payload?.toolName ?? payload?.name ?? "")) || payload?.isError) return undefined;
   const details = payload?.result?.details;
   if (typeof details?.path !== "string" || !details.path) return undefined;
   return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };

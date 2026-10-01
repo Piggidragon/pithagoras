@@ -16,6 +16,7 @@ import {
   understoryOn,
   understoryTokenOf,
 } from "../features.js";
+import { ImageGenerationError, imageGenerationReady, imageGenerationState, parseImageGenerationPatch, saveImageGeneration } from "../image-generation.js";
 import { readPiSettings, updatePiSettings } from "../pi-settings.js";
 import { sessions } from "../session-manager.js";
 import { switchPackage } from "./extensions.js";
@@ -171,9 +172,18 @@ export function featuresRouter(): Router {
     }
   });
 
+  /** Image generation alone, as the subagent tool: its tab needs nothing of Understory or Docker. The key is never in it, only whether one is set. */
+  router.get("/features/images", (_req, res) => {
+    try {
+      res.json({ images: imageGenerationState() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
   router.get("/features", async (_req, res) => {
     try {
-      res.json({ subagent: subagentState(), understory: await understoryState() });
+      res.json({ subagent: subagentState(), understory: await understoryState(), images: imageGenerationState() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
@@ -222,6 +232,26 @@ export function featuresRouter(): Router {
       res.json({ subagent: subagentState(), reloaded, waiting });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * The image endpoint and whether the agent has a tool for it. The tool is
+   * there only while it is on and has an address, and a chat decides that when
+   * it loads, so a change in that reloads the idle ones. The rest — address,
+   * model, size, key — is read at each call and needs no reload.
+   */
+  router.put("/features/images", async (req, res) => {
+    const patch = parseImageGenerationPatch(req.body);
+    if (typeof patch === "string") return res.status(400).json({ error: patch });
+    try {
+      const before = imageGenerationReady();
+      saveImageGeneration(patch);
+      const changed = imageGenerationReady() !== before;
+      const { reloaded, waiting } = changed ? await sessions.reloadIdle() : { reloaded: 0, waiting: 0 };
+      res.json({ images: imageGenerationState(), changed, reloaded, waiting });
+    } catch (e) {
+      res.status(e instanceof ImageGenerationError ? 400 : 500).json({ error: (e as Error).message });
     }
   });
 
