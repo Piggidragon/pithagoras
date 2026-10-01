@@ -304,3 +304,31 @@ test('the conversation window renders a reply as markdown, also while it is writ
   await page.getByRole('button', { name: 'Voice settings' }).click();
   await expect(page.getByRole('group', { name: 'Speech bubbles' }).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('Escape in the confirmation of a link in a reply closes it and neither stops the agent nor ends voice mode', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Show the conversation' }).click();
+  const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
+  // Still being written: the agent is running.
+  await page.getByRole('button', { name: 'Stream markdown' }).click();
+  await conversation.getByRole('button', { name: 'the docs' }).click();
+  const confirmation = page.locator('[data-streamdown="link-safety-modal"]');
+  await expect(confirmation).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(confirmation).toBeHidden();
+  await expect(page.getByTestId('aborted')).toHaveText('0');
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
+});
+
+test('the voice settings card stays inside a short screen and scrolls', async ({ page }) => {
+  await page.setViewportSize({ width: 844, height: 390 });
+  await start(page);
+  await page.getByRole('button', { name: 'Voice settings' }).click();
+  const card = page.getByRole('dialog', { name: 'Voice settings' });
+  await expect(card).toBeVisible();
+  expect((await card.boundingBox())!.y).toBeGreaterThanOrEqual(0);
+  expect(await card.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+  // The first row can be reached.
+  await card.getByRole('group', { name: 'Speaking speed' }).scrollIntoViewIfNeeded();
+  await expect(card.getByRole('group', { name: 'Speaking speed' })).toBeInViewport();
+});

@@ -426,7 +426,7 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
 .voice-said-pictures img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; }
 
 /* Voice settings, in a card above the buttons that open it. */
-.voice-settings { position: fixed; z-index: 55; width: min(320px, calc(100vw - 16px)); display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid #62718a; border-radius: 16px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 20px 60px #0006; }
+.voice-settings { position: fixed; z-index: 55; overflow-y: auto; width: min(320px, calc(100vw - 16px)); display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid #62718a; border-radius: 16px; background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 20px 60px #0006; }
 .voice-setting > span { display: block; font-size: 12px; font-weight: 500; margin-bottom: 6px; }
 .voice-setting > p { margin-top: 6px; font-size: 11px; line-height: 1.45; color: rgb(var(--fg-muted)); }
 .voice-segments { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: rgb(var(--fg) / .07); }

@@ -283,7 +283,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     const down = (e: KeyboardEvent) => {
       const { bindings, actions, ptt, onHold } = keys.current;
       // A dialog, or the voice settings card closing on Escape, has the key.
-      if (e.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
+      // So has the confirmation a link in a reply asks before it leaves: it is no aria-modal, and Escape there would otherwise stop the agent or end voice mode.
+      if (e.defaultPrevented || document.querySelector('[aria-modal="true"], [data-streamdown="link-safety-modal"]')) return;
       if (e.code === "Escape" && document.querySelector(".voice-settings")) return;
       // Escape gives a maximized browser its place back before it stops anything.
       if (e.code === "Escape" && keys.current.maximized && !editing(e.target)) {

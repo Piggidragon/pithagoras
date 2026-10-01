@@ -49,7 +49,7 @@ export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, o
   }, []);
   const choice = <T,>(value: T, current: T, label: string, pick: (value: T) => void) =>
     <button type="button" aria-pressed={value === current} onClick={() => pick(value)}>{label}</button>;
-  return createPortal(<div ref={card} className="voice-settings" role="dialog" aria-label={t("Voice settings")} style={at ? { right: at.right, bottom: at.bottom } : { visibility: "hidden" }}>
+  return createPortal(<div ref={card} className="voice-settings" role="dialog" aria-label={t("Voice settings")} style={at ? { right: at.right, bottom: at.bottom, maxHeight: `calc(100dvh - ${at.bottom}px - 8px)` } : { visibility: "hidden" }}>
     <div className="voice-setting" role="group" aria-label={t("Speaking speed")}>
       <span aria-hidden="true">{t("Speaking speed")}</span>
       <div className="voice-segments">{VOICE_RATES.map(r => <Fragment key={r}>{choice(r, rate, `${r}×`, onRate)}</Fragment>)}</div>
