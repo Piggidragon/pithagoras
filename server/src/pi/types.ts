@@ -66,6 +66,8 @@ export interface PiCommand {
   name: string;
   description?: string;
   source: string;
+  /** Prompt templates: where the values of its argument come from, for the page to suggest (see argument-sources.ts). */
+  argumentSource?: string;
 }
 
 /**

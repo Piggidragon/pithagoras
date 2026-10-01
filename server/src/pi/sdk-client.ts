@@ -3,6 +3,7 @@ import { showImageTool } from "./show-image-tool.js";
 import { GENERATE_IMAGE_VOICE_LINE, GenerateImageTool } from "./generate-image-tool.js";
 import { EDIT_IMAGE_VOICE_LINE, EditImageTool } from "./edit-image-tool.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL } from "../image-generation.js";
+import { declaredArguments } from "../argument-sources.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
@@ -1281,7 +1282,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       });
     }
     for (const t of asArray(this.session.promptTemplates)) {
-      commands.push({ name: t.name, description: t.description, source: "prompt" });
+      const argumentSource = typeof t.filePath === "string" ? declaredArguments(t.filePath) : undefined;
+      commands.push({ name: t.name, description: t.description, source: "prompt", ...(argumentSource ? { argumentSource } : {}) });
     }
     for (const skill of asArray(this.session.resourceLoader?.getSkills?.()?.skills)) {
       commands.push({

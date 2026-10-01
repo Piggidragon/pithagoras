@@ -18,8 +18,10 @@ say its data in those blocks is a small job, which the agent does for you:
 ## Connecting an extension
 
 1. Install the extension as usual, in [Settings → Extensions](/guide/extensions).
-2. In a chat, type `/screen` and the extension's name, as `pi list` shows it. Leave
-   the name out and the agent asks which one you mean.
+2. In a chat, type `/screen` and a space. The extensions that are on are listed
+   right behind the command: [pick one](#picking-the-extension), or type its
+   name, as `pi list` shows it. Leave the name out and the agent asks which one
+   you mean.
 3. The agent reads the extension, decides on the smallest screen of use (for a
    todo list: a progress line and the tasks with their state), writes the
    connection, checks that pi can load it, and tells you what it made and where.
@@ -32,6 +34,40 @@ say its data in those blocks is a small job, which the agent does for you:
 
 A name with a scope, `@scope/name`, is fine to give `/screen`. The agent makes a
 short folder name of its own from it for the connection.
+
+## Picking the extension
+
+After `/screen` and a space, the list above the message box offers the
+extensions of this chat, each with where it comes from (the package it was
+installed as, or its folder). It narrows as you type: names that start with what
+you typed come first, then names that contain it. The keys are the palette's: `↑`
+`↓` move the highlight, `Enter` or `Tab` puts the highlighted name after the
+command (a second `Enter` sends it), and `Esc` puts the list away. A tap or a
+click on a row does the same, so it works on a phone. Type a name that is none of
+them and no list is shown: it is sent as you wrote it.
+
+What is listed is what is **on** in this chat, the same as in
+[Settings → Extensions](/guide/extensions) and the chat's tools menu:
+
+- A package of your settings counts unless it is switched off there, or narrowed
+  to none of its extensions. An extension you only filtered by hand still counts.
+- A package of the chat's [project](/guide/projects) counts too, and says so
+  (*this project*). A package the project lists and loads counts even if your
+  own settings have it off.
+- A package is not listed in a chat where all of its tools are switched off in
+  the chat's tools menu, whether by default, by the project or by the chat. Turn
+  one of its tools back on and it is listed again.
+- Extensions you keep as files, a script or a folder with an `index.ts` or a
+  `package.json` in `extensions` in pi's agent folder or in the project's `.pi`
+  folder, count as on.
+
+Left out are the portal's own extensions (the subagent tool it can install, say)
+and the connections `/screen` made earlier, the `screen-…` folders: those are
+what is connected, not what to connect. One that already has a connection is
+marked *has a screen*. That is read from the connection: its folder is named for
+the extension, or its `Written against:` line names it. Picking a marked one is
+how you have the agent make the connection again, after an update of the
+extension has changed its data.
 
 `/screen` is a prompt template and `extension-screens` is the
 [skill](/guide/extensions#built-in-skills) it has the agent follow. Both ship

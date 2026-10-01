@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../web/src/slash-palette.ts";
+import { argumentMatches, argumentToken, moveHighlight, paletteMatches, slashToken, typedCommand } from "../web/src/slash-palette.ts";
 
 const c = (...names: string[]) => names.map((name) => ({ name }));
 
@@ -81,4 +81,52 @@ test("the highlight wraps at both ends", () => {
   assert.equal(moveHighlight(2, 1, 3), 0);
   assert.equal(moveHighlight(0, -1, 3), 2);
   assert.equal(moveHighlight(0, 1, 0), 0);
+});
+
+test("a command, a space and one word is an argument being typed; the first word only", () => {
+  assert.deepEqual(argumentToken("/screen "), { name: "screen", typed: "" });
+  assert.deepEqual(argumentToken("/screen rp"), { name: "screen", typed: "rp" });
+  assert.deepEqual(argumentToken("  /skill:review @scope/pkg"), { name: "skill:review", typed: "@scope/pkg" });
+  assert.deepEqual(argumentToken("/screen\trp"), { name: "screen", typed: "rp" });
+  // The name alone is still the palette's; a second word, a line break or other text before it is a message.
+  assert.equal(argumentToken("/screen"), null);
+  assert.equal(argumentToken("/screen one two"), null);
+  assert.equal(argumentToken("/screen one "), null);
+  assert.equal(argumentToken("/screen one\ntwo"), null);
+  assert.equal(argumentToken("/screen\n"), null);
+  assert.equal(argumentToken("hello /screen x"), null);
+  assert.equal(argumentToken("/etc/hosts is wrong"), null);
+});
+
+test("under another trigger the argument is read after it, and after the slash that may have been typed", () => {
+  assert.deepEqual(argumentToken("!screen rp", "!"), { name: "screen", typed: "rp" });
+  assert.deepEqual(argumentToken("/screen rp", "!"), { name: "screen", typed: "rp" });
+  assert.equal(argumentToken("?screen rp", "!"), null);
+  assert.deepEqual(argumentToken(".screen rp", "."), { name: "screen", typed: "rp" });
+  assert.equal(argumentToken("xscreen rp", "."), null);
+});
+
+test("what starts with the typed word comes first, then what has it inside, each in the order offered", () => {
+  const all = [{ value: "@scope/rpiv-todo" }, { value: "rpiv-ask" }, { value: "web-search" }, { value: "rpiv-web" }];
+  assert.deepEqual(
+    argumentMatches(all, "rpiv").map((x) => x.value),
+    ["rpiv-ask", "rpiv-web", "@scope/rpiv-todo"],
+  );
+  assert.deepEqual(
+    argumentMatches(all, "WEB").map((x) => x.value),
+    ["web-search", "rpiv-web"],
+  );
+  assert.deepEqual(argumentMatches(all, "").map((x) => x.value), all.map((x) => x.value));
+  assert.deepEqual(argumentMatches(all, "zzz"), []);
+});
+
+test("nothing is suggested once what was typed is one of the values in full, so Enter sends it", () => {
+  const all = [{ value: "todo" }, { value: "todo-plus" }];
+  assert.deepEqual(argumentMatches(all, "todo"), []);
+  assert.deepEqual(argumentMatches(all, "TODO"), []);
+  assert.deepEqual(
+    argumentMatches(all, "todo-").map((x) => x.value),
+    ["todo-plus"],
+  );
+  assert.deepEqual(argumentMatches([], "x"), []);
 });

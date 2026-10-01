@@ -23,6 +23,15 @@ A command typed out in full is the one highlighted, so `/skill:a` never runs
 an argument — `/name` — is completed by Enter instead of run, so there is
 somewhere to type the name.
 
+A command that takes one of a known set of values suggests them once you have
+typed its name and a space: `/screen ` lists the extensions that are on. The list
+narrows as you type, and the keys are the same: `↑` `↓` to move, `Enter` or `Tab`
+to put the highlighted value after the command (a second `Enter` sends), `Esc` to
+put the list away, and a tap or a click picks one. A prompt you write yourself
+can do the same: put `arguments: extensions` in its frontmatter, next to
+`description`, and the extensions that are on are suggested for its argument.
+Nothing is suggested for other commands.
+
 A command that opens a dialog does not appear in the transcript. Its menu is the
 feedback; a chat bubble saying `/models` would be noise.
 
@@ -118,7 +127,7 @@ The portal ships a few commands of its own that are prompt templates, listed as
 
 | Command | Does |
 | --- | --- |
-| `/screen <extension>` | Has the agent connect an installed extension to the [Screens panel](/guide/screens), so its data (a todo list, say) is shown beside the chat |
+| `/screen <extension>` | Has the agent connect an installed extension to the [Screens panel](/guide/screens), so its data (a todo list, say) is shown beside the chat. After the space the extensions that are on are suggested, see [Picking the extension](/guide/screens#picking-the-extension) |
 
 ## Adding more
 

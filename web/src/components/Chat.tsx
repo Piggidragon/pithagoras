@@ -23,14 +23,14 @@ import { Fragment, cloneElement, useCallback, useEffect, useLayoutEffect, useMem
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuLayoutDashboard, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
-import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
+import { api, type ArgumentChoice, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { confirmDialog } from "./ConfirmDialog";
-import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
+import { argumentMatches, argumentToken, moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
@@ -45,7 +45,13 @@ import { copyText } from "../clipboard";
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
-import { msg, t, tp } from "../i18n";
+import { labelOf, msg, t, tp } from "../i18n";
+
+/** What the portal says of a value it suggests, in words: the labels of the short words it uses. */
+const ARGUMENT_NOTES: Record<string, string> = {
+  screen: msg("has a screen"),
+  project: msg("this project"),
+};
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -1021,13 +1027,35 @@ export function Chat({
   // whatever character commands start with in this browser.
   const trigger = useCommandTrigger();
   const slashText = slashToken(input, trigger);
-  const wantsCommands = slashText !== null;
+  // Past the command's name, a space and a word: what the command takes as its argument is suggested,
+  // where it says where the values come from (a prompt that takes an installed extension, say). The
+  // commands are wanted for that too: a draft that already holds "/name x" has not passed the list.
+  const argToken = argumentToken(input, trigger);
+  const wantsCommands = slashText !== null || argToken !== null;
   useEffect(() => {
     if (wantsCommands) void loadCommands();
   }, [wantsCommands, session.id, turns]);
   const allMatches = useMemo(
     () => (slashText === null ? [] : paletteMatches(commands, slashText)),
     [commands, slashText],
+  );
+  const argSource = argToken ? commands.find((c) => c.name === argToken.name)?.argumentSource : undefined;
+  const [argChoices, setArgChoices] = useState<{ chat: string; source: string; choices: ArgumentChoice[] } | null>(null);
+  useEffect(() => {
+    if (!argSource) return;
+    // Asked each time an argument is begun, so what a run installed is there; what was asked before stays until then.
+    let live = true;
+    api.argumentChoices(session.id, argSource).then(
+      (r) => live && setArgChoices({ chat: session.id, source: argSource, choices: r.choices }),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [argSource, session.id, turns]);
+  const allArgMatches = useMemo(
+    () => (argToken && argSource && argChoices?.chat === session.id && argChoices.source === argSource ? argumentMatches(argChoices.choices, argToken.typed) : []),
+    [argChoices, argSource, argToken?.typed, session.id],
   );
   /** Escape puts the list away until something else is typed. */
   const [paletteShut, setPaletteShut] = useState(false);
@@ -1036,19 +1064,28 @@ export function Chat({
   useEffect(() => {
     setPicked(0);
     setPaletteShut(false);
-  }, [slashText]);
+  }, [slashText, argToken?.typed, argSource]);
   const matches = paletteShut ? [] : allMatches;
+  const argMatches = paletteShut ? [] : allArgMatches;
+  /** Whether something is listed above the box: the commands, or what one of them may be given. */
+  const listed = matches.length > 0 || argMatches.length > 0;
   const paletteBox = useRef<HTMLDivElement>(null);
   // Shut, the command list and the way back to the end drop away as pictures of themselves (see motion.ts).
   const paletteRef = useLeaveRef<HTMLDivElement>("menu", paletteBox);
   const jumpRef = useLeaveRef<HTMLButtonElement>("menu");
   useEffect(() => {
     paletteBox.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [picked, matches.length]);
+  }, [picked, matches.length, argMatches.length]);
   /** What is left in the box once a command is chosen: its name, ready for arguments. */
   const complete = (c: PiCommand) => {
     caret.current = null;
     changeInput(`${trigger}${c.name} `);
+  };
+  /** And once one of its argument's values is: the command and the value, to be sent as it stands. */
+  const completeArgument = (choice: ArgumentChoice) => {
+    if (!argToken) return;
+    caret.current = null;
+    changeInput(`${trigger}${argToken.name} ${choice.value}`);
   };
 
   useEffect(() => {
@@ -2026,7 +2063,7 @@ export function Chat({
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
         {/* Scrolled up to read, the way back to the end is one click rather
             than a long drag — and during a run, where the new output is. */}
-        {scroller.away && !loading && matches.length === 0 && (
+        {scroller.away && !loading && !listed && (
           <button
             ref={jumpRef}
             type="button"
@@ -2040,13 +2077,37 @@ export function Chat({
             {running ? t("Latest output") : t("Jump to the end")}
           </button>
         )}
-        {matches.length > 0 && (
+        {listed && (
           <div
             ref={paletteRef}
             role="listbox"
-            aria-label={t("Commands")}
+            aria-label={argMatches.length > 0 ? t("Suggestions") : t("Commands")}
             className="float-in absolute bottom-full left-0 right-0 mb-2 max-h-[min(18rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop"
           >
+            {argMatches.map((c, i) => (
+              <button
+                key={c.value}
+                type="button"
+                role="option"
+                aria-selected={i === picked}
+                onMouseEnter={() => setPicked(i)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  completeArgument(c);
+                }}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left transition ${i === picked ? "bg-fg/5" : ""}`}
+              >
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-mono text-xs text-accent">{c.value}</span>
+                  {c.detail && <span className="truncate text-[11px] text-fg-subtle">{c.detail}</span>}
+                </span>
+                {c.notes?.map((note) => (
+                  <span key={note} className="shrink-0 rounded-full border border-line px-1.5 text-[10px] text-fg-muted">
+                    {labelOf(ARGUMENT_NOTES, note)}
+                  </span>
+                ))}
+              </button>
+            ))}
             {matches.map((c, i) => (
               <button
                 key={c.name}
@@ -2156,6 +2217,26 @@ export function Chat({
             void addFiles(files);
           }}
           onKeyDown={(e) => {
+            // The values a command's argument may take, listed above the box: the same keys, and
+            // Enter and Tab put the lit one in the box. What is sent is then what the box holds.
+            if (argMatches.length > 0 && !isComposing(e)) {
+              const chosen = argMatches[Math.min(picked, argMatches.length - 1)];
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setPicked((i) => moveHighlight(i, e.key === "ArrowDown" ? 1 : -1, argMatches.length));
+                return;
+              }
+              if ((e.key === "Tab" && !e.shiftKey) || (isEnter(e) && !e.shiftKey)) {
+                e.preventDefault();
+                completeArgument(chosen);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setPaletteShut(true);
+                return;
+              }
+            }
             if (matches.length > 0 && !isComposing(e)) {
               const chosen = matches[Math.min(picked, matches.length - 1)];
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -2204,7 +2285,7 @@ export function Chat({
                 key: e.key,
                 running,
                 composing: isComposing(e),
-                paletteOpen: matches.length > 0,
+                paletteOpen: listed,
               })
             ) {
               e.preventDefault();

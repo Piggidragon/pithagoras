@@ -155,7 +155,8 @@ Completed assistant messages and tool results are saved; their streaming updates
 | `PUT /api/context-limit` | `{ provider, model, tokens }` — the context window this model really has here; `tokens: null` goes back to the default, or the model's own |
 | `PUT /api/context-default` | `{ tokens }` — a ceiling on the window of every model; `null` removes it. Also returned by `GET /api/settings` as `contextDefault` |
 | `POST /api/sessions/:id/compact` | Compact now |
-| `GET /api/sessions/:id/commands` | The slash command palette |
+| `GET /api/sessions/:id/commands` | The slash command palette. A prompt whose frontmatter has `arguments: <source>` carries `argumentSource` |
+| `GET /api/sessions/:id/arguments/:source` | `{ choices: [{ value, detail, notes }] }` — what that source offers for the argument (`extensions`: the pi extensions that are on in this chat, see [Picking the extension](/guide/screens#picking-the-extension)). Does not start pi; `404` for a source that does not exist |
 
 `GET` does not start pi. While it is not running the response is `live: false`
 with the stored model and effort, empty `thinking` and `models`, and

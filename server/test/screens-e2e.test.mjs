@@ -66,6 +66,11 @@ writeFileSync(
 mkdirSync(path.join(agent, "extensions", "screen-todo"), { recursive: true });
 cpSync(path.join(repo, "skills/extension-screens/templates/glue.mts"), path.join(agent, "extensions", "screen-todo", "index.ts"));
 
+// Two prompts of the user's: one that says nothing of its argument, and one that names a source there is none of.
+mkdirSync(path.join(agent, "prompts"), { recursive: true });
+writeFileSync(path.join(agent, "prompts", "plain.md"), "---\ndescription: Says nothing of its argument\n---\nDo ${@:-it}.\n");
+writeFileSync(path.join(agent, "prompts", "odd.md"), "---\ndescription: Names a source there is none of\narguments: nonsense\n---\nDo ${@:-it}.\n");
+
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 
 let chats = 0;
@@ -124,6 +129,11 @@ test("the portal's own command and skill for connecting an extension are there i
     const screen = commands.find((c) => c.name === "screen");
     assert.equal(screen?.source, "prompt");
     assert.match(screen.description, /Screens panel/);
+    // Its argument is an extension: the page suggests the installed ones. What names no source of the portal's has none.
+    assert.equal(screen.argumentSource, "extensions");
+    assert.equal(commands.find((c) => c.name === "plain")?.argumentSource, undefined);
+    assert.equal(commands.find((c) => c.name === "odd")?.source, "prompt");
+    assert.equal(commands.find((c) => c.name === "odd")?.argumentSource, undefined);
     assert.ok(commands.some((c) => c.name === "skill:extension-screens"), "the skill is a command of pi's own too");
   } finally {
     client.dispose();

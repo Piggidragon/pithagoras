@@ -107,7 +107,11 @@ Rules for the glue:
   extension's data, and does not write files. It needs no import from the
   portal: only the `ExtensionAPI` type.
 - No timers, no watchers. The extension's events are the only clock.
-- Write at its top which extension and version it was written against.
+- Write at its top which extension and version it was written against, in a line
+  that starts `Written against:` and names the extension as the user gave it to
+  `/screen` (`Written against: @juicesharp/rpiv-todo 2.12.0`). The portal reads
+  that line, and the folder's name, to mark the extension in the suggestions of
+  `/screen` as one that has a screen already.
 
 ## 4. Check that it loads, then have it loaded
 
