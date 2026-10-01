@@ -21,7 +21,9 @@ bash: himalaya envelope list*
 
 A tool and a pattern. `*` stands for the parts that vary; everything else is
 literal. For `bash` the pattern is matched against the command, for file tools
-against the path.
+against the path. A call that names several pictures (`edit_image` with
+[several pictures](/guide/features#several-pictures) switched on) is matched on
+each picture's path, and is allowed only if every one is.
 
 A bare `*` is rejected. That is not a rule, it is switching the thing off by
 accident.

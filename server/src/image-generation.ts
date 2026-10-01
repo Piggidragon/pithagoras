@@ -53,6 +53,12 @@ export interface ImageGenerationConfig {
   editModel: string;
   /** The key of the edit address; see imageEditingTarget for when the one above is used instead. */
   editApiKey: string;
+  /**
+   * The edit endpoint takes several pictures in one request, so edit_image may be given a list. Endpoints differ
+   * (some take one, some several), so it is off until the person says this one does, and it is said of an
+   * endpoint: moving edits to another server takes it off again.
+   */
+  editMultiple: boolean;
 }
 
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -75,6 +81,7 @@ export function imageGenerationConfig(): ImageGenerationConfig {
     editBaseUrl: text(raw.editBaseUrl),
     editModel: text(raw.editModel),
     editApiKey: text(raw.editApiKey),
+    editMultiple: raw.editMultiple === true,
   };
 }
 
@@ -85,11 +92,19 @@ export const imageGenerationReady = (config: ImageGenerationConfig = imageGenera
 export const imageEditingReady = (config: ImageGenerationConfig = imageGenerationConfig()): boolean =>
   config.editEnabled && (config.editBaseUrl || config.baseUrl) !== "";
 
+/**
+ * Editing is ready and its endpoint takes several pictures: the shape of the
+ * edit tool, which a chat decides when it loads, as it does whether there is one.
+ */
+export const imageEditingMultiple = (config: ImageGenerationConfig = imageGenerationConfig()): boolean => imageEditingReady(config) && config.editMultiple;
+
 /** Where an edit goes, and what goes with it. */
 export interface ImageEditingTarget {
   baseUrl: string;
   model: string;
   apiKey: string;
+  /** Whether the endpoint takes more than one picture: otherwise an edit with several is refused before anything is sent. */
+  multiple: boolean;
 }
 
 /**
@@ -100,7 +115,7 @@ export interface ImageEditingTarget {
 export function imageEditingTarget(config: ImageGenerationConfig = imageGenerationConfig()): ImageEditingTarget {
   const baseUrl = config.editBaseUrl || config.baseUrl;
   const sameServer = baseUrl !== "" && originOf(baseUrl) === originOf(config.baseUrl);
-  return { baseUrl, model: config.editModel, apiKey: config.editApiKey || (sameServer ? config.apiKey : "") };
+  return { baseUrl, model: config.editModel, apiKey: config.editApiKey || (sameServer ? config.apiKey : ""), multiple: config.editMultiple };
 }
 
 /** What the page is told of the settings: never a key itself. */
@@ -123,6 +138,7 @@ export interface ImageGenerationPatch {
   editModel?: string;
   /** "" takes the saved one away. */
   editApiKey?: string;
+  editMultiple?: boolean;
 }
 
 /** `1024x1024`, or `auto`, as the OpenAI-style APIs take it. */
@@ -148,7 +164,7 @@ function parseBase(value: unknown): { base: string } | { error: string } {
 export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch | string {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const patch: ImageGenerationPatch = {};
-  for (const field of ["enabled", "editEnabled"] as const) {
+  for (const field of ["enabled", "editEnabled", "editMultiple"] as const) {
     if (b[field] === undefined) continue;
     if (typeof b[field] !== "boolean") return `${field} must be true or false`;
     patch[field] = b[field];
@@ -191,7 +207,9 @@ const originOf = (address: string): string => {
  * A key belongs to the server it was given for, so a new address of another
  * origin that does not come with one has none. A key saved before any address
  * was given for no server yet, and stays for the first. Both keys follow this
- * rule, the edit key by the address edits go to (see imageEditingTarget).
+ * rule, the edit key by the address edits go to (see imageEditingTarget). So
+ * does "takes several pictures", which was said of one endpoint and is not
+ * assumed of another.
  */
 export function saveImageGeneration(patch: ImageGenerationPatch): ImageGenerationConfig {
   const had = imageGenerationConfig();
@@ -199,7 +217,9 @@ export function saveImageGeneration(patch: ImageGenerationPatch): ImageGeneratio
   // Only from one server to another: a key saved before there was an address was given for none, and goes with the first.
   if (patch.apiKey === undefined && had.baseUrl !== "" && originOf(next.baseUrl) !== originOf(had.baseUrl)) next.apiKey = "";
   const wasEditedAt = had.editBaseUrl || had.baseUrl;
-  if (patch.editApiKey === undefined && wasEditedAt !== "" && originOf(next.editBaseUrl || next.baseUrl) !== originOf(wasEditedAt)) next.editApiKey = "";
+  const movedEdits = wasEditedAt !== "" && originOf(next.editBaseUrl || next.baseUrl) !== originOf(wasEditedAt);
+  if (patch.editApiKey === undefined && movedEdits) next.editApiKey = "";
+  if (patch.editMultiple === undefined && movedEdits) next.editMultiple = false;
   if (next.enabled && !next.baseUrl) throw new ImageGenerationError("Set the address of the image endpoint before switching it on");
   if (next.editEnabled && !(next.editBaseUrl || next.baseUrl)) throw new ImageGenerationError("Set the address of the image endpoint before switching editing on");
   putSetting(KEY, JSON.stringify(next));
