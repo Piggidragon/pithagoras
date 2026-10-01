@@ -99,6 +99,9 @@ function take(budget: Budget, nodes: number, chars: number): boolean {
 }
 
 const spent = (budget: Budget) => budget.left <= 0 || budget.chars <= 0;
+const isScalar = (value: unknown) => typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value));
+/** What there is to lose: a value that is data, as against null, undefined, a function, NaN, which were never anything to show. */
+const isData = (value: unknown) => isScalar(value) || (!!value && typeof value === "object");
 
 /**
  * Plain data only, and bounded: strings, finite numbers, booleans, lists and
@@ -119,16 +122,22 @@ function plain(value: unknown, depth: number, budget: Budget): unknown {
   if (Array.isArray(value)) {
     if (!take(budget, 1, 0)) return undefined;
     const kept: unknown[] = [];
-    for (const entry of value.slice(0, ENTRIES_MAX)) {
+    const entries = value.slice(0, ENTRIES_MAX);
+    let lost = false;
+    for (const [at, entry] of entries.entries()) {
       // Cut between the entries: one that does not fit is left out whole, and so is what follows.
-      if (spent(budget)) break;
+      if (spent(budget)) {
+        lost = entries.slice(at).some(isData);
+        break;
+      }
       // The entries of a list are on the level of the list, which its holder put a level down: a list in a list is one more.
       const one = plain(entry, Array.isArray(entry) ? depth + 1 : depth, budget);
       if (one !== undefined) kept.push(one);
+      else if (isData(entry)) lost = true;
     }
-    // A list that had entries and keeps none, for the limits of size or of depth, is not an empty list:
-    // the page would say there is nothing in it.
-    return kept.length || !value.length ? kept : undefined;
+    // A list that had data and keeps none of it, for the limits of size or of depth, is not an empty list:
+    // the page would say there is nothing in it. One that held nothing to begin with is.
+    return kept.length || !lost ? kept : undefined;
   }
   // An object is all of its own fields or none: a block without its `type`, an item
   // without its `state`, would be drawn as something it is not. What it holds in lists
@@ -136,7 +145,7 @@ function plain(value: unknown, depth: number, budget: Budget): unknown {
   // unless one of them is cut away to nothing: a group without its blocks says it has none.
   const fields = Object.entries(value)
     .slice(0, ENTRIES_MAX)
-    .map(([key, entry]): [string, unknown, boolean] => [key.slice(0, KEY_MAX), entry, typeof entry === "string" || typeof entry === "boolean" || (typeof entry === "number" && Number.isFinite(entry))])
+    .map(([key, entry]): [string, unknown, boolean] => [key.slice(0, KEY_MAX), entry, isScalar(entry)])
     .filter(([, entry, scalar]) => scalar || (!!entry && typeof entry === "object"));
   const own = fields.filter(([, , scalar]) => scalar);
   const chars = fields.reduce((sum, [name, entry, scalar]) => sum + name.length + (scalar && typeof entry === "string" ? Math.min(entry.length, TEXT_MAX) : 0), 0);
@@ -144,7 +153,7 @@ function plain(value: unknown, depth: number, budget: Budget): unknown {
   const kept: Record<string, unknown> = {};
   for (const [name, entry, scalar] of fields) {
     const one = scalar ? (typeof entry === "string" ? entry.slice(0, TEXT_MAX) : entry) : plain(entry, depth + 1, budget);
-    if (one === undefined && !scalar && (Array.isArray(entry) ? entry.length > 0 : Object.keys(entry as object).length > 0 && spent(budget))) return undefined;
+    if (one === undefined && !scalar && (Array.isArray(entry) ? entry.slice(0, ENTRIES_MAX).some(isData) : Object.keys(entry as object).length > 0 && spent(budget))) return undefined;
     if (one !== undefined) kept[name] = one;
   }
   return kept;

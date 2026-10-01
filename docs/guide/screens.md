@@ -136,9 +136,11 @@ extension.
   blocks are the first, and each block in a group and each item in an item is one
   more, so a checklist of tasks in three groups leaves two levels for sub-tasks.
   More is cut, not refused: at an entry, never inside one, so what does not fit is
-  left out whole with what follows it, a list that nothing of fits in goes with
+  left out whole with what follows it, a list whose data did not fit goes with
   the block that holds it (rather than say "No tasks." of tasks that were
-  dropped), and what stays is as the extension said it. A long description is
+  dropped), and what stays is as the extension said it. Entries that were never
+  data (`null`, `undefined`) are only skipped, and do not take a block with
+  them. A long description is
   better left out of a block than the reason the list ends early.
 - **Blocks show, they do not take input.** There is no way to click through to
   the extension.

@@ -100,9 +100,11 @@ you build a screen out of them: a board by project, milestone and owner uses
 three.
 
 What goes over any of these is cut between entries: the item or block that does
-not fit is left out whole, and so are the ones after it. A list that nothing of
-fits in is left out as well, with the block that holds it (and so on up), so a
-screen never says "No tasks." of tasks it dropped. Nothing is cut in the middle,
+not fit is left out whole, and so are the ones after it. A list that had data
+and keeps none of it is left out as well, with the block that holds it (and so
+on up), so a screen never says "No tasks." of tasks it dropped. An entry that is
+no data to begin with (`null`, `undefined`, a function) is only skipped: a list of
+nothing else is an empty list, and its block stays. Nothing is cut in the middle,
 so what stays is as you said it. More is cut, not refused. A screen is sent whole
 to every open page with each change, so say what matters, not everything: cut a
 long description before it goes in a block.

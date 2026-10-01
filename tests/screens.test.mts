@@ -114,6 +114,20 @@ test('the depth limit never leaves a list with no items for tasks it was given, 
  assert.deepEqual(cleanScreen({id:'a',blocks:[{type:'group',blocks:[{type:'checklist',items:[sub(4)]}]}]})!.blocks[0].blocks[0].items,[sub(4)],'five levels of tasks in a group');
  for(let depth=5;depth<12;depth++) assert.deepEqual(empties(cleanScreen({id:'a',blocks:[{type:'group',blocks:[{type:'checklist',items:[sub(depth),{text:'Other',state:'done'}]}]}]})!.blocks),[],`${depth} deep`);
 });
+test('a list of nothing that was data is as good as an empty one: only a list that lost data to a limit goes',()=>{
+ const sprint={type:'checklist',empty:'Nothing to do yet.',items:[{text:'Ship it',state:'doing',items:[undefined]},{text:'Write the docs',state:'done',items:[]}]};
+ const out=(blocks:any[])=>cleanScreen({id:'a',blocks})!.blocks;
+ // A glue that says undefined for the sub-task it cannot read still has the task.
+ assert.deepEqual(out([sprint]),[{...sprint,items:[{text:'Ship it',state:'doing',items:[]},{text:'Write the docs',state:'done',items:[]}]}]);
+ assert.deepEqual(out([{type:'group',title:'Sprint 3',blocks:[{type:'checklist',items:[{text:'Ship it',state:'doing',items:[undefined]}]}]}]),
+  [{type:'group',title:'Sprint 3',blocks:[{type:'checklist',items:[{text:'Ship it',state:'doing',items:[]}]}]}]);
+ // A list of nothing is kept, so that its block says what it was given to say.
+ for(const items of [[undefined,undefined],[null,undefined],[()=>1,NaN,Symbol('s'),1n]]) assert.deepEqual(out([{type:'checklist',empty:'Nothing to do yet.',items}]),[{type:'checklist',empty:'Nothing to do yet.',items:[]}]);
+ assert.deepEqual(out([{type:'text',text:'Build green',actions:[()=>1]}]),[{type:'text',text:'Build green',actions:[]}]);
+ // Where data was lost it is as before: a list that held a task the limit took goes, with its block.
+ const long=Array.from({length:49},()=>({type:'text',text:'a'.repeat(1990)}));
+ assert.equal(out([...long,{type:'checklist',empty:'x',items:[null,{text:'Task',detail:'d'.repeat(1900),state:'todo'}]}]).length,49,'a list that lost its task to the limit is out, with the null before it no reason to keep it');
+});
 test('what an extension shows reaches the portal as session events, and is kept as it stands',()=>{
  const b=bus();const out:any[]=[];const screens=bridgeScreens(b,e=>out.push(e));
  b.emit('screen:v1:set',{id:'nothing'});
