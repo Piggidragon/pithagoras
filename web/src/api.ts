@@ -607,8 +607,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
-  /** `apiKey` left out keeps the saved one; "" takes it away. `changed`: the agent got or lost the tool, which chats have from their next load. */
-  setImagesFeature: (patch: { enabled?: boolean; baseUrl?: string; model?: string; size?: string; apiKey?: string }) =>
+  /** `changed`: the agent got or lost a tool, which chats have from their next load. */
+  setImagesFeature: (patch: ImagesFeaturePatch) =>
     json<{ images: ImagesFeature; changed: boolean; reloaded: number; waiting: number }>("/api/features/images", {
       method: "PUT",
       body: JSON.stringify(patch),
@@ -1177,6 +1177,28 @@ export interface ImagesFeature {
   /** "1024x1024" or empty for the endpoint's own. */
   size: string;
   keySet: boolean;
+  /** Editing a picture has a switch of its own: not every endpoint that makes pictures changes them. */
+  editEnabled: boolean;
+  /** Where edits go; empty is the address above. */
+  editBaseUrl: string;
+  /** Empty sends no model: the model above is not taken for editing. */
+  editModel: string;
+  editKeySet: boolean;
+  /** Whether the agent has an edit tool: switched on, and with an address to ask. */
+  editReady: boolean;
+}
+
+/** What the page may change of it. A key left out keeps the saved one; "" takes it away. */
+export interface ImagesFeaturePatch {
+  enabled?: boolean;
+  baseUrl?: string;
+  model?: string;
+  size?: string;
+  apiKey?: string;
+  editEnabled?: boolean;
+  editBaseUrl?: string;
+  editModel?: string;
+  editApiKey?: string;
 }
 
 /** The model that keeps Understory's memory, as the page is told it: never the key. */

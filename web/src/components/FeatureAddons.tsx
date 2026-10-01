@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert } from "react-icons/lu";
-import { api, type AvailableModel, type Features, type ImagesFeature, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
+import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert, LuWandSparkles } from "react-icons/lu";
+import { api, type AvailableModel, type Features, type ImagesFeature, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { SwitchRow, inputCls, primaryCls } from "./SettingsUi";
@@ -691,10 +691,27 @@ interface ImagesDraft {
   apiKey: string;
 }
 
+/** The same for editing, which has its own address, model and key. */
+interface ImagesEditDraft {
+  baseUrl: string;
+  model: string;
+  /** Typed anew; empty keeps the one saved. */
+  apiKey: string;
+}
+
+const originOf = (address: string): string => {
+  try {
+    return new URL(address).origin;
+  } catch {
+    return "";
+  }
+};
+
 export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   // Its own, not with Understory's: a Docker that cannot be reached is not this tab's to wait on.
   const [images, setImages] = useState<ImagesFeature | null>(null);
   const [draft, setDraft] = useState<ImagesDraft | null>(null);
+  const [editDraft, setEditDraft] = useState<ImagesEditDraft | null>(null);
   const [busy, setBusy] = useState(false);
   // Said in the language shown, whenever it is drawn.
   const [note, setNote] = useState<(() => string) | null>(null);
@@ -705,8 +722,12 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   if (!images) return <Loading />;
   const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, apiKey: "" };
   const edit = (patch: Partial<ImagesDraft>) => setDraft({ ...form, ...patch });
+  const editForm = editDraft ?? { baseUrl: images.editBaseUrl, model: images.editModel, apiKey: "" };
+  const editEdit = (patch: Partial<ImagesEditDraft>) => setEditDraft({ ...editForm, ...patch });
+  // The key of generation goes along when edits go to the same server and have none of their own: the server says the same.
+  const usesKeyAbove = images.keySet && !images.editKeySet && originOf(editForm.baseUrl || images.baseUrl) === originOf(images.baseUrl);
 
-  const change = async (patch: Parameters<typeof api.setImagesFeature>[0]) => {
+  const change = async (patch: ImagesFeaturePatch) => {
     setBusy(true);
     setNote(null);
     try {
@@ -714,6 +735,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       setImages(saved);
       // The form's settings are saved now, so it shows them as the server has them; the key typed is not shown again.
       if (patch.baseUrl !== undefined) setDraft(null);
+      if (patch.editBaseUrl !== undefined) setEditDraft(null);
       if (changed) setNote(() => () => reloadNote(waiting));
       return true;
     } catch (e) {
@@ -816,6 +838,91 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       />
       <p className="text-[11px] text-fg-faint">
         {t("Pictures are made in a generated-images folder inside the chat's folder. Making one can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it.")}
+      </p>
+
+      <div className="rounded-xl border border-line bg-raised/40 p-3">
+        <Header Icon={LuWandSparkles} title={t("Image editing")}>
+          {tx("An {tool} tool: the agent changes a picture in the chat's folder as you tell it, with an endpoint that has an OpenAI-style {route}. The original stays; the result is a new picture, shown as one made with {generate} is.", {
+            tool: <code>edit_image</code>,
+            route: <code>images/edits</code>,
+            generate: <code>generate_image</code>,
+          })}
+        </Header>
+      </div>
+
+      <fieldset disabled={busy} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
+        <legend className="px-1 text-xs text-fg-muted">{t("The editing endpoint")}</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="text-xs text-fg-muted sm:col-span-2">
+            {t("Editing address")}
+            <input
+              value={editForm.baseUrl}
+              onChange={(e) => editEdit({ baseUrl: e.target.value })}
+              placeholder={images.baseUrl || "https://images.example.com/v1"}
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Editing key")}
+            <input
+              type="password"
+              value={editForm.apiKey}
+              onChange={(e) => editEdit({ apiKey: e.target.value })}
+              placeholder={images.editKeySet ? t("saved — type to replace") : usesKeyAbove ? t("the key above is used") : t("none needed for a local server")}
+              autoComplete="off"
+              className={`${inputCls} mt-1 text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Editing model")}
+            <input
+              value={editForm.model}
+              onChange={(e) => editEdit({ model: e.target.value })}
+              placeholder="image-edit-model"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+        </div>
+        <p className="text-[11px] text-fg-faint">
+          {t("Leave the address empty to edit with the server above, with its key. The model above is not used for editing, as a model that makes pictures may not change them; leave this one empty for the server's own. A key goes only to the address it was given for.")}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {editDraft && (
+            <button
+              type="button"
+              className={primaryCls}
+              onClick={() => void change({ editBaseUrl: editForm.baseUrl, editModel: editForm.model, ...(editForm.apiKey ? { editApiKey: editForm.apiKey } : {}) })}
+            >
+              {t("Save")}
+            </button>
+          )}
+          {editDraft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-fg" onClick={() => setEditDraft(null)}>
+              {t("Discard")}
+            </button>
+          )}
+          {images.editKeySet && !editDraft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-danger" onClick={() => void change({ editApiKey: "" })}>
+              {t("Remove the saved editing key")}
+            </button>
+          )}
+        </div>
+      </fieldset>
+
+      <SwitchRow
+        title={t("Image editing tool")}
+        detail={images.editEnabled ? t("On: the agent has an edit_image tool.") : t("Off: the agent cannot change a picture.")}
+        on={images.editEnabled}
+        onChange={(editEnabled) => void change({ editEnabled })}
+        disabled={busy || !!editDraft || (!(images.editBaseUrl || images.baseUrl) && !images.editEnabled)}
+        note={editDraft ? t("Save or discard the changes first.") : !(images.editBaseUrl || images.baseUrl) && !images.editEnabled ? t("Save the address of an image endpoint first.") : undefined}
+      />
+      <p className="text-[11px] text-fg-faint">
+        {t("The result is a new picture in the generated-images folder, named after the original, which is not changed. Editing can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it.")}
       </p>
       {busy && (
         <p className="flex items-center gap-2 text-xs text-fg-subtle">
