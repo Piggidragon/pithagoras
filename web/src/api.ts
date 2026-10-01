@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import type { Host, VoiceChoice } from "../../server/src/voice-engines";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
@@ -276,11 +277,15 @@ export interface VoiceConfig {
   defaultResponseInstructions?: string;
   responseInstructionsOff?: boolean;
   pipelineMode?: "parallel" | "sequential";
+  // False with no speech synthesis (runtime "none"): the page can listen, but replies are not spoken.
+  speech?: boolean;
   vad?: typeof DEFAULT_VAD;
-  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox"; sttModel?: string; exaggeration?: number;
+  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "none"; sttModel?: string; exaggeration?: number;
 }
 
-export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; }
+export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; }
+/** The GPUs the voice container can use, as nvidia-smi reports them, and the combination that fits the one it would take. */
+export interface VoiceHardware { gpus: { index: number; name: string; totalMiB: number | null; freeMiB: number | null }[]; source: string; error: string; /** False while nothing could be asked yet, so that no GPU is not yet the same as none. */ checked: boolean; /** The check found there is no GPU: what is suggested is speech recognition alone, on the CPU. */ cpuOnly: boolean; /** Cards the host lists that Docker cannot hand to a container: for voice there are none. */ unusable?: string[]; /** What recognition on the CPU has to run on. */ host: Host; selected: number | null; reserveMiB: number; suggestion: VoiceChoice; }
 export const api = {
   listFiles: (sessionId: string, dir: string) =>
     json<{ path: string; entries: FileEntry[]; truncated: boolean }>(
@@ -339,7 +344,9 @@ export const api = {
   archiveDownloadUrl: (sessionId: string, dir = "") =>
     `/api/sessions/${sessionId}/archive${dir ? `?path=${encodeURIComponent(dir)}` : ""}`,
   voiceInstallStatus: () => json<VoiceInstallStatus>('/api/voice/install'),
-  voiceAction: (action: 'install' | 'start' | 'stop') => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST'}),
+  // `choice` is for install: the engines to build for. Without it an install keeps what is installed, or picks for the GPU.
+  voiceAction: (action: 'install' | 'start' | 'stop', choice?: VoiceChoice) => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST', ...(choice ? {body: JSON.stringify(choice)} : {})}),
+  voiceHardware: () => json<VoiceHardware>('/api/voice/hardware'),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),

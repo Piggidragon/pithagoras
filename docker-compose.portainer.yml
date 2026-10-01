@@ -32,6 +32,11 @@ services:
       PI_THINKING_LEVEL: ${PI_THINKING_LEVEL:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Managed voice, when more than one GPU is in the box: the GPU index it uses
+      # (as nvidia-smi lists them), and memory in MiB to keep free on it for
+      # something else. Left empty, the card with the most room is used.
+      VOICE_GPU: ${VOICE_GPU:-}
+      VOICE_VRAM_RESERVE_MIB: ${VOICE_VRAM_RESERVE_MIB:-}
 
 volumes:
   pithagoras-data:

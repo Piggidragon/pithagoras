@@ -356,3 +356,17 @@ test('composer offers send beside stop for a follow-up and canvas lives in the h
  await expect(page.locator('.session-workspace > header').getByRole('button',{name:'Session canvases',exact:true})).toBeVisible();
  await expect(page.locator('.canvas-toggle')).toHaveCount(0);
 });
+
+test('without speech synthesis voice mode is not offered, because it speaks its replies, and dictation, which only listens, is', async ({ page }) => {
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, speech: false } }));
+  await page.goto('/tests/voice.html');
+  await expect(page.getByRole('button', { name: 'Dictate a message' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
+  // With speech both are there.
+  await page.unroute('**/api/voice');
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, speech: true } }));
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Dictate a message' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toBeVisible();
+});

@@ -1,12 +1,14 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
 import { speechChunks, newSpeech } from '../web/src/voice.js';
 const dir = mkdtempSync(join(tmpdir(), 'pithagoras-voice-'));
 process.env.DATA_DIR = dir;
+// No Docker here, whatever this machine has: the managed service is tested on its own.
+process.env.DOCKER_SOCKET = join(dir, 'no-docker.sock');
 const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice } = await import('../server/src/api/voice.js');
 const { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } = await import('../server/src/voice-languages.js');
 const { getDb, getVoiceInstructions } = await import('../server/src/db.js');
@@ -279,6 +281,100 @@ test('connecting the managed voice drops a recognition model from another runtim
   // reach it in the multipart body of every transcription.
   assert.equal(connectManagedVoice().sttModel, '');
   assert.equal((await (await fetch(`${base}/voice`)).json()).sttModel, '');
+});
+
+test('connecting the managed voice points the settings at the engines it was built with', async () => {
+  const put = (patch: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, voice: 'aria', ...patch }) });
+  assert.equal((await put({ language: 'auto' })).status, 200);
+  // Whisper: its own endpoint, and no model field in the request.
+  const whisper = connectManagedVoice({ tts: 'breeze', asr: 'whisper', asrModel: 'small' });
+  assert.deepEqual([whisper.runtime, whisper.whisperUrl, whisper.breezeUrl, whisper.sttModel], ['audio-cpp', 'http://127.0.0.1:8188/inference', 'http://127.0.0.1:7862/v1/audio/speech', '']);
+  // Qwen3-ASR: audio.cpp's transcription endpoint, with the id of the model it loaded.
+  const qwen = connectManagedVoice({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' });
+  assert.deepEqual([qwen.runtime, qwen.whisperUrl, qwen.sttModel, qwen.language], ['audio-cpp', 'http://127.0.0.1:7862/v1/audio/transcriptions', 'qwen3-asr', 'auto']);
+  assert.equal((await (await fetch(`${base}/voice`)).json()).managed, true);
+  // Chatterbox refuses to guess a language: auto-detect becomes one it speaks, a chosen one stays.
+  const chatterbox = connectManagedVoice({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' });
+  assert.deepEqual([chatterbox.runtime, chatterbox.language, chatterbox.sttModel], ['chatterbox', 'en', 'qwen3-asr']);
+  const shown = await (await fetch(`${base}/voice`)).json();
+  assert.deepEqual([shown.runtime, shown.managed], ['chatterbox', true], 'the leases load the model the saved engine speaks with');
+  await put({ language: 'de' });
+  assert.equal(connectManagedVoice({ tts: 'chatterbox', asr: 'whisper', asrModel: 'base' }).language, 'de');
+  // Back to Breeze keeps the language and drops Chatterbox's runtime.
+  assert.deepEqual([connectManagedVoice().runtime, connectManagedVoice().language], ['audio-cpp', 'de']);
+});
+
+test('recognition alone: nothing is spoken, and dictation still has its transcription', async () => {
+  const put = (patch: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, ...patch }) });
+  // Connecting the managed services of a choice without speech synthesis saves no address to speak to.
+  const whisper = connectManagedVoice({ tts: 'none', asr: 'whisper', asrModel: 'base' });
+  assert.deepEqual([whisper.runtime, whisper.breezeUrl, whisper.whisperUrl, whisper.sttModel, whisper.enabled, whisper.managed], ['none', '', 'http://127.0.0.1:8188/inference', '', true, true]);
+  const qwen = connectManagedVoice({ tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' });
+  assert.deepEqual([qwen.runtime, qwen.breezeUrl, qwen.whisperUrl, qwen.sttModel], ['none', '', 'http://127.0.0.1:7863/v1/audio/transcriptions', 'qwen3-asr']);
+  // Beside a speech engine, Qwen3-ASR is on the GPU server's port, or on the CPU server's by choice.
+  assert.equal(connectManagedVoice({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' }).whisperUrl, 'http://127.0.0.1:7862/v1/audio/transcriptions');
+  assert.equal(connectManagedVoice({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b', asrDevice: 'cpu' }).whisperUrl, 'http://127.0.0.1:7863/v1/audio/transcriptions');
+  connectManagedVoice({ tts: 'none', asr: 'whisper', asrModel: 'base' });
+  // The page is told there is nothing to speak with, so that voice mode is not offered; dictation is.
+  const shown = await (await fetch(`${base}/voice`)).json();
+  assert.deepEqual([shown.enabled, shown.speech, shown.runtime, shown.managed], [true, false, 'none', false]);
+  // Replies are not synthesized, and the answer says why instead of failing on an address that is not there.
+  const spoken = await fetch(`${base}/sessions/test/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"text":"Hello"}' });
+  assert.equal(spoken.status, 409);
+  assert.match((await spoken.json()).error, /Speech synthesis is not installed/);
+  // What was heard is still transcribed: that is dictation. The tests' Whisper stands where the managed one would.
+  assert.equal((await put({ runtime: 'none', breezeUrl: '' })).status, 200);
+  const transcribed = await fetch(`${base}/sessions/test/voice/transcribe`, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: new Uint8Array(pcmWav(Buffer.alloc(32))) });
+  assert.deepEqual(await transcribed.json(), { text: 'Test the session.' });
+  // The settings are saved with no speech address only when there is no speech synthesis.
+  assert.equal((await put({ runtime: 'none', breezeUrl: '' })).status, 200);
+  assert.equal((await put({ runtime: 'audio-cpp', breezeUrl: '' })).status, 400);
+  assert.equal((await put({ runtime: 'none', breezeUrl: 'ftp://nowhere' })).status, 400);
+  // Back to speech: spoken again, and the page is told so.
+  assert.equal((await put({})).status, 200);
+  assert.equal((await (await fetch(`${base}/voice`)).json()).speech, true);
+});
+
+test('without Docker the setup says only that Docker is needed: recognition alone needs no GPU, and the requirement of speech synthesis is said where it applies', async () => {
+  // No Docker socket here, whatever this machine has.
+  const state = await (await fetch(`${base}/voice/install`)).json();
+  assert.deepEqual([state.available, state.state, state.busy], [false, 'unavailable', false]);
+  assert.equal(state.error, 'Automatic voice setup requires access to Docker.');
+  assert.doesNotMatch(state.error, /GPU|NVIDIA/);
+});
+
+test('install takes the engines to build, and refuses a choice the installer does not make', async () => {
+  const post = (body: object) => fetch(`${base}/voice/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  for (const body of [{ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }, { tts: 'breeze', asr: 'whisper', asrModel: '1.7b' }, { tts: 'breeze' }, { asr: 'qwen3-asr', asrModel: '0.6b' }]) {
+    const answer = await post(body);
+    assert.equal(answer.status, 400, JSON.stringify(body));
+    assert.match((await answer.json()).error, /Choose a supported speech/);
+  }
+  // Nothing was started, so there is no setup to wait for either.
+  assert.equal((getDb().prepare("SELECT value FROM settings WHERE key='voice_setup_pending'").get() as any)?.value, undefined);
+});
+
+test('the hardware check reports the GPUs and what it would suggest, and degrades to the original combination without a tool', async () => {
+  const smi = join(dir, 'nvidia-smi');
+  writeFileSync(smi, '#!/bin/sh\nprintf "0, Test GPU A, 12288, 11000\\n1, Test GPU B, 24576, 24000\\n"\n');
+  chmodSync(smi, 0o755);
+  process.env.NVIDIA_SMI = smi;
+  // What the host has is told, not read from the machine the tests run on.
+  (await import('../server/src/extensions/voice-service.js')).hostReader.read = () => ({ totalMiB: 16384, freeMiB: 8192, threads: 8 });
+  const found = await (await fetch(`${base}/voice/hardware`)).json();
+  assert.deepEqual(found.gpus.map((g: any) => [g.index, g.name, g.totalMiB, g.freeMiB]), [[0, 'Test GPU A', 12288, 11000], [1, 'Test GPU B', 24576, 24000]]);
+  assert.deepEqual([found.source, found.selected, found.reserveMiB], ['host', 1, 0]);
+  assert.deepEqual(found.suggestion, { tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' });
+  process.env.NVIDIA_SMI = join(dir, 'missing-nvidia-smi');
+  const none = await fetch(`${base}/voice/hardware`);
+  assert.equal(none.status, 200);
+  const empty = await none.json();
+  // No tool and no Docker is no GPU, said plainly: what is suggested is recognition alone on the CPU, sized to the host.
+  assert.deepEqual([empty.gpus, empty.source, empty.selected, empty.checked, empty.cpuOnly], [[], 'none', null, true, true]);
+  assert.equal(empty.error, 'host: nvidia-smi was not found; docker: no GPU available');
+  assert.deepEqual(empty.host, { totalMiB: 16384, freeMiB: 8192, threads: 8 });
+  assert.deepEqual(empty.suggestion, { tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' });
+  delete process.env.NVIDIA_SMI;
 });
 
 test('speaking instructions: the built-in text is offered, a custom one is saved, and blank or equal goes back to the built-in', async () => {

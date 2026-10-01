@@ -236,8 +236,13 @@ Hindi, Italian, Korean, Malay, Norwegian, Polish, Portuguese, Spanish, Swahili,
 Swedish and Turkish. Qwen3-ASR covers those and more. Both are MIT/Apache-2.0
 licensed, unlike Breeze's research-only weights.
 
-This is a separate deployment; it does not replace Breeze or the managed
-installer, and both keep working unchanged.
+The managed **Install voice** button in Settings builds this combination for
+you: pick **Chatterbox** and **Qwen3-ASR** under **Speech engines** (see
+[Docker add-ons](/guide/add-ons#engines-and-gpu-memory)), and the installer
+downloads both models, sets up the one audio.cpp process and points the settings
+at it. The rest of this section is the alternative: running audio.cpp yourself,
+as a separate deployment. It does not replace Breeze or the managed installer,
+and both keep working unchanged.
 
 ### Download the models
 
@@ -324,9 +329,9 @@ Recognition uses the OpenAI transcription API, which needs the model name that
 leaving **Speech recognition model** empty keeps the existing Whisper setup
 byte for byte.
 
-The managed **Install voice** button still installs Breeze and Whisper; it does
-not know about this runtime. Do not run both on the same GPU unless it has the
-memory for both.
+Do not run this deployment and the managed service on the same GPU unless it has
+the memory for both: the Settings page shows what each combination needs, and the
+managed installer reads the GPU before it installs.
 
 ### Behind llama-swap
 
@@ -637,19 +642,40 @@ prefill; subsequent turns can reuse it. No custom chat template is needed.
 
 On a Linux NVIDIA host with Docker and NVIDIA Container Toolkit, open
 **Settings → Add-ons → Voice → Install voice**. Pithagoras creates a separate
-`pithagoras-voice` container and displays the setup log. It builds pinned audio.cpp
-and Whisper.cpp revisions, downloads the full-precision Breeze-TTS-2 GGUF package,
-quantizes that package locally to Q8_0, and downloads multilingual Whisper base.
-The GGUF source is the audio.cpp repack of BreezeBlue/Breeze-TTS-2. No Python TTS
-runtime is installed. Whisper runs on CPU; Breeze uses the GPU.
+`pithagoras-voice` container and displays the setup log. Under **Speech engines**
+you choose the speech synthesis engine (Breeze or Chatterbox) and the speech
+recognition model (Whisper base or small, Qwen3-ASR 0.6B or 1.7B), or leave the
+choice to the installer, which reads the GPU and its free memory and picks the
+best combination that fits; [Docker add-ons](/guide/add-ons#engines-and-gpu-memory)
+lists what each needs and what happens when a choice does not fit. The default is
+the original combination: Breeze with Whisper base.
+
+For that default, it builds pinned audio.cpp and Whisper.cpp revisions, downloads
+the full-precision Breeze-TTS-2 GGUF package, quantizes that package locally to
+Q8_0, and downloads multilingual Whisper base. The GGUF source is the audio.cpp
+repack of BreezeBlue/Breeze-TTS-2. No Python TTS runtime is installed. Whisper runs
+on CPU; Breeze uses the GPU. Chatterbox and Qwen3-ASR are downloaded as Q8_0 GGUF
+files from a pinned revision of the same repository and verified by checksum;
+audio.cpp serves them from one process, with Qwen3-ASR's recognition on
+`/v1/audio/transcriptions` of the same port, and no Whisper then runs.
 
 Allow about 30 GB free disk space during setup. First installation can take several
 minutes or longer depending on compilation and download speeds. Source downloads
 resume, completed models and builds are reused, and the quantized model is moved
 into place only after the converter inspects it successfully. The full-precision
-file is then removed. Models persist in `pithagoras_voice-models`.
+file is then removed. Models persist in `pithagoras_voice-models`. Choosing other
+engines later recreates the container and builds or downloads only what is new;
+an installation made before the choice existed is the default combination, and
+keeps working unchanged.
 
-Once both health checks pass, Settings connects the installed services automatically.
+**Without a GPU** the installer sets up speech recognition alone, on the CPU: Whisper, or
+Qwen3-ASR in a CPU-only audio.cpp build, in the small base image rather than the CUDA one. Dictation
+works; the voice-conversation control is not offered, because it speaks its replies, and speech
+synthesis needs a GPU (Breeze and Chatterbox take several seconds of CPU time per second of speech).
+Qwen3-ASR on a GPU host can be put on the CPU too, to spare the card. See
+[Docker add-ons](/guide/add-ons#no-gpu-recognition-only).
+
+Once the health checks of what was installed pass, Settings connects the installed services automatically.
 Existing voice choices and Aria reference files are preserved. A reference clone
 still needs the private reference WAV and transcript described above.
 
