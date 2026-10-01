@@ -115,3 +115,7 @@ export function displaySpeechText(text: string, done: boolean): string {
   }
   return visible.replace(/[ \t]+([,.!?])/g, '$1').trim();
 }
+
+/** What the agent said, as it is read — without the reasoning model's stray tags. */
+export const assistantText = (item: { text: string; done: boolean; audio?: boolean }): string =>
+  (item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "");
