@@ -231,7 +231,7 @@
 /* ── Voice mode: the stage blooms around the orb, and the orb comes up out of it ── */
 [data-motion="fancy"] .voice-stage::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background: radial-gradient(circle at 50% 49%, rgb(var(--voice-hue) / .4), transparent 55%); animation: fx-bloom 1.3s var(--ease-out) both; }
 @keyframes fx-bloom { from { transform: scale(.15); opacity: 0; } 25% { opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
-[data-motion="fancy"] .voice-orb { animation: fx-orb-in 1s var(--spring-loose) backwards; }
+[data-motion="fancy"] .voice-stage .voice-orb { animation: fx-orb-in 1s var(--spring-loose) backwards; }
 @keyframes fx-orb-in { from { scale: .2; opacity: 0; filter: blur(10px); } 35% { filter: blur(0); } to { scale: 1; opacity: 1; filter: none; } }
 [data-motion="fancy"] .voice-stage-action { animation: fx-pop-in .6s var(--spring-loose) .35s backwards; }
 [data-motion="fancy"] .voice-stage-action:nth-child(2) { animation-delay: .43s; }
