@@ -42,12 +42,12 @@ const TRIES = 3;
 const QUIET_MS = 8000;
 /**
  * How long a page may go without asking before nobody is taken to be waiting for
- * the clips: the page asks every three seconds while they are being made, and a
- * page that has left, or has switched fillers off, does not. It is what keeps the
- * speech runtime from being used, and a model loaded back onto the GPU, for clips
- * that nobody wants.
+ * the clips: the page asks every three seconds while they are being made. A page
+ * that ends voice mode or switches fillers off says so (`stop()`); this is for one
+ * that cannot, a tab that was closed, so that the speech runtime is not used, and a
+ * model loaded back onto the GPU, for clips that nobody wants.
  */
-const ASKED_MS = 15_000;
+const ASKED_MS = 10_000;
 
 /**
  * The fillers of the voice that is set up, made once and kept on disk. They are

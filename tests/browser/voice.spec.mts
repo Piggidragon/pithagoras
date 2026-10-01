@@ -479,8 +479,9 @@ test('fillers are switched off in the voice settings or with Shift+F, and are no
 });
 
 test('switching fillers off stops asking the portal for them, which is what has it stop making them', async ({ page }) => {
-  let listed = 0;
+  let listed = 0, released = 0;
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  await page.route('**/voice/fillers/stop', route => { released++; return route.fulfill({ status: 204 }); });
   // The portal is still making them: the page looks again every few seconds.
   await page.route('**/voice/fillers', route => { listed++; return route.fulfill({ json: { key: 'a'.repeat(40), clips: [], rendering: true } }); });
   await page.goto('/tests/voice.html');
@@ -489,10 +490,24 @@ test('switching fillers off stops asking the portal for them, which is what has 
   await expect.poll(() => listed, { timeout: 8000 }).toBeGreaterThanOrEqual(2);
   await page.getByRole('button', { name: 'Voice settings' }).click();
   await page.getByRole('dialog', { name: 'Voice settings' }).getByRole('group', { name: 'Fillers' }).getByRole('button', { name: 'Off' }).click();
-  await page.waitForTimeout(200);
+  // Off tells the portal, which would otherwise go on making them for a while, and the page stops asking.
+  await expect.poll(() => released).toBe(1);
   const asked = listed;
   await page.waitForTimeout(3800);
   expect(listed).toBe(asked);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'End voice mode' }).click();
+});
+
+test('ending voice mode tells the portal that nobody is waiting for the fillers', async ({ page }) => {
+  let released = 0;
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  await page.route('**/voice/fillers/stop', route => { released++; return route.fulfill({ status: 204 }); });
+  await page.route('**/voice/fillers', route => route.fulfill({ json: { key: 'a'.repeat(40), clips: [], rendering: true } }));
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+  expect(released).toBe(0);
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  await expect.poll(() => released).toBe(1);
 });

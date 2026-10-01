@@ -2,6 +2,8 @@
 export interface FillerSource {
   list(): Promise<{ key: string; clips: number[]; rendering: boolean }>;
   clip(key: string, n: number): Promise<Float32Array>;
+  /** Tells the portal that nobody is waiting for the clips any more, so that it stops making them. */
+  release?(): Promise<void>;
 }
 
 /** How often to look again while the portal is still making clips, and how many times at most: a few minutes. */
@@ -36,7 +38,11 @@ export class FillerClips {
     clearTimeout(this.timer);
     void this.fetch(run);
   }
-  stop() { this.run++; clearTimeout(this.timer); this.clips.clear(); this.heard.clear(); this.last = -1; }
+  /** Voice mode ended, or fillers are off: no more looking, and the portal is told, which would otherwise make the rest of the clips for nobody. */
+  stop() {
+    this.run++; clearTimeout(this.timer); this.clips.clear(); this.heard.clear(); this.last = -1;
+    void this.source.release?.().catch(() => {});
+  }
 
   private async fetch(run: number, polls = 0) {
     try {
@@ -83,6 +89,10 @@ export function fillerSource(sessionId: string, request: typeof fetch = (...args
       const response = await request(base);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return await response.json();
+    },
+    async release() {
+      // Kept going if the page is being left, which is when voice mode ends with it.
+      await request(`${base}/stop`, { method: "POST", keepalive: true });
     },
     async clip(key, n) {
       const response = await request(`${base}/${key}/${n}`);

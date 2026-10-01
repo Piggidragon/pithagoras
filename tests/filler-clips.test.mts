@@ -4,6 +4,7 @@ import { FillerClips, fillerSource, type FillerSource } from '../web/src/voice-f
 import { playFading } from '../web/src/pcm-stream.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const clip = (n: number) => Float32Array.of(n, n);
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 /** A portal that has made `ready` of its clips so far, a few more each time it is asked while it still makes them. */
 function portal(steps: { key?: string; clips: number[]; rendering: boolean }[]) {
   let at = 0; const fetched: string[] = [];
@@ -20,11 +21,14 @@ test('clips are downloaded once, and more are fetched while the portal is still 
     { key: 'a', clips: [0], rendering: true },
     { key: 'a', clips: [0, 1, 2], rendering: false },
   ]);
+  // The second look waits until the first has been seen, whatever the machine's speed.
+  const second = deferred<void>(); const list = source.list; let looks = 0;
+  source.list = async () => { if (looks++) await second.promise; return list(); };
   const clips = new FillerClips(source, Math.random, 5);
   clips.load(); await tick();
   assert.equal(clips.ready, 1);
-  // Looked again after a few milliseconds; a loaded machine may take longer.
-  for (let i = 0; i < 100 && clips.ready < 3; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  second.resolve();
+  for (let i = 0; i < 200 && clips.ready < 3; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(clips.ready, 3);
   assert.deepEqual(fetched, ['a/0', 'a/1', 'a/2']);
   clips.stop();
@@ -82,6 +86,15 @@ test('stopped, it holds nothing and a late answer from the portal is ignored', a
   assert.equal(clips.ready, 0);
 });
 
+test('stopped, the portal is told, so that it does not make the rest of the clips for nobody; a portal that cannot be told is no error', async () => {
+  let told = 0;
+  const clips = new FillerClips({ list: async () => ({ key: 'a', clips: [], rendering: true }), clip: async () => clip(0), release: async () => { told++; } });
+  clips.load(); await tick(); clips.stop();
+  assert.equal(told, 1);
+  const unreachable = new FillerClips({ list: async () => ({ key: 'a', clips: [], rendering: true }), clip: async () => clip(0), release: async () => { throw new Error('offline'); } });
+  unreachable.load(); await tick(); unreachable.stop(); await tick();
+});
+
 test('the clips are asked for by session and key, and read as 16-bit samples', async () => {
   const urls: string[] = [];
   const request = (async (url: string) => {
@@ -93,6 +106,10 @@ test('the clips are asked for by session and key, and read as 16-bit samples', a
   assert.deepEqual(await source.list(), { key: 'k', clips: [3], rendering: false });
   assert.deepEqual([...await source.clip('k', 3)], [0.5, -1]);
   assert.deepEqual(urls, ['/api/sessions/a%20b/voice/fillers', '/api/sessions/a%20b/voice/fillers/k/3']);
+  // Telling the portal that nobody waits for the clips: a POST that survives a page being left.
+  const posts: { url: string; init?: RequestInit }[] = [];
+  await fillerSource('a b', (async (url: string, init?: RequestInit) => { posts.push({ url, init }); return new Response(null, { status: 204 }); }) as unknown as typeof fetch).release!();
+  assert.deepEqual(posts.map(p => [p.url, p.init?.method, p.init?.keepalive]), [['/api/sessions/a%20b/voice/fillers/stop', 'POST', true]]);
   await assert.rejects(fillerSource('x', (async () => new Response('', { status: 404 })) as unknown as typeof fetch).list());
 });
 

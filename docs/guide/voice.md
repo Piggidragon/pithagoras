@@ -185,19 +185,23 @@ clip is only started when no speech for you is being synthesized and none was in
 the last eight seconds (the gap between two phrases of an answer is not the end
 of it), and a clip under way when speech for an answer begins is cancelled at the
 runtime and made again afterwards. They are made only while a page is asking for
-them: ending voice mode, or switching fillers off, stops it (the clips still
-missing are made the next time voice mode starts), so the speech model is not
-loaded back onto the GPU for clips nobody is waiting for. Only one voice is made
-at a time. Another
-voice, language, speech runtime, expressiveness or reference recording stops
-the one being made, makes a new set, and the old one is deleted once the first
-clip of the new one is made (a setting changed and changed back loses nothing).
+them: ending voice mode, or switching fillers off, tells the portal, which drops
+the clip it is on and makes no more (the clips still missing are made the next
+time voice mode starts), whether or not it manages the speech service, so the
+speech model is not loaded back onto the GPU for clips nobody is waiting for. A
+page that cannot say so, a tab that was closed, is given up on after ten seconds
+without a question. Only one voice is made at a time. Another voice, language,
+speech runtime, expressiveness or reference recording stops the one being made,
+makes a new set, and the old one is deleted once the first clip of the new one is
+made (a setting changed and changed back loses nothing).
 Until the first clip is ready there is no filler; one never waits for them.
 
 **When it plays.** The moment your turn is taken: what you said has been
 recognised, it is not a noise and not a request to the page ("say that again"),
 and it is on its way to the agent. This is before the agent has taken the message
-up, not after a timer. The budget:
+up, not after a timer, and not after the run your turn interrupts has wound
+down: with an agent at work, the filler plays while that run is still being
+stopped. The budget:
 
 | | |
 | --- | --- |
@@ -226,9 +230,9 @@ is played once and then silence beats saying it again.
 
 **Switching them off.** **Voice settings → Fillers → Off**, or
 <kbd>Shift</kbd>+<kbd>F</kbd>. The choice is remembered in this browser, and while
-it is off the page asks the portal for nothing and fetches nothing; the portal
-makes clips only while a page asks, so it stops within a few seconds. Two things
-switch them off for the whole portal, and then the setting is not shown:
+it is off the page asks the portal for nothing and fetches nothing, and tells it
+to stop making them. Two things switch them off for the whole portal, and then
+the setting is not shown:
 
 - `VOICE_STATUS_SPEECH=false`, which also switches off the spoken compaction
   notices below. The portal makes none of the clips either.

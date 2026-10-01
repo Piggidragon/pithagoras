@@ -112,7 +112,7 @@ export class HandsFreeVoice {
    */
   private startFiller() {
     if (!this.alive || !this.io.filler || this.io.statusSpeech === false || this.io.sequential || this.filled || this.filler) return;
-    if (this.hearing || this.compacting || !this.acceptingReplies || this.pipeline.busy || this.output.length) return;
+    if (this.hearing || this.compacting || this.pipeline.busy || this.output.length) return;
     const controller = new AbortController();
     let playing: Promise<void> | undefined;
     try { playing = this.io.filler(controller.signal); } catch { return; }
@@ -122,6 +122,13 @@ export class HandsFreeVoice {
     const filler = { controller, done: playing.catch(() => {}).then(() => { if (this.filler === filler) { this.filler = undefined; this.state(); } }) };
     this.filler = filler;
     this.state();
+    return filler;
+  }
+  /** The turn that started this filler is not going to be sent after all: the filler is cut, and the next turn may have one. */
+  private dropFiller(filler: { controller: AbortController } | undefined) {
+    if (!filler) return;
+    filler.controller.abort();
+    this.filled = false;
   }
   /** Tells the filler to stop, and returns once it has: a player that does not answer is not waited for, as the answer is worth more than a filler. */
   private async endFiller() {
@@ -247,24 +254,25 @@ export class HandsFreeVoice {
         this.ignoreCurrent();
         return;
       }
+      // The turn is taken, and for the agent: from here on there is silence until
+      // it speaks, and the filler is what fills it, from the clip already in hand.
+      // Not after the run this turn interrupts has wound down: that is the gap it is for.
+      const filler = this.startFiller();
       // Serialize abort behind an in-flight send so it cannot miss that new run.
       // When steering, the run goes on and what is said is added to it. When it
       // was already stopped while this was being said, that is not done twice —
       // but whether it was is only known once that stop has settled.
       const busy = (this.io.agentRunning() || this.sending) && !this.io.steering?.();
       const send = this.operations.then(async () => {
-        if (!valid() || this.hearing || this.recordings.length) return;
+        if (!valid() || this.hearing || this.recordings.length) return this.dropFiller(filler);
         if (busy && !this.stopped) {
-          await this.io.abort();
-          if (!valid() || this.hearing || this.recordings.length) return;
+          try { await this.io.abort(); } catch (error) { this.dropFiller(filler); throw error; }
+          if (!valid() || this.hearing || this.recordings.length) return this.dropFiller(filler);
         }
         this.held = null;
         this.ignoreCurrent();
         this.acceptingReplies = true;
         this.sending = true;
-        // The turn is taken: from here on there is silence until the agent speaks, and the
-        // filler is what fills it, from the clip already in hand, not after the send.
-        this.startFiller();
         this.state();
         try {
           await this.io.send(text);

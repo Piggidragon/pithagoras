@@ -326,6 +326,37 @@ test('live speech cuts off the clip being made at the runtime, and the clip is m
   assert.deepEqual(heard.map(h => h.input), [FILLERS[0].text, ...FILLERS.map(f => f.text)]);
 });
 
+/** Starts a render that the fake runtime holds, does `action`, and says how many requests the runtime saw hang up. */
+async function cutBy(language: string, action: () => Promise<Response>) {
+  assert.equal((await save({ language })).status, 200);
+  heard.length = 0; stall = true; cut = 0;
+  let response: Response | undefined;
+  try {
+    await fillers();
+    while (!heard.length) await tick(5);
+    response = await action();
+    for (let i = 0; i < 100 && !cut; i++) await tick(10);
+    return { cut, response };
+  } finally { stall = false; stalled.splice(0).forEach(release => release()); }
+}
+
+test('a page that ends voice mode stops the clip being made, whether or not the portal manages the speech service', async () => {
+  const { cut, response } = await cutBy('no', () => fetch(`${base}/sessions/s/voice/connection`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client: 'c', active: false }) }));
+  assert.equal(cut, 1, 'the runtime was not told to let go of the clip');
+  assert.deepEqual(await response!.json(), { managed: false });
+  // Not asked again, nothing is made; asked again, the rest is.
+  const made = heard.length; await tick(100);
+  assert.equal(heard.length, made);
+  assert.equal((await ready()).clips.length, FILLERS.length);
+});
+
+test('a page that switches fillers off stops the clip being made', async () => {
+  const { cut, response } = await cutBy('tr', () => fetch(`${base}/sessions/s/voice/fillers/stop`, { method: 'POST' }));
+  assert.equal(cut, 1, 'the runtime was not told to let go of the clip');
+  assert.equal(response!.status, 204);
+  assert.equal((await ready()).clips.length, FILLERS.length);
+});
+
 test('a portal with status speech off, or with no speech synthesis, makes and offers nothing', async () => {
   heard.length = 0;
   process.env.VOICE_STATUS_SPEECH = 'false';

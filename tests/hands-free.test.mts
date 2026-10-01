@@ -422,6 +422,36 @@ test('no filler for a noise that is no words, for what is for the page, or for a
   assert.deepEqual(refused.log, ['filler:start', 'filler:cut']); c.voice.stop();
 });
 
+test('a turn that interrupts a running agent has its filler at once, not when the run it stops has wound down', async () => {
+  const { filler, log } = fillers(); const stopped = deferred<void>();
+  const { voice, sent } = setup({ filler, agentRunning: () => true, abort: () => { log.push('abort:asked'); return stopped.promise; } });
+  turn(voice); await tick();
+  // The stop is still pending, as with a tool that is slow to give way: the silence is covered all the same.
+  assert.deepEqual(log, ['filler:start', 'abort:asked']); assert.deepEqual(sent, []);
+  stopped.resolve(); await tick();
+  assert.deepEqual(sent, ['hello']); assert.deepEqual(log, ['filler:start', 'abort:asked']);
+  voice.stop();
+});
+
+test('the filler of an interrupting turn is cut, and the next turn may have one, when the stop fails or the speaker goes on', async () => {
+  const failing = fillers(); const errors: string[] = [];
+  const a = setup({ filler: failing.filler, agentRunning: () => true, abort: async () => { throw new Error('stuck'); }, error: message => errors.push(message) });
+  turn(a.voice); await tick();
+  assert.deepEqual(failing.log, ['filler:start', 'filler:cut']); assert.equal(errors.length, 1);
+  turn(a.voice); await tick();
+  assert.deepEqual(failing.log, ['filler:start', 'filler:cut', 'filler:start', 'filler:cut']);
+  a.voice.stop();
+  // Talking on while the stop is pending: the filler is cut as it is for any speech.
+  const going = fillers(); const stopped = deferred<void>();
+  const b = setup({ filler: going.filler, agentRunning: () => true, abort: () => stopped.promise });
+  turn(b.voice); await tick();
+  b.voice.speechStart(); await tick();
+  assert.deepEqual(going.log, ['filler:start', 'filler:cut']);
+  stopped.resolve(); await tick();
+  assert.deepEqual(b.sent, []);
+  b.voice.stop();
+});
+
 test('a filler yields to the answer: it is cut before the answer is heard, and the two never play together', async () => {
   const { filler, log } = fillers();
   const { voice } = setup({ filler, speak: async text => { log.push('answer:' + text); } });

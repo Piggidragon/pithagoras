@@ -537,6 +537,12 @@ export function voiceRouter(): Router {
       res.json({ key: "", clips: [], rendering: false, error: (e as Error).message });
     }
   });
+  /**
+   * Nobody is waiting for the clips: voice mode ended, or the page switched
+   * fillers off. The one being made is dropped at the runtime, and the next
+   * question carries on. A page that goes without saying so is given up on once it has stopped asking.
+   */
+  router.post("/sessions/:id/voice/fillers/stop", (_req, res) => { fillers.stop(); res.sendStatus(204); });
   router.get("/sessions/:id/voice/fillers/:key/:n", async (req, res) => {
     const clip = await fillers.read(String(req.params.key), Number(req.params.n));
     if (!clip) return res.sendStatus(404);
