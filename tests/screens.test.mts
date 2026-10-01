@@ -2,7 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createEventBus} from '@earendil-works/pi-coding-agent';
 import {bridgeScreens, cleanScreen, SCREENS_MAX} from '../server/src/screens.ts';
-import {fakePi, todoExtension, todoGlue} from './fixtures/todo-extension.mts';
+import {fakePi, todoExtension} from './fixtures/todo-extension.mts';
+import glue from '../skills/extension-screens/templates/glue.mts';
 const bus=()=>{const h=new Map<string,((d:unknown)=>void)[]>();return{emit:(c:string,d:unknown)=>h.get(c)?.forEach(f=>f(d)),on:(c:string,f:(d:unknown)=>void)=>{h.set(c,[...(h.get(c)??[]),f]);return()=>h.set(c,(h.get(c)??[]).filter(x=>x!==f));}};};
 test('a screen is what has an id and blocks, and a block is what says its type',()=>{
  assert.equal(cleanScreen(undefined),undefined);
@@ -73,7 +74,7 @@ test('a chat has only so many screens, and the ones it has are always replaced',
 });
 test('a todo list extension is on screen from its data, as it changes, and as the chat is opened again',async()=>{
  const events=createEventBus();const out:any[]=[];const screens=bridgeScreens(events,e=>out.push(e));
- const pi=fakePi(events);todoExtension(pi.api);todoGlue(pi.api);
+ const pi=fakePi(events);todoExtension(pi.api);glue(pi.api as any);
  // Nothing in the conversation yet: no screen.
  await pi.start();
  assert.deepEqual(screens.list(),[]);
@@ -99,4 +100,32 @@ test('a todo list extension is on screen from its data, as it changes, and as th
  await pi.call('todo',{action:'clear'});
  assert.deepEqual((shown().blocks[1] as any).items,[]);
  assert.equal((shown().blocks[1] as any).empty,'Nothing to do yet.');
+});
+test('the glue says no screen for data it does not know, and leaves the screen alone for a result that is none of it',async()=>{
+ const events=createEventBus();const out:any[]=[];const screens=bridgeScreens(events,e=>out.push(e));
+ const pi=fakePi(events);todoExtension(pi.api);glue(pi.api as any);
+ await pi.start();
+ await pi.call('todo',{action:'add',text:'Write the docs'});
+ assert.equal(out.length,1);
+ // Another tool's result, and one of the tool's own that carries no list (a failed call): the screen stays as it was.
+ await pi.result('bash',{todos:[]});
+ await pi.result('todo',undefined);
+ await pi.result('todo',{error:'no such task'});
+ assert.equal(out.length,1);
+ assert.equal(screens.list().length,1);
+ // The conversation moves to another branch with the same list: nothing to say again, and the failed calls do not take it away.
+ await pi.tree();
+ assert.equal(out.length,1);
+ await pi.start('resume');
+ assert.equal(out.length,1);
+ // Nothing in the conversation has the list in it, as after an update of the extension that changed what it keeps: a wrong screen is worse than none.
+ const events2=createEventBus();const out2:any[]=[];const screens2=bridgeScreens(events2,e=>out2.push(e));
+ const pi2=fakePi(events2);glue(pi2.api as any);
+ await pi2.result('todo',{todos:'three',tasks:[]});
+ await pi2.start();
+ assert.deepEqual(screens2.list(),[]);
+ // A list of what it does not expect is no list, and never throws into the extension.
+ await pi2.result('todo',{todos:[null,{text:'x'}]});
+ await pi2.result('todo',{todos:[{text:'x',status:'pending'}]});
+ assert.equal(screens2.list().length,1);
 });

@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import { createEventBus } from '@earendil-works/pi-coding-agent';
 import { bridgeScreens } from '../../server/src/screens.ts';
-import { fakePi, todoExtension, todoGlue } from '../fixtures/todo-extension.mts';
+import { fakePi, todoExtension } from '../fixtures/todo-extension.mts';
+import glue from '../../skills/extension-screens/templates/glue.mts';
 
 /**
  * A todo-list extension, from its data to the page: the extension and its glue
@@ -17,7 +18,7 @@ async function chat(page: Page, { asked = true } = {}) {
   const bridge = bridgeScreens(events, (e) => sent.push(e));
   const pi = fakePi(events);
   todoExtension(pi.api);
-  todoGlue(pi.api);
+  glue(pi.api as any);
   await page.route('**/api/sessions/*/background', (route) =>
     asked
       ? route.fulfill({ json: { supported: true, jobs: [], statuses: [], widgets: [], screens: bridge.list(), piRunning: true } })

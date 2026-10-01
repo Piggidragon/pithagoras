@@ -1,6 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {BLOCK_TYPES,itemsOf,screensOf,stateOf,toneOf,withScreen} from '../web/src/screens.ts';
+import {readFileSync} from 'node:fs';
+import {BLOCK_TYPES,CHECK_STATES,TONES,isBlockType,itemsOf,screensOf,stateOf,toneOf,withScreen} from '../web/src/screens.ts';
+import {cleanScreen} from '../server/src/screens.ts';
 import {markOf,withLiveUi} from '../web/src/use-background.ts';
 import {appendLiveEvent} from '../web/src/live-events.ts';
 const empty={supported:true,jobs:[],statuses:[],widgets:[],screens:[]};
@@ -53,4 +55,18 @@ test('items are read as far as they make sense: strings and objects with words, 
  assert.equal(toneOf('ok'),'ok');assert.equal(toneOf('loud'),undefined);
  assert.equal(stateOf('blocked'),'blocked');assert.equal(stateOf(undefined),'todo');
  assert.ok(BLOCK_TYPES.includes('checklist'));
+});
+test('the blocks reference the agent reads says what the page draws, and its examples are blocks',()=>{
+ const reference=readFileSync(new URL('../skills/extension-screens/reference/blocks.md',import.meta.url),'utf8');
+ const sections=[...reference.matchAll(/^## `(\w+)`$/gm)].map(m=>m[1]);
+ assert.deepEqual(sections,[...BLOCK_TYPES],'a section for each block, in the order the page lists them');
+ assert.ok(reference.includes(`Block types: ${BLOCK_TYPES.map(t=>`\`${t}\``).join(', ')}.`));
+ for(const word of [...TONES,...CHECK_STATES]) assert.ok(reference.includes(`\`${word}\``),`${word} is explained`);
+ const examples=[...reference.matchAll(/```json\n([\s\S]*?)\n```/g)].map(m=>JSON.parse(m[1]));
+ assert.equal(examples.length,BLOCK_TYPES.length,'one example each');
+ for(const example of examples){
+  assert.ok(isBlockType(example.type),`${example.type} is a block`);
+  // What the examples show is kept whole by the portal, nothing of it cut.
+  assert.deepEqual(cleanScreen({id:'x',blocks:[example]})!.blocks,[example]);
+ }
 });

@@ -180,22 +180,33 @@ function portalLoader(pi: any): new (options: unknown, rule: AudioRule, said?: (
 }
 
 /**
- * Skills shipped with the portal, loaded from the image rather than installed.
+ * A directory the portal ships beside its code, loaded from the image rather
+ * than installed.
  *
  * Resolved relative to the compiled file so it works from dist and from source,
  * the same way the builtin channels are found.
  */
-export function builtinSkillsDir(): string | undefined {
+function shippedDir(name: string): string | undefined {
   const here = path.dirname(fileURLToPath(import.meta.url));
   for (const candidate of [
-    path.resolve(here, "../../../skills"),
-    path.resolve(here, "../../skills"),
-    path.resolve(process.cwd(), "skills"),
-    path.resolve(process.cwd(), "../skills"),
+    path.resolve(here, "../../..", name),
+    path.resolve(here, "../..", name),
+    path.resolve(process.cwd(), name),
+    path.resolve(process.cwd(), "..", name),
   ]) {
     if (existsSync(candidate)) return candidate;
   }
   return undefined;
+}
+
+/** Skills shipped with the portal. */
+export function builtinSkillsDir(): string | undefined {
+  return shippedDir("skills");
+}
+
+/** Prompt templates shipped with the portal: its own slash commands that are a prompt (`/screen`). */
+export function builtinPromptsDir(): string | undefined {
+  return shippedDir("prompts");
 }
 
 /**
@@ -419,6 +430,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // Both are required: the constructor resolves each and throws on
       // undefined, which previously left every session with no extensions.
       const builtinSkills = builtinSkillsDir();
+      const builtinPrompts = builtinPromptsDir();
       // Every session, unconditionally: the point is to limit what a turn can do
       // after it reads something untrusted, and any session can read something.
       const factories: { name: string; factory: (pi: any) => void }[] = [
@@ -456,6 +468,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // place: they belong to the image, so an edit would be lost on the next
         // deploy without saying so.
         ...(builtinSkills ? { additionalSkillPaths: [builtinSkills] } : {}),
+        // The same way, for the commands that are a prompt: they ship with the skill they invoke.
+        ...(builtinPrompts ? { additionalPromptTemplatePaths: [builtinPrompts] } : {}),
         // Inline rather than an installed package: the portal owns routines, so
         // a package would have to call back over HTTP to reach the database it
         // sits beside. Absent unless asked, so a task session never sees them.
