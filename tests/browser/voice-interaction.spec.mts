@@ -93,6 +93,29 @@ test("in voice mode a card for generate_image leads to the pictures only when th
   await expect(ours).toHaveAttribute('title', 'Show the picture');
 });
 
+test("a generate_image card is the same element from its start to its end, only a button once its picture is there", async ({ page }) => {
+  await start(page);
+  // The real order: the call starts, the model works, and some time later the picture arrives.
+  await page.getByRole('button', { name: 'Start generating a picture' }).click();
+  const card = page.locator('.voice-tool-float', { hasText: 'A foggy harbour at first light' });
+  await expect(card).toContainText('Making a picture');
+  await expect(card).not.toHaveAttribute('role', 'button');
+  await expect(card).not.toHaveAttribute('title', /.+/);
+  // The element is marked, so that a new one drawn in its place would be told by not having the mark.
+  await card.evaluate(element => { element.setAttribute('data-first-element', 'yes'); });
+
+  await page.getByRole('button', { name: 'Finish generating the picture' }).click();
+  await expect(card).toHaveAttribute('role', 'button');
+  await expect(card).toHaveAttribute('title', 'Show the picture');
+  await expect(card).toHaveAttribute('data-first-element', 'yes');
+  // And the card works as a button, by keyboard too.
+  await expect(page.getByRole('region', { name: 'Pictures' })).toBeVisible();
+  await page.getByRole('region', { name: 'Pictures' }).getByRole('button', { name: 'Minimize pictures' }).click();
+  await card.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('region', { name: 'Pictures' }).getByRole('img', { name: 'A foggy harbour' })).toBeVisible();
+});
+
 test('a file dropped on the voice stage is taken there once, not again by the chat behind it', async ({ page }) => {
   let uploads = 0;
   await page.route('**/api/sessions/test/upload?**', route => { uploads++; return route.fulfill({ json: { path: 'notes.pdf', size: 3 } }); });

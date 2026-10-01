@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSparkles } from 'react-icons/lu';
 import type { PortalEvent } from '../api';
 import { describeCall, describeOutcome, elapsed, type ToolCall, type ToolTarget } from '../tool-activity';
@@ -26,6 +26,7 @@ const SLOTS = 4;
  * shows how long it has been. When the call ends it says what came of it, and
  * goes a few seconds later. One that can be looked at opens it when tapped:
  * the file in Files, the terminal, the browser, the document, the picture.
+ * That is a role it takes on, not another element: see the card below.
  */
 /** Where a card leads, as its title names it. */
 const TARGET: Record<ToolTarget, string> = {
@@ -112,9 +113,16 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
           {!note && card.status === 'failed' && <p className="voice-tool-note">{t("Failed")}</p>}
         </div>
       </>;
-      return card.target
-        ? <button key={card.id} type="button" className={className} onClick={() => onOpen(card)} title={t('Show {what}', { what: card.target === 'files' && card.path ? card.path : t(TARGET[card.target]) })}>{body}</button>
-        : <div key={card.id} className={className}>{body}</div>;
+      // One element for the card's whole life, a button only by its role: a card that is given something to
+      // open when its call ends (a generate_image's picture) would otherwise be a new element, flying out of the
+      // orb again and read out again by a screen reader.
+      const open = () => onOpen(card);
+      const lead = card.target ? {
+        role: 'button', tabIndex: 0, onClick: open,
+        onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } },
+        title: t('Show {what}', { what: card.target === 'files' && card.path ? card.path : t(TARGET[card.target]) }),
+      } : {};
+      return <div key={card.id} className={className} {...lead}>{body}</div>;
     })}
   </div>;
 }
