@@ -40,7 +40,7 @@ import { caretFrom, drafts, withUnsent } from "../drafts";
 import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
-import { isClientCommand, isCommand } from "../client-commands";
+import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
 import { msg, t, tp } from "../i18n";
@@ -911,6 +911,8 @@ export function Chat({
   // for every chat looked at, which the config route goes out of its way not to do.
   const [commands, setCommands] = useState<PiCommand[]>([]);
   const commandList = useRef<{ key: string; list: Promise<PiCommand[]> } | null>(null);
+  /** Per chat, a send that is waiting for the command list, which what is sent after it queues behind. */
+  const held = useRef(new Map<string, Promise<unknown>>());
   /** The commands for this chat, fetched once per chat and again after each run. */
   const loadCommands = (): Promise<PiCommand[]> => {
     // A run can install an extension, whose commands should then be offered.
@@ -1038,7 +1040,7 @@ export function Chat({
    * there looking unsent while it is on its way — and put back if it does not
    * get there. Throws, for the caller to say what went wrong.
    */
-  const submit = async (msg: string, fromBox: boolean) => {
+  const submit = async (msg: string, fromBox: boolean): Promise<void> => {
     const sent = session.id;
     const typed = typedCommand(msg, trigger);
     // pi is told "/name" whatever character the command was typed with, so the
@@ -1046,8 +1048,10 @@ export function Chat({
     // Typed before the list has come — it starts pi for the chat, which can take
     // a while — it is waited for, rather than the command going out as words.
     // The box is emptied first all the same: what is typed while waiting is for
-    // the next message, and the chat may have been left by then.
-    const waits = typed !== null && !msg.startsWith("/") && !commands.length;
+    // the next message, and the chat may have been left by then. The portal's
+    // own commands do not wait, as under the slash: they open UI here and need
+    // nothing from pi.
+    const waits = typed !== null && !msg.startsWith("/") && !commands.length && !CLIENT_COMMANDS.has(typed.name);
     const knownIn = (list: PiCommand[]) => (typed && isCommand(typed.name, list) ? typed : null);
     // The pictures in the box go with what came from it, and nothing else. A
     // command is run rather than said — this one here, any other by pi — so
@@ -1061,42 +1065,57 @@ export function Chat({
         changeInput("");
       } else clearBox();
     }
-    try {
-      let listed = commands;
-      if (waits) {
-        listed = await loadCommands();
-        known = knownIn(listed);
-        // It was a command after all: its pictures go back where they were.
-        if (known && images.length) putBack(sent, "", images);
-        if (known) images = [];
-      }
-      // Some builtins are UI, not prompts: /model opens the picker the pill uses,
-      // /settings opens the modal. Sending them to pi would just be a chat line.
-      const command = typed && isClientCommand(typed.name, listed) ? typed : null;
-      if (command) {
-        if (command.name === "model") setPanelRequest("model");
-        else await onClientCommand(command.name, command.args);
-        return;
-      }
-      setSending(true);
+    const run = async () => {
       try {
-        // Mid-run, typed words steer the run — taken in after the step it is on
-        // — rather than waiting for it to finish, which on a long run looked
-        // like the message had gone nowhere. Voice mode has its own switch.
-        const steer = running && !voiceMode;
-        await onSend(
-          known ? known.wire : msg,
-          voiceMode || images.length || steer
-            ? { voice: voiceMode || undefined, images: images.length ? images : undefined, steer: steer || undefined }
-            : undefined,
-        );
-      } finally {
-        setSending(false);
+        let listed = commands;
+        if (waits) {
+          listed = await loadCommands();
+          known = knownIn(listed);
+          // It was a command after all: its pictures go back where they were.
+          if (known && images.length) putBack(sent, "", images);
+          if (known) images = [];
+        }
+        // Some builtins are UI, not prompts: /model opens the picker the pill uses,
+        // /settings opens the modal. Sending them to pi would just be a chat line.
+        const command = typed && isClientCommand(typed.name, listed) ? typed : null;
+        if (command) {
+          if (command.name === "model") setPanelRequest("model");
+          else await onClientCommand(command.name, command.args);
+          return;
+        }
+        setSending(true);
+        try {
+          // Mid-run, typed words steer the run — taken in after the step it is on
+          // — rather than waiting for it to finish, which on a long run looked
+          // like the message had gone nowhere. Voice mode has its own switch.
+          const steer = running && !voiceMode;
+          await onSend(
+            known ? known.wire : msg,
+            voiceMode || images.length || steer
+              ? { voice: voiceMode || undefined, images: images.length ? images : undefined, steer: steer || undefined }
+              : undefined,
+          );
+        } finally {
+          setSending(false);
+        }
+      } catch (e) {
+        if (fromBox) putBack(sent, msg, images);
+        throw e;
       }
-    } catch (e) {
-      if (fromBox) putBack(sent, msg, images);
-      throw e;
-    }
+    };
+    // In the order they were said: a command still waiting for the list is not
+    // overtaken by what is sent after it, which may depend on it. What opens UI
+    // here is not part of that order.
+    const earlier = held.current.get(sent);
+    const opensUi = typed !== null && isClientCommand(typed.name, commands);
+    if (!waits && (!earlier || opensUi)) return run();
+    const mine = (earlier ?? Promise.resolve()).then(run);
+    const settled = mine.then(() => undefined, () => undefined);
+    held.current.set(sent, settled);
+    void settled.then(() => {
+      if (held.current.get(sent) === settled) held.current.delete(sent);
+    });
+    return mine;
   };
 
   /** A message that did not go, back where it was typed — in that chat, if you have left it. */

@@ -252,13 +252,28 @@ test.describe('with another character', () => {
     await expect(page.getByRole('button', { name: 'Remove photo.png' })).toHaveCount(0);
   });
 
-  test('a command that is the portal\'s own is run here, however it is typed', async ({ page }) => {
-    const { prompts } = await portal(page);
+  test('a command that is the portal\'s own is run here at once, without the list and in the chat it was typed in', async ({ page }) => {
+    // The list never comes: pi's command list is none of its business.
+    const { prompts } = await portal(page, { listAfter: new Promise<void>(() => {}) });
     await page.goto('/s/demo');
     await say(page, '!settings');
     // /settings opens the dialog: it is never sent to pi, nor said in the chat.
     await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page).toHaveURL(/\/s\/demo\/settings\//);
     expect(prompts).toEqual([]);
     await expect(box(page)).toHaveValue('');
+  });
+
+  test('what is sent while a command waits for the list goes after it', async ({ page }) => {
+    let listed!: () => void;
+    const { prompts } = await portal(page, { listAfter: new Promise<void>((resolve) => (listed = resolve)) });
+    await page.goto('/s/demo');
+    await say(page, '!skill:review the diff');
+    await say(page, 'and then this');
+    await say(page, '!important: and this');
+    await page.waitForTimeout(300);
+    expect(prompts).toEqual([]);
+    listed();
+    await expect.poll(() => prompts).toEqual(['/skill:review the diff', 'and then this', '!important: and this']);
   });
 });
