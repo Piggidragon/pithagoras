@@ -39,6 +39,20 @@ test('text, lists and depth are held to their limits',()=>{
  assert.ok(wide.blocks.length>0&&wide.blocks.length<200);
  assert.ok(JSON.stringify(wide).length<400_000);
 });
+test('a screen is held to a size however long its texts are, since it is sent whole with every change and poll',()=>{
+ // Every one inside the count limits: 30 lists of 200 items of 5000 characters is some 30 MB asked for.
+ const huge=cleanScreen({id:'a',blocks:Array.from({length:30},()=>({type:'list',items:Array.from({length:200},()=>'x'.repeat(5000))}))})!;
+ assert.ok(JSON.stringify(huge).length<250_000,'cut, not sent');
+ assert.ok(huge.blocks.length>0&&(huge.blocks[0].items as unknown[]).length>0,'what comes first is kept');
+ // A text that is cut at the budget keeps its start, and the ones after it are left out.
+ const texts=cleanScreen({id:'a',blocks:Array.from({length:100},(_,i)=>({type:'text',text:`${i}:`+'y'.repeat(1990)}))})!;
+ assert.ok(texts.blocks.length>=45&&texts.blocks.length<100);
+ assert.ok((texts.blocks[0].text as string).startsWith('0:'));
+ // Short texts are not touched: a long todo list is well inside.
+ const todos=cleanScreen({id:'a',blocks:[{type:'checklist',items:Array.from({length:200},(_,i)=>({text:`Task ${i}`,detail:'d'.repeat(300),state:'todo'}))}]})!;
+ assert.equal((todos.blocks[0].items as unknown[]).length,200);
+ assert.equal(((todos.blocks[0].items as any[])[199]).detail.length,300);
+});
 test('what an extension shows reaches the portal as session events, and is kept as it stands',()=>{
  const b=bus();const out:any[]=[];const screens=bridgeScreens(b,e=>out.push(e));
  b.emit('screen:v1:set',{id:'nothing'});

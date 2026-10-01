@@ -1,11 +1,13 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 /**
  * A todo-list extension on a screen, against pi itself: a made-up extension and
@@ -55,7 +57,7 @@ writeFileSync(path.join(agent, "models.json"), JSON.stringify({
   },
 }));
 
-// The extension, and the glue put where the skill says: $HOME/.pi/agent/extensions/screen-<name>/index.ts.
+// The extension, and the glue put where the skill says: pi's agent folder, extensions/screen-<slug>/index.ts.
 mkdirSync(path.join(agent, "extensions", "todo"), { recursive: true });
 writeFileSync(
   path.join(agent, "extensions", "todo", "index.ts"),
@@ -126,4 +128,51 @@ test("the portal's own command and skill for connecting an extension are there i
   } finally {
     client.dispose();
   }
+});
+
+/** Why the skill says the folder's name is no package name: pi finds an extension one folder down, and not two. */
+test("a glue in a folder with a scoped name two levels deep is not loaded, and one named flat is", async () => {
+  const says = (id) => `export default (pi: any) => pi.on("session_start", () => pi.events.emit("screen:v1:set", { id: ${JSON.stringify(id)}, blocks: [{ type: "text", text: "x" }] }));\n`;
+  mkdirSync(path.join(agent, "extensions", "screen-@scope", "todo"), { recursive: true });
+  writeFileSync(path.join(agent, "extensions", "screen-@scope", "todo", "index.ts"), says("two-levels"));
+  mkdirSync(path.join(agent, "extensions", "screen-scope-todo"), { recursive: true });
+  writeFileSync(path.join(agent, "extensions", "screen-scope-todo", "index.ts"), says("flat"));
+  const client = await open();
+  try {
+    assert.deepEqual(client.screens().map((s) => s.id).sort(), ["flat"]);
+  } finally {
+    client.dispose();
+  }
+});
+
+/**
+ * Step 4 of the skill: pi says nothing in the chat of a glue that fails to load, so the agent
+ * runs pi once on the file and looks for the failure. This runs the command as the skill gives
+ * it, against pi's own command line, which a release could change.
+ */
+test("a glue that does not load is found by the check the skill has the agent run", async () => {
+  const { piCli } = await import("../dist/pi/package.js");
+  const cli = piCli();
+  assert.ok(cli, "pi's command line is there");
+  const skill = readFileSync(path.join(repo, "skills/extension-screens/SKILL.md"), "utf8");
+  const command = /^pi -ne -e .*\|\| echo "loads"$/m.exec(skill)?.[0];
+  assert.ok(command, "the skill gives the command");
+  // `pi` on the PATH, as in a real install.
+  const bin = path.join(home, "bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(path.join(bin, "pi"), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(cli)} "$@"\n`, { mode: 0o755 });
+  const check = async (source) => {
+    const dir = path.join(home, "checks", String(++chats));
+    mkdirSync(path.join(dir, "extensions", "screen-check"), { recursive: true });
+    writeFileSync(path.join(dir, "extensions", "screen-check", "index.ts"), source);
+    const { stdout } = await promisify(execFile)("bash", ["-c", command.replace("<slug>", "check")], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, AGENT_DIR: dir, PI_CODING_AGENT_DIR: dir },
+      timeout: 60_000,
+    });
+    return stdout;
+  };
+  const template = readFileSync(path.join(repo, "skills/extension-screens/templates/glue.mts"), "utf8");
+  assert.equal((await check(template)).trim(), "loads", "the template loads");
+  assert.match(await check('export default function (pi) { pi.events.emit("x", { a: 1 ;\n}\n'), /failed to load/i, "a syntax error");
+  assert.match(await check('export default function () { throw new Error("boom"); }\n'), /failed to load.*boom/is, "an error as it starts");
 });

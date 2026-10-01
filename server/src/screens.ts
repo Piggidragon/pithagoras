@@ -52,6 +52,13 @@ const ENTRIES_MAX = 200;
 const DEPTH_MAX = 8;
 /** Everything in one screen: more is cut, not refused, since the glue made a list longer than it knew. */
 const NODES_MAX = 4000;
+/**
+ * The characters of all the texts and keys in one screen. The counts above bound
+ * how many values there are, not how long: a screen is sent whole on every
+ * change and with every poll of the page, so it has to stay a few hundred
+ * kilobytes however long the strings are that a glue puts in it.
+ */
+const CHARS_MAX = 100_000;
 
 type Bus = { on(channel: string, handler: (data: unknown) => void): () => void };
 type Emit = (event: Record<string, unknown>) => void;
@@ -71,11 +78,15 @@ const text = (value: unknown, max: number): string | undefined =>
  * further than the limits are left out, so whatever a glue puts together
  * arrives as JSON the page can hold, however it was made.
  */
-function plain(value: unknown, depth: number, budget: { left: number }): unknown {
+function plain(value: unknown, depth: number, budget: { left: number; chars: number }): unknown {
   if (budget.left <= 0) return undefined;
   if (typeof value === "string") {
+    // What does not fit of the last text is cut; the texts after it are left out.
+    if (budget.chars <= 0) return undefined;
     budget.left--;
-    return value.slice(0, TEXT_MAX);
+    const kept = value.slice(0, Math.min(TEXT_MAX, budget.chars));
+    budget.chars -= kept.length;
+    return kept;
   }
   if (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
     budget.left--;
@@ -93,8 +104,11 @@ function plain(value: unknown, depth: number, budget: { left: number }): unknown
   }
   const kept: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value).slice(0, ENTRIES_MAX)) {
+    const name = key.slice(0, KEY_MAX);
+    if (budget.chars < name.length) break;
+    budget.chars -= name.length;
     const one = plain(entry, depth + 1, budget);
-    if (one !== undefined) kept[key.slice(0, KEY_MAX)] = one;
+    if (one !== undefined) kept[name] = one;
   }
   return kept;
 }
@@ -104,7 +118,7 @@ export function cleanScreen(data: unknown): Screen | undefined {
   const given = data as { id?: unknown; title?: unknown; blocks?: unknown } | null | undefined;
   const id = text(given?.id, ID_MAX);
   if (!id || !Array.isArray(given?.blocks)) return undefined;
-  const budget = { left: NODES_MAX };
+  const budget = { left: NODES_MAX, chars: CHARS_MAX };
   const blocks: Record<string, unknown>[] = [];
   for (const block of given.blocks.slice(0, ENTRIES_MAX)) {
     const one = plain(block, 1, budget) as Record<string, unknown> | undefined;

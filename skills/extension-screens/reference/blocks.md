@@ -89,5 +89,8 @@ Items with a mark for their state. A todo list.
 ## Limits
 
 A chat has at most 12 screens. Within one, text is cut at 2000 characters, a
-list at 200 entries, nesting at a few levels, and the whole screen at a few
-thousand values: more is cut, not refused. Say what matters, not everything.
+list at 200 entries, nesting at a few levels, the whole screen at a few thousand
+values, and all its texts together at 100,000 characters (the rest of a text that
+crosses that is cut, and the texts after it are left out): more is cut, not
+refused. A screen is sent whole to every open page with each change, so say what
+matters, not everything: cut a long description before it goes in a block.

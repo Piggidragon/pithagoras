@@ -22,11 +22,16 @@ say its data in those blocks is a small job, which the agent does for you:
    the name out and the agent asks which one you mean.
 3. The agent reads the extension, decides on the smallest screen of use (for a
    todo list: a progress line and the tasks with their state), writes the
-   connection, and tells you what it made and where.
+   connection, checks that pi can load it, and tells you what it made and where.
+   The check is its job because pi does not say in the chat when an extension
+   fails to load: `/reload` reports a reload either way.
 4. Run `/reload`, or start a new chat, so pi finds it. A **Screens** button
    appears in the chat's header once the extension has something to show: at
    once if its data is already in the conversation, otherwise the first time it
    is used.
+
+A name with a scope, `@scope/name`, is fine to give `/screen`. The agent makes a
+short folder name of its own from it for the connection.
 
 `/screen` is a prompt template and `extension-screens` is the
 [skill](/guide/extensions#built-in-skills) it has the agent follow. Both ship
@@ -89,9 +94,14 @@ Like the [subagent protocol](/guide/extensions#the-subagent-protocol), it needs 
 dependency on the portal: the glue only calls `pi.events.emit`, and does nothing
 where nobody listens.
 
-The glue lives in `~/.pi/agent/extensions/screen-<name>/index.ts`: pi's own
-folder for an extension of yours, on the data volume (`$HOME` is there in the
-image). That is on purpose, and it is why the connection survives updates:
+The glue lives in `extensions/screen-<slug>/index.ts` in pi's agent folder:
+pi's own place for an extension of yours, on the data volume. That folder is
+`~/.pi/agent`, or where `PI_CODING_AGENT_DIR` puts it (see
+[Configuration](/reference/configuration)); the agent takes it from there and
+does not write a path by hand. `<slug>` is a short name the agent chooses, such as
+`screen-rpiv-todo`, and has no scope or `/` in it: pi finds an extension one
+folder down and not two, so a folder named after `@scope/name` would never be
+loaded. That is on purpose, and it is why the connection survives updates:
 
 - **A portal update** replaces the image. The data volume stays.
 - **An update of the extension** replaces the extension's own folder. The glue
@@ -114,11 +124,15 @@ extension.
   own process with its own event bus, out of reach, and the panel stays empty.
   Subagents and jobs have the same limit.
 - **Screens are not stored.** The portal keeps them while the chat's pi runs. The
-  glue reads the extension's data back when a chat starts or is opened again, and
-  says the screen again, so it is right after a restart without a database of its
-  own. A chat that is not open shows nothing.
-- **At most 12 screens a chat**, and each is bounded: text is cut at 2,000
-  characters, a list at 200 entries, nesting at a few levels, and the whole
-  screen at a few thousand values. More is cut, not refused.
+  glue reads the extension's data back when pi starts for the chat, and says the
+  screen again, so it is right without a database of its own. Opening a chat in
+  the page does not start its pi, so after a restart of the portal the Screens
+  button comes with the chat's first message (typing `/` starts it too), and not
+  before.
+- **At most 12 screens a chat**, and each is bounded, since a screen is sent whole
+  to every open page with each change: text is cut at 2,000 characters, a list at
+  200 entries, nesting at a few levels, the whole screen at a few thousand values,
+  and all its text together at 100,000 characters. More is cut, not refused, so a
+  long description is better left out of a block than cut by it.
 - **Blocks show, they do not take input.** There is no way to click through to
   the extension.

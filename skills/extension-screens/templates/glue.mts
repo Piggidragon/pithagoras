@@ -6,8 +6,9 @@
  * Written against: <package and version of the extension>. If an update changes
  * the data this reads, run /screen again.
  *
- * Copy to $HOME/.pi/agent/extensions/screen-<name>/index.ts and change the three
- * places marked CHANGE. Nothing else here is specific to an extension.
+ * Copy to ${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/extensions/screen-<slug>/index.ts
+ * (<slug>: a short name of your own, with no scope or "/" in it) and change the
+ * three places marked CHANGE. Nothing else here is specific to an extension.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
