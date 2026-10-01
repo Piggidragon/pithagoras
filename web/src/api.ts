@@ -1,5 +1,6 @@
 import { t } from "./i18n";
 import type { Host, VoiceChoice } from "../../server/src/voice-engines";
+import type { OrbStyle } from "../../server/src/orb-style";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
@@ -701,6 +702,9 @@ export const api = {
     json<{ sessions: Session[] }>(`/api/routines/${id}/sessions`),
 
   agentSetup: () => json<AgentSetup>("/api/agent/setup"),
+  /** The voice-mode orb's look and personality, one for the portal. */
+  agentOrb: () => json<OrbStyle>("/api/agent/orb"),
+  setAgentOrb: (style: OrbStyle) => json<OrbStyle>("/api/agent/orb", { method: "PUT", body: JSON.stringify(style) }),
   runAgentWizard: (input: {
     agentName: string;
     vibe?: string;
