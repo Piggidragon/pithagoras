@@ -33,6 +33,8 @@ export const NO_GPU_MESSAGE = "Docker cannot give the voice container a GPU: its
 export const DRIVER_TOO_OLD_MESSAGE = "The NVIDIA driver on this host is too old for the CUDA image the voice container runs in: update the driver, then try again.";
 /** What a choice with speech synthesis is told on a host that was found to have no GPU. */
 export const NO_GPU_FOR_SPEECH = "Speech synthesis needs a GPU, and none was found: install speech recognition only, or add an NVIDIA GPU that Docker can use.";
+/** The same where the host lists a card that Docker cannot hand to a container: the card is there, so the fix is Docker's. */
+export const NO_GPU_FOR_SPEECH_UNUSABLE = "Speech synthesis needs a GPU that Docker can use: install the NVIDIA Container Toolkit and restart Docker, or install speech recognition only, which needs no GPU.";
 /**
  * Docker's, nvidia-container-cli's and nvidia-smi's own words for there being no GPU to use. Only those: the toolkit
  * has other errors (a driver that is too old, a failed mount) that are not this, and their words say what to do.
@@ -99,7 +101,7 @@ export function readHost(): Host {
 }
 
 export interface Decision { choice: VoiceChoice; gpu: Gpu | undefined; summary: string }
-export interface DecideOptions { reserveMiB?: number; preferredGpu?: number; host?: Host; noGpu?: boolean }
+export interface DecideOptions { reserveMiB?: number; preferredGpu?: number; host?: Host; noGpu?: boolean; /** Cards the host lists that Docker cannot use: with `noGpu`, they are why there is none. */ unusable?: string[] }
 
 /** Throws when the host cannot hold what the choice runs on the CPU; otherwise what to say of it, or nothing where it is a matter of course. */
 function ramVerdict(choice: VoiceChoice, host: Host | undefined, alone: boolean): string {
@@ -129,8 +131,11 @@ export function decide(requested: VoiceChoice | undefined, gpus: readonly Gpu[],
   const host = options.host;
   if (options.noGpu && !gpus.length) {
     const choice = requested ?? suggestCpuChoice(host);
-    if (usesGpu(choice)) throw new Error(NO_GPU_FOR_SPEECH);
-    return { choice, gpu: undefined, summary: `No GPU detected: installing ${choiceLabel(choice)} needing ${ramVerdict(choice, host, true)}. Replies are not spoken: speech synthesis needs a GPU.` };
+    const unusable = options.unusable?.length ? options.unusable[0] : undefined;
+    if (usesGpu(choice)) throw new Error(unusable ? NO_GPU_FOR_SPEECH_UNUSABLE : NO_GPU_FOR_SPEECH);
+    // A card that is there but cannot be used is not "no GPU detected": the page says so, and so does the log.
+    const detected = unusable ? `GPU detected: ${unusable}, but Docker cannot use it` : "No GPU detected";
+    return { choice, gpu: undefined, summary: `${detected}: installing ${choiceLabel(choice)} needing ${ramVerdict(choice, host, true)}. Replies are not spoken: speech synthesis needs a GPU${unusable ? " that Docker can use" : ""}.` };
   }
   const gpu = pickGpu(gpus, options.preferredGpu);
   const choice = requested ?? suggestChoice(gpu, reserve);

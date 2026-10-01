@@ -7,7 +7,7 @@ import {
   ramNeeded, sameChoice, serverConfig, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, vramNeeded,
   type Gpu, type Host, type VoiceChoice,
 } from '../server/src/voice-engines.js';
-import { DRIVER_TOO_OLD_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, readHost, type Probe } from '../server/src/voice-gpu.js';
+import { DRIVER_TOO_OLD_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_FOR_SPEECH_UNUSABLE, NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, readHost, type Probe } from '../server/src/voice-gpu.js';
 
 // Neutral cards: only the sizes matter.
 const card = (totalMiB: number | null, freeMiB: number | null = totalMiB, index = 0): Gpu => ({ index, name: `Test GPU ${index}`, totalMiB, freeMiB });
@@ -313,6 +313,11 @@ test('on a host that was found to have no GPU, recognition alone is chosen, spee
   assert.deepEqual(decide(NONE('whisper', 'small'), [], { noGpu: true, host }).choice, NONE('whisper', 'small'));
   assert.throws(() => decide(DEFAULT_CHOICE, [], { noGpu: true, host }), (e: Error) => e.message === NO_GPU_FOR_SPEECH);
   assert.throws(() => decide({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b', asrDevice: 'cpu' }, [], { noGpu: true, host }), /Speech synthesis needs a GPU/);
+  // A card the host lists that Docker cannot hand on is not "none was found": it is the toolkit that is asked for, in the log as well.
+  const unusable = { noGpu: true, host, unusable: ['Test GPU'] };
+  assert.throws(() => decide(DEFAULT_CHOICE, [], unusable), (e: Error) => e.message === NO_GPU_FOR_SPEECH_UNUSABLE);
+  assert.doesNotMatch(NO_GPU_FOR_SPEECH_UNUSABLE, /none was found/);
+  assert.equal(decide(undefined, [], unusable).summary, 'GPU detected: Test GPU, but Docker cannot use it: installing Qwen3-ASR 0.6B (speech recognition only) needing about 1.6 GiB of memory on the CPU, which fits. Replies are not spoken: speech synthesis needs a GPU that Docker can use.');
   // Too little memory is refused with what would fit; little free right now is said and goes on; slow threads are said.
   assert.throws(() => decide(NONE('qwen3-asr', '1.7b'), [], { noGpu: true, host: machine(2048, 1800, 8) }),
     /^Error: Qwen3-ASR 1\.7B \(speech recognition only\) needs about 2\.9 GiB of memory on the CPU, but this host has 2\.0 GiB\. Qwen3-ASR 0\.6B \(speech recognition only\) would fit\.$/);

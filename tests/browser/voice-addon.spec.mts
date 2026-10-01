@@ -382,17 +382,45 @@ test('engine choice: on a host without a GPU the install is left to the check, a
 });
 
 test('engine choice: an installed recognition-only service shows its engines, and a GPU that turns up offers speech',async({page})=>{
- let hw:any=noGpu();
+ let hw:any=noGpu();const posts:any[]=[];
  await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
  await page.route('**/api/voice/hardware',r=>r.fulfill({json:hw}));
  await page.route('**/api/voice',r=>r.fulfill({json:{...config,enabled:true,runtime:'none',breezeUrl:''}}));
- await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'running',busy:false,progress:'',error:'',choice:{tts:'none',asr:'qwen3-asr',asrModel:'0.6b'}}}));
+ await page.route('**/api/voice/install',r=>{
+  if(r.request().method()==='POST'){posts.push(r.request().postDataJSON());return r.fulfill({json:{ok:true}});}
+  return r.fulfill({json:{available:true,state:'running',busy:false,progress:'',error:'',choice:{tts:'none',asr:'qwen3-asr',asrModel:'0.6b'}}});
+ });
  await page.goto('/tests/voice-addon.html');
  await page.locator('summary').filter({hasText:'Voice service'}).click();
+ const synthesis=page.getByRole('combobox',{name:'Speech synthesis engine'});
  await expect(page.getByRole('combobox',{name:'Speech recognition engine'})).toContainText('Qwen3-ASR 0.6B');
- await expect(page.getByRole('combobox',{name:'Speech synthesis engine'})).toBeDisabled();
+ await expect(synthesis).toBeDisabled();
  // No verdict on what runs: its own memory is what the host shows as taken.
  await expect(page.getByText('Needs about',{exact:false})).toHaveCount(0);
+ // A GPU turns up: the installation is still shown as what it is, recognition alone, and speech can be added.
+ hw=hardware([card]);
+ await page.reload();
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ await expect(page.getByText('GPU detected: Test GPU, 6 GiB, 4.9 GiB free')).toBeVisible();
+ await expect(page.getByRole('alert').filter({hasText:'No GPU detected'})).toHaveCount(0);
+ await expect(synthesis).toBeEnabled();
+ await expect(synthesis).toContainText('No speech synthesis');
+ await expect(synthesis).not.toContainText('Choose');
+ await synthesis.click();
+ for(const name of [/Breeze/,/Chatterbox/,/No speech synthesis/])await expect(page.getByRole('option',{name})).toBeVisible();
+ await page.getByRole('option',{name:/Breeze/}).click();
+ await expect(page.getByRole('button',{name:'Rebuild with these engines'})).toBeVisible();
+ // And back to what is installed is no change: nothing is left pending.
+ await synthesis.click();
+ await page.getByRole('option',{name:/No speech synthesis/}).click();
+ await expect(synthesis).toContainText('No speech synthesis');
+ await expect(page.getByRole('button',{name:'Rebuild with these engines'})).toHaveCount(0);
+ // Breeze is a rebuild that is sent, with the recognition it had.
+ await synthesis.click();
+ await page.getByRole('option',{name:/Breeze/}).click();
+ await page.getByRole('button',{name:'Rebuild with these engines'}).click();
+ await expect.poll(()=>posts.length).toBe(1);
+ expect(posts[0]).toEqual({tts:'breeze',asr:'qwen3-asr',asrModel:'0.6b'});
 });
 
 test('a service without speech synthesis is a listening one: the settings say so and offer nothing to speak with',async({page})=>{

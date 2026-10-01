@@ -39,6 +39,8 @@ const NO_RUNTIME = 'could not select device driver "nvidia" with capabilities: [
 let noGpuRuntime = false;               // making the container works, starting one that wants a GPU does not
 let probeError: string | null = null;   // an unrelated failure of the probe container
 let hangUp = false;                     // the daemon drops the probe's connection
+let probeDelay = 0;                     // the probe container is slow to be made, as when its image is still being downloaded
+let onStop: (() => void) | null = null; // what stopping the voice container changes: the memory it held is given back
 let calls: { method: string; url: string; body: any }[] = [];
 const server = http.createServer(async (req, res) => {
   let raw = ''; for await (const c of req) raw += c;
@@ -57,6 +59,7 @@ const server = http.createServer(async (req, res) => {
   if (url.startsWith('/images/')) { res.statusCode = images.has(decodeURIComponent(url.slice('/images/'.length, -'/json'.length))) ? 200 : 404; return res.end('{}'); }
   // The throwaway container that reads nvidia-smi inside the image.
   if (url === '/containers/create') {
+    if (probeDelay) await new Promise(r => setTimeout(r, probeDelay));
     if (hangUp) return req.socket.destroy();
     if (probeError) { res.statusCode = 500; return res.end(JSON.stringify({ message: probeError })); }
     if (dockerGpus === null) { res.statusCode = 500; return res.end(JSON.stringify({ message: NO_RUNTIME })); }
@@ -66,7 +69,7 @@ const server = http.createServer(async (req, res) => {
   if (noGpuRuntime && (url === '/containers/probe-1/start' || (url === '/containers/pithagoras-voice/start' && container?.HostConfig?.DeviceRequests))) { res.statusCode = 500; return res.end(JSON.stringify({ message: NO_RUNTIME })); }
   if (url === '/containers/probe-1/wait') return res.end(JSON.stringify({ StatusCode: 0 }));
   if (url.startsWith('/containers/probe-1/logs')) return res.end(dockerGpus ?? '');
-  if (url.includes('/stop?')) container.State.Running = false;
+  if (url.includes('/stop?')) { container.State.Running = false; onStop?.(); }
   if (method === 'DELETE' && url === '/containers/pithagoras-voice') container = null;
   if (url.startsWith('/containers/create?name=pithagoras-voice')) container = { Config: body, HostConfig: body.HostConfig, State: { Running: false } };
   if (url === '/containers/pithagoras-voice/start') container.State.Running = true;
@@ -83,11 +86,11 @@ after(async () => {
 });
 const voice = await import('../server/src/extensions/voice-service.js');
 const { DEFAULT_CHOICE } = await import('../server/src/voice-engines.js');
-const { NO_GPU_MESSAGE, NO_GPU_FOR_SPEECH, DRIVER_TOO_OLD_MESSAGE } = await import('../server/src/voice-gpu.js');
+const { NO_GPU_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_FOR_SPEECH_UNUSABLE, DRIVER_TOO_OLD_MESSAGE } = await import('../server/src/voice-gpu.js');
 
 // What the host has to run recognition on: sixteen GiB and eight threads, unless a test says otherwise.
 const host = (patch = {}) => { voice.hostReader.read = () => ({ totalMiB: 16384, freeMiB: 12000, threads: 8, ...patch }); };
-const reset = () => { host(); portalId = 'portal-one'; container = null; dockerGpus = ''; images = new Set([CUDA, BASE]); pullFails = false; noGpuRuntime = false; probeError = null; hangUp = false; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
+const reset = () => { host(); portalId = 'portal-one'; container = null; dockerGpus = ''; images = new Set([CUDA, BASE]); pullFails = false; noGpuRuntime = false; probeError = null; hangUp = false; probeDelay = 0; onStop = null; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
 const settle = async () => { for (let n = 0; n < 200 && (await voice.status()).busy; n++) await new Promise(r => setTimeout(r, 10)); };
 const created = () => calls.filter(c => c.url === '/containers/create?name=pithagoras-voice');
 /** The voice container was deleted, not the throwaway one that reads nvidia-smi. */
@@ -359,11 +362,21 @@ test('a host with the driver but without the toolkit has no GPU for voice: the c
   assert.equal('DeviceRequests' in created()[0].body.HostConfig, false);
   assert.deepEqual(state.choice, { tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' });
   assert.ok(!calls.some(c => c.url.startsWith('/images/create') && c.url.includes('nvidia')), 'no CUDA image');
-  // A request for speech is told what is missing.
+  // The log says what the page says: the card is there, and it is Docker that cannot use it.
+  assert.match(env(created()[0].body).VOICE_PLAN, /^GPU detected: Test GPU 0, but Docker cannot use it: installing Qwen3-ASR 0\.6B \(speech recognition only\) needing about 1\.6 GiB of memory on the CPU, which fits\. Replies are not spoken: speech synthesis needs a GPU that Docker can use\.$/);
+  // A request for speech is told what is missing: the toolkit, not a card, since the card is there.
   reset(); hostGpus(GPU(0, 12288, 11000)); dockerGpus = null;
   await voice.install({ tts: 'breeze', asr: 'whisper', asrModel: 'base' });
   await settle();
+  assert.equal((await voice.status()).error, NO_GPU_FOR_SPEECH_UNUSABLE);
+  assert.match(NO_GPU_FOR_SPEECH_UNUSABLE, /NVIDIA Container Toolkit/);
+  assert.doesNotMatch(NO_GPU_FOR_SPEECH_UNUSABLE, /none was found/);
+  // Where there is no card at all it is a GPU that is asked for.
+  reset(); hostGpus(null); dockerGpus = null;
+  await voice.install({ tts: 'breeze', asr: 'whisper', asrModel: 'base' });
+  await settle();
   assert.equal((await voice.status()).error, NO_GPU_FOR_SPEECH);
+  reset(); hostGpus(GPU(0, 12288, 11000)); dockerGpus = null;
   // Docker that cannot be asked leaves the host's word, and Docker that works confirms it.
   reset(); hostGpus(GPU(0, 12288, 11000)); probeError = 'no space left on device';
   assert.deepEqual([(await voice.hardware()).gpus.length, (await voice.hardware()).cpuOnly], [1, false]);
@@ -493,6 +506,37 @@ test('the page is told the card the installed service is on, not the one with th
   container = null;
   process.env.VOICE_GPU = '0';
   assert.equal((await voice.hardware()).selected, 0, 'VOICE_GPU for a first install');
+});
+
+test('a rebuild takes its own reading of the GPUs after the stop, not that of a check of the page which began before it', async () => {
+  // Two cards: the service runs on card 0, which looks full while it holds its memory (5000 MiB free) and has 12000 once it is stopped; card 1 has 9000.
+  const running = () => ({ Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1', 'pithagoras.voice-recipe': 'breeze+whisper:base' } }, HostConfig: { NetworkMode: 'container:portal-one', DeviceRequests: [{ Driver: 'nvidia', DeviceIDs: ['0'], Capabilities: [['gpu']] }] }, State: { Running: true } });
+  const setup = () => {
+    reset(); hostGpus(GPU(0, 12288, 5000) + GPU(1, 12288, 9000)); container = running();
+    onStop = () => writeFileSync(smiOutput, GPU(0, 12288, 12000) + GPU(1, 12288, 9000));
+  };
+  // Alone: the card the service is on.
+  setup();
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' });
+  await settle();
+  assert.deepEqual(created()[0].body.HostConfig.DeviceRequests[0].DeviceIDs, ['0']);
+  // While the page's check is still running, slowly, with readings taken when the service still held its memory.
+  setup(); probeDelay = 400;
+  const page = voice.hardware();
+  await new Promise(r => setTimeout(r, 50));
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' });
+  await page;
+  await settle();
+  assert.deepEqual(created()[0].body.HostConfig.DeviceRequests[0].DeviceIDs, ['0'], 'the service stays on its card: it is the one with room once it is stopped');
+  assert.match(env(created()[0].body).VOICE_PLAN, /^Detected Test GPU 0 \(12\.0 GiB, 11\.7 GiB free\)/);
+  // The page's own check is not made to wait for ever, and a failed one does not stop the install.
+  setup(); probeDelay = 50; probeError = 'no space left on device';
+  const failing = voice.hardware();
+  await new Promise(r => setTimeout(r, 10));
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' });
+  await failing;
+  await settle();
+  assert.equal(created().length, 1);
 });
 
 test('a rebuild reads the GPU after the running service is stopped, and starts it again when the choice is refused', async () => {

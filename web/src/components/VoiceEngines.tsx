@@ -45,13 +45,14 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked: pickedN
     onPick(installed && sameChoice(next, installed) ? null : next);
   };
   const noSpeech = { value: "none" as const, label: t("No speech synthesis"), hint: t("Too slow on a CPU for conversation") };
-  // With no GPU recognition alone can always be chosen, also where a speech engine is installed that has lost its GPU.
+  // With no GPU recognition alone can always be chosen, also where a speech engine is installed that has lost its GPU; and an installation
+  // of recognition alone keeps being shown as what it is, also when a GPU has turned up and speech could be added.
   const ttsOptions: { value: TtsChoice; label: string; hint: string }[] = speechOff
     ? [noSpeech]
     : [
       { value: "breeze", label: TTS_ENGINES.breeze.label, hint: t("English and Chinese, streams while it speaks") },
       { value: "chatterbox", label: TTS_ENGINES.chatterbox.label, hint: t("Nineteen languages, clones a reference voice") },
-      ...(cpuOnly ? [noSpeech] : []),
+      ...(cpuOnly || installed?.tts === "none" ? [noSpeech] : []),
     ];
   const suggest = suggestion && !sameChoice(suggestion, shown) && <> <button type="button" className={btnCls} onClick={() => onPick(installed && sameChoice(suggestion, installed) ? null : suggestion)}>{t("Use the suggestion")}</button></>;
   return <div className="space-y-3 rounded-lg border border-line p-3">

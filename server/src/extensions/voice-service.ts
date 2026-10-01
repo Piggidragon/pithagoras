@@ -173,8 +173,13 @@ async function detectGpuUse(): Promise<Detected> {
   }
   return found;
 }
-/** One probe at a time: the page asks as it opens, and an install asks too. */
-function detect(): Promise<Detected> {
+/**
+ * One probe at a time: the page asks as it opens, and an install asks too. A `fresh` answer is one that was
+ * not begun before the caller did something that changes what is read, such as stopping the service whose memory
+ * would count as taken: it waits for a probe that is running to end, and takes its own.
+ */
+async function detect(fresh = false): Promise<Detected> {
+  if (fresh && probing) await probing.catch(() => {});
   probing ??= detectGpuUse().finally(() => { probing = undefined; });
   return probing;
 }
@@ -231,9 +236,10 @@ export async function install(requested?: VoiceChoice) {
         if (stopped) await checked('POST', `/containers/${CONTAINER}/stop?t=10`);
         try {
           progress = 'Checking the GPU';
-          const found = await detect();
+          // Read after the stop, not from a check of the page that began while the service still held its memory.
+          const found = await detect(true);
           // A host that was found to have no GPU gets recognition alone, on the CPU, in the small image.
-          const decision = decide(wanted, found.gpus, { reserveMiB: reserveMiB(), preferredGpu: preferredGpu(), host: hostReader.read(), noGpu: found.checked && !found.gpus.length });
+          const decision = decide(wanted, found.gpus, { reserveMiB: reserveMiB(), preferredGpu: preferredGpu(), host: hostReader.read(), noGpu: found.checked && !found.gpus.length, unusable: found.unusable });
           choice = decision.choice;
           // With one card Docker's own pick is the card; only a choice among several needs naming. A choice with nothing on the GPU names none.
           plan = { gpuIndex: !usesGpu(choice) ? undefined : found.gpus.length > 1 ? decision.gpu?.index : found.gpus.length ? undefined : preferredGpu(), note: decision.summary };
