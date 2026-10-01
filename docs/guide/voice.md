@@ -42,6 +42,12 @@ speak. Quiet synthesized sound cues mark connection, submission, mute and tool
 focus; they can be turned off in the voice settings. Reduced-motion
 preferences disable panel transitions.
 
+The orb's look is set on the **Agent** page under **Avatar**: **Customize** opens
+a dialog with a live preview. Choose a personality (how it moves), a colour
+palette and a colour for each state, the motion speed, reactivity and glow, eyes,
+a hat and a prop. **Save avatar** applies it to every device and to an open voice
+screen at once; **Reset to default** brings back the plain orb.
+
 Browser tool calls bring the live browser into a floating window and dock the
 orb. Terminal calls show the agent’s actual command and streamed output on the
 right, moving the orb left. With both open, the browser is larger and the terminal
