@@ -343,6 +343,18 @@ test('without Docker the setup says only that Docker is needed: recognition alon
   assert.doesNotMatch(state.error, /GPU|NVIDIA/);
 });
 
+test('without Docker an uninstall says the same as an install, and leaves the settings alone', async () => {
+  const before = await (await fetch(`${base}/voice`)).json();
+  for (const removeData of [false, true]) {
+    const answer = await fetch(`${base}/voice/uninstall`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ removeData }) });
+    assert.equal(answer.status, 400);
+    assert.equal((await answer.json()).error, 'Docker is unavailable');
+  }
+  const install = await fetch(`${base}/voice/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  assert.equal((await install.json()).error, 'Docker is unavailable');
+  assert.deepEqual(await (await fetch(`${base}/voice`)).json(), before);
+});
+
 test('install takes the engines to build, and refuses a choice the installer does not make', async () => {
   const post = (body: object) => fetch(`${base}/voice/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   for (const body of [{ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }, { tts: 'breeze', asr: 'whisper', asrModel: '1.7b' }, { tts: 'breeze' }, { asr: 'qwen3-asr', asrModel: '0.6b' }]) {
