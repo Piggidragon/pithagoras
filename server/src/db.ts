@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
-import { GENERATE_IMAGE_TOOL, imageGenerationReady } from "./image-generation.js";
+import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, imageGenerationReady } from "./image-generation.js";
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
@@ -1883,10 +1883,11 @@ export function shownTools(folder?: string): Omit<KnownTool, "package">[] {
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
   // The portal's own tools belong to no package, so the packages cannot say
   // that one is not offered: image generation says so itself, while it is off.
+  // Only its own tool: an extension's of the same name is loaded whatever it says.
   const images = imageGenerationReady();
   return knownTools()
     .filter(toolAvailability(readPiSettings().packages, project))
-    .filter((tool) => images || tool.name !== GENERATE_IMAGE_TOOL)
+    .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.source === GENERATE_IMAGE_SOURCE))
     .map(({ package: _package, ...tool }) => tool);
 }
 

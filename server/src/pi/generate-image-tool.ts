@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { Type } from "typebox";
-import { GENERATE_IMAGE_TOOL, SIZE, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
+import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SIZE, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
 import { FileError, baseDir, makeFolder, saveNewFile } from "../workspace-files.js";
 import { pictureIn } from "./show-image-tool.js";
 
@@ -43,17 +43,35 @@ export function saveGenerated(folder: string, bytes: Buffer, ext: string): strin
 }
 
 /**
+ * Whether another extension has a tool of this name. pi keeps the first
+ * registration of a name, and inline extensions load after the others, so
+ * such a tool is the one the model has, and the portal's is left unused.
+ */
+export function takenByAnother(extensions: readonly any[]): boolean {
+  return extensions.some(
+    (extension) =>
+      extension?.path !== `<inline:${GENERATE_IMAGE_SOURCE}>` &&
+      [...(extension?.tools?.values?.() ?? [])].some((tool: any) => tool?.definition?.name === GENERATE_IMAGE_TOOL),
+  );
+}
+
+/**
  * An ExtensionFactory — see pi's InlineExtension.
  *
  * Decided each time pi loads it, and again on a reload: while the add-on is
  * off or has no address there is no tool at all, and the voice rule says
- * nothing of one. `registered` is what the tool was last loaded as.
+ * nothing of one. `registered` is whether the model has the portal's tool as
+ * it was last loaded: not where an extension's tool of the same name is the
+ * one pi uses, which `extensions` — what pi has loaded — tells.
  */
 export class GenerateImageTool {
   private on = false;
-  constructor(private readonly folder: string) {}
+  constructor(
+    private readonly folder: string,
+    private readonly extensions: () => readonly any[] = () => [],
+  ) {}
 
-  registered = (): boolean => this.on;
+  registered = (): boolean => this.on && !takenByAnother(this.extensions());
 
   extension = (pi: any) => {
     this.on = false;

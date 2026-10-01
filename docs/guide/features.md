@@ -121,6 +121,15 @@ already has. A failure — nothing configured, the endpoint's error, a reply tha
 no picture — is an error result the agent sees and can pass on, never a
 silent success.
 
+The tool is a tool like the others: it can be switched off for a chat, a project
+or everywhere in the tool menus and Settings → Tools, and then the model does not
+have it and the voice instructions say nothing of it either. Its name is
+`generate_image`, which an image extension you installed may use too. pi keeps
+the first tool of a name it loads, and the portal's loads last, so then the
+extension's tool is the one the model has, the portal's is left unused, and the
+voice instructions do not mention it. Switch that extension off to use the
+add-on's tool.
+
 Only the primary user's conversations can have the agent make a picture: like
 any tool that is not a plain read, it is refused in a conversation with a
 teammate unless a [tool rule](/people/rules) allows it. Each picture can cost

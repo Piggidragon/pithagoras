@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -529,6 +529,59 @@ test("image generation: the tool and what the voice rule says of it come and go 
     assert.equal(offered.at(-1).includes("show_image"), false);
   } finally {
     bare.dispose();
+    saveImageGeneration({ enabled: false });
+  }
+});
+
+test("image generation: the voice line is said only while the model has the tool, switched off in the chat or not", async () => {
+  const { saveImageGeneration } = await import("../dist/image-generation.js");
+  const { GENERATE_IMAGE_VOICE_LINE } = await import("../dist/pi/generate-image-tool.js");
+  saveInstructions(undefined);
+  saveImageGeneration({ baseUrl: "http://127.0.0.1:9/v1", enabled: true });
+  const state = (prompt) => ({ tool: offered.at(-1).includes("generate_image"), line: prompt.includes(GENERATE_IMAGE_VOICE_LINE) });
+  try {
+    // Opened with it switched off (the chat's menu, a project's default, Settings → Tools): not offered, not spoken of.
+    const client = await open(undefined, { sessionId: "image-generation-switched-off", toolsOff: ["generate_image"] });
+    try {
+      assert.deepEqual(state(await say(client, "Spoken, tool off", true)), { tool: false, line: false });
+      // Switched on in the chat's menu: both come at the next message, a typed one.
+      await client.setToolsOff([]);
+      assert.deepEqual(state(await say(client, "Typed, tool on")), { tool: true, line: true });
+      // And off again.
+      await client.setToolsOff(["generate_image"]);
+      assert.deepEqual(state(await say(client, "Typed, tool off again")), { tool: false, line: false });
+      // Another tool switched off changes nothing about it.
+      await client.setToolsOff(["show_image"]);
+      assert.deepEqual(state(await say(client, "Typed, another tool off")), { tool: true, line: true });
+    } finally {
+      client.dispose();
+    }
+  } finally {
+    saveImageGeneration({ enabled: false });
+  }
+});
+
+test("image generation: where an extension has a tool of the same name, pi keeps that one and the voice line says nothing of the portal's", async () => {
+  const { saveImageGeneration } = await import("../dist/image-generation.js");
+  const { GENERATE_IMAGE_VOICE_LINE } = await import("../dist/pi/generate-image-tool.js");
+  const extension = path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "image-package.ts");
+  writeFileSync(extension, `
+export default function (pi: any) {
+  pi.registerTool({ name: "generate_image", label: "generate image", description: "THIRD-PARTY generate_image", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "ok" }] }) });
+}
+`);
+  saveInstructions(undefined);
+  saveImageGeneration({ baseUrl: "http://127.0.0.1:9/v1", enabled: true });
+  const client = await open(undefined, { sessionId: "image-generation-clash" });
+  try {
+    const prompt = await say(client, "Spoken, with an extension's tool of that name", true);
+    assert.ok(offered.at(-1).includes("generate_image"), "the extension's tool is the one the model has");
+    assert.equal(client.session.getAllTools().find((t) => t.name === "generate_image").sourceInfo.path.includes("image-package"), true);
+    assert.equal(prompt.includes(GENERATE_IMAGE_VOICE_LINE), false, "not told of a tool it does not have");
+    assert.ok(prompt.includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    client.dispose();
+    rmSync(extension, { force: true });
     saveImageGeneration({ enabled: false });
   }
 });

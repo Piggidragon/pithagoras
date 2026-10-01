@@ -12,7 +12,7 @@ process.env.PI_CODING_AGENT_DIR = path.join(temp, "agent");
 process.env.AGENT_HOME = path.join(temp, "agent-home");
 
 const gen = await import("../server/src/image-generation.ts");
-const { GenerateImageTool, GENERATED_DIR } = await import("../server/src/pi/generate-image-tool.ts");
+const { GenerateImageTool, GENERATED_DIR, takenByAnother } = await import("../server/src/pi/generate-image-tool.ts");
 
 // The first bytes of each kind a browser draws, padded: that is all the check reads.
 const pad = (head: number[], to = 64) => Buffer.concat([Buffer.from(head), Buffer.alloc(to)]);
@@ -485,4 +485,28 @@ test("the tool menus do not offer generate_image while the add-on is off, though
   assert.deepEqual(names().filter((n) => /image/.test(n)).sort(), ["generate_image", "show_image"]);
   gen.saveImageGeneration({ enabled: false });
   assert.deepEqual(names().filter((n) => /image/.test(n)), ["show_image"]);
+
+  // An extension's tool of the same name is not the portal's: it is loaded, so it is offered, whatever the add-on says.
+  rememberTools([{ name: "generate_image", source: "image-package", package: "npm:image-package" }]);
+  assert.deepEqual(names().filter((n) => /image/.test(n)).sort(), ["generate_image", "show_image"]);
+  rememberTools([{ name: "generate_image", source: "image-generation", package: null }]);
+  assert.deepEqual(names().filter((n) => /image/.test(n)), ["show_image"], "the portal's own again");
+});
+
+test("an extension's tool of the same name is the one pi keeps, so the portal's is not counted as there", () => {
+  const ext = (extensionPath: string, ...names: string[]) => ({ path: extensionPath, tools: new Map(names.map((n) => [n, { definition: { name: n } }])) });
+  const own = ext("<inline:image-generation>", "generate_image");
+  assert.equal(takenByAnother([]), false);
+  assert.equal(takenByAnother([ext("/x/other.ts", "other_tool"), own]), false, "its own is not another's");
+  assert.equal(takenByAnother([ext("/x/image-package.ts", "edit_image", "generate_image"), own]), true);
+
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", enabled: true });
+  let loaded: any[] = [own];
+  const tool = new GenerateImageTool(mkdtempSync(path.join(temp, "chat-")), () => loaded);
+  assert.equal(tool.registered(), false, "not before it is loaded");
+  tool.extension({ registerTool: () => {} });
+  assert.equal(tool.registered(), true);
+  loaded = [ext("/x/image-package.ts", "generate_image"), own];
+  assert.equal(tool.registered(), false, "an extension's tool is the model's");
+  gen.saveImageGeneration({ enabled: false });
 });
