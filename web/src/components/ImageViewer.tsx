@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { LuChevronLeft, LuChevronRight, LuDownload, LuExternalLink, LuRedo2, LuUndo2, LuX, LuZoomIn, LuZoomOut } from "react-icons/lu";
 import { isEscape } from "../shortcuts";
@@ -74,14 +74,9 @@ export function ImageViewer({
   const [failed, setFailed] = useState<string | null>(null);
   const image = loaded?.id === id ? loaded.image : null;
 
-  const arrows = useRef<{ prev: HTMLButtonElement | null; next: HTMLButtonElement | null }>({ prev: null, next: null });
   const step = (by: 1 | -1) => {
     const to = stepped(index, pictures.length, by);
-    if (to === undefined) return;
-    setShownId(pictures[to].id);
-    // The arrow in use goes disabled when this reaches an end of the list, and a disabled button drops focus to the page: it goes to the dialog first.
-    const spent = to === 0 ? arrows.current.prev : to === pictures.length - 1 ? arrows.current.next : null;
-    if (spent && document.activeElement === spent) dialog.current?.focus({ preventScroll: true });
+    if (to !== undefined) setShownId(pictures[to].id);
   };
   const pan = usePanZoom({ id, image, stage, element: stageEl, onSwipe: step, onTap: onClose });
   useScrollLock();
@@ -95,6 +90,12 @@ export function ImageViewer({
   useEffect(() => {
     if (!pictures.length) onClose();
   }, [pictures.length, onClose]);
+
+  // What has focus can go away under it (an arrow that is used up, Zoom out of a picture that is whole again, Original of one that has none), and focus drops to the page: it goes to the dialog.
+  useLayoutEffect(() => {
+    const focused = document.activeElement;
+    if (!focused || focused === document.body || focused.matches(":disabled")) dialog.current?.focus({ preventScroll: true });
+  });
 
   useEffect(() => {
     const el = stageEl.current;
@@ -228,10 +229,10 @@ export function ImageViewer({
           </div>
           {many && (
             <>
-              <button type="button" ref={(el) => void (arrows.current.prev = el)} onClick={() => step(-1)} disabled={index === 0} aria-label={t("Previous picture")} title={t("Previous picture")} className={`${iconButton} absolute left-2 top-1/2 -translate-y-1/2 border border-line bg-surface/80 shadow-pop backdrop-blur`}>
+              <button type="button" onClick={() => step(-1)} disabled={index === 0} aria-label={t("Previous picture")} title={t("Previous picture")} className={`${iconButton} absolute left-2 top-1/2 -translate-y-1/2 border border-line bg-surface/80 shadow-pop backdrop-blur`}>
                 <LuChevronLeft aria-hidden className="h-5 w-5" />
               </button>
-              <button type="button" ref={(el) => void (arrows.current.next = el)} onClick={() => step(1)} disabled={index === pictures.length - 1} aria-label={t("Next picture")} title={t("Next picture")} className={`${iconButton} absolute right-2 top-1/2 -translate-y-1/2 border border-line bg-surface/80 shadow-pop backdrop-blur`}>
+              <button type="button" onClick={() => step(1)} disabled={index === pictures.length - 1} aria-label={t("Next picture")} title={t("Next picture")} className={`${iconButton} absolute right-2 top-1/2 -translate-y-1/2 border border-line bg-surface/80 shadow-pop backdrop-blur`}>
                 <LuChevronRight aria-hidden className="h-5 w-5" />
               </button>
             </>

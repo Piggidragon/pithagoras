@@ -64,6 +64,9 @@ const swipe = (page: Page, dx: number) =>
     fire('pointerup', x + dx);
   }, dx);
 
+/** A button that turns disabled, or goes, loses focus to the page when the browser next draws. */
+const afterDraw = (page: Page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+
 /** The pictures drawn in the chat, loaded: the page loads them as they come near. */
 async function drawn(page: Page) {
   for (const name of ['A lighthouse at dusk', 'The lighthouse, in blue', 'docs/diagram.png', 'A picture sent with this message']) {
@@ -264,14 +267,12 @@ test('focus stays in the dialog when an arrow is used up at an end of the list',
   const prev = dialog.getByRole('button', { name: 'Previous picture' });
   const next = dialog.getByRole('button', { name: 'Next picture' });
   await expect(dialog.getByText('3 / 4', { exact: true })).toBeVisible();
-  // A button that turns disabled loses focus to the page when the browser next draws.
-  const afterDraw = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 
   await next.focus();
   await page.keyboard.press('Enter');
   await expect(dialog.getByText('4 / 4', { exact: true })).toBeVisible();
   await expect(next).toBeDisabled();
-  await afterDraw();
+  await afterDraw(page);
   await expect(dialog).toBeFocused();
   // Still the keyboard's: Tab goes on from there.
   await page.keyboard.press('Tab');
@@ -281,10 +282,46 @@ test('focus stays in the dialog when an arrow is used up at an end of the list',
   for (let i = 0; i < 3; i++) await page.keyboard.press('Enter');
   await expect(dialog.getByText('1 / 4', { exact: true })).toBeVisible();
   await expect(prev).toBeDisabled();
-  await afterDraw();
+  await afterDraw(page);
   await expect(dialog).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+});
+
+test('focus stays in the dialog when the control that has it is disabled or goes away', async ({ page }) => {
+  await open(page);
+  await drawn(page);
+  await thumb(page, 'A lighthouse at dusk').click();
+  const dialog = viewer(page);
+  const button = (name: string) => dialog.getByRole('button', { name });
+  await expect(button('Show the picture at full size')).toHaveText(/\d+%/);
+
+  // Zoomed in with the keyboard and out again: the picture is whole, and Zoom out is no more to be used.
+  await button('Zoom in').focus();
+  await page.keyboard.press('Enter');
+  await expect(button('Zoom out')).toBeEnabled();
+  await button('Zoom out').focus();
+  await page.keyboard.press('Enter');
+  await expect(button('Zoom out')).toBeDisabled();
+  await afterDraw(page);
+  await expect(dialog).toBeFocused();
+
+  // Original and Edited version are there only for a picture that has one.
+  await page.keyboard.press('ArrowRight');
+  await expect(dialog.getByText('3 / 4', { exact: true })).toBeVisible();
+  await button('Show the original').focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByText('2 / 4', { exact: true })).toBeVisible();
+  await expect(button('Show the original')).toHaveCount(0);
+  await afterDraw(page);
+  await expect(dialog).toBeFocused();
+
+  await button('Show the edited version').focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(dialog.getByText('1 / 4', { exact: true })).toBeVisible();
+  await expect(button('Show the edited version')).toHaveCount(0);
+  await afterDraw(page);
+  await expect(dialog).toBeFocused();
 });
 
 test('an edit and the picture it was made from reach each other', async ({ page }) => {
