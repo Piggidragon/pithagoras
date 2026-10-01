@@ -88,6 +88,27 @@ test('with enough clips none of the last two comes again, so that a long wait do
   }
 });
 
+test('one wait is not given a clip twice while there are others, wherever in a round of all the clips it falls', () => {
+  for (const size of [5, 8]) for (let before = 0; before < size; before++) for (let seed = 0; seed < 100; seed++) {
+    let state = seed + 1;
+    const random = () => (state = (state * 48271) % 2147483647) / 2147483647;
+    const clips = new FillerClips({ list: async () => ({ key: 'a', clips: [], rendering: false }), clip: async () => clip(0) }, random);
+    for (let n = 0; n < size; n++) (clips as any).clips.set(n, clip(n));
+    // Some turns in, so that the round is partly through.
+    const turns = take(clips, before) as number[];
+    const wait = {};
+    const played = Array.from({ length: Math.min(6, size) }, () => clips.next(wait)?.[0]) as number[];
+    assert.equal(new Set(played).size, played.length, `size ${size}, ${before} before, repeated in one wait: ${turns} | ${played}`);
+    assert.ok(!played.slice(0, 2).some((n, i) => [...turns, ...played].slice(Math.max(0, turns.length + i - 2), turns.length + i).includes(n)), `within two of the last: ${turns} | ${played}`);
+  }
+  // Longer than there are clips: one has to come again, and not within two.
+  const clips = new FillerClips({ list: async () => ({ key: 'a', clips: [], rendering: false }), clip: async () => clip(0) });
+  for (let n = 0; n < 5; n++) (clips as any).clips.set(n, clip(n));
+  const wait = {}; const played = Array.from({ length: 8 }, () => clips.next(wait)?.[0]) as number[];
+  for (let i = 0; i < played.length; i++) assert.ok(!played.slice(Math.max(0, i - 2), i).includes(played[i]), `repeated within two: ${played}`);
+  assert.equal(new Set(played.slice(0, 5)).size, 5);
+});
+
 test('with a single clip, it is played once and then silence beats saying it again', () => {
   const clips = new FillerClips({ list: async () => ({ key: 'a', clips: [], rendering: false }), clip: async () => clip(0) });
   (clips as any).clips.set(7, clip(7));

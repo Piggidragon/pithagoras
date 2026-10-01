@@ -26,6 +26,9 @@ export class FillerClips {
   private heard = new Set<number>();
   /** The last ones played, newest last: not heard again for a while, so that it does not feel like a loop. */
   private recent: number[] = [];
+  /** The wait the last filler was for, and the clips it has had: one wait is not given a clip twice while there are others. */
+  private wait?: object;
+  private inWait = new Set<number>();
   constructor(
     private source: FillerSource,
     private random: () => number = Math.random,
@@ -44,7 +47,7 @@ export class FillerClips {
   }
   /** Voice mode ended, or fillers are off: no more looking, and the portal is told, which would otherwise make the rest of the clips for nobody. */
   stop() {
-    this.run++; clearTimeout(this.timer); this.clips.clear(); this.heard.clear(); this.recent = [];
+    this.run++; clearTimeout(this.timer); this.clips.clear(); this.heard.clear(); this.recent = []; this.inWait.clear();
     void this.source.release?.().catch(() => {});
   }
 
@@ -53,7 +56,7 @@ export class FillerClips {
       const { key, clips, rendering } = await this.source.list(this.busy());
       if (run !== this.run) return;
       // Another voice: what was held is not it.
-      if (key !== this.key) { this.key = key; this.clips.clear(); this.heard.clear(); this.recent = []; }
+      if (key !== this.key) { this.key = key; this.clips.clear(); this.heard.clear(); this.recent = []; this.inWait.clear(); }
       await Promise.all(clips.filter(n => !this.clips.has(n)).map(async n => {
         try {
           const samples = await this.source.clip(key, n);
@@ -71,18 +74,25 @@ export class FillerClips {
    * The next filler, or none. Never the one played last, nor (with enough to
    * choose from) the one before it, and none again until all the others have
    * been: a filler does not come back to back, nor twice while another is still
-   * unheard. With only the one just played, silence is better than saying it
-   * again.
+   * unheard. Within one wait (`wait` is anything that names it) not one the wait
+   * has had already, as long as there are others: a round of all the clips that
+   * ends in the middle of a long wait does not bring the first ones back. With
+   * only the one just played, silence is better than saying it again.
    */
-  next(): Float32Array | undefined {
+  next(wait?: object): Float32Array | undefined {
+    // Without a wait to tell it by there is no memory of one.
+    if (wait !== this.wait || !wait) { this.wait = wait; this.inWait.clear(); }
     const all = [...this.clips.keys()];
     const window = all.length > 3 ? 2 : 1;
     const away = this.recent.slice(-window);
-    let pool = all.filter(n => !this.heard.has(n) && !away.includes(n));
-    if (!pool.length) { this.heard.clear(); pool = all.filter(n => !away.includes(n)); }
+    const fresh = (n: number) => !away.includes(n) && !this.inWait.has(n);
+    let pool = all.filter(n => !this.heard.has(n) && fresh(n));
+    if (!pool.length) { this.heard.clear(); pool = all.filter(fresh); }
+    // Every clip has been heard in this wait: one that was not the last two is better than none.
+    if (!pool.length) pool = all.filter(n => !away.includes(n));
     if (!pool.length) return undefined;
     const n = pool[Math.floor(this.random() * pool.length)];
-    this.heard.add(n); this.recent.push(n); if (this.recent.length > 2) this.recent.shift();
+    this.heard.add(n); this.inWait.add(n); this.recent.push(n); if (this.recent.length > 2) this.recent.shift();
     return this.clips.get(n);
   }
 }

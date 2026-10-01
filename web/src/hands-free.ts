@@ -15,7 +15,7 @@ export interface FillerPacing {
   /** The fraction by which each gap varies at random, so that it does not come like a clock. */
   jitter: number;
 }
-/** A filler at once, then 3, 4.5, 6.5, 9.5 and 14 seconds after the one before ended: six in a wait of about a minute, and then no more. */
+/** A filler at once, then 3, 4.5, 6.5, 9.5 and 14 seconds after the one before ended: six in a wait of about three quarters of a minute, and then no more. */
 export const FILLER_PACING: FillerPacing = { gaps: [3000, 4500, 6500, 9500, 14000], max: 6, jitter: 0.2 };
 /** The silence after a turn, while it is being filled: how many fillers have been tried, whether one was played, and the timer of the next. */
 interface Silence { tries: number; played: boolean; timer?: ReturnType<typeof setTimeout> }
@@ -41,9 +41,10 @@ export interface VoiceIO {
   /**
    * Plays a filler: a short sound for the silence after a turn is sent. Resolves
    * when it has ended or `signal` cut it off. Nothing to play (switched off, no
-   * clip ready) is returning nothing; that is no error.
+   * clip ready) is returning nothing; that is no error. `wait` names the silence
+   * it is for, the same for every filler of one, so that a wait gets different ones.
    */
-  filler?: (signal: AbortSignal) => Promise<void> | undefined;
+  filler?: (signal: AbortSignal, wait: object) => Promise<void> | undefined;
   /** How the silence is filled over a long wait: `FILLER_PACING`, unless a test wants it quicker. */
   fillerPacing?: FillerPacing;
   trace?: (name:string)=>void;
@@ -144,7 +145,7 @@ export class HandsFreeVoice {
     silence.tries++;
     const controller = new AbortController();
     let playing: Promise<void> | undefined;
-    try { playing = this.io.filler!(controller.signal); } catch { playing = undefined; }
+    try { playing = this.io.filler!(controller.signal, silence); } catch { playing = undefined; }
     // Nothing to play yet (no clip is ready): clips may be, by the next try.
     if (!playing) return this.later(silence);
     silence.played = true;
@@ -167,8 +168,8 @@ export class HandsFreeVoice {
       silence.timer = undefined;
       if (this.silence !== silence) return;
       // There is nothing left to wait for: the user is speaking or a notice is being said, or the agent has finished without a word.
-      // An answer that is being made into speech is not that: until it is audible (see `prepare`) the silence goes on, and a first sentence can take seconds.
-      if (!this.alive || this.hearing || this.compacting || this.filler || !this.io.filler || this.io.statusSpeech === false || !(this.io.agentRunning() || this.sending)) return this.endSilence(silence);
+      // An answer that is being made into speech is not that, also when the run that wrote it has ended: until it is audible (see `prepare`) the silence goes on, and a first sentence can take seconds.
+      if (!this.alive || this.hearing || this.compacting || this.filler || !this.io.filler || this.io.statusSpeech === false || !(this.io.agentRunning() || this.sending || this.pipeline.busy)) return this.endSilence(silence);
       this.fill(silence);
     }, gap);
   }

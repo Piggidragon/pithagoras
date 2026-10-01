@@ -564,8 +564,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         steering: () => steering.current,
         agentRunning: () => latest.current.running,
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
-        filler: signal => {
-          const samples = fillersOn.current ? fillerClips.current?.next() : undefined;
+        filler: (signal, wait) => {
+          const samples = fillersOn.current ? fillerClips.current?.next(wait) : undefined;
           if (!samples) return undefined;
           // At the speed replies are spoken at, like the rest of the voice.
           const buffer = bufferOf(audio, speed.current === 1 ? samples : stretch(samples, speed.current), 24000);

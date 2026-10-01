@@ -245,8 +245,8 @@ up for with a late one at once, but the long-wait timing below carries on.
 **A long wait.** After the first filler the voice waits for it to have ended, then
 stays silent for three seconds, and plays the next; after that the silence grows,
 4.5, 6.5, 9.5 and then 14 seconds, each varied by a fifth either way so that it
-is not a metronome. At most six fillers are played in one wait, which is a little
-over a minute: a wait that long is an agent doing real work, and an endless
+is not a metronome. At most six fillers are played in one wait, which is about
+three quarters of a minute: a wait that long is an agent doing real work, and an endless
 "mhm" would be worse than the quiet, which is where the agent's own announcements
 of what it is about to do, as the speaking instructions ask, take over. The timeline
 stops at once when:
@@ -257,8 +257,9 @@ stops at once when:
   is filled all the same;
 - you speaking, or the conversation being compacted (which has its own spoken
   notice);
-- the agent finishing without anything to say, voice mode ending, or fillers being
-  switched off.
+- the agent having finished with no answer on its way (an answer that is still
+  being made into speech is one, also after the run has ended), voice mode ending,
+  or fillers being switched off.
 
 If no clip is ready at a moment when one is due, it is tried again after the next
 gap, and counts towards the six. After a wait whose last sound was a filler, the
@@ -274,10 +275,13 @@ start talking, it stops at once. Talking over it is not a turn for it to finish.
 
 **It does not repeat itself.** Of the clips ready, none of the last two played is
 chosen again (with three or fewer clips ready, not the last one), and none comes
-round again before all the others have been heard, so six fillers in a minute are
-six different ones from eight, in an order that changes each round. A clip that
-turns up in the middle of a wait is heard before the ones heard already. With only
-one clip ready, it is played once and then silence beats saying it again.
+round again before all the others have been heard, in an order that changes each
+round. One wait does not get a clip twice while there are others it has not had,
+wherever in that round it falls: with all eight ready, six fillers are six
+different ones. With only the first five ready a sixth has to repeat one, but never
+the last two. A clip that turns up in the middle of a wait is heard before the ones
+heard already. With only one clip ready, it is played once and then silence beats
+saying it again.
 
 **Switching them off.** **Voice settings → Fillers → Off**, or
 <kbd>Shift</kbd>+<kbd>F</kbd>. The choice is remembered in this browser, and while
