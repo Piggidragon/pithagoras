@@ -114,7 +114,7 @@ settings**:
 | **Speaking speed** | 1×, 1.25×, 1.5× or 1.75×. Speech is made faster in the browser without raising the voice (WSOLA time stretching), so it works with every speech runtime and a streamed reply starts as early as before. |
 | **Talking while the agent works** | **Stops it** (default): speaking interrupts the task, as before. **Adds to the task**: what you say goes into the running task after its current step, and the task carries on; use Stop to stop it. |
 | **Push to talk** | Only what you say while holding <kbd>Space</kbd> (outside a text field) or the microphone button is heard. A tap, or a press with no speech in it, is not sent. Useful with background noise or other people talking. |
-| **Fillers** | **On** (default) or **Off**: short sounds from the moment you have finished until the answer starts, again and again if the wait is long. See [Fillers](#fillers). Not shown where the portal has them switched off. |
+| **Fillers** | **On** (default) or **Off**: short sounds from the moment you have finished until the answer starts, again and again if the wait is long. While they are on, four more settings say when they come: **First filler after**, **Time between fillers**, **Randomness** and **Most per wait**. See [Fillers](#fillers). Not shown where the portal has them switched off. |
 | **Sound effects** | The cues for connection, sending, mute and panels. |
 
 Each setting is remembered in this browser.
@@ -159,8 +159,8 @@ replaces the spoken "let me think about that" line that used to come after about
 two seconds, in English only. The gap can be long: a model that has to read a lot
 before it starts, or an agent that thinks and works for a minute before its first
 sentence. One "oh, okay" and then silence is not much better than none, so the wait
-is filled again and again, further apart each time, until the answer is heard (see
-[A long wait](#a-long-wait)).
+is filled again and again until the answer is heard, at a pace you set (see
+[When they come](#when-they-come)).
 
 **What it says.** One of eight two-sound forms: "Ah, okay.", "Oh, okay.", "Okay,
 ah.", "Ah, mhm." and "Okay, mhm.", and for a long wait "Mhm, okay.", "Oh, mhm."
@@ -224,12 +224,12 @@ is deleted once the first clip of the new one is made (a setting changed and
 changed back loses nothing).
 Until the first clip is ready there is no filler; one never waits for them.
 
-**When it plays.** The moment your turn is taken: what you said has been
-recognised, it is not a noise and not a request to the page ("say that again"),
-and it is on its way to the agent. This is before the agent has taken the message
-up, not after a timer, and not after the run your turn interrupts has wound
-down: with an agent at work, the filler plays while that run is still being
-stopped. The budget:
+**When the first one plays.** By default the moment your turn is taken: what you
+said has been recognised, it is not a noise and not a request to the page ("say
+that again"), and it is on its way to the agent. This is before the agent has taken
+the message up, not after a timer, and not after the run your turn interrupts has
+wound down: with an agent at work, the filler plays while that run is still being
+stopped. (**First filler after** can hold it back, see below.) The budget:
 
 | | |
 | --- | --- |
@@ -240,31 +240,55 @@ stopped. The budget:
 So a filler is heard as soon as your turn has ended where recognition was
 ready, which is the usual case, and one recognition request later where it was
 not. A first filler that could not be played because no clip was ready is not made
-up for with a late one at once, but the long-wait timing below carries on.
+up for with a late one at once, but the timing below carries on.
 
-**A long wait.** After the first filler the voice waits for it to have ended, then
-stays silent for three seconds, and plays the next; after that the silence grows,
-4.5, 6.5, 9.5 and then 14 seconds, each varied by a fifth either way so that it
-is not a metronome. At most six fillers are played in one wait, which is about
-three quarters of a minute: a wait that long is an agent doing real work, and an endless
-"mhm" would be worse than the quiet, which is where the agent's own announcements
-of what it is about to do, as the speaking instructions ask, take over. The timeline
-stops at once when:
+**When they come.** Voice settings → **Filler timing**, four numbers, kept in this
+browser and shown while fillers are on:
 
-- the answer's audio being ready (see below), whether a filler is playing or the
+| Setting | What it does | Default | Limits |
+| --- | --- | --- | --- |
+| **First filler after** | Seconds of silence after your turn is taken before the first filler. If the answer is audible before then, there is no filler at all. | At once (0 s) | 0 to 10 s |
+| **Time between fillers** | After a filler has ended, how long before the next. This is the base the randomness varies. | 5 s | 1 to 30 s |
+| **Randomness** | Like a temperature. At 0 % every gap is exactly the time between fillers. Above that each gap is that time made shorter or longer by a random amount of up to this share of it, evenly spread: at 20 % and 5 s, 4 to 6 s; at 100 %, 1 to 10 s. It does not apply to the first filler's time. | 20 % | 0 to 100 % |
+| **Most per wait** | At most this many fillers in one wait. After that the voice stays quiet until the answer: a long task is not filled for ever. | 8 | 1 to 20 |
+
+There is no cadence built into the page: the gaps are these numbers and nothing
+else, and a change applies to the next filler, also in the middle of a call. Values
+are kept as numbers within the limits above, in steps (half seconds, 5 %, whole
+fillers): what was typed in or changed in the browser's storage that is not a
+number is the default, and one out of range is the nearest limit. A gap is never
+shorter than one second, so a wide randomness cannot put two fillers on top of each
+other.
+
+The defaults fill about the same wait as before, about three quarters of a minute,
+with the same early density: eight fillers, five seconds apart, give or take a fifth, are
+about 45 seconds, and four of them fall in the first twenty, as with the growing
+gaps they replace. Those were 3, 4.5, 6.5, 9.5 and then 14 seconds with six at most,
+and they are gone, for two reasons. A cadence that grows by itself makes "time
+between fillers" untrue and "randomness 0" inexact, the two things these settings
+are for. And what the growth was for, keeping a long task from being filled with
+"mhm" for ever, is **Most per wait**, which is now visible and yours: to have them
+thin out, set a longer time and a smaller most, and for a wait that is filled for
+longer, a larger one (twenty at most). The first filler's time is a delay, not a
+gap, so it is exact.
+
+The timeline stops at once when:
+
+- the answer's audio is ready (see below), whether a filler is playing or the
   wait is between two. Not before: while the first sentence of the answer is still
   being made into speech, which on a busy speech runtime takes seconds, the wait
   is filled all the same;
-- you speaking, or the conversation being compacted (which has its own spoken
+- you speak, or the conversation is being compacted (which has its own spoken
   notice);
-- the agent having finished with no answer on its way (an answer that is still
-  being made into speech is one, also after the run has ended), voice mode ending,
-  or fillers being switched off.
+- the agent has finished with no answer on its way (an answer that is still
+  being made into speech is one, also after the run has ended), voice mode ends,
+  or fillers are switched off.
 
 If no clip is ready at a moment when one is due, it is tried again after the next
-gap, and counts towards the six. After a wait whose last sound was a filler, the
-first filler of your next turn waits the first three seconds too, so that two
-turns without an answer between them do not start with two fillers back to back.
+gap, and counts towards the most. After a wait whose last sound was a filler, the
+first filler of your next turn waits one gap too, or the time to the first filler
+if that is longer, so that two turns without an answer between them do not start
+with two fillers back to back.
 
 **It gives way to the answer.** The answer is never heard over a filler. The
 filler stops when the answer's audio is ready to play, not when its text arrives,
@@ -286,7 +310,8 @@ saying it again.
 **Switching them off.** **Voice settings → Fillers → Off**, or
 <kbd>Shift</kbd>+<kbd>F</kbd>. The choice is remembered in this browser, and while
 it is off the page asks the portal for nothing and fetches nothing, and tells it
-to stop making them. Two things switch them off for the whole portal, and then
+to stop making them. The timing settings are hidden then, and kept for when they
+are on again. Two things switch them off for the whole portal, and then
 the setting is not shown:
 
 - `VOICE_STATUS_SPEECH=false`, which also switches off the spoken compaction

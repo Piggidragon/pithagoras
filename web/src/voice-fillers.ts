@@ -7,6 +7,50 @@ export interface FillerSource {
   release?(): Promise<void>;
 }
 
+/**
+ * How the silence after a turn is filled, in seconds. All four are the user's, set
+ * in the voice settings: the timeline reads them and has no cadence of its own.
+ */
+export interface FillerPacing {
+  /** Silence after the turn is taken before the first filler; 0 is at once. */
+  first: number;
+  /** After a filler has ended, how long before the next: the base that `randomness` varies. */
+  every: number;
+  /** How far each gap strays from `every`, as a fraction of it: 0 is exactly `every`, 1 is anything from none to twice as long. */
+  randomness: number;
+  /** At most this many fillers in one wait: a wait longer than that is a long task, and an endless "mhm" is worse than the quiet. */
+  max: number;
+}
+/** What the voice settings offer, per value. */
+export const FILLER_LIMITS = {
+  first: { min: 0, max: 10, step: 0.5 },
+  every: { min: 1, max: 30, step: 0.5 },
+  randomness: { min: 0, max: 1, step: 0.05 },
+  max: { min: 1, max: 20, step: 1 },
+} as const;
+/** At once, then every five seconds give or take a fifth, eight at most: about as many fillers over about as long a wait as before, with the same early density. */
+export const FILLER_PACING: FillerPacing = { first: 0, every: 5, randomness: 0.2, max: 8 };
+
+/** Settings as they were kept, in any shape: a number within the limits, on its step, for each, and the default for anything that is not a number. */
+export function fillerPacing(raw: { [K in keyof FillerPacing]?: unknown }): FillerPacing {
+  const pick = (key: keyof FillerPacing) => {
+    const value = raw[key], { min, max, step } = FILLER_LIMITS[key];
+    const n = typeof value === "number" || (typeof value === "string" && value.trim() !== "") ? Number(value) : NaN;
+    if (!Number.isFinite(n)) return FILLER_PACING[key];
+    return Number((Math.round(Math.min(max, Math.max(min, n)) / step) * step).toFixed(2));
+  };
+  return { first: pick("first"), every: pick("every"), randomness: pick("randomness"), max: pick("max") };
+}
+
+/**
+ * One gap in seconds, from `random` in [0, 1): the base, spread by the randomness
+ * evenly to either side of it. Never under the shortest base there is, so a wide
+ * spread cannot put two fillers on top of each other.
+ */
+export function fillerGap(pacing: FillerPacing, random = Math.random()): number {
+  return Math.max(FILLER_LIMITS.every.min, pacing.every * (1 + pacing.randomness * (2 * random - 1)));
+}
+
 /** How often to look again while the portal is still making clips, and how many times at most: twenty minutes, as the extra clips are made in a lull and may take a while to come. */
 const POLL_MS = 3000;
 const POLLS = 400;

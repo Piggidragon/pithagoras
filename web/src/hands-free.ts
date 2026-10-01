@@ -3,20 +3,10 @@ import type { Item } from "./transcript";
 import { StreamingSpeech } from "./voice";
 import { language, t } from "./i18n";
 import { notice, type Notice } from "./voice-notices";
+import { FILLER_PACING, fillerGap, type FillerPacing } from "./voice-fillers";
 
 /** The longest the answer waits for a filler to stop: a fade-out takes a few milliseconds, and this is for a player that never reports back. */
 const FILLER_STOP_MS = 150;
-/** How the silence after a turn is filled over a long wait. */
-export interface FillerPacing {
-  /** After a filler has ended (or one could not be played), how long before the next, growing; the last is kept for any beyond. */
-  gaps: readonly number[];
-  /** At most this many tries in one wait: a wait longer than that is a long task, which the agent says what it is at itself. */
-  max: number;
-  /** The fraction by which each gap varies at random, so that it does not come like a clock. */
-  jitter: number;
-}
-/** A filler at once, then 3, 4.5, 6.5, 9.5 and 14 seconds after the one before ended: six in a wait of about three quarters of a minute, and then no more. */
-export const FILLER_PACING: FillerPacing = { gaps: [3000, 4500, 6500, 9500, 14000], max: 6, jitter: 0.2 };
 /** The silence after a turn, while it is being filled: how many fillers have been tried, whether one was played, and the timer of the next. */
 interface Silence { tries: number; played: boolean; timer?: ReturnType<typeof setTimeout> }
 export type VoicePhase = "Listening" | "Hearing you" | "Transcribing" | "Thinking" | "Compacting context" | "Speaking";
@@ -45,7 +35,7 @@ export interface VoiceIO {
    * it is for, the same for every filler of one, so that a wait gets different ones.
    */
   filler?: (signal: AbortSignal, wait: object) => Promise<void> | undefined;
-  /** How the silence is filled over a long wait: `FILLER_PACING`, unless a test wants it quicker. */
+  /** How the silence is filled, read each time it matters, so that a setting changed in the middle of a call applies to the next filler: `FILLER_PACING` unless set. */
   fillerPacing?: FillerPacing;
   trace?: (name:string)=>void;
   phase: (phase: VoicePhase) => void;
@@ -125,19 +115,21 @@ export class HandsFreeVoice {
   }
   /**
    * The turn has been taken, and until the agent has something to say there is
-   * silence: this fills it, with a filler at once, and then further ones with
-   * growing gaps between them (`FILLER_PACING`) until something else is heard.
-   * Not while anything else is going to be heard: the user is speaking, a notice
-   * is, or the answer already is. Returns what was begun, for the turn to take
-   * back if it is not sent after all.
+   * silence: this fills it, with a filler after the time the user set (at once
+   * unless told otherwise), and then further ones, each a gap after the one before
+   * has ended, until something else is heard (`FillerPacing`). Not while anything
+   * else is going to be heard: the user is speaking, a notice is, or the answer
+   * already is. Returns what was begun, for the turn to take back if it is not
+   * sent after all.
    */
   private startFiller() {
     if (!this.alive || !this.io.filler || this.io.statusSpeech === false || this.io.sequential || this.filler) return;
     if (this.hearing || this.compacting || this.pipeline.busy || this.output.length) return;
     this.endSilence();
     const silence = this.silence = { tries: 0, played: false };
-    // After a filler that nothing has followed, not at once either: two turns in a row do not get two at the same moment.
-    if (this.filled) this.later(silence); else this.fill(silence);
+    // After a filler that nothing has followed, not at once either, whatever was set: two turns in a row do not get two at the same moment.
+    const wait = Math.max(this.pacing().first, this.filled ? this.gap() : 0);
+    if (wait > 0) this.later(silence, wait); else this.fill(silence);
     return silence;
   }
   /** One filler, now, or when there is none to play, the next try after a gap. */
@@ -159,11 +151,12 @@ export class HandsFreeVoice {
     this.filler = filler;
     this.state();
   }
-  /** The next try, after a gap that grows with the tries made; none once there have been as many as a wait is to have. */
-  private later(silence: Silence) {
-    const pacing = this.io.fillerPacing ?? FILLER_PACING;
-    if (silence.tries >= pacing.max) return this.endSilence(silence);
-    const gap = pacing.gaps[Math.min(Math.max(silence.tries - 1, 0), pacing.gaps.length - 1)] * (1 + pacing.jitter * (Math.random() * 2 - 1));
+  private pacing() { return this.io.fillerPacing ?? FILLER_PACING; }
+  /** One gap in seconds, the base set by the user spread by their randomness. */
+  private gap() { return fillerGap(this.pacing()); }
+  /** The next try, after `seconds` (a gap, unless told); none once there have been as many as a wait is to have. */
+  private later(silence: Silence, seconds = this.gap()) {
+    if (silence.tries >= this.pacing().max) return this.endSilence(silence);
     silence.timer = setTimeout(() => {
       silence.timer = undefined;
       if (this.silence !== silence) return;
@@ -171,7 +164,7 @@ export class HandsFreeVoice {
       // An answer that is being made into speech is not that, also when the run that wrote it has ended: until it is audible (see `prepare`) the silence goes on, and a first sentence can take seconds.
       if (!this.alive || this.hearing || this.compacting || this.filler || !this.io.filler || this.io.statusSpeech === false || !(this.io.agentRunning() || this.sending || this.pipeline.busy)) return this.endSilence(silence);
       this.fill(silence);
-    }, gap);
+    }, seconds * 1000);
   }
   /** The silence is over, or not to be filled any more: no filler is started for it again. */
   private endSilence(silence?: Silence | undefined) {

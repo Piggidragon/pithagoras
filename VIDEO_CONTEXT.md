@@ -145,7 +145,7 @@ A custom Qwen chat-template experiment was explicitly reverted. The final setup 
 
 ### 8. Add useful waiting cues
 
-The end of a turn plays a short filler sound such as “Ah, okay.” at once, from a clip made earlier, instead of the spoken thinking phrase that used to come after about 1.8 seconds. A long wait is filled again and again, at growing intervals (about 3 to 14 seconds, six fillers at most), until the answer is audible; the voice does not go quiet after one sound. The fillers give way to the answer, and none of the last two played comes again.
+The end of a turn plays a short filler sound such as “Ah, okay.” at once, from a clip made earlier, instead of the spoken thinking phrase that used to come after about 1.8 seconds. A long wait is filled again and again until the answer is audible, at a pace set in the voice settings (first filler after, time between fillers, randomness, most per wait; by default at once, then every five seconds give or take a fifth, eight at most); the voice does not go quiet after one sound. The fillers give way to the answer, and none of the last two played comes again.
 
 Compaction was initially misrepresented as ordinary thinking. This was fixed using the SDK's `compaction_start` and `compaction_end` events:
 

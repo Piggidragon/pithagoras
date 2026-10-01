@@ -13,7 +13,7 @@ import { api, type PortalEvent, type PromptOptions } from "../api";
 import type { Item } from "../transcript";
 import { LiveTranscription } from "../live-transcription";
 import { preparePcmSpeech, readPcmStream, playAudioBuffer, playFading, bufferOf } from "../pcm-stream";
-import { FillerClips, fillerSource } from "../voice-fillers";
+import { FillerClips, fillerPacing, fillerSource, type FillerPacing } from "../voice-fillers";
 import { stretch, stretchInSteps } from "../time-stretch";
 import { joinSamples } from "../samples";
 import { asksToRepeat, couldAskToRepeat } from "../voice-commands";
@@ -106,6 +106,15 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const [fillers, setFillers] = useState(() => local.get('voiceFillers') !== 'off');
   const fillersOn = useRef(fillers); fillersOn.current = fillers;
   const [fillersOffered, setFillersOffered] = useState(false);
+  // When they come: kept as typed into the settings, and read back through `fillerPacing`, which makes anything that is not a number, or is out of range, one that is.
+  const [pacing, setPacing] = useState(() => fillerPacing({ first: local.get('voiceFillerFirst'), every: local.get('voiceFillerEvery'), randomness: local.get('voiceFillerRandomness'), max: local.get('voiceFillerMax') }));
+  const fillerTiming = useRef(pacing); fillerTiming.current = pacing;
+  const choosePacing = (next: FillerPacing) => {
+    const clean = fillerPacing(next);
+    local.set('voiceFillerFirst', String(clean.first)); local.set('voiceFillerEvery', String(clean.every));
+    local.set('voiceFillerRandomness', String(clean.randomness)); local.set('voiceFillerMax', String(clean.max));
+    setPacing(clean); fillerTiming.current = clean;
+  };
   const fillerClips = useRef<FillerClips | null>(null);
   const [available, setAvailable] = useState(false);
   // After a reload voice mode comes back, but audio may not start until the
@@ -564,6 +573,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         steering: () => steering.current,
         agentRunning: () => latest.current.running,
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
+        // Read at the moment it matters: a setting changed during the call applies to the next filler.
+        get fillerPacing() { return fillerTiming.current; },
         filler: (signal, wait) => {
           const samples = fillersOn.current ? fillerClips.current?.next(wait) : undefined;
           if (!samples) return undefined;
@@ -674,7 +685,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         canRepeat={canRepeat} onRepeat={() => { repeatReply(); }}
         rate={rate} onRate={value => { local.set('voiceRate', String(value)); setRate(value); }}
         steer={steer} onSteer={value => { local.set('voiceSteer', value ? 'on' : 'off'); setSteer(value); }}
-        fillers={fillersOffered ? fillers : null} onFillers={chooseFillers}
+        fillers={fillersOffered ? fillers : null} onFillers={chooseFillers} pacing={pacing} onPacing={choosePacing}
         ptt={ptt} onPtt={value => { void choosePtt(value); }} holding={holding} onHold={hold} />, stageTarget,
     )}
     <div className="relative flex items-center gap-1">
