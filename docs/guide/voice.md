@@ -443,14 +443,31 @@ Other providers and the container executor retain their normal thinking behavior
 
 ### Speaking instructions
 
-The rules above — a short spoken sentence before tools, plain text without
-Markdown, long reports in a canvas, pictures through `show_image`, the
-`(laugh)` / `(sigh)` cues — are one built-in block of text
-(`server/src/pi/voice-first.ts`), not a field in the UI. They are switched off as
-a whole with `VOICE_RESPONSE_INSTRUCTIONS=false` on the portal: no `[Audio mode]`
-prefix is added and the system-prompt rule is never sent, which is what the
-[comparison baseline](/guide/voice-comparison) does. Any other value leaves them
-on. `VOICE_SKIP_FIRST_THINKING=false` keeps thinking on for the first call. The
+The rules for how the agent talks — a short spoken sentence before tools, plain
+text without Markdown, long reports in a canvas, pictures through `show_image`,
+the `(laugh)` / `(sigh)` cues — are a block of text that is part of the rule
+above. **Settings → Add-ons → Voice → Speaking instructions** shows the text in
+use and lets you change it: shorter or longer replies, another tone, no
+announcing before tools. Save, and it applies from the next spoken message,
+also in conversations that are already open; typed messages keep the prompt they
+had. A local model reads the conversation again once after a change, as it
+does at the first spoken message.
+
+The built-in text comes from the portal, so a portal update improves it for
+everyone who has not changed it. **Reset to default** puts it back in the
+field. Saving empty text, or the built-in text unchanged, stores nothing and
+keeps following the portal's own. Text can be up to 8000 characters.
+
+What the `[Audio mode]` marker means, and that a message without it is an
+ordinary chat message, is said in a fixed note around your text and is not part
+of what you edit.
+
+`VOICE_RESPONSE_INSTRUCTIONS=false` on the portal switches the speaking
+instructions off as a whole, whatever is saved: no `[Audio mode]` prefix is added
+and the system-prompt rule is never sent, which is what the
+[comparison baseline](/guide/voice-comparison) does. The page says so, and keeps
+your text for when the variable is removed. Any other value leaves them on.
+`VOICE_SKIP_FIRST_THINKING=false` keeps thinking on for the first call. The
 remaining `VOICE_*` variables (`VOICE_PIPELINE_MODE`, `VOICE_SENTENCE_CHUNKS`,
 `VOICE_TTS_PREFETCH`, `VOICE_STATUS_SPEECH`, `VOICE_COMPARISON`) are described in
 the comparison guide.
@@ -682,9 +699,10 @@ description** and click **Save description**. The change is stored at once and
 applies from the next phrase spoken, for a clone as well as a designed voice;
 the recording and its transcript stay as they are. **Save voice settings** also
 saves a description you edited and have not saved yet, and stops with an error,
-without saving the other settings, if the description cannot be saved. Breeze is the engine that reads the description. Chatterbox takes
-no description: it speaks from the recording alone, so editing the description of
-a voice used with Chatterbox changes nothing you can hear.
+without saving the other settings, if the description cannot be saved. Breeze is
+the engine that reads the description. Chatterbox takes no description: it speaks
+from the recording alone, so editing the description of a voice used with
+Chatterbox changes nothing you can hear.
 
 Delete voice removes the preset and falls back
 to the default designed voice if it was active. Presets and recordings persist in

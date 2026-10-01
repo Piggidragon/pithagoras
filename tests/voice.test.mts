@@ -9,7 +9,8 @@ const dir = mkdtempSync(join(tmpdir(), 'pithagoras-voice-'));
 process.env.DATA_DIR = dir;
 const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice } = await import('../server/src/api/voice.js');
 const { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } = await import('../server/src/voice-languages.js');
-const { getDb } = await import('../server/src/db.js');
+const { getDb, getVoiceInstructions } = await import('../server/src/db.js');
+const { DEFAULT_VOICE_INSTRUCTIONS } = await import('../server/src/pi/voice-first.js');
 const upstream = express();
 let calls = 0;
 let busyAttempts = 0;
@@ -278,4 +279,57 @@ test('connecting the managed voice drops a recognition model from another runtim
   // reach it in the multipart body of every transcription.
   assert.equal(connectManagedVoice().sttModel, '');
   assert.equal((await (await fetch(`${base}/voice`)).json()).sttModel, '');
+});
+
+test('speaking instructions: the built-in text is offered, a custom one is saved, and blank or equal goes back to the built-in', async () => {
+  const put = (responseInstructions: unknown) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, responseInstructions }) });
+  const get = async () => (await fetch(`${base}/voice`)).json();
+  // Nothing saved: the server's own text is what the page shows and resets to.
+  await put(undefined);
+  let shown = await get();
+  assert.equal(shown.responseInstructions, DEFAULT_VOICE_INSTRUCTIONS);
+  assert.equal(shown.defaultResponseInstructions, DEFAULT_VOICE_INSTRUCTIONS);
+  assert.equal(shown.responseInstructionsOff, false);
+  assert.equal(getVoiceInstructions(), '');
+  // A custom text is saved trimmed, and is what every turn is then given.
+  const saved = await put('  Answer in one word.\n');
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).responseInstructions, 'Answer in one word.');
+  assert.equal(getVoiceInstructions(), 'Answer in one word.');
+  shown = await get();
+  assert.equal(shown.responseInstructions, 'Answer in one word.');
+  assert.equal(shown.defaultResponseInstructions, DEFAULT_VOICE_INSTRUCTIONS, 'still there to go back to');
+  // Empty text, or the built-in text sent back, is not saved as a custom one: the built-in instructions then follow the portal's updates.
+  for (const back of ['', '   ', DEFAULT_VOICE_INSTRUCTIONS, `${DEFAULT_VOICE_INSTRUCTIONS}\n`]) {
+    await put('Answer in one word.');
+    assert.equal((await put(back)).status, 200);
+    assert.equal(getVoiceInstructions(), '', JSON.stringify(back));
+    assert.equal((await get()).responseInstructions, DEFAULT_VOICE_INSTRUCTIONS);
+  }
+  // Connecting the managed voice saves the settings again, and keeps it.
+  await put('Answer in one word.');
+  assert.equal(connectManagedVoice().responseInstructions, 'Answer in one word.');
+  assert.equal(getVoiceInstructions(), 'Answer in one word.');
+  // Text that cannot be, and a size that no turn should carry.
+  assert.equal((await put(42)).status, 400);
+  assert.equal((await put('x'.repeat(8001))).status, 400);
+  assert.equal((await put('x'.repeat(8000))).status, 200);
+  assert.equal(getVoiceInstructions(), 'x'.repeat(8000));
+  await put('');
+});
+test('VOICE_RESPONSE_INSTRUCTIONS=false is shown to the page, and leaves a saved text alone', async () => {
+  const previous = process.env.VOICE_RESPONSE_INSTRUCTIONS;
+  try {
+    await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, responseInstructions: 'Answer in one word.' }) });
+    process.env.VOICE_RESPONSE_INSTRUCTIONS = 'false';
+    const shown = await (await fetch(`${base}/voice`)).json();
+    assert.equal(shown.responseInstructionsOff, true);
+    assert.equal(shown.responseInstructions, 'Answer in one word.');
+    process.env.VOICE_RESPONSE_INSTRUCTIONS = 'true';
+    assert.equal((await (await fetch(`${base}/voice`)).json()).responseInstructionsOff, false);
+  } finally {
+    if (previous === undefined) delete process.env.VOICE_RESPONSE_INSTRUCTIONS;
+    else process.env.VOICE_RESPONSE_INSTRUCTIONS = previous;
+    await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) });
+  }
 });

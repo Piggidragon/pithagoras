@@ -261,7 +261,7 @@ See [The agent's browser](/guide/browser).
 
 | | |
 | --- | --- |
-| `GET /api/voice` · `PUT /api/voice` | The voice settings |
+| `GET /api/voice` · `PUT /api/voice` | The voice settings, including the speaking instructions in use and the built-in ones to go back to |
 | `GET /api/voice/install` · `POST /api/voice/install` · `/start` · `/stop` | The managed voice container and its readiness |
 | `POST /api/voice/connect` | Use the managed services in the settings |
 | `GET/POST /api/voice/presets` · `GET …/presets/:id/audio` · `PATCH …/presets/:id` · `DELETE …/presets/:id` | Saved voices. `PATCH` takes `{ instruction }`, the voice description (1–1000 characters), and returns the voice; 404 for an unknown voice |

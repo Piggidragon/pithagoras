@@ -1112,6 +1112,19 @@ export function getSetting(key: string): string | undefined {
   return row?.value || undefined;
 }
 
+/**
+ * The speaking instructions saved with the voice settings; empty where the
+ * built-in ones are used. They live in the same JSON as the rest of them.
+ */
+export function getVoiceInstructions(): string {
+  try {
+    const saved = JSON.parse(getSetting("voice") ?? "{}").responseInstructions;
+    return typeof saved === "string" ? saved : "";
+  } catch {
+    return "";
+  }
+}
+
 /** Only what the portal was explicitly told; absent keys fall through. */
 export function getStoredSettings(): Partial<GlobalSettings> {
   const rows = getDb().prepare("SELECT key, value FROM settings").all() as {

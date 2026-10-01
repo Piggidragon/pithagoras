@@ -269,6 +269,10 @@ export interface VoiceConfig {
   ttsPrefetch?: boolean;
   comparison?: boolean;
   statusSpeech?: boolean;
+  // The speaking instructions in use, the built-in ones to go back to, and whether the portal sends none at all.
+  responseInstructions?: string;
+  defaultResponseInstructions?: string;
+  responseInstructionsOff?: boolean;
   pipelineMode?: "parallel" | "sequential";
   vad?: typeof DEFAULT_VAD;
   enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox"; sttModel?: string; exaggeration?: number;
