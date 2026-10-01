@@ -108,7 +108,7 @@ Advanced to edit `settings.json` directly when that happens.
 
 ## This browser, Add-ons and About
 
-**This browser** holds what is kept per browser: theme, language,
+**This browser** holds what is kept per browser: theme, animations, language,
 notifications, the command character, confirmations and sign-out — see
 [The interface](/guide/interface) and
 [Slash commands](/guide/commands#the-command-character).

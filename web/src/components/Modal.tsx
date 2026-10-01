@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { LuChevronLeft, LuX } from "react-icons/lu";
 import { isEscape } from "../shortcuts";
+import { useLeaveRef } from "../motion";
 import { t } from "../i18n";
 
 /**
@@ -36,6 +37,8 @@ export function Modal({
 }) {
   // Only read below `sm`; wider, both panes are always there.
   const [inRail, setInRail] = useState(startInRail);
+  // Closed, it sinks away as a picture of itself (see motion.ts).
+  const leaving = useLeaveRef<HTMLDivElement>("dialog");
   useEffect(() => {
     // Not the Escape that takes back an input method's word in one of its fields.
     const onKey = (e: KeyboardEvent) => isEscape(e) && onClose();
@@ -45,6 +48,7 @@ export function Modal({
 
   return (
     <div
+      ref={leaving}
       className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-2 backdrop-blur-sm sm:p-4"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >

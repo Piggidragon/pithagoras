@@ -6,6 +6,7 @@ import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { isEnter } from "../shortcuts";
 import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { useDismiss } from "../use-dismiss";
+import { useLeaveRef } from "../motion";
 import { formatNumber, t } from "../i18n";
 
 /**
@@ -194,6 +195,7 @@ export function ContextPill({
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const pill = useRef<HTMLButtonElement>(null);
+  const card = useLeaveRef<HTMLDivElement>("menu");
 
   useEffect(() => {
     if (!open || keepRecent !== null) return;
@@ -275,7 +277,7 @@ export function ContextPill({
       </button>
 
       {open && (
-        <div style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div ref={card} style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           <div className="flex items-baseline justify-between">
             <p className="text-sm text-fg-muted">{t("Context")}</p>
             <p className={`text-sm tabular-nums ${known ? look.text : "text-fg-subtle"}`}>{known ? t("{n}% full", { n: formatNumber(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) : t("just compacted")}</p>

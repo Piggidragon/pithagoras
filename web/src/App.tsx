@@ -1,7 +1,7 @@
 import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { fillFrom } from "./editor-fills";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { api, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -27,6 +27,7 @@ import { APP_NAME, finishedRuns, tabTitle } from "./attention";
 import { notifyIfAway, notifyState } from "./notify";
 import { guardStrayDrops } from "./drop-guard";
 import { usePlaces } from "./use-session-folders";
+import { fancy, keep, swapPages, type Leave } from "./motion";
 import { t, useLanguage } from "./i18n";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
@@ -425,6 +426,33 @@ function Shell({
 
   const active = listed ?? (other?.id === sessionId ? other : null);
 
+  // The page that is left plays out as a picture of itself over the one that
+  // comes (see motion.ts). Taken here, while what is on the page is still the
+  // page that was drawn, and put on it once the next one is. A chat to another
+  // chat is the same page: only its conversation goes. A chat that was
+  // deleted dissolves, and the empty page it is left on for a moment does not.
+  const main = useRef<HTMLElement>(null);
+  const pageKey = view === "chat" ? `chat:${active?.id ?? ""}` : view;
+  const leaving = useRef<{ key: string; leave: ((how: Leave) => void) | null; how: Leave }>({ key: pageKey, leave: null, how: "page" });
+  if (leaving.current.key !== pageKey) {
+    const was = leaving.current.key;
+    const page = main.current?.lastElementChild as HTMLElement | null | undefined;
+    const chats = was.startsWith("chat:") && pageKey.startsWith("chat:");
+    const deleted = was.startsWith("chat:") && was !== "chat:" && !sessions.some((s) => s.id === was.slice(5));
+    leaving.current = {
+      key: pageKey,
+      leave: was === "chat:" ? null : keep((chats && page?.querySelector<HTMLElement>("[data-transcript]")) || page || null),
+      how: deleted ? "gone" : "page",
+    };
+    if (leaving.current.leave && fancy()) swapPages(true);
+  }
+  useLayoutEffect(() => {
+    const { leave, how } = leaving.current;
+    leaving.current.leave = null;
+    swapPages(false);
+    leave?.(how);
+  }, [pageKey]);
+
   // What the tab says while you are looking at something else, and — if you
   // asked for them — a notification when a chat you left running is done.
   const waiting = Boolean(active && uiQueue[0]);
@@ -502,7 +530,7 @@ function Shell({
       />
 
       </div>
-      <main className="app-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <main ref={main} className="app-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* In a chat the chat's own header has the menu button, and this bar
             would only repeat its title; in voice mode that header is gone. */}
         <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">

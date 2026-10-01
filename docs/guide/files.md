@@ -85,4 +85,5 @@ sides. Each place keeps the size you gave it, whichever panels are in it. When
 panels at both sides would leave the conversation narrower than 320px, the side
 you sized last keeps its width and the other gives way first; it gets its width
 back as soon as there is room again. A panel you have never moved goes where
-all of them went before.
+all of them went before. A panel carried to another place flies there from where
+you let go of it, unless [the animations](/guide/interface#animations) are off.

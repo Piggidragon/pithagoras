@@ -1,6 +1,13 @@
 import { defineConfig } from '@playwright/test';
+const origin = 'http://127.0.0.1:5191';
 export default defineConfig({
   testDir: './tests/browser', timeout: 45000, workers: 1,
-  use: { baseURL: 'http://127.0.0.1:5191', browserName: 'chromium', ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}), headless: true },
+  use: {
+    baseURL: origin, browserName: 'chromium', ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}), headless: true,
+    // The portal's extra animations (web/src/motion.ts) are on until someone switches them off, and what leaves
+    // does so as a picture of itself that lingers for a moment: no test should wait on that or find it by text. So every
+    // page starts with them off, as the switch in Settings would leave it; the animation spec turns them on for itself.
+    storageState: { cookies: [], origins: [{ origin, localStorage: [{ name: 'animations', value: 'off' }] }] },
+  },
   webServer: { command: 'npm run dev -w web -- --host 127.0.0.1 --port 5191 --strictPort', url: 'http://127.0.0.1:5191', reuseExistingServer: false },
 });
