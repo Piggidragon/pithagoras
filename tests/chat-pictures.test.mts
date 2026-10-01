@@ -36,7 +36,9 @@ test("an edit is tied to the latest picture of the file it was given, by a relat
     tool("t5", "edit_image", { path: "generated-images/y-edited.png" }, { path: "somewhere/else.png" }),
     // Not the portal's edit_image: its path is not read as one.
     tool("t6", "edit_image", undefined, { path: "generated-images/x.png" }),
+    // Made from several pictures: it is tied to the first, which the result is named after.
+    tool("t7", "edit_image", { path: "generated-images/x-edited-3.png" }, { paths: [`${folder}/generated-images/x-edited.png`, "generated-images/x.png"], prompt: "both" }),
   ];
   const list = chatPictures(items, folder, urls);
-  assert.deepEqual(list.map((p) => p.from), [undefined, undefined, "shown:t2", "shown:t3", undefined]);
+  assert.deepEqual(list.map((p) => p.from), [undefined, undefined, "shown:t2", "shown:t3", undefined, "shown:t3"]);
 });

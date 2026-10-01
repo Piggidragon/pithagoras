@@ -18,8 +18,9 @@ export const shownPictureId = (itemId: string) => `shown:${itemId}`;
  * the agent showed, made or changed. This is what the viewer steps through.
  *
  * A changed picture is tied to the one it was changed from when that was shown
- * in the conversation too: the call says its path, and the latest picture by
- * that path before it is the one it started from. An original that never
+ * in the conversation too: the call says its path (the first of them, when it
+ * was given several), and the latest picture by that path before it is the one
+ * it started from. An original that never
  * appeared here — a file the agent was told about, a picture it had not shown —
  * has nothing to reach it, and the link is left out.
  */
@@ -51,8 +52,12 @@ export function chatPictures(items: Item[], folder: string, urls: PictureUrls): 
   return list;
 }
 
-/** The picture an edit_image call was given, as a path in the chat's folder. */
+/**
+ * The picture an edit_image call was given, as a path in the chat's folder: its one
+ * path, or the first of a list, which is the one the result is named after.
+ */
 function editedPath(args: unknown, folder: string): string | undefined {
-  const given = (args as { path?: unknown } | undefined)?.path;
+  const { path, paths } = (args ?? {}) as { path?: unknown; paths?: unknown };
+  const given = Array.isArray(paths) ? paths[0] : path;
   return typeof given === "string" ? insideFolder(folder, given) : undefined;
 }

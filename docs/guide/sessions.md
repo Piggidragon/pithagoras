@@ -95,7 +95,8 @@ are docked beside the conversation, and does not move them.
 - **Its title.** What the agent called the picture is shown under it.
 - **An edit and what it came from.** When a picture was changed with
   `edit_image` and the original was shown in the conversation too, **Original**
-  and **Edited version** at the top go from one to the other.
+  and **Edited version** at the top go from one to the other. For an edit made
+  from several pictures, the original is the first of them.
 - **The file itself.** The two icons at the top open the picture in a new tab or
   download it. That is the only way a picture opens in a tab, and it is on purpose.
 
