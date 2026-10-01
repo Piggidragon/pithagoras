@@ -89,11 +89,20 @@ Items with a mark for their state. A todo list.
 ## Limits
 
 A chat has at most 12 screens. Within one, text is cut at 2000 characters, a
-list at 200 entries, nesting at a few levels, the whole screen at a few thousand
-values, and all its texts together at 100,000 characters. What goes over is cut
-between entries: the item or block that does not fit is left out whole, and so
-are the ones after it. A list that nothing of fits in is left out as well, with
-the block that holds it, so a screen never says "No tasks." of tasks it dropped.
-Nothing is cut in the middle, so what stays is as you said it. More is cut, not
-refused. A screen is sent whole to every open page with each change, so say what
-matters, not everything: cut a long description before it goes in a block.
+list at 200 entries, the whole screen at a few thousand values, and all its texts
+together at 100,000 characters.
+
+Nesting is at most **seven levels**. A screen's blocks are the first level, and
+each block in a group, and each item in an item, is one more; a list between two
+of them is not a level. So a checklist of tasks inside three groups is four levels
+and its tasks the fifth, which leaves two for sub-tasks. Count the groups before
+you build a screen out of them: a board by project, milestone and owner uses
+three.
+
+What goes over any of these is cut between entries: the item or block that does
+not fit is left out whole, and so are the ones after it. A list that nothing of
+fits in is left out as well, with the block that holds it (and so on up), so a
+screen never says "No tasks." of tasks it dropped. Nothing is cut in the middle,
+so what stays is as you said it. More is cut, not refused. A screen is sent whole
+to every open page with each change, so say what matters, not everything: cut a
+long description before it goes in a block.

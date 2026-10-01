@@ -30,10 +30,15 @@ test('text, lists and depth are held to their limits',()=>{
  assert.equal((long.blocks[0].text as string).length,2000);
  const many=cleanScreen({id:'a',blocks:Array.from({length:500},()=>({type:'text',text:'x'}))})!;
  assert.equal(many.blocks.length,200);
- let deep:any={type:'group',blocks:[]};const top=deep;
- for(let i=0;i<30;i++){const next={type:'group',blocks:[]};deep.blocks.push(next);deep=next;}
+ // Nesting is held to seven levels (a block in a group, an item in an item); what is deeper goes whole, and the block that held it.
+ const chain=(n:number)=>{let g:any={type:'group',title:'g',blocks:[{type:'text',text:'leaf'}]};for(let i=1;i<n;i++)g={type:'group',title:'g',blocks:[g]};return g;};
  const levels=(b:any):number=>1+Math.max(0,...((b.blocks??[]) as any[]).map(levels));
- assert.ok(levels(cleanScreen({id:'a',blocks:[top]})!.blocks[0])<=5,'a group in a group in a group stops somewhere');
+ assert.equal(levels(cleanScreen({id:'a',blocks:[chain(6)]})!.blocks[0]),7,'six groups and what is in the last: seven levels');
+ assert.deepEqual(cleanScreen({id:'a',blocks:[chain(7)]})!.blocks,[],'one more is left out, not cut to groups with nothing in them');
+ assert.deepEqual(cleanScreen({id:'a',blocks:[chain(30)]})!.blocks,[]);
+ // Lists in lists count too, so that a cyclic one is cut as well.
+ const loop:any[]=[];loop.push(loop,'x');
+ assert.ok(JSON.stringify(cleanScreen({id:'a',blocks:[{type:'list',items:loop}]})!).length<2000);
  // The whole screen has a budget, so a list longer than anybody meant is cut and not refused.
  const wide=cleanScreen({id:'a',blocks:Array.from({length:200},()=>({type:'list',items:Array.from({length:200},(_,i)=>`item ${i}`)}))})!;
  assert.ok(wide.blocks.length>0&&wide.blocks.length<200);
@@ -86,6 +91,28 @@ test('a list the limit leaves nothing of is left out, not kept empty, since the 
  }
  // What was given empty stays empty, and is no reason to leave the object out.
  assert.deepEqual(cleanScreen({id:'a',blocks:[{type:'checklist',empty:'Nothing yet.',items:[]},{type:'group',title:'Part',blocks:[]}]})!.blocks,[{type:'checklist',empty:'Nothing yet.',items:[]},{type:'group',title:'Part',blocks:[]}]);
+});
+test('the depth limit never leaves a list with no items for tasks it was given, and counts a group and an item as one level each',()=>{
+ const empties=(node:any):any[]=>Array.isArray(node)?node.flatMap(empties):node&&typeof node==='object'?[...((Array.isArray(node.items)&&node.items.length===0)||(Array.isArray(node.blocks)&&node.blocks.length===0)?[node]:[]),...Object.values(node).flatMap(empties)]:[];
+ const tasks=()=>[{text:'Write',state:'done',detail:'the docs'},{text:'Ship',state:'todo'}];
+ const inGroups=(n:number)=>{let b:any={type:'checklist',empty:'No tasks.',items:tasks()};for(let i=0;i<n;i++)b={type:'group',title:`Part ${i}`,blocks:[b]};return b;};
+ for(let n=0;n<=10;n++){
+  const out=cleanScreen({id:'a',blocks:[inGroups(n)]})!.blocks;
+  assert.deepEqual(empties(out),[],`no empty list in ${n} groups`);
+  // The groups and the checklist are n+1 levels, and its tasks one more: whole up to there, and not there after it.
+  assert.equal(out.length,n<=5?1:0,`${n} groups`);
+ }
+ assert.deepEqual(cleanScreen({id:'a',blocks:[inGroups(3)]})!.blocks,[inGroups(3)],'three groups round a checklist are kept as said');
+ // A board by project, milestone and owner, a checklist and a list to each owner.
+ const board={type:'group',title:'Project',blocks:[{type:'group',title:'Milestone',blocks:[{type:'group',title:'Owner',blocks:[
+  {type:'checklist',empty:'No tasks.',items:tasks()},
+  {type:'list',items:['a string note',{text:'an object note'}]},
+ ]}]}]};
+ assert.deepEqual(cleanScreen({id:'a',blocks:[board]})!.blocks,[board]);
+ // Sub-tasks: as deep as the limit allows in a group, and no list left empty past it.
+ const sub=(depth:number):any=>({text:`T${depth}`,state:'done',...(depth>0?{items:[sub(depth-1)]}:{})});
+ assert.deepEqual(cleanScreen({id:'a',blocks:[{type:'group',blocks:[{type:'checklist',items:[sub(4)]}]}]})!.blocks[0].blocks[0].items,[sub(4)],'five levels of tasks in a group');
+ for(let depth=5;depth<12;depth++) assert.deepEqual(empties(cleanScreen({id:'a',blocks:[{type:'group',blocks:[{type:'checklist',items:[sub(depth),{text:'Other',state:'done'}]}]}]})!.blocks),[],`${depth} deep`);
 });
 test('what an extension shows reaches the portal as session events, and is kept as it stands',()=>{
  const b=bus();const out:any[]=[];const screens=bridgeScreens(b,e=>out.push(e));

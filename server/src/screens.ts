@@ -48,8 +48,12 @@ const TEXT_MAX = 2000;
 const KEY_MAX = 40;
 /** How many entries one list, or one block, has. */
 const ENTRIES_MAX = 200;
-/** How deep blocks may hold blocks, and items items: a checklist of checklists of … is a tree nobody reads. */
-const DEPTH_MAX = 8;
+/**
+ * How many levels of objects there are: a screen's block is the first, and each block in a group, each
+ * item in an item adds one, lists between them do not. A checklist of checklists of … is a tree nobody
+ * reads, and the page follows no more than this.
+ */
+const DEPTH_MAX = 7;
 /** Everything in one screen: more is cut, not refused, since the glue made a list longer than it knew. */
 const NODES_MAX = 4000;
 /**
@@ -95,7 +99,6 @@ function take(budget: Budget, nodes: number, chars: number): boolean {
 }
 
 const spent = (budget: Budget) => budget.left <= 0 || budget.chars <= 0;
-const hasEntries = (value: unknown) => (Array.isArray(value) ? value.length > 0 : Object.keys(value as object).length > 0);
 
 /**
  * Plain data only, and bounded: strings, finite numbers, booleans, lists and
@@ -119,11 +122,13 @@ function plain(value: unknown, depth: number, budget: Budget): unknown {
     for (const entry of value.slice(0, ENTRIES_MAX)) {
       // Cut between the entries: one that does not fit is left out whole, and so is what follows.
       if (spent(budget)) break;
-      const one = plain(entry, depth + 1, budget);
+      // The entries of a list are on the level of the list, which its holder put a level down: a list in a list is one more.
+      const one = plain(entry, Array.isArray(entry) ? depth + 1 : depth, budget);
       if (one !== undefined) kept.push(one);
     }
-    // A list that had entries and keeps none for the limit is not an empty list: the page would say so.
-    return kept.length || !value.length || !spent(budget) ? kept : undefined;
+    // A list that had entries and keeps none, for the limits of size or of depth, is not an empty list:
+    // the page would say there is nothing in it.
+    return kept.length || !value.length ? kept : undefined;
   }
   // An object is all of its own fields or none: a block without its `type`, an item
   // without its `state`, would be drawn as something it is not. What it holds in lists
@@ -139,7 +144,7 @@ function plain(value: unknown, depth: number, budget: Budget): unknown {
   const kept: Record<string, unknown> = {};
   for (const [name, entry, scalar] of fields) {
     const one = scalar ? (typeof entry === "string" ? entry.slice(0, TEXT_MAX) : entry) : plain(entry, depth + 1, budget);
-    if (one === undefined && !scalar && hasEntries(entry) && spent(budget)) return undefined;
+    if (one === undefined && !scalar && (Array.isArray(entry) ? entry.length > 0 : Object.keys(entry as object).length > 0 && spent(budget))) return undefined;
     if (one !== undefined) kept[name] = one;
   }
   return kept;
