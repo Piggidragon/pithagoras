@@ -1,0 +1,36 @@
+import { nanoid } from "nanoid";
+import { addGrant, addToolRule } from "./db.js";
+import { getPerson } from "./people.js";
+import { rulePatterns } from "./pi/guard.js";
+import type { QuestionRow } from "./questions.js";
+
+/**
+ * What the primary user's answer to a question permits, written down.
+ *
+ * `asking` is the conversation that asked, which a one-off approval is bound to.
+ * What was approved is the question's `action`, matched against the call the way
+ * the guard names it (see callSubject and rulePatterns there): for most tools the
+ * command or the path, and for edit_image the paths of its pictures.
+ */
+export function recordApproval(question: QuestionRow, asking: { id: string } | undefined, approves: boolean, always: boolean): void {
+  const tool = question.action_tool || "bash";
+  // An approval is a permission, not a sentence. Bound to the exact action
+  // that was shown, the conversation that asked, one use, fifteen minutes
+  // — so "yes" cannot be stretched into a standing role change.
+  if (approves && question.action && asking) addGrant(nanoid(10), asking.id, tool, question.action);
+  // Standing permission, narrowed to the person who asked. Recorded as an
+  // ordinary rule so it shows up in Settings → People beside the ones
+  // written by hand, and is revoked the same way.
+  if (always && question.action) {
+    for (const pattern of rulePatterns(tool, question.action)) {
+      addToolRule({
+        id: nanoid(10),
+        role: getPerson(question.person_key)?.role || "colleague",
+        tool,
+        pattern,
+        person_key: question.person_key,
+        note: `Approved for ${question.person_name}`,
+      });
+    }
+  }
+}

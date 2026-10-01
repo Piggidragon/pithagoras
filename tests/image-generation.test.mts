@@ -47,11 +47,11 @@ async function fake(handler: (req: IncomingMessage, res: ServerResponse, seen: S
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   return { origin: `http://127.0.0.1:${(server.address() as { port: number }).port}`, seen, server };
 }
-/** The parts of a multipart request as an endpoint reads them: by field name, with the file name, the type and the bytes of each. */
-function parts(seen: Seen): Record<string, { filename?: string; type?: string; bytes: Buffer }> {
+/** The parts of a multipart request as an endpoint reads them, in the order they were sent: the name of each, with its file name, its type and its bytes. */
+function partList(seen: Seen): { name: string; filename?: string; type?: string; bytes: Buffer }[] {
   const boundary = /boundary=(.+)$/.exec(seen.type ?? "")?.[1];
   assert.ok(boundary, `a multipart form, not ${seen.type}`);
-  const found: Record<string, { filename?: string; type?: string; bytes: Buffer }> = {};
+  const found: { name: string; filename?: string; type?: string; bytes: Buffer }[] = [];
   const delimiter = Buffer.from(`--${boundary}`);
   let at = seen.raw!.indexOf(delimiter);
   while (at >= 0) {
@@ -60,20 +60,23 @@ function parts(seen: Seen): Record<string, { filename?: string; type?: string; b
     const part = seen.raw!.subarray(at + delimiter.length + 2, next - 2);
     const split = part.indexOf("\r\n\r\n");
     const head = part.subarray(0, split).toString("utf8");
-    const name = /name="([^"]*)"/.exec(head)![1];
-    found[name] = { filename: /filename="([^"]*)"/.exec(head)?.[1], type: /content-type: (.+)/i.exec(head)?.[1], bytes: part.subarray(split + 4) };
+    found.push({ name: /name="([^"]*)"/.exec(head)![1], filename: /filename="([^"]*)"/.exec(head)?.[1], type: /content-type: (.+)/i.exec(head)?.[1], bytes: part.subarray(split + 4) });
     at = next;
   }
   return found;
 }
+/** The same by field name, for the fields that are there once. */
+function parts(seen: Seen): Record<string, { filename?: string; type?: string; bytes: Buffer }> {
+  return Object.fromEntries(partList(seen).map(({ name, ...rest }) => [name, rest]));
+}
 const json = (res: ServerResponse, body: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
 const b64 = (bytes: Buffer) => bytes.toString("base64");
 const config = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageGenerationConfig>> = {}) => ({
-  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", ...more,
+  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, ...more,
 });
 /** What the page is told of a fresh install, with `more` changed. */
 const fresh = (more: Record<string, unknown> = {}) => ({
-  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editKeySet: false, editReady: false, ...more,
+  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, editKeySet: false, editReady: false, ...more,
 });
 
 test("a request is checked: the address is a base with no secret in it, the size a real one", () => {
@@ -611,7 +614,7 @@ test("an extension's tool of the same name is the one pi keeps, so the portal's 
 
 /** As a fresh install has the settings, whatever the tests before left. */
 const reset = () => gen.saveImageGeneration({
-  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "",
+  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false,
 });
 
 test("a request for editing is checked as one for generation is", () => {
@@ -661,7 +664,7 @@ test("a key goes only to the server it was given for: generation's never to anot
   reset();
   const target = gen.imageEditingTarget;
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", apiKey: KEY, editEnabled: true, editModel: "edit-model" });
-  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY }, "edits to the generation server have its key");
+  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY, multiple: false }, "edits to the generation server have its key");
   assert.equal(target().model, "edit-model", "and never the model of generation, which may only make pictures");
 
   gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
@@ -705,7 +708,7 @@ test("the route for edits is added to the address unless it is there, and genera
   assert.equal(editing.editEndpointUrl("http://localhost:8080").href, "http://localhost:8080/images/edits");
 });
 
-const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, ...more });
+const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, multiple: false, ...more });
 
 test("an edit is a form with the picture, the prompt and the model, sent with the key to this address", async () => {
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
@@ -822,6 +825,122 @@ test("an edit that is never answered is given up on, and a chat that is stopped 
     await assert.rejects(slow, (e: Error) => !(e instanceof gen.ImageGenerationError) && /abort/i.test(e.name));
   } finally {
     server.closeAllConnections();
+    server.close();
+  }
+});
+
+// --- several pictures ---
+
+test("a request may say the editing endpoint takes several pictures, and it is off until it does", () => {
+  const parse = gen.parseImageGenerationPatch;
+  assert.deepEqual(parse({ editMultiple: true }), { editMultiple: true });
+  assert.deepEqual(parse({ editMultiple: false }), { editMultiple: false });
+  assert.equal(typeof parse({ editMultiple: "yes" }), "string");
+  assert.equal(typeof parse({ editMultiple: 1 }), "string");
+
+  reset();
+  assert.equal(gen.imageGenerationConfig().editMultiple, false, "a fresh install takes one picture");
+  assert.equal(gen.imageGenerationState().editMultiple, false);
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true });
+  assert.equal(gen.imageEditingMultiple(), false, "editing on is not several pictures on");
+  assert.equal(gen.imageEditingTarget().multiple, false);
+  gen.saveImageGeneration({ editMultiple: true });
+  assert.equal(gen.imageEditingMultiple(), true);
+  assert.equal(gen.imageEditingTarget().multiple, true);
+  assert.equal(gen.imageGenerationState().editMultiple, true);
+  // It is the edit tool's shape, so it counts only while there is one.
+  gen.saveImageGeneration({ editEnabled: false });
+  assert.equal(gen.imageEditingMultiple(), false);
+  reset();
+});
+
+test("what an endpoint takes is said of that endpoint: another server is not assumed to take several pictures", () => {
+  reset();
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true, editMultiple: true });
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v2" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true, "the same server by another route");
+  gen.saveImageGeneration({ editBaseUrl: "https://images.example.com/edit" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true, "and by an address of its own");
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, false, "edits moved to another server: it is not known to take them");
+  // Said again for the new server, it stays; and in the same save as the move, it is what was said.
+  gen.saveImageGeneration({ editMultiple: true });
+  gen.saveImageGeneration({ editBaseUrl: "https://third.example.org/v1", editMultiple: true });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true);
+  // Generation's address moving does not touch edits that have an address of their own.
+  gen.saveImageGeneration({ baseUrl: "https://elsewhere.example.org/v1" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true);
+  // Edits that follow generation's address follow its server, too.
+  gen.saveImageGeneration({ editBaseUrl: "", editMultiple: true });
+  gen.saveImageGeneration({ baseUrl: "https://another.example.org/v1" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, false);
+  // Said before there was an address, it was said of none, and goes with the first.
+  reset();
+  gen.saveImageGeneration({ editMultiple: true });
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true);
+  reset();
+});
+
+test("several pictures are one request, each as image[] in the order given, and only to an endpoint that takes them", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(WEBP) }] }));
+  try {
+    const several = target(origin, { multiple: true });
+    const got = await editing.editImage(several, { prompt: "put the cat from the second into the first", image: [PNG, JPEG, GIF] });
+    assert.deepEqual(got.bytes, WEBP);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, "/images/edits");
+    assert.equal(seen[0].auth, `Bearer ${KEY}`);
+    const list = partList(seen[0]);
+    assert.deepEqual(list.map((part) => part.name), ["image[]", "image[]", "image[]", "prompt", "model", "n"], "one part for each, first, in order");
+    assert.deepEqual(list.slice(0, 3).map((part) => part.bytes), [PNG, JPEG, GIF]);
+    assert.deepEqual(list.slice(0, 3).map((part) => part.type), ["image/png", "image/jpeg", "image/gif"], "the type each one's bytes say");
+    assert.deepEqual(list.slice(0, 3).map((part) => part.filename), ["image-1.png", "image-2.jpg", "image-3.gif"], "neutral names that say only the place");
+    assert.equal(parts(seen[0]).prompt.bytes.toString(), "put the cat from the second into the first", "the prompt is the agent's, as it is");
+
+    // A mask goes with them as it does with one.
+    await editing.editImage(several, { prompt: "p", image: [PNG, JPEG], mask: GIF });
+    assert.deepEqual(partList(seen[1]).map((part) => part.name), ["image[]", "image[]", "mask", "prompt", "model", "n"]);
+
+    // A list of one is the request an endpoint that takes one is sent, whether the endpoint takes several or not.
+    for (const multiple of [true, false]) {
+      await editing.editImage(target(origin, { multiple }), { prompt: "p", image: [WEBP] });
+      const one = partList(seen.at(-1)!);
+      assert.deepEqual(one.map((part) => part.name), ["image", "prompt", "model", "n"], `multiple: ${multiple}`);
+      assert.equal(one[0].filename, "image.webp");
+    }
+    const before = seen.length;
+
+    // Not to one that was not said to: nothing is sent.
+    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: [PNG, JPEG] }), /not set up to take several pictures, so none was sent/);
+    assert.equal(seen.length, before);
+  } finally {
+    server.close();
+  }
+});
+
+test("several pictures are limited in number and in weight, and one that is refused refuses them all before anything is sent", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    const several = target(origin, { multiple: true });
+    const ask = (image: Buffer[], options = {}) => editing.editImage(several, { prompt: "p", image }, options);
+    assert.equal((await ask(Array(editing.MAX_EDIT_PICTURES).fill(PNG))).ext, "png", "as many as an edit takes");
+    const sent = seen.length;
+    await assert.rejects(ask(Array(editing.MAX_EDIT_PICTURES + 1).fill(PNG)), /at most 8 pictures, and 9 were given/);
+    await assert.rejects(ask([]), /no picture to change/);
+
+    // By their bytes and size each, and named by their place: the others are fine, but the prompt would no longer match them.
+    await assert.rejects(ask([PNG, SVG, JPEG]), /Picture 2 is not a PNG, JPEG, GIF or WebP picture/);
+    await assert.rejects(ask([PNG, JPEG, Buffer.alloc(0)]), /Picture 3 is not a PNG/);
+    const big = Buffer.concat([PNG, Buffer.alloc(4096)]);
+    await assert.rejects(ask([PNG, big], { maxInputBytes: 1024 }), /Picture 2 is over/);
+    await assert.rejects(editing.editImage(several, { prompt: "p", image: [PNG, JPEG], mask: SVG }), /The mask is not a PNG/);
+    // Together, too: not scaled and not cut.
+    await assert.rejects(ask([big, big, big], { maxTotalBytes: 10 * 1024 }), /pictures are over 0 MB together, which is more than an edit takes.*none is scaled or cut/);
+    assert.equal((await ask([big, big], { maxTotalBytes: 10 * 1024 })).ext, "png", "within the weight");
+    assert.equal(seen.length, sent + 1, "nothing was sent for any of the refusals");
+    assert.equal(editing.MAX_EDIT_TOTAL_BYTES, 50 * 1024 * 1024);
+  } finally {
     server.close();
   }
 });
@@ -1061,6 +1180,137 @@ test("a picture made by the portal can be edited, and the result sits beside it 
   }
 });
 
+test("an endpoint that takes one picture gets a tool with one path, and one that takes several a tool with a list", () => {
+  reset();
+  const folder = chatWith();
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true });
+  const one = loadEdit(folder).registered[0];
+  assert.deepEqual(Object.keys(one.parameters.properties).sort(), ["path", "prompt", "title"], "off: the tool is as it was");
+  assert.deepEqual(one.parameters.required.sort(), ["path", "prompt"]);
+  assert.doesNotMatch(one.description, /order of the list|\bpaths\b/);
+  assert.match(one.description, /reference for a new picture/, "one picture can be the reference for a new one");
+
+  gen.saveImageGeneration({ editMultiple: true });
+  const many = loadEdit(folder).registered[0];
+  assert.equal(many.name, "edit_image", "the same tool, not another");
+  assert.deepEqual(Object.keys(many.parameters.properties).sort(), ["paths", "prompt", "title"], "a list instead of a path, so that there is one way to say it");
+  assert.deepEqual(many.parameters.required.sort(), ["paths", "prompt"]);
+  assert.equal(many.parameters.properties.paths.type, "array");
+  assert.equal(many.parameters.properties.paths.items.type, "string");
+  assert.equal(many.parameters.properties.paths.minItems, 1);
+  assert.equal(many.parameters.properties.paths.maxItems, editing.MAX_EDIT_PICTURES);
+  assert.match(many.description, /order of the list/, "the model is told how it says which is which");
+  assert.match(many.description, /by place/);
+  assert.match(many.description, /if one is refused, none is sent/);
+  assert.ok(!JSON.stringify(many).includes("sk-"));
+
+  // Several with editing off is no tool at all.
+  gen.saveImageGeneration({ editEnabled: false });
+  assert.deepEqual(loadEdit(folder).registered, []);
+  reset();
+});
+
+test("the tool makes one picture of several, in the order given, named after the first, and the originals stay", async () => {
+  const folder = chatWith({ "person.png": PNG, "style.jpg": JPEG, "shots/pattern.gif": GIF });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(WEBP) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, apiKey: KEY, editEnabled: true, editMultiple: true, editModel: "edit-model" });
+    const { call } = loadEdit(folder);
+    const result = await call({ paths: ["person.png", "style.jpg", path.join(folder, "shots", "pattern.gif")], prompt: "the person from the first, painted as the second, on the third", title: "Painted" });
+    assert.deepEqual(result.details, { path: "generated-images/person-edited.webp", title: "Painted", [GENERATED_PICTURE_MARK]: true }, "answers as for one picture: the page draws it the same");
+    assert.match(result.content[0].text, /Made from person\.png, style\.jpg, shots\/pattern\.gif \(in this order\), and shown to the user: generated-images\/person-edited\.webp/);
+    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), WEBP);
+    assert.equal(seen.length, 1, "one request for all");
+    assert.equal(seen[0].auth, `Bearer ${KEY}`);
+    const list = partList(seen[0]);
+    assert.deepEqual(list.map((part) => part.name), ["image[]", "image[]", "image[]", "prompt", "model", "n"]);
+    assert.deepEqual(list.slice(0, 3).map((part) => part.bytes), [PNG, JPEG, GIF], "in the order of the list, with the bytes of the folder's files");
+    assert.deepEqual(list.slice(0, 3).map((part) => part.filename), ["image-1.png", "image-2.jpg", "image-3.gif"], "never their names");
+    assert.equal(list[3].bytes.toString(), "the person from the first, painted as the second, on the third");
+    assert.deepEqual(readFileSync(path.join(folder, "person.png")), PNG);
+    assert.deepEqual(readFileSync(path.join(folder, "style.jpg")), JPEG);
+    assert.deepEqual(readdirSync(folder).sort(), [GENERATED_DIR, "person.png", "shots", "style.jpg"], "nothing else was made");
+
+    // A second one with the same first picture takes the next number, as an edit does; a list of one is one picture.
+    assert.equal((await call({ paths: ["person.png", "style.jpg"], prompt: "p" })).details.path, "generated-images/person-edited (2).webp");
+    const single = await call({ paths: ["style.jpg"], prompt: "p" });
+    assert.match(single.content[0].text, /^Edited style\.jpg, and shown/);
+    assert.deepEqual(partList(seen.at(-1)!).map((part) => part.name), ["image", "prompt", "model", "n"], "sent as one picture is");
+    // One path still does as it did, where the tool was loaded with a list.
+    assert.equal((await call({ path: "style.jpg", prompt: "p" })).details.path, "generated-images/style-edited (2).webp");
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("a picture of a list that is refused refuses the call, says which it is, and nothing is sent or kept", async () => {
+  const folder = chatWith({
+    "a.png": PNG, "b.jpg": JPEG, "notes.txt": Buffer.from("not a picture"), "vector.png": SVG,
+    "big-1.png": Buffer.concat([PNG, Buffer.alloc(20 * 1024 * 1024)]), "big-2.png": Buffer.concat([JPEG, Buffer.alloc(20 * 1024 * 1024)]), "big-3.png": Buffer.concat([GIF, Buffer.alloc(20 * 1024 * 1024)]),
+    "huge.png": Buffer.concat([PNG, Buffer.alloc(26 * 1024 * 1024)]),
+  });
+  const outside = chatWith({ "secret.png": PNG });
+  symlinkSync(path.join(outside, "secret.png"), path.join(folder, "link.png"));
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true, editMultiple: true });
+    const { call } = loadEdit(folder);
+    const refused = (paths: string[], message: RegExp) => assert.rejects(call({ paths, prompt: "p" }), (e: Error) => { assert.match(e.message, message); return true; });
+    await refused(["a.png", path.join(outside, "secret.png")], /^Picture 2 \(.*secret\.png\): Only a picture in the chat's folder can be edited/);
+    await refused(["a.png", "../secret.png", "b.jpg"], /^Picture 2 \(\.\.\/secret\.png\): Only a picture in the chat's folder can be edited/);
+    await refused(["link.png", "a.png"], /^Picture 1 \(link\.png\): .*leads outside the folder/);
+    await refused(["a.png", "b.jpg", "notes.txt"], /^Picture 3 \(notes\.txt\): .*not a PNG, JPEG, GIF or WebP/);
+    await refused(["vector.png", "a.png"], /^Picture 1 \(vector\.png\): .*not a PNG, JPEG, GIF or WebP/);
+    await refused(["a.png", "missing.png"], /^Picture 2 \(missing\.png\): .*no such file/i);
+    await refused(["a.png", ""], /^Picture 2 \(\): Only a picture in the chat's folder can be edited/);
+    await refused(["a.png", "huge.png"], /^Picture 2 \(huge\.png\): The picture is over 25 MB, which is more than an edit takes\. It is not scaled or cut/);
+    // Each within the limit of a picture, but not together: not scaled and not cut.
+    await refused(["big-1.png", "big-2.png", "big-3.png"], /^The pictures are over 50 MB together, which is more than an edit takes\..*none is scaled or cut/);
+    await refused(Array(editing.MAX_EDIT_PICTURES + 1).fill("a.png"), /at most 8 pictures, and 9 were given/);
+    await refused([], /no picture to change/);
+    await assert.rejects(call({ paths: ["a.png", 5], prompt: "p" }), /Picture 2 \(5\): Name the picture by its path/);
+    await assert.rejects(call({ paths: ["a.png", "b.jpg"], prompt: "  " }), /prompt is required/);
+    assert.equal(seen.length, 0, "nothing was sent for any of it");
+    assert.equal(existsSync(path.join(folder, GENERATED_DIR)), false, "and nothing kept");
+    assert.deepEqual(readdirSync(outside), ["secret.png"]);
+    // What is in bounds is made as ever.
+    assert.equal((await call({ paths: ["big-1.png", "big-2.png"], prompt: "p" })).details.path, "generated-images/big-1-edited.png");
+    assert.equal((await call({ paths: Array(editing.MAX_EDIT_PICTURES).fill("a.png"), prompt: "p" })).details.path, "generated-images/a-edited.png");
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("the setting is read at each call: a list is refused once the endpoint is no longer said to take it, and a path or a list does for the shape it was loaded with", async () => {
+  const folder = chatWith({ "a.png": PNG, "b.jpg": JPEG });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(WEBP) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true, editMultiple: true });
+    const withList = loadEdit(folder);
+    gen.saveImageGeneration({ editMultiple: false });
+    await assert.rejects(withList.call({ paths: ["a.png", "b.jpg"], prompt: "p" }), /not set up to take several pictures, so none was sent/);
+    assert.equal(seen.length, 0, "nothing was sent");
+    assert.ok((await withList.call({ paths: ["a.png"], prompt: "p" })).details.path, "one picture is as ever");
+
+    // Switched on since the tool was loaded with one path: the person's setting is in force at once, for the call that names several.
+    const withPath = loadEdit(folder);
+    gen.saveImageGeneration({ editMultiple: true });
+    assert.equal((await withPath.call({ paths: ["a.png", "b.jpg"], prompt: "p" })).details.path, "generated-images/a-edited (2).webp");
+    assert.equal(partList(seen.at(-1)!).filter((part) => part.name === "image[]").length, 2);
+    // And switched off with editing since: there is nothing to call.
+    gen.saveImageGeneration({ editEnabled: false });
+    await assert.rejects(withPath.call({ paths: ["a.png"], prompt: "p" }), /switched off/);
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
 test("the API holds the edit settings, never gives a key back, and reloads chats when the edit tool comes or goes", async () => {
   const express = (await import("express")).default;
   const { featuresRouter } = await import("../server/src/api/features.ts");
@@ -1098,6 +1348,175 @@ test("the API holds the edit settings, never gives a key back, and reloads chats
   } finally {
     portal.close();
     reset();
+  }
+});
+
+test("the API says whether several pictures are taken, and reloads chats when that changes the edit tool", async () => {
+  const express = (await import("express")).default;
+  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const app = express().use(express.json()).use("/api", featuresRouter());
+  const portal = app.listen(0, "127.0.0.1");
+  await new Promise((r) => portal.once("listening", r));
+  const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/api`;
+  const call = async (method: string, p: string, body?: unknown) => {
+    const r = await fetch(`${at}${p}`, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, body: await r.json() as any };
+  };
+  try {
+    reset();
+    assert.equal((await call("GET", "/features/images")).body.images.editMultiple, false, "off by default");
+    assert.equal((await call("PUT", "/features/images", { editMultiple: "yes" })).status, 400);
+    // Without an edit tool there is no shape to change: said, but nobody is reloaded.
+    const early = await call("PUT", "/features/images", { baseUrl: "https://images.example.com/v1", editMultiple: true });
+    assert.equal(early.body.images.editMultiple, true);
+    assert.equal(early.body.changed, false);
+    assert.equal((await call("PUT", "/features/images", { editEnabled: true })).body.changed, true, "the tool came, with a list");
+    assert.equal((await call("PUT", "/features/images", { editMultiple: false })).body.changed, true, "the tool is one with a path now: chats are reloaded");
+    assert.equal((await call("PUT", "/features/images", { editMultiple: false })).body.changed, false, "said again: nothing to do");
+    assert.equal((await call("PUT", "/features/images", { editMultiple: true })).body.changed, true);
+    // Moving edits to another server takes it off, which the tool's shape follows.
+    const moved = await call("PUT", "/features/images", { editBaseUrl: "https://edit.example.net/v1" });
+    assert.equal(moved.body.images.editMultiple, false);
+    assert.equal(moved.body.changed, true);
+    assert.equal((await call("GET", "/features")).body.images.editMultiple, false);
+  } finally {
+    portal.close();
+    reset();
+  }
+});
+
+test("a tool rule for edit_image is matched on each picture, whether it is named by path or by a list, never on the list's JSON", async () => {
+  const { ruleAllows, guardExtension } = await import("../server/src/pi/guard.ts");
+  const { addToolRule, deleteToolRule, listToolRules } = await import("../server/src/db.ts");
+  const rule = (pattern: string, more: Record<string, unknown> = {}) =>
+    ({ id: `r-${pattern}`, role: "colleague", tool: "edit_image", pattern, note: "", created_at: "", person_key: null, ...more }) as Parameters<typeof ruleAllows>[0][number];
+  const allows = (rules: ReturnType<typeof rule>[], input: Record<string, unknown>, role = "colleague") => ruleAllows(rules, role, "edit_image", input);
+
+  const folder = [rule("shared/*")];
+  assert.equal(allows(folder, { path: "shared/a.png", prompt: "p" }), true, "one picture, as ever");
+  assert.equal(allows(folder, { path: "private.png", prompt: "p" }), false);
+  // A list is the same pictures one by one: a folder rule that allowed each still does, and one that did not allow one does not allow the call.
+  assert.equal(allows(folder, { paths: ["shared/a.png"], prompt: "p" }), true, "a list of one is the one picture");
+  assert.equal(allows(folder, { paths: ["shared/a.png", "shared/b.jpg"], prompt: "p" }), true);
+  assert.equal(allows(folder, { paths: ["shared/a.png", "private.png"], prompt: "p" }), false, "one that is not allowed is enough");
+  assert.equal(allows(folder, { paths: ["private.png", "shared/a.png"], prompt: "p" }), false, "wherever it is in the list");
+
+  // A rule for a word is not met by the prompt or by another picture of the list, which the call's JSON would have let through.
+  const word = [rule("*shared/*")];
+  assert.equal(allows(word, { path: "private.png", prompt: "like shared/x" }), false);
+  assert.equal(allows(word, { paths: ["private.png"], prompt: "like shared/x" }), false, "the prompt is no picture");
+  assert.equal(allows(word, { paths: ["private.png", "shared/a.png"], prompt: "p" }), false, "nor is another picture of the list");
+  assert.equal(allows(word, { paths: ["x/shared/a.png", "y/shared/b.png"], prompt: "p" }), true);
+
+  // Each picture needs a rule, not the same one: two folders, two rules.
+  assert.equal(allows([rule("shared/*"), rule("pictures/*")], { paths: ["shared/a.png", "pictures/b.png"], prompt: "p" }), true);
+  assert.equal(allows([rule("shared/*"), rule("pictures/*")], { paths: ["shared/a.png", "other/b.png"], prompt: "p" }), false);
+
+  // Whichever name the tool would use is checked: a path that is allowed does not carry a list that is not, nor the other way round.
+  assert.equal(allows(folder, { path: "shared/a.png", paths: ["private.png"], prompt: "p" }), false);
+  assert.equal(allows(folder, { path: "private.png", paths: ["shared/a.png"], prompt: "p" }), false);
+  assert.equal(allows(folder, { paths: "private.png", prompt: "p" }), false, "a list given as text, as pi may coerce it");
+  // A call that names no picture, an empty list, or something that is no name is allowed by nothing, even by a rule for everything.
+  const anything = [rule("*")];
+  for (const input of [{ prompt: "p" }, { paths: [], prompt: "p" }, { paths: [""], prompt: "p" }, { paths: ["a.png", 5], prompt: "p" }, { path: 5, prompt: "p" }]) {
+    assert.equal(allows(anything, input), false, JSON.stringify(input));
+  }
+  assert.equal(allows(anything, { paths: ["a.png", "b.png"], prompt: "p" }), true);
+
+  // The rule's role, person and tool count as for any call.
+  assert.equal(allows(folder, { paths: ["shared/a.png"], prompt: "p" }, "stranger"), false);
+  assert.equal(allows([rule("shared/*", { role: "all" })], { paths: ["shared/a.png"], prompt: "p" }, "stranger"), true);
+  assert.equal(allows([rule("shared/*", { tool: "show_image" })], { paths: ["shared/a.png"], prompt: "p" }), false);
+  assert.equal(ruleAllows([rule("shared/*", { person_key: "priya" })], "colleague", "edit_image", { paths: ["shared/a.png"] }, "priya"), true);
+  assert.equal(ruleAllows([rule("shared/*", { person_key: "priya" })], "colleague", "edit_image", { paths: ["shared/a.png"] }, "sam"), false);
+
+  // Other tools are matched as they were: a command, a path, or the call's own arguments.
+  const bash = (pattern: string) => rule(pattern, { tool: "bash" });
+  assert.equal(ruleAllows([bash("ls*")], "colleague", "bash", { command: "ls -l 2>&1" }), true);
+  assert.equal(ruleAllows([bash("ls*")], "colleague", "bash", { command: "ls; rm x" }), false);
+  assert.equal(ruleAllows([rule("docs/*", { tool: "write" })], "colleague", "write", { path: "docs/a.md", content: "x" }), true);
+  assert.equal(ruleAllows([rule("*shared*", { tool: "other_tool" })], "colleague", "other_tool", { paths: ["a"], note: "shared" }), true, "a tool of another name keeps its arguments' JSON");
+
+  // As the guard asks it, with the rules in the portal's own table: the call goes through for the pictures the rule allows and is refused for the rest.
+  const added = [{ id: "issue90-a", pattern: "shared/*" }];
+  for (const r of added) addToolRule({ id: r.id, role: "colleague", tool: "edit_image", pattern: r.pattern, note: "", person_key: null });
+  try {
+    assert.equal(listToolRules().filter((r) => r.id === "issue90-a").length, 1);
+    let handler: ((event: any) => any) | undefined;
+    guardExtension("/tmp/none", () => ({ role: "colleague" }), "chat-issue90")({ on: (name: string, fn: (event: any) => any) => { if (name === "tool_call") handler = fn; } });
+    const asked = (input: Record<string, unknown>) => handler!({ toolName: "edit_image", input });
+    assert.equal(asked({ paths: ["shared/a.png", "shared/b.png"], prompt: "p" }), undefined, "allowed");
+    assert.equal(asked({ paths: ["shared/a.png"], prompt: "like shared/x" }), undefined);
+    assert.equal(asked({ paths: ["private.png"], prompt: "like shared/x" })?.block, true, "refused: the prompt is not a rule's business");
+    assert.equal(asked({ paths: ["shared/a.png", "private.png"], prompt: "p" })?.block, true);
+  } finally {
+    for (const r of added) deleteToolRule(r.id);
+  }
+});
+
+test("a colleague's edit_image call can be approved once or always, with the action the guard asks for, in either shape of the tool", async () => {
+  const { guardExtension, callSubject, rulePatterns } = await import("../server/src/pi/guard.ts");
+  const { deleteToolRule, listToolRules } = await import("../server/src/db.ts");
+  const { askQuestion, readAnswer } = await import("../server/src/questions.ts");
+  const { recordApproval } = await import("../server/src/approvals.ts");
+
+  // What the guard calls a call: the path, or the path of each picture, one to a line, never the prompt.
+  assert.equal(callSubject("edit_image", { path: "shared/a.png", prompt: "p" }), "shared/a.png", "as it was");
+  assert.equal(callSubject("edit_image", { paths: ["shared/a.png"], prompt: "p" }), "shared/a.png", "a list of one is its picture");
+  assert.equal(callSubject("edit_image", { paths: ["shared/a.png", " shared/b.jpg "], prompt: "other" }), "shared/a.png\nshared/b.jpg");
+  assert.equal(callSubject("edit_image", { prompt: "p" }), JSON.stringify({ prompt: "p" }), "a call that names nothing is shown as it is");
+  assert.equal(callSubject("bash", { command: " ls " }), "ls");
+  assert.equal(callSubject("write", { path: "docs/a.md" }), "docs/a.md");
+  assert.deepEqual(rulePatterns("edit_image", "shared/a.png\n shared/b.jpg \n"), ["shared/a.png", "shared/b.jpg"], "one rule for each picture");
+  assert.deepEqual(rulePatterns("edit_image", "Summer, 2026.png"), ["Summer, 2026.png"], "a comma is part of a name");
+  assert.deepEqual(rulePatterns("bash", "ls\nmore"), ["ls\nmore"], "other tools' actions are one pattern as they were");
+
+  const session = "chat-issue90-approval";
+  const person = { role: "colleague", key: "priya" };
+  let handler: ((event: any) => any) | undefined;
+  let who: { role: string; key?: string } = person;
+  guardExtension("/tmp/none", () => who, session)({ on: (name: string, fn: (event: any) => any) => { if (name === "tool_call") handler = fn; } });
+  const call = (input: Record<string, unknown>) => handler!({ toolName: "edit_image", input });
+  /** What the agent does with a refusal: asks with the action it names, as ask_primary files it, and the primary answers. */
+  const approve = (refused: any, answer: string) => {
+    assert.equal(refused?.block, true);
+    assert.match(refused.reason, /actionTool is edit_image/);
+    const action = refused.reason.split("exactly:\n")[1].trim();
+    const row = askQuestion({ sessionId: session, personKey: "priya", personName: "Priya", channelSlug: "chat", channelKey: "k", question: "may I?", actionTool: "edit_image", action });
+    const pending = readAnswer(`#${row.id} ${answer}`)!;
+    recordApproval(pending.question, { id: session }, pending.approves, pending.always);
+    return action;
+  };
+  try {
+    // Once, for several pictures: refused, told what to ask for, approved, then it runs, and only once.
+    const several = { paths: ["shared/logo.png", "Summer, banner.png"], prompt: "put the logo on the banner" };
+    assert.equal(approve(call(several), "approve"), "shared/logo.png\nSummer, banner.png");
+    assert.equal(call({ ...several, prompt: "another words" }), undefined, "it is the pictures that were approved");
+    assert.equal(call(several)?.block, true, "and once");
+    assert.equal(call({ paths: ["shared/logo.png"], prompt: "p" })?.block, true, "not for fewer or other pictures");
+
+    // The path the agent would write for one picture works for a list of one, as for the tool's other shape.
+    const row = askQuestion({ sessionId: session, personKey: "priya", personName: "Priya", channelSlug: "chat", channelKey: "k", question: "may I?", actionTool: "edit_image", action: "shared/a.png" });
+    recordApproval(readAnswer(`#${row.id} approve`)!.question, { id: session }, true, false);
+    assert.equal(call({ paths: ["shared/a.png"], prompt: "p" }), undefined);
+    const again = askQuestion({ sessionId: session, personKey: "priya", personName: "Priya", channelSlug: "chat", channelKey: "k", question: "may I?", actionTool: "edit_image", action: "shared/a.png" });
+    recordApproval(readAnswer(`#${again.id} approve`)!.question, { id: session }, true, false);
+    assert.equal(call({ path: "shared/a.png", prompt: "p" }), undefined, "and for one path");
+
+    // Always: one rule for each picture, for her alone, which lets the same call through every time and nothing else.
+    approve(call(several), "always");
+    const made = listToolRules().filter((r) => r.tool === "edit_image" && r.person_key === "priya");
+    assert.deepEqual(made.map((r) => r.pattern).sort(), ["Summer, banner.png", "shared/logo.png"], "a rule that held both would match neither");
+    assert.equal(call(several), undefined);
+    assert.equal(call(several), undefined, "not spent");
+    assert.equal(call({ paths: ["Summer, banner.png"], prompt: "p" }), undefined, "each picture is allowed on its own now");
+    assert.equal(call({ paths: ["shared/logo.png", "private.png"], prompt: "p" })?.block, true, "a picture that was not approved is not");
+    // "Always" is also an approval of the call once, which her rules did not need and left open for this conversation: spent here.
+    who = { role: "colleague", key: "sam" };
+    assert.equal(call(several), undefined, "the one-off approval is the conversation's, whoever speaks");
+    assert.equal(call(several)?.block, true, "the rules are Priya's alone");
+  } finally {
+    for (const r of listToolRules().filter((rule) => rule.tool === "edit_image")) deleteToolRule(r.id);
   }
 });
 

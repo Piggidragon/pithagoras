@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { inlineBrowserScreenshot } from "./browser-screenshot.js";
 import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-format.js";
 import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
+import { EDIT_IMAGE_TOOL } from "../image-generation.js";
 
 /**
  * A blast-radius limiter for prompt injection.
@@ -284,6 +285,51 @@ const subjectOf = (toolName: string, input: Record<string, unknown>) =>
   toolName === "bash" ? cmd(input) : target(input) || JSON.stringify(input);
 
 /**
+ * What a rule must allow for a call: one subject, or one for each picture of an
+ * edit_image given a list. A list has no `path`, so matched like any other
+ * tool's arguments it would be matched on their JSON — a rule for a folder
+ * would match nothing, and one for a word would match the prompt or another
+ * picture of the list. Each picture is a subject instead, as if the pictures
+ * were asked for one at a time. Every name the call carries is one, `path` and
+ * `paths` alike, so that the one the tool uses is never the one left unchecked;
+ * a call that names no picture is allowed by nothing, and fails in the tool.
+ */
+function subjectsOf(toolName: string, input: Record<string, unknown>): string[] {
+  if (toolName !== EDIT_IMAGE_TOOL) return [subjectOf(toolName, input)];
+  const named = (value: unknown): unknown[] => (Array.isArray(value) ? value : value === undefined ? [] : [value]);
+  return [...named(input.path), ...named(input.paths)].map((name) => (typeof name === "string" ? name.trim() : ""));
+}
+
+/**
+ * Between the pictures of an edit_image call where somebody approves it. A line
+ * break, not a comma: a picture's name may hold a comma and a space, hardly a
+ * line break, so the pictures can be told apart again (see rulePatterns).
+ */
+const PICTURE_SEP = "\n";
+
+/**
+ * What a call is called where a person is asked to approve it, and in the log:
+ * what a one-off approval is matched on, exactly. The command, or the path, and
+ * for an edit_image the path of each picture, one to a line, in the order of the
+ * call, so that the agent can write it as an `action` however the pictures were
+ * named. The prompt is not part of it, as the prompt of one picture never was.
+ */
+export function callSubject(toolName: string, input: Record<string, unknown>): string {
+  if (toolName !== EDIT_IMAGE_TOOL) return subjectOf(toolName, input).trim();
+  return subjectsOf(toolName, input).join(PICTURE_SEP).trim() || JSON.stringify(input);
+}
+
+/**
+ * The patterns a standing approval of `action` is written as: the action itself,
+ * and for an edit_image one for each picture of it, since a rule is matched on
+ * each picture (see subjectsOf) and one that held them all would match none.
+ */
+export function rulePatterns(toolName: string, action: string): string[] {
+  if (toolName !== EDIT_IMAGE_TOOL) return [action];
+  return action.split(PICTURE_SEP).map((line) => line.trim()).filter(Boolean);
+}
+
+/**
  * Folding stderr in is a fixed idiom, not redirection.
  *
  * Models write it by reflex on almost every command. Refusing it means an
@@ -299,18 +345,23 @@ export function ruleAllows(
   input: Record<string, unknown>,
   personKey?: string
 ): boolean {
-  let subject = subjectOf(toolName, input).trim();
-  if (!subject) return false;
-  if (toolName === "bash") subject = subject.replace(STDERR_IDIOM, "").trim();
-  if (toolName === "bash" && CHAINING.test(subject)) return false;
-  return rules.some(
-    (r) =>
-      (r.role === role || r.role === "all") &&
-      // A rule naming somebody applies to them alone: approving Priya's request
-      // must not quietly permit the same command for every colleague.
-      (!r.person_key || r.person_key === personKey) &&
-      r.tool === toolName &&
-      globToRegExp(r.pattern).test(subject)
+  const subjects = subjectsOf(toolName, input).map((s) => s.trim());
+  if (!subjects.length || subjects.some((s) => !s)) return false;
+  if (toolName === "bash") {
+    subjects[0] = subjects[0].replace(STDERR_IDIOM, "").trim();
+    if (CHAINING.test(subjects[0])) return false;
+  }
+  // Each subject by some rule of its own, as the same calls one by one would be.
+  return subjects.every((subject) =>
+    rules.some(
+      (r) =>
+        (r.role === role || r.role === "all") &&
+        // A rule naming somebody applies to them alone: approving Priya's request
+        // must not quietly permit the same command for every colleague.
+        (!r.person_key || r.person_key === personKey) &&
+        r.tool === toolName &&
+        globToRegExp(r.pattern).test(subject)
+    )
   );
 }
 
@@ -382,7 +433,7 @@ export function guardExtension(
 
     pi.on("tool_call", (event: any) => {
       const { role, key } = whoNow();
-      const subject = subjectOf(event.toolName, event.input ?? {}).trim();
+      const subject = callSubject(event.toolName, event.input ?? {});
       const note = (kind: string, reason: string) =>
         recordAudit({
           kind,
@@ -453,7 +504,12 @@ export function guardExtension(
             `command makes it something else and it is refused. Tell them plainly that this ` +
             `needs the primary user, and pass the request along — with the exact command as the ` +
             `action, so they can approve that and only that. If you have already asked about ` +
-            `this, do not ask again: say you are waiting.`,
+            `this, do not ask again: say you are waiting.` +
+            // The pictures of a list have no one path to write: say what the action is, so that it matches.
+            (event.toolName === EDIT_IMAGE_TOOL
+              ? ` For this call the actionTool is edit_image and the action is the path of each ` +
+                `picture, one to a line, in this order, exactly:\n${subject}`
+              : ""),
         };
       }
 

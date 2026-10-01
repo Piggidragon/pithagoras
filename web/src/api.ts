@@ -1208,6 +1208,8 @@ export interface ImagesFeature {
   editBaseUrl: string;
   /** Empty sends no model: the model above is not taken for editing. */
   editModel: string;
+  /** The edit endpoint takes several pictures, so edit_image has a list; off until said, and off again when edits move to another server. */
+  editMultiple: boolean;
   editKeySet: boolean;
   /** Whether the agent has an edit tool: switched on, and with an address to ask. */
   editReady: boolean;
@@ -1224,6 +1226,7 @@ export interface ImagesFeaturePatch {
   editBaseUrl?: string;
   editModel?: string;
   editApiKey?: string;
+  editMultiple?: boolean;
 }
 
 /** The model that keeps Understory's memory, as the page is told it: never the key. */
