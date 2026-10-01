@@ -740,6 +740,10 @@ const de: Locale = {
     "Image editing tool": "Tool zur Bildbearbeitung",
     "On: the agent has an edit_image tool.": "An: Der Agent hat ein edit_image-Tool.",
     "Off: the agent cannot change a picture.": "Aus: Der Agent kann kein Bild ändern.",
+    "Several pictures per edit": "Mehrere Bilder pro Bearbeitung",
+    "On: edit_image takes a list of pictures.": "An: edit_image nimmt eine Liste von Bildern.",
+    "Off: edit_image takes one picture.": "Aus: edit_image nimmt ein Bild.",
+    "Switch on several pictures only if the editing endpoint takes more than one in a request, to combine subjects or keep a style. The agent then names its pictures in the order the prompt refers to them. What an endpoint takes is said of that endpoint, so editing moved to another server switches it off again.": "Schalte mehrere Bilder nur ein, wenn der Bearbeitungs-Endpunkt in einer Anfrage mehr als eines nimmt, etwa um Motive zu kombinieren oder einen Stil zu halten. Der Agent nennt seine Bilder dann in der Reihenfolge, auf die sich der Prompt bezieht. Was ein Endpunkt nimmt, gilt für genau diesen Endpunkt; wird die Bearbeitung auf einen anderen Server verlegt, ist die Einstellung wieder aus.",
     "The result is a new picture in the generated-images folder, named after the original, which is not changed. Editing can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it.": "Das Ergebnis ist ein neues Bild im Ordner generated-images, benannt nach dem Original, das nicht verändert wird. Bearbeiten kann bei einem gehosteten Endpunkt Geld kosten, darum wird das Tool für Personen, mit denen der Agent in deinem Namen spricht, abgelehnt, sofern keine Tool-Regel es erlaubt.",
     // components/FilesPanel.tsx
     "Not a picture that can be shown here. Download it to open it.": "Kein Bild, das sich hier zeigen lässt. Lade es herunter, um es zu öffnen.",
