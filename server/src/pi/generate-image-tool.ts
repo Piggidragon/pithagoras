@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { Type } from "typebox";
+import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SIZE, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
 import { FileError, baseDir, makeFolder, saveNewFile } from "../workspace-files.js";
 import { pictureIn } from "./show-image-tool.js";
@@ -9,7 +10,8 @@ import { pictureIn } from "./show-image-tool.js";
  * in Settings → Add-ons → Images, and putting it in front of them.
  *
  * What it returns is what show_image returns — the picture's path in the chat's
- * folder, and a title — so the page draws it as it draws one the agent showed:
+ * folder, and a title, with a mark that it is this tool's (see generated-picture.ts)
+ * — so the page draws it as it draws one the agent showed:
  * a thumbnail under the tool line in the chat, the picture window in voice
  * mode. The picture is written into a folder of its own inside the chat's, which
  * is where /sessions/:id/picture serves from, under a name made here, never
@@ -105,7 +107,7 @@ export class GenerateImageTool {
         const { bytes, ext } = await generateImage(config, { prompt, ...(size ? { size } : {}) }, { signal });
         const rel = saveGenerated(folder, bytes, ext);
         const title = (typeof p.title === "string" && p.title.trim() ? p.title : prompt).replace(/\s+/g, " ").trim().slice(0, 120);
-        const details = { path: rel, ...(title ? { title } : {}) };
+        const details = { path: rel, ...(title ? { title } : {}), [GENERATED_PICTURE_MARK]: true };
         return { content: [{ type: "text", text: `Generated and shown to the user: ${rel}` }], details };
       },
     });

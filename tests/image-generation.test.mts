@@ -12,6 +12,7 @@ process.env.PI_CODING_AGENT_DIR = path.join(temp, "agent");
 process.env.AGENT_HOME = path.join(temp, "agent-home");
 
 const gen = await import("../server/src/image-generation.ts");
+const { GENERATED_PICTURE_MARK } = await import("../server/src/generated-picture.ts");
 const { GenerateImageTool, GENERATED_DIR, takenByAnother } = await import("../server/src/pi/generate-image-tool.ts");
 
 // The first bytes of each kind a browser draws, padded: that is all the check reads.
@@ -378,7 +379,9 @@ test("the tool makes a picture in the chat's folder and answers as show_image do
 
     const result = await call({ prompt: "  a lighthouse at dusk  ", title: "Lighthouse", size: "1024x1024" });
     assert.match(result.details.path, new RegExp(`^${GENERATED_DIR}/image-\\d{8}-\\d{6}-[0-9a-f]{6}\\.png$`));
-    assert.deepEqual(result.details, { path: result.details.path, title: "Lighthouse" });
+    // The same details as show_image's, and the mark that tells this tool's answer from another extension's of the name.
+    assert.deepEqual(result.details, { path: result.details.path, title: "Lighthouse", [GENERATED_PICTURE_MARK]: true });
+    assert.ok(!path.isAbsolute(result.details.path), "a path in the chat's folder, which is what the page asks for");
     assert.match(result.content[0].text, /shown to the user/i);
     assert.deepEqual(readFileSync(path.join(folder, result.details.path)), PNG);
     assert.deepEqual(seen[0].body, { model: "image-model", prompt: "a lighthouse at dusk", n: 1, size: "1024x1024" });
