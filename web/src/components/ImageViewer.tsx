@@ -74,9 +74,14 @@ export function ImageViewer({
   const [failed, setFailed] = useState<string | null>(null);
   const image = loaded?.id === id ? loaded.image : null;
 
+  const arrows = useRef<{ prev: HTMLButtonElement | null; next: HTMLButtonElement | null }>({ prev: null, next: null });
   const step = (by: 1 | -1) => {
     const to = stepped(index, pictures.length, by);
-    if (to !== undefined) setShownId(pictures[to].id);
+    if (to === undefined) return;
+    setShownId(pictures[to].id);
+    // The arrow in use goes disabled when this reaches an end of the list, and a disabled button drops focus to the page: it goes to the dialog first.
+    const spent = to === 0 ? arrows.current.prev : to === pictures.length - 1 ? arrows.current.next : null;
+    if (spent && document.activeElement === spent) dialog.current?.focus({ preventScroll: true });
   };
   const pan = usePanZoom({ id, image, stage, element: stageEl, onSwipe: step, onTap: onClose });
   useScrollLock();
@@ -223,10 +228,10 @@ export function ImageViewer({
           </div>
           {many && (
             <>
-              <button type="button" onClick={() => step(-1)} disabled={index === 0} aria-label={t("Previous picture")} title={t("Previous picture")} className={`${iconButton} absolute left-2 top-1/2 -translate-y-1/2 border border-line bg-surface/80 shadow-pop backdrop-blur`}>
+              <button type="button" ref={(el) => void (arrows.current.prev = el)} onClick={() => step(-1)} disabled={index === 0} aria-label={t("Previous picture")} title={t("Previous picture")} className={`${iconButton} absolute left-2 top-1/2 -translate-y-1/2 border border-line bg-surface/80 shadow-pop backdrop-blur`}>
                 <LuChevronLeft aria-hidden className="h-5 w-5" />
               </button>
-              <button type="button" onClick={() => step(1)} disabled={index === pictures.length - 1} aria-label={t("Next picture")} title={t("Next picture")} className={`${iconButton} absolute right-2 top-1/2 -translate-y-1/2 border border-line bg-surface/80 shadow-pop backdrop-blur`}>
+              <button type="button" ref={(el) => void (arrows.current.next = el)} onClick={() => step(1)} disabled={index === pictures.length - 1} aria-label={t("Next picture")} title={t("Next picture")} className={`${iconButton} absolute right-2 top-1/2 -translate-y-1/2 border border-line bg-surface/80 shadow-pop backdrop-blur`}>
                 <LuChevronRight aria-hidden className="h-5 w-5" />
               </button>
             </>

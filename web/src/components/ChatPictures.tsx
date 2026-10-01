@@ -15,6 +15,8 @@ import { ImageViewer } from "./ImageViewer";
 export function useChatPictures(items: Item[], session: { id: string; workspace: string }) {
   // Of this chat: another chat's pictures are not the ones to step through.
   const [opened, setOpened] = useState<{ chat: string; id: string } | null>(null);
+  // Gone to another chat with it open (a notification does that): it was closed there, and does not come back with this chat.
+  if (opened && opened.chat !== session.id) setOpened(null);
   const open = opened?.chat === session.id;
   // Only while it is open: the list is of no use otherwise, and the items change with every word of a reply.
   const pictures = useMemo(

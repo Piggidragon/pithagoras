@@ -27,6 +27,10 @@ interface Entry {
  */
 let leaving: { entry: Entry; timer: number } | null = null;
 
+// A reload keeps the state of the entry it was opened over, though what was open is gone: back would take off
+// an entry that holds nothing, and the person would press it twice to leave. It is taken off as the page comes up.
+if (typeof window !== "undefined" && history.state?.[MARK]) history.back();
+
 export function useBackToClose(close: () => void): void {
   const latest = useRef(close);
   latest.current = close;

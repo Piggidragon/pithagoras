@@ -143,8 +143,8 @@ export function usePanZoom({
     const at = local(e);
     presses.current.set(e.pointerId, at);
     const { image, stage } = live.current;
-    if (!image || !stage) return;
     if (current.pinch && presses.current.size >= 2) {
+      if (!image || !stage) return;
       const [a, b] = [...presses.current.values()];
       const mid = between(a, b);
       const zoomed = zoomAt(current.pinch.view, current.pinch.view.k * (apart(a, b) / current.pinch.distance), current.pinch.middle, image, stage);
@@ -158,7 +158,7 @@ export function usePanZoom({
         current.captured = true;
       }
       // Only a picture that is bigger than the stage has anywhere to go.
-      if (current.view && !isFitted(current.view, image, stage)) put({ ...current.view, x: current.view.x + dx, y: current.view.y + dy });
+      if (image && stage && current.view && !isFitted(current.view, image, stage)) put({ ...current.view, x: current.view.x + dx, y: current.view.y + dy });
     }
   };
 
@@ -188,7 +188,9 @@ export function usePanZoom({
     }
     const [dx, dy] = [at.x - current.start.x, at.y - current.start.y];
     const { image, stage } = live.current;
-    if (current.type !== "mouse" && current.view && image && stage && isFitted(current.view, image, stage) && elapsed < SWIPE_TIME && Math.abs(dx) > SWIPE_DISTANCE && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+    // A picture that has not loaded (yet) is as good as whole: there is nothing in it to move, and the swipe is the way on.
+    const whole = !current.view || !image || !stage || isFitted(current.view, image, stage);
+    if (current.type !== "mouse" && whole && elapsed < SWIPE_TIME && Math.abs(dx) > SWIPE_DISTANCE && Math.abs(dx) > 1.5 * Math.abs(dy)) {
       live.current.onSwipe(dx < 0 ? 1 : -1);
     }
   };

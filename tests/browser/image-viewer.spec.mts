@@ -17,12 +17,14 @@ const folder: Record<string, [number, number, string]> = {
 
 const URL = '/tests/chat.html?phase=pictures';
 
-async function open(page: Page, { broken = [] as string[] } = {}) {
-  await page.route('**/api/sessions/preview/picture?**', (route) => {
+async function open(page: Page, { broken = [] as string[], held = [] as string[], until = Promise.resolve() } = {}) {
+  await page.route('**/api/sessions/preview/picture?**', async (route) => {
     const path = new globalThis.URL(route.request().url()).searchParams.get('path')!;
     if (broken.includes(path)) return route.fulfill({ status: 404, body: 'gone' });
+    // A slow link: these arrive when the test lets them.
+    if (held.includes(path)) await until;
     const [w, h, fill] = folder[path];
-    return route.fulfill({ body: svg(w, h, fill), contentType: 'image/svg+xml' });
+    return route.fulfill({ body: svg(w, h, fill), contentType: 'image/svg+xml' }).catch(() => {});
   });
   await page.route('**/api/sessions/preview/images/**', (route) => route.fulfill({ body: svg(300, 300, '#a53'), contentType: 'image/svg+xml' }));
   await page.goto(URL);
@@ -48,6 +50,19 @@ async function settled(image: Locator) {
   }).toBe(true);
   return (await image.boundingBox())!;
 }
+
+/** A finger drawn sideways across the stage, quick: left is the next picture, right the one before. */
+const swipe = (page: Page, dx: number) =>
+  page.evaluate((dx) => {
+    const stage = document.querySelector('.image-viewer-stage')!;
+    const r = stage.getBoundingClientRect();
+    const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+    const fire = (type: string, clientX: number) => stage.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: 'touch', isPrimary: true, bubbles: true, clientX, clientY: y, button: 0 }));
+    fire('pointerdown', x);
+    fire('pointermove', x + dx / 2);
+    fire('pointermove', x + dx);
+    fire('pointerup', x + dx);
+  }, dx);
 
 /** The pictures drawn in the chat, loaded: the page loads them as they come near. */
 async function drawn(page: Page) {
@@ -150,6 +165,23 @@ test("the browser's back button closes it on a phone, and the chat stays; any ot
   await expect.poll(() => page.url()).toBe('about:blank');
 });
 
+test('reloaded with a picture open, one press of back leaves the chat', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('about:blank');
+  await open(page);
+  await drawn(page);
+  await thumb(page, 'A lighthouse at dusk').click();
+  await expect(viewer(page)).toBeVisible();
+  await page.reload();
+  await expect(thumb(page, 'A lighthouse at dusk')).toBeVisible();
+  await expect(viewer(page)).toBeHidden();
+  // What the viewer had pushed is not left behind to be pressed through (the page may load once more as it is taken off).
+  await expect.poll(() => page.evaluate(() => history.state?.pithagorasOverlay ?? null).catch(() => 'loading')).toBeNull();
+  await expect(thumb(page, 'A lighthouse at dusk')).toBeVisible();
+  await page.goBack();
+  await expect.poll(() => page.url()).toBe('about:blank');
+});
+
 test('Left and Right, the arrows and a swipe step through the pictures, and stop at the ends', async ({ page }) => {
   await open(page);
   await drawn(page);
@@ -180,23 +212,12 @@ test('Left and Right, the arrows and a swipe step through the pictures, and stop
 
   // A swipe with a finger, sideways: left for the next, right for the one before.
   await expect(dialog.getByRole('button', { name: 'Show the picture at full size' })).toHaveText(/\d+%/);
-  const swipe = (dx: number) =>
-    page.evaluate((dx) => {
-      const stage = document.querySelector('.image-viewer-stage')!;
-      const r = stage.getBoundingClientRect();
-      const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
-      const fire = (type: string, clientX: number) => stage.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: 'touch', isPrimary: true, bubbles: true, clientX, clientY: y, button: 0 }));
-      fire('pointerdown', x);
-      fire('pointermove', x + dx / 2);
-      fire('pointermove', x + dx);
-      fire('pointerup', x + dx);
-    }, dx);
-  await swipe(-160);
+  await swipe(page, -160);
   await expect(dialog.getByText('2 / 4', { exact: true })).toBeVisible();
-  await swipe(160);
+  await swipe(page, 160);
   await expect(dialog.getByText('1 / 4', { exact: true })).toBeVisible();
   // Too short to be one.
-  await swipe(-20);
+  await swipe(page, -20);
   await expect(dialog.getByText('1 / 4', { exact: true })).toBeVisible();
 
   // Closed after stepping, focus is on the picture that was last shown.
@@ -205,6 +226,65 @@ test('Left and Right, the arrows and a swipe step through the pictures, and stop
   await expect(dialog.getByText('3 / 4', { exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(thumb(page, 'The lighthouse, in blue')).toBeFocused();
+});
+
+test('a swipe goes on from a picture that is still coming, or never came', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  // The edited picture is slow, and the last is gone.
+  let arrive!: () => void;
+  const late = new Promise<void>((resolve) => (arrive = resolve));
+  await open(page, { broken: ['docs/diagram.png'], held: ['generated-images/lighthouse-edited.png'], until: late });
+  const first = thumb(page, 'A lighthouse at dusk').locator('img');
+  await first.scrollIntoViewIfNeeded();
+  await loaded(first);
+  await thumb(page, 'A lighthouse at dusk').click();
+  const dialog = viewer(page);
+  await expect(dialog.getByRole('button', { name: 'Show the picture at full size' })).toHaveText(/\d+%/);
+
+  await swipe(page, -160);
+  await expect(dialog.getByText('3 / 4', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Show the picture at full size' })).toHaveText('');
+  // Still coming, and the next swipe is not lost on it.
+  await swipe(page, -160);
+  await expect(dialog.getByText('4 / 4', { exact: true })).toBeVisible();
+  await expect(dialog).toContainText('The picture could not be loaded.');
+  // Nor on the one that did not come.
+  await swipe(page, 160);
+  await expect(dialog.getByText('3 / 4', { exact: true })).toBeVisible();
+  await swipe(page, 160);
+  await expect(dialog.getByText('2 / 4', { exact: true })).toBeVisible();
+  arrive();
+});
+
+test('focus stays in the dialog when an arrow is used up at an end of the list', async ({ page }) => {
+  await open(page);
+  await drawn(page);
+  await thumb(page, 'The lighthouse, in blue').click();
+  const dialog = viewer(page);
+  const prev = dialog.getByRole('button', { name: 'Previous picture' });
+  const next = dialog.getByRole('button', { name: 'Next picture' });
+  await expect(dialog.getByText('3 / 4', { exact: true })).toBeVisible();
+  // A button that turns disabled loses focus to the page when the browser next draws.
+  const afterDraw = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+
+  await next.focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByText('4 / 4', { exact: true })).toBeVisible();
+  await expect(next).toBeDisabled();
+  await afterDraw();
+  await expect(dialog).toBeFocused();
+  // Still the keyboard's: Tab goes on from there.
+  await page.keyboard.press('Tab');
+  await expect(dialog.locator(':focus')).toHaveCount(1);
+
+  await prev.focus();
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Enter');
+  await expect(dialog.getByText('1 / 4', { exact: true })).toBeVisible();
+  await expect(prev).toBeDisabled();
+  await afterDraw();
+  await expect(dialog).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
 });
 
 test('an edit and the picture it was made from reach each other', async ({ page }) => {
@@ -427,13 +507,13 @@ test('a picture that cannot be loaded says so, and the viewer still closes', asy
 });
 
 /**
- * The whole app over canned answers, as a phone has it: the dev server runs React's strict mode, which opens
- * what it draws, closes it and opens it again at once, and the router is there to be left by the back button.
+ * The whole app over canned answers: the chats `ids`, each with the one picture the agent made. The dev server
+ * runs React's strict mode, which opens what it draws, closes it and opens it again at once, and the router
+ * is there to be left by the back button.
  */
-test('in the app on a phone, the viewer opens over the chat and the back button closes it without leaving the chat', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+async function openApp(page: Page, ids: string[], { collapsed = true } = {}) {
   const at = new Date().toISOString();
-  const chat = { id: 'a', title: 'Lighthouses', workspace: '/w/a', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null };
+  const chats = ids.map((id) => ({ id, title: `Lighthouses ${id}`, workspace: `/w/${id}`, status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null }));
   let seq = 0;
   const ev = (type: string, payload: object = {}) => ({ seq: ++seq, type, at: Date.now() - 60_000 + seq * 1000, payload });
   const events = [
@@ -453,9 +533,9 @@ test('in the app on a phone, the viewer opens over the chat and the back button 
     const p = new globalThis.URL(route.request().url()).pathname;
     let reply: unknown = {};
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions: [chat], executor: 'host' };
-    else if (p === '/api/sessions/a') reply = chat;
-    else if (p === '/api/sessions/a/picture') return route.fulfill({ body: svg(1600, 1000, '#335'), contentType: 'image/svg+xml' });
+    else if (p === '/api/sessions') reply = { sessions: chats, executor: 'host' };
+    else if (/^\/api\/sessions\/\w+$/.test(p)) reply = chats.find((c) => p.endsWith(`/${c.id}`)) ?? {};
+    else if (/^\/api\/sessions\/\w+\/picture$/.test(p)) return route.fulfill({ body: svg(1600, 1000, '#335'), contentType: 'image/svg+xml' });
     else if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) reply = { live: false, state: { model: { id: 'm', name: 'Model', provider: 'x' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
     else if (/^\/api\/sessions\/\w+\/files$/.test(p)) reply = { path: '', entries: [], truncated: false };
     else if (p.endsWith('/canvases')) reply = [];
@@ -468,9 +548,9 @@ test('in the app on a phone, the viewer opens over the chat and the back button 
     else if (p === '/api/extensions') reply = { extensions: [], settingsPath: '/p/settings.json' };
     await route.fulfill({ json: reply });
   });
-  await page.addInitScript((events) => {
+  await page.addInitScript(({ events, collapsed }) => {
     localStorage.setItem('pithagoras.setup', 'done');
-    localStorage.setItem('sidebarCollapsed', 'true');
+    if (collapsed) localStorage.setItem('sidebarCollapsed', 'true');
     (window as any).EventSource = class {
       closed = false; onmessage: any; onopen: any; listeners: Record<string, ((e: any) => void)[]> = {};
       constructor() {
@@ -484,7 +564,14 @@ test('in the app on a phone, the viewer opens over the chat and the back button 
       addEventListener(n: string, fn: (e: any) => void) { (this.listeners[n] ??= []).push(fn); }
       close() { this.closed = true; }
     };
-  }, events);
+  }, { events, collapsed });
+  return { tabs, failures };
+}
+
+/** Back is the way out of a picture on a phone, and in the app the router and strict mode are both in the way. */
+test('in the app on a phone, the viewer opens over the chat and the back button closes it without leaving the chat', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { tabs, failures } = await openApp(page, ['a']);
   await page.goto('/s/a');
   const picture = thumb(page, 'A lighthouse at dusk');
   await expect(picture).toBeVisible();
@@ -508,6 +595,37 @@ test('in the app on a phone, the viewer opens over the chat and the back button 
   await expect(viewer(page)).toBeHidden();
   await expect.poll(() => page.evaluate(() => history.state?.pithagorasOverlay ?? null)).toBeNull();
   expect(await page.evaluate(() => history.length)).toBeLessThanOrEqual(before + 1);
+  expect(failures).toEqual([]);
+});
+
+test('left for another chat with the viewer open, it is not open again on coming back', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  // The entries the viewer puts on the history.
+  await page.addInitScript(() => {
+    (window as any).overlays = 0;
+    const push = history.pushState.bind(history);
+    history.pushState = (state, ...rest) => {
+      if (state?.pithagorasOverlay) (window as any).overlays++;
+      return push(state, ...rest);
+    };
+  });
+  const { failures } = await openApp(page, ['a', 'b'], { collapsed: false });
+  await page.goto('/s/a');
+  const picture = thumb(page, 'A lighthouse at dusk');
+  await loaded(picture.locator('img'));
+  await picture.click();
+  await expect(viewer(page)).toBeVisible();
+  // The way a notification takes you to a chat that finished: the router goes there, and no back button is pressed.
+  const go = (id: string) => page.evaluate((id) => (document.querySelector(`[data-flip="${id}"]`) as HTMLElement).click(), id);
+  await go('b');
+  await expect(page).toHaveURL(/\/s\/b$/);
+  await expect(viewer(page)).toBeHidden();
+  await go('a');
+  await expect(page).toHaveURL(/\/s\/a$/);
+  await expect(picture).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(viewer(page)).toBeHidden();
+  expect(await page.evaluate(() => (window as any).overlays)).toBe(1);
   expect(failures).toEqual([]);
 });
 
