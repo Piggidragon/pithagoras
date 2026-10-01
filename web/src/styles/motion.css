@@ -157,15 +157,15 @@
 [data-motion="fancy"] .chat-list.is-opening > :nth-last-child(3):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 280ms; }
 [data-motion="fancy"] .chat-list.is-opening > :nth-last-child(2):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 320ms; }
 [data-motion="fancy"] .chat-list.is-opening > :nth-last-child(1):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 360ms; }
-@keyframes fx-open { from { opacity: 0; transform: translateY(46px) scale(.95); filter: blur(7px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes fx-open { from { opacity: 0; transform: translateY(20px) scale(.95); filter: blur(7px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 /* The chat's name slides in from the side its row was on. */
 [data-motion="fancy"] .chat-title { animation: fx-title .6s var(--spring) backwards; }
 @keyframes fx-title { from { opacity: 0; transform: translateX(-22px); } to { opacity: 1; transform: none; } }
-/* New: what comes in rises with a little overshoot, your own growing out of the corner the send button is in. Nothing here starts to the right of its box: the scrolling boxes it is in would be made to scroll sideways while it plays. */
+/* New: what comes in rises with a little overshoot, your own growing out of the corner the send button is in. Nothing here starts to the right of its box, nor further below the end of the conversation than the padding under it: the box would be made to scroll while it plays, and the conversation, which is held at its end, would bounce. */
 [data-motion="fancy"] .chat-enter { animation: fx-chat-enter .62s var(--spring) backwards; }
-@keyframes fx-chat-enter { from { opacity: 0; transform: translateY(26px) scale(.97); filter: blur(6px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes fx-chat-enter { from { opacity: 0; transform: translateY(20px) scale(.97); filter: blur(6px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 [data-motion="fancy"] .chat-enter.is-mine { transform-origin: 100% 100%; animation-name: fx-chat-mine; }
-@keyframes fx-chat-mine { from { opacity: 0; transform: translateY(54px) scale(.62); filter: blur(5px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes fx-chat-mine { from { opacity: 0; transform: translateY(20px) scale(.62); filter: blur(5px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 [data-motion="fancy"] .tool-row.chat-enter { animation-name: fx-chat-tool; }
 @keyframes fx-chat-tool { from { opacity: 0; transform: translateX(-30px); filter: blur(4px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 /* What went wrong shakes once. */

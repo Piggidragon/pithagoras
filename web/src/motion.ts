@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useSyncExternalStore, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type MutableRefObject, type RefObject } from "react";
 import { local } from "./safe-storage";
 
 /**
@@ -22,8 +22,12 @@ import { local } from "./safe-storage";
 const KEY = "animations";
 const REDUCED = "(prefers-reduced-motion: reduce)";
 
-/** Whether the switch is on. It is, until somebody turns it off: storage that cannot be read reads as on. */
-export const animationsChosen = (): boolean => local.get(KEY) !== "off";
+/** What was chosen on this page, for as long as it lasts: storage that cannot be written to still lets the switch work, and only forgets it at the next load. */
+let kept: boolean | null = null;
+/** The switch, from what was chosen here and what storage has: on until somebody turns it off, and storage that cannot be read reads as on. */
+export const switchIs = (here: boolean | null, stored: string | null): boolean => here ?? stored !== "off";
+/** Whether the switch is on. */
+export const animationsChosen = (): boolean => switchIs(kept, local.get(KEY));
 /** Whether the system asks for less motion. */
 export const reducedMotion = (): boolean => typeof matchMedia === "function" && matchMedia(REDUCED).matches;
 /** What plays: the switch, unless the system asks against it. */
@@ -68,10 +72,15 @@ export function installMotion(): void {
   sync();
   matchMedia(REDUCED).addEventListener("change", sync);
   // Another tab turned them on or off.
-  window.addEventListener("storage", (e) => e.key === KEY && sync());
+  window.addEventListener("storage", (e) => {
+    if (e.key !== KEY) return;
+    kept = null;
+    sync();
+  });
 }
 
 export function setAnimations(on: boolean): void {
+  kept = on;
   local.set(KEY, on ? "on" : "off");
   sync();
 }
@@ -132,6 +141,13 @@ const LEAVES: Record<Leave, (el: HTMLElement, delay: number) => Animation[]> = {
   gone: (el) => [el.animate([{ transform: "none", opacity: 1 }, { transform: "translateY(14px) scale(.88)", opacity: 0 }], { duration: 520, easing: OUT, fill: "both" })],
 };
 
+/**
+ * How high each is laid. A page that is left, or a row, a message or a panel,
+ * is under the dialogs, which may open in the same moment (Settings from the
+ * Sessions page): a dialog's own picture and a menu's are over everything.
+ */
+const LAYER: Record<Leave, number> = { dialog: 1000, menu: 1000, panel: 25, row: 25, message: 25, page: 25, gone: 25 };
+
 const MAX_GHOSTS = 8;
 const ghosts = new Set<HTMLElement>();
 /** Set while a page is being swapped for another, whose own picture covers everything in it. */
@@ -181,7 +197,7 @@ export function picture(source: HTMLElement | null, clip?: HTMLElement | null): 
   frame.setAttribute("inert", "");
   Object.assign(frame.style, {
     position: "fixed", left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px`, height: `${bounds.height}px`,
-    overflow: clip ? "hidden" : "visible", pointerEvents: "none", zIndex: "1000",
+    overflow: clip ? "hidden" : "visible", pointerEvents: "none",
   });
   // Placed by its box alone: whatever moved the original (a translate, an
   // inset, a margin) is already in where it is.
@@ -198,6 +214,7 @@ export function picture(source: HTMLElement | null, clip?: HTMLElement | null): 
 export function out(shot: Picture | null, how: Leave, delay = 0): void {
   if (!shot || !fancy() || swapping) return;
   const { frame, el } = shot;
+  frame.style.zIndex = String(LAYER[how]);
   for (const old of ghosts) if (ghosts.size >= MAX_GHOSTS) { old.remove(); ghosts.delete(old); }
   document.body.append(frame);
   ghosts.add(frame);
@@ -308,11 +325,10 @@ function lifted(el: Element): number {
   return Number.parseFloat(y ?? "") || 0;
 }
 
-/** Where each row lies: by its `data-flip` (or `data-key`) and how far down its box, in the page or in the box's own content. */
-function spotsOf(box: HTMLElement, attr: string, inContent: boolean): Map<string, number> {
+/** Where each row is drawn on the page, less any slide it is on: by its `data-flip` (or `data-key`). */
+function spotsOf(box: HTMLElement, attr: string): Map<string, number> {
   const spots = new Map<string, number>();
-  const top = box.getBoundingClientRect().top - (inContent ? box.scrollTop : 0);
-  box.querySelectorAll<HTMLElement>(`[${attr}]`).forEach((el) => spots.set(el.getAttribute(attr)!, el.getBoundingClientRect().top - lifted(el) - top));
+  box.querySelectorAll<HTMLElement>(`[${attr}]`).forEach((el) => spots.set(el.getAttribute(attr)!, el.getBoundingClientRect().top - lifted(el)));
   return spots;
 }
 
@@ -340,6 +356,8 @@ function reflow(box: HTMLElement, attr: string, before: Map<string, number>, now
         { duration: 560, delay: first ? Math.min(order++, 10) * 34 : 0, easing: SPRING, fill: "backwards" },
       );
     } else {
+      // Moved in the page, a row starts its CSS animations again: those are taken to their end, so that only the slide is seen.
+      for (const css of el.getAnimations()) if ("animationName" in css) finishQuietly(css);
       const dy = was - now.get(key)!;
       // Not rows that jumped a whole screen: those are another list, not a move.
       if (Math.abs(dy) < 2 || Math.abs(dy) > 700) return;
@@ -365,17 +383,31 @@ function reflow(box: HTMLElement, attr: string, before: Map<string, number>, now
  */
 export function useFlip<T extends HTMLElement>(order: string, quiet = false, entering = true): RefObject<T> {
   const box = useRef<T>(null);
+  /** Where the rows were, in the box's own content, so that scrolling it between two draws is not a move. */
   const last = useRef<{ order: string; quiet: boolean; spots: Map<string, number> } | null>(null);
+  /** Where the box was last seen scrolled to: not yet where the browser put it when the list got shorter. */
+  const seen = useRef(0);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const on = () => (seen.current = el.scrollTop);
+    el.addEventListener("scroll", on, { passive: true });
+    return () => el.removeEventListener("scroll", on);
+  }, []);
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
     // Nothing is looked at while they are off: this is drawn with every change to the list.
     if (!fancy()) return void (last.current = null);
-    const spots = spotsOf(el, "data-flip", true);
+    const now = spotsOf(el, "data-flip");
     const before = last.current;
-    last.current = { order, quiet, spots };
+    const was = seen.current;
+    last.current = { order, quiet, spots: new Map([...now].map(([key, y]) => [key, y + el.scrollTop])) };
+    seen.current = el.scrollTop;
     // Not in the draw in which a search ends either: the rows it had hidden are back, not new.
-    if (before && before.order !== order && !quiet && !before.quiet) reflow(el, "data-flip", before.spots, spots, entering);
+    // Compared where they are drawn: a list scrolled to its end, made shorter, is pulled back by
+    // the browser, and what is below what went has not moved on the page.
+    if (before && before.order !== order && !quiet && !before.quiet) reflow(el, "data-flip", new Map([...before.spots].map(([key, y]) => [key, y - was])), now, entering);
   });
   return box;
 }
@@ -396,7 +428,7 @@ export interface Mark {
 
 export function mark(box: HTMLElement | null, clip: HTMLElement | null): Mark | null {
   if (!box || !fancy()) return null;
-  const spots = spotsOf(box, "data-key", false);
+  const spots = spotsOf(box, "data-key");
   const shots = new Map<string, Picture>();
   const view = (clip ?? box).getBoundingClientRect();
   for (const el of box.querySelectorAll<HTMLElement>(":scope > [data-key]")) {
@@ -410,7 +442,7 @@ export function mark(box: HTMLElement | null, clip: HTMLElement | null): Mark | 
 
 /** Whether the list has changed from what was marked, and so the mark is done with. */
 export function settle(m: Mark, how: Leave = "message"): boolean {
-  const now = spotsOf(m.box, "data-key", false);
+  const now = spotsOf(m.box, "data-key");
   let changed = false;
   let n = 0;
   for (const [key, shot] of m.shots) {

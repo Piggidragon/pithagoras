@@ -13,7 +13,7 @@ import { test, expect, type Page } from '@playwright/test';
 test.use({ storageState: { cookies: [], origins: [] } });
 
 interface Played { on: string; keys: string[]; ghost: boolean; duration: number }
-interface Picture { text: string; hidden: string | null; pointer: string; roles: number; dock: string | null; scrollTop: number }
+interface Picture { text: string; hidden: string | null; pointer: string; roles: number; dock: string | null; scrollTop: number; z: number }
 
 const at = new Date().toISOString();
 const chat = (id: string, title: string, extra: object = {}) => ({ id, title, workspace: `/w/${id}`, status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null, ...extra });
@@ -33,9 +33,9 @@ const conversation = (tag: string) => {
 };
 
 /** The portal over canned answers: chats that can be deleted, a stream that replays them, and a log of what is played. */
-async function portal(page: Page, { off = false, confirms = true, places, many = false }: { off?: boolean; confirms?: boolean; places?: Record<string, string>; many?: boolean } = {}) {
+async function portal(page: Page, { off = false, confirms = true, places, many = 0 }: { off?: boolean; confirms?: boolean; places?: Record<string, string>; many?: boolean | number } = {}) {
   // More than the sidebar lists without a search box, when asked.
-  const extra = many ? Array.from({ length: 10 }, (_, i) => chat(`x${i}`, `Extra chat ${i}`)) : [];
+  const extra = many ? Array.from({ length: many === true ? 10 : many }, (_, i) => chat(`x${i}`, `Extra chat ${i}`)) : [];
   const state = { sessions: [chat('a', 'First chat'), chat('b', 'Second chat'), chat('c', 'Third chat'), chat('d', 'Fourth chat'), ...extra], events: { a: conversation('A'), b: conversation('B'), c: [] as any[], d: [] as any[], r: conversation('R') } as Record<string, any[]> };
   // A routine's chat: opened by its address, and not in the list of chats.
   const routine = chat('r', 'Routine chat', { kind: 'routine' });
@@ -68,6 +68,7 @@ async function portal(page: Page, { off = false, confirms = true, places, many =
     else if (/^\/api\/sessions\/\w+\/files$/.test(p)) reply = { path: '', entries: [], truncated: false };
     else if (p.endsWith('/canvases')) reply = [];
     else if (p.endsWith('/background')) reply = { jobs: [], statuses: [] };
+    else if (p === '/api/projects') reply = { root: '/w', home: '/w', projects: [] };
     else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
     else if (p === '/api/models') reply = { models: [], providers: {} };
     else if (p === '/api/features/flags') reply = { subagent: { enabled: false }, understory: { enabled: false } };
@@ -94,7 +95,7 @@ async function portal(page: Page, { off = false, confirms = true, places, many =
     new MutationObserver((records) => {
       for (const r of records) for (const n of r.addedNodes) {
         if (!(n instanceof HTMLElement)) continue;
-        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length, dock: n.firstElementChild?.getAttribute('data-dock') ?? null, scrollTop: (n.firstElementChild as HTMLElement | null)?.scrollTop ?? 0 });
+        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length, dock: n.firstElementChild?.getAttribute('data-dock') ?? null, scrollTop: (n.firstElementChild as HTMLElement | null)?.scrollTop ?? 0, z: Number(getComputedStyle(n).zIndex) });
         if (n.classList.contains('app-intro')) intro.push({ pointer: getComputedStyle(n).pointerEvents, at: performance.now() });
       }
     }).observe(document, { childList: true, subtree: true });
@@ -634,4 +635,145 @@ test('the options of a list that fits do not make it scroll while they come in',
   await expect(page.getByRole('listbox', { name: 'Language' })).toBeVisible();
   await page.waitForTimeout(1300);
   expect(await page.evaluate(() => (window as any).taller.most as number)).toBe(0);
+});
+
+test('deleting at the end of a conversation slides what is above, and leaves what is below where it is', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  await portal(page, { confirms: false });
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await expect(page.locator('main .chat-list')).not.toHaveClass(/is-opening/);
+
+  // Where two rows are drawn, frame by frame, from the press: the one above the gap, and the one below it.
+  const drawn = await page.evaluate(() => new Promise<{ above: number[]; below: number[] }>((done) => {
+    const find = (text: string) => [...document.querySelectorAll('main .chat-list > [data-key]')].find((r) => r.textContent?.includes(text))!;
+    const above: number[] = [], below: number[] = [];
+    (find('A question 4').querySelector('button[aria-label^="Delete this message"]') as HTMLElement).click();
+    const from = performance.now();
+    const tick = () => {
+      above.push(find('A answer 3').getBoundingClientRect().top);
+      below.push(find('A answer 5').getBoundingClientRect().top);
+      if (performance.now() - from < 1500) requestAnimationFrame(tick);
+      else done({ above, below });
+    };
+    tick();
+  }));
+  // The browser pulls a conversation held at its end back when it gets shorter: what is below the gap stays on the page.
+  expect(Math.max(...drawn.below) - Math.min(...drawn.below)).toBeLessThanOrEqual(3);
+  // What is above it comes down to it, from where it was, and not in one step.
+  const first = drawn.above[0], last = drawn.above.at(-1)!;
+  expect(last - first).toBeGreaterThan(60);
+  expect(drawn.above.filter((y) => y > first + 8 && y < last - 8).length).toBeGreaterThanOrEqual(3);
+  expect(Math.max(...drawn.above.slice(1).map((y, i) => y - drawn.above[i]))).toBeLessThan((last - first) * 0.7);
+});
+
+test('sending a message and opening a chat do not make the conversation bounce', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  await portal(page);
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await expect(page.locator('main .chat-list')).not.toHaveClass(/is-opening/);
+
+  /** How much taller than it ends the box is, at most, over the next 1.4 s: rows that start below its end make it scroll further than it goes. */
+  const taller = () => page.evaluate(() => new Promise<number>((done) => {
+    const box = document.querySelector('[data-transcript]')!;
+    const heights: number[] = [];
+    const from = performance.now();
+    const tick = () => {
+      heights.push(box.scrollHeight);
+      if (performance.now() - from < 1400) requestAnimationFrame(tick);
+      else done(Math.max(...heights) - heights.at(-1)!);
+    };
+    tick();
+  }));
+
+  const sent = taller();
+  await page.evaluate(() => (window as any).emit('a', { seq: 800, type: 'portal_prompt', payload: { message: 'One more thing' } }));
+  expect(await sent).toBe(0);
+
+  await row(page, 'Second chat').click();
+  await expect(page.getByText('B answer 5')).toBeVisible();
+  expect(await taller()).toBe(0);
+});
+
+test('a chat that moves up the list does not play its entrance again, and does not light up as picked', async ({ page }) => {
+  const state = await portal(page);
+  await page.goto('/s/b');
+  await expect(page.getByText('B answer 5')).toBeVisible();
+  await page.waitForTimeout(1600);
+  const open = sidebar(page).locator('.session-row[aria-current="page"]');
+  await expect(open).toHaveCount(1);
+
+  // Another chat overtakes the open one, as a chat that starts working does.
+  const before = (await played(page)).length;
+  state.sessions = [state.sessions[3], ...state.sessions.slice(0, 3)];
+  await page.evaluate(() => (window as any).emit('b', { seq: 950, type: 'portal_status', payload: { status: 'idle' } }));
+  await expect(sidebar(page).locator('.session-row').first()).toContainText('Fourth chat');
+  // It slides; and what the move made start again is at its end.
+  expect((await played(page)).slice(before).some((p) => p.on.includes('session-row') && p.keys.includes('translate'))).toBe(true);
+  expect(await open.evaluate((el) => el.getAnimations().filter((a) => 'animationName' in a && a.playState === 'running').length)).toBe(0);
+});
+
+test('a page that is left is under the dialog that opens as it goes', async ({ page }) => {
+  await portal(page);
+  await page.goto('/sessions');
+  await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
+  await page.waitForTimeout(1500);
+  await sidebar(page).getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  // Settings' backdrop is at 50; what is left of the page lies under it.
+  await expect.poll(async () => (await pictures(page)).filter((p) => p.text.includes('Every task you have handed')).length).toBeGreaterThan(0);
+  const left = (await pictures(page)).find((p) => p.text.includes('Every task you have handed'))!;
+  expect(left.z).toBeLessThan(50);
+  // And a dialog's own picture is over everything.
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await pictures(page)).some((p) => p.text.includes('Settings') && p.z >= 50)).toBe(true);
+});
+
+test('the switch turns the animations off where the page cannot keep it', async ({ page }) => {
+  await portal(page);
+  // Site data blocked: reading or writing storage throws.
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('blocked', 'SecurityError'); } });
+  });
+  await page.route('**/api/models', (route) => route.fulfill({ json: { models: [{ provider: 'x', id: 'm', name: 'M', contextWindow: 1000, reasoning: false }], providers: {} } }));
+  await page.goto('/settings/browser');
+  const switchEl = page.getByRole('switch', { name: 'Fancy animations' });
+  await expect(switchEl).toHaveAttribute('aria-checked', 'true');
+  await expect(motion(page)).toHaveAttribute('data-motion', 'fancy');
+
+  await switchEl.click();
+  await expect(switchEl).toHaveAttribute('aria-checked', 'false');
+  await expect(motion(page)).not.toHaveAttribute('data-motion', /.+/);
+});
+
+test("deleting in the sidebar's list, scrolled to its end, slides the rows above and leaves the ones below", async ({ page }) => {
+  // Twelve chats, in a window too low for them.
+  await page.setViewportSize({ width: 1300, height: 420 });
+  await portal(page, { confirms: false, many: 8 });
+  await page.goto('/s/a');
+  await expect(row(page, 'Extra chat 7')).toBeVisible();
+  await page.waitForTimeout(1500);
+  await sidebar(page).locator('.sidebar-list').evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await page.waitForTimeout(200);
+
+  const drawn = await page.evaluate(() => new Promise<{ above: number[]; below: number[] }>((done) => {
+    const find = (text: string) => [...document.querySelectorAll('aside .session-row')].find((r) => r.textContent?.includes(text))!;
+    const above: number[] = [], below: number[] = [];
+    (find('Extra chat 3').querySelector('button[title="Delete session"]') as HTMLElement).click();
+    const from = performance.now();
+    const tick = () => {
+      above.push(find('Extra chat 1').getBoundingClientRect().top);
+      below.push(find('Extra chat 7').getBoundingClientRect().top);
+      if (performance.now() - from < 1500) requestAnimationFrame(tick);
+      else done({ above, below });
+    };
+    tick();
+  }));
+  // Pulled back by the browser as the list gets shorter: what is below the gap has not moved on the page.
+  expect(Math.max(...drawn.below) - Math.min(...drawn.below)).toBeLessThanOrEqual(3);
+  const first = drawn.above[0], last = drawn.above.at(-1)!;
+  expect(last - first).toBeGreaterThan(20);
+  expect(Math.max(...drawn.above.slice(1).map((y, i) => y - drawn.above[i]))).toBeLessThan((last - first) * 0.7);
 });

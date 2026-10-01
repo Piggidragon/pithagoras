@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { animationsChosen, fancy, plays } from "../web/src/motion.ts";
+import { animationsChosen, fancy, plays, switchIs } from "../web/src/motion.ts";
 
 const CSS = fs.readFileSync(path.resolve(import.meta.dirname, "../web/src/styles/motion.css"), "utf8");
 
@@ -17,6 +17,16 @@ test("the animations are on until switched off, and the system's reduced motion 
 test("storage that cannot be read reads as on, and nothing plays where there is no page", () => {
   assert.equal(animationsChosen(), true);
   assert.equal(fancy(), false);
+});
+
+test("what was chosen on the page holds where storage cannot keep it", () => {
+  // Turned off with storage that took nothing: it is off, for as long as the page is.
+  assert.equal(switchIs(false, null), false);
+  assert.equal(switchIs(true, "off"), true);
+  // Nothing chosen here: what storage has, and on where it has nothing.
+  assert.equal(switchIs(null, "off"), false);
+  assert.equal(switchIs(null, "on"), true);
+  assert.equal(switchIs(null, null), true);
 });
 
 /** The rules of a style sheet, nested ones (a media query's) with the at-rule they are in. */
