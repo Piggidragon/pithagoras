@@ -9,16 +9,20 @@ export interface VoiceLevels { input: number; output: number }
 /** Sent with the new style when it is saved, so an open voice stage changes with it. */
 export const ORB_STYLE_EVENT = "orb-style-changed";
 
-/** The portal's orb style: the default until the server answers, then whatever is saved. */
-export function useOrbStyle(): OrbStyle {
+/**
+ * The avatar of the agent a chat talks to: the default until the server
+ * answers, then whatever is saved. Asked again when an avatar is saved, since
+ * it can be this one.
+ */
+export function useOrbStyle(session: string): OrbStyle {
   const [style, setStyle] = useState<OrbStyle>(DEFAULT_ORB);
   useEffect(() => {
     let live = true;
-    api.agentOrb().then((s) => { if (live) setStyle(s); }).catch(() => {});
-    const changed = (e: Event) => setStyle((e as CustomEvent<OrbStyle>).detail);
-    window.addEventListener(ORB_STYLE_EVENT, changed);
-    return () => { live = false; window.removeEventListener(ORB_STYLE_EVENT, changed); };
-  }, []);
+    const load = () => api.chatOrb(session).then((s) => { if (live) setStyle(s); }).catch(() => {});
+    void load();
+    window.addEventListener(ORB_STYLE_EVENT, load);
+    return () => { live = false; window.removeEventListener(ORB_STYLE_EVENT, load); };
+  }, [session]);
   return style;
 }
 
@@ -711,7 +715,7 @@ function drawWorn(ctx: Ctx, kind: OrbHat | OrbProp, color: string, r: number, t:
  * The shape follows real RMS audio levels; the slow drift only gives idle depth.
  *
  * The style is read on every frame rather than restarting the animation, so a
- * change in the Agent page's preview shows at once. With the balanced
+ * change in the avatar customizer's preview shows at once. With the balanced
  * personality and the default multipliers this draws the orb as it always was.
  */
 export function VoiceOrb({ mode, levels, look }: { mode: OrbState; levels: MutableRefObject<VoiceLevels>; look: OrbStyle }) {
