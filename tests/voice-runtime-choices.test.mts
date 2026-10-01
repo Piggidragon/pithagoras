@@ -420,13 +420,15 @@ test('a container recreated for a new portal namespace stays on the card it was 
   await settle();
   assert.deepEqual(created()[0].body.HostConfig.DeviceRequests, [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }]);
   // A portal update gives the portal container a new id, and the voice container is made again for it.
+  // The card it has is looked up, as it may be gone, but the engines are not judged against it again: with card 1 read as too small for them they are kept.
+  hostGpus(GPU(0, 12288, 2000) + GPU(1, 2048, 1500));
   portalId = 'portal-two'; calls = [];
   assert.equal((await voice.status()).state, 'installing');
   await settle();
   assert.equal(created()[0].body.HostConfig.NetworkMode, 'container:portal-two');
   assert.deepEqual(created()[0].body.HostConfig.DeviceRequests, [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }]);
   assert.equal(created()[0].body.Labels['pithagoras.voice-recipe'], 'breeze+whisper:base');
-  assert.equal(calls.some(c => c.url === '/containers/create'), false, 'a kept choice is not checked again');
+  assert.equal((await voice.status()).error, '', 'a kept choice is not checked again');
 });
 
 test('VOICE_GPU decides the card of a recreated container, and of one installed without a GPU reading', async () => {

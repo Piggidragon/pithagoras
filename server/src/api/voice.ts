@@ -177,12 +177,13 @@ export function voiceRouter(): Router {
   const router = express.Router();
   // The stored GPU choice, in place before anything asks the service to start.
   voiceService.useGpu((getStoredSettings() as Record<string, string>).voice_gpu ?? '');
-  /** Choose the GPU by UUID, or "" to leave it to VOICE_GPU and the card with the most room. A running voice moves now; a stopped one on its next start. */
+  /** Choose the GPU by UUID, or "" to leave it to VOICE_GPU and then the card with the most room. A running voice moves now; a stopped one on its next start. */
   router.put('/voice/gpu', async (req, res) => {
     const id = req.body?.gpu;
     if (typeof id !== 'string') return res.status(400).json({ error: 'gpu must be a GPU UUID, or empty to choose automatically' });
     try {
-      if (id && !(await voiceService.gpus()).some((g) => g.uuid === id)) return res.status(400).json({ error: 'That GPU is not on this host' });
+      // Before anything is saved or stopped: a card that is not there, or that cannot hold the engines installed, leaves the service where it is.
+      if (id) await voiceService.checkGpu(id);
       if (id) getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice_gpu', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id);
       else getDb().prepare("DELETE FROM settings WHERE key = 'voice_gpu'").run();
       voiceService.useGpu(id);

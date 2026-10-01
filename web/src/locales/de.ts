@@ -1433,7 +1433,7 @@ const de: Locale = {
     "Voice setup log": "Log der Spracheinrichtung",
     "Stopping releases GPU memory and keeps your models.": "Stoppen gibt den GPU-Speicher frei und behält deine Modelle.",
     "Automatic": "Automatisch",
-    "VOICE_GPU if set, else where it runs now, else the most free memory": "VOICE_GPU, falls gesetzt, sonst wo er jetzt läuft, sonst die mit dem meisten freien Speicher",
+    "VOICE_GPU if set, else the most free memory when installing or rebuilding; a restart keeps the card": "VOICE_GPU, falls gesetzt, sonst der meiste freie Speicher beim Installieren oder Neuaufbauen; ein Neustart behält die GPU",
     "{free} of {total} GiB free": "{free} von {total} GiB frei",
     "Changing the GPU restarts voice and keeps your models.": "Ein GPU-Wechsel startet die Sprachfunktion neu und behält deine Modelle.",
     "Lazy load · release GPU memory when voice is idle": "Bei Bedarf laden · GPU-Speicher freigeben, wenn die Sprache ruht",

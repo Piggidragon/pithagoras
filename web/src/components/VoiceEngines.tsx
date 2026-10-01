@@ -84,7 +84,7 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked: pickedN
         ]} /></div>
     {choosable.length > 1 && usesGpu(shown) && <div className="block text-xs text-fg-muted">{t("GPU")}
       <Select aria-label={t("GPU")} size="sm" className="mt-1.5 w-full" disabled={busy} value={hardware!.chosen} onChange={onGpu}
-        options={[{ value: "", label: t("Automatic"), hint: t("VOICE_GPU if set, else where it runs now, else the most free memory") },
+        options={[{ value: "", label: t("Automatic"), hint: t("VOICE_GPU if set, else the most free memory when installing or rebuilding; a restart keeps the card") },
           ...choosable.map((g) => ({ value: g.uuid!, label: `GPU ${g.index} · ${g.name}`,
             hint: g.totalMiB === null || g.freeMiB === null ? undefined : t("{free} of {total} GiB free", { free: gib(g.freeMiB), total: gib(g.totalMiB) }) }))]} />
       {installed && <p className="mt-1.5 text-fg-faint">{t("Changing the GPU restarts voice and keeps your models.")}</p>}

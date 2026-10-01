@@ -24,6 +24,8 @@ const SMI = `0, ${A}, NVIDIA GeForce RTX 3060, 12288, 4427\n1, ${B}, NVIDIA GeFo
 const BASE = 'ubuntu:22.04';
 
 let container: any = null;
+// What nvidia-smi inside the image prints.
+let reading = SMI;
 let calls: { method: string; url: string; body: any }[] = [];
 const server = http.createServer(async (req, res) => {
   let raw = ''; for await (const c of req) raw += c;
@@ -37,7 +39,7 @@ const server = http.createServer(async (req, res) => {
   // The throwaway container that reads nvidia-smi inside the image.
   if (url === '/containers/create') return res.end(JSON.stringify({ Id: 'probe-1' }));
   if (url === '/containers/probe-1/wait') return res.end(JSON.stringify({ StatusCode: 0 }));
-  if (url.startsWith('/containers/probe-1/logs')) return res.end(JSON.stringify(SMI));
+  if (url.startsWith('/containers/probe-1/logs')) return res.end(JSON.stringify(reading));
   if (url.includes('/stop?')) container.State.Running = false;
   if (method === 'DELETE' && url === '/containers/pithagoras-voice') container = null;
   if (url.startsWith('/containers/create?name=pithagoras-voice')) container = { Config: body, HostConfig: body.HostConfig, State: { Running: false } };
@@ -57,7 +59,7 @@ const voice = await import('../server/src/extensions/voice-service.js');
 const { parseGpus, askedCard, holds, deviceId, cardOf } = await import('../server/src/voice-gpu.js');
 voice.hostReader.read = () => ({ totalMiB: 16384, freeMiB: 12000, threads: 8 });
 
-const reset = () => { container = null; calls = []; voice.useGpu(''); delete process.env.VOICE_GPU; };
+const reset = () => { container = null; reading = SMI; calls = []; voice.useGpu(''); delete process.env.VOICE_GPU; };
 const settle = async () => { for (let n = 0; n < 200 && (await voice.status()).busy; n++) await new Promise(r => setTimeout(r, 10)); };
 const created = () => calls.filter(c => c.url === '/containers/create?name=pithagoras-voice');
 const cardOfCreated = () => created()[0].body.HostConfig.DeviceRequests[0];
@@ -65,7 +67,7 @@ const cardOfCreated = () => created()[0].body.HostConfig.DeviceRequests[0];
 const gone = () => calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice');
 const volumeKept = () => !calls.some(c => c.method === 'DELETE' && c.url.startsWith('/volumes'));
 /** A managed container of the default engines, as an earlier portal made it: on a card by index, or on Docker's own pick without one. */
-const made = (devices: any, running = false) => ({ Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1', 'pithagoras.voice-recipe': 'breeze+whisper:base' } },
+const made = (devices: any, running = false, recipe = 'breeze+whisper:base') => ({ Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1', 'pithagoras.voice-recipe': recipe } },
   HostConfig: { NetworkMode: 'container:portal-one', ...(devices ? { DeviceRequests: [devices] } : {}) }, State: { Running: running } });
 const byIndex = (index: number) => ({ Driver: 'nvidia', DeviceIDs: [String(index)], Capabilities: [['gpu']] });
 const anyGpu = { Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] };
@@ -136,7 +138,8 @@ test('one check lists the cards with their UUID, and the page is told the choice
   voice.useGpu('GPU-gone');
   const gone = await voice.hardware();
   assert.deepEqual([gone.chosen, gone.selected], ['', 1]);
-  assert.deepEqual((await voice.gpus()).map(g => g.uuid), [A, B]);
+  await voice.checkGpu(A);
+  await assert.rejects(voice.checkGpu('GPU-gone'), /That GPU is not on this host/);
 });
 
 test('the engine check judges the chosen card, and the container is made for it', async () => {
@@ -236,6 +239,70 @@ test('a stopped service moves on its next start, one that asked Docker for any G
   assert.equal((await voice.status()).error, '');
 });
 
+test('a card that cannot hold the engines installed is refused, and the service stays where it is', async () => {
+  // Card 0 has 6 GiB: room for Breeze with Whisper, not for Breeze with the large Qwen3-ASR model that runs on card 1.
+  const small = `0, ${A}, Small GPU, 6144, 6000\n1, ${B}, NVIDIA GeForce RTX 3060, 12288, 12159\n`;
+  reset();
+  reading = small;
+  container = made(byIndex(1), true, 'breeze+qwen3-asr:1.7b');
+  await assert.rejects(voice.checkGpu(A), /Breeze speech with Qwen3-ASR 1\.7B needs about 7\.0 GiB of GPU memory, but Small GPU \(6\.0 GiB, 5\.9 GiB free\) has less\. Breeze speech with Qwen3-ASR 0\.6B would fit\./);
+  await voice.checkGpu(B);
+  // The same, where it is Start that moves it: by a choice saved earlier, or by VOICE_GPU. It goes on running, and says why.
+  for (const ask of [() => voice.useGpu(A), () => { process.env.VOICE_GPU = '0'; }]) {
+    reset();
+    reading = small;
+    container = made(byIndex(1), true, 'breeze+qwen3-asr:1.7b');
+    ask();
+    await voice.start();
+    await settle();
+    assert.match((await voice.status()).error, /needs about 7\.0 GiB of GPU memory, but Small GPU/);
+    assert.equal(gone() || created().length > 0, false);
+    assert.equal(container.State.Running, true);
+  }
+  // Engines that fit move: Breeze with Whisper is 4.5 GiB.
+  reset();
+  reading = small;
+  container = made(byIndex(1), true);
+  voice.useGpu(A);
+  await voice.start();
+  await settle();
+  assert.equal((await voice.status()).error, '');
+  assert.deepEqual(cardOfCreated().DeviceIDs, [A]);
+});
+
+test('a service pinned to a card that was taken out is made again on one that is there', async () => {
+  const gonePin = { Driver: 'nvidia', DeviceIDs: ['GPU-replaced-9999'], Capabilities: [['gpu']] };
+  reset();
+  container = made(gonePin);
+  await voice.start();
+  await settle();
+  assert.equal((await voice.status()).error, '');
+  assert.deepEqual(cardOfCreated().DeviceIDs, [B], 'the card with the most room, as an install takes it');
+  assert.equal(container.Config.Labels['pithagoras.voice-recipe'], 'breeze+whisper:base');
+  assert.ok(gone() && volumeKept());
+  // One card left, pinned by an index that is no longer there too: it is pinned to the card that is.
+  reset();
+  reading = `0, ${A}, NVIDIA GeForce RTX 3060, 12288, 12159\n`;
+  container = made(byIndex(1));
+  await voice.start();
+  await settle();
+  assert.deepEqual(cardOfCreated().DeviceIDs, [A]);
+  // The card that is there cannot hold the engines: it is refused as an install is, and the service is left as it is.
+  reset();
+  reading = `0, ${A}, Tiny GPU, 2048, 2000\n`;
+  container = made(gonePin);
+  await voice.start();
+  await settle();
+  assert.match((await voice.status()).error, /Breeze speech with Whisper base needs about 4\.5 GiB of GPU memory, but Tiny GPU/);
+  assert.equal(gone() || created().length > 0, false);
+  // A card that is still there is no reason to move: it is started as it is.
+  reset();
+  container = made({ Driver: 'nvidia', DeviceIDs: [B], Capabilities: [['gpu']] });
+  await voice.start();
+  await settle();
+  assert.equal(gone() || created().length > 0, false);
+});
+
 test('PUT /api/voice/gpu is how a card is chosen: it stores the UUID, moves a running service, and refuses a card that is not there', async () => {
   reset();
   const { voiceRouter } = await import('../server/src/api/voice.js');
@@ -251,6 +318,15 @@ test('PUT /api/voice/gpu is how a card is chosen: it stores the UUID, moves a ru
     const unknown = await put('GPU-gone');
     assert.deepEqual([unknown.status, (await unknown.json()).error], [400, 'That GPU is not on this host']);
     assert.equal(stored(), undefined);
+    // A card that cannot hold the engines installed is refused before anything is saved or stopped.
+    reading = `0, ${A}, Small GPU, 6144, 6000\n1, ${B}, NVIDIA GeForce RTX 3060, 12288, 12159\n`;
+    container = made(byIndex(1), true, 'breeze+qwen3-asr:1.7b');
+    const large = await put(A);
+    assert.equal(large.status, 400);
+    assert.match((await large.json()).error, /needs about 7\.0 GiB of GPU memory, but Small GPU/);
+    assert.equal(stored(), undefined);
+    assert.equal(gone() || created().length > 0, false);
+    reading = SMI;
     // Stopped: saved, and used from the next start.
     container = made(byIndex(0));
     let answer = await put(B);

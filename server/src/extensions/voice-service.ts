@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { containerState, dockerAvailable, imagePresent, pullImage, request } from './docker.js';
-import { asrDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, speechUrl, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, whisperUrl as managedWhisperUrl, type Host, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
+import { asrDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, speechUrl, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, whisperUrl as managedWhisperUrl, type Gpu, type Host, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
 import { NoGpu, askedCard, cardOf, decide, detectGpus, deviceId, explain, holds, hostProbe, isNoGpu, readHost, SMI_ARGS, type Card, type Detected, type Probe } from '../voice-gpu.js';
 
 export const CONTAINER = 'pithagoras-voice';
@@ -194,8 +194,29 @@ async function detect(fresh = false): Promise<Detected> {
   probing ??= detectGpuUse().finally(() => { probing = undefined; });
   return probing;
 }
-/** The GPUs Docker can give the voice container, as the last check read them; none where it could not tell. */
-export const gpus = async () => (await detect()).gpus;
+/** The managed container as `installedContainer` reads it. */
+type Installed = NonNullable<Awaited<ReturnType<typeof installedContainer>>>;
+/**
+ * The card an installed service is to be moved to: the one asked for, or another where the one it was given is no longer
+ * on the host (a container is pinned to its card, and Docker refuses one that was taken out). The engines it has were never
+ * checked against that card, so it is held to what a new install is: refused, with what would fit, where the card cannot
+ * hold them. Nothing where the service stays; where no card could be read, what is asked for is taken as it is.
+ */
+function moveTo(existing: Installed, gpus: readonly Gpu[], asked: Card | undefined): Card | undefined {
+  if (!gpus.length) return asked;
+  const gone = !!existing.card && !gpus.some(g => holds(existing.card, g));
+  const target = asked ?? (gone ? pickGpu(gpus) : undefined);
+  if (target && !holds(existing.card, target)) decide(existing.choice, gpus, { reserveMiB: reserveMiB(), preferredGpu: target.index, host: hostReader.read() });
+  return target;
+}
+/** Throws where this GPU cannot be chosen: it is not on the host, or the engines installed cannot be held by it. */
+export async function checkGpu(uuid: string) {
+  const { gpus } = await detect();
+  const card = gpus.find(g => g.uuid === uuid);
+  if (!card) throw new Error('That GPU is not on this host');
+  const existing = dockerAvailable() ? await installedContainer().catch(() => undefined) : undefined;
+  if (existing && usesGpu(existing.choice)) moveTo(existing, gpus, card);
+}
 /**
  * `VOICE_GPU` picks the card, as it does for the Compose service, where none was chosen on the page;
  * `VOICE_VRAM_RESERVE_MIB` keeps memory on it free for something else.
@@ -271,11 +292,12 @@ export async function install(requested?: VoiceChoice) {
           throw e;
         }
       } else {
-        if (usesGpu(existing.choice) && (chosenGpu || preferredGpu() !== undefined)) {
-          // A kept choice is not checked against the card, but a card that is asked for has to be one that is there, as an install insists.
-          // Where no GPU can be read it is taken as it is, as an install does.
-          const asked = askedCard((await detect()).gpus, chosenGpu, preferredGpu());
-          if (asked) plan = { card: asked };
+        if (usesGpu(existing.choice) && (chosenGpu || preferredGpu() !== undefined || existing.card)) {
+          // A kept choice is not checked against the card it is on, but a move to another one is, and a card that is asked for has to be one that
+          // is there, as an install insists. Where no GPU can be read it is taken as it is, as an install does.
+          const { gpus } = await detect();
+          const target = moveTo(existing, gpus, askedCard(gpus, chosenGpu, preferredGpu()));
+          if (target) plan = { card: target };
         }
         await ensureImage(imageFor(existing.choice), line => { progress = line; });
       }
