@@ -47,11 +47,11 @@ async function fake(handler: (req: IncomingMessage, res: ServerResponse, seen: S
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   return { origin: `http://127.0.0.1:${(server.address() as { port: number }).port}`, seen, server };
 }
-/** The parts of a multipart request as an endpoint reads them: by field name, with the file name, the type and the bytes of each. */
-function parts(seen: Seen): Record<string, { filename?: string; type?: string; bytes: Buffer }> {
+/** The parts of a multipart request as an endpoint reads them, in the order they were sent: the name of each, with its file name, its type and its bytes. */
+function partList(seen: Seen): { name: string; filename?: string; type?: string; bytes: Buffer }[] {
   const boundary = /boundary=(.+)$/.exec(seen.type ?? "")?.[1];
   assert.ok(boundary, `a multipart form, not ${seen.type}`);
-  const found: Record<string, { filename?: string; type?: string; bytes: Buffer }> = {};
+  const found: { name: string; filename?: string; type?: string; bytes: Buffer }[] = [];
   const delimiter = Buffer.from(`--${boundary}`);
   let at = seen.raw!.indexOf(delimiter);
   while (at >= 0) {
@@ -60,20 +60,23 @@ function parts(seen: Seen): Record<string, { filename?: string; type?: string; b
     const part = seen.raw!.subarray(at + delimiter.length + 2, next - 2);
     const split = part.indexOf("\r\n\r\n");
     const head = part.subarray(0, split).toString("utf8");
-    const name = /name="([^"]*)"/.exec(head)![1];
-    found[name] = { filename: /filename="([^"]*)"/.exec(head)?.[1], type: /content-type: (.+)/i.exec(head)?.[1], bytes: part.subarray(split + 4) };
+    found.push({ name: /name="([^"]*)"/.exec(head)![1], filename: /filename="([^"]*)"/.exec(head)?.[1], type: /content-type: (.+)/i.exec(head)?.[1], bytes: part.subarray(split + 4) });
     at = next;
   }
   return found;
 }
+/** The same by field name, for the fields that are there once. */
+function parts(seen: Seen): Record<string, { filename?: string; type?: string; bytes: Buffer }> {
+  return Object.fromEntries(partList(seen).map(({ name, ...rest }) => [name, rest]));
+}
 const json = (res: ServerResponse, body: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
 const b64 = (bytes: Buffer) => bytes.toString("base64");
 const config = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageGenerationConfig>> = {}) => ({
-  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", ...more,
+  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, ...more,
 });
 /** What the page is told of a fresh install, with `more` changed. */
 const fresh = (more: Record<string, unknown> = {}) => ({
-  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editKeySet: false, editReady: false, ...more,
+  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, editKeySet: false, editReady: false, ...more,
 });
 
 test("a request is checked: the address is a base with no secret in it, the size a real one", () => {
@@ -611,7 +614,7 @@ test("an extension's tool of the same name is the one pi keeps, so the portal's 
 
 /** As a fresh install has the settings, whatever the tests before left. */
 const reset = () => gen.saveImageGeneration({
-  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "",
+  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false,
 });
 
 test("a request for editing is checked as one for generation is", () => {
@@ -661,7 +664,7 @@ test("a key goes only to the server it was given for: generation's never to anot
   reset();
   const target = gen.imageEditingTarget;
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", apiKey: KEY, editEnabled: true, editModel: "edit-model" });
-  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY }, "edits to the generation server have its key");
+  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY, multiple: false }, "edits to the generation server have its key");
   assert.equal(target().model, "edit-model", "and never the model of generation, which may only make pictures");
 
   gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
@@ -705,7 +708,7 @@ test("the route for edits is added to the address unless it is there, and genera
   assert.equal(editing.editEndpointUrl("http://localhost:8080").href, "http://localhost:8080/images/edits");
 });
 
-const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, ...more });
+const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, multiple: false, ...more });
 
 test("an edit is a form with the picture, the prompt and the model, sent with the key to this address", async () => {
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
@@ -822,6 +825,122 @@ test("an edit that is never answered is given up on, and a chat that is stopped 
     await assert.rejects(slow, (e: Error) => !(e instanceof gen.ImageGenerationError) && /abort/i.test(e.name));
   } finally {
     server.closeAllConnections();
+    server.close();
+  }
+});
+
+// --- several pictures ---
+
+test("a request may say the editing endpoint takes several pictures, and it is off until it does", () => {
+  const parse = gen.parseImageGenerationPatch;
+  assert.deepEqual(parse({ editMultiple: true }), { editMultiple: true });
+  assert.deepEqual(parse({ editMultiple: false }), { editMultiple: false });
+  assert.equal(typeof parse({ editMultiple: "yes" }), "string");
+  assert.equal(typeof parse({ editMultiple: 1 }), "string");
+
+  reset();
+  assert.equal(gen.imageGenerationConfig().editMultiple, false, "a fresh install takes one picture");
+  assert.equal(gen.imageGenerationState().editMultiple, false);
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true });
+  assert.equal(gen.imageEditingMultiple(), false, "editing on is not several pictures on");
+  assert.equal(gen.imageEditingTarget().multiple, false);
+  gen.saveImageGeneration({ editMultiple: true });
+  assert.equal(gen.imageEditingMultiple(), true);
+  assert.equal(gen.imageEditingTarget().multiple, true);
+  assert.equal(gen.imageGenerationState().editMultiple, true);
+  // It is the edit tool's shape, so it counts only while there is one.
+  gen.saveImageGeneration({ editEnabled: false });
+  assert.equal(gen.imageEditingMultiple(), false);
+  reset();
+});
+
+test("what an endpoint takes is said of that endpoint: another server is not assumed to take several pictures", () => {
+  reset();
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true, editMultiple: true });
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v2" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true, "the same server by another route");
+  gen.saveImageGeneration({ editBaseUrl: "https://images.example.com/edit" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true, "and by an address of its own");
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, false, "edits moved to another server: it is not known to take them");
+  // Said again for the new server, it stays; and in the same save as the move, it is what was said.
+  gen.saveImageGeneration({ editMultiple: true });
+  gen.saveImageGeneration({ editBaseUrl: "https://third.example.org/v1", editMultiple: true });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true);
+  // Generation's address moving does not touch edits that have an address of their own.
+  gen.saveImageGeneration({ baseUrl: "https://elsewhere.example.org/v1" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true);
+  // Edits that follow generation's address follow its server, too.
+  gen.saveImageGeneration({ editBaseUrl: "", editMultiple: true });
+  gen.saveImageGeneration({ baseUrl: "https://another.example.org/v1" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, false);
+  // Said before there was an address, it was said of none, and goes with the first.
+  reset();
+  gen.saveImageGeneration({ editMultiple: true });
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
+  assert.equal(gen.imageGenerationConfig().editMultiple, true);
+  reset();
+});
+
+test("several pictures are one request, each as image[] in the order given, and only to an endpoint that takes them", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(WEBP) }] }));
+  try {
+    const several = target(origin, { multiple: true });
+    const got = await editing.editImage(several, { prompt: "put the cat from the second into the first", image: [PNG, JPEG, GIF] });
+    assert.deepEqual(got.bytes, WEBP);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, "/images/edits");
+    assert.equal(seen[0].auth, `Bearer ${KEY}`);
+    const list = partList(seen[0]);
+    assert.deepEqual(list.map((part) => part.name), ["image[]", "image[]", "image[]", "prompt", "model", "n"], "one part for each, first, in order");
+    assert.deepEqual(list.slice(0, 3).map((part) => part.bytes), [PNG, JPEG, GIF]);
+    assert.deepEqual(list.slice(0, 3).map((part) => part.type), ["image/png", "image/jpeg", "image/gif"], "the type each one's bytes say");
+    assert.deepEqual(list.slice(0, 3).map((part) => part.filename), ["image-1.png", "image-2.jpg", "image-3.gif"], "neutral names that say only the place");
+    assert.equal(parts(seen[0]).prompt.bytes.toString(), "put the cat from the second into the first", "the prompt is the agent's, as it is");
+
+    // A mask goes with them as it does with one.
+    await editing.editImage(several, { prompt: "p", image: [PNG, JPEG], mask: GIF });
+    assert.deepEqual(partList(seen[1]).map((part) => part.name), ["image[]", "image[]", "mask", "prompt", "model", "n"]);
+
+    // A list of one is the request an endpoint that takes one is sent, whether the endpoint takes several or not.
+    for (const multiple of [true, false]) {
+      await editing.editImage(target(origin, { multiple }), { prompt: "p", image: [WEBP] });
+      const one = partList(seen.at(-1)!);
+      assert.deepEqual(one.map((part) => part.name), ["image", "prompt", "model", "n"], `multiple: ${multiple}`);
+      assert.equal(one[0].filename, "image.webp");
+    }
+    const before = seen.length;
+
+    // Not to one that was not said to: nothing is sent.
+    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: [PNG, JPEG] }), /not set up to take several pictures, so none was sent/);
+    assert.equal(seen.length, before);
+  } finally {
+    server.close();
+  }
+});
+
+test("several pictures are limited in number and in weight, and one that is refused refuses them all before anything is sent", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    const several = target(origin, { multiple: true });
+    const ask = (image: Buffer[], options = {}) => editing.editImage(several, { prompt: "p", image }, options);
+    assert.equal((await ask(Array(editing.MAX_EDIT_PICTURES).fill(PNG))).ext, "png", "as many as an edit takes");
+    const sent = seen.length;
+    await assert.rejects(ask(Array(editing.MAX_EDIT_PICTURES + 1).fill(PNG)), /at most 8 pictures, and 9 were given/);
+    await assert.rejects(ask([]), /no picture to change/);
+
+    // By their bytes and size each, and named by their place: the others are fine, but the prompt would no longer match them.
+    await assert.rejects(ask([PNG, SVG, JPEG]), /Picture 2 is not a PNG, JPEG, GIF or WebP picture/);
+    await assert.rejects(ask([PNG, JPEG, Buffer.alloc(0)]), /Picture 3 is not a PNG/);
+    const big = Buffer.concat([PNG, Buffer.alloc(4096)]);
+    await assert.rejects(ask([PNG, big], { maxInputBytes: 1024 }), /Picture 2 is over/);
+    await assert.rejects(editing.editImage(several, { prompt: "p", image: [PNG, JPEG], mask: SVG }), /The mask is not a PNG/);
+    // Together, too: not scaled and not cut.
+    await assert.rejects(ask([big, big, big], { maxTotalBytes: 10 * 1024 }), /pictures are over 0 MB together, which is more than an edit takes.*none is scaled or cut/);
+    assert.equal((await ask([big, big], { maxTotalBytes: 10 * 1024 })).ext, "png", "within the weight");
+    assert.equal(seen.length, sent + 1, "nothing was sent for any of the refusals");
+    assert.equal(editing.MAX_EDIT_TOTAL_BYTES, 50 * 1024 * 1024);
+  } finally {
     server.close();
   }
 });
@@ -1095,6 +1214,40 @@ test("the API holds the edit settings, never gives a key back, and reloads chats
     // Generation coming on does not change what edits have; editing going off is a change.
     assert.equal((await call("PUT", "/features/images", { baseUrl: "https://images.example.com/v1", enabled: true })).body.changed, true, "generation's own tool came");
     assert.equal((await call("PUT", "/features/images", { editEnabled: false })).body.changed, true);
+  } finally {
+    portal.close();
+    reset();
+  }
+});
+
+test("the API says whether several pictures are taken, and reloads chats when that changes the edit tool", async () => {
+  const express = (await import("express")).default;
+  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const app = express().use(express.json()).use("/api", featuresRouter());
+  const portal = app.listen(0, "127.0.0.1");
+  await new Promise((r) => portal.once("listening", r));
+  const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/api`;
+  const call = async (method: string, p: string, body?: unknown) => {
+    const r = await fetch(`${at}${p}`, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, body: await r.json() as any };
+  };
+  try {
+    reset();
+    assert.equal((await call("GET", "/features/images")).body.images.editMultiple, false, "off by default");
+    assert.equal((await call("PUT", "/features/images", { editMultiple: "yes" })).status, 400);
+    // Without an edit tool there is no shape to change: said, but nobody is reloaded.
+    const early = await call("PUT", "/features/images", { baseUrl: "https://images.example.com/v1", editMultiple: true });
+    assert.equal(early.body.images.editMultiple, true);
+    assert.equal(early.body.changed, false);
+    assert.equal((await call("PUT", "/features/images", { editEnabled: true })).body.changed, true, "the tool came, with a list");
+    assert.equal((await call("PUT", "/features/images", { editMultiple: false })).body.changed, true, "the tool is one with a path now: chats are reloaded");
+    assert.equal((await call("PUT", "/features/images", { editMultiple: false })).body.changed, false, "said again: nothing to do");
+    assert.equal((await call("PUT", "/features/images", { editMultiple: true })).body.changed, true);
+    // Moving edits to another server takes it off, which the tool's shape follows.
+    const moved = await call("PUT", "/features/images", { editBaseUrl: "https://edit.example.net/v1" });
+    assert.equal(moved.body.images.editMultiple, false);
+    assert.equal(moved.body.changed, true);
+    assert.equal((await call("GET", "/features")).body.images.editMultiple, false);
   } finally {
     portal.close();
     reset();
