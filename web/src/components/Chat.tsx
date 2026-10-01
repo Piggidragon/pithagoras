@@ -1047,11 +1047,15 @@ export function Chat({
     // page has to know it is one: the server cannot tell "!name" from a message.
     // Typed before the list has come — it starts pi for the chat, which can take
     // a while — it is waited for, rather than the command going out as words.
+    // The list held may be the one from before the last run, which can have
+    // added commands — a skill the agent wrote, an extension it installed — so
+    // that is waited for too, and it comes at once when it is the current one.
     // The box is emptied first all the same: what is typed while waiting is for
     // the next message, and the chat may have been left by then. The portal's
     // own commands do not wait, as under the slash: they open UI here and need
     // nothing from pi.
-    const waits = typed !== null && !msg.startsWith("/") && !commands.length && !CLIENT_COMMANDS.has(typed.name);
+    const listCurrent = commandList.current?.key === `${session.id}:${turns}`;
+    const waits = typed !== null && !msg.startsWith("/") && (!commands.length || !listCurrent) && !CLIENT_COMMANDS.has(typed.name);
     const knownIn = (list: PiCommand[]) => (typed && isCommand(typed.name, list) ? typed : null);
     // The pictures in the box go with what came from it, and nothing else. A
     // command is run rather than said — this one here, any other by pi — so

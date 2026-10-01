@@ -13,6 +13,8 @@ const commands = [
 async function portal(page: Page, opts: { listAfter?: Promise<void> } = {}) {
   const prompts: string[] = [];
   const images: unknown[] = [];
+  /** Whether a command that did not exist before is now among them: what a run can add. */
+  const added = { fresh: false };
   const chats = [session, other];
   await page.route('**/api/**', async (route) => {
     const p = new URL(route.request().url()).pathname;
@@ -21,7 +23,7 @@ async function portal(page: Page, opts: { listAfter?: Promise<void> } = {}) {
     else if (p === '/api/sessions') body = { sessions: chats, executor: 'host' };
     else if (p.endsWith('/commands')) {
       await opts.listAfter;
-      body = { commands };
+      body = { commands: added.fresh ? [...commands, { name: 'skill:fresh', description: 'Written in the last run', source: 'skill' }] : commands };
     } else if (p.endsWith('/prompt')) {
       const sent = route.request().postDataJSON();
       prompts.push(sent.message);
@@ -40,12 +42,25 @@ async function portal(page: Page, opts: { listAfter?: Promise<void> } = {}) {
     await route.fulfill({ json: body });
   });
   await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
+    // A stream the test can send events down: `emit` is the server's.
+    const streams: any[] = ((window as any).streams = []);
+    (window as any).EventSource = class {
+      closed = false; onmessage: any; onopen: any; onerror: any;
+      listeners: Record<string, ((e: any) => void)[]> = {};
+      constructor() { streams.push(this); setTimeout(() => this.onopen?.(), 0); }
+      addEventListener(name: string, fn: (e: any) => void) { (this.listeners[name] ??= []).push(fn); }
+      close() { this.closed = true; }
+      emit(name: string, data: unknown) {
+        const e = { data: JSON.stringify(data) };
+        if (name === 'message') this.onmessage?.(e);
+        else (this.listeners[name] ?? []).forEach((fn) => fn(e));
+      }
+    };
     localStorage.setItem('sidebarCollapsed', 'true');
     // No model in this portal: the setup assistant would otherwise open over the chat.
     localStorage.setItem('pithagoras.setup', 'skipped');
   });
-  return { prompts, images };
+  return { prompts, images, added };
 }
 
 const box = (page: Page) => page.getByLabel('Message', { exact: true });
@@ -250,6 +265,26 @@ test.describe('with another character', () => {
     await expect.poll(() => prompts.length).toBe(2);
     expect(images[1]).toHaveLength(1);
     await expect(page.getByRole('button', { name: 'Remove photo.png' })).toHaveCount(0);
+  });
+
+  test('a command a run has just added is one when it is sent, however it got into the box', async ({ page }) => {
+    const { prompts, added } = await portal(page);
+    await page.goto('/s/demo');
+    // The list is shown once, as it was before the run.
+    await box(page).fill('!skill:rev');
+    await expect(palette(page).getByRole('option')).toHaveCount(1);
+    await box(page).fill('');
+    // A run ends, and has written a skill.
+    added.fresh = true;
+    await expect.poll(() => page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).length)).toBeGreaterThan(0);
+    await page.evaluate(() => {
+      const stream = (window as any).streams.filter((s: any) => !s.closed).at(-1);
+      stream.emit('caught-up', {});
+      stream.emit('message', { seq: 1, type: 'turn_end', at: Date.now(), payload: {} });
+    });
+    // Pasted whole: never typed as a bare name, so nothing has asked for the new list.
+    await say(page, '!skill:fresh go');
+    await expect.poll(() => prompts).toEqual(['/skill:fresh go']);
   });
 
   test('a command that is the portal\'s own is run here at once, without the list and in the chat it was typed in', async ({ page }) => {
