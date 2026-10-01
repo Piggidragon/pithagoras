@@ -1,0 +1,233 @@
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+// The managed service against a fake Docker daemon and a fake nvidia-smi: what is
+// asked of Docker for each choice, how the GPU is read and what is refused. No
+// GPU, no image and no container is touched.
+const dir = mkdtempSync(path.join(tmpdir(), 'voice-choices-'));
+process.env.DOCKER_SOCKET = path.join(dir, 'docker.sock');
+process.env.PORTAL_CONTAINER_NAME = 'portal-test';
+delete process.env.VOICE_GPU;
+delete process.env.VOICE_VRAM_RESERVE_MIB;
+const smi = path.join(dir, 'nvidia-smi');
+const smiOutput = path.join(dir, 'smi-output');
+writeFileSync(smi, `#!/bin/sh\ncat "${smiOutput}"\n`);
+chmodSync(smi, 0o755);
+/** What the host's nvidia-smi prints, or null for a host that has none. */
+const hostGpus = (output: string | null) => {
+  if (output === null) process.env.NVIDIA_SMI = path.join(dir, 'no-such-nvidia-smi');
+  else { process.env.NVIDIA_SMI = smi; writeFileSync(smiOutput, output); }
+};
+
+let container: any = null;
+let dockerGpus: string | null = null;   // what nvidia-smi inside the CUDA image prints; null: no GPU runtime
+let imageThere = true;
+let calls: { method: string; url: string; body: any }[] = [];
+const server = http.createServer(async (req, res) => {
+  let raw = ''; for await (const c of req) raw += c;
+  const body = raw ? JSON.parse(raw) : undefined; const url = req.url!; const method = req.method!;
+  calls.push({ method, url, body });
+  res.setHeader('Content-Type', 'application/json');
+  if (url === '/containers/portal-test/json') return res.end(JSON.stringify({ Id: 'portal-one', State: { Running: true } }));
+  if (url === '/containers/pithagoras-voice/json') { res.statusCode = container ? 200 : 404; return res.end(JSON.stringify(container)); }
+  if (url.startsWith('/containers/pithagoras-voice/logs')) return res.end(JSON.stringify('services ready'));
+  if (url.startsWith('/images/')) { res.statusCode = imageThere ? 200 : 404; return res.end('{}'); }
+  // The throwaway container that reads nvidia-smi inside the image.
+  if (url === '/containers/create') {
+    if (dockerGpus === null) { res.statusCode = 500; return res.end(JSON.stringify({ message: 'could not select device driver "nvidia" with capabilities: [[gpu]]' })); }
+    return res.end(JSON.stringify({ Id: 'probe-1' }));
+  }
+  if (url === '/containers/probe-1/wait') return res.end(JSON.stringify({ StatusCode: 0 }));
+  if (url.startsWith('/containers/probe-1/logs')) return res.end(dockerGpus ?? '');
+  if (url.includes('/stop?')) container.State.Running = false;
+  if (method === 'DELETE' && url === '/containers/pithagoras-voice') container = null;
+  if (url.startsWith('/containers/create?name=pithagoras-voice')) container = { Config: body, HostConfig: body.HostConfig, State: { Running: false } };
+  if (url === '/containers/pithagoras-voice/start') container.State.Running = true;
+  res.end('{}');
+});
+await new Promise<void>(r => server.listen(process.env.DOCKER_SOCKET, r));
+const oldFetch = globalThis.fetch;
+let unhealthy: string[] = [];
+globalThis.fetch = (async (url: any) => new Response('{}', { status: unhealthy.some(u => String(url).includes(u)) ? 503 : 200 })) as typeof fetch;
+after(async () => {
+  globalThis.fetch = oldFetch;
+  await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()));
+  rmSync(dir, { recursive: true, force: true });
+});
+const voice = await import('../server/src/extensions/voice-service.js');
+const { DEFAULT_CHOICE } = await import('../server/src/voice-engines.js');
+
+const reset = () => { container = null; dockerGpus = null; imageThere = true; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
+const settle = async () => { for (let n = 0; n < 200 && (await voice.status()).busy; n++) await new Promise(r => setTimeout(r, 10)); };
+const created = () => calls.filter(c => c.url === '/containers/create?name=pithagoras-voice');
+const GPU = (index: number, total: number, free: number) => `${index}, Test GPU ${index}, ${total}, ${free}\n`;
+const env = (spec: any) => Object.fromEntries(spec.Env.map((e: string) => [e.slice(0, e.indexOf('=')), e.slice(e.indexOf('=') + 1)]));
+
+test('a first install without a choice takes what the GPU check suggests, and says so in the setup log', async () => {
+  reset(); hostGpus(GPU(0, 12288, 11000));
+  await voice.install();
+  await settle();
+  assert.equal(created().length, 1);
+  const spec = created()[0].body;
+  assert.deepEqual(env(spec).VOICE_ASR, 'qwen3-asr');
+  assert.deepEqual([env(spec).VOICE_TTS, env(spec).VOICE_ASR_MODEL], ['breeze', '1.7b']);
+  assert.equal(spec.Labels['pithagoras.voice-recipe'], 'breeze+qwen3-asr:1.7b');
+  assert.match(env(spec).VOICE_PLAN, /^Detected Test GPU 0 \(12\.0 GiB, 10\.7 GiB free\): Breeze speech with Qwen3-ASR 1\.7B needs about 7\.0 GiB, which fits\.$/);
+  // One card: Docker's own pick, as it has always been.
+  assert.deepEqual(spec.HostConfig.DeviceRequests, [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }]);
+  assert.equal(calls.some(c => c.url === '/containers/create'), false, 'the host had nvidia-smi: no probe container');
+  assert.deepEqual(JSON.parse(env(spec).VOICE_SERVER_CONFIG).models.map((m: any) => m.id), ['breeze', 'qwen3-asr']);
+  // Ready needs only the audio.cpp process: there is no Whisper.
+  unhealthy = [':8188'];
+  container.State.Running = true;
+  const state = await voice.status();
+  assert.deepEqual([state.state, state.choice], ['running', { tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' }]);
+});
+
+test('a portal without nvidia-smi reads the GPUs in a throwaway container, and names the one with the most room', async () => {
+  reset(); hostGpus(null);
+  dockerGpus = GPU(0, 8192, 1000) + GPU(1, 12288, 12000);
+  await voice.install({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '0.6b' });
+  await settle();
+  const probe = calls.find(c => c.url === '/containers/create')!.body;
+  assert.deepEqual(probe.Cmd.slice(0, 1), ['nvidia-smi']);
+  assert.deepEqual(probe.HostConfig.DeviceRequests, [{ Driver: 'nvidia', Count: -1, Capabilities: [['gpu']] }], 'all of them, to choose among');
+  assert.ok(calls.some(c => c.method === 'DELETE' && c.url.startsWith('/containers/probe-1')), 'the probe container is removed again');
+  assert.equal(calls.some(c => c.url.includes('/images/create')), false, 'the check never pulls an image of its own');
+  const spec = created()[0].body;
+  assert.deepEqual(spec.HostConfig.DeviceRequests, [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }]);
+  assert.equal(spec.Labels['pithagoras.voice-recipe'], 'chatterbox+qwen3-asr:0.6b');
+  assert.match(env(spec).VOICE_PLAN, /^Detected Test GPU 1 /);
+});
+
+test('VOICE_GPU picks the card and VOICE_VRAM_RESERVE_MIB keeps memory on it free', async () => {
+  reset(); hostGpus(GPU(0, 8192, 6500) + GPU(1, 12288, 12000));
+  process.env.VOICE_GPU = '0';
+  await voice.install();
+  await settle();
+  assert.deepEqual(created()[0].body.HostConfig.DeviceRequests[0].DeviceIDs, ['0']);
+  assert.equal(created()[0].body.Labels['pithagoras.voice-recipe'], 'breeze+qwen3-asr:0.6b', '6.5 GB free holds Breeze and the small model, not the large one');
+  reset(); hostGpus(GPU(0, 8192, 8000));
+  // Without the reserve 8 GB holds the large model too.
+  process.env.VOICE_VRAM_RESERVE_MIB = '2500';
+  await voice.install();
+  await settle();
+  assert.equal(created()[0].body.Labels['pithagoras.voice-recipe'], 'breeze+whisper:base', 'room is kept for something else');
+  const hardware = await voice.hardware();
+  assert.deepEqual([hardware.reserveMiB, hardware.selected, hardware.suggestion], [2500, 0, DEFAULT_CHOICE]);
+});
+
+test('a choice the GPU cannot hold is refused with what would fit, and nothing is created', async () => {
+  reset(); hostGpus(GPU(0, 6144, 6000));
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' });
+  await settle();
+  const state = await voice.status();
+  assert.match(state.error, /Breeze speech with Qwen3-ASR 1\.7B needs about 7\.0 GiB of GPU memory, but Test GPU 0 \(6\.0 GiB, 5\.9 GiB free\) has less\. Breeze speech with Qwen3-ASR 0\.6B would fit\./);
+  assert.equal(state.state, 'absent');
+  assert.equal(created().length, 0);
+  // The refusal is not sticky: the next attempt starts clean.
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' });
+  await settle();
+  assert.equal((await voice.status()).error, '');
+  assert.equal(created().length, 1);
+});
+
+test('without any GPU reading the choice is installed unchecked, and Docker has the last word', async () => {
+  reset(); hostGpus(null);
+  const none = await voice.hardware();
+  assert.deepEqual([none.gpus, none.source, none.suggestion, none.selected], [[], 'none', DEFAULT_CHOICE, null]);
+  assert.match(none.error, /host: .*ENOENT.*; docker: could not select device driver/);
+  await voice.install({ tts: 'chatterbox', asr: 'whisper', asrModel: 'small' });
+  await settle();
+  assert.equal(created().length, 1);
+  assert.match(env(created()[0].body).VOICE_PLAN, /^No GPU could be read here; installing Chatterbox speech with Whisper small unchecked\.$/);
+  // Before the image is there, the probe does not wait for it.
+  reset(); hostGpus(null); imageThere = false;
+  assert.match((await voice.hardware()).error, /docker: the CUDA image is not downloaded yet/);
+});
+
+test('a container made before engines could be chosen keeps its engines through start and through a restating of the same choice', async () => {
+  reset(); hostGpus(GPU(0, 1024, 1000));   // far too small: a restart must not be refused on that
+  container = { Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1' } }, HostConfig: { NetworkMode: 'container:portal-one' }, State: { Running: false } };
+  assert.deepEqual((await voice.status()).choice, DEFAULT_CHOICE);
+  await voice.start();
+  await settle();
+  assert.equal(container.State.Running, true);
+  await voice.install(DEFAULT_CHOICE);
+  await settle();
+  assert.equal(calls.some(c => c.method === 'DELETE' || c.url.startsWith('/containers/create')), false, 'nothing recreated');
+  assert.equal((await voice.status()).error, '');
+  assert.deepEqual((await voice.status()).state, 'running');
+});
+
+test('a legacy container moved to a new network namespace is recreated as the original combination, without a GPU check', async () => {
+  reset(); hostGpus(GPU(0, 1024, 1000));   // a card the original combination would be refused on
+  container = { Config: { Labels: { 'pithagoras.addon': 'voice' } }, HostConfig: { NetworkMode: 'bridge' }, State: { Running: true } };
+  assert.equal((await voice.status()).state, 'installing');
+  await settle();
+  assert.equal((await voice.status()).error, '');
+  const spec = created()[0].body;
+  assert.equal(spec.HostConfig.NetworkMode, 'container:portal-one');
+  assert.equal(spec.Labels['pithagoras.voice-recipe'], 'breeze+whisper:base');
+  assert.deepEqual(spec.HostConfig.DeviceRequests, [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }]);
+  assert.equal('VOICE_PLAN' in env(spec), false, 'no check was made, so there is nothing to report');
+  assert.equal(calls.some(c => c.url === '/containers/create'), false);
+});
+
+test('another choice recreates the container, keeps the volume and is not mistaken for a network change', async () => {
+  reset(); hostGpus(GPU(0, 12288, 11000));
+  container = { Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1' } }, HostConfig: { NetworkMode: 'container:portal-one' }, State: { Running: true } };
+  await voice.install({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' });
+  await settle();
+  assert.ok(calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice'));
+  assert.ok(calls.some(c => c.url.includes('/stop?')));
+  assert.equal(calls.some(c => c.url.startsWith('/volumes') && c.method === 'DELETE'), false);
+  assert.deepEqual(created()[0].body.HostConfig.Binds, ['pithagoras_voice-models:/voice']);
+  assert.equal(container.Config.Labels['pithagoras.voice-recipe'], 'chatterbox+qwen3-asr:1.7b');
+  // Start now keeps what was built.
+  calls = [];
+  await voice.start();
+  await settle();
+  assert.equal(calls.some(c => c.method === 'DELETE'), false);
+  assert.equal(container.Config.Labels['pithagoras.voice-recipe'], 'chatterbox+qwen3-asr:1.7b');
+});
+
+test('a request for an engine the installer does not make is refused before anything happens', async () => {
+  reset(); hostGpus(GPU(0, 12288, 11000));
+  await assert.rejects(voice.install({ tts: 'kokoro', asr: 'whisper', asrModel: 'base' } as any), /speech synthesis engine/);
+  await assert.rejects(voice.install({ tts: 'breeze', asr: 'whisper', asrModel: '1.7b' }), /speech recognition model/);
+  assert.equal((await voice.status()).busy, false, 'the refusal does not leave a setup running');
+  assert.equal(calls.some(c => c.url.startsWith('/containers/create')), false);
+});
+
+test('the container spec of the original combination is the one it always was', () => {
+  const spec = voice.containerSpec('echo test', 'host');
+  assert.deepEqual(spec.HostConfig.DeviceRequests, [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }]);
+  assert.deepEqual(spec.HostConfig.Binds, ['pithagoras_voice-models:/voice']);
+  assert.equal(spec.Labels['pithagoras.voice-network'], 'shared-v1');
+  assert.equal(spec.Labels['pithagoras.voice-recipe'], 'breeze+whisper:base');
+  assert.deepEqual(spec.Cmd, ['bash', '-c', 'echo test']);
+  assert.deepEqual(env(spec).VOICE_TTS + env(spec).VOICE_ASR + env(spec).VOICE_ASR_MODEL, 'breezewhisperbase');
+  assert.equal('VOICE_PLAN' in env(spec), false);
+});
+
+test('the model the lease loads is the one the saved engine speaks with', async () => {
+  reset();
+  const sent: { url: string; body: any }[] = [];
+  globalThis.fetch = (async (url: any, init: any) => { sent.push({ url: String(url), body: JSON.parse(init.body) }); return new Response('{}'); }) as typeof fetch;
+  await voice.modelAction('load');
+  await voice.modelAction('unload');
+  await voice.modelAction('load', 'chatterbox');
+  await voice.modelAction('unload', 'chatterbox');
+  assert.deepEqual(sent.map(s => s.url), Array(4).fill('http://127.0.0.1:7862/v1/models/load').map((u, i) => u.replace('load', i % 2 ? 'unload' : 'load')));
+  // The load request Breeze has always had, byte for byte.
+  assert.deepEqual(sent[0].body, { id: 'breeze', family: 'breeze_tts', path: '/voice/models/breeze-q8_0.gguf', task: 'tts', mode: 'streaming', session_options: { 'breeze_tts.reference_cache_slots': '1' } });
+  assert.deepEqual(sent[1].body, { id: 'breeze' });
+  assert.equal(sent[2].body.id, 'chatterbox');
+  assert.equal(sent[2].body.path, '/voice/models/chatterbox-q8_0.gguf');
+  assert.deepEqual(sent[3].body, { id: 'chatterbox' });
+});

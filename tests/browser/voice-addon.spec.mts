@@ -1,4 +1,6 @@
 import {test,expect} from '@playwright/test';
+// The engine choice asks for the GPU as the page opens; the tests that are about something else get none to read.
+test.beforeEach(async({page})=>{await page.route('**/api/voice/hardware',r=>r.fulfill({json:{gpus:[],source:'none',error:'',selected:null,reserveMiB:0,suggestion:{tts:'breeze',asr:'whisper',asrModel:'base'}}}));});
 test('settings install progress, ready connection, and stop',async({page})=>{
  let state='absent'; const actions:string[]=[];
  const config={enabled:false,whisperUrl:'http://127.0.0.1:8178/inference',breezeUrl:'http://127.0.0.1:7860/v1/audio/speech',instruction:'Clear speech',voice:'design',runtime:'breeze',language:'auto',cfgScale:4};
@@ -129,4 +131,101 @@ test('saving other voice settings does not pin the built-in text of an older por
  await page.getByRole('button',{name:'Save voice settings'}).click();
  await expect(page.getByRole('button',{name:'Saved',exact:true})).toBeVisible();
  expect(puts[1].responseInstructions).toBe('Answer in one word.');
+});
+
+// A card with 6 GB, 5 GB of it free: the small recognition model fits next to Breeze with room to spare, the large one does not fit at all.
+const hardware = (gpus: any[]) => ({ gpus, source: 'host', error: '', selected: gpus.length ? 0 : null, reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } });
+const card = { index: 0, name: 'Test GPU', totalMiB: 6144, freeMiB: 5000 };
+const config = { enabled: false, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4 };
+
+test('engine choice: the GPU is shown, the install picks for it by default, and an explicit pick is checked against it and sent',async({page})=>{
+ let state='absent'; let choice:any; const posts:any[]=[];
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/hardware',r=>r.fulfill({json:hardware([card])}));
+ await page.route('**/api/voice',r=>r.fulfill({json:config}));
+ await page.route('**/api/voice/install',r=>{
+  if(r.request().method()==='POST'){posts.push(r.request().postDataJSON());state='starting';choice=posts.at(-1)??{tts:'breeze',asr:'qwen3-asr',asrModel:'0.6b'};return r.fulfill({json:{ok:true}});}
+  return r.fulfill({json:{available:true,state,busy:false,progress:'',error:'',choice}});
+ });
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ await expect(page.getByText('GPU: Test GPU, 6 GB, 4.9 GB free')).toBeVisible();
+ // Left to the install, the engines are the suggestion and cannot be changed by accident.
+ const auto=page.getByRole('checkbox',{name:'Choose for me, based on my GPU'});
+ await expect(auto).toBeChecked();
+ await expect(page.getByText('Suggested for this GPU: Breeze with Qwen3-ASR 0.6B.')).toBeVisible();
+ const recognition=page.getByRole('combobox',{name:'Speech recognition engine'}),synthesis=page.getByRole('combobox',{name:'Speech synthesis engine'});
+ await expect(recognition).toBeDisabled();
+ await expect(recognition).toContainText('Qwen3-ASR 0.6B');
+ await auto.uncheck();
+ await recognition.click();
+ await expect(page.getByRole('option',{name:/Whisper small/})).toContainText('On the CPU, no GPU memory');
+ await expect(page.getByRole('option',{name:/Qwen3-ASR 1\.7B/})).toContainText('On the GPU, about 2.5 GB');
+ await page.getByRole('option',{name:/Qwen3-ASR 1\.7B/}).click();
+ // More than the card has: flagged, with the way back to what fits.
+ await expect(page.getByRole('alert').filter({hasText:'Needs about 7 GB of GPU memory, more than this GPU has.'})).toBeVisible();
+ await page.getByRole('button',{name:'Use the suggestion'}).click();
+ await expect(recognition).toContainText('Qwen3-ASR 0.6B');
+ await expect(page.getByText('The card is big enough, but other programs use part of it right now.')).toContainText('Needs about 5.9 GB');
+ await synthesis.click();
+ await page.getByRole('option',{name:/Chatterbox/}).click();
+ await expect(page.getByText('Needs about 4.3 GB of GPU memory. Fits.')).toBeVisible();
+ await page.screenshot({path:'/tmp/pithagoras-voice-engines.png'});
+ await page.getByRole('button',{name:'Install voice',exact:true}).click();
+ await expect.poll(()=>posts.length).toBe(1);
+ expect(posts[0]).toEqual({tts:'chatterbox',asr:'qwen3-asr',asrModel:'0.6b'});
+ // Once the container is built for it, that is what is shown, and the pick is no longer pending.
+ await expect(synthesis).toContainText('Chatterbox');
+ await expect(page.getByRole('button',{name:'Rebuild with these engines'})).toHaveCount(0);
+});
+
+test('engine choice: left to the install, nothing is sent with it',async({page})=>{
+ const posts:any[]=[]; let state='absent';
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/hardware',r=>r.fulfill({json:hardware([])}));
+ await page.route('**/api/voice',r=>r.fulfill({json:config}));
+ await page.route('**/api/voice/install',r=>{
+  if(r.request().method()==='POST'){posts.push(r.request().postData());state='starting';return r.fulfill({json:{ok:true}});}
+  return r.fulfill({json:{available:true,state,busy:false,progress:'',error:''}});
+ });
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ // No GPU can be read from here: said so, with what happens instead.
+ await expect(page.getByText('No GPU could be read yet.')).toBeVisible();
+ await expect(page.getByText('The install picks what fits your GPU.')).toBeVisible();
+ await page.getByRole('button',{name:'Install voice',exact:true}).click();
+ await expect.poll(()=>posts.length).toBe(1);
+ expect(posts[0]).toBeNull();
+});
+
+test('engine choice: an installed service shows its engines, and another pick offers a rebuild that is sent',async({page})=>{
+ let installed:any={tts:'breeze',asr:'whisper',asrModel:'base'}; const posts:any[]=[];
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/hardware',r=>r.fulfill({json:hardware([{...card,totalMiB:24576,freeMiB:24000}])}));
+ await page.route('**/api/voice',r=>r.fulfill({json:{...config,enabled:true}}));
+ await page.route('**/api/voice/install',r=>{
+  if(r.request().method()==='POST'){posts.push(r.request().postDataJSON());installed=posts.at(-1);return r.fulfill({json:{ok:true}});}
+  return r.fulfill({json:{available:true,state:'running',busy:false,progress:'',error:'',choice:installed}});
+ });
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ const recognition=page.getByRole('combobox',{name:'Speech recognition engine'});
+ await expect(recognition).toContainText('Whisper base');
+ await expect(page.getByRole('checkbox',{name:'Choose for me, based on my GPU'})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Start voice',exact:true})).toBeDisabled();
+ await expect(page.getByRole('button',{name:'Rebuild with these engines'})).toHaveCount(0);
+ await recognition.click();
+ await page.getByRole('option',{name:/Qwen3-ASR 1\.7B/}).click();
+ await expect(page.getByText('Switching engines recreates the voice container. Downloaded models are kept.')).toBeVisible();
+ // Back to what is installed is no change: the rebuild is not offered for it.
+ await recognition.click();
+ await page.getByRole('option',{name:/Whisper base/}).click();
+ await expect(page.getByRole('button',{name:'Rebuild with these engines'})).toHaveCount(0);
+ await recognition.click();
+ await page.getByRole('option',{name:/Qwen3-ASR 1\.7B/}).click();
+ await page.getByRole('button',{name:'Rebuild with these engines'}).click();
+ await expect.poll(()=>posts.length).toBe(1);
+ expect(posts[0]).toEqual({tts:'breeze',asr:'qwen3-asr',asrModel:'1.7b'});
+ await expect(recognition).toContainText('Qwen3-ASR 1.7B');
+ await expect(page.getByRole('button',{name:'Rebuild with these engines'})).toHaveCount(0);
 });

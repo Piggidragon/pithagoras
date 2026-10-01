@@ -1,6 +1,7 @@
 import { addVoice, listVoices, readVoice, updateVoice, deleteVoice, VoiceNotFound } from '../voice-presets.js';
 import { spokenNumbers } from '../voice-numbers.js';
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from '../voice-languages.js';
+import { DEFAULT_CHOICE, endpoints, parseChoice, type VoiceChoice } from '../voice-engines.js';
 import { VoiceLeases } from '../extensions/voice-leases.js';
 import { DEFAULT_VOICE_INSTRUCTIONS, voiceInstructions, voiceRulesOn } from '../pi/voice-first.js';
 import * as voiceService from '../extensions/voice-service.js';
@@ -137,14 +138,16 @@ export function pcmWav(pcm: Buffer): Buffer {
   header.write("data", 36); header.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([header, pcm]);
 }
-const managedVoice = () => config().runtime === 'audio-cpp' && config().breezeUrl === voiceService.breezeUrl;
-const leases = new VoiceLeases(()=>voiceService.modelAction('load'),()=>voiceService.modelAction('unload'));
+const managedVoice = () => ['audio-cpp', 'chatterbox'].includes(config().runtime ?? '') && config().breezeUrl === voiceService.breezeUrl;
+// The lease loads the speech model the saved runtime speaks with. Recognition loads itself on its first request.
+const managedEngine = () => config().runtime === 'chatterbox' ? 'chatterbox' : 'breeze';
+const leases = new VoiceLeases(()=>voiceService.modelAction('load', managedEngine()),()=>voiceService.modelAction('unload', managedEngine()));
 async function maintainManagedVoice() {
   // Also reconciles running legacy containers after portal updates, without
   // requiring the settings modal to be opened. Stopped add-ons stay stopped.
   const state = await voiceService.status();
   if ((getStoredSettings() as Record<string,string>).voice_setup_pending === '1' && state.state === 'running') {
-    connectManagedVoice();
+    connectManagedVoice(state.choice);
     getDb().prepare("DELETE FROM settings WHERE key='voice_setup_pending'").run();
   }
   if (managedVoice()) await leases.sweep(config().lazyLoad !== false);
@@ -155,11 +158,15 @@ leaseTimer.unref();
 // Wait until module initialization finishes before accessing configuration.
 setImmediate(maintain);
 
-/** Point the saved config at the managed Breeze and Whisper pair. */
-export function connectManagedVoice() {
+/** Point the saved config at the managed services, for the engines they were built with. */
+export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
+  const { runtime, ...urls } = endpoints(choice);
+  const current = config();
+  // Chatterbox is told a language and has no detection mode; keep one it speaks rather than save a setting it refuses.
+  const language = runtime === 'chatterbox' && !CHATTERBOX_LANGUAGES.includes(current.language) ? 'en' : current.language;
   // Whisper.cpp serves one model and is sent no model field: an id left over
   // from another runtime would reach it in the multipart body.
-  const saved = { ...config(), enabled: true, runtime: 'audio-cpp', sttModel: '', whisperUrl: voiceService.whisperUrl, breezeUrl: voiceService.breezeUrl };
+  const saved = { ...current, language, enabled: true, runtime, ...urls };
   getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(saved));
   return {...saved, managed:true};
 }
@@ -174,15 +181,20 @@ export function voiceRouter(): Router {
     try {
       const state = await voiceService.status();
       if (state.state === 'running' && (getStoredSettings() as Record<string,string>).voice_setup_pending === '1') {
-        connectManagedVoice();
+        connectManagedVoice(state.choice);
         getDb().prepare("DELETE FROM settings WHERE key = 'voice_setup_pending'").run();
       }
       res.json(state);
     } catch (e) { res.status(503).json({ error: (e as Error).message }); }
   });
-  for (const action of ['install', 'start', 'stop'] as const) router.post(`/voice/${action}`, async (_req, res) => {
+  router.get('/voice/hardware', async (_req, res) => {
+    try { res.json(await voiceService.hardware()); } catch (e) { res.status(503).json({ error: (e as Error).message }); }
+  });
+  for (const action of ['install', 'start', 'stop'] as const) router.post(`/voice/${action}`, async (req, res) => {
     try {
-      await voiceService[action]();
+      // Install takes the engines to build for; without them it keeps what is installed, or picks for the GPU.
+      if (action === 'install') await voiceService.install(Object.keys(req.body ?? {}).length ? parseChoice(req.body) : undefined);
+      else await voiceService[action]();
       if (action !== 'stop') getDb().prepare("INSERT INTO settings (key,value) VALUES ('voice_setup_pending','1') ON CONFLICT(key) DO UPDATE SET value='1'").run();
       else getDb().prepare("DELETE FROM settings WHERE key = 'voice_setup_pending'").run();
       res.json({ ok: true });
@@ -190,8 +202,9 @@ export function voiceRouter(): Router {
   });
   router.post('/voice/connect', async (_req, res) => {
     try {
-      if ((await voiceService.status()).state !== 'running') throw new Error('Wait for voice setup to finish before connecting');
-      res.json(withInstructions(connectManagedVoice()));
+      const state = await voiceService.status();
+      if (state.state !== 'running') throw new Error('Wait for voice setup to finish before connecting');
+      res.json(withInstructions(connectManagedVoice(state.choice)));
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
   router.get("/voice", (_req, res) => res.json({...withInstructions(config()),managed:managedVoice(),comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"}));

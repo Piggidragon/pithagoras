@@ -171,17 +171,53 @@ Browser uses Docker's `unless-stopped` restart policy. If `BROWSER_EXTERNAL=true
 
 ## Install Voice
 
-### Install and wait for Ready
+### Choose engines, install and wait for Ready
 
 1. Open **Settings → Add-ons → Voice**.
-2. Expand **Voice service** and click **Install voice**.
-3. Follow **Setup log** until the service shows **Ready**.
+2. Expand **Voice service**. Under **Speech engines** the page shows the GPU it can read and what fits it. Leave **Choose for me, based on my GPU** on, or turn it off and pick the engines yourself (see [the engines](#engines-and-gpu-memory) below).
+3. Click **Install voice** and follow **Setup log** until the service shows **Ready**.
 
 ::: info First setup takes time
-The installer downloads an image, builds the runtimes, and downloads and quantizes the models. A running container is not yet a ready service.
+The installer downloads an image, builds the runtimes, and downloads the models of the engines you chose. A running container is not yet a ready service.
 :::
 
-Once both services are healthy, the installer enables voice and saves the endpoints automatically. If you previously used custom endpoints, click **Use installed voice** to reconnect.
+Once the services are healthy, the installer enables voice and saves the endpoints automatically. If you previously used custom endpoints, click **Use installed voice** to reconnect.
+
+### Engines and GPU memory
+
+| | Choices | Runs on |
+| --- | --- | --- |
+| **Speech synthesis** | **Breeze** (English and Chinese, streams while it speaks) · **Chatterbox** (nineteen languages, clones a reference voice) | GPU |
+| **Speech recognition** | **Whisper** base or small · **Qwen3-ASR** 0.6B or 1.7B | Whisper on the CPU, Qwen3-ASR on the GPU |
+
+The default, and what every earlier installation has, is Breeze with Whisper base. Whisper takes no GPU memory; Qwen3-ASR recognises more languages and is more accurate, and shares one audio.cpp process with the speech engine.
+
+The page and the installer estimate the GPU memory each combination needs, from the measured Breeze process and the size of the other model files:
+
+| Model | About |
+| --- | --- |
+| Breeze | 4.5 GB |
+| Chatterbox | 2.9 GB |
+| Qwen3-ASR 0.6B | 1.4 GB |
+| Qwen3-ASR 1.7B | 2.5 GB |
+
+These are estimates, not guarantees. A combination **fits** when the GPU has that much free now, is **tight** when the card is big enough but other programs hold part of it right now (the models load only when voice is used, so it can still work), and does **not fit** when the card is smaller than the combination needs.
+
+Before installing, Pithagoras reads the GPU with `nvidia-smi`. A portal in a container has no `nvidia-smi` of its own, so once the CUDA image is downloaded it asks a throwaway container of that image; before that the page says it cannot read a GPU yet. At install time it checks again:
+
+- With **Choose for me**, it picks the best combination that fits: Breeze, and the largest of Whisper base, Qwen3-ASR 0.6B and 1.7B that fits next to it; Chatterbox only when Breeze does not fit. It writes what it found as the first line of the setup log.
+- With your own pick, it keeps it, and refuses one the card cannot hold at all, naming the combination that would fit. A tight pick installs, with that noted in the log.
+- If it cannot read a GPU at all, it installs your pick unchecked and Docker has the last word.
+
+With several GPUs it uses the one with the most memory free and gives the container that one. Two settings on the portal change that, as in the multilingual Compose service:
+
+| Variable | Meaning |
+| --- | --- |
+| `VOICE_GPU` | The GPU index (as `nvidia-smi` lists it) the voice container uses. |
+| `VOICE_VRAM_RESERVE_MIB` | GPU memory, in MiB, to keep free for something else on the same card, such as a model you run in the container later. Counted against every combination. |
+| `NVIDIA_SMI` | The `nvidia-smi` binary to run, when it is not on the portal's `PATH`. |
+
+To change the engines of an installed service, pick others under **Speech engines** and click **Rebuild with these engines**. The container is recreated, with the models and builds in the volume kept; only what the new choice needs is built or downloaded, and a runtime already built for an engine is not built again. **Use installed voice** then points the settings at the new engines. A Chatterbox choice needs an input language (not auto-detect) and a voice with a recording, as in [voice control](/guide/voice#other-languages-chatterbox-and-qwen3-asr).
 
 ### Choose your voice settings
 
@@ -193,7 +229,7 @@ Once both services are healthy, the installer enables voice and saves the endpoi
 ### Start talking
 
 Open a session, click the **microphone**, allow microphone access, and speak.
-The first connection loads Breeze into GPU memory.
+The first connection loads the speech model into GPU memory.
 
 Use **Add voice** for your own designed or reference-cloned voice. Installing the runtime does not install a personal Aria recording. See [voice control](/guide/voice) for references and speech detection settings.
 
@@ -202,21 +238,22 @@ Use **Add voice** for your own designed or reference-cloned voice. Installing th
 The managed installer:
 
 - Creates `pithagoras-voice` and the named volume `pithagoras_voice-models`, mounted at `/voice`.
-- Builds pinned audio.cpp with CUDA and Whisper.cpp without CUDA. **Whisper runs on CPU**; Breeze uses one NVIDIA GPU.
-- Downloads multilingual Whisper `base` and Breeze-TTS-2 BF16 GGUF, quantizes Breeze to **Q8_0** on CPU, verifies the generated file, then removes the BF16 source file after successful conversion.
+- Builds pinned audio.cpp with CUDA, with the families of the engines you chose (Breeze, Chatterbox, Qwen3-ASR), and Whisper.cpp without CUDA when Whisper is chosen. A build keeps every family it has been given, so switching engines back and forth compiles once.
+- Downloads what the choice needs: multilingual Whisper `base` or `small`; Breeze-TTS-2 BF16 GGUF, quantized to **Q8_0** on CPU, verified, and the BF16 source removed after successful conversion; the Chatterbox Multilingual and Qwen3-ASR Q8_0 GGUF files from a pinned revision of the audio.cpp repository, checked against their SHA-256.
 - Retains source trees, compiled binaries and model files in the named volume.
-- Starts both services on the portal’s loopback interface by sharing its Docker network namespace. No voice ports are published on the host.
+- Starts the services on the portal’s loopback interface by sharing its Docker network namespace. No voice ports are published on the host.
 :::
 
 ### Service addresses and health checks
 
 | Setting | Managed value |
 | --- | --- |
-| Speech runtime | **Breeze audio.cpp · streaming** |
-| Whisper inference URL | `http://127.0.0.1:8188/inference` |
-| Breeze speech URL | `http://127.0.0.1:7862/v1/audio/speech` |
+| Speech runtime | **Breeze audio.cpp · streaming**, or **Chatterbox audio.cpp · multilingual** |
+| Speech synthesis URL | `http://127.0.0.1:7862/v1/audio/speech` |
+| Speech recognition URL | Whisper: `http://127.0.0.1:8188/inference`. Qwen3-ASR: `http://127.0.0.1:7862/v1/audio/transcriptions` |
+| Speech recognition model | Whisper: empty. Qwen3-ASR: `qwen3-asr` |
 
-Check readiness from inside the portal container:
+Check readiness from inside the portal container. With Whisper chosen both ports answer; with Qwen3-ASR everything is on `7862`:
 
 ```sh
 docker exec pithagoras node -e 'Promise.all([8188,7862].map(async p => console.log(p, (await fetch(`http://127.0.0.1:${p}/health`)).status)))'
@@ -246,10 +283,10 @@ The service can be healthy while the TTS model is unloaded. GPU memory is alloca
 | Action | Result |
 | --- | --- |
 | **Mute** in a voice session | Stops listening; keeps the voice session and spoken replies active. |
-| **End** in a voice session | Releases that tab's connection; does not stop an accepted agent task. With lazy loading, the last released connection allows Breeze to unload. |
+| **End** in a voice session | Releases that tab's connection; does not stop an accepted agent task. With lazy loading, the last released connection allows the speech model to unload. |
 | **Start voice** | Starts the existing managed container, reusing its models. |
 | **Retry setup** | Restarts a failed container and its setup script; retained downloads/builds are reused where the script can reuse them. |
-| **Stop · release VRAM** | Stops both voice processes in the container, releasing their GPU allocations. Keeps model files. |
+| **Stop · release VRAM** | Stops the voice processes in the container, releasing their GPU allocations. Keeps model files. |
 | Disable voice controls and save | Hides the session controls; it is not a container-uninstall operation. |
 
 ### When GPU memory is released

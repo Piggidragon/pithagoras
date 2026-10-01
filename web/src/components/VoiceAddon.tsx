@@ -1,8 +1,10 @@
 import { VoiceLibrary } from './VoiceLibrary';
+import { VoiceEngines } from './VoiceEngines';
 import { Select } from "./Select";
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig } from "../api";
+import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
+import { sameChoice, type VoiceChoice } from "../../../server/src/voice-engines";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
 import { labelOf, languageName, msg, t } from "../i18n";
 import { btnCls, inputCls } from "./SettingsUi";
@@ -25,7 +27,14 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     const poll=async()=>{try { const state=await api.voiceInstallStatus(); if(!disposed)setInstall(state); } catch(e) { if(!disposed)setInstall({available:false,state:'unavailable',busy:false,progress:'',error:(e as Error).message}); } finally { if(!disposed)timer=setTimeout(poll,2500); }};
     void poll(); return ()=>{disposed=true;clearTimeout(timer);};
   },[]);
-  const manage=async(action:'install'|'start'|'stop')=>{setActionBusy(true);try{await api.voiceAction(action);setInstall(await api.voiceInstallStatus());}catch(e){onError((e as Error).message);}finally{setActionBusy(false);}};
+  // The GPU as nvidia-smi reports it, for the engine choice. Where it cannot be read the install reads it, so a failure here is no error.
+  const [hardware, setHardware] = useState<VoiceHardware | null>(null);
+  useEffect(() => { void api.voiceHardware().then(setHardware).catch(() => {}); }, []);
+  // The engines picked here; null leaves the choice to the install, or to what is installed.
+  const [picked, setPicked] = useState<VoiceChoice | null>(null);
+  // Once the container is built for what was picked, the pick is what is installed.
+  useEffect(() => { if (picked && install?.choice && sameChoice(picked, install.choice)) setPicked(null); }, [install?.choice, picked]);
+  const manage=async(action:'install'|'start'|'stop',choice?:VoiceChoice)=>{setActionBusy(true);try{await api.voiceAction(action,choice);setInstall(await api.voiceInstallStatus());}catch(e){onError((e as Error).message);}finally{setActionBusy(false);}};
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   // A saved voice's description is stored on its own; this saves the edited ones along with the settings.
@@ -37,6 +46,8 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const builtIn = config.defaultResponseInstructions ?? "";
   // Text that is still the built-in one this page was given is sent as nothing: the portal may have been updated since, and its newer text is then the one to follow.
   const toSave = () => instructions.trim() === builtIn.trim() ? { ...config, responseInstructions: "" } : config;
+  // Another choice than the installed one, picked for a service that exists: it is a rebuild, not a start.
+  const rebuild = !!picked && !!install && install.state !== 'absent';
   const chatterbox = config.runtime === "chatterbox";
   const languages = chatterbox ? INPUT_LANGUAGES.filter(([code]) => CHATTERBOX_LANGUAGES.includes(code)) : INPUT_LANGUAGES;
   // Switching runtime must not leave a language the runtime will refuse on save.
@@ -90,9 +101,11 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     <details className="group rounded-xl border border-line p-4">
       <summary className="cursor-pointer text-sm font-medium">{t("Voice service")} <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-normal text-accent">{install?.state === 'absent' ? t("Not installed") : install?.state === 'running' ? t("Ready") : install?.state ? labelOf(INSTALL_STATE, install.state) : t("Checking…")}</span><span className="mt-1 block text-xs font-normal text-fg-muted">{t("Installation, GPU memory and service controls")}</span></summary>
     <div className="mt-4 space-y-3">
-      <p className="text-xs text-fg-faint">{t("Install once on your NVIDIA Docker host. Setup downloads and quantizes Breeze, and installs Whisper. Allow 30 GB of disk space during setup.")}</p>
+      <p className="text-xs text-fg-faint">{t("Install once on your NVIDIA Docker host. Setup builds and downloads the engines you choose. Allow 30 GB of disk space during setup.")}</p>
+      {install?.available && <VoiceEngines installed={install.choice} fresh={install.state==='absent'} busy={actionBusy||install.busy} hardware={hardware} picked={picked} onPick={setPicked} />}
       <div className="flex gap-2 flex-wrap">
-        {install?.available && <button disabled={actionBusy || install.busy || ['starting','running'].includes(install.state)} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage(install.state==='absent'?'install':'start')}>{install.state==='absent'?t("Install voice"):install.state==='failed'?t("Retry setup"):t("Start voice")}</button>}
+        {install?.available && rebuild && <button disabled={actionBusy || install.busy} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage('install',picked)}>{t("Rebuild with these engines")}</button>}
+        {install?.available && !rebuild && <button disabled={actionBusy || install.busy || ['starting','running'].includes(install.state)} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent disabled:opacity-40" onClick={()=>manage(install.state==='absent'?'install':'start',install.state==='absent'?picked??undefined:undefined)}>{install.state==='absent'?t("Install voice"):install.state==='failed'?t("Retry setup"):t("Start voice")}</button>}
         {install?.available && ['starting','running'].includes(install.state) && <button disabled={actionBusy} className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={()=>manage('stop')}>{t("Stop · release VRAM")}</button>}
         {install?.state==='running' && <button disabled={busy} className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent" onClick={async()=>{setBusy(true);try{setConfig(await api.connectVoice());window.dispatchEvent(new Event('voice-config-changed'));}catch(e){onError((e as Error).message);}finally{setBusy(false);}}}>{t("Use installed voice")}</button>}
       </div>
@@ -102,7 +115,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     </div>
       <div className="mt-4 border-t border-line pt-4 space-y-2">
     <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.lazyLoad!==false} onChange={e=>update({lazyLoad:e.target.checked})}/>{t("Lazy load · release GPU memory when voice is idle")}</label>
-    <p className="text-xs text-fg-faint">{t("Load on connection and release memory after the last session ends. Turn off to keep Breeze ready for faster starts.")}</p>
+    <p className="text-xs text-fg-faint">{t("Load on connection and release memory after the last session ends. Turn off to keep the speech model ready for faster starts.")}</p>
       </div>
     </details>
     <details className="rounded-xl border border-line p-4">

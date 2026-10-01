@@ -262,7 +262,8 @@ See [The agent's browser](/guide/browser).
 | | |
 | --- | --- |
 | `GET /api/voice` · `PUT /api/voice` | The voice settings, including the speaking instructions in use and the built-in ones to go back to |
-| `GET /api/voice/install` · `POST /api/voice/install` · `/start` · `/stop` | The managed voice container and its readiness |
+| `GET /api/voice/install` · `POST /api/voice/install` · `/start` · `/stop` | The managed voice container and its readiness, with the `choice` it was built for. `POST /api/voice/install` takes `{ tts, asr, asrModel }` — `tts` is `breeze` or `chatterbox`; `asr` and `asrModel` are `whisper` with `base` or `small`, or `qwen3-asr` with `0.6b` or `1.7b` — and builds for it, recreating an installed container that has other engines. Without a body it keeps the installed engines, or picks the combination that fits the GPU. A choice the GPU cannot hold at all is refused after the check, in the status `error`; `400` for a combination that does not exist |
+| `GET /api/voice/hardware` | The GPUs the voice container can use (`gpus`, each with `index`, `name`, `totalMiB`, `freeMiB`; `source` says how they were read), the one it would take (`selected`), the memory kept free (`reserveMiB`) and the combination that fits (`suggestion`). No GPU and no tool is `gpus: []`, not an error |
 | `POST /api/voice/connect` | Use the managed services in the settings |
 | `GET/POST /api/voice/presets` · `GET …/presets/:id/audio` · `PATCH …/presets/:id` · `DELETE …/presets/:id` | Saved voices. `PATCH` takes `{ instruction }`, the voice description (1–1000 characters), and returns the voice; 404 for an unknown voice |
 | `POST /api/sessions/:id/voice/connection` | Take or give back a lease on the voice services |

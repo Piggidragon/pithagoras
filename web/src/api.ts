@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import type { VoiceChoice } from "../../server/src/voice-engines";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
@@ -278,7 +279,9 @@ export interface VoiceConfig {
   enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox"; sttModel?: string; exaggeration?: number;
 }
 
-export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; }
+export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; }
+/** The GPUs the voice container can use, as nvidia-smi reports them, and the combination that fits the one it would take. */
+export interface VoiceHardware { gpus: { index: number; name: string; totalMiB: number | null; freeMiB: number | null }[]; source: string; error: string; selected: number | null; reserveMiB: number; suggestion: VoiceChoice; }
 export const api = {
   listFiles: (sessionId: string, dir: string) =>
     json<{ path: string; entries: FileEntry[]; truncated: boolean }>(
@@ -337,7 +340,9 @@ export const api = {
   archiveDownloadUrl: (sessionId: string, dir = "") =>
     `/api/sessions/${sessionId}/archive${dir ? `?path=${encodeURIComponent(dir)}` : ""}`,
   voiceInstallStatus: () => json<VoiceInstallStatus>('/api/voice/install'),
-  voiceAction: (action: 'install' | 'start' | 'stop') => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST'}),
+  // `choice` is for install: the engines to build for. Without it an install keeps what is installed, or picks for the GPU.
+  voiceAction: (action: 'install' | 'start' | 'stop', choice?: VoiceChoice) => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST', ...(choice ? {body: JSON.stringify(choice)} : {})}),
+  voiceHardware: () => json<VoiceHardware>('/api/voice/hardware'),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
