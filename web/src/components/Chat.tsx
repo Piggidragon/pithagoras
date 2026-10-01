@@ -1672,9 +1672,13 @@ export function Chat({
         )}
 
         {(loading ? [] : visible).map((item, index) => {
-          const enter = arriving(item.id, hiddenHere + index) ? " chat-enter" : "";
+          const entering = arriving(item.id, hiddenHere + index);
+          // A row that came in while the chat was open is not one of those that are
+          // played in when it has loaded, whenever that second is still on (motion.css).
+          const live = (entered.current.at.get(item.id) ?? 0) > 0 ? " is-live" : "";
+          const enter = (entering ? " chat-enter" : "") + live;
           // What you said comes in from the corner the send button is in; what went wrong shakes (motion.css).
-          const mine = enter && item.kind === "user" ? " is-mine" : "";
+          const mine = entering && item.kind === "user" ? " is-mine" : "";
           if (item.kind === "user") {
             const { text, blocks } = splitContext(item.text);
             // Nothing but framing: the portal spoke, not a person. Drawing it as
@@ -1950,7 +1954,7 @@ export function Chat({
           return (
             <div
               key={item.id}
-              className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs${enter}${enter && item.tone === "error" ? " is-error" : ""} ${
+              className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs${enter}${entering && item.tone === "error" ? " is-error" : ""} ${
                 item.tone === "error"
                   ? "bg-danger/10 text-danger"
                   : item.tone === "warn"

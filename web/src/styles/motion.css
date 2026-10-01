@@ -98,7 +98,8 @@
 [data-motion="fancy"] .composer-menu > :nth-child(2) { animation-delay: .12s; }
 [data-motion="fancy"] .composer-menu > :nth-child(3) { animation-delay: .16s; }
 [data-motion="fancy"] .composer-menu > :nth-child(n+4) { animation-delay: .2s; }
-@keyframes fx-item-in { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
+/* From above: from below they would push the end of a list that scrolls past its padding, and make it scroll. */
+@keyframes fx-item-in { from { opacity: 0; translate: 0 -8px; } to { opacity: 1; translate: 0 0; } }
 [data-motion="fancy"] .ui-select-list { animation: fx-pop .34s var(--spring) both; }
 [data-motion="fancy"] .ui-select-list.is-above { animation-name: fx-pop-up; }
 @keyframes fx-pop { from { opacity: 0; transform: translateY(-10px) scale(.92); } to { opacity: 1; transform: none; } }
@@ -141,19 +142,21 @@
 /* ── A chat: opening it, and what is said in it ──
  * The last few messages come in one after another, from the bottom of the
  * window, whenever a chat has just loaded (Chat.tsx sets is-opening for
- * a second). Further up there is nothing to see in. */
-[data-motion="fancy"] .chat-list.is-opening > :not(.chat-empty, .chat-enter) { animation: fx-open .66s var(--spring) backwards; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(n+11):not(.chat-empty, .chat-enter) { animation: none; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(10):not(.chat-empty, .chat-enter) { animation-delay: 0ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(9):not(.chat-empty, .chat-enter) { animation-delay: 40ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(8):not(.chat-empty, .chat-enter) { animation-delay: 80ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(7):not(.chat-empty, .chat-enter) { animation-delay: 120ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(6):not(.chat-empty, .chat-enter) { animation-delay: 160ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(5):not(.chat-empty, .chat-enter) { animation-delay: 200ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(4):not(.chat-empty, .chat-enter) { animation-delay: 240ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(3):not(.chat-empty, .chat-enter) { animation-delay: 280ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(2):not(.chat-empty, .chat-enter) { animation-delay: 320ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(1):not(.chat-empty, .chat-enter) { animation-delay: 360ms; }
+ * a second). Further up there is nothing to see in. What has an entrance of
+ * its own (the empty state, a row that came in after the chat was open) is
+ * left out, for good: a name that changes with the class would play it again. */
+[data-motion="fancy"] .chat-list.is-opening > :not(.chat-empty, .chat-enter, .is-live) { animation: fx-open .66s var(--spring) backwards; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(n+11):not(.chat-empty, .chat-enter, .is-live) { animation: none; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(10):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 0ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(9):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 40ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(8):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 80ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(7):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 120ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(6):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 160ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(5):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 200ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(4):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 240ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(3):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 280ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(2):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 320ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(1):not(.chat-empty, .chat-enter, .is-live) { animation-delay: 360ms; }
 @keyframes fx-open { from { opacity: 0; transform: translateY(46px) scale(.95); filter: blur(7px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 /* The chat's name slides in from the side its row was on. */
 [data-motion="fancy"] .chat-title { animation: fx-title .6s var(--spring) backwards; }
@@ -211,12 +214,12 @@
 [data-motion="fancy"] .settings-page > :nth-child(5) { animation-delay: 160ms; }
 [data-motion="fancy"] .settings-page > :nth-child(n+6) { animation-delay: 200ms; }
 @keyframes fx-settings-in { from { opacity: 0; transform: translateX(-34px); filter: blur(4px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
-/* The rail's entries come after the dialog, from the left: while the dialog is new, not each time the rail is drawn again (a search ending). */
-[data-motion="fancy"] .is-fresh .rail-item { animation: fx-rail-item .5s var(--spring) .18s backwards; }
-[data-motion="fancy"] .is-fresh .rail-item:nth-child(2) { animation-delay: .22s; }
-[data-motion="fancy"] .is-fresh .rail-item:nth-child(3) { animation-delay: .26s; }
-[data-motion="fancy"] .is-fresh .rail-item:nth-child(4) { animation-delay: .30s; }
-[data-motion="fancy"] .is-fresh .rail-item:nth-child(n+5) { animation-delay: .34s; }
+/* The rail's entries come after the dialog, from the left: while the dialog is new, not each time the rail is drawn again (a search ending); the extensions' lines, which come when they have been asked for, have the list's own. */
+[data-motion="fancy"] .is-fresh :not(.stagger-in) > .rail-item { animation: fx-rail-item .5s var(--spring) .18s backwards; }
+[data-motion="fancy"] .is-fresh :not(.stagger-in) > .rail-item:nth-child(2) { animation-delay: .22s; }
+[data-motion="fancy"] .is-fresh :not(.stagger-in) > .rail-item:nth-child(3) { animation-delay: .26s; }
+[data-motion="fancy"] .is-fresh :not(.stagger-in) > .rail-item:nth-child(4) { animation-delay: .30s; }
+[data-motion="fancy"] .is-fresh :not(.stagger-in) > .rail-item:nth-child(n+5) { animation-delay: .34s; }
 @keyframes fx-rail-item { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: none; } }
 /* A switch's knob stretches under the finger and lands with a bounce. */
 [data-motion="fancy"] [role="switch"] > span { transition-duration: .3s; }

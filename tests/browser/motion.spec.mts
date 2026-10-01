@@ -553,3 +553,85 @@ test("the Stop button of voice mode is there at once when a run starts, and the 
   await expect(stop).toBeVisible();
   expect(await stop.evaluate((el) => [getComputedStyle(el).animationName, getComputedStyle(el).opacity])).toEqual(['none', '1']);
 });
+
+test('a row that comes in while a chat opens is not played in again when the opening second ends', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  await portal(page);
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await expect(page.locator('main .chat-list')).not.toHaveClass(/is-opening/);
+
+  // From the moment the other chat is drawn: a tool call 100 ms in, and another event at 850 ms, which is any draw.
+  const seen = page.evaluate(() => new Promise<[string, string, boolean]>((done) => {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const tool = (seq: number, id: string) => (window as any).emit('b', { seq, type: 'tool_execution_start', payload: { toolCallId: id, toolName: 'bash', args: { command: `echo ${id}` } } });
+    const timer = setInterval(async () => {
+      if (!document.querySelector('main .chat-list.is-opening')) return;
+      clearInterval(timer);
+      await wait(100);
+      tool(900, 'live-one');
+      await wait(750);
+      tool(901, 'live-two');
+      await wait(120);
+      const row = [...document.querySelectorAll('main .chat-list > [data-key]')].find((r) => r.textContent?.includes('live-one'))!;
+      const style = getComputedStyle(row);
+      done([style.animationName, style.opacity, !!document.querySelector('main .chat-list.is-opening')]);
+    }, 5);
+  }));
+  await row(page, 'Second chat').click();
+  const [name, opacity, opening] = await seen;
+  // Still in the opening second, and the row is there, not played in a second time.
+  expect(opening).toBe(true);
+  expect(name).not.toBe('fx-open');
+  expect(opacity).toBe('1');
+});
+
+test("Settings' extension pages come in once, not again when the dialog stops being new", async ({ page }) => {
+  await portal(page);
+  // Asked for as the dialog opens, answered a little after: they are the lines that come in with the list's own stagger.
+  await page.route('**/api/extensions', async (route) => {
+    await new Promise((r) => setTimeout(r, 400));
+    await route.fulfill({ json: { extensions: ['One', 'Two'].map((name) => ({ spec: `npm:ext-${name}`, name: `Ext ${name}`, version: '1', description: '', settings: [{ key: 'apiKey', value: '' }] })), settingsPath: '/p/settings.json' } });
+  });
+  await page.goto('/s/a');
+  await page.waitForTimeout(1500);
+  const names = page.evaluate(() => new Promise<string[]>((done) => {
+    const seen = new Set<string>();
+    const until = performance.now() + 2400;
+    const tick = () => {
+      for (const el of document.querySelectorAll('.rail-item')) if (el.textContent?.includes('Ext ')) seen.add(getComputedStyle(el).animationName);
+      if (performance.now() < until) requestAnimationFrame(tick);
+      else done([...seen]);
+    };
+    tick();
+  }));
+  await sidebar(page).getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('dialog').getByText('Ext One')).toBeVisible();
+  // One animation, from the start to the end of it: another name is another one, started over.
+  expect((await names).filter((n) => n !== 'none')).toHaveLength(1);
+});
+
+test('the options of a list that fits do not make it scroll while they come in', async ({ page }) => {
+  await portal(page);
+  await page.goto('/s/a');
+  await sidebar(page).getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'This browser' }).click();
+  const language = page.getByRole('combobox', { name: 'Language' });
+  await expect(language).toBeVisible();
+  await page.waitForTimeout(900);
+
+  await page.evaluate(() => {
+    const seen = ((window as any).taller = { most: 0 });
+    const until = performance.now() + 1200;
+    const tick = () => {
+      const list = document.querySelector('.ui-select-list');
+      if (list) seen.most = Math.max(seen.most, list.scrollHeight - list.clientHeight);
+      if (performance.now() < until) requestAnimationFrame(tick);
+    };
+    tick();
+  });
+  await language.click();
+  await expect(page.getByRole('listbox', { name: 'Language' })).toBeVisible();
+  await page.waitForTimeout(1300);
+  expect(await page.evaluate(() => (window as any).taller.most as number)).toBe(0);
+});
