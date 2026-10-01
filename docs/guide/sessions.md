@@ -124,6 +124,41 @@ If an edit's replacement is refused — the model is unreachable, say — the
 conversation is put back as it was, rather than left without the messages the
 edit meant to replace.
 
+## Pictures the agent makes
+
+With the [Images add-on](/guide/features#image-generation) on, a `generate_image`
+or `edit_image` call is not shown as a tool line but as the picture itself, from
+the moment it is asked for:
+
+- **While it is made**, a frame in the shape of the coming picture holds its
+  place: the size the agent asked for, or, for an edit, the shape of the picture
+  being changed, which is shown under the wait; a square when nothing says. It
+  says "Making a picture" or "Editing a picture" and, after a few seconds, how
+  long it has taken. Image endpoints do not report how far they are, so the
+  animation does not pretend to: a soft light drifts over the frame and a sheen
+  passes, and that is all.
+- **When it is there**, the picture fades in over the wait, in the same place.
+  Where the shape was right nothing under it moves; where it was not, the frame
+  takes the picture's own shape. A click opens the picture in a new tab.
+- **When it fails**, the frame says so quietly, with the reason in a line or
+  two — the endpoint's answer, a setting that was switched off — and the whole of
+  it under **Details**. A call that was cut off, because the run was stopped or
+  the portal restarted before the picture came back, says it was interrupted.
+- **The call itself** — the tool's name and what the agent gave it: the prompt,
+  the title, the size, the picture to change — is under **Details**, below the
+  picture.
+- **Opening a chat again** draws the pictures that were made at once, with no
+  fade, in the shape asked for; one whose file is gone from the folder says so.
+
+The movement is one of the [animations](/guide/interface#animations): with them
+switched off, or when your system asks for reduced motion, the frame is the same
+and still, with the same words, and the picture simply appears. Only a picture
+being made, or just arriving, moves, and only as layers of the frame slide —
+nothing is laid out again — so several in a long chat cost nothing once they
+are made. In
+[voice mode](/guide/voice) the card of such a call carries the same preview as a
+small tile.
+
 ## Drafts and what is running
 
 What you have typed into a chat's box and not sent is kept per chat, so half a

@@ -116,9 +116,11 @@ it. The picture is written to a `generated-images` folder inside the chat's
 folder — the one place the page serves pictures from — under a name the portal
 makes (`image-20261001-101500-a1b2c3.png`), never one the agent or the endpoint
 chose, and never over an existing file. Its answer is the picture's path and a
-title, the same as `show_image`'s, so the chat draws a thumbnail under the tool
-line and voice mode opens the Pictures window through the path `show_image`
-already has. The answer also carries a mark only this tool sets, and the page
+title, the same as `show_image`'s, so the chat draws the picture, in a preview
+that holds its place while it is made (see
+[Sessions](/guide/sessions#pictures-the-agent-makes)), and voice mode opens the
+Pictures window through the path `show_image` already has. The answer also
+carries a mark only this tool sets, and the page
 draws a `generate_image` result as a picture only with it: another extension's
 tool of the same name answers with paths of its own kind, and its results stay
 plain tool cards. A failure — nothing configured, the endpoint's error, a reply that is
