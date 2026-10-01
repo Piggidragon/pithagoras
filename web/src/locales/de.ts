@@ -1406,7 +1406,6 @@ const de: Locale = {
     "Glow": "Leuchten",
     "The halo and light around it": "Der Schein und das Licht um ihn herum",
     "Ribbons of light inside the orb": "Lichtbänder im Inneren des Orbs",
-    "Reset to default": "Auf Standard zurücksetzen",
     "Save avatar": "Avatar speichern",
     "Customize": "Anpassen",
     "Auto": "Automatisch",
