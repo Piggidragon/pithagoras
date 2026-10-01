@@ -211,9 +211,11 @@ What was decided for it:
   `photo-edited (3).png`, not `photo-edited-edited.png`.
 - **A failed edit leaves nothing behind.** The result is written only once the
   endpoint has answered with a real picture, and then as a new file is: beside its
-  place first, and put there whole. A failure — before the request, from the
-  endpoint, or in the answer — leaves no file and no `generated-images` folder
-  that was not there.
+  place first, and put there whole. A failure before the result is in hand —
+  a picture that is refused, the endpoint's error, an answer that is no picture —
+  leaves no file and no `generated-images` folder that was not there. (A disk
+  that fails while the result is being written leaves no file either, and at most
+  the empty folder.)
 - **Only a real picture, only from the chat's folder, and not too large.** The
   picture to change must be a PNG, JPEG, GIF or WebP by its first bytes,
   whatever it is called, and at most 25 MB — the limit the Files panel shows a
