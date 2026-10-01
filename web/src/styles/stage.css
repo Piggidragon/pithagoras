@@ -453,6 +453,8 @@ button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
   .voice-stage.is-docked .voice-tool-float span { display: block; font-size: 11px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .voice-stage.is-docked .voice-tool-float p { margin-top: 1px; font-size: 10px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .voice-stage.is-docked .voice-tool-float > div { min-width: 0; }
+  /* The note (how long a call has run, what came of it) takes the call's line: a third line made the card as tall as the ones it was shrunk from. */
+  .voice-stage.is-docked .voice-tool-float p:has(+ .voice-tool-note) { display: none; }
 }
 .voice-terminal-empty { color: #8f9bb0; font-family: system-ui, sans-serif; }
 

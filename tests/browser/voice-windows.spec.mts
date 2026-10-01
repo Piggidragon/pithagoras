@@ -466,6 +466,8 @@ test('on a phone the windows end above the dock, one or two of them, and the car
   // A card is a line or two, just above the dock, not a block over the terminal's output.
   const card = page.locator('.voice-tool-float').first();
   await expect(card).toBeVisible();
+  // A call that runs on counts its time after three seconds: the card must stay as small with that line as without.
+  await expect(card.locator('.voice-tool-note')).toBeVisible({ timeout: 8000 });
   await page.waitForTimeout(900);
   const c = await box(card);
   expect(c.height).toBeLessThan(48);
