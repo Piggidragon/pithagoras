@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { containerState, dockerAvailable, imagePresent, pullImage, request } from './docker.js';
 import { choiceFromKey, choiceKey, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, speechUrl, suggestChoice, ttsModel, whisperUrl as managedWhisperUrl, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
-import { decide, detectGpus, hostProbe, SMI_ARGS, type Detected, type Probe } from '../voice-gpu.js';
+import { NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, hostProbe, SMI_ARGS, type Detected, type Probe } from '../voice-gpu.js';
 
 export const CONTAINER = 'pithagoras-voice';
 export const IMAGE = 'nvidia/cuda:12.4.1-devel-ubuntu22.04';
@@ -46,7 +46,7 @@ export async function status(): Promise<ServiceStatus> {
   const choice = labels?.['pithagoras.addon'] === 'voice' ? choiceFromKey(labels['pithagoras.voice-recipe']) : undefined;
   const ready = state.running && (await Promise.all(healthUrls(choice ?? DEFAULT_CHOICE).map(healthy))).every(Boolean);
   const failed = !state.running && Boolean(detail?.body?.State?.ExitCode);
-  return { available: true, state: pending ? 'installing' : ready ? 'running' : state.running ? 'starting' : failed ? 'failed' : state.exists ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? detail?.body?.State?.Error || 'Voice setup or service exited. Review the log, then retry.' : ''), choice };
+  return { available: true, state: pending ? 'installing' : ready ? 'running' : state.running ? 'starting' : failed ? 'failed' : state.exists ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? explain(detail?.body?.State?.Error || 'Voice setup or service exited. Review the log, then retry.') : ''), choice };
 }
 /** Share loopback with the portal; no published host ports or gateway lookup. */
 export async function voiceNetworkMode(): Promise<string> {
@@ -119,10 +119,10 @@ async function installedContainer(): Promise<{ choice: VoiceChoice; gpuIndex?: n
 const dockerProbe: Probe = {
   name: 'docker',
   async run() {
-    if (!dockerAvailable()) throw new Error('Docker is unavailable');
-    if (!(await imagePresent(IMAGE))) throw new Error('the CUDA image is not downloaded yet');
+    if (!dockerAvailable()) throw new NoGpu('Docker is unavailable');
+    if (!(await imagePresent(IMAGE).catch(unanswered))) throw new Error('the CUDA image is not downloaded yet');
     const created = await checked<{ Id: string }>('POST', '/containers/create', { Image: IMAGE, Tty: true, Cmd: ['nvidia-smi', ...SMI_ARGS],
-      Labels: { 'pithagoras.addon': 'voice-probe' }, HostConfig: { DeviceRequests: [{ Driver: 'nvidia', Count: -1, Capabilities: [['gpu']] }] } });
+      Labels: { 'pithagoras.addon': 'voice-probe' }, HostConfig: { DeviceRequests: [{ Driver: 'nvidia', Count: -1, Capabilities: [['gpu']] }] } }).catch(unanswered);
     const id = created.body.Id;
     try {
       await checked('POST', `/containers/${id}/start`);
@@ -134,6 +134,8 @@ const dockerProbe: Probe = {
     } finally { await request('DELETE', `/containers/${id}?force=1`).catch(() => {}); }
   },
 };
+/** A Docker that does not answer at all, a socket error rather than a refusal, is no GPU either. */
+const unanswered = (e: unknown): never => { throw typeof (e as NodeJS.ErrnoException).code === 'string' ? new NoGpu('Docker did not answer') : e; };
 let probing: Promise<Detected> | undefined;
 /** One probe at a time: the page asks as it opens, and an install asks too. */
 function detect(): Promise<Detected> {
@@ -189,6 +191,8 @@ export async function install(requested?: VoiceChoice) {
         try {
           progress = 'Checking the GPU';
           const found = await detect();
+          // Nothing for Docker to give: say so before anything is created, not as what Docker answers to a start.
+          if (!found.gpus.length && found.checked) throw new Error(NO_GPU_MESSAGE);
           const decision = decide(wanted, found.gpus, { reserveMiB: reserveMiB(), preferredGpu: preferredGpu() });
           choice = decision.choice;
           // With one card Docker's own pick is the card; only a choice among several needs naming.
@@ -207,7 +211,7 @@ export async function install(requested?: VoiceChoice) {
         if (!gpus.length || gpus.some(g => g.index === asked)) plan = { gpuIndex: asked };
       }
       await ensureContainer(script, choice ?? DEFAULT_CHOICE, plan);
-    } catch (e) { error = (e as Error).message; }
+    } catch (e) { error = explain((e as Error).message); }
     finally { pending = false; }
   })();
 }

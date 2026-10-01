@@ -4,7 +4,7 @@ import type { VoiceHardware } from "../api";
 import { formatNumber, t } from "../i18n";
 import { btnCls } from "./SettingsUi";
 
-const gb = (mib: number) => formatNumber(mib / 1024, { maximumFractionDigits: 1 });
+const gib = (mib: number) => formatNumber(mib / 1024, { maximumFractionDigits: 1 });
 const asrKey = (c: Pick<VoiceChoice, "asr" | "asrModel">) => `${c.asr}:${c.asrModel}`;
 
 /**
@@ -22,7 +22,7 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked, onPick 
   // The installed choice is running there: the memory it holds is what the card shows as taken, so a verdict on it would blame the service itself, and it is what the card is already used for.
   const kept = !!installed && picked === null;
   const fit = fitOn(shown, gpu, hardware?.reserveMiB ?? 0);
-  const need = gb(vramNeeded(shown));
+  const need = gib(vramNeeded(shown));
   const suggestion = hardware?.suggestion;
   const pick = (patch: Partial<VoiceChoice>) => {
     const next = { ...shown, ...patch };
@@ -43,18 +43,18 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked, onPick 
       <Select aria-label={t("Speech recognition engine")} size="sm" className="mt-1.5 w-full" disabled={auto || busy} value={asrKey(shown)}
         onChange={(key) => { const o = ASR_MODELS.find((m) => asrKey({ asr: m.asr, asrModel: m.model }) === key)!; pick({ asr: o.asr, asrModel: o.model }); }}
         options={ASR_MODELS.map((o) => ({ value: asrKey({ asr: o.asr, asrModel: o.model }), label: o.label,
-          hint: o.vramMiB ? t("On the GPU, about {gb} GB", { gb: gb(o.vramMiB) }) : t("On the CPU, no GPU memory") }))} /></div>
+          hint: o.vramMiB ? t("On the GPU, about {gib} GiB", { gib: gib(o.vramMiB) }) : t("On the CPU, no GPU memory") }))} /></div>
     {hardware && (gpu
-      ? <p className="text-xs text-fg-faint">{gpu.totalMiB === null ? t("GPU: {name}", { name: gpu.name }) : t("GPU: {name}, {total} GB, {free} GB free", { name: gpu.name, total: gb(gpu.totalMiB), free: gb(gpu.freeMiB ?? 0) })}</p>
-      : fresh && <p className="text-xs text-fg-faint">{t("No GPU could be read yet. It is checked while installing, and you are told if your choice does not fit.")}</p>)}
+      ? <p className="text-xs text-fg-faint">{gpu.totalMiB === null ? t("GPU detected: {name}", { name: gpu.name }) : t("GPU detected: {name}, {total} GiB, {free} GiB free", { name: gpu.name, total: gib(gpu.totalMiB), free: gib(gpu.freeMiB ?? 0) })}</p>
+      : fresh && <p className="text-xs text-fg-faint">{hardware.checked ? t("No GPU detected. Voice needs an NVIDIA GPU that Docker can use.") : t("GPU not checked yet. It is checked while installing, and you are told if your choice does not fit.")}</p>)}
     {auto
       ? <p className="text-xs text-fg-faint">{gpu && suggestion
         ? t("Suggested for this GPU: {tts} with {asr}.", { tts: TTS_ENGINES[suggestion.tts].label, asr: asrOption(suggestion)?.label ?? suggestion.asrModel })
         : t("The install picks what fits your GPU.")}</p>
       : gpu && !kept && <p role={fit === "too-large" ? "alert" : "status"} className={`text-xs ${fit === "fits" ? "text-fg-faint" : fit === "tight" ? "text-warn" : "text-red-400"}`}>
-        {fit === "too-large" ? t("Needs about {gb} GB of GPU memory, more than this GPU has.", { gb: need })
-          : fit === "tight" ? t("Needs about {gb} GB of GPU memory. The card is big enough, but other programs use part of it right now.", { gb: need })
-            : t("Needs about {gb} GB of GPU memory. Fits.", { gb: need })}
+        {fit === "too-large" ? t("Needs about {gib} GiB of GPU memory, more than this GPU has.", { gib: need })
+          : fit === "tight" ? t("Needs about {gib} GiB of GPU memory. The card is big enough, but other programs use part of it right now.", { gib: need })
+            : t("Needs about {gib} GiB of GPU memory. Fits.", { gib: need })}
         {fit === "too-large" && suggestion && !sameChoice(suggestion, shown) && <> <button type="button" className={btnCls} onClick={() => onPick(installed && sameChoice(suggestion, installed) ? null : suggestion)}>{t("Use the suggestion")}</button></>}
       </p>}
     {installed && picked && <p className="text-xs text-fg-faint">{t("Switching engines recreates the voice container. Downloaded models are kept.")}</p>}

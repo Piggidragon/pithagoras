@@ -196,18 +196,19 @@ The page and the installer estimate the GPU memory each combination needs, from 
 
 | Model | About |
 | --- | --- |
-| Breeze | 4.5 GB |
-| Chatterbox | 2.9 GB |
-| Qwen3-ASR 0.6B | 1.4 GB |
-| Qwen3-ASR 1.7B | 2.5 GB |
+| Breeze | 4.5 GiB |
+| Chatterbox | 2.9 GiB |
+| Qwen3-ASR 0.6B | 1.4 GiB |
+| Qwen3-ASR 1.7B | 2.5 GiB |
 
 These are estimates, not guarantees. A combination **fits** when the GPU has that much free now, is **tight** when the card is big enough but other programs hold part of it right now (the models load only when voice is used, so it can still work), and does **not fit** when the card is smaller than the combination needs.
 
-Before installing, Pithagoras reads the GPU with `nvidia-smi`. A portal in a container has no `nvidia-smi` of its own, so once the CUDA image is downloaded it asks a throwaway container of that image; before that the page says it cannot read a GPU yet. At install time it checks again:
+Before installing, Pithagoras reads the GPU with `nvidia-smi`. A portal in a container has no `nvidia-smi` of its own, so once the CUDA image is downloaded it asks a throwaway container of that image. The **Speech engines** block then says **GPU detected** with its name and memory, or **No GPU detected**; before anything could be asked it says **GPU not checked yet**. A host without `nvidia-smi`, without an NVIDIA runtime for Docker, with a driver that finds no device, or with a Docker that does not answer, has no GPU for voice: that is an answer, not an error. At install time it checks again:
 
 - With **Choose for me**, it picks the best combination that fits: Breeze, and the largest of Whisper base, Qwen3-ASR 0.6B and 1.7B that fits next to it; Chatterbox only when Breeze does not fit. It writes what it found as the first line of the setup log.
 - With your own pick, it keeps it, and refuses one the card cannot hold at all, naming the combination that would fit. A tight pick installs, with that noted in the log.
-- If it cannot read a GPU at all, it installs your pick unchecked and Docker has the last word.
+- If the check finds that there is no GPU Docker can use, it stops before it creates anything, with one sentence on what is missing: install the NVIDIA Container Toolkit and restart Docker, or run voice on a host that has a GPU. A Docker that fails to start the container for the same reason is told that way too, not in its own words.
+- If it cannot tell at all (for instance the check itself failed for another reason), it installs your pick unchecked and Docker has the last word.
 
 With several GPUs it uses the one with the most memory free and gives the container that one. When the container is recreated later with the engines it has, for instance after a portal update, it stays on that card. Settings on the portal change this, as in the multilingual Compose service. Put them in `.env` (the shipped Compose files and the Portainer stack pass both on to the portal) or set them in the portal's environment:
 
@@ -310,7 +311,7 @@ Run the socket `_ping` check above. Verify the mount and process permissions. So
 :::
 
 ::: details NVIDIA driver/device error
-Run the CUDA `docker run --gpus all` check. Fix host driver, toolkit or passthrough before retrying Voice.
+Run the CUDA `docker run --gpus all` check. Fix host driver, toolkit or passthrough before retrying Voice. Voice has no CPU-only mode: on a host without an NVIDIA GPU that Docker can use, the page says **No GPU detected**, and an install stops with the sentence that says what to install.
 :::
 
 ::: details Setup stays at Starting

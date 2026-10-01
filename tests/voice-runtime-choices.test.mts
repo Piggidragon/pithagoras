@@ -17,6 +17,9 @@ const smi = path.join(dir, 'nvidia-smi');
 const smiOutput = path.join(dir, 'smi-output');
 writeFileSync(smi, `#!/bin/sh\ncat "${smiOutput}"\n`);
 chmodSync(smi, 0o755);
+const noDevices = path.join(dir, 'nvidia-smi-no-devices');
+writeFileSync(noDevices, '#!/bin/sh\necho "No devices were found" >&2\nexit 6\n');
+chmodSync(noDevices, 0o755);
 /** What the host's nvidia-smi prints, or null for a host that has none. */
 const hostGpus = (output: string | null) => {
   if (output === null) process.env.NVIDIA_SMI = path.join(dir, 'no-such-nvidia-smi');
@@ -27,6 +30,11 @@ let container: any = null;
 let portalId = 'portal-one';
 let dockerGpus: string | null = null;   // what nvidia-smi inside the CUDA image prints; null: no GPU runtime
 let imageThere = true;
+// How Docker fails a container that wants a GPU on a host that has none for it: the daemon's own words.
+const NO_RUNTIME = 'could not select device driver "nvidia" with capabilities: [[gpu]]';
+let noGpuRuntime = false;               // making the container works, starting one that wants a GPU does not
+let probeError: string | null = null;   // an unrelated failure of the probe container
+let hangUp = false;                     // the daemon drops the probe's connection
 let calls: { method: string; url: string; body: any }[] = [];
 const server = http.createServer(async (req, res) => {
   let raw = ''; for await (const c of req) raw += c;
@@ -39,9 +47,12 @@ const server = http.createServer(async (req, res) => {
   if (url.startsWith('/images/')) { res.statusCode = imageThere ? 200 : 404; return res.end('{}'); }
   // The throwaway container that reads nvidia-smi inside the image.
   if (url === '/containers/create') {
-    if (dockerGpus === null) { res.statusCode = 500; return res.end(JSON.stringify({ message: 'could not select device driver "nvidia" with capabilities: [[gpu]]' })); }
+    if (hangUp) return req.socket.destroy();
+    if (probeError) { res.statusCode = 500; return res.end(JSON.stringify({ message: probeError })); }
+    if (dockerGpus === null) { res.statusCode = 500; return res.end(JSON.stringify({ message: NO_RUNTIME })); }
     return res.end(JSON.stringify({ Id: 'probe-1' }));
   }
+  if ((url === '/containers/probe-1/start' || url === '/containers/pithagoras-voice/start') && noGpuRuntime) { res.statusCode = 500; return res.end(JSON.stringify({ message: NO_RUNTIME })); }
   if (url === '/containers/probe-1/wait') return res.end(JSON.stringify({ StatusCode: 0 }));
   if (url.startsWith('/containers/probe-1/logs')) return res.end(dockerGpus ?? '');
   if (url.includes('/stop?')) container.State.Running = false;
@@ -61,8 +72,9 @@ after(async () => {
 });
 const voice = await import('../server/src/extensions/voice-service.js');
 const { DEFAULT_CHOICE } = await import('../server/src/voice-engines.js');
+const { NO_GPU_MESSAGE } = await import('../server/src/voice-gpu.js');
 
-const reset = () => { portalId = 'portal-one'; container = null; dockerGpus = null; imageThere = true; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
+const reset = () => { portalId = 'portal-one'; container = null; dockerGpus = null; imageThere = true; noGpuRuntime = false; probeError = null; hangUp = false; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
 const settle = async () => { for (let n = 0; n < 200 && (await voice.status()).busy; n++) await new Promise(r => setTimeout(r, 10)); };
 const created = () => calls.filter(c => c.url === '/containers/create?name=pithagoras-voice');
 const GPU = (index: number, total: number, free: number) => `${index}, Test GPU ${index}, ${total}, ${free}\n`;
@@ -137,18 +149,73 @@ test('a choice the GPU cannot hold is refused with what would fit, and nothing i
   assert.equal(created().length, 1);
 });
 
-test('without any GPU reading the choice is installed unchecked, and Docker has the last word', async () => {
-  reset(); hostGpus(null);
-  const none = await voice.hardware();
-  assert.deepEqual([none.gpus, none.source, none.suggestion, none.selected], [[], 'none', DEFAULT_CHOICE, null]);
-  assert.match(none.error, /host: .*ENOENT.*; docker: could not select device driver/);
+test('where the GPU cannot be told, the choice is installed unchecked and Docker has the last word', async () => {
+  reset(); hostGpus(null); probeError = 'no space left on device';
+  const unknown = await voice.hardware();
+  assert.deepEqual([unknown.gpus, unknown.source, unknown.checked, unknown.suggestion, unknown.selected], [[], 'none', false, DEFAULT_CHOICE, null]);
+  assert.match(unknown.error, /host: nvidia-smi was not found; docker: no space left on device/);
   await voice.install({ tts: 'chatterbox', asr: 'whisper', asrModel: 'small' });
   await settle();
   assert.equal(created().length, 1);
   assert.match(env(created()[0].body).VOICE_PLAN, /^No GPU could be read here; installing Chatterbox speech with Whisper small unchecked\.$/);
-  // Before the image is there, the probe does not wait for it.
+  // Before the image is there, the probe does not wait for it, and that is not an answer either.
   reset(); hostGpus(null); imageThere = false;
-  assert.match((await voice.hardware()).error, /docker: the CUDA image is not downloaded yet/);
+  const early = await voice.hardware();
+  assert.match(early.error, /docker: the CUDA image is not downloaded yet/);
+  assert.equal(early.checked, false);
+});
+
+test('no GPU for Docker is "no GPU", not an error, however Docker or the driver says so', async () => {
+  const asked = { tts: 'breeze', asr: 'whisper', asrModel: 'base' } as const;
+  const refused = async (why: string) => {
+    const found = await voice.hardware();
+    assert.deepEqual([found.gpus, found.checked, found.selected, found.suggestion], [[], true, null, DEFAULT_CHOICE], why);
+    assert.doesNotMatch(JSON.stringify(found), /could not select device driver|nvidia-container|ECONN/, why);
+    // An install is refused in one plain sentence, before a container is made, whether it names engines or leaves them to the check.
+    for (const choice of [asked, undefined]) {
+      await voice.install(choice);
+      await settle();
+      const state = await voice.status();
+      assert.equal(state.error, NO_GPU_MESSAGE, why);
+      assert.equal(state.state, 'absent', why);
+    }
+    assert.equal(created().length, 0, why);
+    assert.ok(!calls.some(c => c.url.includes('probe-1') && c.method === 'DELETE') || calls.some(c => c.method === 'DELETE' && c.url.startsWith('/containers/probe-1')), why);
+  };
+  // Docker refuses the probe as it is made, or as it is started, which is where the daemon says it.
+  reset(); hostGpus(null); dockerGpus = null;
+  await refused('refused at create');
+  reset(); hostGpus(null); dockerGpus = ''; noGpuRuntime = true;
+  await refused('refused at start');
+  assert.ok(calls.some(c => c.method === 'DELETE' && c.url.startsWith('/containers/probe-1')), 'the probe container is removed again');
+  // The daemon does not answer at all.
+  reset(); hostGpus(null); hangUp = true;
+  await refused('no answer');
+  // The driver is there and finds no device.
+  reset(); process.env.NVIDIA_SMI = noDevices; dockerGpus = null;
+  await refused('no devices');
+});
+
+test('a GPU that Docker cannot hand on is told in one plain sentence, not as the daemon words it', async () => {
+  // The host sees a card, but Docker has no NVIDIA runtime: the container is made and cannot start.
+  reset(); hostGpus(GPU(0, 12288, 11000)); noGpuRuntime = true;
+  await voice.install();
+  await settle();
+  assert.equal(created().length, 1);
+  const state = await voice.status();
+  assert.equal(state.error, NO_GPU_MESSAGE);
+  assert.doesNotMatch(JSON.stringify(state), /could not select device driver/);
+  // A container that was made and exited with Docker's own words is shown the same way.
+  reset(); hostGpus(GPU(0, 12288, 11000));
+  container = { Config: { Labels: { 'pithagoras.addon': 'voice' } }, HostConfig: { NetworkMode: 'container:portal-one' }, State: { Running: false, ExitCode: 128, Error: `failed to create task for container: ${NO_RUNTIME}` } };
+  await voice.stop();   // the install's own error is gone; what is left is what Docker says of the container
+  container.State.Running = false;
+  const failed = await voice.status();
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.error, NO_GPU_MESSAGE);
+  // Anything else Docker says is left as it is.
+  container.State.Error = 'port is already allocated';
+  assert.equal((await voice.status()).error, 'port is already allocated');
 });
 
 test('a container made before engines could be chosen keeps its engines through start and through a restating of the same choice', async () => {
@@ -201,7 +268,7 @@ test('VOICE_GPU decides the card of a recreated container, and of one installed 
   assert.equal((await voice.status()).state, 'installing');
   await settle();
   assert.deepEqual(created()[0].body.HostConfig.DeviceRequests, [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }]);
-  reset(); hostGpus(null);
+  reset(); hostGpus(null); probeError = 'no space left on device';
   process.env.VOICE_GPU = '1';
   await voice.install({ tts: 'chatterbox', asr: 'whisper', asrModel: 'base' });
   await settle();

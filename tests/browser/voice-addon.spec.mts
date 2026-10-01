@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 // The engine choice asks for the GPU as the page opens; the tests that are about something else get none to read.
-test.beforeEach(async({page})=>{await page.route('**/api/voice/hardware',r=>r.fulfill({json:{gpus:[],source:'none',error:'',selected:null,reserveMiB:0,suggestion:{tts:'breeze',asr:'whisper',asrModel:'base'}}}));});
+test.beforeEach(async({page})=>{await page.route('**/api/voice/hardware',r=>r.fulfill({json:{gpus:[],source:'none',error:'',checked:false,selected:null,reserveMiB:0,suggestion:{tts:'breeze',asr:'whisper',asrModel:'base'}}}));});
 test('settings install progress, ready connection, and stop',async({page})=>{
  let state='absent'; const actions:string[]=[];
  const config={enabled:false,whisperUrl:'http://127.0.0.1:8178/inference',breezeUrl:'http://127.0.0.1:7860/v1/audio/speech',instruction:'Clear speech',voice:'design',runtime:'breeze',language:'auto',cfgScale:4};
@@ -133,8 +133,9 @@ test('saving other voice settings does not pin the built-in text of an older por
  expect(puts[1].responseInstructions).toBe('Answer in one word.');
 });
 
-// A card with 6 GB, 5 GB of it free: the small recognition model fits next to Breeze with room to spare, the large one does not fit at all.
-const hardware = (gpus: any[]) => ({ gpus, source: 'host', error: '', selected: gpus.length ? 0 : null, reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } });
+// A card with 6 GiB, 5 GiB of it free: the small recognition model fits next to Breeze with room to spare, the large one does not fit at all.
+// `checked` is whether the check could tell: with no GPU listed, a probe that ran and found none, or nothing asked yet.
+const hardware = (gpus: any[], checked = gpus.length > 0) => ({ gpus, source: 'host', error: '', checked, selected: gpus.length ? 0 : null, reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } });
 const card = { index: 0, name: 'Test GPU', totalMiB: 6144, freeMiB: 5000 };
 const config = { enabled: false, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4 };
 
@@ -149,7 +150,7 @@ test('engine choice: the GPU is shown, the install picks for it by default, and 
  });
  await page.goto('/tests/voice-addon.html');
  await page.locator('summary').filter({hasText:'Voice service'}).click();
- await expect(page.getByText('GPU: Test GPU, 6 GB, 4.9 GB free')).toBeVisible();
+ await expect(page.getByText('GPU detected: Test GPU, 6 GiB, 4.9 GiB free')).toBeVisible();
  // Left to the install, the engines are the suggestion and cannot be changed by accident.
  const auto=page.getByRole('checkbox',{name:'Choose for me, based on my GPU'});
  await expect(auto).toBeChecked();
@@ -160,16 +161,16 @@ test('engine choice: the GPU is shown, the install picks for it by default, and 
  await auto.uncheck();
  await recognition.click();
  await expect(page.getByRole('option',{name:/Whisper small/})).toContainText('On the CPU, no GPU memory');
- await expect(page.getByRole('option',{name:/Qwen3-ASR 1\.7B/})).toContainText('On the GPU, about 2.5 GB');
+ await expect(page.getByRole('option',{name:/Qwen3-ASR 1\.7B/})).toContainText('On the GPU, about 2.5 GiB');
  await page.getByRole('option',{name:/Qwen3-ASR 1\.7B/}).click();
  // More than the card has: flagged, with the way back to what fits.
- await expect(page.getByRole('alert').filter({hasText:'Needs about 7 GB of GPU memory, more than this GPU has.'})).toBeVisible();
+ await expect(page.getByRole('alert').filter({hasText:'Needs about 7 GiB of GPU memory, more than this GPU has.'})).toBeVisible();
  await page.getByRole('button',{name:'Use the suggestion'}).click();
  await expect(recognition).toContainText('Qwen3-ASR 0.6B');
- await expect(page.getByText('The card is big enough, but other programs use part of it right now.')).toContainText('Needs about 5.9 GB');
+ await expect(page.getByText('The card is big enough, but other programs use part of it right now.')).toContainText('Needs about 5.9 GiB');
  await synthesis.click();
  await page.getByRole('option',{name:/Chatterbox/}).click();
- await expect(page.getByText('Needs about 4.3 GB of GPU memory. Fits.')).toBeVisible();
+ await expect(page.getByText('Needs about 4.3 GiB of GPU memory. Fits.')).toBeVisible();
  await page.screenshot({path:'/tmp/pithagoras-voice-engines.png'});
  await page.getByRole('button',{name:'Install voice',exact:true}).click();
  await expect.poll(()=>posts.length).toBe(1);
@@ -191,7 +192,7 @@ test('engine choice: left to the install, nothing is sent with it',async({page})
  await page.goto('/tests/voice-addon.html');
  await page.locator('summary').filter({hasText:'Voice service'}).click();
  // No GPU can be read from here: said so, with what happens instead.
- await expect(page.getByText('No GPU could be read yet.')).toBeVisible();
+ await expect(page.getByText('GPU not checked yet.')).toBeVisible();
  await expect(page.getByText('The install picks what fits your GPU.')).toBeVisible();
  await page.getByRole('button',{name:'Install voice',exact:true}).click();
  await expect.poll(()=>posts.length).toBe(1);
@@ -263,7 +264,7 @@ test('engine choice: an installed service is shown on its own card and is not ju
  await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'running',busy:false,progress:'',error:'',choice:{tts:'breeze',asr:'qwen3-asr',asrModel:'1.7b'}}}));
  await page.goto('/tests/voice-addon.html');
  await page.locator('summary').filter({hasText:'Voice service'}).click();
- await expect(page.getByText('GPU: Test GPU B, 12 GB, 4.9 GB free')).toBeVisible();
+ await expect(page.getByText('GPU detected: Test GPU B, 12 GiB, 4.9 GiB free')).toBeVisible();
  await expect(page.getByRole('combobox',{name:'Speech recognition engine'})).toContainText('Qwen3-ASR 1.7B');
  // Running there: no warning that other programs use the card, and no red alert about its size.
  await expect(page.getByText('other programs use part of it')).toHaveCount(0);
@@ -272,5 +273,26 @@ test('engine choice: an installed service is shown on its own card and is not ju
  // Another pick is judged as soon as there is one.
  await page.getByRole('combobox',{name:'Speech synthesis engine'}).click();
  await page.getByRole('option',{name:/Chatterbox/}).click();
- await expect(page.getByText('Needs about 5.5 GB of GPU memory. The card is big enough, but other programs use part of it right now.')).toBeVisible();
+ await expect(page.getByText('Needs about 5.5 GiB of GPU memory. The card is big enough, but other programs use part of it right now.')).toBeVisible();
+});
+
+test('engine choice: a host with no GPU for Docker says "No GPU detected", and an install that Docker refuses gives one plain sentence',async({page})=>{
+ const plain='Voice needs an NVIDIA GPU that Docker can use, and none was found: install the NVIDIA Container Toolkit and restart Docker, or run voice on a host that has one.';
+ let state='absent',error='';
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ // A probe ran and found that Docker has no NVIDIA runtime: that is an answer, not a failure.
+ await page.route('**/api/voice/hardware',r=>r.fulfill({json:hardware([],true)}));
+ await page.route('**/api/voice',r=>r.fulfill({json:config}));
+ await page.route('**/api/voice/install',r=>{
+  if(r.request().method()==='POST'){error=plain;return r.fulfill({json:{ok:true}});}
+  return r.fulfill({json:{available:true,state,busy:false,progress:'',error}});
+ });
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ await expect(page.getByText('No GPU detected. Voice needs an NVIDIA GPU that Docker can use.')).toBeVisible();
+ await expect(page.getByText('GPU not checked yet.')).toHaveCount(0);
+ await expect(page.getByText('could not select device driver')).toHaveCount(0);
+ await page.getByRole('button',{name:'Install voice',exact:true}).click();
+ await expect(page.getByRole('alert').filter({hasText:plain})).toBeVisible();
+ await expect(page.getByText('could not select device driver')).toHaveCount(0);
 });

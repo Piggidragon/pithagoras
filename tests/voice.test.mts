@@ -329,7 +329,8 @@ test('the hardware check reports the GPUs and what it would suggest, and degrade
   assert.equal(none.status, 200);
   const empty = await none.json();
   assert.deepEqual([empty.gpus, empty.source, empty.selected, empty.suggestion], [[], 'none', null, { tts: 'breeze', asr: 'whisper', asrModel: 'base' }]);
-  assert.match(empty.error, /host: .*ENOENT.*; docker: Docker is unavailable/);
+  // No tool and no Docker is no GPU, said plainly.
+  assert.deepEqual([empty.checked, empty.error], [true, 'host: nvidia-smi was not found; docker: no GPU available']);
   delete process.env.NVIDIA_SMI;
 });
 

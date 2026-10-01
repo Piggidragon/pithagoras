@@ -22,26 +22,55 @@ export function parseGpus(output: string): Gpu[] {
 /** A way to read what nvidia-smi says. The portal may sit in a container without the tool, so there is more than one. */
 export interface Probe { name: string; run(): Promise<string> }
 
+/**
+ * The one sentence for a host where Docker cannot give a container a GPU, however Docker or the
+ * driver says so: no NVIDIA runtime, no driver loaded, no device. It is what the person reads.
+ */
+export const NO_GPU_MESSAGE = "Voice needs an NVIDIA GPU that Docker can use, and none was found: install the NVIDIA Container Toolkit and restart Docker, or run voice on a host that has one.";
+/** Docker's, nvidia-container-cli's and nvidia-smi's own words for there being no GPU to use. */
+const NO_GPU = /could not select device driver|nvidia-container-cli|nvidia-container-runtime|nvml error|driver not loaded|no devices were found|couldn't communicate with the nvidia driver|unknown or invalid runtime name: nvidia|no known gpu vendor/i;
+/** Does this error from Docker or nvidia-smi only say that there is no GPU? */
+export const isNoGpu = (message: string) => NO_GPU.test(message);
+/** What a person reads of an error out of Docker: the plain sentence when it only says there is no GPU, else as it came. */
+export const explain = (message: string) => isNoGpu(message) ? NO_GPU_MESSAGE : message;
+
+/** A probe's way of saying that it ran and found there is no GPU to use, as opposed to not being able to tell. */
+export class NoGpu extends Error {}
+
 /** nvidia-smi on the portal's own host; `NVIDIA_SMI` names another binary. */
 export const hostProbe: Probe = {
   name: "host",
   run: () => new Promise((resolve, reject) =>
-    execFile(process.env.NVIDIA_SMI || "nvidia-smi", SMI_ARGS, { timeout: 8000 }, (error, stdout) => error ? reject(error) : resolve(stdout))),
+    execFile(process.env.NVIDIA_SMI || "nvidia-smi", SMI_ARGS, { timeout: 8000 }, (error, stdout) => {
+      if (!error) return resolve(stdout);
+      // A portal in a container has no nvidia-smi: that says nothing about the GPUs.
+      reject((error as NodeJS.ErrnoException).code === "ENOENT" ? new Error("nvidia-smi was not found") : error);
+    })),
 };
 
-export interface Detected { gpus: Gpu[]; source: string; error: string }
+/**
+ * `checked` is whether the check could tell: GPUs were found, or a probe ran and found there are
+ * none. It is false while nothing could be asked yet, such as before the CUDA image is downloaded.
+ */
+export interface Detected { gpus: Gpu[]; source: string; error: string; checked: boolean }
 
-/** The first probe that finds a GPU wins. No GPU and no tool is an answer too, not a failure. */
+/** The first probe that finds a GPU wins. No GPU, no tool and no NVIDIA runtime are answers too, not failures. */
 export async function detectGpus(probes: readonly Probe[]): Promise<Detected> {
   const errors: string[] = [];
+  let none = false;
   for (const probe of probes) {
     try {
       const gpus = parseGpus(await probe.run());
-      if (gpus.length) return { gpus, source: probe.name, error: "" };
+      if (gpus.length) return { gpus, source: probe.name, error: "", checked: true };
+      none = true;
       errors.push(`${probe.name}: no GPU listed`);
-    } catch (e) { errors.push(`${probe.name}: ${(e as Error).message.split("\n")[0]}`); }
+    } catch (e) {
+      const message = (e as Error).message.split("\n")[0];
+      if (e instanceof NoGpu || isNoGpu((e as Error).message)) { none = true; errors.push(`${probe.name}: no GPU available`); }
+      else errors.push(`${probe.name}: ${message}`);
+    }
   }
-  return { gpus: [], source: "none", error: errors.join("; ") };
+  return { gpus: [], source: "none", error: errors.join("; "), checked: none };
 }
 
 const gib = (mib: number | null) => mib === null ? "unknown" : `${(mib / 1024).toFixed(1)} GiB`;

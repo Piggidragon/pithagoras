@@ -5,7 +5,7 @@ import {
   ASR_MODELS, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, choiceFromKey, choiceKey, endpoints, fitOn, healthUrls, parseChoice, pickGpu, serverConfig, suggestChoice, ttsModel, vramNeeded,
   type Gpu, type VoiceChoice,
 } from '../server/src/voice-engines.js';
-import { decide, detectGpus, parseGpus, type Probe } from '../server/src/voice-gpu.js';
+import { NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, type Probe } from '../server/src/voice-gpu.js';
 
 // Neutral cards: only the sizes matter.
 const card = (totalMiB: number | null, freeMiB: number | null = totalMiB, index = 0): Gpu => ({ index, name: `Test GPU ${index}`, totalMiB, freeMiB });
@@ -25,18 +25,46 @@ test('nvidia-smi output is read as one GPU per line, and what does not fit the s
   assert.deepEqual(parseGpus(''), []);
 });
 
-test('the first probe that finds a GPU wins, and no GPU and no tool is an answer, not a failure', async () => {
-  const fails: Probe = { name: 'host', run: async () => { throw new Error('spawn nvidia-smi ENOENT'); } };
+test('the first probe that finds a GPU wins, and no GPU and no tool are answers, not failures', async () => {
+  const fails: Probe = { name: 'host', run: async () => { throw new Error('nvidia-smi was not found'); } };
   const empty: Probe = { name: 'empty', run: async () => '\n' };
   const works: Probe = { name: 'docker', run: async () => '0, Test GPU A, 12288, 11000\n' };
   const found = await detectGpus([fails, works]);
-  assert.equal(found.source, 'docker');
-  assert.equal(found.gpus[0].totalMiB, 12288);
+  assert.deepEqual([found.source, found.checked, found.gpus[0].totalMiB], ['docker', true, 12288]);
+  // A probe that ran and listed nothing found that there is none.
   const none = await detectGpus([fails, empty]);
-  assert.deepEqual(none.gpus, []);
-  assert.equal(none.source, 'none');
-  assert.match(none.error, /host: spawn nvidia-smi ENOENT; empty: no GPU listed/);
-  assert.deepEqual((await detectGpus([])).gpus, []);
+  assert.deepEqual([none.gpus, none.source, none.checked], [[], 'none', true]);
+  assert.match(none.error, /host: nvidia-smi was not found; empty: no GPU listed/);
+  // Not being able to ask is not an answer: the tool is missing, or the image the probe needs is not there yet.
+  const unknown = await detectGpus([fails, { name: 'docker', run: async () => { throw new Error('the CUDA image is not downloaded yet'); } }]);
+  assert.deepEqual([unknown.gpus, unknown.checked], [[], false]);
+  assert.deepEqual(await detectGpus([]), { gpus: [], source: 'none', error: '', checked: false });
+});
+
+test('Docker and the driver saying there is no GPU is "no GPU", in whatever words they use', async () => {
+  const says = (message: string): Probe => ({ name: 'docker', run: async () => { throw new Error(message); } });
+  for (const message of [
+    'could not select device driver "nvidia" with capabilities: [[gpu]]',
+    'failed to create task for container: OCI runtime create failed: nvidia-container-cli: initialization error: nvml error: driver not loaded',
+    "Command failed: nvidia-smi --query-gpu=index\nNVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver. Make sure that the latest NVIDIA driver is installed and running.",
+    'No devices were found',
+    'unknown or invalid runtime name: nvidia',
+  ]) {
+    assert.equal(isNoGpu(message), true, message);
+    const found = await detectGpus([says(message)]);
+    assert.deepEqual([found.gpus, found.checked, found.error], [[], true, 'docker: no GPU available'], message);
+    // The person reads one sentence about what is missing and what to do, not the daemon's words.
+    assert.equal(explain(message), NO_GPU_MESSAGE);
+  }
+  assert.match(NO_GPU_MESSAGE, /NVIDIA Container Toolkit.*restart Docker/);
+  // A probe can say it outright, as when Docker does not answer.
+  assert.equal((await detectGpus([{ name: 'docker', run: async () => { throw new NoGpu('Docker did not answer'); } }])).checked, true);
+  // Anything else is left as it is, and is not an answer.
+  for (const message of ['no space left on device', 'port is already allocated']) {
+    assert.equal(isNoGpu(message), false);
+    assert.equal(explain(message), message);
+    assert.deepEqual([(await detectGpus([says(message)])).checked, (await detectGpus([says(message)])).error], [false, `docker: ${message}`]);
+  }
 });
 
 test('a choice fits when the GPU has room now, is tight when only the card is big enough, and is too large otherwise', () => {
