@@ -1,0 +1,28 @@
+/* The picture viewer (components/ImageViewer.tsx): a layer over the whole
+   window, whatever is docked or full-screen behind it. The dimming is shell.css's
+   (.ui-backdrop); here are the picture's own rules. Opening and closing move
+   as little as every dialog does, and step aside for prefers-reduced-motion;
+   with the Animations switch on the picture swings up out of the page like a
+   dialog does (motion.css has the others of that kind) and the whole viewer
+   sinks when it closes (motion.ts, "dialog"). */
+
+/* A finger on the viewer is the viewer's: the picture is pinched and moved by
+   use-pan-zoom.ts, and the page behind neither scrolls nor zooms with it. */
+.image-viewer { overscroll-behavior: contain; touch-action: none; }
+.image-viewer-stage { touch-action: none; user-select: none; -webkit-user-select: none; }
+/* Laid out at its own size and put in place with a transform, never by changing its width: moving and zooming cost the page nothing to lay out. */
+.image-viewer-img { position: absolute; left: 0; top: 0; max-width: none; max-height: none; transform-origin: 0 0; cursor: zoom-in; -webkit-user-drag: none; will-change: transform; }
+.image-viewer-stage.is-zoomed .image-viewer-img { cursor: grab; }
+
+.image-viewer-frame { animation: viewer-in .26s var(--ease-out) both; }
+@keyframes viewer-in { from { scale: .965; translate: 0 8px; } to { scale: 1; translate: 0 0; } }
+
+[data-motion="fancy"] .image-viewer-frame { transform-origin: 50% 60%; animation: fx-viewer-in .5s var(--spring) both; }
+@keyframes fx-viewer-in {
+  from { transform: perspective(1100px) translateY(36px) rotateX(9deg) scale(.86); }
+  to { transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-viewer-frame { animation: none; }
+}
