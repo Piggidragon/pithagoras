@@ -25,6 +25,108 @@ test('settings install progress, ready connection, and stop',async({page})=>{
  await page.screenshot({path:'/tmp/pithagoras-voice-addon.png'});
 });
 
+// The saved settings the install overwrote, as the portal puts them back, and the page that has to show them.
+const uninstallPage = async (page: any, state = 'running') => {
+ let status = state, connected = false, failure = ''; const requests: any[] = [];
+ let config: any = { enabled: true, whisperUrl: 'http://127.0.0.1:7862/v1/audio/transcriptions', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'audio-cpp', sttModel: 'qwen3-asr', language: 'auto' };
+ await page.route('**/api/voice/presets', (r: any) => r.fulfill({ json: [] }));
+ await page.route('**/api/voice', (r: any) => r.fulfill({ json: config }));
+ await page.route('**/api/voice/install', (r: any) => r.fulfill({ json: { available: true, state: status, busy: false, progress: '', error: '', connected, choice: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } } }));
+ await page.route('**/api/voice/uninstall', (r: any) => {
+  requests.push(r.request().postDataJSON()); status = 'absent'; connected = false;
+  config = { ...config, enabled: false, runtime: 'breeze', whisperUrl: 'http://stt.example.test:9000/inference', breezeUrl: 'http://tts.example.test:9001/v1/audio/speech', sttModel: '' };
+  // Docker refused to delete the volume: the container is gone and the settings are put back all the same.
+  return failure ? r.fulfill({ status: 409, json: { error: failure } }) : r.fulfill({ json: { ok: true } });
+ });
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({ hasText: 'Voice service' }).click();
+ return { requests, setState: (value: string) => { status = value; }, setConnected: (value: boolean) => { connected = value; }, fail: (message: string) => { failure = message; } };
+};
+
+test('uninstall asks first and says what goes, keeps the downloads unless told, and shows the settings that were put back', async ({ page }) => {
+ const { requests } = await uninstallPage(page);
+ const uninstall = page.getByRole('button', { name: 'Uninstall', exact: true });
+ const dialog = page.getByRole('alertdialog');
+ await page.getByLabel('Describe the speaking voice').fill('Edited and not saved yet');
+ await uninstall.click();
+ await expect(dialog.getByRole('heading', { name: 'Uninstall voice?' })).toBeVisible();
+ await expect(dialog).toContainText('The voice container is stopped and removed');
+ await expect(dialog).toContainText('speech servers you set up yourself stay as they are');
+ // Keeping the downloads is the default: a new install is then quick.
+ await expect(dialog.getByRole('checkbox', { name: /Also delete the downloaded engines and models/ })).not.toBeChecked();
+ await page.screenshot({ path: '/tmp/pithagoras-voice-uninstall.png' });
+ await dialog.getByRole('button', { name: 'Cancel' }).click();
+ await expect(dialog).toBeHidden();
+ expect(requests).toEqual([]);
+ await uninstall.click();
+ await dialog.getByRole('button', { name: 'Uninstall', exact: true }).click();
+ await expect.poll(() => requests).toEqual([{ removeData: false }]);
+ // The page is that of a portal that never installed it, and Install is offered.
+ await expect(page.getByRole('button', { name: 'Install voice', exact: true })).toBeVisible();
+ await expect(page.locator('summary').filter({ hasText: 'Voice service' })).toContainText('Not installed');
+ await expect(uninstall).toBeHidden();
+ // What was put back is shown, and an edit that was not saved yet is not lost with it.
+ await page.locator('summary').filter({ hasText: 'Advanced connection' }).click();
+ await expect(page.getByLabel('Speech recognition URL')).toHaveValue('http://stt.example.test:9000/inference');
+ await expect(page.getByLabel('Speech synthesis URL')).toHaveValue('http://tts.example.test:9001/v1/audio/speech');
+ await expect(page.getByLabel('Describe the speaking voice')).toHaveValue('Edited and not saved yet');
+ await expect(page.getByRole('checkbox', { name: 'Enable voice controls in sessions' })).not.toBeChecked();
+});
+
+test('uninstall deletes the downloaded engines and models only when the box is ticked, and is not offered where nothing is installed', async ({ page }) => {
+ const { requests, setState, setConnected } = await uninstallPage(page, 'absent');
+ const uninstall = page.getByRole('button', { name: 'Uninstall', exact: true });
+ await expect(page.getByRole('button', { name: 'Install voice', exact: true })).toBeVisible();
+ await expect(uninstall).toBeHidden();
+ // The container was removed by hand and the settings still point at the service: they can be put right from here.
+ setConnected(true);
+ await expect(uninstall).toBeVisible({ timeout: 8000 });
+ setConnected(false);
+ await expect(uninstall).toBeHidden({ timeout: 8000 });
+ // A stopped service is uninstalled too.
+ setState('stopped');
+ await expect(uninstall).toBeVisible({ timeout: 8000 });
+ await uninstall.click();
+ await page.getByRole('alertdialog').getByRole('checkbox', { name: /Also delete the downloaded engines and models/ }).check();
+ await page.getByRole('alertdialog').getByRole('button', { name: 'Uninstall', exact: true }).click();
+ await expect.poll(() => requests).toEqual([{ removeData: true }]);
+});
+
+test('the question can be answered with the keyboard alone, the box included', async ({ page }) => {
+ const { requests } = await uninstallPage(page);
+ const dialog = page.getByRole('alertdialog');
+ const box = dialog.getByRole('checkbox', { name: /Also delete the downloaded engines and models/ });
+ await page.getByRole('button', { name: 'Uninstall', exact: true }).focus();
+ await page.keyboard.press('Enter');
+ // Focus starts on Cancel; Tab goes on to Uninstall, then round to the box, which Space ticks, and Shift+Tab goes back.
+ await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+ await page.keyboard.press('Tab');
+ await expect(dialog.getByRole('button', { name: 'Uninstall', exact: true })).toBeFocused();
+ await page.keyboard.press('Tab');
+ await expect(box).toBeFocused();
+ await page.keyboard.press('Space');
+ await expect(box).toBeChecked();
+ await page.keyboard.press('Shift+Tab');
+ await expect(dialog.getByRole('button', { name: 'Uninstall', exact: true })).toBeFocused();
+ await page.keyboard.press('Enter');
+ await expect.poll(() => requests).toEqual([{ removeData: true }]);
+});
+
+test('where the downloads cannot be deleted the page still shows the uninstall, with the reason', async ({ page }) => {
+ const { requests, fail } = await uninstallPage(page);
+ fail('The voice container is removed, but its downloaded engines and models could not be deleted: volume is in use');
+ await page.getByRole('button', { name: 'Uninstall', exact: true }).click();
+ await page.getByRole('alertdialog').getByRole('checkbox', { name: /Also delete the downloaded engines and models/ }).check();
+ await page.getByRole('alertdialog').getByRole('button', { name: 'Uninstall', exact: true }).click();
+ await expect.poll(() => requests).toEqual([{ removeData: true }]);
+ await expect(page.getByRole('alert').filter({ hasText: 'could not be deleted: volume is in use' })).toBeVisible();
+ // The container is gone all the same, and so is the button; the restored settings are shown.
+ await expect(page.locator('summary').filter({ hasText: 'Voice service' })).toContainText('Not installed');
+ await expect(page.getByRole('button', { name: 'Uninstall', exact: true })).toBeHidden();
+ await page.locator('summary').filter({ hasText: 'Advanced connection' }).click();
+ await expect(page.getByLabel('Speech recognition URL')).toHaveValue('http://stt.example.test:9000/inference');
+});
+
 test('speech detection settings save and restore defaults',async({page})=>{
  let config:any={enabled:true,whisperUrl:'http://localhost:8188/inference',breezeUrl:'http://localhost:7862/v1/audio/speech',instruction:'Clear speech',voice:'aria',runtime:'audio-cpp'};
  await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));

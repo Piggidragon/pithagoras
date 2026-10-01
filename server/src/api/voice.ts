@@ -1,7 +1,7 @@
 import { addVoice, listVoices, readVoice, updateVoice, deleteVoice, VoiceNotFound } from '../voice-presets.js';
 import { spokenNumbers } from '../voice-numbers.js';
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from '../voice-languages.js';
-import { DEFAULT_CHOICE, endpoints, parseChoice, type VoiceChoice } from '../voice-engines.js';
+import { DEFAULT_CHOICE, endpoints, isManagedUrl, parseChoice, type VoiceChoice } from '../voice-engines.js';
 import { VoiceLeases } from '../extensions/voice-leases.js';
 import { DEFAULT_VOICE_INSTRUCTIONS, voiceInstructions, voiceRulesOn } from '../pi/voice-first.js';
 import * as voiceService from '../extensions/voice-service.js';
@@ -36,12 +36,15 @@ export interface VoiceConfig {
 }
 /** Long enough for the built-in text several times over; every voice turn carries it. */
 export const MAX_RESPONSE_INSTRUCTIONS = 8000;
+// The addresses of a portal with nothing set up: services of the Compose overlay, not the managed ones.
+const DEFAULT_WHISPER_URL = "http://127.0.0.1:8178/inference";
+const DEFAULT_BREEZE_URL = "http://127.0.0.1:7860/v1/audio/speech";
 function config(): VoiceConfig {
   const stored = getStoredSettings() as Record<string, string>;
   return stored.voice ? { voice: "design", language: "auto", cfgScale: 4, ...JSON.parse(stored.voice) } : {
     voice: "design", language: "auto", cfgScale: 4,
-    enabled: false, whisperUrl: "http://127.0.0.1:8178/inference",
-    breezeUrl: "http://127.0.0.1:7860/v1/audio/speech",
+    enabled: false, whisperUrl: DEFAULT_WHISPER_URL,
+    breezeUrl: DEFAULT_BREEZE_URL,
     instruction: "A warm, clear English voice with a calm, conversational delivery.",
   };
 }
@@ -161,17 +164,85 @@ leaseTimer.unref();
 // Wait until module initialization finishes before accessing configuration.
 setImmediate(maintain);
 
+/**
+ * What the portal keeps of the settings a connect overwrites, for the uninstall to put back. Kept for each side on its own, so
+ * that an address the user sets up after the install is remembered as well: `listening` is the recognition address with its
+ * model, `speaking` the speech address with its runtime. A side is there once it held something that was not the managed
+ * service's, with whether voice was on then: that goes with the side, as the connect itself saves voice as on, and a side that
+ * stays the service's while the other is set up again must not take the other's flag over. `noSpeech`: the last connect saved
+ * no speech address, which is how recognition alone leaves the speech side, and which is then the managed service's and not the user's.
+ */
+interface Remembered {
+  listening?: { whisperUrl: string; sttModel: string; enabled: boolean };
+  speaking?: { breezeUrl: string; runtime: NonNullable<VoiceConfig["runtime"]>; enabled: boolean };
+  noSpeech?: boolean;
+}
+const REMEMBERED_KEY = "voice_before_managed";
+function saveVoice(value: VoiceConfig) {
+  getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(value));
+}
+function remembered(): Remembered {
+  try {
+    const value = JSON.parse((getStoredSettings() as Record<string, string>)[REMEMBERED_KEY] ?? "{}");
+    const { listening, speaking } = value;
+    return {
+      ...(typeof listening?.whisperUrl === "string" ? { listening: { whisperUrl: listening.whisperUrl, sttModel: typeof listening.sttModel === "string" ? listening.sttModel : "", enabled: listening.enabled === true } } : {}),
+      ...(typeof speaking?.breezeUrl === "string" && typeof speaking.runtime === "string" ? { speaking: { breezeUrl: speaking.breezeUrl, runtime: speaking.runtime, enabled: speaking.enabled === true } } : {}),
+      ...(typeof value.noSpeech === "boolean" ? { noSpeech: value.noSpeech } : {}),
+    };
+  } catch { return {}; }
+}
+/** Which sides of the saved settings are the managed service's, as far as the portal can tell. */
+function managedSides(c: VoiceConfig, noSpeech: boolean | undefined) {
+  const listening = isManagedUrl(c.whisperUrl);
+  // No speech address and the runtime none is the service's where a connect saved it. Where nothing says (a service connected by an older portal), it is when the recognition is.
+  const speaking = isManagedUrl(c.breezeUrl) || (c.runtime === "none" && !c.breezeUrl && (noSpeech ?? listening));
+  return { listening, speaking };
+}
+/** Do the saved settings still point at the managed service, in either side? */
+export const pointsAtManagedVoice = () => { const { listening, speaking } = managedSides(config(), remembered().noSpeech); return listening || speaking; };
 /** Point the saved config at the managed services, for the engines they were built with. */
 export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
   const { runtime, ...urls } = endpoints(choice);
   const current = config();
+  // What is about to be overwritten is kept for the uninstall, side by side: a side that is the managed service's already (a
+  // rebuild, a second connect) keeps what was remembered of it, as the service is not what there was before it.
+  const kept = remembered();
+  const { listening, speaking } = managedSides(current, kept.noSpeech);
+  const next: Remembered = { ...kept, noSpeech: runtime === "none" };
+  if (!listening) next.listening = { whisperUrl: current.whisperUrl, sttModel: current.sttModel ?? "", enabled: current.enabled };
+  if (!speaking) next.speaking = { breezeUrl: current.breezeUrl, runtime: current.runtime ?? "breeze", enabled: current.enabled };
+  getDb().prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(REMEMBERED_KEY, JSON.stringify(next));
   // Chatterbox is told a language and has no detection mode; keep one it speaks rather than save a setting it refuses.
   const language = runtime === 'chatterbox' && !CHATTERBOX_LANGUAGES.includes(current.language) ? 'en' : current.language;
   // Whisper.cpp serves one model and is sent no model field: an id left over
   // from another runtime would reach it in the multipart body.
   const saved = { ...current, language, enabled: true, runtime, ...urls };
-  getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(saved));
+  saveVoice(saved);
   return {...saved, managed:true};
+}
+/**
+ * Takes the managed service out of the saved settings after it has been uninstalled: what the connect overwrote is put back, or,
+ * where nothing was remembered of a side (the service was connected before the portal did), what points at it is reset to a portal
+ * with nothing set up. Only what points at the managed service is touched: an address the user set up themselves stays as it is,
+ * and so do the voice, the speech detection and the rest.
+ */
+export function disconnectManagedVoice() {
+  const current = config();
+  const kept = remembered();
+  getDb().prepare("DELETE FROM settings WHERE key = ?").run(REMEMBERED_KEY);
+  const { listening, speaking } = managedSides(current, kept.noSpeech);
+  if (!listening && !speaking) return current;
+  const back = {
+    ...(listening ? { whisperUrl: kept.listening?.whisperUrl ?? DEFAULT_WHISPER_URL, sttModel: kept.listening?.sttModel ?? "" } : {}),
+    ...(speaking ? { breezeUrl: kept.speaking?.breezeUrl ?? DEFAULT_BREEZE_URL, runtime: kept.speaking?.runtime ?? "breeze" } : {}),
+  };
+  // Voice was switched on by the connect, and is left on only where everything put back is what the user had, it was on when each
+  // part of it was, and it has not been turned off since; an address that is only a default is no use switched on.
+  const on = (!listening || kept.listening?.enabled === true) && (!speaking || kept.speaking?.enabled === true);
+  const saved: VoiceConfig = { ...current, ...back, enabled: on && current.enabled };
+  saveVoice(saved);
+  return saved;
 }
 export function voiceRouter(): Router {
   const router = express.Router();
@@ -208,7 +279,8 @@ export function voiceRouter(): Router {
         connectManagedVoice(state.choice);
         getDb().prepare("DELETE FROM settings WHERE key = 'voice_setup_pending'").run();
       }
-      res.json(state);
+      // `connected`: the saved settings point at the service, whether or not it is there, so that they can be put right after the container was removed by hand.
+      res.json({ ...state, connected: pointsAtManagedVoice() });
     } catch (e) { res.status(503).json({ error: (e as Error).message }); }
   });
   router.get('/voice/hardware', async (_req, res) => {
@@ -224,6 +296,21 @@ export function voiceRouter(): Router {
       res.json({ ok: true });
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
+  // The container goes, and with it the settings that point at it. The downloads stay unless `removeData` says they go too.
+  router.post('/voice/uninstall', async (req, res) => {
+    try {
+      const removeData = req.body?.removeData ?? false;
+      if (typeof removeData !== 'boolean') throw new Error('removeData must be true or false');
+      // The container being gone is what the settings follow, whether or not the downloads could be deleted after it.
+      let kept: Error | undefined;
+      try { await voiceService.uninstall(removeData); }
+      catch (e) { if (!(e instanceof voiceService.DataNotRemoved)) throw e; kept = e; }
+      getDb().prepare("DELETE FROM settings WHERE key = 'voice_setup_pending'").run();
+      disconnectManagedVoice();
+      if (kept) return res.status(409).json({ error: kept.message });
+      res.json({ ok: true });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
   router.post('/voice/connect', async (_req, res) => {
     try {
       const state = await voiceService.status();
@@ -235,7 +322,7 @@ export function voiceRouter(): Router {
   router.put("/voice", (req, res) => {
     try {
       const saved = validateConfig(req.body);
-      getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(saved));
+      saveVoice(saved);
       res.json(withInstructions(saved));
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
