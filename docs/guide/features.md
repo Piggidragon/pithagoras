@@ -179,12 +179,15 @@ On the same tab, under the generation settings:
 | **Editing key** | Sent as `Authorization: Bearer …` to the editing address, and nowhere else. **Empty:** the key above goes along when edits go to the same server as generation (an empty address, or the same scheme, name and port), and no key goes to another server: a key belongs to the server it was given for. A saved key is never shown again, and a new address of another server without a key drops it, as for the key above. |
 | **Editing model** | Sent as `model`. Empty sends none. It is never the model above, which may be one that only makes pictures. |
 | **Image editing tool** | The switch. It needs an address, its own or generation's; like generation's it is decided when a chat loads, so a change reloads the idle open chats. |
+| **Several pictures per edit** | Off by default. Switch it on only if the editing endpoint takes more than one picture in a request. Then `edit_image` is given a list of pictures instead of one (see [several pictures](#several-pictures)). It is said of this endpoint: when edits move to another server (a new editing address, or a new generation address while editing has none of its own), it goes off again until you say the new one takes them. The tool's shape is decided when a chat loads, so a change reloads the idle open chats. |
 
 The request is the OpenAI-style `images/edits` one: a `multipart/form-data` form
 with `image`, `prompt`, `n` (always 1), `model` when there is one, and `mask`
 when a caller gives one. The picture is sent under a neutral name (`image.png`,
 with the type its bytes say), never under the name or the place it has in the
-chat's folder. No `size` is sent: what an edit comes out as is the endpoint's to
+chat's folder. With [several pictures](#several-pictures) switched on, a request
+of more than one picture has `image[]` once for each, in order (`image-1.png`,
+`image-2.jpg`, …); one picture is always sent as `image`, whatever the setting. No `size` is sent: what an edit comes out as is the endpoint's to
 say, usually the picture's own, and the size set for generation need not be one
 an edit takes. The answer is read as a generation's is — the first picture from
 `data[0].b64_json` or `data[0].url`, with the same rules for where an address may
@@ -244,6 +247,63 @@ the name `edit_image` is the one pi keeps, as for `generate_image`.
 | --- | --- |
 | Stored as | The portal's own settings (`image_generation`), not pi's `settings.json`, which the Advanced tab shows in full. |
 | API | [`/api/features/images`](/reference/api#opt-in-features) |
+
+### Several pictures
+
+Some endpoints take more than one picture in an edit: to combine subjects, to
+keep a style or a person the same, to use a picture as a pattern. Others take one,
+or fail on a list. So this is opt-in and off by default, with a switch of its own
+under the editing settings (**Several pictures per edit**), and while it is off the
+tool is exactly what it was: `edit_image(path, prompt, title?)` with one picture.
+
+Switched on, the tool is `edit_image(paths, prompt, title?)` instead: `paths` is a
+list of one to eight pictures of the chat's folder, and one path is a list of one.
+The agent is told how the pictures are known: **by their place in the list**. The
+endpoint sees them in that order and nothing else about them, so the prompt says
+"the person from the first picture, painted like the second". There is no label per
+picture: the OpenAI-style form has no field for one, and putting one in the prompt
+would change what the agent wrote.
+
+The same call also makes **a new picture from references**. The route cannot tell
+the two apart — the prompt does — so there is no second tool for it, and
+`generate_image` stays as it is: `images/generations` takes no pictures, and an
+agent with a reference picks `edit_image`. A single reference works with the
+switch off, too; the switch only adds more than one. It needs editing switched on,
+since the references go to the editing endpoint with its key.
+
+What was decided for it:
+
+- **Per endpoint.** The setting belongs to the editing endpoint, like its key: it
+  is turned off again when edits move to another server, and a request that moves
+  them and says it again in the same save keeps what it says. The endpoint is the
+  editing address, or the generation address while editing has none of its own.
+- **The same safety rules, for every picture.** Each is a PNG, JPEG, GIF or WebP
+  by its first bytes, from inside the chat's folder only (not through a link out of
+  it), at most 25 MB, sent under a neutral name, and never changed. The key stays
+  in the portal and goes to the editing address only; the result is read, limited
+  and written as for one picture.
+- **A count and a weight.** At most **8 pictures**, and **50 MB together**: all of
+  them are held in memory and go up within the three minutes of the request. More
+  is refused with the numbers, never scaled, cut or dropped to fit. The endpoint's
+  own limit, if lower, is its to say, in its answer, which is passed on without the
+  key. The count is also what the tool's list accepts, so the model is held to it
+  before the tool runs.
+- **One that is refused refuses the call.** A picture that is outside the folder,
+  is no picture, is missing, or is too large, fails the whole call, before anything
+  is sent, naming which one (`Picture 2 (style.jpg): …`). Leaving it out would shift
+  the places the prompt refers to and make something other than what was asked, at
+  the person's cost. Nothing is kept either: a failed call leaves no file and no
+  `generated-images` folder.
+- **Named after the first picture.** One result, as `<first>-edited.<ext>` in the
+  `generated-images` folder, with the same numbering and the same cut by bytes as
+  an edit's: `person.png` and `style.jpg` give `person-edited.webp`. The answer to
+  the agent lists all the originals, in order, and the page shows the result as it
+  does an edit's, in the chat and in voice mode.
+- **A mask goes with the first picture** where a caller gives one, as for one
+  picture; the agent's tool still has none.
+- **The setting is read at each call.** A list is refused when the endpoint is no
+  longer said to take it, and a path still does where the tool was loaded with a
+  list. Only the tool's shape is decided when a chat loads.
 
 ## Memory: Understory
 
