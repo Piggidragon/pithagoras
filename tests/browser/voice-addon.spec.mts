@@ -136,7 +136,7 @@ test('saving other voice settings does not pin the built-in text of an older por
 // A card with 6 GiB, 5 GiB of it free: the small recognition model fits next to Breeze with room to spare, the large one does not fit at all.
 // `checked` is whether the check could tell: with no GPU listed, a probe that ran and found none, or nothing asked yet.
 const host = { totalMiB: 16384, freeMiB: 12000, threads: 8 };
-const hardware = (gpus: any[], checked = gpus.length > 0) => ({ gpus, source: 'host', error: '', checked, cpuOnly: false, host, selected: gpus.length ? 0 : null, reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } });
+const hardware = (gpus: any[], checked = gpus.length > 0) => ({ gpus, source: 'host', error: '', checked, cpuOnly: false, host, selected: gpus.length ? 0 : null, chosen: '', reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } });
 // A host that was found to have no GPU: what is suggested is recognition alone, on the CPU.
 const noGpu = (patch: any = {}) => ({ gpus: [], source: 'none', error: '', checked: true, cpuOnly: true, host, selected: null, reserveMiB: 0, suggestion: { tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' }, ...patch });
 const card = { index: 0, name: 'Test GPU', totalMiB: 6144, freeMiB: 5000 };
@@ -273,10 +273,40 @@ test('engine choice: an installed service is shown on its own card and is not ju
  await expect(page.getByText('other programs use part of it')).toHaveCount(0);
  await expect(page.getByText('more than this GPU has')).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Use the suggestion'})).toHaveCount(0);
+ // Readings without a UUID name no card that could be chosen for good.
+ await expect(page.getByRole('combobox',{name:'GPU',exact:true})).toHaveCount(0);
  // Another pick is judged as soon as there is one.
  await page.getByRole('combobox',{name:'Speech synthesis engine'}).click();
  await page.getByRole('option',{name:/Chatterbox/}).click();
  await expect(page.getByText('Needs about 5.5 GiB of GPU memory. The card is big enough, but other programs use part of it right now.')).toBeVisible();
+});
+
+test('engine choice: with several GPUs the card is chosen at once, by its UUID',async({page})=>{
+ const gpus=[{index:0,uuid:'GPU-a',name:'Test GPU A',totalMiB:12288,freeMiB:4000},{index:1,uuid:'GPU-b',name:'Test GPU B',totalMiB:12288,freeMiB:12000}];
+ const puts:any[]=[]; let chosen='';
+ const shown=()=>({...hardware(gpus),selected:chosen?gpus.findIndex(g=>g.uuid===chosen):1,chosen});
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/hardware',r=>r.fulfill({json:shown()}));
+ await page.route('**/api/voice/gpu',r=>{puts.push(r.request().postDataJSON());chosen=puts.at(-1).gpu;return r.fulfill({json:{selected:chosen,restarting:true}});});
+ await page.route('**/api/voice',r=>r.fulfill({json:{...config,enabled:true}}));
+ await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'running',busy:false,progress:'',error:'',choice:{tts:'breeze',asr:'whisper',asrModel:'base'}}}));
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ const card=page.getByRole('combobox',{name:'GPU',exact:true});
+ // Automatic: the card with the most room is the one in use.
+ await expect(card).toContainText('Automatic');
+ await expect(page.getByText('GPU detected: Test GPU B, 12 GiB, 11.7 GiB free')).toBeVisible();
+ await expect(page.getByText('Changing the GPU restarts voice and keeps your models.')).toBeVisible();
+ await card.click();
+ await page.getByRole('option',{name:/Test GPU A/}).click();
+ await expect.poll(()=>puts).toEqual([{gpu:'GPU-a'}]);
+ // What the page shows is read again: the card chosen, and the one the engines are judged on.
+ await expect(card).toContainText('Test GPU A');
+ await expect(page.getByText('GPU detected: Test GPU A, 12 GiB, 3.9 GiB free')).toBeVisible();
+ await card.click();
+ await page.getByRole('option',{name:/Automatic/}).click();
+ await expect.poll(()=>puts.at(-1)).toEqual({gpu:''});
+ await expect(card).toContainText('Automatic');
 });
 
 test('engine choice: a GPU host also picks where recognition runs, and the CPU spares the card',async({page})=>{
