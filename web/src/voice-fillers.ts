@@ -45,10 +45,14 @@ export function fillerPacing(raw: { [K in keyof FillerPacing]?: unknown }): Fill
 /**
  * One gap in seconds, from `random` in [0, 1): the base, spread by the randomness
  * evenly to either side of it. Never under the shortest base there is, so a wide
- * spread cannot put two fillers on top of each other.
+ * spread cannot put two fillers on top of each other: a spread that would go
+ * lower is narrowed to end there, which keeps it even and centred on the base
+ * (and at the shortest base there is none).
  */
 export function fillerGap(pacing: FillerPacing, random = Math.random()): number {
-  return Math.max(FILLER_LIMITS.every.min, pacing.every * (1 + pacing.randomness * (2 * random - 1)));
+  const every = Math.max(FILLER_LIMITS.every.min, pacing.every);
+  const spread = Math.min(pacing.randomness, 1 - FILLER_LIMITS.every.min / every);
+  return every * (1 + spread * (2 * random - 1));
 }
 
 /** How often to look again while the portal is still making clips, and how many times at most: twenty minutes, as the extra clips are made in a lull and may take a while to come. */

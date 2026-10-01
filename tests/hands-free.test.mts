@@ -555,7 +555,7 @@ test('ending voice cuts a filler, and the phase says speaking only while it play
 const pacing: FillerPacing = { first: 0, every: 1, randomness: 0, max: 4 };
 /** Fillers that play for `length` ms of that clock, and what happened to them when. */
 function timeline(t: TestContext, length = 500) {
-  t.mock.timers.reset(); t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.timers.reset(); t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const log: { at: number; e: string }[] = []; const waits: object[] = []; let now = 0;
   const filler = (signal: AbortSignal, wait: object) => {
     log.push({ at: now, e: 'start' }); waits.push(wait);
@@ -643,7 +643,7 @@ test('speech, compaction, an agent that has finished, or the end of voice mode s
 });
 
 test('a wait where no clip is ready yet tries again after a gap, and the tries count towards the most', async t => {
-  t.mock.timers.reset(); t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.timers.reset(); t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   let now = 0, asked: number[] = [];
   const advance = async (ms: number) => { for (let done = 0; done < ms; done += 100) { now += 100; t.mock.timers.tick(100); await tick(); await tick(); } };
   const { voice, errors } = setup({ agentRunning: () => true, fillerPacing: pacing, filler: () => { asked.push(now); return undefined; } });
@@ -678,7 +678,9 @@ test('the gap is what was set and nothing else: exactly so without randomness, s
 
 test('the gap has a floor, and the pacing it ships with is today\'s first filler at once and a long wait filled, then no more', async t => {
   assert.equal(fillerGap({ first: 0, every: 1, randomness: 1, max: 4 }, 0), FILLER_LIMITS.every.min);
-  assert.equal(fillerGap({ first: 0, every: 4, randomness: 1, max: 4 }, 1), 8);
+  // A spread that would go under the floor is narrowed to end on it, not piled up there: 1 to 7 around 4, not 0 to 8.
+  assert.equal(fillerGap({ first: 0, every: 4, randomness: 1, max: 4 }, 0), 1);
+  assert.equal(fillerGap({ first: 0, every: 4, randomness: 1, max: 4 }, 1), 7);
   assert.equal(FILLER_PACING.first, 0, 'at once, as it always was');
   assert.ok(FILLER_PACING.max >= 6, 'at least as many as the growing gaps had');
   t.mock.method(Math, 'random', () => 0.5);
@@ -715,7 +717,7 @@ test('a time to the first filler holds it back, and an answer that comes first l
   b.voice.stop();
 });
 
-test('after a filler that nothing followed the next first filler waits the gap if that is longer than the time to the first', async t => {
+test('after a filler that nothing followed the next first filler waits what is left of a gap since it ended, or the time to the first if that is longer', async t => {
   const line = timeline(t, 300);
   const { voice } = setup({ filler: line.filler, agentRunning: () => true, fillerPacing: { first: 0.5, every: 2, randomness: 0, max: 5 } });
   turn(voice); await tick();
@@ -724,13 +726,93 @@ test('after a filler that nothing followed the next first filler waits the gap i
   await line.advance(300);
   assert.deepEqual(line.starts(), [500]);
   await line.advance(1000);
-  // The second turn, with the one before the last thing heard: the gap, not the half second.
+  // The second turn, with the one before the last thing heard: it ended at 800, so the gap is over at 2800, and that is later than the half second.
   turn(voice); await tick();
-  await line.advance(1800);
+  await line.advance(1100);
   assert.deepEqual(line.starts(), [500]);
-  await line.advance(300);
-  assert.deepEqual(line.starts().length, 2);
+  await line.advance(200);
+  assert.deepEqual(line.starts(), [500, 2800]);
   voice.stop();
+});
+
+test('a turn more than a gap after the last filler has its first filler at once, or after the time set for it: the delay is for fillers on top of each other', async t => {
+  // A wait filled up to the most, the agent going on in silence, and the user interrupting it much later.
+  for (const [every, first, later] of [[1, 0, 10_000], [30, 0, 40_000], [1, 2, 10_000]] as const) {
+    const line = timeline(t, 300);
+    const pacing: FillerPacing = { first: 0, every, randomness: 0, max: 1 };
+    const { voice } = setup({ filler: line.filler, agentRunning: () => true, fillerPacing: pacing });
+    turn(voice); await tick();
+    await line.advance(later);
+    assert.deepEqual(line.starts(), [0], `every ${every}`);
+    pacing.first = first;
+    turn(voice); await tick();
+    await line.advance(first * 1000 + 100);
+    assert.deepEqual(line.starts(), [0, later + first * 1000], `every ${every}, first ${first}`);
+    voice.stop();
+  }
+});
+
+test('a setting changed while a gap is pending applies to it, counting what has passed, and a most that has been reached ends the wait', async t => {
+  const start = (pacing: FillerPacing) => {
+    const line = timeline(t, 300);
+    const { voice } = setup({ filler: line.filler, agentRunning: () => true, fillerPacing: pacing });
+    turn(voice); return { line, voice };
+  };
+  // Quicker: 3 seconds instead of 30, at 2 s, with the first filler having ended at 0.3 s.
+  let pacing: FillerPacing = { first: 0, every: 30, randomness: 0, max: 8 };
+  let run = start(pacing); await tick();
+  await run.line.advance(2000);
+  pacing.every = 3; run.voice.pacingChanged();
+  await run.line.advance(1100);
+  assert.deepEqual(run.line.starts(), [0]);
+  await run.line.advance(300);
+  assert.deepEqual(run.line.starts(), [0, 3300]);
+  run.voice.stop();
+  // Slower: the filler that was due is not.
+  pacing = { first: 0, every: 3, randomness: 0, max: 8 };
+  run = start(pacing); await tick();
+  await run.line.advance(2000);
+  pacing.every = 30; run.voice.pacingChanged();
+  await run.line.advance(20_000);
+  assert.deepEqual(run.line.starts(), [0]);
+  await run.line.advance(10_000);
+  assert.deepEqual(run.line.starts(), [0, 30_300]);
+  run.voice.stop();
+  // The time to the first filler, before it has played.
+  pacing = { first: 10, every: 3, randomness: 0, max: 8 };
+  run = start(pacing); await tick();
+  await run.line.advance(1000);
+  pacing.first = 2; run.voice.pacingChanged();
+  await run.line.advance(900);
+  assert.deepEqual(run.line.starts(), []);
+  await run.line.advance(200);
+  assert.deepEqual(run.line.starts(), [2000]);
+  run.voice.stop();
+  // A lower most than the fillers there have been: no more, whether or not the voice was told.
+  for (const told of [true, false]) {
+    pacing = { first: 0, every: 1, randomness: 0, max: 8 };
+    run = start(pacing); await tick();
+    await run.line.advance(3500);
+    assert.deepEqual(run.line.starts(), [0, 1300, 2600]);
+    pacing.max = 3; if (told) run.voice.pacingChanged();
+    await run.line.advance(60_000);
+    assert.deepEqual(run.line.starts(), [0, 1300, 2600], `told ${told}`);
+    run.voice.stop();
+  }
+});
+
+test('a spread that would go under the shortest gap is narrowed to end there: even, centred on the time set, and none at the shortest', () => {
+  const draws = (every: number, randomness: number) => Array.from({ length: 1001 }, (_, i) => fillerGap({ first: 0, every, randomness, max: 4 }, i / 1000));
+  for (const [every, randomness] of [[1.5, 1], [2, 1], [2, 0.5], [5, 1], [3, 0.5], [30, 1]] as const) {
+    const gaps = draws(every, randomness);
+    const mean = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+    assert.ok(Math.abs(mean - every) < every * 0.002, `${every} s at ${randomness}: mean ${mean}`);
+    assert.ok(Math.min(...gaps) >= 1 - 1e-9, `${every} s at ${randomness}: shortest ${Math.min(...gaps)}`);
+    // Not piled up on the shortest: at most the one draw that reaches it.
+    assert.ok(gaps.filter(gap => gap < 1 + 1e-9).length <= 1, `${every} s at ${randomness}`);
+  }
+  // At the shortest time there is nothing under it to spread into, and it is not lengthened either.
+  assert.ok(draws(1, 1).every(gap => gap === 1));
 });
 
 test('what is set applies to the next gap, also in the middle of a call, and anything that is not a number or is out of range is made one', async t => {
@@ -754,17 +836,17 @@ test('what is set applies to the next gap, also in the middle of a call, and any
   assert.deepEqual(fillerPacing({ first: Infinity, every: -Infinity }), FILLER_PACING);
 });
 
-test('after a filler that nothing followed the next turn waits the first gap for its own, and after an answer it does not', async t => {
+test('after a filler that nothing followed the next turn waits what is left of a gap for its own, and after an answer it does not', async t => {
   const first = timeline(t, 300);
   const a = setup({ filler: first.filler, agentRunning: () => true, fillerPacing: pacing });
   turn(a.voice); await tick();
   await first.advance(500);
   turn(a.voice); await tick();
-  await first.advance(900);
-  // Not at once, as the one before was the last thing heard.
+  await first.advance(700);
+  // Not at once, as the one before was the last thing heard: it ended at 300, and the gap is over at 1300.
   assert.deepEqual(first.starts(), [0]);
-  await first.advance(300);
-  assert.deepEqual(first.starts(), [0, 1500]);
+  await first.advance(200);
+  assert.deepEqual(first.starts(), [0, 1300]);
   a.voice.stop();
   const second = timeline(t, 300);
   const b = setup({ filler: second.filler, agentRunning: () => true, fillerPacing: pacing });
@@ -818,10 +900,10 @@ test('speech in a gap ends the wait for good, also once the transcript is being 
   turn(voice); await tick();
   await line.advance(5000);
   assert.deepEqual(line.starts(), [0]);
-  // What was said is the next turn, and its silence is filled on its own clock.
+  // What was said is the next turn, and its silence is filled on its own clock: the last filler ended long ago, so at once.
   transcript.resolve('hello again'); await tick(); await tick();
-  await line.advance(1200);
-  assert.deepEqual(line.starts(), [0, 5500 + 1000]);
+  await line.advance(200);
+  assert.deepEqual(line.starts(), [0, 5500]);
   voice.stop();
 });
 

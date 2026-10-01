@@ -114,6 +114,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     local.set('voiceFillerFirst', String(clean.first)); local.set('voiceFillerEvery', String(clean.every));
     local.set('voiceFillerRandomness', String(clean.randomness)); local.set('voiceFillerMax', String(clean.max));
     setPacing(clean); fillerTiming.current = clean;
+    // A filler that is already due by the old settings is due by these.
+    voice.current?.pacingChanged();
   };
   const fillerClips = useRef<FillerClips | null>(null);
   const [available, setAvailable] = useState(false);

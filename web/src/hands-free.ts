@@ -7,8 +7,13 @@ import { FILLER_PACING, fillerGap, type FillerPacing } from "./voice-fillers";
 
 /** The longest the answer waits for a filler to stop: a fade-out takes a few milliseconds, and this is for a player that never reports back. */
 const FILLER_STOP_MS = 150;
-/** The silence after a turn, while it is being filled: how many fillers have been tried, whether one was played, and the timer of the next. */
-interface Silence { tries: number; played: boolean; timer?: ReturnType<typeof setTimeout> }
+/**
+ * The silence after a turn, while it is being filled: how many fillers have been
+ * tried, whether one was played, when the filler before it ended (if nothing else
+ * was heard since), and the timer of the next with what it waits for and since when,
+ * so that a setting changed meanwhile can set it anew.
+ */
+interface Silence { tries: number; played: boolean; dropped?: boolean; after?: number; timer?: ReturnType<typeof setTimeout>; pending?: { first: boolean; since: number } }
 export type VoicePhase = "Listening" | "Hearing you" | "Transcribing" | "Thinking" | "Compacting context" | "Speaking";
 export interface VoiceIO {
   sequential?: boolean;
@@ -35,7 +40,7 @@ export interface VoiceIO {
    * it is for, the same for every filler of one, so that a wait gets different ones.
    */
   filler?: (signal: AbortSignal, wait: object) => Promise<void> | undefined;
-  /** How the silence is filled, read each time it matters, so that a setting changed in the middle of a call applies to the next filler: `FILLER_PACING` unless set. */
+  /** How the silence is filled, read each time it matters, so that a setting changed in the middle of a call applies at once (`pacingChanged` is for what is pending): `FILLER_PACING` unless set. */
   fillerPacing?: FillerPacing;
   trace?: (name:string)=>void;
   phase: (phase: VoicePhase) => void;
@@ -74,7 +79,8 @@ export class HandsFreeVoice {
   /** The filler being played, while it plays. */
   private filler?: { controller: AbortController; done: Promise<void> };
   /** A filler was the last thing said: the first one of the next wait is not at once. */
-  private filled = false;
+  /** When the last filler ended, as long as nothing else has been heard since: the next turn's first one is not on top of it. */
+  private filledAt?: number;
   private silence?: Silence;
 
   constructor(private io: VoiceIO, initial: Item[]) {
@@ -109,7 +115,7 @@ export class HandsFreeVoice {
       this.endSilence();
       await this.endFiller();
       playback.throwIfAborted();
-      this.filled = false;
+      this.filledAt = undefined;
       await prepared(playback);
     }, { completed: prepared.completed });
   }
@@ -126,10 +132,9 @@ export class HandsFreeVoice {
     if (!this.alive || !this.io.filler || this.io.statusSpeech === false || this.io.sequential || this.filler) return;
     if (this.hearing || this.compacting || this.pipeline.busy || this.output.length) return;
     this.endSilence();
-    const silence = this.silence = { tries: 0, played: false };
-    // After a filler that nothing has followed, not at once either, whatever was set: two turns in a row do not get two at the same moment.
-    const wait = Math.max(this.pacing().first, this.filled ? this.gap() : 0);
-    if (wait > 0) this.later(silence, wait); else this.fill(silence);
+    const silence = this.silence = { tries: 0, played: false, after: this.filledAt };
+    const wait = this.due(silence, true, Date.now());
+    if (wait > 0) this.later(silence, true); else this.fill(silence);
     return silence;
   }
   /** One filler, now, or when there is none to play, the next try after a gap. */
@@ -141,10 +146,12 @@ export class HandsFreeVoice {
     // Nothing to play yet (no clip is ready): clips may be, by the next try.
     if (!playing) return this.later(silence);
     silence.played = true;
-    this.filled = true;
+    this.filledAt = Date.now();
     // A filler that fails is a filler not heard, not an error shown.
     const filler = { controller, done: playing.catch(() => {}).then(() => {
       if (this.filler === filler) { this.filler = undefined; this.state(); }
+      // Not for a turn that was not sent after all: nothing was heard of it that the next turn must give way to.
+      if (!silence.dropped) this.filledAt = Date.now();
       // Played to its end, not cut off by what ended the silence: the next comes after a gap.
       if (this.silence === silence && !controller.signal.aborted) this.later(silence);
     }) };
@@ -154,17 +161,49 @@ export class HandsFreeVoice {
   private pacing() { return this.io.fillerPacing ?? FILLER_PACING; }
   /** One gap in seconds, the base set by the user spread by their randomness. */
   private gap() { return fillerGap(this.pacing()); }
-  /** The next try, after `seconds` (a gap, unless told); none once there have been as many as a wait is to have. */
-  private later(silence: Silence, seconds = this.gap()) {
+  /**
+   * Seconds from `since` until the next filler of this silence is due, by the
+   * settings as they are now. The first of a turn comes after the time set for
+   * it, and not on top of the one before it: when that ended less than a gap ago,
+   * what is left of the gap is waited, and nothing when it was longer ago.
+   */
+  private due(silence: Silence, first: boolean, since: number) {
+    if (!first) return this.gap();
+    const left = silence.after === undefined ? 0 : this.gap() - (since - silence.after) / 1000;
+    return Math.max(this.pacing().first, left);
+  }
+  /** The next try, a gap after the one before (`first`: the first of the turn, by its own time); none once there have been as many as a wait is to have. */
+  private later(silence: Silence, first = false) {
     if (silence.tries >= this.pacing().max) return this.endSilence(silence);
+    silence.pending = { first, since: Date.now() };
+    this.arm(silence);
+  }
+  private arm(silence: Silence) {
+    const { first, since } = silence.pending!;
+    clearTimeout(silence.timer);
+    // What has passed since the wait began counts, for a timer that is set anew.
+    const seconds = Math.max(0, this.due(silence, first, since) - (Date.now() - since) / 1000);
     silence.timer = setTimeout(() => {
       silence.timer = undefined;
       if (this.silence !== silence) return;
+      // A lower most than when it was set: that many have been played.
+      if (silence.tries >= this.pacing().max) return this.endSilence(silence);
       // There is nothing left to wait for: the user is speaking or a notice is being said, or the agent has finished without a word.
       // An answer that is being made into speech is not that, also when the run that wrote it has ended: until it is audible (see `prepare`) the silence goes on, and a first sentence can take seconds.
       if (!this.alive || this.hearing || this.compacting || this.filler || !this.io.filler || this.io.statusSpeech === false || !(this.io.agentRunning() || this.sending || this.pipeline.busy)) return this.endSilence(silence);
       this.fill(silence);
     }, seconds * 1000);
+  }
+  /**
+   * The settings were changed: the filler that is due is due by the new ones, with
+   * what has passed counted, and a most that has been reached ends the wait. What is
+   * playing, or comes after it, reads them as it goes.
+   */
+  pacingChanged() {
+    const silence = this.silence;
+    if (!silence?.timer) return;
+    if (silence.tries >= this.pacing().max) return this.endSilence(silence);
+    this.arm(silence);
   }
   /** The silence is over, or not to be filled any more: no filler is started for it again. */
   private endSilence(silence?: Silence | undefined) {
@@ -175,9 +214,10 @@ export class HandsFreeVoice {
   /** The turn that began this is not going to be sent after all: its fillers are cut and not to come, and the next turn may have one at once. */
   private dropFiller(silence: Silence | undefined) {
     if (!silence) return;
+    silence.dropped = true;
     this.endSilence(silence);
     this.filler?.controller.abort();
-    if (silence.played) this.filled = false;
+    if (silence.played) this.filledAt = undefined;
   }
   /** Tells the filler to stop, and returns once it has: a player that does not answer is not waited for, as the answer is worth more than a filler. */
   private async endFiller() {

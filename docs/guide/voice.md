@@ -249,16 +249,21 @@ browser and shown while fillers are on:
 | --- | --- | --- | --- |
 | **First filler after** | Seconds of silence after your turn is taken before the first filler. If the answer is audible before then, there is no filler at all. | At once (0 s) | 0 to 10 s |
 | **Time between fillers** | After a filler has ended, how long before the next. This is the base the randomness varies. | 5 s | 1 to 30 s |
-| **Randomness** | Like a temperature. At 0 % every gap is exactly the time between fillers. Above that each gap is that time made shorter or longer by a random amount of up to this share of it, evenly spread: at 20 % and 5 s, 4 to 6 s; at 100 %, 1 to 10 s. It does not apply to the first filler's time. | 20 % | 0 to 100 % |
+| **Randomness** | Like a temperature. At 0 % every gap is exactly the time between fillers. Above that each gap is that time made shorter or longer by a random amount of up to this share of it, evenly spread: at 20 % and 5 s, 4 to 6 s; at 100 %, 1 to 9 s. It does not apply to the first filler's time. | 20 % | 0 to 100 % |
 | **Most per wait** | At most this many fillers in one wait. After that the voice stays quiet until the answer: a long task is not filled for ever. | 8 | 1 to 20 |
 
 There is no cadence built into the page: the gaps are these numbers and nothing
-else, and a change applies to the next filler, also in the middle of a call. Values
-are kept as numbers within the limits above, in steps (half seconds, 5 %, whole
-fillers): what was typed in or changed in the browser's storage that is not a
-number is the default, and one out of range is the nearest limit. A gap is never
-shorter than one second, so a wide randomness cannot put two fillers on top of each
-other.
+else. A change applies at once, also in the middle of a call and to a gap that is
+already running: the filler that was due is due by the new time, counting what has
+passed since the last one ended (so a gap shortened below what has passed brings it
+at once, and a lengthened one pushes it back), and a most that has been reached
+ends the wait. Values are kept as numbers within the limits above, in steps (half
+seconds, 5 %, whole fillers): what was typed in or changed in the browser's
+storage that is not a number is the default, and one out of range is the nearest
+limit. The shortest gap is one second, so a wide randomness cannot put two fillers
+on top of each other: a spread that would go below it is narrowed to end there
+(5 s at 100 % is 1 to 9 s, not 0 to 10 s), still evenly and centred on the time
+set, and at one second there is none.
 
 The defaults fill about the same wait as before, about three quarters of a minute,
 with the same early density: eight fillers, five seconds apart, give or take a fifth, are
@@ -285,10 +290,11 @@ The timeline stops at once when:
   or fillers are switched off.
 
 If no clip is ready at a moment when one is due, it is tried again after the next
-gap, and counts towards the most. After a wait whose last sound was a filler, the
-first filler of your next turn waits one gap too, or the time to the first filler
-if that is longer, so that two turns without an answer between them do not start
-with two fillers back to back.
+gap, and counts towards the most. If the last sound before your next turn was a
+filler (no answer or notice since), its first filler does not come on top of it:
+it waits what is left of one gap since that filler ended, or the time to the first
+filler if that is longer. A turn more than a gap later, such as one that interrupts
+a long silent task, gets its first filler at once as any other.
 
 **It gives way to the answer.** The answer is never heard over a filler. The
 filler stops when the answer's audio is ready to play, not when its text arrives,
