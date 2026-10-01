@@ -22,15 +22,15 @@ import { pathBelow } from "../within.js";
 /** Where `p` is below `root`, relative to it; null when it is not below it, or is `root` itself. */
 const under = (root: string, p: string): string | null => pathBelow(root, p) || null;
 
-/** Where `given` is inside `folder`, relative to it, or an explanation why it is not. */
-export function pictureIn(folder: string, given: string): string {
+/** Where `given` is inside `folder`, relative to it, or an explanation why it is not. `action` is what is to be done with the picture, for that. */
+export function pictureIn(folder: string, given: string, action = "shown"): string {
   const base = baseDir(folder);
   // The folder as the agent names it may reach the real one through a link:
   // an absolute path is taken inside either. openPicture then checks what the
   // path really leads to.
   const rel = under(base, path.resolve(base, given)) ?? under(path.resolve(folder), path.resolve(folder, given));
   if (!rel) {
-    throw new FileError("invalid", "Only a picture in the chat's folder can be shown. Copy it there first.");
+    throw new FileError("invalid", `Only a picture in the chat's folder can be ${action}. Copy it there first.`);
   }
   // Checked as the page will fetch it, so a call that succeeds is one that shows.
   closeSync(openPicture(base, rel).fd);

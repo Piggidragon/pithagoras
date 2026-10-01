@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Type } from "typebox";
 import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
-import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SIZE, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
+import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, MAX_PROMPT, SIZE, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
 import { FileError, baseDir, makeFolder, saveNewFile } from "../workspace-files.js";
 import { pictureIn } from "./show-image-tool.js";
 
@@ -24,22 +24,20 @@ export const GENERATE_IMAGE_VOICE_LINE =
 
 /** Where generated pictures go, inside the chat's folder, so that they do not mix with the work. */
 export const GENERATED_DIR = "generated-images";
-/** What the endpoints take: DALL-E 3's four thousand characters is the least. */
-const MAX_PROMPT = 4000;
 
 /** A name made here: the time, and something that tells two in one second apart. */
 const fileName = (ext: string): string =>
   `image-${new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-")}-${randomBytes(3).toString("hex")}.${ext}`;
 
-/** Writes the picture into the chat's folder and returns where, from it. */
-export function saveGenerated(folder: string, bytes: Buffer, ext: string): string {
+/** Writes the picture into the chat's folder, under a name made here unless one is given, and returns where, from it. */
+export function saveGenerated(folder: string, bytes: Buffer, ext: string, name = fileName(ext)): string {
   const base = baseDir(folder);
   try {
     makeFolder(base, "", GENERATED_DIR);
   } catch (e) {
     if (!(e instanceof FileError && e.code === "exists")) throw e;
   }
-  const rel = saveNewFile(base, GENERATED_DIR, fileName(ext), bytes);
+  const rel = saveNewFile(base, GENERATED_DIR, name, bytes);
   // Checked as the page will fetch it, so a call that succeeds is one that shows.
   return pictureIn(folder, rel);
 }
@@ -48,12 +46,12 @@ export function saveGenerated(folder: string, bytes: Buffer, ext: string): strin
  * Whether another extension has a tool of this name. pi keeps the first
  * registration of a name, and inline extensions load after the others, so
  * such a tool is the one the model has, and the portal's is left unused.
+ * By default the generation tool; `source` is the label of the portal's own.
  */
-export function takenByAnother(extensions: readonly any[]): boolean {
+export function takenByAnother(extensions: readonly any[], name = GENERATE_IMAGE_TOOL, source = GENERATE_IMAGE_SOURCE): boolean {
   return extensions.some(
     (extension) =>
-      extension?.path !== `<inline:${GENERATE_IMAGE_SOURCE}>` &&
-      [...(extension?.tools?.values?.() ?? [])].some((tool: any) => tool?.definition?.name === GENERATE_IMAGE_TOOL),
+      extension?.path !== `<inline:${source}>` && [...(extension?.tools?.values?.() ?? [])].some((tool: any) => tool?.definition?.name === name),
   );
 }
 

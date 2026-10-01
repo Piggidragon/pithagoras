@@ -14,6 +14,8 @@ process.env.AGENT_HOME = path.join(temp, "agent-home");
 const gen = await import("../server/src/image-generation.ts");
 const { GENERATED_PICTURE_MARK } = await import("../server/src/generated-picture.ts");
 const { GenerateImageTool, GENERATED_DIR, takenByAnother } = await import("../server/src/pi/generate-image-tool.ts");
+const editing = await import("../server/src/image-editing.ts");
+const { EditImageTool, editedName } = await import("../server/src/pi/edit-image-tool.ts");
 
 // The first bytes of each kind a browser draws, padded: that is all the check reads.
 const pad = (head: number[], to = 64) => Buffer.concat([Buffer.from(head), Buffer.alloc(to)]);
@@ -25,7 +27,7 @@ const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1
 
 const KEY = "sk-test-0123456789";
 
-interface Seen { method?: string; url?: string; auth?: string; body?: any }
+interface Seen { method?: string; url?: string; auth?: string; body?: any; type?: string; raw?: Buffer }
 /** A fake image endpoint: `handler` answers, and every request it gets is kept. */
 async function fake(handler: (req: IncomingMessage, res: ServerResponse, seen: Seen) => void): Promise<{ origin: string; seen: Seen[]; server: Server }> {
   const seen: Seen[] = [];
@@ -33,10 +35,11 @@ async function fake(handler: (req: IncomingMessage, res: ServerResponse, seen: S
     const chunks: Buffer[] = [];
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString("utf8");
+      const whole = Buffer.concat(chunks);
+      const raw = whole.toString("utf8");
       let body: any;
       try { body = raw ? JSON.parse(raw) : undefined; } catch { body = raw; }
-      const one: Seen = { method: req.method, url: req.url, auth: req.headers.authorization, body };
+      const one: Seen = { method: req.method, url: req.url, auth: req.headers.authorization, body, type: req.headers["content-type"], raw: whole };
       seen.push(one);
       handler(req, res, one);
     });
@@ -44,9 +47,34 @@ async function fake(handler: (req: IncomingMessage, res: ServerResponse, seen: S
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   return { origin: `http://127.0.0.1:${(server.address() as { port: number }).port}`, seen, server };
 }
+/** The parts of a multipart request as an endpoint reads them: by field name, with the file name, the type and the bytes of each. */
+function parts(seen: Seen): Record<string, { filename?: string; type?: string; bytes: Buffer }> {
+  const boundary = /boundary=(.+)$/.exec(seen.type ?? "")?.[1];
+  assert.ok(boundary, `a multipart form, not ${seen.type}`);
+  const found: Record<string, { filename?: string; type?: string; bytes: Buffer }> = {};
+  const delimiter = Buffer.from(`--${boundary}`);
+  let at = seen.raw!.indexOf(delimiter);
+  while (at >= 0) {
+    const next = seen.raw!.indexOf(delimiter, at + delimiter.length);
+    if (next < 0) break;
+    const part = seen.raw!.subarray(at + delimiter.length + 2, next - 2);
+    const split = part.indexOf("\r\n\r\n");
+    const head = part.subarray(0, split).toString("utf8");
+    const name = /name="([^"]*)"/.exec(head)![1];
+    found[name] = { filename: /filename="([^"]*)"/.exec(head)?.[1], type: /content-type: (.+)/i.exec(head)?.[1], bytes: part.subarray(split + 4) };
+    at = next;
+  }
+  return found;
+}
 const json = (res: ServerResponse, body: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
 const b64 = (bytes: Buffer) => bytes.toString("base64");
-const config = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageGenerationConfig>> = {}) => ({ enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, ...more });
+const config = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageGenerationConfig>> = {}) => ({
+  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", ...more,
+});
+/** What the page is told of a fresh install, with `more` changed. */
+const fresh = (more: Record<string, unknown> = {}) => ({
+  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editKeySet: false, editReady: false, ...more,
+});
 
 test("a request is checked: the address is a base with no secret in it, the size a real one", () => {
   const parse = gen.parseImageGenerationPatch;
@@ -71,7 +99,7 @@ test("the route is added to the address unless it is there", () => {
 
 test("it is off until switched on with an address, and the key is kept but never shown", () => {
   assert.equal(gen.imageGenerationReady(), false);
-  assert.deepEqual(gen.imageGenerationState(), { enabled: false, baseUrl: "", model: "", size: "", keySet: false });
+  assert.deepEqual(gen.imageGenerationState(), fresh());
   assert.throws(() => gen.saveImageGeneration({ enabled: true }), /address/, "no address to ask: not on");
   assert.equal(gen.imageGenerationReady(), false);
 
@@ -478,14 +506,14 @@ test("the API holds the settings, never gives the key back, and reloads chats on
   try {
     // As a fresh install has it, whatever the tests before left.
     gen.saveImageGeneration({ enabled: false, baseUrl: "", model: "", size: "", apiKey: "" });
-    assert.deepEqual((await call("GET", "/features/images")).body, { images: { enabled: false, baseUrl: "", model: "", size: "", keySet: false } });
+    assert.deepEqual((await call("GET", "/features/images")).body, { images: fresh() });
     assert.equal((await call("PUT", "/features/images", { enabled: true })).status, 400, "nowhere to ask yet");
     assert.equal((await call("PUT", "/features/images", { baseUrl: "https://u:p@h.example/v1" })).status, 400);
     assert.equal((await call("PUT", "/features/images", { size: "wide" })).status, 400);
 
     const saved = await call("PUT", "/features/images", { baseUrl: "https://images.example.com/v1", model: "image-model", apiKey: KEY });
     assert.equal(saved.status, 200);
-    assert.deepEqual(saved.body, { images: { enabled: false, baseUrl: "https://images.example.com/v1", model: "image-model", size: "", keySet: true }, changed: false, reloaded: 0, waiting: 0 });
+    assert.deepEqual(saved.body, { images: fresh({ baseUrl: "https://images.example.com/v1", model: "image-model", keySet: true }), changed: false, reloaded: 0, waiting: 0 });
     const on = await call("PUT", "/features/images", { enabled: true });
     assert.equal(on.body.changed, true, "the tool is there from now on: chats are reloaded");
     assert.equal(on.body.images.enabled, true);
@@ -577,4 +605,541 @@ test("an extension's tool of the same name is the one pi keeps, so the portal's 
   loaded = [ext("/x/image-package.ts", "generate_image"), own];
   assert.equal(tool.registered(), false, "an extension's tool is the model's");
   gen.saveImageGeneration({ enabled: false });
+});
+
+// --- editing a picture ---
+
+/** As a fresh install has the settings, whatever the tests before left. */
+const reset = () => gen.saveImageGeneration({
+  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "",
+});
+
+test("a request for editing is checked as one for generation is", () => {
+  const parse = gen.parseImageGenerationPatch;
+  assert.deepEqual(parse({ editEnabled: true, editBaseUrl: " https://edit.example.com/v1/ ", editModel: " m ", editApiKey: " k " }), {
+    editEnabled: true, editBaseUrl: "https://edit.example.com/v1", editModel: "m", editApiKey: "k",
+  });
+  assert.deepEqual(parse({ editBaseUrl: "" }), { editBaseUrl: "" }, "emptied is the way back to the address of generation");
+  for (const bad of ["ftp://x/v1", "not a url", "https://user:pass@host/v1", "https://host/v1?api_key=abc", "https://host/v1#x"]) {
+    assert.equal(typeof parse({ editBaseUrl: bad }), "string", bad);
+  }
+  assert.equal(typeof parse({ editEnabled: "yes" }), "string");
+  assert.equal(typeof parse({ editModel: 5 }), "string");
+  assert.equal(typeof parse({ editModel: "m".repeat(201) }), "string");
+  assert.equal(typeof parse({ editApiKey: 5 }), "string");
+  assert.equal(typeof parse({ editApiKey: "k".repeat(4001) }), "string");
+});
+
+test("editing is off until it is switched on with an address, its own or generation's, and its key is never shown", () => {
+  reset();
+  assert.equal(gen.imageEditingReady(), false);
+  assert.throws(() => gen.saveImageGeneration({ editEnabled: true }), /address/, "nowhere to ask: not on");
+  assert.equal(gen.imageEditingReady(), false);
+
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", apiKey: KEY });
+  assert.equal(gen.imageEditingReady(), false, "an address alone does not switch it on");
+  gen.saveImageGeneration({ editEnabled: true });
+  assert.equal(gen.imageEditingReady(), true, "the address of generation will do");
+  assert.equal(gen.imageGenerationReady(), false, "and is a switch of its own: generation is still off");
+  assert.deepEqual(gen.imageGenerationState(), fresh({ baseUrl: "https://images.example.com/v1", keySet: true, editEnabled: true, editReady: true }));
+
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1", editModel: "edit-model", editApiKey: "edit-key" });
+  const state = gen.imageGenerationState();
+  assert.deepEqual(state, fresh({ baseUrl: "https://images.example.com/v1", keySet: true, editEnabled: true, editBaseUrl: "https://edit.example.net/v1", editModel: "edit-model", editKeySet: true, editReady: true }));
+  assert.ok(!JSON.stringify(state).includes("edit-key") && !JSON.stringify(state).includes(KEY), "nothing the page is given holds a key");
+
+  // Back to the address of generation; and no address at all is no editing, whatever the switch says.
+  gen.saveImageGeneration({ editBaseUrl: "" });
+  assert.equal(gen.imageEditingTarget().baseUrl, "https://images.example.com/v1");
+  assert.throws(() => gen.saveImageGeneration({ baseUrl: "" }), /address/, "not while it is on");
+  gen.saveImageGeneration({ editEnabled: false });
+  assert.equal(gen.imageEditingReady(), false);
+  reset();
+});
+
+test("a key goes only to the server it was given for: generation's never to another edit address", () => {
+  reset();
+  const target = gen.imageEditingTarget;
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", apiKey: KEY, editEnabled: true, editModel: "edit-model" });
+  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY }, "edits to the generation server have its key");
+  assert.equal(target().model, "edit-model", "and never the model of generation, which may only make pictures");
+
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
+  assert.equal(target().apiKey, "", "another server is not given the key of generation");
+  gen.saveImageGeneration({ editBaseUrl: "https://images.example.com/v2" });
+  assert.equal(target().apiKey, KEY, "the same server, by another route");
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1", editApiKey: "ek" });
+  assert.equal(target().apiKey, "ek");
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v2" });
+  assert.equal(target().apiKey, "ek", "kept while the address stays the server's");
+  gen.saveImageGeneration({ baseUrl: "https://elsewhere.example.org/v1" });
+  assert.equal(target().apiKey, "ek", "the key of edits does not follow the address of generation while edits have one of their own");
+  gen.saveImageGeneration({ editBaseUrl: "https://third.example.org/v1" });
+  assert.equal(gen.imageGenerationState().editKeySet, false, "a new address of another server without a key has none");
+
+  // Edits going where generation goes: the key given for them goes with the address, not with the switch.
+  reset();
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true, editApiKey: "ek" });
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v2" });
+  assert.equal(target().apiKey, "ek", "the same server");
+  gen.saveImageGeneration({ baseUrl: "https://elsewhere.example.org/v1" });
+  assert.equal(gen.imageGenerationState().editKeySet, false, "edits went to another server with it: the key was not given for that");
+  assert.equal(target().apiKey, "");
+
+  // A key saved before there was an address was given for none, and goes with the first.
+  reset();
+  gen.saveImageGeneration({ editApiKey: "ek" });
+  assert.equal(gen.imageGenerationState().editKeySet, true);
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
+  assert.equal(target().apiKey, "ek");
+  gen.saveImageGeneration({ editBaseUrl: "" });
+  assert.equal(gen.imageGenerationState().editKeySet, false, "back at generation's server, which the key was not given for");
+  reset();
+});
+
+test("the route for edits is added to the address unless it is there, and generation's is swapped for it", () => {
+  assert.equal(editing.editEndpointUrl("https://h.example/v1").href, "https://h.example/v1/images/edits");
+  assert.equal(editing.editEndpointUrl("https://h.example/v1/").href, "https://h.example/v1/images/edits");
+  assert.equal(editing.editEndpointUrl("https://h.example/v1/images/edits").href, "https://h.example/v1/images/edits");
+  assert.equal(editing.editEndpointUrl("https://h.example/v1/images/generations").href, "https://h.example/v1/images/edits", "the address saved for generation, used for edits");
+  assert.equal(editing.editEndpointUrl("http://localhost:8080").href, "http://localhost:8080/images/edits");
+});
+
+const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, ...more });
+
+test("an edit is a form with the picture, the prompt and the model, sent with the key to this address", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
+  try {
+    const got = await editing.editImage(target(`${origin}/v1`), { prompt: "make it red", image: PNG });
+    assert.equal(got.ext, "jpg", "the result is whatever its bytes say");
+    assert.deepEqual(got.bytes, JPEG);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].method, "POST");
+    assert.equal(seen[0].url, "/v1/images/edits");
+    assert.equal(seen[0].auth, `Bearer ${KEY}`);
+    assert.match(seen[0].type!, /^multipart\/form-data; boundary=/);
+    const form = parts(seen[0]);
+    assert.deepEqual(Object.keys(form).sort(), ["image", "model", "n", "prompt"], "no size and no mask unless given");
+    assert.deepEqual(form.image.bytes, PNG);
+    assert.equal(form.image.type, "image/png", "its type is its bytes'");
+    assert.equal(form.image.filename, "image.png", "a neutral name, never the file's own");
+    assert.equal(form.prompt.bytes.toString(), "make it red");
+    assert.equal(form.model.bytes.toString(), "edit-model");
+    assert.equal(form.n.bytes.toString(), "1");
+
+    // A mask goes along as a file of its own; no model and no key send neither.
+    await editing.editImage(target(origin, { model: "", apiKey: "" }), { prompt: "p", image: WEBP, mask: GIF });
+    const withMask = parts(seen[1]);
+    assert.deepEqual(Object.keys(withMask).sort(), ["image", "mask", "n", "prompt"]);
+    assert.deepEqual(withMask.mask.bytes, GIF);
+    assert.equal(withMask.mask.type, "image/gif");
+    assert.equal(withMask.mask.filename, "mask.gif");
+    assert.equal(withMask.image.type, "image/webp");
+    assert.equal(seen[1].auth, undefined);
+    assert.equal(seen[1].url, "/images/edits");
+  } finally {
+    server.close();
+  }
+});
+
+test("a picture to edit is checked by its bytes and its size before anything is sent", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    for (const bad of [SVG, Buffer.from("<html><script>alert(1)</script></html>"), Buffer.from("not a picture at all"), Buffer.alloc(0)]) {
+      await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: bad }), /The image is not a PNG, JPEG, GIF or WebP picture/);
+      await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: PNG, mask: bad }), /The mask is not a PNG, JPEG, GIF or WebP picture/);
+    }
+    const big = Buffer.concat([PNG, Buffer.alloc(4096)]);
+    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: big }, { maxInputBytes: 1024 }), /The image is over/);
+    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: PNG, mask: big }, { maxInputBytes: 1024 }), /The mask is over/);
+    assert.equal(seen.length, 0, "nothing left the portal");
+    assert.equal((await editing.editImage(target(origin), { prompt: "p", image: big }, { maxInputBytes: 1024 * 1024 })).ext, "png");
+  } finally {
+    server.close();
+  }
+});
+
+test("the answer to an edit is read, limited and kept from the key as one to a generation is", async () => {
+  let answer: unknown = { data: [{ url: `data:image/png;base64,${b64(PNG)}` }] };
+  const { origin, seen, server } = await fake((req, res) => {
+    if (req.url === "/files/own.png") return res.writeHead(200, { "content-type": "application/octet-stream" }).end(GIF);
+    json(res, answer, answer === "error" ? 401 : 200);
+  });
+  const ask = (more: Partial<ReturnType<typeof target>> = {}, options = {}) => editing.editImage(target(origin, more), { prompt: "p", image: PNG }, options);
+  try {
+    assert.equal((await ask()).ext, "png", "a data URL");
+    answer = { data: [{ url: `${origin}/files/own.png` }] };
+    assert.equal((await ask()).ext, "gif", "an address on the endpoint's own host, fetched with the key, whatever it is served as");
+    assert.equal(seen.at(-1)!.auth, `Bearer ${KEY}`);
+
+    // Only a picture counts, and only up to the limit.
+    answer = { data: [{ b64_json: b64(SVG) }] };
+    await assert.rejects(ask(), /not a PNG, JPEG, GIF or WebP picture/);
+    answer = { data: [] };
+    await assert.rejects(ask(), /no picture in it/);
+    answer = { data: [{ b64_json: b64(Buffer.concat([PNG, Buffer.alloc(4096)])) }] };
+    await assert.rejects(ask({}, { maxBytes: 1024 }), /over/);
+
+    // An error is passed on without the key, even where the endpoint repeats it.
+    answer = "error";
+    const failing = await fake((_req, res) => json(res, { error: { message: `Invalid key ${KEY} for model edit-model` } }, 401));
+    try {
+      await assert.rejects(editing.editImage(target(failing.origin), { prompt: "p", image: PNG }), (e: Error) => {
+        assert.match(e.message, /answered 401: Invalid key \[key\] for model/);
+        assert.ok(!e.message.includes(KEY));
+        return true;
+      });
+    } finally {
+      failing.server.close();
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test("an edit's picture is never fetched from another place on this machine, and the endpoint is never followed elsewhere", async () => {
+  const inner = await fake((_req, res) => res.writeHead(200).end(PNG));
+  const { origin, server } = await fake((_req, res) => json(res, { data: [{ url: `${inner.origin}/secret.png` }] }));
+  const redirecting = await fake((_req, res) => res.writeHead(307, { location: `${inner.origin}/v1/images/edits` }).end());
+  try {
+    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: PNG }), /another host than the endpoint, and is only fetched from there over https/);
+    await assert.rejects(editing.editImage(target(redirecting.origin), { prompt: "p", image: PNG }), /Could not reach the image endpoint/);
+    assert.equal(inner.seen.length, 0, "nothing was asked of the other place, and it was sent no key");
+  } finally {
+    server.close();
+    redirecting.server.close();
+    inner.server.close();
+  }
+});
+
+test("an edit that is never answered is given up on, and a chat that is stopped stops it", async () => {
+  const { origin, server } = await fake(() => {});
+  try {
+    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: PNG }, { timeoutMs: 150 }), /did not answer within/);
+    const stop = new AbortController();
+    const slow = editing.editImage(target(origin), { prompt: "p", image: PNG }, { signal: stop.signal });
+    setTimeout(() => stop.abort(), 50);
+    await assert.rejects(slow, (e: Error) => !(e instanceof gen.ImageGenerationError) && /abort/i.test(e.name));
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+/** The editing tool as pi gets it, and a way to call it. */
+function loadEdit(folder: string) {
+  const tool = new EditImageTool(folder);
+  const registered: any[] = [];
+  tool.extension({ registerTool: (t: any) => registered.push(t) });
+  return { tool, registered, call: (p: any, signal?: AbortSignal) => registered[0].execute("id", p, signal) };
+}
+
+/** A chat's folder with a picture in it. */
+function chatWith(files: Record<string, Buffer> = { "photo.png": PNG }) {
+  const folder = mkdtempSync(path.join(temp, "chat-"));
+  for (const [name, bytes] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(folder, name)), { recursive: true });
+    writeFileSync(path.join(folder, name), bytes);
+  }
+  return folder;
+}
+
+test("while editing is off, or has no address, the edit tool is not there at all", () => {
+  reset();
+  const folder = chatWith();
+  const off = loadEdit(folder);
+  assert.deepEqual(off.registered, []);
+  assert.equal(off.tool.registered(), false);
+
+  // Generation on is not editing on.
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", enabled: true });
+  assert.deepEqual(loadEdit(folder).registered, []);
+  assert.deepEqual(load(folder).registered.map((t) => t.name), ["generate_image"], "and the other way round");
+
+  gen.saveImageGeneration({ editEnabled: true });
+  const on = loadEdit(folder);
+  assert.deepEqual(on.registered.map((t) => t.name), ["edit_image"]);
+  assert.equal(on.tool.registered(), true);
+
+  // Loaded again after a switch, as pi does on a reload: it follows.
+  gen.saveImageGeneration({ editEnabled: false });
+  on.tool.extension({ registerTool: () => assert.fail("not while it is off") });
+  assert.equal(on.tool.registered(), false);
+  reset();
+});
+
+test("the tool changes a picture of the chat's folder into a new one next to its kind and answers as generate_image does", async () => {
+  const folder = chatWith({ "photo.png": PNG, "shots/other.jpg": JPEG });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(WEBP) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, model: "generation-model", apiKey: KEY, editEnabled: true, editModel: "edit-model" });
+    const { call, registered } = loadEdit(folder);
+    assert.deepEqual(Object.keys(registered[0].parameters.properties).sort(), ["path", "prompt", "title"]);
+    assert.ok(!JSON.stringify(registered[0]).includes(KEY));
+
+    const result = await call({ path: "photo.png", prompt: "  make the sky purple  ", title: "Purple sky" });
+    assert.equal(result.details.path, "generated-images/photo-edited.webp", "named after the original, with the type of the result");
+    assert.deepEqual(result.details, { path: "generated-images/photo-edited.webp", title: "Purple sky", [GENERATED_PICTURE_MARK]: true });
+    assert.match(result.content[0].text, /Edited photo\.png, and shown to the user: generated-images\/photo-edited\.webp/);
+    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), WEBP);
+    assert.deepEqual(readFileSync(path.join(folder, "photo.png")), PNG, "the original stays as it was");
+
+    // What was sent: the picture from the folder, the prompt, and the model of editing, not of generation.
+    assert.equal(seen[0].url, "/images/edits");
+    assert.equal(seen[0].auth, `Bearer ${KEY}`, "the key of the server it was given for");
+    const form = parts(seen[0]);
+    assert.deepEqual(form.image.bytes, PNG);
+    assert.equal(form.prompt.bytes.toString(), "make the sky purple");
+    assert.equal(form.model.bytes.toString(), "edit-model");
+
+    // A second edit of the same picture never takes the first's place; one of an edit does not stack the mark.
+    const again = await call({ path: "photo.png", prompt: "make the sky green" });
+    assert.equal(again.details.path, "generated-images/photo-edited (2).webp");
+    assert.equal(again.details.title, "make the sky green", "without a title, the prompt is the caption");
+    const ofEdit = await call({ path: result.details.path, prompt: "and add a moon" });
+    assert.equal(ofEdit.details.path, "generated-images/photo-edited (3).webp");
+    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), WEBP, "the first is as it was");
+
+    // An absolute path inside the folder, and a picture in a folder of its own: the result is still where the pictures go.
+    const inner = await call({ path: path.join(folder, "shots", "other.jpg"), prompt: "p" });
+    assert.equal(inner.details.path, "generated-images/other-edited.webp");
+    assert.deepEqual(readdirSync(folder).sort(), [GENERATED_DIR, "photo.png", "shots"], "nothing else was made in the folder");
+    assert.deepEqual(readdirSync(path.join(folder, "shots")), ["other.jpg"]);
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("what an edit is called: the original's name, with the mark once, within what a name may be", () => {
+  assert.equal(editedName("photo.png", "png"), "photo-edited.png");
+  assert.equal(editedName("a/b/photo.final.jpg", "webp"), "photo.final-edited.webp");
+  assert.equal(editedName("generated-images/photo-edited.png", "png"), "photo-edited.png", "an edit of an edit: the mark is not stacked, the number is made when it is saved");
+  assert.equal(editedName("photo-edited (2).png", "png"), "photo-edited.png");
+  assert.equal(editedName(".hidden.png", "png"), ".hidden-edited.png");
+  assert.ok(Buffer.byteLength(editedName(`${"x".repeat(300)}.png`, "png")) <= 255 - 10);
+  assert.ok(Buffer.byteLength(editedName(`${"é".repeat(300)}.png`, "png")) <= 255 - 10, "by bytes, not by letters");
+  // Four bytes a letter: a name of 62 of them (248 bytes) is a valid name, and the result's must be one too, with room for a number.
+  const emoji = editedName(`${"😀".repeat(62)}.png`, "webp");
+  assert.ok(Buffer.byteLength(emoji) <= 255 - 10, `${Buffer.byteLength(emoji)} bytes`);
+  assert.ok(emoji.endsWith("-edited.webp") && !emoji.includes("\uFFFD"), "cut between letters, not inside one");
+});
+
+test("an original with a long name of four-byte letters is edited as any other, and a failed save is not what finds out", async () => {
+  const name = `${"😀".repeat(62)}.png`;
+  assert.equal(Buffer.byteLength(name), 252, "a valid name");
+  const folder = chatWith({ [name]: PNG });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(WEBP) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true });
+    const { call } = loadEdit(folder);
+    const first = await call({ path: name, prompt: "p" });
+    const second = await call({ path: name, prompt: "p" });
+    assert.notEqual(first.details.path, second.details.path);
+    for (const result of [first, second]) {
+      assert.ok(existsSync(path.join(folder, result.details.path)));
+      assert.ok(Buffer.byteLength(path.basename(result.details.path)) <= 255);
+    }
+    assert.equal(seen.length, 2);
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("the tool reads only what is in the chat's folder, and only a picture: nothing is sent for anything else", async () => {
+  const folder = chatWith({ "photo.png": PNG, "notes.txt": Buffer.from("not a picture"), "vector.png": SVG });
+  const outside = chatWith({ "secret.png": PNG });
+  symlinkSync(path.join(outside, "secret.png"), path.join(folder, "link.png"));
+  symlinkSync(outside, path.join(folder, "linked"));
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true });
+    const { call } = loadEdit(folder);
+    await assert.rejects(call({ path: path.join(outside, "secret.png"), prompt: "p" }), /Only a picture in the chat's folder can be edited/);
+    await assert.rejects(call({ path: "../secret.png", prompt: "p" }), /Only a picture in the chat's folder can be edited/);
+    await assert.rejects(call({ path: "link.png", prompt: "p" }), /leads outside the folder/);
+    await assert.rejects(call({ path: "linked/secret.png", prompt: "p" }), /leads outside the folder/);
+    await assert.rejects(call({ path: "notes.txt", prompt: "p" }), /not a PNG, JPEG, GIF or WebP/);
+    await assert.rejects(call({ path: "vector.png", prompt: "p" }), /not a PNG, JPEG, GIF or WebP/);
+    await assert.rejects(call({ path: "missing.png", prompt: "p" }), /no such file/i);
+    await assert.rejects(call({ path: "", prompt: "p" }), /Only a picture in the chat's folder can be edited/);
+    await assert.rejects(call({ path: "photo.png", prompt: "   " }), /prompt is required/);
+    await assert.rejects(call({ path: "photo.png", prompt: "x".repeat(4001) }), /over 4000 characters/);
+    assert.equal(seen.length, 0, "nothing was sent for any of it");
+    assert.equal(existsSync(path.join(folder, GENERATED_DIR)), false, "and nothing kept");
+    assert.deepEqual(readdirSync(outside), ["secret.png"]);
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("a picture over the limit is refused as too large for an edit, not told to be downloaded, and nothing is sent", async () => {
+  const folder = chatWith({ "small.png": PNG, "huge.png": Buffer.concat([PNG, Buffer.alloc(26 * 1024 * 1024)]) });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true });
+    const { call } = loadEdit(folder);
+    await assert.rejects(call({ path: "huge.png", prompt: "p" }), (e: Error) => {
+      assert.match(e.message, /over 25 MB, which is more than an edit takes/);
+      assert.doesNotMatch(e.message, /download/i);
+      return true;
+    });
+    assert.equal(seen.length, 0, "nothing was sent");
+    assert.equal(existsSync(path.join(folder, GENERATED_DIR)), false, "and nothing kept");
+    assert.equal((await call({ path: "small.png", prompt: "p" })).details.path, "generated-images/small-edited.png", "a picture within the limit is edited as ever");
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("a failed edit leaves nothing behind: no file, no folder, and the original as it was", async () => {
+  const folder = chatWith();
+  let answer: unknown = { data: [{ b64_json: b64(SVG) }] };
+  let status = 200;
+  const { origin, server } = await fake((_req, res) => json(res, answer, status));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true });
+    const { call } = loadEdit(folder);
+    const untouched = () => {
+      assert.equal(existsSync(path.join(folder, GENERATED_DIR)), false, "no folder made for it");
+      assert.deepEqual(readdirSync(folder), ["photo.png"]);
+      assert.deepEqual(readFileSync(path.join(folder, "photo.png")), PNG);
+    };
+    await assert.rejects(call({ path: "photo.png", prompt: "p" }), /not a PNG, JPEG, GIF or WebP/);
+    untouched();
+    answer = { data: [] };
+    await assert.rejects(call({ path: "photo.png", prompt: "p" }), /no picture in it/);
+    untouched();
+    answer = { error: { message: "This model cannot edit" } };
+    status = 400;
+    await assert.rejects(call({ path: "photo.png", prompt: "p" }), /answered 400: This model cannot edit/);
+    untouched();
+    // Where there is a folder of the pictures already, a failure adds nothing to it either.
+    answer = { data: [{ b64_json: b64(JPEG) }] };
+    status = 200;
+    await call({ path: "photo.png", prompt: "p" });
+    answer = { data: [] };
+    await assert.rejects(call({ path: "photo.png", prompt: "p" }));
+    assert.deepEqual(readdirSync(path.join(folder, GENERATED_DIR)), ["photo-edited.jpg"]);
+    // Nothing is written through a folder that leads out of the chat's, either.
+    const outside = mkdtempSync(path.join(temp, "outside-"));
+    const other = chatWith();
+    symlinkSync(outside, path.join(other, GENERATED_DIR));
+    answer = { data: [{ b64_json: b64(PNG) }] };
+    await assert.rejects(loadEdit(other).call({ path: "photo.png", prompt: "p" }));
+    assert.deepEqual(readdirSync(outside), [], "nothing outside the folder");
+    // Switched off since it was loaded: refused.
+    gen.saveImageGeneration({ editEnabled: false });
+    await assert.rejects(call({ path: "photo.png", prompt: "p" }), /switched off/);
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("a picture made by the portal can be edited, and the result sits beside it in the generated pictures", async () => {
+  const folder = mkdtempSync(path.join(temp, "chat-"));
+  const { origin, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, enabled: true, editEnabled: true });
+    const made = await load(folder).call({ prompt: "a lighthouse" });
+    const edited = await loadEdit(folder).call({ path: made.details.path, prompt: "at night" });
+    assert.equal(edited.details.path, made.details.path.replace(/\.png$/, "-edited.png"));
+    assert.deepEqual(readdirSync(path.join(folder, GENERATED_DIR)).length, 2);
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("the API holds the edit settings, never gives a key back, and reloads chats when the edit tool comes or goes", async () => {
+  const express = (await import("express")).default;
+  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const app = express().use(express.json()).use("/api", featuresRouter());
+  const portal = app.listen(0, "127.0.0.1");
+  await new Promise((r) => portal.once("listening", r));
+  const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/api`;
+  const call = async (method: string, p: string, body?: unknown) => {
+    const r = await fetch(`${at}${p}`, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await r.text();
+    assert.ok(!text.includes("edit-key") && !text.includes(KEY), `${method} ${p} gave a key back`);
+    return { status: r.status, body: JSON.parse(text) };
+  };
+  try {
+    reset();
+    assert.equal((await call("PUT", "/features/images", { editEnabled: true })).status, 400, "nowhere to ask yet");
+    assert.equal((await call("PUT", "/features/images", { editBaseUrl: "https://u:p@h.example/v1" })).status, 400);
+    assert.equal((await call("PUT", "/features/images", { editEnabled: "yes" })).status, 400);
+
+    const saved = await call("PUT", "/features/images", { editBaseUrl: "https://edit.example.net/v1", editModel: "edit-model", editApiKey: "edit-key" });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.body, { images: fresh({ editBaseUrl: "https://edit.example.net/v1", editModel: "edit-model", editKeySet: true }), changed: false, reloaded: 0, waiting: 0 });
+    const on = await call("PUT", "/features/images", { editEnabled: true });
+    assert.equal(on.body.changed, true, "the tool is there from now on: chats are reloaded");
+    assert.equal(on.body.images.editReady, true);
+    assert.equal((await call("PUT", "/features/images", { editModel: "other" })).body.changed, false, "the model is read at each call: no reload");
+    assert.equal((await call("GET", "/features/images")).body.images.editKeySet, true);
+    const all = await call("GET", "/features");
+    assert.equal(all.body.images.editKeySet, true);
+    assert.ok(!("editApiKey" in all.body.images));
+    assert.equal((await call("PUT", "/features/images", { editApiKey: "" })).body.images.editKeySet, false);
+    // Generation coming on does not change what edits have; editing going off is a change.
+    assert.equal((await call("PUT", "/features/images", { baseUrl: "https://images.example.com/v1", enabled: true })).body.changed, true, "generation's own tool came");
+    assert.equal((await call("PUT", "/features/images", { editEnabled: false })).body.changed, true);
+  } finally {
+    portal.close();
+    reset();
+  }
+});
+
+test("the tool menus do not offer edit_image while editing is off, though it is remembered for when it is on", async () => {
+  const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
+  rememberTools([
+    remembered({ name: "edit_image", source: "image-editing", inline: true }),
+    remembered({ name: "generate_image", source: "image-generation", inline: true }),
+    remembered({ name: "show_image", source: "pictures", inline: true }),
+  ]);
+  const names = () => shownTools().map((t) => t.name).filter((n) => /image/.test(n)).sort();
+  reset();
+  assert.deepEqual(names(), ["show_image"]);
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true });
+  assert.deepEqual(names(), ["edit_image", "show_image"], "editing on, generation off: only its own tool");
+  gen.saveImageGeneration({ enabled: true });
+  assert.deepEqual(names(), ["edit_image", "generate_image", "show_image"]);
+  gen.saveImageGeneration({ editEnabled: false });
+  assert.deepEqual(names(), ["generate_image", "show_image"]);
+  assert.equal(knownTools().find((t) => t.name === "edit_image")?.inline, true, "remembered for when it is on");
+
+  // An extension's tool of the same name is loaded whatever the add-on says, so it is offered.
+  rememberTools([remembered({ name: "edit_image", source: "image-package" })]);
+  assert.deepEqual(names(), ["edit_image", "generate_image", "show_image"]);
+  rememberTools([remembered({ name: "edit_image", source: "image-editing", inline: true })]);
+  assert.deepEqual(names(), ["generate_image", "show_image"]);
+  reset();
+});
+
+test("an extension's edit_image is the one pi keeps, so the portal's is not counted as there", () => {
+  const ext = (extensionPath: string, ...names: string[]) => ({ path: extensionPath, tools: new Map(names.map((n) => [n, { definition: { name: n } }])) });
+  const own = ext("<inline:image-editing>", "edit_image");
+  reset();
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true });
+  let loaded: any[] = [own];
+  const tool = new EditImageTool(mkdtempSync(path.join(temp, "chat-")), () => loaded);
+  assert.equal(tool.registered(), false, "not before it is loaded");
+  tool.extension({ registerTool: () => {} });
+  assert.equal(tool.registered(), true);
+  loaded = [ext("/x/image-package.ts", "edit_image"), own];
+  assert.equal(tool.registered(), false, "an extension's tool is the model's");
+  loaded = [ext("/x/image-package.ts", "generate_image"), own];
+  assert.equal(tool.registered(), true, "another name is no clash: the generation tool is not this one");
+  reset();
 });

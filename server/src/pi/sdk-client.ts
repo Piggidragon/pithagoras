@@ -1,7 +1,8 @@
 import { CanvasTools } from "./canvas-tools.js";
 import { showImageTool } from "./show-image-tool.js";
 import { GENERATE_IMAGE_VOICE_LINE, GenerateImageTool } from "./generate-image-tool.js";
-import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL } from "../image-generation.js";
+import { EDIT_IMAGE_VOICE_LINE, EditImageTool } from "./edit-image-tool.js";
+import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL } from "../image-generation.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
@@ -422,8 +423,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Whether the model has the tool is settled when pi loads it and by the tool switches: the rule says
     // so only while it has — and it is the portal's, not an extension's of the same name that pi keeps.
     const imageTool = opts.sessionId ? new GenerateImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? []) : undefined;
+    const editTool = opts.sessionId ? new EditImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? []) : undefined;
     const audioRule = new AudioRule(getVoiceInstructions, () =>
-      imageTool?.registered() && !switchedOff().has(GENERATE_IMAGE_TOOL) ? GENERATE_IMAGE_VOICE_LINE : "",
+      [
+        imageTool?.registered() && !switchedOff().has(GENERATE_IMAGE_TOOL) ? GENERATE_IMAGE_VOICE_LINE : "",
+        editTool?.registered() && !switchedOff().has(EDIT_IMAGE_TOOL) ? EDIT_IMAGE_VOICE_LINE : "",
+      ].filter(Boolean).join(" "),
     );
     const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
     try {
@@ -448,6 +453,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       if (opts.sessionId) factories.push({ name: "pictures", factory: showImageTool(opts.cwd) });
       // Registers nothing while the add-on is off or has no address: see GenerateImageTool.
       if (imageTool) factories.push({ name: GENERATE_IMAGE_SOURCE, factory: imageTool.extension });
+      // The same for editing, with its own switch.
+      if (editTool) factories.push({ name: EDIT_IMAGE_SOURCE, factory: editTool.extension });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       // Only where it means something: a conversation with the primary user has

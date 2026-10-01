@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
-import { GENERATE_IMAGE_TOOL, imageGenerationReady } from "./image-generation.js";
+import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL, imageEditingReady, imageGenerationReady } from "./image-generation.js";
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
@@ -1894,14 +1894,17 @@ export function knownTools(): KnownTool[] {
 export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline">[] {
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
   // The portal's own tools belong to no package, so the packages cannot say
-  // that one is not offered: image generation says so itself, while it is off.
-  // Only its own tool, which is known by being inline, as no label can say: an
+  // that one is not offered: image generation and image editing say so
+  // themselves, while they are off.
+  // Only their own tools, which are known by being inline, as no label can say: an
   // extension of the same name is loaded whatever the add-on says, and a file
   // called image-generation.ts has the label the portal's factory has.
   const images = imageGenerationReady();
+  const editing = imageEditingReady();
   return knownTools()
     .filter(toolAvailability(readPiSettings().packages, project))
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
+    .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))
     .map(({ package: _package, inline: _inline, ...tool }) => tool);
 }
 

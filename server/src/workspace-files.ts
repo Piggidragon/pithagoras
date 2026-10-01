@@ -287,6 +287,28 @@ export function openPicture(base: string, rel: unknown): { fd: number; size: num
 }
 
 /**
+ * A picture in the folder, read whole, for one that is sent on as it is, to an
+ * image endpoint to be changed. Opened as a picture shown is: checked by its
+ * bytes and its size, and never through a link out of the folder.
+ */
+export function readPicture(base: string, rel: unknown): { bytes: Buffer; mimeType: string; name: string } {
+  const opened = openPicture(base, rel);
+  try {
+    const bytes = Buffer.alloc(opened.size);
+    let read = 0;
+    while (read < bytes.length) {
+      const n = readSync(opened.fd, bytes, read, bytes.length - read, read);
+      // Shorter than it was when it was measured.
+      if (n === 0) break;
+      read += n;
+    }
+    return { bytes: bytes.subarray(0, read), mimeType: opened.mimeType, name: opened.name };
+  } finally {
+    closeSync(opened.fd);
+  }
+}
+
+/**
  * What a failed change is called to the person, by what the system said.
  * Anything not known here is left as it is, and becomes a plain 500 with a log line.
  */
@@ -517,7 +539,7 @@ export function makeFolder(base: string, dirRel: unknown, name: unknown): string
 }
 
 /** The start of a name that fits in `max` bytes, cut between letters, not inside one. */
-function fitBytes(name: string, max: number): string {
+export function fitBytes(name: string, max: number): string {
   let start = "";
   for (const ch of name) {
     if (Buffer.byteLength(start + ch) > max) break;

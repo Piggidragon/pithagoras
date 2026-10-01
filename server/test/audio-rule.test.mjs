@@ -632,3 +632,46 @@ export default function (pi: any) {
     saveImageGeneration({ enabled: false });
   }
 });
+
+test("image editing: the edit tool and what the voice rule says of it come and go with its own switch, apart from generation's", async () => {
+  const { saveImageGeneration } = await import("../dist/image-generation.js");
+  const { GENERATE_IMAGE_VOICE_LINE } = await import("../dist/pi/generate-image-tool.js");
+  const { EDIT_IMAGE_VOICE_LINE } = await import("../dist/pi/edit-image-tool.js");
+  saveInstructions(undefined);
+  saveImageGeneration({ enabled: false, editEnabled: false, baseUrl: "http://127.0.0.1:9/v1", apiKey: "" });
+  const state = (prompt) => ({
+    generate: offered.at(-1).includes("generate_image"), edit: offered.at(-1).includes("edit_image"),
+    generateLine: prompt.includes(GENERATE_IMAGE_VOICE_LINE), editLine: prompt.includes(EDIT_IMAGE_VOICE_LINE),
+  });
+  const client = await open(undefined, { sessionId: "image-editing-chat" });
+  try {
+    // An address alone is neither tool.
+    assert.deepEqual(state(await say(client, "Spoken, both off", true)), { generate: false, edit: false, generateLine: false, editLine: false });
+
+    // Editing on and the chat reloaded, as the page's switch does it: the tool and its line, and not generation's.
+    saveImageGeneration({ editEnabled: true });
+    await client.reload();
+    const edit = await say(client, "Typed, editing on");
+    assert.deepEqual(state(edit), { generate: false, edit: true, generateLine: false, editLine: true });
+    assert.ok(edit.includes(audioSystemRule(DEFAULT_VOICE_INSTRUCTIONS, EDIT_IMAGE_VOICE_LINE)), "the line alone, as generation's is");
+
+    // Both on: both lines.
+    saveImageGeneration({ enabled: true });
+    await client.reload();
+    assert.deepEqual(state(await say(client, "Typed, both on")), { generate: true, edit: true, generateLine: true, editLine: true });
+
+    // The edit tool switched off in the chat's menu: its line goes with it, at the next message.
+    await client.setToolsOff(["edit_image"]);
+    assert.deepEqual(state(await say(client, "Typed, edit_image off")), { generate: true, edit: false, generateLine: true, editLine: false });
+    await client.setToolsOff([]);
+    assert.deepEqual(state(await say(client, "Typed, edit_image on again")), { generate: true, edit: true, generateLine: true, editLine: true });
+
+    // Editing off again: the tool and the line go with the reload, generation's stay.
+    saveImageGeneration({ editEnabled: false });
+    await client.reload();
+    assert.deepEqual(state(await say(client, "Typed, editing off")), { generate: true, edit: false, generateLine: true, editLine: false });
+  } finally {
+    client.dispose();
+    saveImageGeneration({ enabled: false, editEnabled: false });
+  }
+});
