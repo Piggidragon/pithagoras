@@ -10,7 +10,7 @@ import {
   imageEditingTarget,
   imageGenerationConfig,
 } from "../image-generation.js";
-import { baseDir, fitBytes, readPicture } from "../workspace-files.js";
+import { FileError, MAX_PICTURE_BYTES, baseDir, fitBytes, readPicture } from "../workspace-files.js";
 import { saveGenerated, takenByAnother } from "./generate-image-tool.js";
 import { pictureIn } from "./show-image-tool.js";
 
@@ -92,8 +92,18 @@ export class EditImageTool {
         if (!prompt) throw new Error("A prompt is required: say what should change in the picture.");
         if (prompt.length > MAX_PROMPT) throw new Error(`The prompt is over ${MAX_PROMPT} characters; say it shorter.`);
         // Where it is in the chat's folder, as show_image needs it, and read from there: no other place is read.
-        const original = pictureIn(folder, p.path, "edited");
-        const { bytes: image } = readPicture(baseDir(folder), original);
+        let original: string;
+        let image: Buffer;
+        try {
+          original = pictureIn(folder, p.path, "edited");
+          image = readPicture(baseDir(folder), original).bytes;
+        } catch (e) {
+          // The Files panel's words for it ("download it instead") are no way forward for an edit.
+          if (e instanceof FileError && e.code === "too_large") {
+            throw new Error(`The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB, which is more than an edit takes. It is not scaled or cut; say so to the person, or make a smaller copy of it first.`);
+          }
+          throw e;
+        }
         const { bytes, ext } = await editImage(imageEditingTarget(config), { prompt, image }, { signal });
         const rel = saveGenerated(folder, bytes, ext, editedName(original, ext));
         const title = (typeof p.title === "string" && p.title.trim() ? p.title : prompt).replace(/\s+/g, " ").trim().slice(0, 120);

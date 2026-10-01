@@ -978,6 +978,27 @@ test("the tool reads only what is in the chat's folder, and only a picture: noth
   }
 });
 
+test("a picture over the limit is refused as too large for an edit, not told to be downloaded, and nothing is sent", async () => {
+  const folder = chatWith({ "small.png": PNG, "huge.png": Buffer.concat([PNG, Buffer.alloc(26 * 1024 * 1024)]) });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true });
+    const { call } = loadEdit(folder);
+    await assert.rejects(call({ path: "huge.png", prompt: "p" }), (e: Error) => {
+      assert.match(e.message, /over 25 MB, which is more than an edit takes/);
+      assert.doesNotMatch(e.message, /download/i);
+      return true;
+    });
+    assert.equal(seen.length, 0, "nothing was sent");
+    assert.equal(existsSync(path.join(folder, GENERATED_DIR)), false, "and nothing kept");
+    assert.equal((await call({ path: "small.png", prompt: "p" })).details.path, "generated-images/small-edited.png", "a picture within the limit is edited as ever");
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
 test("a failed edit leaves nothing behind: no file, no folder, and the original as it was", async () => {
   const folder = chatWith();
   let answer: unknown = { data: [{ b64_json: b64(SVG) }] };
