@@ -20,14 +20,18 @@ mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
 
 /** Each request's system prompt, in the order they came. */
 const sent = [];
+/** The names of the tools each request offered the model, in the same order. */
+const offered = [];
 /** Held until let go, for a run that is still going when the next message comes. */
 let hold;
 const model = createServer((req, res) => {
   let body = "";
   req.on("data", (d) => { body += d; });
   req.on("end", async () => {
-    const system = JSON.parse(body).messages.find((m) => m.role === "system" || m.role === "developer");
+    const request = JSON.parse(body);
+    const system = request.messages.find((m) => m.role === "system" || m.role === "developer");
     sent.push(typeof system?.content === "string" ? system.content : system?.content?.map((c) => c.text).join("") ?? "");
+    offered.push((request.tools ?? []).map((t) => t.function?.name));
     if (hold) await hold;
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const chunk = (delta, finish = null) =>
@@ -74,10 +78,11 @@ function saveInstructions(text) {
 }
 
 let chats = 0;
-const open = (sessionFile) => {
+/** `more` is what a conversation of the portal has beside these: its `sessionId`, as the portal opens one. */
+const open = (sessionFile, more = {}) => {
   const dir = path.join(home, "chats", String(++chats));
   mkdirSync(dir, { recursive: true });
-  return SdkPiClient.create({ cwd: process.env.WORKSPACE_ROOT, sessionDir: dir, sessionFile, provider: "fake", modelId: "m" });
+  return SdkPiClient.create({ cwd: process.env.WORKSPACE_ROOT, sessionDir: dir, sessionFile, provider: "fake", modelId: "m", ...more });
 };
 /** Waits for `ready`, and fails rather than waiting for ever. */
 async function until(ready, what) {
@@ -465,5 +470,65 @@ test("a prompt that could not be built again with new instructions keeps the ear
     client.activate = activate;
     client.dispose();
     saveInstructions(undefined);
+  }
+});
+
+test("image generation: the tool and what the voice rule says of it come and go together, with the add-on and a reload", async () => {
+  const { saveImageGeneration } = await import("../dist/image-generation.js");
+  const { GENERATE_IMAGE_VOICE_LINE } = await import("../dist/pi/generate-image-tool.js");
+  const withLine = audioSystemRule(DEFAULT_VOICE_INSTRUCTIONS, GENERATE_IMAGE_VOICE_LINE);
+  saveInstructions(undefined);
+  saveImageGeneration({ enabled: false, baseUrl: "", apiKey: "" });
+  // Said after each message: what the model was sent, in the system prompt and as tools.
+  const state = (prompt) => ({ tool: offered.at(-1).includes("generate_image"), line: prompt.includes(GENERATE_IMAGE_VOICE_LINE) });
+
+  // A conversation of the portal (it has a session id), with the add-on off: nothing of it, rule or no rule.
+  const client = await open(undefined, { sessionId: "image-generation-chat" });
+  try {
+    assert.deepEqual(state(await say(client, "Typed, add-on off")), { tool: false, line: false });
+    const off = await say(client, "Spoken, add-on off", true);
+    assert.ok(off.includes(AUDIO_SYSTEM_RULE));
+    assert.deepEqual(state(off), { tool: false, line: false });
+    assert.ok(offered.at(-1).includes("show_image"), "the tools beside it are there");
+
+    // Switched on, and the chat reloaded, as the page's switch does it: the tool and the line are in
+    // the very next message, a typed one — not only from the next spoken message on.
+    saveImageGeneration({ baseUrl: "http://127.0.0.1:9/v1", enabled: true });
+    await client.reload();
+    const on = await say(client, "Typed, after switching on");
+    assert.deepEqual(state(on), { tool: true, line: true });
+    assert.ok(on.includes(withLine));
+    assert.deepEqual(state(await say(client, "Spoken, add-on on", true)), { tool: true, line: true });
+
+    // And off again: both go with the reload.
+    saveImageGeneration({ enabled: false });
+    await client.reload();
+    const gone = await say(client, "Typed, after switching off");
+    assert.deepEqual(state(gone), { tool: false, line: false });
+    assert.ok(gone.includes(AUDIO_SYSTEM_RULE), "the rule itself stays: the conversation is a spoken one");
+  } finally {
+    client.dispose();
+  }
+
+  // A typed conversation has the tool when the add-on is on, and no voice rule to say anything in.
+  saveImageGeneration({ enabled: true });
+  const typed = await open(undefined, { sessionId: "image-generation-typed" });
+  try {
+    const prompt = await say(typed, "Only typed");
+    assert.deepEqual(state(prompt), { tool: true, line: false });
+    assert.doesNotMatch(prompt, /Audio mode/);
+  } finally {
+    typed.dispose();
+  }
+
+  // Without a session id there is no tool: it is a conversation of the portal's that has pictures.
+  const bare = await open();
+  try {
+    await say(bare, "No session id");
+    assert.equal(offered.at(-1).includes("generate_image"), false);
+    assert.equal(offered.at(-1).includes("show_image"), false);
+  } finally {
+    bare.dispose();
+    saveImageGeneration({ enabled: false });
   }
 });

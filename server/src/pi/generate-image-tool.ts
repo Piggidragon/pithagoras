@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { Type } from "typebox";
-import { SIZE, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
+import { GENERATE_IMAGE_TOOL, SIZE, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
 import { FileError, baseDir, makeFolder, saveNewFile } from "../workspace-files.js";
 import { pictureIn } from "./show-image-tool.js";
 
@@ -60,7 +60,7 @@ export class GenerateImageTool {
     if (!imageGenerationReady()) return;
     const folder = this.folder;
     pi.registerTool({
-      name: "generate_image",
+      name: GENERATE_IMAGE_TOOL,
       label: "generate image",
       description:
         "Make a new picture from a description with the image model the person has set up, and show it to them. " +

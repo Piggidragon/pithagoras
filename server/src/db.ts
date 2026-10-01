@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
+import { GENERATE_IMAGE_TOOL, imageGenerationReady } from "./image-generation.js";
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
@@ -1880,8 +1881,12 @@ export function knownTools(): KnownTool[] {
  */
 export function shownTools(folder?: string): Omit<KnownTool, "package">[] {
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
+  // The portal's own tools belong to no package, so the packages cannot say
+  // that one is not offered: image generation says so itself, while it is off.
+  const images = imageGenerationReady();
   return knownTools()
     .filter(toolAvailability(readPiSettings().packages, project))
+    .filter((tool) => images || tool.name !== GENERATE_IMAGE_TOOL)
     .map(({ package: _package, ...tool }) => tool);
 }
 

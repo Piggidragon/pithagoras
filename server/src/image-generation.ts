@@ -20,6 +20,9 @@ import { pictureExt } from "./prompt-images.js";
 
 const KEY = "image_generation";
 
+/** The agent's tool: it exists only while the add-on is ready (see imageGenerationReady). */
+export const GENERATE_IMAGE_TOOL = "generate_image";
+
 export interface ImageGenerationConfig {
   enabled: boolean;
   /** The API's base, such as https://host/v1: no credentials, query or fragment, so that nothing secret is in what the page is shown. */

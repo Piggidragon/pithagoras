@@ -468,3 +468,21 @@ test("the API holds the settings, never gives the key back, and reloads chats on
     portal.close();
   }
 });
+
+test("the tool menus do not offer generate_image while the add-on is off, though it is remembered for when it is on", async () => {
+  const { rememberTools, shownTools } = await import("../server/src/db.ts");
+  // As a chat that had the tool reports it: no package of the user's brings it.
+  rememberTools([
+    { name: "generate_image", source: "image-generation", package: null },
+    { name: "show_image", source: "pictures", package: null },
+  ]);
+  const names = () => shownTools().map((t) => t.name);
+  gen.saveImageGeneration({ enabled: false, baseUrl: "", apiKey: "" });
+  assert.deepEqual(names().filter((n) => /image/.test(n)), ["show_image"]);
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1" });
+  assert.deepEqual(names().filter((n) => /image/.test(n)), ["show_image"], "an address alone does not make the tool");
+  gen.saveImageGeneration({ enabled: true });
+  assert.deepEqual(names().filter((n) => /image/.test(n)).sort(), ["generate_image", "show_image"]);
+  gen.saveImageGeneration({ enabled: false });
+  assert.deepEqual(names().filter((n) => /image/.test(n)), ["show_image"]);
+});

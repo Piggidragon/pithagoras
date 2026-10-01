@@ -1335,6 +1335,20 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // And has pi switch every extension tool back on — which is every MCP tool,
     // the browser's among them. The switches are the portal's to keep.
     if (this.switchedOff.size) this.applyToolsOff();
+    this.sayAudioRuleAgain();
+  }
+
+  /**
+   * The rule as the tools are now, after a reload: what it says of a tool that
+   * came or went with the reload, such as image generation, holds from the next
+   * message of any kind, not only from the next spoken one. A conversation that
+   * has no rule has nothing to correct.
+   */
+  private sayAudioRuleAgain(): void {
+    const rule = this.audioRule;
+    if (!rule?.lines().length) return;
+    // As in sayAudioRule: a prompt that could not be built again leaves pi's as it was.
+    if (rule.set(true) && !this.buildPromptAgain()) rule.undo();
   }
 
   /** HTML unless a .jsonl path is given, matching pi's own /export. */
