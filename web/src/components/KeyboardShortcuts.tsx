@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LuRotateCcw } from "react-icons/lu";
 import { ACTIONS, FIXED, bindingOf, describe, resetAll, resetBinding, setBinding, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
 import { t } from "../i18n";
+import { useCommandTrigger } from "../command-trigger";
 
 const btnCls = "inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-2.5 py-1.5 text-xs text-fg transition hover:bg-fg/10 disabled:opacity-40";
 const kbdCls = "inline-flex min-w-[2rem] justify-center rounded-md border border-line bg-raised px-2 py-0.5 font-mono text-xs text-fg shadow-[inset_0_-1px_0_rgb(var(--line))]";
@@ -17,6 +18,7 @@ const kbdCls = "inline-flex min-w-[2rem] justify-center rounded-md border border
 export function KeyboardShortcuts() {
   const bindings = useKeybindings();
   const layout = useKeyLabels();
+  const trigger = useCommandTrigger();
   const [recording, setRecording] = useState<ActionId | null>(null);
   // Said in the language shown when it is drawn.
   const [note, setNote] = useState<(() => string) | null>(null);
@@ -79,11 +81,11 @@ export function KeyboardShortcuts() {
     </section>
     <section className="mb-6">
       <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Chat")}</h3>
-      <p className="mt-0.5 text-xs text-fg-subtle">{t("Part of how the message box works, so they are fixed.")}</p>
+      <p className="mt-0.5 text-xs text-fg-subtle">{t("Part of how the message box works, so they are fixed. The character that opens the command list is the one exception: it is set under This browser.")}</p>
       <ul className="mt-2.5 divide-y divide-line rounded-xl border border-line bg-raised/40" aria-label={t("Chat shortcuts")}>
         {FIXED.map(item => <li key={item.label} className="flex items-center gap-2 px-3 py-2">
           <span className="min-w-0 flex-1 text-sm text-fg">{t(item.label)}</span>
-          <kbd className={kbdCls}>{describe(item.keys, layout)}</kbd>
+          <kbd className={kbdCls}>{item.command ? trigger : describe(item.keys, layout)}</kbd>
         </li>)}
       </ul>
     </section>
