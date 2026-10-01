@@ -20,6 +20,7 @@ import { api, type PortalEvent } from "../api";
 import type { VoiceCue } from "../voice-cues";
 import type { VoicePhase } from "../hands-free";
 import { t } from "../i18n";
+import { local } from "../safe-storage";
 
 export interface VoiceLevels { input: number; output: number }
 type OrbMode = "input" | "output" | "idle" | "muted";
@@ -157,6 +158,9 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
   const [picturesShown, setPicturesShown] = useState(false), [pictureIndex, setPictureIndex] = useState(0);
   const [conversation, setConversation] = useState(false), [settings, setSettings] = useState(false);
+  // Replies in speech bubbles in the conversation window: only a look, so it is kept here, in this browser.
+  const [bubbles, setBubbles] = useState(() => local.get("voiceBubbles") === "on");
+  const chooseBubbles = (on: boolean) => { local.set("voiceBubbles", on ? "on" : "off"); setBubbles(on); };
   const settingsToggle = useRef<HTMLButtonElement>(null);
   const [dropping, setDropping] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
@@ -467,7 +471,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         {!terminalShown && <button type="button" aria-label={t("Show terminal")} title={`${t("Show terminal")}${hint("voice.terminal")}`} onClick={() => { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); }}><LuTerminal /></button>}
         <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title={`${t("Voice settings")}${hint("voice.settings")}`} aria-label={t("Voice settings")} aria-expanded={settings}><LuSlidersHorizontal /></button>
       </div>
-      {settings && <VoiceSettings anchor={settingsToggle} sounds={sounds} onSounds={onSounds} rate={rate} onRate={onRate} steer={steer} onSteer={onSteer} ptt={ptt} onPtt={onPtt} onClose={() => setSettings(false)} />}
+      {settings && <VoiceSettings anchor={settingsToggle} sounds={sounds} onSounds={onSounds} rate={rate} onRate={onRate} steer={steer} onSteer={onSteer} ptt={ptt} onPtt={onPtt} bubbles={bubbles} onBubbles={chooseBubbles} onClose={() => setSettings(false)} />}
     </header>
     {attachments.length > 0 && <div className="voice-attachments" aria-label={t("Pictures for your next message")}>
       <div>{attachments.map(a => <figure key={a.id}>
@@ -505,7 +509,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     </section>
     <section ref={conversationWindow} className={`voice-files-window voice-conversation-window ${conversationMain ? 'as-main' : 'as-side'} ${conversation ? 'is-open' : ''}`} aria-label={t("Conversation")} aria-hidden={!conversation}>
       <header><span><LuMessageSquareText />{t("Conversation")}</span><div><button type="button" aria-label={t("Close the conversation")} title={t("Close")} onClick={() => { setConversation(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
-      {conversation && <VoiceConversation sessionId={sessionId} items={items} />}
+      {conversation && <VoiceConversation sessionId={sessionId} items={items} bubbles={bubbles} />}
       <ResizeHandles target={conversationWindow} />
     </section>
     <VoiceToolActivity events={toolEvents} folder={folder} onOpen={openCall} />

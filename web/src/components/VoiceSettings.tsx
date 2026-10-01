@@ -7,18 +7,20 @@ export const VOICE_RATES = [1, 1.25, 1.5, 1.75];
 
 /**
  * How voice mode behaves, in a small card by its buttons: sound effects, how
- * fast the agent speaks, what talking mid-run does, and push-to-talk. Each is
+ * fast the agent speaks, what talking mid-run does, push-to-talk, and speech
+ * bubbles in the conversation window. Each is
  * remembered in this browser.
  *
  * Drawn over the whole page, not inside the voice stage: the stage is its own
  * layer, and the canvas panel beside it would otherwise cover the card. It is
  * placed above the button that opens it, and follows it when the window changes.
  */
-export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, onSteer, ptt, onPtt, onClose }: {
+export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, onSteer, ptt, onPtt, bubbles, onBubbles, onClose }: {
   sounds: boolean; onSounds: () => void;
   rate: number; onRate: (rate: number) => void;
   steer: boolean; onSteer: (steer: boolean) => void;
   ptt: boolean; onPtt: (ptt: boolean) => void;
+  bubbles: boolean; onBubbles: (bubbles: boolean) => void;
   onClose: () => void;
   anchor: RefObject<HTMLElement>;
 }) {
@@ -74,6 +76,14 @@ export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, o
         {choice(false, sounds, t("Off"), () => sounds && onSounds())}
         {choice(true, sounds, t("On"), () => !sounds && onSounds())}
       </div>
+    </div>
+    <div className="voice-setting" role="group" aria-label={t("Speech bubbles")}>
+      <span aria-hidden="true">{t("Speech bubbles")}</span>
+      <div className="voice-segments">
+        {choice(false, bubbles, t("Off"), onBubbles)}
+        {choice(true, bubbles, t("On"), onBubbles)}
+      </div>
+      <p>{t("Puts the agent's replies in the conversation window in speech bubbles.")}</p>
     </div>
   </div>, document.body);
 }

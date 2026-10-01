@@ -256,3 +256,51 @@ test('windows can be resized by their edges, until the windows are arranged anew
   await page.waitForTimeout(900);
   expect(await terminal.evaluate(el => el.style.width)).toBe('');
 });
+
+test('the conversation window renders a reply as markdown, also while it is written, and puts replies in speech bubbles only when asked', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Show the conversation' }).click();
+  const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
+  // Half a reply: the list is a list and the open fence is already a code block.
+  await page.getByRole('button', { name: 'Stream markdown' }).click();
+  await expect(conversation.locator('.voice-said.is-agent li')).toHaveCount(2);
+  await expect(conversation.locator('.voice-said.is-agent [data-streamdown="strong"]')).toHaveText('bold');
+  // A link is a button that asks before it leaves, as in the chat.
+  await expect(conversation.getByRole('button', { name: 'the docs' })).toBeVisible();
+  await expect(conversation.locator('.voice-said.is-agent [data-streamdown="code-block"]')).toHaveCount(1);
+  await expect(conversation).not.toContainText('**bold**');
+  await expect(conversation).not.toContainText('```');
+  await page.getByRole('button', { name: 'Finish markdown' }).click();
+  await expect(conversation.locator('.voice-said.is-agent [data-streamdown="code-block"]')).toContainText('const answer = 42;');
+  await expect(conversation.locator('.voice-said.is-agent li')).toHaveCount(2);
+
+  // Off by default: the text is not in a bubble, what the user said is.
+  const agent = conversation.locator('.voice-said.is-agent').last(), user = conversation.locator('.voice-said.is-user').first();
+  await expect(agent).not.toHaveClass(/is-bubble/);
+  const style = (el: import('@playwright/test').Locator) => el.evaluate(e => { const s = getComputedStyle(e); return { background: s.backgroundColor, border: s.borderTopWidth }; });
+  const plain = await style(agent);
+  expect(plain.background).toBe('rgba(0, 0, 0, 0)');
+  await page.getByRole('button', { name: 'Voice settings' }).click();
+  const bubbles = page.getByRole('group', { name: 'Speech bubbles' });
+  await expect(bubbles.getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
+  await bubbles.getByRole('button', { name: 'On' }).click();
+  await page.keyboard.press('Escape');
+  await expect(agent).toHaveClass(/is-bubble/);
+  expect(await page.evaluate(() => localStorage.getItem('voiceBubbles'))).toBe('on');
+  // Apart from the user's bubble, in the light theme and in the dark.
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, scheme);
+    const [said, asked] = [await style(agent), await style(user)];
+    expect(said.background).not.toBe('rgba(0, 0, 0, 0)');
+    expect(said.border).toBe('1px');
+    expect(said.background).not.toBe(asked.background);
+    const [a, u] = [(await agent.boundingBox())!, (await user.boundingBox())!];
+    expect(a.x).toBeLessThan(u.x);
+    await page.getByTestId('workspace').screenshot({ path: `/tmp/pithagoras-voice-bubbles-${scheme}.png` });
+  }
+  // Kept for the next time voice mode is opened.
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
+  await page.getByRole('button', { name: 'Voice settings' }).click();
+  await expect(page.getByRole('group', { name: 'Speech bubbles' }).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+});

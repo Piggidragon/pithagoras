@@ -92,7 +92,8 @@ file in Files, the terminal, the browser, the document or the picture.
 | **Stop** | Shown while the agent works. Stops the task without ending voice mode. |
 
 The buttons at the bottom right open the **conversation** — a window like Files,
-with what you said as it was transcribed and what came back as written — the
+with what you said as it was transcribed and what came back as written, with
+its markdown (lists, code, links) rendered as in the chat — the
 canvases, Files, pictures, the browser and the terminal, and the **voice
 settings**:
 
@@ -102,6 +103,7 @@ settings**:
 | **Talking while the agent works** | **Stops it** (default): speaking interrupts the task, as before. **Adds to the task**: what you say goes into the running task after its current step, and the task carries on; use Stop to stop it. |
 | **Push to talk** | Only what you say while holding <kbd>Space</kbd> (outside a text field) or the microphone button is heard. A tap, or a press with no speech in it, is not sent. Useful with background noise or other people talking. |
 | **Sound effects** | The cues for connection, sending, mute and panels. |
+| **Speech bubbles** | Off (default): the agent's replies in the conversation window are plain text, and only what you said sits in a bubble. On: the replies sit in a bubble of their own too, in a different colour and on the other side, so the exchange reads as a conversation. |
 
 Each setting is remembered in this browser.
 
