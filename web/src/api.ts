@@ -348,6 +348,8 @@ export const api = {
   // `choice` is for install: the engines to build for. Without it an install keeps what is installed, or picks for the GPU.
   voiceAction: (action: 'install' | 'start' | 'stop', choice?: VoiceChoice) => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST', ...(choice ? {body: JSON.stringify(choice)} : {})}),
   voiceHardware: () => json<VoiceHardware>('/api/voice/hardware'),
+  /** Removes the voice container and puts the settings back; `removeData` deletes the downloaded engines and models too. */
+  uninstallVoice: (removeData: boolean) => json<{ok:boolean}>('/api/voice/uninstall', {method:'POST', body: JSON.stringify({removeData})}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),

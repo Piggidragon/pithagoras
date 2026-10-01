@@ -318,6 +318,32 @@ export async function stop() {
   error = '';
 }
 
+/**
+ * Removes the managed container, and with `removeData` the volume that holds its downloads and builds (the engines and
+ * models), which a reinstall would otherwise reuse. Nothing there is not an error: the container may have been removed by hand.
+ * The image is left, as other containers may be made from it.
+ */
+export async function uninstall(removeData = false) {
+  if (pending) throw new Error('Wait for voice setup to finish before uninstalling');
+  if (!dockerAvailable()) throw new Error('Docker is unavailable');
+  // Held like a setup: the page shows it as under way, and no start or install begins in the middle of it.
+  pending = true; error = ''; progress = 'Removing the voice service';
+  try {
+    const found = await request<{Config?: {Labels?: Record<string,string>}; State?: {Running?: boolean}}>('GET', `/containers/${CONTAINER}/json`);
+    if (found.status !== 404) {
+      if (found.status >= 400) throw new Error(`Cannot inspect voice container: Docker ${found.status}`);
+      if (found.body.Config?.Labels?.['pithagoras.addon'] !== 'voice') throw new Error('The pithagoras-voice container is not a managed voice add-on, so it is left alone.');
+      if (found.body.State?.Running) await checked('POST', `/containers/${CONTAINER}/stop?t=10`);
+      await checked('DELETE', `/containers/${CONTAINER}`);
+    }
+    if (removeData) {
+      progress = 'Removing the downloaded engines and models';
+      const volume = await request<{ message?: string }>('DELETE', `/volumes/${VOLUME}`);
+      if (volume.status >= 400 && volume.status !== 404) throw new Error(volume.body?.message || `Docker returned ${volume.status}`);
+    }
+  } finally { pending = false; }
+}
+
 export async function modelAction(action:'load'|'unload', engine: TtsEngine = 'breeze') {
   const model = ttsModel(engine);
   const response=await fetch(`http://127.0.0.1:${SPEECH_PORT}/v1/models/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(action==='load'?model:{id:model.id}),signal:AbortSignal.timeout(120000)});
