@@ -335,6 +335,14 @@ test('recognition alone: nothing is spoken, and dictation still has its transcri
   assert.equal((await (await fetch(`${base}/voice`)).json()).speech, true);
 });
 
+test('without Docker the setup says only that Docker is needed: recognition alone needs no GPU, and the requirement of speech synthesis is said where it applies', async () => {
+  // No Docker socket here, whatever this machine has.
+  const state = await (await fetch(`${base}/voice/install`)).json();
+  assert.deepEqual([state.available, state.state, state.busy], [false, 'unavailable', false]);
+  assert.equal(state.error, 'Automatic voice setup requires access to Docker.');
+  assert.doesNotMatch(state.error, /GPU|NVIDIA/);
+});
+
 test('install takes the engines to build, and refuses a choice the installer does not make', async () => {
   const post = (body: object) => fetch(`${base}/voice/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   for (const body of [{ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }, { tts: 'breeze', asr: 'whisper', asrModel: '1.7b' }, { tts: 'breeze' }, { asr: 'qwen3-asr', asrModel: '0.6b' }]) {

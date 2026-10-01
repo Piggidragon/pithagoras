@@ -26,7 +26,7 @@ async function healthy(url: string) {
 }
 export interface ServiceStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; /** The engines the managed container is built for, once there is one. */ choice?: VoiceChoice }
 export async function status(): Promise<ServiceStatus> {
-  if (!dockerAvailable()) return { available: false, state: 'unavailable', busy: false, progress: '', error: 'Automatic voice setup requires Docker with NVIDIA GPU support.' };
+  if (!dockerAvailable()) return { available: false, state: 'unavailable', busy: false, progress: '', error: 'Automatic voice setup requires access to Docker.' };
   const state = await containerState(CONTAINER);
   if (state.running && !pending) {
     const detail = await request<{Config?: {Labels?: Record<string,string>}; HostConfig?: {NetworkMode?: string}}>('GET', `/containers/${CONTAINER}/json`);
