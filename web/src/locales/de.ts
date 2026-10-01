@@ -1423,6 +1423,7 @@ const de: Locale = {
     "Clone from a recording": "Aus einer Aufnahme klonen",
     "Design from a description": "Aus einer Beschreibung gestalten",
     "Voice description": "Beschreibung der Stimme",
+    "Save description": "Beschreibung speichern",
     "Reference recording": "Referenzaufnahme",
     "Use a clean 1–30 second clip with one speaker and no background music. Browser-supported audio formats are converted automatically.": "Nimm einen sauberen Ausschnitt von 1–30 Sekunden mit einem Sprecher und ohne Hintergrundmusik. Vom Browser unterstützte Audioformate werden automatisch umgewandelt.",
     "Exact words in the recording": "Genauer Wortlaut der Aufnahme",

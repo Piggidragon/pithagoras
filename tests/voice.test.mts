@@ -172,6 +172,41 @@ test('custom clone sends its saved recording, transcript and description to audi
   assert.equal(nativeRequest.options.instruction, 'Warm narrator.');
 });
 
+test('a changed voice description reaches the next phrase on both Breeze runtimes, and the recording stays', async () => {
+  const { addVoice } = await import('../server/src/voice-presets.js');
+  const { samplesWav } = await import('../web/src/voice.js');
+  const audio = Buffer.from(await samplesWav(new Float32Array(16000)).arrayBuffer()).toString('base64');
+  const preset = addVoice({ name: 'Edited narrator', kind: 'clone', instruction: 'Warm narrator.', transcript: 'Words on the tape.', audio });
+  const patch = (id: string, body: unknown) => fetch(`${base}/voice/presets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const speak = async () => { const response = await fetch(`${base}/sessions/test/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Edited voice response.' }) }); assert.equal(response.status, 200); await response.arrayBuffer(); };
+  const select = async (runtime: string) => assert.equal((await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, runtime, voice: preset.id }) })).status, 200);
+  await select('audio-cpp');
+  await speak();
+  assert.equal(nativeRequest.options.instruction, 'Warm narrator.');
+  const edited = await patch(preset.id, { instruction: '  A slow, low voice.  ' });
+  assert.equal(edited.status, 200);
+  assert.deepEqual(await edited.json(), { id: preset.id, name: 'Edited narrator', kind: 'clone', instruction: 'A slow, low voice.', transcript: 'Words on the tape.' });
+  await speak();
+  assert.equal(nativeRequest.options.instruction, 'A slow, low voice.');
+  assert.deepEqual(nativeRequest.voice_ref, { type: 'base64', data: audio });
+  assert.equal(nativeRequest.reference_text, 'Words on the tape.');
+  // The Python runtime takes the same text as a form field.
+  await select('breeze');
+  await speak();
+  assert.ok(speechBody.includes('name="instruction"\r\n\r\nA slow, low voice.\r\n'));
+  assert.ok(!speechBody.includes('Warm narrator.'));
+  assert.equal((await (await fetch(`${base}/voice/presets`)).json()).find((v: any) => v.id === preset.id).instruction, 'A slow, low voice.');
+  // A description that cannot be used, or a voice that is not there, changes nothing.
+  for (const instruction of ['', '   ', 'x'.repeat(1001), 7, undefined]) {
+    const refused = await patch(preset.id, { instruction });
+    assert.equal(refused.status, 400);
+    assert.match((await refused.json()).error, /1–1000 characters/);
+  }
+  assert.equal((await patch('voice-missing', { instruction: 'Clear.' })).status, 404);
+  await speak();
+  assert.ok(speechBody.includes('name="instruction"\r\n\r\nA slow, low voice.\r\n'));
+});
+
 test('Chatterbox clones a reference, writes numbers out and returns one buffered phrase', async () => {
   const chatterbox = { ...settings, runtime: 'chatterbox', voice: 'aria', language: 'de', exaggeration: 0.3, sttModel: 'qwen3-asr' };
   assert.equal((await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(chatterbox) })).status, 200);

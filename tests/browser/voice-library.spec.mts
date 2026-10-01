@@ -27,3 +27,31 @@ test('upload a voice reference, select it, save settings, and delete it',async({
  await expect(page.getByRole('combobox',{name:'Speaking voice',exact:true})).toHaveText('Designed voice');
  await expect(page.locator('#error')).toBeEmpty();
 });
+test('change the description of a saved voice after it was created',async({page})=>{
+ let voice={id:'voice-test',name:'Night narrator',kind:'design',instruction:'Warm delivery',transcript:''};
+ const patches:any[]=[];let refuse='';
+ await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'absent',busy:false,progress:'',error:''}}));
+ await page.route('**/api/voice',r=>r.fulfill({json:{enabled:true,voice:'voice-test',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4}}));
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[voice]}));
+ await page.route('**/api/voice/presets/voice-test',r=>{
+  expect(r.request().method()).toBe('PATCH');patches.push(r.request().postDataJSON());
+  if(refuse)return r.fulfill({status:400,json:{error:refuse}});
+  voice={...voice,instruction:patches.at(-1).instruction.trim()};return r.fulfill({json:voice});
+ });
+ await page.goto('/tests/voice-addon.html');
+ const description=page.getByLabel('Voice description');const save=page.getByRole('button',{name:'Save description',exact:true});
+ await expect(description).toHaveValue('Warm delivery');
+ await expect(save).toBeDisabled();
+ await description.fill('   ');await expect(save).toBeDisabled();
+ await description.fill('  A slow, low voice.  ');await expect(save).toBeEnabled();
+ await save.click();
+ await expect(description).toHaveValue('A slow, low voice.');
+ await expect(save).toBeDisabled();
+ expect(patches).toEqual([{instruction:'  A slow, low voice.  '}]);
+ await expect(page.locator('#error')).toBeEmpty();
+ // A refusal from the server is shown and the text stays for another try.
+ refuse='Describe the voice in 1–1000 characters';
+ await description.fill('Another voice.');await save.click();
+ await expect(page.locator('#error')).toHaveText(refuse);
+ await expect(description).toHaveValue('Another voice.');await expect(save).toBeEnabled();
+});

@@ -264,7 +264,7 @@ See [The agent's browser](/guide/browser).
 | `GET /api/voice` · `PUT /api/voice` | The voice settings |
 | `GET /api/voice/install` · `POST /api/voice/install` · `/start` · `/stop` | The managed voice container and its readiness |
 | `POST /api/voice/connect` | Use the managed services in the settings |
-| `GET/POST /api/voice/presets` · `GET …/presets/:id/audio` · `DELETE …/presets/:id` | Saved voices |
+| `GET/POST /api/voice/presets` · `GET …/presets/:id/audio` · `PATCH …/presets/:id` · `DELETE …/presets/:id` | Saved voices. `PATCH` takes `{ instruction }`, the voice description (1–1000 characters), and returns the voice; 404 for an unknown voice |
 | `POST /api/sessions/:id/voice/connection` | Take or give back a lease on the voice services |
 | `POST /api/sessions/:id/voice/transcribe` | `audio/wav` body (12 MB at most) → `{ text }` |
 | `POST /api/sessions/:id/voice/speech` | Text → audio |
