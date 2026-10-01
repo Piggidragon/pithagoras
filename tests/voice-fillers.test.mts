@@ -64,29 +64,46 @@ test('a clip is only made when nothing live is being said, and not at once after
   rmSync(root, { recursive: true, force: true });
 });
 
-test('a clip under way when live speech begins is cut off, so that it does not hold the runtime, and is made again afterwards; that is no failure', async () => {
+test('a clip under way when speech begins is let finish and is kept, as the runtime would finish it anyway; none starts until it is quiet', async () => {
   const root = mkdtempSync(join(tmpdir(), 'fillers-'));
-  const made: string[] = [], cut: string[] = [], warned: string[] = [];
-  let first = true;
-  const render = (text: string, signal: AbortSignal) => new Promise<Buffer>((resolve, reject) => {
+  const made: string[] = []; let cut = 0;
+  const render = (text: string, signal: AbortSignal) => new Promise<Buffer>(resolve => {
     made.push(text);
-    if (!first) return resolve(seconds(1));
-    first = false;
-    // Held until it is cut: a runtime that takes its time over it.
-    const timer = setTimeout(() => resolve(seconds(1)), 400);
-    signal.addEventListener('abort', () => { clearTimeout(timer); cut.push(text); reject(signal.reason); });
+    signal.addEventListener('abort', () => { cut++; });
+    setTimeout(() => resolve(seconds(1)), 60);
   });
-  const store = new FillerStore(() => root, message => warned.push(message), undefined, 20);
+  const store = new FillerStore(() => root, undefined, undefined, 80);
   await store.status(KEY, render);
-  await tick(30);
+  await tick(20);
   const end = store.speaking();
-  await tick(30);
-  assert.deepEqual(cut, [FILLERS[0].text]);
-  end();
-  while ((await store.status(KEY, render)).rendering) await tick(5);
-  assert.deepEqual(warned, []);
-  assert.deepEqual(made, [FILLERS[0].text, ...FILLERS.map(f => f.text)]);
-  assert.deepEqual((await store.status(KEY, render)).clips, FILLERS.map((_, i) => i));
+  await tick(120);
+  // The clip under way was not given up on, and the next was not started while speech was being made.
+  assert.equal(cut, 0); assert.deepEqual(made, [FILLERS[0].text]);
+  assert.deepEqual((await store.status(KEY, render)).clips, [0]);
+  const ended = Date.now(); end();
+  await tick(40);
+  assert.deepEqual(made, [FILLERS[0].text]);
+  let status;
+  while ((status = await store.status(KEY, render)).rendering) await tick(10);
+  assert.deepEqual(made, FILLERS.map(f => f.text));
+  assert.equal(status.clips.length, FILLERS.length); assert.equal(cut, 0);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('while the page says the agent is at work no clip is started, and one is when it has stopped saying so', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'fillers-'));
+  const started: number[] = [];
+  const render = async () => { started.push(Date.now()); return seconds(1); };
+  const store = new FillerStore(() => root, undefined, undefined, 300);
+  store.busy();
+  await store.status(KEY, render);
+  // The page keeps saying so with every look, which is more often than the wait.
+  for (let i = 0; i < 12; i++) { await tick(40); store.busy(); }
+  assert.deepEqual(started, []);
+  const last = Date.now();
+  while ((await store.status(KEY, render)).rendering) await tick(10);
+  assert.equal(started.length, FILLERS.length);
+  assert.ok(started[0] - last >= 250, `started ${started[0] - last} ms after the last`);
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -247,6 +264,8 @@ upstream.post('/v1/audio/speech', express.json({ limit: '5mb' }), async (req, re
   if (stall) { await new Promise<void>(resolve => { stalled.push(resolve); res.on('close', () => { cut++; resolve(); }); }); return; }
   wav(req.body.input === long ? 6 : 1.2);
 });
+let listening = false; let releaseWhisper: (() => void) | undefined;
+upstream.post('/inference', async (_req, res) => { listening = true; await new Promise<void>(resolve => { releaseWhisper = resolve; }); listening = false; res.json({ text: 'hello' }); });
 const backend = upstream.listen(0, '127.0.0.1'); await new Promise<void>(r => backend.once('listening', r));
 const port = (backend.address() as { port: number }).port;
 const app = express(); app.use(express.json()); app.use('/api', voiceRouter());
@@ -309,21 +328,27 @@ test('while live speech is being made, no filler is started; the answer comes fi
   assert.equal(status.clips.length, FILLERS.length);
 });
 
-test('live speech cuts off the clip being made at the runtime, and the clip is made again once it is over', async () => {
+test('while recognition is being made no clip is started, nor soon after: the answer follows it', async () => {
   assert.equal((await save({ language: 'sv' })).status, 200);
-  heard.length = 0; stall = true; cut = 0;
-  let speaking: Promise<Response> | undefined;
+  heard.length = 0;
+  const recognising = fetch(`${base}/sessions/s/voice/transcribe`, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: pcmWav(Buffer.alloc(3200)) });
+  while (!listening) await tick(5);
   try {
-    await fillers();
-    while (!heard.length) await tick(5);
-    speaking = fetch(`${base}/sessions/s/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"text":"live speech"}' });
-    for (let i = 0; i < 100 && !cut; i++) await tick(10);
-    assert.equal(cut, 1, 'the runtime was not told to let go of the clip');
-  } finally { stall = false; stalled.splice(0).forEach(release => release()); while (!hold) await tick(5); slow!(); }
-  assert.equal((await speaking!).status, 200);
-  const status = await ready();
-  assert.equal(status.clips.length, FILLERS.length);
-  assert.deepEqual(heard.map(h => h.input), [FILLERS[0].text, ...FILLERS.map(f => f.text)]);
+    await fillers(); await tick(300);
+    assert.deepEqual(heard, []);
+  } finally { releaseWhisper!(); }
+  assert.equal((await recognising).status, 200);
+  assert.equal((await ready()).clips.length, FILLERS.length);
+});
+
+test('a page that says the agent is at work with its look has no clip started meanwhile', async () => {
+  assert.equal((await save({ language: 'fi' })).status, 200);
+  heard.length = 0; shared.quiet = 400;
+  try {
+    for (let i = 0; i < 15; i++) { await fetch(`${base}/sessions/s/voice/fillers?busy=1`); await tick(30); }
+    assert.deepEqual(heard, []);
+    assert.equal((await ready()).clips.length, FILLERS.length);
+  } finally { shared.quiet = 30; }
 });
 
 /** Starts a render that the fake runtime holds, does `action`, and says how many requests the runtime saw hang up. */

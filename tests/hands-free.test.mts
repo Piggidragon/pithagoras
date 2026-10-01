@@ -422,6 +422,17 @@ test('no filler for a noise that is no words, for what is for the page, or for a
   assert.deepEqual(refused.log, ['filler:start', 'filler:cut']); c.voice.stop();
 });
 
+test('a turn said again after a send that was refused has its filler', async () => {
+  const { filler, log } = fillers(); let calls = 0; const errors: string[] = [];
+  const { voice, sent } = setup({ filler, error: message => errors.push(message), send: async text => { if (!calls++) throw new Error('offline'); sent.push(text); } });
+  turn(voice); await tick();
+  assert.deepEqual(log, ['filler:start', 'filler:cut']); assert.equal(errors.length, 1);
+  // The user says it again: that turn is the one that happens, and the silence before its answer is filled.
+  turn(voice); await tick();
+  assert.deepEqual(log, ['filler:start', 'filler:cut', 'filler:start']);
+  voice.stop();
+});
+
 test('a turn that interrupts a running agent has its filler at once, not when the run it stops has wound down', async () => {
   const { filler, log } = fillers(); const stopped = deferred<void>();
   const { voice, sent } = setup({ filler, agentRunning: () => true, abort: () => { log.push('abort:asked'); return stopped.promise; } });

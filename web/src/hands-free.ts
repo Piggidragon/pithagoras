@@ -279,7 +279,9 @@ export class HandsFreeVoice {
           if (valid()) { this.text = []; this.stopped = false; }
         } catch (error) {
           this.acceptingReplies = false;
+          // The turn did not happen: the one said again may have a filler.
           this.filler?.controller.abort();
+          this.dropFiller(filler);
           throw new Error(t("Could not send “{text}”: {error}", { text, error: error instanceof Error ? error.message : String(error) }));
         } finally { this.sending = false; }
       });

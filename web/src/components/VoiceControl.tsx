@@ -184,7 +184,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   /** Fetches the fillers, or looks again for them, while voice mode is on and they are wanted: asking is what has the portal make them. */
   const loadFillers = () => {
     if (!voice.current || !statusSpeech.current || sequential.current || !fillersOn.current) return;
-    (fillerClips.current ??= new FillerClips(fillerSource(sessionId))).load();
+    (fillerClips.current ??= new FillerClips(fillerSource(sessionId), Math.random, undefined, () => latest.current.running)).load();
   };
   // Off is not asking any more: the portal leaves off making them once nobody asks.
   const chooseFillers = (on: boolean) => { local.set('voiceFillers', on ? 'on' : 'off'); setFillers(on); fillersOn.current = on; if (on) loadFillers(); else fillerClips.current?.stop(); };

@@ -392,7 +392,7 @@ test('a filler plays right after the turn, is not the same one twice running, an
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
   await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'A test voice turn.' } }));
-  await page.route('**/voice/fillers', route => route.fulfill({ json: { key: 'k', clips: [0, 1], rendering: false } }));
+  await page.route(/\/voice\/fillers(\?.*)?$/, route => route.fulfill({ json: { key: 'k', clips: [0, 1], rendering: false } }));
   await page.route('**/voice/fillers/k/*', route => route.fulfill({ body: clips[Number(new URL(route.request().url()).pathname.split('/').pop())], headers: { 'content-type': 'audio/pcm' } }));
   await page.route('**/voice/speech', async route => {
     await new Promise(resolve => setTimeout(resolve, answerAfter));
@@ -436,7 +436,7 @@ test('a filler plays right after the turn, is not the same one twice running, an
 test('fillers are switched off in the voice settings or with Shift+F, and are not offered where the portal has none', async ({ page }) => {
   let listed = 0; let config: object = { enabled: true };
   await page.route('**/api/voice', route => route.fulfill({ json: config }));
-  await page.route('**/voice/fillers', route => { listed++; return route.fulfill({ json: { key: '', clips: [], rendering: false } }); });
+  await page.route(/\/voice\/fillers(\?.*)?$/, route => { listed++; return route.fulfill({ json: { key: '', clips: [], rendering: false } }); });
   const open = async () => {
     await page.goto('/tests/voice.html');
     await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
@@ -479,15 +479,19 @@ test('fillers are switched off in the voice settings or with Shift+F, and are no
 });
 
 test('switching fillers off stops asking the portal for them, which is what has it stop making them', async ({ page }) => {
-  let listed = 0, released = 0;
+  let listed = 0, released = 0; const looks: string[] = [];
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/voice/fillers/stop', route => { released++; return route.fulfill({ status: 204 }); });
   // The portal is still making them: the page looks again every few seconds.
-  await page.route('**/voice/fillers', route => { listed++; return route.fulfill({ json: { key: 'a'.repeat(40), clips: [], rendering: true } }); });
+  await page.route(/\/voice\/fillers(\?.*)?$/, route => { listed++; looks.push(route.request().url()); return route.fulfill({ json: { key: 'a'.repeat(40), clips: [], rendering: true } }); });
   await page.goto('/tests/voice.html');
   await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
   await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
   await expect.poll(() => listed, { timeout: 8000 }).toBeGreaterThanOrEqual(2);
+  expect(looks.some(url => url.includes('busy'))).toBe(false);
+  // With the agent at work, every look says so: the portal starts no clip while an answer is on its way.
+  await page.getByRole('button', { name: 'Stream reply' }).click();
+  await expect.poll(() => looks.at(-1), { timeout: 8000 }).toContain('busy=1');
   await page.getByRole('button', { name: 'Voice settings' }).click();
   await page.getByRole('dialog', { name: 'Voice settings' }).getByRole('group', { name: 'Fillers' }).getByRole('button', { name: 'Off' }).click();
   // Off tells the portal, which would otherwise go on making them for a while, and the page stops asking.
@@ -503,7 +507,7 @@ test('ending voice mode tells the portal that nobody is waiting for the fillers'
   let released = 0;
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/voice/fillers/stop', route => { released++; return route.fulfill({ status: 204 }); });
-  await page.route('**/voice/fillers', route => route.fulfill({ json: { key: 'a'.repeat(40), clips: [], rendering: true } }));
+  await page.route(/\/voice\/fillers(\?.*)?$/, route => route.fulfill({ json: { key: 'a'.repeat(40), clips: [], rendering: true } }));
   await page.goto('/tests/voice.html');
   await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
   await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });

@@ -34,6 +34,17 @@ test('clips are downloaded once, and more are fetched while the portal is still 
   clips.stop();
 });
 
+test('every look says whether the agent is at work, as the portal holds its clips back then', async () => {
+  const asked: (boolean | undefined)[] = []; let working = false;
+  const source: FillerSource = { list: async busy => { asked.push(busy); return { key: 'a', clips: [], rendering: true }; }, clip: async () => clip(0) };
+  const clips = new FillerClips(source, Math.random, 5, () => working);
+  clips.load(); await tick();
+  working = true;
+  for (let i = 0; i < 100 && asked.length < 3; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  clips.stop();
+  assert.equal(asked[0], false); assert.equal(asked.at(-1), true);
+});
+
 test('a portal that has none, or cannot be reached, is a page with no fillers and no error', async () => {
   const none = new FillerClips({ list: async () => ({ key: '', clips: [], rendering: false }), clip: async () => clip(0) });
   none.load(); await tick();
@@ -99,13 +110,15 @@ test('the clips are asked for by session and key, and read as 16-bit samples', a
   const urls: string[] = [];
   const request = (async (url: string) => {
     urls.push(url);
-    if (url.endsWith('/fillers')) return new Response(JSON.stringify({ key: 'k', clips: [3], rendering: false }));
+    if (url.split('?')[0].endsWith('/fillers')) return new Response(JSON.stringify({ key: 'k', clips: [3], rendering: false }));
     return new Response(new Int16Array([16384, -32768]).buffer);
   }) as unknown as typeof fetch;
   const source = fillerSource('a b', request);
   assert.deepEqual(await source.list(), { key: 'k', clips: [3], rendering: false });
   assert.deepEqual([...await source.clip('k', 3)], [0.5, -1]);
   assert.deepEqual(urls, ['/api/sessions/a%20b/voice/fillers', '/api/sessions/a%20b/voice/fillers/k/3']);
+  await source.list(true);
+  assert.equal(urls.at(-1), '/api/sessions/a%20b/voice/fillers?busy=1');
   // Telling the portal that nobody waits for the clips: a POST that survives a page being left.
   const posts: { url: string; init?: RequestInit }[] = [];
   await fillerSource('a b', (async (url: string, init?: RequestInit) => { posts.push({ url, init }); return new Response(null, { status: 204 }); }) as unknown as typeof fetch).release!();

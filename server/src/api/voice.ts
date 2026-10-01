@@ -453,7 +453,9 @@ export function voiceRouter(): Router {
     // loaded model here; Whisper.cpp has one model and ignores the field.
     if (settings.sttModel) form.set("model", settings.sttModel);
     const controller = new AbortController();
-    res.on("close", () => controller.abort());
+    // Someone is speaking, and an answer follows: no filler clip is started meanwhile or soon after.
+    const done = fillers.speaking();
+    res.on("close", () => { done(); controller.abort(); });
     try {
       const sttStarted=performance.now();
       const upstream = await fetch(settings.whisperUrl, { method: "POST", body: form, redirect: "error", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]) });
@@ -522,10 +524,13 @@ export function voiceRouter(): Router {
    * The fillers of the voice as it is set up now: which clips are ready, and a
    * `key` that names them. Asking starts the making of the ones that are not;
    * the page asks again while `rendering` says more are coming. Nothing is made
-   * where the portal has switched status speech off.
+   * where the portal has switched status speech off. With `busy=1` the page says
+   * that the agent is at work, so that no clip is started while an answer is on its way.
    */
-  router.get("/sessions/:id/voice/fillers", async (_req, res) => {
+  router.get("/sessions/:id/voice/fillers", async (req, res) => {
     const settings = config();
+    // The page says the agent is at work, so an answer is on its way: no clip is started now.
+    if (req.query.busy === "1") fillers.busy();
     if (process.env.VOICE_STATUS_SPEECH === "false" || settings.runtime === "none") return res.json({ key: "", clips: [], rendering: false });
     try {
       const voice = await speakingVoice(settings);

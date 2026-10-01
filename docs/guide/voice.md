@@ -176,24 +176,36 @@ Breeze server is not seeded: there it is made again, up to three times, and only
 after that left alone, until the portal is restarted and not for good.
 
 **Made once, not at play time.** The portal makes the five clips the first time
-voice mode starts with a voice (about ten seconds with Chatterbox, in the
-background), keeps them in its data folder under `voice-fillers`, and the page
-downloads them when voice mode starts. A filler is therefore a sound already in
-the browser's memory: no synthesis stands between the end of your turn and the
-sound. The speech runtime has one slot, so the answer comes before the clips: a
-clip is only started when no speech for you is being synthesized and none was in
-the last eight seconds (the gap between two phrases of an answer is not the end
-of it), and a clip under way when speech for an answer begins is cancelled at the
-runtime and made again afterwards. They are made only while a page is asking for
-them: ending voice mode, or switching fillers off, tells the portal, which drops
-the clip it is on and makes no more (the clips still missing are made the next
-time voice mode starts), whether or not it manages the speech service, so the
-speech model is not loaded back onto the GPU for clips nobody is waiting for. A
-page that cannot say so, a tab that was closed, is given up on after ten seconds
-without a question. Only one voice is made at a time. Another voice, language,
-speech runtime, expressiveness or reference recording stops the one being made,
-makes a new set, and the old one is deleted once the first clip of the new one is
-made (a setting changed and changed back loses nothing).
+voice mode starts with a voice, in the background (about ten seconds on a fast
+GPU with Chatterbox, well over twenty on a shared one: a clip takes as long as a
+sentence of an answer does), keeps them in its data folder under `voice-fillers`,
+and the page downloads them when voice mode starts. A filler is therefore a sound
+already in the browser's memory: no synthesis stands between the end of your turn
+and the sound.
+
+The speech runtime has one slot, and it does not give up a request it has begun:
+audio.cpp runs it to the end whatever the portal does, so a clip cannot be cut off
+for an answer. A clip under way when an answer is asked for is finished first, and
+the answer waits for it, by up to the time of one clip (the same one to five
+seconds as a sentence of the answer). To keep that rare, a clip is only started
+when no answer is near: not while your speech is being recognised or an answer is
+being synthesized, not for eight seconds after either (the gap between two
+phrases of an answer is not the end of it), and not while the agent is at work,
+which the page says with every look. The first set is made from the start of voice
+mode, before you have spoken; a clip under way when you do speak is not thrown
+away, and the clips still missing are made once it is quiet again. Until then
+you may hear fewer fillers, or none, on the first turns of a new voice.
+
+They are made only while a page is asking for them: ending voice mode, or
+switching fillers off, tells the portal, which drops the request it is on and
+makes no more (the clips still missing are made the next time voice mode starts),
+whether or not it manages the speech service, so the speech model is not loaded
+back onto the GPU for clips nobody is waiting for. A page that cannot say so, a
+tab that was closed, is given up on after ten seconds without a question. Only one
+voice is made at a time. Another voice, language, speech runtime, expressiveness
+or reference recording stops the one being made, makes a new set, and the old one
+is deleted once the first clip of the new one is made (a setting changed and
+changed back loses nothing).
 Until the first clip is ready there is no filler; one never waits for them.
 
 **When it plays.** The moment your turn is taken: what you said has been

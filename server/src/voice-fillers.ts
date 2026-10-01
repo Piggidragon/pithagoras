@@ -52,11 +52,18 @@ const ASKED_MS = 10_000;
 /**
  * The fillers of the voice that is set up, made once and kept on disk. They are
  * made here and downloaded by the page, not made at play time: a filler has to
- * start the moment a turn ends, with no synthesis in front of it, and one still
- * being made when the answer arrives would hold the speech runtime's single slot
- * against the answer. So a clip is only started when no live speech is being made
- * nor was a moment ago, and one that is under way when live speech begins is
- * given up on and made again afterwards.
+ * start the moment a turn ends, with no synthesis in front of it.
+ *
+ * The speech runtime has one slot, and a request that has been started is not
+ * given up by it: audio.cpp runs a model to the end whatever the client does, and
+ * only notices a client that is gone when it writes the answer. So a clip cannot
+ * be cut off for the answer, and one under way when the answer is asked for makes
+ * the answer wait for it, by the time of one clip (about one to five seconds,
+ * by the hardware). What can be done is to start clips when no answer is near:
+ * not while recognition or speech is being made, nor for a while after it, nor
+ * while the page says the agent is at work (`busy`), as an answer is on its way
+ * then. A clip that is under way when that begins is let finish and kept, not
+ * thrown away only to be made again.
  *
  * A voice is a `key`: whatever decides how it sounds. Only one voice is made at a
  * time, and only while a page asks for it: it ends when nobody has asked for a while,
@@ -67,8 +74,6 @@ const ASKED_MS = 10_000;
 export class FillerStore {
   /** The voice being made, and what stops it. */
   private current?: { key: string; run: AbortController; done: Promise<void> };
-  /** The clip being made, for live speech to cut off. */
-  private attempt?: AbortController;
   private asking: Promise<unknown> = Promise.resolve();
   private failed = new Map<string, number>();
   /** Clips of a runtime that does not say the same thing each time, which came out wrong too often: left alone until the portal is restarted. */
@@ -89,13 +94,12 @@ export class FillerStore {
   private dir(key: string) { return path.join(this.root(), key); }
 
   /**
-   * Live speech is being made: from now, until the returned function is called,
-   * no clip is started, and the one being made is cut off so that it does not
-   * hold the runtime against this.
+   * Recognition or speech is being made for the page: from now, until the
+   * returned function is called and a while after, no clip is started. One that is
+   * under way is not cut off, as the runtime would finish it anyway.
    */
   speaking(): () => void {
     this.live++;
-    this.attempt?.abort();
     let ended = false;
     return () => {
       if (ended) return;
@@ -103,6 +107,9 @@ export class FillerStore {
       for (const wake of [...this.wake]) wake();
     };
   }
+
+  /** The page says the agent is at work, so an answer is on its way: the wait before a clip starts begins anew. */
+  busy() { this.endedAt = Date.now(); }
 
   /** Resolves when no live speech is being made nor was just now, or when `signal` stops the wait. */
   private async idle(signal: AbortSignal) {
@@ -163,23 +170,17 @@ export class FillerStore {
     return readFile(path.join(this.dir(key), `${n}.pcm`)).catch(() => undefined);
   }
 
-  /** One clip, made when the runtime has nothing live to say, and again if live speech took it back meanwhile. Nothing once `run` is stopped. */
+  /** One clip, made when no answer is near. Nothing once `run` is stopped. */
   private async render(text: string, render: Render, run: AbortSignal): Promise<Buffer | undefined> {
-    while (true) {
-      await this.idle(run);
-      // Not started for nobody: the page that asked has gone, and a request now would use the runtime, and load its model, for nothing.
-      if (run.aborted || Date.now() - this.askedAt > this.patience) return undefined;
-      const attempt = this.attempt = new AbortController();
-      try {
-        const pcm = await render(text, AbortSignal.any([attempt.signal, run, AbortSignal.timeout(60_000)]));
-        return run.aborted ? undefined : pcm;
-      } catch (e) {
-        if (run.aborted) return undefined;
-        // Cut off for live speech: not a failure, only for later.
-        if (!attempt.signal.aborted) throw e;
-      } finally {
-        if (this.attempt === attempt) this.attempt = undefined;
-      }
+    await this.idle(run);
+    // Not started for nobody: the page that asked has gone, and a request now would use the runtime, and load its model, for nothing.
+    if (run.aborted || Date.now() - this.askedAt > this.patience) return undefined;
+    try {
+      const pcm = await render(text, AbortSignal.any([run, AbortSignal.timeout(60_000)]));
+      return run.aborted ? undefined : pcm;
+    } catch (e) {
+      if (run.aborted) return undefined;
+      throw e;
     }
   }
 

@@ -1,6 +1,7 @@
 /** What the page has of the portal's fillers: the clips that are ready, and a name for them that changes with the voice. */
 export interface FillerSource {
-  list(): Promise<{ key: string; clips: number[]; rendering: boolean }>;
+  /** `busy`: the agent is at work, so an answer is on its way, and the portal starts no clip for now. */
+  list(busy?: boolean): Promise<{ key: string; clips: number[]; rendering: boolean }>;
   clip(key: string, n: number): Promise<Float32Array>;
   /** Tells the portal that nobody is waiting for the clips any more, so that it stops making them. */
   release?(): Promise<void>;
@@ -28,6 +29,8 @@ export class FillerClips {
     private source: FillerSource,
     private random: () => number = Math.random,
     private pollMs = POLL_MS,
+    /** Whether the agent is at work: said with every look, as the portal then holds its clips back. */
+    private busy: () => boolean = () => false,
   ) {}
   /** How many clips are held. */
   get ready() { return this.clips.size; }
@@ -46,7 +49,7 @@ export class FillerClips {
 
   private async fetch(run: number, polls = 0) {
     try {
-      const { key, clips, rendering } = await this.source.list();
+      const { key, clips, rendering } = await this.source.list(this.busy());
       if (run !== this.run) return;
       // Another voice: what was held is not it.
       if (key !== this.key) { this.key = key; this.clips.clear(); this.heard.clear(); this.last = -1; }
@@ -85,8 +88,8 @@ export class FillerClips {
 export function fillerSource(sessionId: string, request: typeof fetch = (...args) => fetch(...args)): FillerSource {
   const base = `/api/sessions/${encodeURIComponent(sessionId)}/voice/fillers`;
   return {
-    async list() {
-      const response = await request(base);
+    async list(busy = false) {
+      const response = await request(busy ? `${base}?busy=1` : base);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return await response.json();
     },
