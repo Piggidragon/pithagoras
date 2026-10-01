@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { loadsExtensions, npmName, packageKey, sourceOf } from "./extension-switch.js";
 import { localPackagePath, SUBAGENT_PACKAGE } from "./features.js";
-import { looseExtensions, type LooseExtension } from "./loose-extensions.js";
+import { discovered, isDir, isFile, looseExtensions, type LooseExtension } from "./loose-extensions.js";
 import { realPath } from "./within.js";
 
 /**
@@ -41,7 +41,7 @@ export interface ExtensionsSeen {
 
 const real = (p: string) => realPath(p) ?? path.resolve(p);
 
-function packageJson(dir: string): { name?: unknown } | undefined {
+function packageJson(dir: string): { name?: unknown; pi?: unknown } | undefined {
   try {
     return JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
   } catch {
@@ -55,7 +55,7 @@ function nameOf(source: string, dir: string | undefined): string {
   if (key.startsWith("npm:")) return npmName(source) ?? key.slice(4);
   if (key.startsWith("git:")) return key.slice(4);
   const name = dir ? packageJson(dir)?.name : undefined;
-  return typeof name === "string" && name ? name : path.basename(dir ?? source);
+  return typeof name === "string" && name ? name : path.basename(dir ?? source).replace(/\.(ts|js)$/, "");
 }
 
 /** The folders the agent's connections to screens are kept in (`screen-<slug>`, see the skill `extension-screens`). */
@@ -96,6 +96,39 @@ interface Listing {
   source: string;
   /** The folder of a package kept in one. */
   dir?: string;
+  /** What the settings that list it start at: pi's folder, or the project's `.pi`. Where pi installs a package is beneath it. */
+  base: string;
+}
+
+/**
+ * Whether a package has an extension for pi to load, which is a thing of what it
+ * holds and not of what the settings say. Read as pi reads it: a manifest
+ * (`pi` in its `package.json`) names the extensions, or else there are some in
+ * its `extensions` folder, and one that only has skills, prompts or themes has
+ * none. A folder that has none of those is itself the extension, but only when
+ * it is a local package. Where it is found is the folder of a local package, or
+ * where pi installs an npm or git package under the settings' base; one that is
+ * not there is taken to be on, as it may be installed another way or not yet. A
+ * local folder that is not there loads nothing.
+ */
+function bringsExtensions(listing: Listing): boolean {
+  const key = packageKey(listing.source);
+  const root = listing.dir ?? (key.startsWith("npm:") ? path.join(listing.base, "npm", "node_modules", key.slice(4)) : key.startsWith("git:") ? path.join(listing.base, "git", ...key.slice(4).split("/")) : undefined);
+  if (root === undefined) return true;
+  if (!existsSync(root)) return listing.dir === undefined;
+  if (!isDir(root)) return true;
+
+  const manifest = packageJson(root)?.pi;
+  const listed = manifest && typeof manifest === "object" ? (manifest as { extensions?: unknown }).extensions : undefined;
+  const named = Array.isArray(listed) ? listed.filter((e): e is string => typeof e === "string" && !/^[!+-]/.test(e)) : [];
+  // A path, which counts if it is a script or has some in it; a glob is not looked through.
+  if (named.length > 0) return named.some((e) => /[*?]/.test(e) || isFile(path.resolve(root, e)) || (isDir(path.resolve(root, e)) && discovered(path.resolve(root, e)).length > 0));
+  // An entry with a list of its own looks in the folder as well, where the manifest names no extension.
+  if (manifest && typeof listing.entry !== "object") return false;
+  const folder = path.join(root, "extensions");
+  if (isDir(folder)) return discovered(folder).length > 0;
+  if (["skills", "prompts", "themes"].some((d) => isDir(path.join(root, d)))) return false;
+  return listing.dir !== undefined && !manifest;
 }
 
 /**
@@ -104,7 +137,8 @@ interface Listing {
  * `extensions` folders and those the `extensions` settings add. As in
  * Settings → Extensions and the chat's tools menu: a package switched off, or
  * narrowed to none of its extensions, is not there, and one whose tools are all
- * off in this chat is not either.
+ * off in this chat is not either, nor one that has no extension to load (only
+ * skills, say, or a folder that is gone).
  *
  * Where both settings list a package, the project's entry decides alone, as in
  * pi: a project that lists it and loads it has it, whatever the user's entry
@@ -132,7 +166,7 @@ export function installedExtensions(seen: ExtensionsSeen): ExtensionChoice[] {
       // The subagent tool the portal installs from its own folder is the portal's.
       if (dir && ((bundled && real(dir) === bundled) || packageJson(dir)?.name === SUBAGENT_PACKAGE)) continue;
       const id = dir ? `local:${dir}` : key;
-      if (last || !found.has(id)) found.set(id, { entry, source, dir });
+      if (last || !found.has(id)) found.set(id, { entry, source, dir, base });
     }
     return found;
   };
@@ -158,6 +192,8 @@ export function installedExtensions(seen: ExtensionsSeen): ExtensionChoice[] {
     const delta = !!p && typeof p.entry === "object" && (p.entry as Record<string, unknown>).autoload === false;
     if (!(p && !delta ? projectOn : userOn || projectOn)) continue;
     const one = (userOn ? u : p) as Listing;
+    // What pi loads it from is the entry that decides: where the project lists it, the project's install.
+    if (!bringsExtensions((p && !delta ? p : one) as Listing)) continue;
     // Off in this chat as a whole: the group of its tools in the chat's menu is switched off.
     const keys = new Set([u, p].filter((l): l is Listing => l !== undefined).map((l) => packageKey(l.source)));
     const own = seen.tools.filter((t) => [t.package, t.projectPackage].some((x) => typeof x === "string" && keys.has(packageKey(x))));

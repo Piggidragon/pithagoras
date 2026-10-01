@@ -60,6 +60,14 @@ What is listed is what is **on** in this chat, the same as in
   you unload one extension of a package for a project) is not followed: your
   entry decides. Nor is a list of patterns that happens to match none of
   its extensions: only an empty list counts as none.
+- A package has to bring an extension, as pi reads the package: the extensions
+  its `package.json` names under `pi.extensions`, or else those in its
+  `extensions` folder. One that only has skills, prompt templates or themes is
+  not listed, and neither is a package kept in a folder that is not there. A
+  package kept in a folder with none of these is itself the extension. An npm or
+  git package is looked for where pi installs it (under pi's agent folder, or
+  the project's `.pi` for one the project lists); one that is not found there,
+  because it is installed another way or not yet, is listed.
 - A package is not listed in a chat where all of its tools are switched off in
   the chat's tools menu, whether by default, by the project or by the chat. That
   goes for a project's package as for yours. Turn one of its tools back on and it

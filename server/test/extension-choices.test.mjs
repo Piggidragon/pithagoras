@@ -274,3 +274,59 @@ test("a pattern's ** is a globstar only as a whole segment, and a wildcard does 
   assert.deepEqual(names(`!${path.dirname(path.dirname(agent))}/.c*/agent/extensions/a.ts`), ["ext-c", "f"], "unless the pattern starts it with a dot");
   assert.deepEqual(names(`!${path.dirname(path.dirname(agent))}/.cfg/**/a.ts`), ["ext-c", "f"]);
 });
+
+test("a package that has no extension for pi to load is not offered, whatever its entry says", () => {
+  const agent = path.join(home, "agent-brings");
+  const proj = path.join(home, "ws", "brings-project");
+  const pkg = (name) => path.join(home, "pkgs-brings", name);
+  const json = (dir, o) => write(path.join(dir, "package.json"), JSON.stringify(o));
+  // A package that is only skills, and one that names an extension, in several ways.
+  json(pkg("skillpack"), { name: "skillpack", pi: { skills: ["skills"] } });
+  write(path.join(pkg("skillpack"), "skills", "x", "SKILL.md"), "---\nname: x\ndescription: d\n---\n");
+  json(pkg("manifest-ext"), { name: "manifest-ext", pi: { extensions: ["ext/main.ts"] } });
+  write(path.join(pkg("manifest-ext"), "ext", "main.ts"));
+  json(pkg("manifest-missing"), { name: "manifest-missing", pi: { extensions: ["ext/none.ts"] } });
+  json(pkg("manifest-glob"), { name: "manifest-glob", pi: { extensions: ["ext/*.ts"] } });
+  json(pkg("manifest-dir"), { name: "manifest-dir", pi: { extensions: ["ext"] } });
+  write(path.join(pkg("manifest-dir"), "ext", "d.ts"));
+  json(pkg("manifest-emptydir"), { name: "manifest-emptydir", pi: { extensions: ["ext"] } });
+  write(path.join(pkg("manifest-emptydir"), "ext", "notes.md"), "not an extension");
+  json(pkg("manifest-none"), { name: "manifest-none", pi: {} });
+  write(path.join(pkg("manifest-none"), "extensions", "e.ts"));
+  // Without a manifest: by the folders it has.
+  json(pkg("conv-ext"), { name: "conv-ext" });
+  write(path.join(pkg("conv-ext"), "extensions", "x.ts"));
+  json(pkg("conv-skills"), { name: "conv-skills" });
+  write(path.join(pkg("conv-skills"), "skills", "s", "SKILL.md"), "---\nname: s\ndescription: d\n---\n");
+  json(pkg("conv-emptyext"), { name: "conv-emptyext" });
+  write(path.join(pkg("conv-emptyext"), "extensions", "notes.md"), "not an extension");
+  json(pkg("bare"), { name: "bare" });
+  write(path.join(pkg("single"), "single.ts"));
+  // Installed where pi puts them, under pi's folder and under the project's.
+  json(path.join(agent, "npm", "node_modules", "pi-skillz"), { name: "pi-skillz", pi: { skills: ["skills"] } });
+  json(path.join(agent, "npm", "node_modules", "@acme", "pi-ext"), { name: "@acme/pi-ext" });
+  write(path.join(agent, "npm", "node_modules", "@acme", "pi-ext", "extensions", "e.ts"));
+  json(path.join(agent, "git", "github.com", "acme", "themes"), { name: "themes", pi: { themes: ["themes"] } });
+  json(path.join(agent, "git", "github.com", "acme", "tool"), { name: "tool" });
+  write(path.join(agent, "git", "github.com", "acme", "tool", "extensions", "e.ts"));
+  json(path.join(agent, "npm", "node_modules", "pi-both"), { name: "pi-both", pi: { skills: ["skills"] } });
+  json(path.join(proj, ".pi", "npm", "node_modules", "pi-both"), { name: "pi-both" });
+  write(path.join(proj, ".pi", "npm", "node_modules", "pi-both", "extensions", "e.ts"));
+  json(path.join(proj, ".pi", "npm", "node_modules", "pi-project-skills"), { name: "pi-project-skills", pi: { skills: ["skills"] } });
+
+  const offered = (user, projectList) =>
+    installedExtensions({ agentDir: agent, userPackages: user, projectDir: proj, projectPackages: projectList, tools: [], off: new Set() }).map((c) => c.value);
+  const local = ["skillpack", "manifest-ext", "manifest-missing", "manifest-glob", "manifest-dir", "manifest-emptydir", "manifest-none", "conv-ext", "conv-skills", "conv-emptyext", "bare"].map(pkg);
+  assert.deepEqual(offered(local, []), ["bare", "conv-ext", "manifest-dir", "manifest-ext", "manifest-glob"], "a manifest that names none brings none; a glob is not looked through");
+  assert.deepEqual(offered([path.join(pkg("single"), "single.ts"), path.join(home, "pkgs-brings", "gone")], []), ["single"], "a script is a package, and a folder that is gone loads nothing");
+  // An npm or git package is looked for where pi installs it; one that is not there may be installed some other way, or not yet.
+  assert.deepEqual(offered(["npm:pi-skillz", "npm:@acme/pi-ext", "npm:pi-not-here", "git:github.com/acme/themes", "git:github.com/acme/tool"], []), ["@acme/pi-ext", "github.com/acme/tool", "pi-not-here"]);
+  // The entry that decides is the one whose install is read: the project's, where it lists the package.
+  assert.deepEqual(offered(["npm:pi-both"], []), []);
+  assert.deepEqual(offered(["npm:pi-both"], ["npm:pi-both"]), ["pi-both"]);
+  assert.deepEqual(offered([], ["npm:pi-project-skills"]), []);
+  // An entry with a list of its own looks in the extensions folder where the manifest names none; one that is a string does not.
+  assert.deepEqual(offered([{ source: pkg("manifest-none"), extensions: ["extensions/e.ts"] }], []), ["manifest-none"]);
+  assert.deepEqual(offered([pkg("manifest-none")], []), []);
+  assert.deepEqual(offered([{ source: pkg("skillpack"), extensions: ["x.ts"] }], []), []);
+});

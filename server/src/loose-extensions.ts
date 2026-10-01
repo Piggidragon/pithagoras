@@ -31,14 +31,14 @@ export interface LooseScope {
   setting: unknown;
 }
 
-const isDir = (p: string) => {
+export const isDir = (p: string) => {
   try {
     return statSync(p).isDirectory();
   } catch {
     return false;
   }
 };
-const isFile = (p: string) => {
+export const isFile = (p: string) => {
   try {
     return statSync(p).isFile();
   } catch {
