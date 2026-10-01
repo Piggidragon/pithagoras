@@ -6,7 +6,7 @@ The portal talks directly to the host Docker API; no Docker CLI inside the porta
 
 This guide covers the managed Linux Docker installation. Add-ons are separate from [pi extensions](/guide/extensions) and [channel packages](/channels/index).
 
-The **Subagents**, **Memory** and **Images** tabs beside them switch on the [opt-in features](/guide/features) — a subagent tool, Understory as the agent's memory, and a tool that makes pictures with an image model you point it at. The portal can run Understory itself with the same Docker access; pointed at one you run, it needs none, and image generation needs no Docker at all.
+The **Subagents**, **Memory** and **Images** tabs beside them switch on the [opt-in features](/guide/features) — a subagent tool, Understory as the agent's memory, and tools that make and change pictures with an image model you point them at. The portal can run Understory itself with the same Docker access; pointed at one you run, it needs none, and image generation and editing need no Docker at all.
 
 ## Choose your next step
 
