@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { agentHome, agentHomePath } from "./agent-home.js";
 import path from "node:path";
 import type { Draft, PiClient, PiTool, PromptTaken } from "./pi/types.js";
+import type { Screen } from "./screens.js";
 import { effectiveOff, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
 import { projectOf } from "./workspaces.js";
@@ -247,6 +248,8 @@ const EPHEMERAL_EVENTS = new Set([
   "portal_model",
   // A subagent's reply as it streams; its finished messages are stored.
   "portal_subagent_live",
+  // What an extension shows on a screen: the portal keeps the latest per chat, and a page opened later asks for it.
+  "portal_screen",
   // Tells a page which stretch of its transcript is gone. Stored, it would be
   // replayed to a reader who never saw what it refers to.
   "portal_removed",
@@ -827,11 +830,14 @@ class SessionManager extends EventEmitter {
     return this.calls.has(sessionId);
   }
 
-  extensionState(sessionId: string): { statuses: { key: string; text: string }[]; widgets: { key: string; lines: string[] }[] } {
+  extensionState(sessionId: string): { statuses: { key: string; text: string }[]; widgets: { key: string; lines: string[] }[]; screens: Screen[] } {
     const ui = this.extensionUi.get(sessionId);
     return {
       statuses: ui ? [...ui.statuses].map(([key, text]) => ({ key, text })) : [],
       widgets: ui ? [...ui.widgets].map(([key, lines]) => ({ key, lines })) : [],
+      // Asked of the client rather than noted from events: an extension says its
+      // screens as the chat starts, before anything here listens to its events.
+      screens: this.live.get(sessionId)?.client.screens?.() ?? [],
     };
   }
 

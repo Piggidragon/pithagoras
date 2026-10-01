@@ -17,6 +17,7 @@ import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
+import { bridgeScreens, type Screen, type ScreenBridge } from "../screens.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { contextWindowFor, getVoiceInstructions } from "../db.js";
 import { configStamp } from "../providers.js";
@@ -314,6 +315,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   /** The extensions' event bus, when this client made one. */
   bus?: { emit(channel: string, data: unknown): void };
   unbridge?: Bridge;
+  /** What the extensions put on screen over the screen protocol: see screens.ts. */
+  unscreens?: ScreenBridge;
+
+  screens(): Screen[] {
+    return this.unscreens?.list() ?? [];
+  }
 
   // Only to one running here that takes it: after a restart, the bus is new
   // and nobody on it, and "sent" would be a message that went nowhere.
@@ -535,6 +542,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           return model ? { model } : {};
         },
       );
+      client.unscreens = bridgeScreens(eventBus, (event) => client.emit("event", event));
     }
     if (resourceLoader) {
       client.voiceFirst = voiceFirst;
@@ -986,6 +994,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   dispose(): void {
     this.unbridge?.();
+    this.unscreens?.();
     if (this.disposed) return;
     this.disposed = true;
     this.canvases?.interrupt();

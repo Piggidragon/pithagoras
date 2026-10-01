@@ -1,5 +1,6 @@
 import type { EventEmitter } from "node:events";
 import type { ImageContent } from "../prompt-images.js";
+import type { Screen } from "../screens.js";
 
 export interface PiState {
   model: {
@@ -88,6 +89,11 @@ export interface PiClient extends EventEmitter {
   subagentsRunning?(): number;
   /** Says each subagent still running has stopped: its pi is about to go. */
   endSubagents?(why: string): void;
+  /**
+   * What the extensions show on the page's Screens panel (see screens.ts).
+   * Optional: only the in-process client shares the event bus they say it on.
+   */
+  screens?(): Screen[];
   /**
    * Where the chat box's text is kept — by the portal, one copy for the page
    * and pi alike — for an extension's getEditorText, and for what it puts in
