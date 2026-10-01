@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSparkles } from 'react-icons/lu';
 import type { PortalEvent } from '../api';
 import { describeCall, describeOutcome, elapsed, type ToolCall, type ToolTarget } from '../tool-activity';
+import { shownPicture } from '../transcript';
 import { msg, t } from "../i18n";
 
 /** A card for one tool call, in one of four places around the orb. */
@@ -76,7 +77,9 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
         const card = next.find(c => c.callId && c.callId === String(p.toolCallId ?? '') && c.status === 'running');
         if (!card) continue;
         const status = p.isError ? 'failed' as const : 'done' as const;
-        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p) } : c);
+        // A card leads to the pictures once its call has shown one: a generate_image has no picture to open before that, nor when it is another extension's tool.
+        const target = shownPicture(p) ? 'pictures' as const : undefined;
+        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}) } : c);
         later(STAYS[status], () => leave(card.id));
       } else if (event.type === 'agent_end' || (event.type === 'portal_status' && p.status !== 'running')) {
         // The run is over: a call that never reported its end is not still going.

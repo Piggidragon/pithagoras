@@ -123,13 +123,15 @@ const originOf = (address: string): string => {
 
 /**
  * Saves a change, or refuses it: switched on, there must be an address to ask.
- * A key belongs to the server it was given for, so a new address that does not
- * come with one has none.
+ * A key belongs to the server it was given for, so a new address of another
+ * origin that does not come with one has none. A key saved before any address
+ * was given for no server yet, and stays for the first.
  */
 export function saveImageGeneration(patch: ImageGenerationPatch): ImageGenerationConfig {
   const had = imageGenerationConfig();
   const next = { ...had, ...patch };
-  if (patch.apiKey === undefined && originOf(next.baseUrl) !== originOf(had.baseUrl)) next.apiKey = "";
+  // Only from one server to another: a key saved before there was an address was given for none, and goes with the first.
+  if (patch.apiKey === undefined && had.baseUrl !== "" && originOf(next.baseUrl) !== originOf(had.baseUrl)) next.apiKey = "";
   if (next.enabled && !next.baseUrl) throw new ImageGenerationError("Set the address of the image endpoint before switching it on");
   putSetting(KEY, JSON.stringify(next));
   return next;

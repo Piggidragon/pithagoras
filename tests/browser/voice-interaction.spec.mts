@@ -74,6 +74,25 @@ test('a picture the agent had generated is drawn in the chat under its tool line
   expect(failures).toEqual([]);
 });
 
+test("in voice mode a card for generate_image leads to the pictures only when the portal's tool made one", async ({ page }) => {
+  await start(page);
+  // An extension's tool of that name: its card says what it does and opens nothing, whatever pictures there are.
+  // A picture shown before is there to be opened wrongly; its window is put away.
+  await page.getByRole('button', { name: 'Show picture' }).click();
+  await page.getByRole('region', { name: 'Pictures' }).getByRole('button', { name: 'Minimize pictures' }).click();
+  await page.getByRole('button', { name: "Call an extension's generate_image" }).click();
+  const theirs = page.locator('.voice-tool-float', { hasText: 'A cat on a sofa' });
+  await expect(theirs).toContainText('Making a picture');
+  expect(await theirs.evaluate(card => card.tagName)).toBe('DIV');
+  await expect(page.getByRole('button', { name: /Making a picture/ })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Pictures' })).toHaveCount(0);
+
+  // The portal's own, once its picture is there: tapping the card shows it.
+  await page.getByRole('button', { name: 'Generate picture' }).click();
+  const ours = page.getByRole('button', { name: /Making a picture/ });
+  await expect(ours).toHaveAttribute('title', 'Show the picture');
+});
+
 test('a file dropped on the voice stage is taken there once, not again by the chat behind it', async ({ page }) => {
   let uploads = 0;
   await page.route('**/api/sessions/test/upload?**', route => { uploads++; return route.fulfill({ json: { path: 'notes.pdf', size: 3 } }); });

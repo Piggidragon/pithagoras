@@ -25,9 +25,11 @@ test('the chat puts a generated picture under the tool line that made it', () =>
   assert.deepEqual(tool.picture, { path: generated.path, title: generated.title });
 });
 
-test('the tool line says a picture is being made, and tapping it opens the pictures', () => {
-  assert.deepEqual(describeCall(start('generate_image', { prompt: 'a lighthouse\nat dusk' }).payload, '/work'), { label: 'Making a picture', detail: 'a lighthouse at dusk', target: 'pictures' });
+test('the tool line says a picture is being made; what tapping it opens is settled when the call ends', () => {
+  // Not here: the start cannot tell the portal's tool from an extension's of the same name, whose card must open nothing.
+  assert.deepEqual(describeCall(start('generate_image', { prompt: 'a lighthouse\nat dusk' }).payload, '/work'), { label: 'Making a picture', detail: 'a lighthouse at dusk' });
   assert.equal(describeCall(start('generate_image', { prompt: 'x', title: 'Lighthouse' }).payload, '/work').detail, 'Lighthouse');
+  assert.equal(describeCall(start('show_image', { path: 'a.png' }).payload, '/work').target, 'pictures');
 });
 
 test("a generate_image that an extension brings is not taken for a picture of the chat's folder", () => {

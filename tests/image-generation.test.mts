@@ -100,6 +100,20 @@ test("it is off until switched on with an address, and the key is kept but never
   assert.equal(gen.imageGenerationReady(), false);
 });
 
+test("a key saved before any address goes with the first address, and is dropped only for another server", () => {
+  gen.saveImageGeneration({ enabled: false, baseUrl: "", model: "", size: "", apiKey: "" });
+  // What the Images form sends on two saves: the key first, then the address with the key field left empty.
+  gen.saveImageGeneration({ baseUrl: "", model: "", size: "", apiKey: KEY });
+  assert.equal(gen.imageGenerationState().keySet, true);
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", model: "image-model", size: "" });
+  assert.equal(gen.imageGenerationState().keySet, true, "given for no server before: it is this one's now");
+  assert.equal(gen.imageGenerationConfig().apiKey, KEY);
+  // Now it is a server's: another is not given it.
+  gen.saveImageGeneration({ baseUrl: "https://elsewhere.example.org/v1", model: "image-model", size: "" });
+  assert.equal(gen.imageGenerationState().keySet, false);
+  gen.saveImageGeneration({ baseUrl: "", apiKey: "" });
+});
+
 test("a picture comes back as base64 and is asked for with the model, the prompt and the key", async () => {
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
   try {
