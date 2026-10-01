@@ -21,6 +21,12 @@ It wants to run, exactly once:
 Approving runs that and nothing else.
 ```
 
+For `edit_image` the action is the path of each picture, one to a line, in the
+order of the call (a single picture is just its path), and the agent is told
+exactly which when the call is refused. The prompt is not part of what is
+approved. **Always allow** then writes one rule for each picture, since a rule is
+matched against each picture of a call and one for all of them would match none.
+
 The agent chooses neither the recipient nor the route. A session working for
 somebody else must not be able to pick who hears from it.
 
