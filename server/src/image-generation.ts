@@ -16,17 +16,25 @@ import { pictureExt } from "./prompt-images.js";
  * address or the model needs no restart. The key is kept here and goes to the
  * endpoint it was given for, and nowhere else: not into a log, not into an
  * answer of the API (only whether one is set), and not to another host.
+ *
+ * Editing a picture (`images/edits`, see image-editing.ts) is the same add-on
+ * with a switch of its own: not every endpoint that makes pictures changes
+ * them, so it is opt-in apart, and may be asked of another address.
  */
 
 const KEY = "image_generation";
 
 /** The agent's tool: it exists only while the add-on is ready (see imageGenerationReady). */
 export const GENERATE_IMAGE_TOOL = "generate_image";
+/** The agent's tool for changing a picture: it exists only while editing is ready (see imageEditingReady). */
+export const EDIT_IMAGE_TOOL = "edit_image";
 /**
  * The name of the portal's inline extension for it, which pi lists as `<inline:image-generation>`.
  * Also the label the tool is shown under, which a file of that name has too: only the path says whose it is.
  */
 export const GENERATE_IMAGE_SOURCE = "image-generation";
+/** The same for the editing tool, which is an extension of its own: `<inline:image-editing>`. */
+export const EDIT_IMAGE_SOURCE = "image-editing";
 
 export interface ImageGenerationConfig {
   enabled: boolean;
@@ -37,6 +45,14 @@ export interface ImageGenerationConfig {
   /** Sent as `size` when it is not empty, unless the agent asks for another. */
   size: string;
   apiKey: string;
+  /** Editing is opt-in apart from generation: an endpoint that makes pictures may not change them. */
+  editEnabled: boolean;
+  /** Where edits go, with the same rules as `baseUrl`. Empty is the address above. */
+  editBaseUrl: string;
+  /** Sent as `model` on an edit when it is not empty; never the generation model, which may be one that only makes pictures. */
+  editModel: string;
+  /** The key of the edit address; see imageEditingTarget for when the one above is used instead. */
+  editApiKey: string;
 }
 
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -49,16 +65,49 @@ export function imageGenerationConfig(): ImageGenerationConfig {
   } catch {
     // Unreadable is as good as nothing saved.
   }
-  return { enabled: raw.enabled === true, baseUrl: text(raw.baseUrl), model: text(raw.model), size: text(raw.size), apiKey: text(raw.apiKey) };
+  return {
+    enabled: raw.enabled === true,
+    baseUrl: text(raw.baseUrl),
+    model: text(raw.model),
+    size: text(raw.size),
+    apiKey: text(raw.apiKey),
+    editEnabled: raw.editEnabled === true,
+    editBaseUrl: text(raw.editBaseUrl),
+    editModel: text(raw.editModel),
+    editApiKey: text(raw.editApiKey),
+  };
 }
 
 /** On, and told where to ask: only then is there a tool, so there is no tool that always fails. */
 export const imageGenerationReady = (config: ImageGenerationConfig = imageGenerationConfig()): boolean => config.enabled && config.baseUrl !== "";
 
-/** What the page is told of the settings: never the key itself. */
+/** Editing is on and has an address to ask, its own or the one of generation: only then is there an edit tool. */
+export const imageEditingReady = (config: ImageGenerationConfig = imageGenerationConfig()): boolean =>
+  config.editEnabled && (config.editBaseUrl || config.baseUrl) !== "";
+
+/** Where an edit goes, and what goes with it. */
+export interface ImageEditingTarget {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+
+/**
+ * The edit address, or the address of generation while none is given of its own.
+ * A key belongs to the server it was given for: the generation key goes along
+ * only when the edits go to the generation server, never to another one.
+ */
+export function imageEditingTarget(config: ImageGenerationConfig = imageGenerationConfig()): ImageEditingTarget {
+  const baseUrl = config.editBaseUrl || config.baseUrl;
+  const sameServer = baseUrl !== "" && originOf(baseUrl) === originOf(config.baseUrl);
+  return { baseUrl, model: config.editModel, apiKey: config.editApiKey || (sameServer ? config.apiKey : "") };
+}
+
+/** What the page is told of the settings: never a key itself. */
 export function imageGenerationState() {
-  const { apiKey, ...rest } = imageGenerationConfig();
-  return { ...rest, keySet: apiKey !== "" };
+  const config = imageGenerationConfig();
+  const { apiKey, editApiKey, ...rest } = config;
+  return { ...rest, keySet: apiKey !== "", editKeySet: editApiKey !== "", editReady: imageEditingReady(config) };
 }
 
 export interface ImageGenerationPatch {
@@ -68,47 +117,63 @@ export interface ImageGenerationPatch {
   size?: string;
   /** "" takes the saved one away. */
   apiKey?: string;
+  editEnabled?: boolean;
+  /** "" is the address of generation. */
+  editBaseUrl?: string;
+  editModel?: string;
+  /** "" takes the saved one away. */
+  editApiKey?: string;
 }
 
 /** `1024x1024`, or `auto`, as the OpenAI-style APIs take it. */
 export const SIZE = /^(auto|\d{2,5}x\d{2,5})$/;
 
+/** An API address as the settings keep it, or the reason it is not one. */
+function parseBase(value: unknown): { base: string } | { error: string } {
+  if (typeof value !== "string") return { error: "The address must be text" };
+  const given = value.trim();
+  if (!given) return { base: "" };
+  let url: URL;
+  try {
+    url = new URL(given);
+  } catch {
+    return { error: "The address must be an http or https URL" };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return { error: "The address must be an http or https URL" };
+  if (url.username || url.password || url.search || url.hash) return { error: "The address is the API's base, such as https://host/v1: the key goes in the key field, not in the address" };
+  return { base: url.toString().replace(/\/+$/, "") };
+}
+
 /** What a request may change, checked; the reason when it may not. */
 export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch | string {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const patch: ImageGenerationPatch = {};
-  if (b.enabled !== undefined) {
-    if (typeof b.enabled !== "boolean") return "enabled must be true or false";
-    patch.enabled = b.enabled;
+  for (const field of ["enabled", "editEnabled"] as const) {
+    if (b[field] === undefined) continue;
+    if (typeof b[field] !== "boolean") return `${field} must be true or false`;
+    patch[field] = b[field];
   }
-  if (b.baseUrl !== undefined) {
-    if (typeof b.baseUrl !== "string") return "The address must be text";
-    const given = b.baseUrl.trim();
-    if (given) {
-      let url: URL;
-      try {
-        url = new URL(given);
-      } catch {
-        return "The address must be an http or https URL";
-      }
-      if (url.protocol !== "http:" && url.protocol !== "https:") return "The address must be an http or https URL";
-      if (url.username || url.password || url.search || url.hash) return "The address is the API's base, such as https://host/v1: the key goes in the key field, not in the address";
-      patch.baseUrl = url.toString().replace(/\/+$/, "");
-    } else {
-      patch.baseUrl = "";
-    }
+  for (const field of ["baseUrl", "editBaseUrl"] as const) {
+    if (b[field] === undefined) continue;
+    const parsed = parseBase(b[field]);
+    if ("error" in parsed) return parsed.error;
+    patch[field] = parsed.base;
   }
-  if (b.model !== undefined) {
-    if (typeof b.model !== "string" || b.model.length > 200) return "The model must be text of at most 200 characters";
-    patch.model = b.model.trim();
+  for (const field of ["model", "editModel"] as const) {
+    if (b[field] === undefined) continue;
+    const given = b[field];
+    if (typeof given !== "string" || given.length > 200) return "The model must be text of at most 200 characters";
+    patch[field] = given.trim();
   }
   if (b.size !== undefined) {
     if (typeof b.size !== "string" || (b.size.trim() && !SIZE.test(b.size.trim()))) return 'The size looks like "1024x1024"';
     patch.size = b.size.trim();
   }
-  if (b.apiKey !== undefined) {
-    if (typeof b.apiKey !== "string" || b.apiKey.length > 4000) return "The key must be text of at most 4000 characters";
-    patch.apiKey = b.apiKey.trim();
+  for (const field of ["apiKey", "editApiKey"] as const) {
+    if (b[field] === undefined) continue;
+    const given = b[field];
+    if (typeof given !== "string" || given.length > 4000) return "The key must be text of at most 4000 characters";
+    patch[field] = given.trim();
   }
   return patch;
 }
@@ -125,14 +190,18 @@ const originOf = (address: string): string => {
  * Saves a change, or refuses it: switched on, there must be an address to ask.
  * A key belongs to the server it was given for, so a new address of another
  * origin that does not come with one has none. A key saved before any address
- * was given for no server yet, and stays for the first.
+ * was given for no server yet, and stays for the first. Both keys follow this
+ * rule, the edit key by the address edits go to (see imageEditingTarget).
  */
 export function saveImageGeneration(patch: ImageGenerationPatch): ImageGenerationConfig {
   const had = imageGenerationConfig();
   const next = { ...had, ...patch };
   // Only from one server to another: a key saved before there was an address was given for none, and goes with the first.
   if (patch.apiKey === undefined && had.baseUrl !== "" && originOf(next.baseUrl) !== originOf(had.baseUrl)) next.apiKey = "";
+  const wasEditedAt = had.editBaseUrl || had.baseUrl;
+  if (patch.editApiKey === undefined && wasEditedAt !== "" && originOf(next.editBaseUrl || next.baseUrl) !== originOf(wasEditedAt)) next.editApiKey = "";
   if (next.enabled && !next.baseUrl) throw new ImageGenerationError("Set the address of the image endpoint before switching it on");
+  if (next.editEnabled && !(next.editBaseUrl || next.baseUrl)) throw new ImageGenerationError("Set the address of the image endpoint before switching editing on");
   putSetting(KEY, JSON.stringify(next));
   return next;
 }
@@ -166,6 +235,9 @@ const without = (message: string, key: string): string => (key ? message.split(k
 
 const seconds = (ms: number) => Math.round(ms / 1000);
 
+/** What the endpoints take of a prompt: DALL-E 3's four thousand characters is the least. */
+export const MAX_PROMPT = 4000;
+
 /**
  * Asks for a picture and returns it, checked: what comes back is a PNG, JPEG,
  * GIF or WebP by its first bytes, whatever the server calls it, and not larger
@@ -176,19 +248,34 @@ export async function generateImage(
   request: { prompt: string; size?: string },
   options: GenerateOptions = {},
 ): Promise<{ bytes: Buffer; ext: string }> {
+  const size = request.size || config.size;
+  const body = JSON.stringify({ ...(config.model ? { model: config.model } : {}), prompt: request.prompt, n: 1, ...(size ? { size } : {}) });
+  return requestPicture(endpointUrl(config.baseUrl), config.apiKey, body, options);
+}
+
+/**
+ * Sends a request to an image endpoint and returns the picture it answers
+ * with, as generation and editing both do. `body` is the JSON text of a
+ * generation, or the form of an edit, whose type fetch sets itself with its
+ * boundary. The key goes with this request to this address, and is not
+ * followed anywhere else.
+ */
+export async function requestPicture(
+  endpoint: URL,
+  apiKey: string,
+  body: string | FormData,
+  options: GenerateOptions = {},
+): Promise<{ bytes: Buffer; ext: string }> {
   const timeoutMs = options.timeoutMs ?? GENERATE_TIMEOUT_MS;
   const max = options.maxBytes ?? MAX_GENERATED_BYTES;
   const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(timeoutMs)]);
-  const endpoint = endpointUrl(config.baseUrl);
-  const size = request.size || config.size;
-  const body = JSON.stringify({ ...(config.model ? { model: config.model } : {}), prompt: request.prompt, n: 1, ...(size ? { size } : {}) });
   const failed = (e: unknown): Error => {
     // The chat was stopped: nobody is told it failed.
     if (options.signal?.aborted) return e as Error;
     if (signal.aborted) return new ImageGenerationError(`The image endpoint did not answer within ${seconds(timeoutMs)} seconds`);
     if (e instanceof ImageGenerationError) return e;
     const why = (e as { cause?: { code?: string } })?.cause?.code ?? (e as Error)?.message ?? "unknown error";
-    return new ImageGenerationError(without(`Could not reach the image endpoint at ${endpoint.origin} (${why})`, config.apiKey));
+    return new ImageGenerationError(without(`Could not reach the image endpoint at ${endpoint.origin} (${why})`, apiKey));
   };
 
   try {
@@ -197,7 +284,7 @@ export async function generateImage(
       method: "POST",
       redirect: "error",
       signal,
-      headers: { "content-type": "application/json", accept: "application/json", ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}) },
+      headers: { ...(typeof body === "string" ? { "content-type": "application/json" } : {}), accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
       body,
     });
     // The picture as base64 is a third larger than itself, and wrapped in JSON.
@@ -212,14 +299,14 @@ export async function generateImage(
     if (!res.ok) {
       const said = text(parsed?.error?.message) || text(parsed?.error) || text(parsed?.message);
       // The key out first, then the cut: one that starts before the cut and ends after it would be found by neither.
-      const shown = without(said, config.apiKey).replace(/\s+/g, " ").slice(0, 300);
+      const shown = without(said, apiKey).replace(/\s+/g, " ").slice(0, 300);
       throw new ImageGenerationError(`The image endpoint answered ${res.status}${shown ? `: ${shown}` : ""}`);
     }
     const first = Array.isArray(parsed?.data) ? parsed.data[0] : undefined;
     let bytes: Buffer;
     if (typeof first?.b64_json === "string" && first.b64_json) bytes = fromBase64(first.b64_json, max);
     else if (typeof first?.url === "string" && first.url.startsWith("data:")) bytes = fromBase64(first.url, max);
-    else if (typeof first?.url === "string" && first.url) bytes = await download(first.url, endpoint, config.apiKey, signal, max);
+    else if (typeof first?.url === "string" && first.url) bytes = await download(first.url, endpoint, apiKey, signal, max);
     else throw new ImageGenerationError("The image endpoint answered, but with no picture in it");
     return picture(bytes, max);
   } catch (e) {

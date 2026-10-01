@@ -16,7 +16,7 @@ import {
   understoryOn,
   understoryTokenOf,
 } from "../features.js";
-import { ImageGenerationError, imageGenerationReady, imageGenerationState, parseImageGenerationPatch, saveImageGeneration } from "../image-generation.js";
+import { ImageGenerationError, imageEditingReady, imageGenerationReady, imageGenerationState, parseImageGenerationPatch, saveImageGeneration } from "../image-generation.js";
 import { readPiSettings, updatePiSettings } from "../pi-settings.js";
 import { sessions } from "../session-manager.js";
 import { switchPackage } from "./extensions.js";
@@ -236,18 +236,19 @@ export function featuresRouter(): Router {
   });
 
   /**
-   * The image endpoint and whether the agent has a tool for it. The tool is
-   * there only while it is on and has an address, and a chat decides that when
-   * it loads, so a change in that reloads the idle ones. The rest — address,
-   * model, size, key — is read at each call and needs no reload.
+   * The image endpoint and whether the agent has a tool for it, and for editing
+   * a picture. A tool is there only while it is on and has an address, and a
+   * chat decides that when it loads, so a change in either reloads the idle
+   * ones. The rest — address, model, size, key — is read at each call and needs
+   * no reload.
    */
   router.put("/features/images", async (req, res) => {
     const patch = parseImageGenerationPatch(req.body);
     if (typeof patch === "string") return res.status(400).json({ error: patch });
     try {
-      const before = imageGenerationReady();
+      const before = [imageGenerationReady(), imageEditingReady()];
       saveImageGeneration(patch);
-      const changed = imageGenerationReady() !== before;
+      const changed = imageGenerationReady() !== before[0] || imageEditingReady() !== before[1];
       const { reloaded, waiting } = changed ? await sessions.reloadIdle() : { reloaded: 0, waiting: 0 };
       res.json({ images: imageGenerationState(), changed, reloaded, waiting });
     } catch (e) {

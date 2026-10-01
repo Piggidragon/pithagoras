@@ -82,7 +82,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const [shown, setShown] = useState(false), [terminalShown, setTerminalShown] = useState(false);
   const [filesShown, setFilesShown] = useState(false), [filesUsed, setFilesUsed] = useState(false), [filesSince, setFilesSince] = useState<number | undefined>(undefined);
   const filesWindow = useRef<HTMLElement>(null), picturesWindow = useRef<HTMLElement>(null), conversationWindow = useRef<HTMLElement>(null);
-  // Pictures the agent showed with show_image or made with generate_image. A new one opens the window on it.
+  // Pictures the agent showed with show_image or made with generate_image or edit_image. A new one opens the window on it.
   const pictures = useMemo(() => shownPictures(toolEvents), [toolEvents]);
   const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
   const [picturesShown, setPicturesShown] = useState(false), [pictureIndex, setPictureIndex] = useState(0);

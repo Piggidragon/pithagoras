@@ -15,7 +15,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       },
     },
   };
-  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false };
+  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editKeySet: false, editReady: false };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -39,10 +39,12 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     else if (p === '/api/features/images' && method === 'PUT') {
       const patch = route.request().postDataJSON();
       sent.push({ path: p, body: patch });
-      const changed = patch.enabled !== undefined && patch.enabled !== images.enabled;
-      const { apiKey, ...rest } = patch;
+      const changed = (patch.enabled !== undefined && patch.enabled !== images.enabled) || (patch.editEnabled !== undefined && patch.editEnabled !== images.editEnabled);
+      const { apiKey, editApiKey, ...rest } = patch;
       Object.assign(images, rest);
       if (apiKey !== undefined) images.keySet = apiKey !== '';
+      if (editApiKey !== undefined) images.editKeySet = editApiKey !== '';
+      images.editReady = images.editEnabled && (images.editBaseUrl || images.baseUrl) !== '';
       body = { images, changed, reloaded: 1, waiting: 1 };
     }
     else if (p === '/api/features') body = { ...state, images };
@@ -331,12 +333,13 @@ test('image generation needs an endpoint before it can be switched on, and the k
   const tool = panel.getByRole('switch', { name: 'Image generation tool' });
   await expect(tool).toHaveAttribute('aria-checked', 'false');
   await expect(tool).toBeDisabled();
-  await expect(panel.getByText('Save the address of an image endpoint first.')).toBeVisible();
+  // Both switches say it: generation's is the first.
+  await expect(panel.getByText('Save the address of an image endpoint first.').first()).toBeVisible();
   await expect(panel.getByText('Off: the agent has no image tool.')).toBeVisible();
 
   await panel.getByLabel('API address').fill('https://images.example.com/v1');
   await panel.getByLabel('API key').fill('sk-test-123');
-  await panel.getByLabel('Model').fill('image-model');
+  await panel.getByLabel('Model', { exact: true }).fill('image-model');
   await expect(tool).toBeDisabled();
   await expect(panel.getByText('Save or discard the changes first.')).toBeVisible();
   await panel.getByRole('button', { name: 'Save', exact: true }).click();
@@ -354,7 +357,7 @@ test('image generation needs an endpoint before it can be switched on, and the k
   expect(sent.at(-1)!.body).toEqual({ enabled: true });
 
   // Changing only the model keeps the key: it is not sent again.
-  await panel.getByLabel('Model').fill('another-model');
+  await panel.getByLabel('Model', { exact: true }).fill('another-model');
   await panel.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
   expect(sent.at(-1)!.body).toEqual({ baseUrl: 'https://images.example.com/v1', model: 'another-model', size: '' });
@@ -362,4 +365,59 @@ test('image generation needs an endpoint before it can be switched on, and the k
   await panel.getByRole('button', { name: 'Remove the saved key' }).click();
   await expect(panel.getByLabel('API key')).toHaveAttribute('placeholder', 'none needed for a local server');
   expect(sent.at(-1)!.body).toEqual({ apiKey: '' });
+});
+
+test('image editing has a switch and an endpoint of its own: it needs an address, may use the one above, and its key is sent once', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Images' }).click();
+  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  const editing = panel.getByRole('switch', { name: 'Image editing tool' });
+  await expect(editing).toHaveAttribute('aria-checked', 'false');
+  await expect(editing).toBeDisabled();
+  await expect(panel.getByText('Off: the agent cannot change a picture.')).toBeVisible();
+
+  // Generation's address is enough, and its key is the one used: the form says so.
+  await panel.getByLabel('API address').fill('https://images.example.com/v1');
+  await panel.getByLabel('API key').fill('sk-test-123');
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  await expect(panel.getByLabel('Editing address')).toHaveAttribute('placeholder', 'https://images.example.com/v1');
+  await expect(panel.getByLabel('Editing key')).toHaveAttribute('placeholder', 'the key above is used');
+  await expect(editing).toBeEnabled();
+  await editing.click();
+  await expect(editing).toHaveAttribute('aria-checked', 'true');
+  await expect(panel.getByText('On: the agent has an edit_image tool.')).toBeVisible();
+  await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
+  expect(sent.at(-1)!.body).toEqual({ editEnabled: true });
+  // Generation is its own switch: still off.
+  await expect(panel.getByRole('switch', { name: 'Image generation tool' })).toHaveAttribute('aria-checked', 'false');
+
+  // Its own address, model and key: another server is not given the one above, and the switch waits for the save.
+  await panel.getByLabel('Editing address').fill('https://edit.example.net/v1');
+  await panel.getByLabel('Editing key').fill('sk-edit-456');
+  await panel.getByLabel('Editing model').fill('image-edit-model');
+  await expect(editing).toBeDisabled();
+  await expect(panel.getByText('Save or discard the changes first.')).toBeVisible();
+  await expect(panel.getByLabel('Editing key')).toHaveAttribute('placeholder', 'none needed for a local server');
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ editBaseUrl: 'https://edit.example.net/v1', editModel: 'image-edit-model', editApiKey: 'sk-edit-456' });
+  await expect(panel.getByLabel('Editing key')).toHaveValue('');
+  await expect(panel.getByLabel('Editing key')).toHaveAttribute('placeholder', 'saved — type to replace');
+  await expect(editing).toBeEnabled();
+  // The key of generation is untouched by it.
+  await expect(panel.getByLabel('API key')).toHaveAttribute('placeholder', 'saved — type to replace');
+
+  // Only the model changed: the key is not sent again.
+  await panel.getByLabel('Editing model').fill('another-edit-model');
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ editBaseUrl: 'https://edit.example.net/v1', editModel: 'another-edit-model' });
+
+  await panel.getByRole('button', { name: 'Remove the saved editing key' }).click();
+  await expect(panel.getByLabel('Editing key')).toHaveAttribute('placeholder', 'none needed for a local server');
+  expect(sent.at(-1)!.body).toEqual({ editApiKey: '' });
+  // Generation's key is still there to remove on its own.
+  await expect(panel.getByRole('button', { name: 'Remove the saved key' })).toBeVisible();
 });

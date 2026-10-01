@@ -44,3 +44,23 @@ test("a generate_image that an extension brings is not taken for a picture of th
   // show_image is the portal's alone to answer with a path in the folder, and is as it was.
   assert.deepEqual(shownPicture(end('show_image', { path: 'cat.png' }).payload), { path: 'cat.png' });
 });
+
+// What edit_image answers with: the same as generate_image's, for a new picture made from an old one.
+const edited = { path: 'generated-images/photo-edited.png', title: 'Purple sky', [GENERATED_PICTURE_MARK]: true };
+
+test('an edited picture is a shown picture, under the tool line that made it, and only with the mark of the portal\'s own tool', () => {
+  assert.deepEqual(shownPicture(end('edit_image', edited).payload), { path: edited.path, title: edited.title });
+  assert.equal(shownPicture(end('edit_image', edited, { isError: true }).payload), undefined, 'a failed call shows nothing');
+  const items = buildTranscript([start('edit_image', { path: 'photo.png', prompt: 'make the sky purple' }), end('edit_image', edited)]);
+  assert.deepEqual((items.find((i) => i.kind === 'tool') as any).picture, { path: edited.path, title: edited.title });
+  // An extension's edit_image answers with a path of its own kind: no thumbnail, as for generate_image.
+  for (const details of [{ path: '/work/proj/cat.png' }, { path: 'cat.png' }, { ...edited, [GENERATED_PICTURE_MARK]: 'yes' }]) {
+    assert.equal(shownPicture(end('edit_image', details).payload), undefined, JSON.stringify(details));
+  }
+});
+
+test('the tool line says a picture is being edited, with what was asked or the title', () => {
+  assert.deepEqual(describeCall(start('edit_image', { path: 'photo.png', prompt: 'make the\nsky purple' }).payload, '/work'), { label: 'Editing a picture', detail: 'make the sky purple' });
+  assert.equal(describeCall(start('edit_image', { path: 'photo.png', prompt: 'x', title: 'Purple sky' }).payload, '/work').detail, 'Purple sky');
+  assert.equal(describeCall(start('edit_image', { path: 'photo.png', prompt: 'x' }).payload, '/work').target, undefined, 'what tapping it opens is settled when the call ends');
+});
