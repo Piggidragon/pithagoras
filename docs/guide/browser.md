@@ -50,7 +50,9 @@ then close the tab. The profile lives on its own volume and survives restarts.
 
 The portal proxies the browser's UI at `/browser-ui`, so **Open browser** shows
 it inline with a fullscreen button, using the portal's own certificate and
-credential. No second password, no second certificate.
+credential. No second password, no second certificate. The frame switches on like
+a screen when it opens, unless [the animations](/guide/interface#animations) are
+off.
 
 That needs the portal itself on HTTPS. The VNC client gates on
 `isSecureContext`, and a frame only counts as secure when **every page above it**

@@ -26,6 +26,7 @@ import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
+import { keep, pick, useFlip } from "../motion";
 import { HOME, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t } from "../i18n";
@@ -147,6 +148,18 @@ export function Sidebar({
 
   const headingProps = { grouping, sort, onGrouping: setGrouping, onSort: setSort };
 
+  // Rows slide to their new places, and new ones come in (see motion.ts): not
+  // while a search is typed, which moves them with every key.
+  const rowsOrder = [byFolder ? "folders" : "recents", ...pinned.map((s) => s.id), "|", ...(byFolder ? folders.flatMap((f) => listed.get(f.key)!) : shownRecents).map((s) => s.id)].join();
+  const list = useFlip<HTMLDivElement>(rowsOrder, searching);
+  // The chat that is picked lights up: when the open chat changes, not each time its row is shown again.
+  const opened = useRef(activeId);
+  useEffect(() => {
+    if (opened.current === activeId) return;
+    opened.current = activeId;
+    if (activeId) pick(list.current?.querySelector(`[data-flip="${CSS.escape(activeId)}"]`));
+  }, [activeId]);
+
   const item = (s: Session) => (
     <SessionItem
       key={s.id}
@@ -214,7 +227,7 @@ export function Sidebar({
 
       {/* Destinations, above the session lists. */}
       <nav className="px-2 pb-2">
-        <NavItem icon={<LuPlus />} label={t("New")} onClick={() => newChat()} active={starting} />
+        <NavItem icon={<LuPlus />} label={t("New")} onClick={() => newChat()} active={starting} isNew />
         {destinations.map((d) => (
           <NavItem key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} active={view === d.to} />
         ))}
@@ -237,7 +250,7 @@ export function Sidebar({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-2 pb-2">
+      <div ref={list} className="sidebar-list flex-1 overflow-y-auto px-2 pb-2">
         {/* By folder, each says so itself, and a chat can be started in it. */}
         {sessions.length === 0 && !byFolder && (
           <p className="px-2 py-4 text-xs text-fg-subtle">{t("No sessions yet.")}</p>
@@ -363,25 +376,29 @@ function NavItem({
   label,
   active,
   onClick,
+  isNew,
 }: {
   icon: ReactNode;
   label: string;
   active: boolean;
   onClick: () => void;
+  /** The one that starts a chat: its plus turns. */
+  isNew?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition ${
+      data-new={isNew || undefined}
+      className={`nav-item group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition ${
         active ? "bg-fg/[0.07] text-fg" : "text-fg-muted hover:bg-fg/5 hover:text-fg"
       }`}
     >
       <span
-        className={`absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-accent transition-opacity ${
-          active ? "opacity-100" : "opacity-0"
+        className={`nav-bar absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-accent transition-opacity ${
+          active ? "is-on opacity-100" : "opacity-0"
         }`}
       />
-      <span className={`shrink-0 transition-colors ${active ? "text-accent" : "text-fg-faint group-hover:text-fg-subtle"}`}>
+      <span className={`nav-icon shrink-0 transition-colors ${active ? "text-accent" : "text-fg-faint group-hover:text-fg-subtle"}`}>
         {icon}
       </span>
       {label}
@@ -405,10 +422,13 @@ function SessionItem({
   onPin: (id: string, pinned: boolean) => Promise<void>;
 }) {
   const [renaming, setRenaming] = useState(false);
+  const row = useRef<HTMLDivElement>(null);
   return (
     // A row with buttons in it, so not a button itself: reachable with Tab and
     // opened with Enter all the same, which a bare div with a click was not.
     <div
+      ref={row}
+      data-flip={s.id}
       onClick={onSelect}
       tabIndex={0}
       aria-current={active ? "page" : undefined}
@@ -419,7 +439,7 @@ function SessionItem({
           onSelect();
         }
       }}
-      className={`group mb-0.5 cursor-pointer rounded-lg px-2.5 py-1.5 transition focus-visible:outline-offset-0 ${
+      className={`session-row group mb-0.5 cursor-pointer rounded-lg px-2.5 py-1.5 transition focus-visible:outline-offset-0 ${
         active ? "bg-fg/[0.07]" : "hover:bg-fg/5"
       }`}
     >
@@ -482,7 +502,9 @@ function SessionItem({
                   deletes: true,
                 })
               ) {
-                onDelete(s.id);
+                // A picture of the row, to break apart where it was once it is gone (see motion.ts).
+                const gone = keep(row.current, row.current?.closest<HTMLElement>(".sidebar-list"));
+                onDelete(s.id).then(() => gone("row"));
               }
             }}
             className="rounded p-1 text-fg-subtle hover:text-danger"

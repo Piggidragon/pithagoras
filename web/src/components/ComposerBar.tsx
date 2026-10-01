@@ -3,6 +3,7 @@ import { StatusDot } from "./StatusDot";
 import { ToolSwitches } from "./ToolSwitches";
 import { SubagentModelPicker, useSubagentChoice } from "./SubagentModelPicker";
 import { useDismiss } from "../use-dismiss";
+import { useLeaveRef } from "../motion";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
@@ -362,6 +363,8 @@ export function ComposerBar({
   }, [panelRequest]);
 
   const menu = useRef<HTMLDivElement>(null);
+  // Shut, a menu drops away as a picture of itself (see motion.ts).
+  const menuRef = useLeaveRef<HTMLDivElement>("menu", menu);
   const trigger = open ? pills[open] : undefined;
   useDismiss(
     !!open,
@@ -540,7 +543,7 @@ export function ComposerBar({
 
       {/* Tools */}
       {open === "tools" && (
-        <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menuRef} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <p className="px-3 py-1 text-[11px] text-fg-subtle">{t("Tools in this chat")}</p>
           <ToolSwitches sessionId={sessionId} />
         </div>
@@ -548,7 +551,7 @@ export function ComposerBar({
 
       {/* Models */}
       {open === "model" && (
-        <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menuRef} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <div className="flex items-center gap-2 px-3 py-1">
             <p className="text-[11px] text-fg-subtle">{t("Models")}</p>
             <button
@@ -630,7 +633,7 @@ export function ComposerBar({
 
       {/* Effort */}
       {open === "effort" && levels.length > 1 && (
-        <div ref={menu} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div ref={menuRef} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           {onOff ? (
             // Reached through /effort; the pill flips the same switch directly.
             <button

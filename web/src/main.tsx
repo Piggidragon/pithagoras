@@ -8,15 +8,20 @@ import App from "./App";
 import "./styles";
 import { installTooltips } from "./tooltips";
 import { watchKeyboard } from "./keyboard";
+import { installMotion } from "./motion";
+import { Intro } from "./components/Intro";
 
 installTooltips();
 watchKeyboard();
+// Before the first draw: the intro and every other animation read what it says.
+installMotion();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
       <App />
     </BrowserRouter>
+    <Intro />
   </React.StrictMode>
 );
 

@@ -12,6 +12,7 @@ import { ChatsHeading, FolderTree } from "./FolderTree";
 import { RowsSkeleton } from "./Skeleton";
 import { folderFrom, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
+import { keep, useFlip } from "../motion";
 import { t } from "../i18n";
 
 /**
@@ -105,6 +106,9 @@ export function SessionsPage({
   const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching, allKeys);
   // A folder asked for shows only its chats — none while it cannot be told which they are.
   const shown = useMemo(() => (only ? filterSessions(only.sessions, query) : asked !== null ? [] : matches), [only, asked, query, matches]);
+  // Rows slide to their new places (see motion.ts); a new one comes in with the list's own stagger.
+  const rowsOrder = [byFolder ? "folders" : "list", ...(byFolder ? folders.flatMap((f) => f.sessions) : shown).map((s) => s.id)].join();
+  const list = useFlip<HTMLDivElement>(rowsOrder, searching, false);
   const [startError, setStartError] = useState<string | null>(null);
   /** A chat on its way: a second press of + would start another. */
   const starting = useRef(false);
@@ -122,6 +126,7 @@ export function SessionsPage({
   const row = (s: Session) => (
       <li
         key={s.id}
+        data-flip={s.id}
         onMouseDown={() => {
           endingRename.current = renaming === s.id;
         }}
@@ -197,6 +202,7 @@ export function SessionsPage({
           <button
             onClick={async (e) => {
               e.stopPropagation();
+              const row = e.currentTarget;
               if (
                 await confirmDialog({
                   title: t("Delete \"{name}\"?", { name: s.title }),
@@ -206,7 +212,9 @@ export function SessionsPage({
                   deletes: true,
                 })
               ) {
-                onDelete(s.id);
+                // A picture of the row, to break apart where it was once it is gone (see motion.ts).
+                const gone = keep(row?.closest("li") ?? null, row?.closest<HTMLElement>(".sessions-list"));
+                onDelete(s.id).then(() => gone("row"));
               }
             }}
             className="rounded p-1.5 text-fg-subtle hover:text-danger"
@@ -220,7 +228,7 @@ export function SessionsPage({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-6">
+      <div ref={list} className="sessions-list flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl">
           <PageHeader
             icon={<LuMessagesSquare />}

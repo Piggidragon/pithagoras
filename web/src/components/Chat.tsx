@@ -18,7 +18,7 @@ import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
@@ -39,6 +39,7 @@ import { latestFileActivity } from "../file-activity";
 import { caretFrom, drafts, withUnsent } from "../drafts";
 import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
+import { fancy, glide, launch, leaveRef, mark, settle, useLeaveRef, type Mark } from "../motion";
 import { copyText } from "../clipboard";
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
@@ -479,6 +480,14 @@ export function Chat({
     };
     boxes.letGo(asidePanels);
   });
+  // Drawn in its new place, the panel flies there from where it was let go.
+  useLayoutEffect(() => {
+    const f = flight.current;
+    flight.current = null;
+    const box = f && boxes.box(f.kind);
+    const slot = box?.parentElement, there = box?.closest("aside");
+    if (f && slot && there) glide(slot, f.from, [there as HTMLElement]);
+  }, [places]);
   // A window put aside from another (spreadFrames), kept where it is drawn:
   // it jumped back onto the other's place when that one closed.
   useEffect(() => {
@@ -515,6 +524,20 @@ export function Chat({
   // storage each time. By place — "left", "right", "bottom" — and by panel
   // for the floating windows.
   const asides = useRef<Partial<Record<string, HTMLElement | null>>>({});
+  // A panel carried to another place goes there itself (see `glide`), from where
+  // it was let go: its old place does not also close behind it.
+  const flight = useRef<{ kind: AsidePanel; from: DOMRect } | null>(null);
+  // A place whose panels are all gone drops away as a picture of itself (see
+  // motion.ts): each place with a ref of its own, held so that React does not
+  // put the element away and back at every draw.
+  const asideRefs = useRef<Record<string, (el: HTMLElement | null) => void>>({});
+  const asideRef = (place: string) =>
+    (asideRefs.current[place] ??= leaveRef<HTMLElement>(
+      () => (flight.current ? null : "panel"),
+      (el) => {
+        asides.current[place] = el;
+      },
+    ));
   const zones = useRef<HTMLDivElement>(null);
   const setBox = (el: HTMLElement | null | undefined, f: Frame) => {
     if (el) Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
@@ -687,7 +710,10 @@ export function Chat({
             setFrames((f) => ({ ...f, [kind]: at }));
             setOnTop(kind);
           }
-          if (to !== place) setPlaces((p) => ({ ...p, [kind]: to! }));
+          if (to !== place) {
+            flight.current = { kind, from: boxes.box(kind).getBoundingClientRect() };
+            setPlaces((p) => ({ ...p, [kind]: to! }));
+          }
         }
         stopMoving();
       },
@@ -716,6 +742,33 @@ export function Chat({
     for (const it of items) if (!entered.current.at.has(it.id)) entered.current.at.set(it.id, 0);
     entered.current.ready = true;
   }, [items, loading]);
+  // A chat that has just loaded: its last few messages come in one after
+  // another (see motion.css), for a moment, and then it is just a chat.
+  const opened = useRef({ session: "", until: 0 });
+  if (!loading && opened.current.session !== session.id) opened.current = { session: session.id, until: performance.now() + 1100 };
+  const opening = !loading && fancy() && performance.now() < opened.current.until;
+  const [, redraw] = useState(0);
+  useEffect(() => {
+    if (!opening) return;
+    const timer = window.setTimeout(() => redraw((n) => n + 1), 1150);
+    return () => window.clearTimeout(timer);
+  }, [opening, session.id]);
+  // Messages taken out of the conversation break apart where they stood, and
+  // what was below them slides up (see motion.ts): marked before it is asked
+  // for, played when the server says it has done it.
+  const taken = useRef<Mark | null>(null);
+  const takeOut = () => {
+    taken.current?.stop();
+    const m = (taken.current = mark(list.current, scroller.ref.current));
+    window.setTimeout(() => {
+      if (taken.current !== m) return;
+      m?.stop();
+      taken.current = null;
+    }, 5000);
+  };
+  useLayoutEffect(() => {
+    if (taken.current && settle(taken.current)) taken.current = null;
+  }, [items]);
   // The last thing the person said. Retrying it replaces it and what came of
   // it, which is only safe where nothing follows that would go too.
   const lastSaid = useMemo(() => {
@@ -982,9 +1035,12 @@ export function Chat({
     setPaletteShut(false);
   }, [slashText]);
   const matches = paletteShut ? [] : allMatches;
-  const paletteRef = useRef<HTMLDivElement>(null);
+  const paletteBox = useRef<HTMLDivElement>(null);
+  // Shut, the command list and the way back to the end drop away as pictures of themselves (see motion.ts).
+  const paletteRef = useLeaveRef<HTMLDivElement>("menu", paletteBox);
+  const jumpRef = useLeaveRef<HTMLButtonElement>("menu");
   useEffect(() => {
-    paletteRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+    paletteBox.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
   }, [picked, matches.length]);
   /** What is left in the box once a command is chosen: its name, ready for arguments. */
   const complete = (c: PiCommand) => {
@@ -1156,6 +1212,7 @@ export function Chat({
   const send = async () => {
     const msg = input.trim();
     if ((!msg && !attached.length) || sending || adding) return;
+    launch(box.current?.closest("form")?.querySelector(".prompt-send") ?? null);
     await attempt(() => submit(msg, true));
   };
 
@@ -1361,7 +1418,7 @@ export function Chat({
         <iframe
           src="/browser-ui/"
           title={t("The agent's browser")}
-          className="min-h-0 flex-1 border-0"
+          className="fx-power min-h-0 flex-1 border-0"
           allow="clipboard-read; clipboard-write; fullscreen"
         />
       )}
@@ -1431,9 +1488,7 @@ export function Chat({
     const wide = across(place);
     const aside = (
       <aside
-        ref={(el) => {
-          asides.current[place] = el;
-        }}
+        ref={asideRef(place)}
         data-dock={place}
         aria-label={wide ? t("Panels at the bottom") : place === "left" ? t("Panels on the left") : t("Panels on the right")}
         // At a side, as wide as made, giving way where the conversation would
@@ -1462,9 +1517,7 @@ export function Chat({
     return (
       <aside
         key={kind}
-        ref={(el) => {
-          asides.current[kind] = el;
-        }}
+        ref={asideRef(kind)}
         data-dock="float"
         aria-label={t("{panel}, floating", { panel: t(PANEL[kind].label) })}
         style={{ left: at.x, top: at.y, width: at.w, height: at.h }}
@@ -1502,7 +1555,7 @@ export function Chat({
               onCancel={() => setRenaming(false)}
             />
           ) : (
-            <h2 className="truncate text-sm font-medium text-fg">
+            <h2 key={session.id} className="chat-title truncate text-sm font-medium text-fg">
               <button
                 type="button"
                 onClick={() => setRenaming(true)}
@@ -1594,9 +1647,10 @@ export function Chat({
           reading.current = null;
           scroller.hold(e);
         }}
+        data-transcript=""
         className="flex-1 overflow-y-auto px-4 py-6"
       >
-        <div ref={list} className="chat-list mx-auto w-full max-w-3xl space-y-3">
+        <div ref={list} className={`chat-list mx-auto w-full max-w-3xl space-y-3${opening ? " is-opening" : ""}`}>
         <div ref={topEdge} aria-hidden className="h-px" />
         {!loading && hasEarlier && hiddenHere === 0 && (
           <div data-earlier="" className="flex justify-center pb-2">
@@ -1621,7 +1675,13 @@ export function Chat({
         )}
 
         {(loading ? [] : visible).map((item, index) => {
-          const enter = arriving(item.id, hiddenHere + index) ? " chat-enter" : "";
+          const entering = arriving(item.id, hiddenHere + index);
+          // A row that came in while the chat was open is not one of those that are
+          // played in when it has loaded, whenever that second is still on (motion.css).
+          const live = (entered.current.at.get(item.id) ?? 0) > 0 ? " is-live" : "";
+          const enter = (entering ? " chat-enter" : "") + live;
+          // What you said comes in from the corner the send button is in; what went wrong shakes (motion.css).
+          const mine = entering && item.kind === "user" ? " is-mine" : "";
           if (item.kind === "user") {
             const { text, blocks } = splitContext(item.text);
             // Nothing but framing: the portal spoke, not a person. Drawing it as
@@ -1662,7 +1722,7 @@ export function Chat({
             if (item.queued || item.unsent) {
               const waits = !item.unsent;
               return (
-                <div key={item.id} className={`group flex flex-col items-end gap-1${enter}`}>
+                <div key={item.id} className={`group flex flex-col items-end gap-1${enter}${mine}`}>
                   <div className="max-w-[80%] rounded-2xl rounded-br-md border border-dashed border-accent/30 bg-accent/5 px-3.5 py-2 text-sm text-fg-muted">
                     {text && <div className="whitespace-pre-wrap">{text}</div>}
                     {item.images && <div className="mt-1 text-[11px] text-fg-subtle">{tp(item.images.length, "{n} picture", "{n} pictures")}</div>}
@@ -1695,7 +1755,7 @@ export function Chat({
               );
             }
             return (
-              <div key={item.id} className={`group flex flex-col items-end gap-1${enter}`}>
+              <div key={item.id} className={`group flex flex-col items-end gap-1${enter}${mine}`}>
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
                   {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title={t("Sent in voice mode")}><LuAudioLines size={13} aria-hidden="true" /><span>{t("Audio")}</span></div>}
                   {item.images && (
@@ -1759,7 +1819,10 @@ export function Chat({
                           : t("Retry — drops the reply and sends this message again")
                       }
                       disabled={running}
-                      onClick={() => attempt(() => onEditMessage(item.seq, text))}
+                      onClick={() => {
+                        takeOut();
+                        void attempt(() => onEditMessage(item.seq, text));
+                      }}
                     >
                       <LuRotateCw className="h-3 w-3" />
                     </MessageAction>
@@ -1795,8 +1858,10 @@ export function Chat({
                           danger: true,
                           deletes: true,
                         })
-                      )
-                        attempt(() => onDeleteMessage(item.seq));
+                      ) {
+                        takeOut();
+                        void attempt(() => onDeleteMessage(item.seq));
+                      }
                     }}
                   >
                     <LuTrash2 className="h-3 w-3" />
@@ -1892,7 +1957,7 @@ export function Chat({
           return (
             <div
               key={item.id}
-              className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs${enter} ${
+              className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs${enter}${entering && item.tone === "error" ? " is-error" : ""} ${
                 item.tone === "error"
                   ? "bg-danger/10 text-danger"
                   : item.tone === "warn"
@@ -1903,7 +1968,8 @@ export function Chat({
               {item.portal ? t(item.text) : item.text}
             </div>
           );
-        })}
+        // Each by its id, for motion.ts to tell them apart once they have been drawn.
+        }).map((row) => cloneElement(row, { "data-key": row.key }))}
 
           {actionError && (
             <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
@@ -1943,6 +2009,7 @@ export function Chat({
             than a long drag — and during a run, where the new output is. */}
         {scroller.away && !loading && matches.length === 0 && (
           <button
+            ref={jumpRef}
             type="button"
             onClick={() => {
               reading.current = null;

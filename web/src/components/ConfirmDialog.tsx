@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { asksBeforeDeleting } from "../confirm-prefs";
+import { useLeaveRef } from "../motion";
 import { t } from "../i18n";
 
 /**
@@ -49,6 +50,8 @@ export function ConfirmHost() {
   const cancel = useRef<HTMLButtonElement>(null);
   const confirm = useRef<HTMLButtonElement>(null);
   const current = queue[0];
+  // Answered, the dialog sinks away as a picture of itself (see motion.ts).
+  const leaving = useLeaveRef<HTMLDivElement>("dialog");
 
   useEffect(() => {
     present = (p) => setQueue((q) => [...q, p]);
@@ -98,6 +101,7 @@ export function ConfirmHost() {
 
   return (
     <div
+      ref={leaving}
       className="ui-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && answer(false)}
     >
@@ -107,6 +111,7 @@ export function ConfirmHost() {
         aria-labelledby="confirm-title"
         aria-describedby={current.message ? "confirm-message" : undefined}
         key={current.id}
+        data-danger={current.danger || undefined}
         className="ui-dialog is-alert w-full max-w-sm rounded-2xl border border-line bg-surface p-5 shadow-pop"
       >
         <h2 id="confirm-title" className="text-sm font-semibold text-fg">

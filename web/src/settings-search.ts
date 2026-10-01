@@ -40,6 +40,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "channels", title: msg("Channels"), words: "telegram discord slack matrix signal email webhook bot kanäle" },
   { tab: "people", title: msg("People"), words: "allow deny stranger contact who users personen" },
   { tab: "browser", section: msg("Appearance"), title: msg("Theme"), words: "dark light mode appearance colour color design dunkel hell" },
+  { tab: "browser", section: msg("Animations"), title: msg("Fancy animations"), words: "motion animation animate effects intro transitions flourish reduce reduced motion off animationen bewegung effekte übergänge ausschalten" },
   { tab: "browser", section: msg("Language"), title: msg("Language"), words: "language locale translation german english deutsch englisch sprache übersetzung" },
   { tab: "browser", section: msg("Notifications"), title: msg("Notifications"), words: "notify alert done finished benachrichtigung" },
   { tab: "browser", section: msg("Command character"), title: msg("Command character"), words: "command trigger prefix slash palette skill start type befehl zeichen auslöser schrägstrich" },
