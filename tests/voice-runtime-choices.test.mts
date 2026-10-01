@@ -29,7 +29,11 @@ const hostGpus = (output: string | null) => {
 let container: any = null;
 let portalId = 'portal-one';
 let dockerGpus: string | null = null;   // what nvidia-smi inside the CUDA image prints; null: no GPU runtime
-let imageThere = true;
+// The images the daemon has: the CUDA one many gigabytes, the base one small. A pull adds the image it was asked for.
+const CUDA = 'nvidia/cuda:12.4.1-devel-ubuntu22.04';
+const BASE = 'ubuntu:22.04';
+let images = new Set<string>([CUDA, BASE]);
+let pullFails = false;
 // How Docker fails a container that wants a GPU on a host that has none for it: the daemon's own words.
 const NO_RUNTIME = 'could not select device driver "nvidia" with capabilities: [[gpu]]';
 let noGpuRuntime = false;               // making the container works, starting one that wants a GPU does not
@@ -44,7 +48,13 @@ const server = http.createServer(async (req, res) => {
   if (url === '/containers/portal-test/json') return res.end(JSON.stringify({ Id: portalId, State: { Running: true } }));
   if (url === '/containers/pithagoras-voice/json') { res.statusCode = container ? 200 : 404; return res.end(JSON.stringify(container)); }
   if (url.startsWith('/containers/pithagoras-voice/logs')) return res.end(JSON.stringify('services ready'));
-  if (url.startsWith('/images/')) { res.statusCode = imageThere ? 200 : 404; return res.end('{}'); }
+  if (url.startsWith('/images/create')) {
+    if (pullFails) { res.statusCode = 500; return res.end(JSON.stringify({ message: 'no route to host' })); }
+    const q = new URL(url, 'http://docker').searchParams;
+    images.add(`${q.get('fromImage')}:${q.get('tag')}`);
+    return res.end('{"status":"Download complete"}\n');
+  }
+  if (url.startsWith('/images/')) { res.statusCode = images.has(decodeURIComponent(url.slice('/images/'.length, -'/json'.length))) ? 200 : 404; return res.end('{}'); }
   // The throwaway container that reads nvidia-smi inside the image.
   if (url === '/containers/create') {
     if (hangUp) return req.socket.destroy();
@@ -52,7 +62,8 @@ const server = http.createServer(async (req, res) => {
     if (dockerGpus === null) { res.statusCode = 500; return res.end(JSON.stringify({ message: NO_RUNTIME })); }
     return res.end(JSON.stringify({ Id: 'probe-1' }));
   }
-  if ((url === '/containers/probe-1/start' || url === '/containers/pithagoras-voice/start') && noGpuRuntime) { res.statusCode = 500; return res.end(JSON.stringify({ message: NO_RUNTIME })); }
+  // Only a container that asks for a GPU is refused one.
+  if (noGpuRuntime && (url === '/containers/probe-1/start' || (url === '/containers/pithagoras-voice/start' && container?.HostConfig?.DeviceRequests))) { res.statusCode = 500; return res.end(JSON.stringify({ message: NO_RUNTIME })); }
   if (url === '/containers/probe-1/wait') return res.end(JSON.stringify({ StatusCode: 0 }));
   if (url.startsWith('/containers/probe-1/logs')) return res.end(dockerGpus ?? '');
   if (url.includes('/stop?')) container.State.Running = false;
@@ -72,9 +83,11 @@ after(async () => {
 });
 const voice = await import('../server/src/extensions/voice-service.js');
 const { DEFAULT_CHOICE } = await import('../server/src/voice-engines.js');
-const { NO_GPU_MESSAGE } = await import('../server/src/voice-gpu.js');
+const { NO_GPU_MESSAGE, NO_GPU_FOR_SPEECH } = await import('../server/src/voice-gpu.js');
 
-const reset = () => { portalId = 'portal-one'; container = null; dockerGpus = null; imageThere = true; noGpuRuntime = false; probeError = null; hangUp = false; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
+// What the host has to run recognition on: sixteen GiB and eight threads, unless a test says otherwise.
+const host = (patch = {}) => { voice.hostReader.read = () => ({ totalMiB: 16384, freeMiB: 12000, threads: 8, ...patch }); };
+const reset = () => { host(); portalId = 'portal-one'; container = null; dockerGpus = null; images = new Set([CUDA, BASE]); pullFails = false; noGpuRuntime = false; probeError = null; hangUp = false; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
 const settle = async () => { for (let n = 0; n < 200 && (await voice.status()).busy; n++) await new Promise(r => setTimeout(r, 10)); };
 const created = () => calls.filter(c => c.url === '/containers/create?name=pithagoras-voice');
 const GPU = (index: number, total: number, free: number) => `${index}, Test GPU ${index}, ${total}, ${free}\n`;
@@ -108,6 +121,8 @@ test('a portal without nvidia-smi reads the GPUs in a throwaway container, and n
   await settle();
   const probe = calls.find(c => c.url === '/containers/create')!.body;
   assert.deepEqual(probe.Cmd.slice(0, 1), ['nvidia-smi']);
+  assert.equal(probe.Image, BASE, 'the small image, not the CUDA one');
+  assert.deepEqual(probe.Env, ['NVIDIA_DRIVER_CAPABILITIES=utility']);
   assert.deepEqual(probe.HostConfig.DeviceRequests, [{ Driver: 'nvidia', Count: -1, Capabilities: [['gpu']] }], 'all of them, to choose among');
   assert.ok(calls.some(c => c.method === 'DELETE' && c.url.startsWith('/containers/probe-1')), 'the probe container is removed again');
   assert.equal(calls.some(c => c.url.includes('/images/create')), false, 'the check never pulls an image of its own');
@@ -158,42 +173,130 @@ test('where the GPU cannot be told, the choice is installed unchecked and Docker
   await settle();
   assert.equal(created().length, 1);
   assert.match(env(created()[0].body).VOICE_PLAN, /^No GPU could be read here; installing Chatterbox speech with Whisper small unchecked\.$/);
-  // Before the image is there, the probe does not wait for it, and that is not an answer either.
-  reset(); hostGpus(null); imageThere = false;
+  // The small image the probe runs in is downloaded when it is missing; when that does not come, nothing could be asked, which is not an answer.
+  reset(); hostGpus(null); images.delete(BASE); dockerGpus = GPU(0, 12288, 11000);
+  assert.equal((await voice.hardware()).gpus.length, 1);
+  assert.ok(calls.some(c => c.url.startsWith('/images/create?fromImage=ubuntu')), 'downloaded');
+  assert.ok(!calls.some(c => c.url.includes('nvidia%2Fcuda') && c.url.startsWith('/images/create')), 'the CUDA image is not needed to ask');
+  reset(); hostGpus(null); images.delete(BASE); pullFails = true;
   const early = await voice.hardware();
-  assert.match(early.error, /docker: the CUDA image is not downloaded yet/);
-  assert.equal(early.checked, false);
+  assert.match(early.error, /docker: Pull failed with 500/);
+  assert.deepEqual([early.checked, early.cpuOnly], [false, false]);
 });
 
-test('no GPU for Docker is "no GPU", not an error, however Docker or the driver says so', async () => {
-  const asked = { tts: 'breeze', asr: 'whisper', asrModel: 'base' } as const;
-  const refused = async (why: string) => {
+test('no GPU for Docker is "no GPU", not an error, however Docker or the driver says so: recognition alone is installed on the CPU', async () => {
+  const cpuOnly = async (why: string) => {
     const found = await voice.hardware();
-    assert.deepEqual([found.gpus, found.checked, found.selected, found.suggestion], [[], true, null, DEFAULT_CHOICE], why);
+    assert.deepEqual([found.gpus, found.checked, found.cpuOnly, found.selected], [[], true, true, null], why);
+    assert.deepEqual(found.suggestion, { tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' }, why);
+    assert.deepEqual(found.host, { totalMiB: 16384, freeMiB: 12000, threads: 8 }, why);
     assert.doesNotMatch(JSON.stringify(found), /could not select device driver|nvidia-container|ECONN/, why);
-    // An install is refused in one plain sentence, before a container is made, whether it names engines or leaves them to the check.
-    for (const choice of [asked, undefined]) {
-      await voice.install(choice);
-      await settle();
-      const state = await voice.status();
-      assert.equal(state.error, NO_GPU_MESSAGE, why);
-      assert.equal(state.state, 'absent', why);
-    }
-    assert.equal(created().length, 0, why);
-    assert.ok(!calls.some(c => c.url.includes('probe-1') && c.method === 'DELETE') || calls.some(c => c.method === 'DELETE' && c.url.startsWith('/containers/probe-1')), why);
+    // Left to the check, an install is recognition alone: no error, no GPU asked for, and no CUDA image.
+    await voice.install();
+    await settle();
+    const state = await voice.status();
+    assert.equal(state.error, '', why);
+    assert.equal(created().length, 1, why);
+    const spec = created()[0].body;
+    assert.equal(spec.Image, BASE, why);
+    assert.equal('DeviceRequests' in spec.HostConfig, false, why);
+    assert.equal(spec.Labels['pithagoras.voice-recipe'], 'none+qwen3-asr:0.6b', why);
+    assert.match(env(spec).VOICE_PLAN, /^No GPU detected: installing Qwen3-ASR 0\.6B \(speech recognition only\) needing about 1\.6 GiB of memory on the CPU, which fits\. Replies are not spoken: speech synthesis needs a GPU\.$/, why);
+    assert.deepEqual([state.state, state.choice], ['running', { tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' }], why);
+    assert.ok(!calls.some(c => c.url.startsWith('/images/create') && c.url.includes('nvidia')), `${why}: the CUDA image is never downloaded`);
+    if (why === 'refused at start') assert.ok(calls.some(c => c.method === 'DELETE' && c.url.startsWith('/containers/probe-1')), `${why}: the probe is removed again`);
   };
   // Docker refuses the probe as it is made, or as it is started, which is where the daemon says it.
-  reset(); hostGpus(null); dockerGpus = null;
-  await refused('refused at create');
-  reset(); hostGpus(null); dockerGpus = ''; noGpuRuntime = true;
-  await refused('refused at start');
-  assert.ok(calls.some(c => c.method === 'DELETE' && c.url.startsWith('/containers/probe-1')), 'the probe container is removed again');
+  reset(); hostGpus(null); dockerGpus = null; images.delete(CUDA);
+  await cpuOnly('refused at create');
+  reset(); hostGpus(null); dockerGpus = ''; noGpuRuntime = true; images.delete(CUDA);
+  await cpuOnly('refused at start');
   // The daemon does not answer at all.
-  reset(); hostGpus(null); hangUp = true;
-  await refused('no answer');
+  reset(); hostGpus(null); hangUp = true; images.delete(CUDA);
+  await cpuOnly('no answer');
   // The driver is there and finds no device.
-  reset(); process.env.NVIDIA_SMI = noDevices; dockerGpus = null;
-  await refused('no devices');
+  reset(); process.env.NVIDIA_SMI = noDevices; dockerGpus = null; images.delete(CUDA);
+  await cpuOnly('no devices');
+});
+
+test('on a host without a GPU the speech engine is refused, and recognition is the host\'s to carry', async () => {
+  reset(); hostGpus(null); dockerGpus = null; images.delete(CUDA);
+  // A request for speech synthesis is told what is missing, and nothing is made.
+  await voice.install({ tts: 'breeze', asr: 'whisper', asrModel: 'base' });
+  await settle();
+  const state = await voice.status();
+  assert.equal(state.error, NO_GPU_FOR_SPEECH);
+  assert.equal(state.state, 'absent');
+  assert.equal(created().length, 0);
+  // Few threads: a model that would fall behind the speaker is not suggested, and the cheap one is.
+  host({ threads: 2 });
+  assert.deepEqual((await voice.hardware()).suggestion, { tts: 'none', asr: 'whisper', asrModel: 'base' });
+  // Little memory: what does not fit is refused, with what would.
+  host({ totalMiB: 2048, freeMiB: 1800, threads: 8 });
+  await voice.install({ tts: 'none', asr: 'qwen3-asr', asrModel: '1.7b' });
+  await settle();
+  assert.match((await voice.status()).error, /^Qwen3-ASR 1\.7B \(speech recognition only\) needs about 2\.9 GiB of memory on the CPU, but this host has 2\.0 GiB\. .* would fit\.$/);
+  assert.equal(created().length, 0);
+  // Recognition alone that is asked for by name is installed as it is, with the threads the host has.
+  host({ threads: 6 });
+  await voice.install({ tts: 'none', asr: 'whisper', asrModel: 'small' });
+  await settle();
+  const spec = created()[0].body;
+  assert.equal(spec.Image, BASE);
+  assert.deepEqual([env(spec).VOICE_TTS, env(spec).VOICE_ASR, env(spec).VOICE_ASR_DEVICE, env(spec).VOICE_THREADS], ['none', 'whisper', 'cpu', '6']);
+  assert.equal('VOICE_SERVER_CONFIG' in env(spec) || 'VOICE_ASR_CPU_CONFIG' in env(spec), false, 'Whisper alone needs no audio.cpp');
+});
+
+test('a CPU-only container is ready when its own services answer, and keeps its engines through start', async () => {
+  reset(); hostGpus(null); dockerGpus = null; images.delete(CUDA);
+  await voice.install({ tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' });
+  await settle();
+  const spec = created()[0].body;
+  assert.deepEqual([env(spec).VOICE_ASR_DEVICE, env(spec).VOICE_THREADS], ['cpu', '8']);
+  assert.equal('VOICE_SERVER_CONFIG' in env(spec), false, 'there is no GPU process');
+  const cpuConfig = JSON.parse(env(spec).VOICE_ASR_CPU_CONFIG);
+  assert.deepEqual([cpuConfig.backend, cpuConfig.port, cpuConfig.threads, cpuConfig.models.map((m: any) => m.id)], ['cpu', 7863, 8, ['qwen3-asr']]);
+  // Neither Whisper's port nor the speech port is waited for.
+  unhealthy = [':8188', ':7862'];
+  container.State.Running = true;
+  assert.equal((await voice.status()).state, 'running');
+  unhealthy = [':7863'];
+  assert.equal((await voice.status()).state, 'starting');
+  // Start keeps what it is, and does not ask for a GPU it was never given.
+  container.State.Running = false; calls = [];
+  host({ threads: 2 });
+  process.env.VOICE_GPU = '1';
+  await voice.start();
+  await settle();
+  assert.equal(calls.some(c => c.method === 'DELETE' || c.url.startsWith('/containers/create?')), false);
+  assert.equal(container.State.Running, true);
+});
+
+test('a GPU host can put recognition on the CPU, to keep its memory: one image, a GPU server for speech and a CPU one for recognition', async () => {
+  reset(); hostGpus(GPU(0, 6144, 6000));
+  // Breeze next to Qwen3-ASR 1.7B does not fit the card: on the CPU it does.
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b', asrDevice: 'cpu' });
+  await settle();
+  assert.equal((await voice.status()).error, '');
+  const spec = created()[0].body;
+  assert.equal(spec.Image, CUDA);
+  assert.deepEqual(spec.HostConfig.DeviceRequests, [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }]);
+  assert.equal(spec.Labels['pithagoras.voice-recipe'], 'breeze+qwen3-asr:1.7b@cpu');
+  assert.deepEqual(JSON.parse(env(spec).VOICE_SERVER_CONFIG).models.map((m: any) => m.id), ['breeze']);
+  assert.deepEqual(JSON.parse(env(spec).VOICE_ASR_CPU_CONFIG).models.map((m: any) => m.id), ['qwen3-asr']);
+  assert.match(env(spec).VOICE_PLAN, /^Detected Test GPU 0 \(6\.0 GiB, 5\.9 GiB free\): Breeze speech with Qwen3-ASR 1\.7B on the CPU needs about 4\.5 GiB, which fits, and about 2\.9 GiB of memory on the CPU, which fits\.$/);
+  assert.equal((await voice.status()).choice?.asrDevice, 'cpu');
+  // The same choice on the GPU is refused: it does not fit the card.
+  reset(); hostGpus(GPU(0, 6144, 6000));
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b', asrDevice: 'gpu' });
+  await settle();
+  assert.match((await voice.status()).error, /needs about 7\.0 GiB of GPU memory/);
+  // What the host cannot hold on the CPU is refused too.
+  reset(); hostGpus(GPU(0, 24576, 24000)); host({ totalMiB: 2048, freeMiB: 1800 });
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b', asrDevice: 'cpu' });
+  await settle();
+  assert.match((await voice.status()).error, /Breeze speech with Qwen3-ASR 1\.7B on the CPU needs about 2\.9 GiB of memory on the CPU, but this host has 2\.0 GiB\./);
+  assert.equal(created().length, 0);
 });
 
 test('a GPU that Docker cannot hand on is told in one plain sentence, not as the daemon words it', async () => {

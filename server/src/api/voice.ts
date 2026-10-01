@@ -23,7 +23,8 @@ export interface VoiceConfig {
   voice: string;
   language: string;
   cfgScale: number;
-  runtime?: "breeze" | "audio-cpp" | "chatterbox";
+  // `none`: speech recognition only. There is nothing to speak with, so no replies are spoken.
+  runtime?: "breeze" | "audio-cpp" | "chatterbox" | "none";
   // Sent as the OpenAI transcription "model" field. audio.cpp requires it and
   // names the loaded model; Whisper.cpp ignores unknown fields, so an empty
   // value keeps the existing Whisper contract byte for byte.
@@ -46,8 +47,12 @@ function config(): VoiceConfig {
 }
 export function validateConfig(value: any): VoiceConfig {
   if (typeof value?.enabled !== "boolean") throw new Error("enabled must be a boolean");
+  const runtime = value.runtime ?? "breeze";
+  if (!["breeze", "audio-cpp", "chatterbox", "none"].includes(runtime)) throw new Error("Choose a supported speech runtime");
   for (const key of ["whisperUrl", "breezeUrl"]) {
     if (typeof value[key] !== "string") throw new Error(`${key} is required`);
+    // With no speech synthesis there is no address to speak to.
+    if (key === "breezeUrl" && runtime === "none" && !value[key].trim()) continue;
     const url = new URL(value[key]);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash)
       throw new Error(`${key} must be an HTTP URL without credentials or a fragment`);
@@ -62,8 +67,6 @@ export function validateConfig(value: any): VoiceConfig {
     throw new Error("Choose a supported input language");
   const cfgScale = value.cfgScale ?? 4;
   if (![1, 4].includes(cfgScale)) throw new Error("Choose fast or expressive speech generation");
-  const runtime = value.runtime ?? "breeze";
-  if (!["breeze", "audio-cpp", "chatterbox"].includes(runtime)) throw new Error("Choose a supported speech runtime");
   const sttModel = typeof value.sttModel === "string" ? value.sttModel.trim() : value.sttModel ?? "";
   if (typeof sttModel !== "string" || sttModel.length > 100 || (sttModel && !/^[\w.:-]+$/.test(sttModel)))
     throw new Error("A speech recognition model id may only contain letters, digits, dot, colon, dash or underscore");
@@ -207,7 +210,7 @@ export function voiceRouter(): Router {
       res.json(withInstructions(connectManagedVoice(state.choice)));
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
-  router.get("/voice", (_req, res) => res.json({...withInstructions(config()),managed:managedVoice(),comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"}));
+  router.get("/voice", (_req, res) => res.json({...withInstructions(config()),managed:managedVoice(),speech:config().runtime!=="none",comparison:process.env.VOICE_COMPARISON === "true",statusSpeech:process.env.VOICE_STATUS_SPEECH !== "false",ttsPrefetch:process.env.VOICE_TTS_PREFETCH === "true",sentenceChunks:process.env.VOICE_SENTENCE_CHUNKS === "true",pipelineMode:process.env.VOICE_PIPELINE_MODE === "sequential" ? "sequential" : "parallel"}));
   router.put("/voice", (req, res) => {
     try {
       const saved = validateConfig(req.body);
@@ -255,6 +258,8 @@ export function voiceRouter(): Router {
     } catch (e) { if (!res.destroyed) res.status(502).json({ error: (e as Error).message }); }
   });
   router.post("/sessions/:id/voice/speech", async (req, res) => {
+    // Recognition alone has nothing to speak with: say so, rather than send the text to an address that is not there.
+    if (config().runtime === "none") return res.status(409).json({ error: "Speech synthesis is not installed: replies are not spoken" });
     const speechStarted=performance.now();
     let busyMs=0;
     const text = req.body?.text;

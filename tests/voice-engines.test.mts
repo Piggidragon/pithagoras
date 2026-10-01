@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  ASR_MODELS, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, choiceFromKey, choiceKey, endpoints, fitOn, healthUrls, parseChoice, pickGpu, serverConfig, suggestChoice, ttsModel, vramNeeded,
-  type Gpu, type VoiceChoice,
+  ASR_CPU_PORT, ASR_MODELS, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, asrDevice, asrDevices, choiceFromKey, choiceKey, choiceLabel, cpuRealtime, cpuServerConfig, cpuSlow, cpuThreads, endpoints, fitOn, fitRam, healthUrls, parseChoice, pickGpu,
+  ramNeeded, sameChoice, serverConfig, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, vramNeeded,
+  type Gpu, type Host, type VoiceChoice,
 } from '../server/src/voice-engines.js';
-import { NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, type Probe } from '../server/src/voice-gpu.js';
+import { NO_GPU_FOR_SPEECH, NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, readHost, type Probe } from '../server/src/voice-gpu.js';
 
 // Neutral cards: only the sizes matter.
 const card = (totalMiB: number | null, freeMiB: number | null = totalMiB, index = 0): Gpu => ({ index, name: `Test GPU ${index}`, totalMiB, freeMiB });
@@ -181,4 +182,142 @@ test('what the install decides tells the person what fits and what does not', ()
   // Several cards: the one asked for, which the container is then given.
   assert.equal(decide(undefined, [card(12288, 11000, 0), card(12288, 12000, 1)]).gpu?.index, 1);
   assert.equal(decide(undefined, [card(12288, 11000, 0), card(12288, 12000, 1)], { preferredGpu: 0 }).gpu?.index, 0);
+});
+
+// What recognition on the CPU has to run on, with a number of threads to say how fast it is.
+const machine = (totalMiB: number | null, freeMiB: number | null, threads: number): Host => ({ totalMiB, freeMiB, threads });
+const NONE = (asr: VoiceChoice['asr'], asrModel: string): VoiceChoice => ({ tts: 'none', asr, asrModel });
+
+test('every recognition engine and size runs on the CPU, and none is a GPU matter alone', () => {
+  for (const o of ASR_MODELS) {
+    const choice = NONE(o.asr, o.model);
+    assert.deepEqual(parseChoice(choice), choice, `${o.label} without speech synthesis`);
+    assert.equal(usesGpu(choice), false, o.label);
+    assert.equal(asrDevice(choice), 'cpu', o.label);
+    assert.ok(ramNeeded(choice) > 0 && vramNeeded(choice) === 0, `${o.label} takes memory of the host, and none of a GPU`);
+    // The GPU is offered for the one engine that can use it, and only next to a speech engine.
+    assert.deepEqual(asrDevices({ tts: 'breeze', asr: o.asr }), o.asr === 'qwen3-asr' ? ['cpu', 'gpu'] : ['cpu'], o.label);
+    assert.deepEqual(asrDevices({ tts: 'none', asr: o.asr }), ['cpu'], o.label);
+  }
+});
+
+test('a choice names where recognition runs, and a label written before there was a choice of device means what it did', () => {
+  const onCpu: VoiceChoice = { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b', asrDevice: 'cpu' };
+  // Next to a speech engine Qwen3-ASR is on the GPU, as it always was, unless it is put on the CPU.
+  assert.equal(asrDevice({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' }), 'gpu');
+  assert.equal(asrDevice(onCpu), 'cpu');
+  assert.equal(choiceKey(onCpu), 'breeze+qwen3-asr:0.6b@cpu');
+  assert.deepEqual(choiceFromKey('breeze+qwen3-asr:0.6b@cpu'), onCpu);
+  assert.deepEqual(choiceFromKey('breeze+qwen3-asr:0.6b'), { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' });
+  assert.deepEqual(choiceFromKey('none+qwen3-asr:1.7b'), NONE('qwen3-asr', '1.7b'));
+  assert.deepEqual(choiceFromKey('none+whisper:small'), NONE('whisper', 'small'));
+  // A device that says nothing is not written: a choice is one thing, however it is spelt.
+  assert.deepEqual(parseChoice({ tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b', asrDevice: 'cpu' }), NONE('qwen3-asr', '0.6b'));
+  assert.deepEqual(parseChoice({ tts: 'breeze', asr: 'whisper', asrModel: 'base', asrDevice: 'cpu' }), DEFAULT_CHOICE);
+  assert.equal(sameChoice({ tts: 'breeze', asr: 'whisper', asrModel: 'base', asrDevice: 'cpu' }, DEFAULT_CHOICE), true);
+  assert.equal(sameChoice(onCpu, { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' }), false);
+  // What cannot be is said so.
+  assert.throws(() => parseChoice({ tts: 'breeze', asr: 'whisper', asrModel: 'base', asrDevice: 'gpu' }), /Whisper runs on the CPU/);
+  assert.throws(() => parseChoice({ tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b', asrDevice: 'gpu' }), /without speech synthesis runs on the CPU/);
+  assert.throws(() => parseChoice({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b', asrDevice: 'tpu' }), /CPU or the GPU/);
+  assert.equal(choiceLabel(onCpu), 'Breeze speech with Qwen3-ASR 0.6B on the CPU');
+  assert.equal(choiceLabel(NONE('whisper', 'small')), 'Whisper small (speech recognition only)');
+  assert.equal(choiceLabel({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' }), 'Breeze speech with Qwen3-ASR 1.7B');
+});
+
+test('recognition on the CPU takes memory of the host, not of the card, and is judged by it and by the threads', () => {
+  const onCpu: VoiceChoice = { tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b', asrDevice: 'cpu' };
+  const onGpu: VoiceChoice = { tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' };
+  assert.equal(vramNeeded(onGpu) - vramNeeded(onCpu), 2600, 'the card is spared the model');
+  assert.equal(ramNeeded(onGpu), 0);
+  assert.ok(ramNeeded(onCpu) > ramNeeded(NONE('qwen3-asr', '0.6b')));
+  // A card that cannot hold the model next to Breeze can hold the choice with the model on the CPU.
+  const small = card(6144);
+  assert.equal(fitOn(onGpu, small), 'too-large');
+  assert.equal(fitOn(onCpu, small), 'fits');
+  // Nothing on the GPU needs no card at all.
+  assert.equal(fitOn(NONE('qwen3-asr', '1.7b'), undefined), 'fits');
+  // The host's memory: as for a card, there is room now, only the host is big enough, or it is not.
+  const need = ramNeeded(onCpu);
+  assert.equal(fitRam(onCpu, machine(need * 4, need, 8)), 'fits');
+  assert.equal(fitRam(onCpu, machine(need * 4, need - 1, 8)), 'tight');
+  assert.equal(fitRam(onCpu, machine(need - 1, need - 1, 8)), 'too-large');
+  assert.equal(fitRam(onCpu, machine(null, null, 8)), 'unknown');
+  assert.equal(fitRam(onGpu, machine(1, 1, 8)), 'fits', 'nothing of it is on the CPU');
+  // Speed follows the threads, from one measurement on eight: an estimate, said where it is not known.
+  assert.equal(cpuRealtime(NONE('qwen3-asr', '0.6b'), 8), 5.4);
+  assert.equal(cpuRealtime(NONE('qwen3-asr', '0.6b'), 16), 5.4, 'no more than was measured');
+  assert.ok(Math.abs(cpuRealtime(NONE('qwen3-asr', '1.7b'), 2)! - 0.65) < 1e-9);
+  assert.equal(cpuRealtime(NONE('whisper', 'base'), 2), undefined, 'Whisper was not measured');
+  assert.equal(cpuRealtime(onGpu, 8), undefined, 'not on the CPU');
+  assert.deepEqual([cpuSlow(NONE('qwen3-asr', '1.7b'), 2), cpuSlow(NONE('qwen3-asr', '1.7b'), 4), cpuSlow(NONE('qwen3-asr', '0.6b'), 2), cpuSlow(NONE('whisper', 'base'), 1)], [true, false, false, false]);
+  assert.deepEqual([cpuThreads(1), cpuThreads(2), cpuThreads(6), cpuThreads(32), cpuThreads(NaN)], [2, 2, 6, 8, 2]);
+});
+
+test('on a host without a GPU the suggestion is recognition alone, the largest that fits and keeps well ahead of the speaker', () => {
+  assert.deepEqual(suggestCpuChoice(machine(16384, 12000, 8)), NONE('qwen3-asr', '0.6b'), 'the larger model is only 2.6 times faster than the audio');
+  assert.deepEqual(suggestCpuChoice(machine(16384, 12000, 2)), NONE('whisper', 'base'), 'two threads are too few for either');
+  assert.deepEqual(suggestCpuChoice(machine(16384, 1000, 8)), NONE('whisper', 'base'), 'the memory is busy');
+  assert.deepEqual(suggestCpuChoice(machine(512, 512, 8)), NONE('whisper', 'base'));
+  assert.deepEqual(suggestCpuChoice(undefined), NONE('whisper', 'base'), 'nothing known of the memory: the one that asks for the least');
+  // Whisper small is offered, never suggested.
+  for (const threads of [1, 2, 4, 8, 64]) assert.notEqual(suggestCpuChoice(machine(65536, 60000, threads)).asrModel, 'small');
+});
+
+test('the processes of a choice: a GPU server for the speech engine, a CPU one for recognition on the CPU, and Whisper by itself', () => {
+  const onCpu: VoiceChoice = { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b', asrDevice: 'cpu' };
+  // Recognition put on the CPU leaves the GPU server to speech alone.
+  assert.deepEqual(serverConfig(onCpu)!.models.map(m => m.id), ['breeze']);
+  assert.equal(serverConfig(onCpu)!.max_loaded_models, 1);
+  const cpu = cpuServerConfig(onCpu, 6)!;
+  assert.deepEqual([cpu.backend, cpu.port, cpu.threads, cpu.max_loaded_models, cpu.host], ['cpu', ASR_CPU_PORT, 6, 1, '127.0.0.1']);
+  assert.deepEqual(cpu.models, [{ id: 'qwen3-asr', family: 'qwen3_asr', path: '/voice/models/qwen3-asr-0.6b-q8_0.gguf', task: 'asr', mode: 'offline' }]);
+  assert.equal(cpuServerConfig(onCpu)!.threads, 4, 'four, as the GPU server has');
+  // Without a speech engine there is no GPU server, and no GPU.
+  assert.equal(serverConfig(NONE('qwen3-asr', '1.7b')), undefined);
+  assert.equal(cpuServerConfig(NONE('qwen3-asr', '1.7b'))!.models[0].path, '/voice/models/qwen3-asr-1.7b-q8_0.gguf');
+  assert.equal(serverConfig(NONE('whisper', 'base')), undefined);
+  assert.equal(cpuServerConfig(NONE('whisper', 'base')), undefined, 'Whisper is a process of its own');
+  // On the GPU Qwen3-ASR is in the speech server, and there is no CPU one.
+  assert.equal(cpuServerConfig({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' }), undefined);
+  assert.equal(cpuServerConfig(DEFAULT_CHOICE), undefined);
+  // Where the portal looks.
+  assert.deepEqual(endpoints(onCpu), { runtime: 'audio-cpp', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech', whisperUrl: 'http://127.0.0.1:7863/v1/audio/transcriptions', sttModel: 'qwen3-asr' });
+  assert.deepEqual(endpoints(NONE('whisper', 'small')), { runtime: 'none', breezeUrl: '', whisperUrl: 'http://127.0.0.1:8188/inference', sttModel: '' });
+  assert.deepEqual(endpoints(NONE('qwen3-asr', '0.6b')), { runtime: 'none', breezeUrl: '', whisperUrl: 'http://127.0.0.1:7863/v1/audio/transcriptions', sttModel: 'qwen3-asr' });
+  // What has to answer: only what the choice runs.
+  assert.deepEqual(healthUrls(onCpu), ['http://127.0.0.1:7862/health', 'http://127.0.0.1:7863/health']);
+  assert.deepEqual(healthUrls(NONE('qwen3-asr', '0.6b')), ['http://127.0.0.1:7863/health']);
+  assert.deepEqual(healthUrls(NONE('whisper', 'base')), ['http://127.0.0.1:8188/health']);
+  assert.deepEqual(healthUrls({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' }), ['http://127.0.0.1:7862/health']);
+});
+
+test('on a host that was found to have no GPU, recognition alone is chosen, speech is refused, and the memory is judged', () => {
+  const host = machine(16384, 12000, 8);
+  const auto = decide(undefined, [], { noGpu: true, host });
+  assert.deepEqual([auto.choice, auto.gpu], [NONE('qwen3-asr', '0.6b'), undefined]);
+  assert.equal(auto.summary, 'No GPU detected: installing Qwen3-ASR 0.6B (speech recognition only) needing about 1.6 GiB of memory on the CPU, which fits. Replies are not spoken: speech synthesis needs a GPU.');
+  assert.deepEqual(decide(NONE('whisper', 'small'), [], { noGpu: true, host }).choice, NONE('whisper', 'small'));
+  assert.throws(() => decide(DEFAULT_CHOICE, [], { noGpu: true, host }), (e: Error) => e.message === NO_GPU_FOR_SPEECH);
+  assert.throws(() => decide({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b', asrDevice: 'cpu' }, [], { noGpu: true, host }), /Speech synthesis needs a GPU/);
+  // Too little memory is refused with what would fit; little free right now is said and goes on; slow threads are said.
+  assert.throws(() => decide(NONE('qwen3-asr', '1.7b'), [], { noGpu: true, host: machine(2048, 1800, 8) }),
+    /^Error: Qwen3-ASR 1\.7B \(speech recognition only\) needs about 2\.9 GiB of memory on the CPU, but this host has 2\.0 GiB\. Qwen3-ASR 0\.6B \(speech recognition only\) would fit\.$/);
+  assert.match(decide(NONE('qwen3-asr', '1.7b'), [], { noGpu: true, host: machine(8192, 1000, 8) }).summary, /needing about 2\.9 GiB of memory on the CPU, of which the host has less free now\./);
+  assert.match(decide(NONE('qwen3-asr', '1.7b'), [], { noGpu: true, host: machine(8192, 8000, 2) }).summary, /which fits and may be slower than the speaker on this host's 2 CPU threads/);
+  // Without the finding that there is none, nothing changes: the original combination, unchecked.
+  assert.deepEqual(decide(undefined, [], { host }).choice, DEFAULT_CHOICE);
+  // A GPU host that puts recognition on the CPU: both parts are judged, and both are said.
+  const onCpu: VoiceChoice = { tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b', asrDevice: 'cpu' };
+  assert.equal(decide(onCpu, [card(6144)], { host }).summary,
+    'Detected Test GPU 0 (6.0 GiB, 6.0 GiB free): Breeze speech with Qwen3-ASR 1.7B on the CPU needs about 4.5 GiB, which fits, and about 2.9 GiB of memory on the CPU, which fits.');
+  assert.throws(() => decide(onCpu, [card(6144)], { host: machine(2048, 1800, 8) }), /Breeze speech with Qwen3-ASR 1\.7B on the CPU needs about 2\.9 GiB of memory on the CPU, but this host has 2\.0 GiB\./);
+  // Whisper's few hundred MiB are not worth a clause next to a GPU.
+  assert.equal(decide(DEFAULT_CHOICE, [card(12288)], { host }).summary, 'Detected Test GPU 0 (12.0 GiB, 12.0 GiB free): Breeze speech with Whisper base needs about 4.5 GiB, which fits.');
+});
+
+test('the host is read as it is, and within the limit of a container where it has one', () => {
+  const host = readHost();
+  assert.ok(host.totalMiB! > 0 && host.freeMiB! >= 0 && host.freeMiB! <= host.totalMiB!, JSON.stringify(host));
+  assert.ok(Number.isInteger(host.threads) && host.threads >= 1);
 });

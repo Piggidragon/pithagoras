@@ -1,11 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { containerState, dockerAvailable, imagePresent, pullImage, request } from './docker.js';
-import { choiceFromKey, choiceKey, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, speechUrl, suggestChoice, ttsModel, whisperUrl as managedWhisperUrl, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
-import { NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, hostProbe, SMI_ARGS, type Detected, type Probe } from '../voice-gpu.js';
+import { asrDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, speechUrl, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, whisperUrl as managedWhisperUrl, type Host, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
+import { NoGpu, decide, detectGpus, explain, hostProbe, readHost, SMI_ARGS, type Detected, type Probe } from '../voice-gpu.js';
 
 export const CONTAINER = 'pithagoras-voice';
 export const IMAGE = 'nvidia/cuda:12.4.1-devel-ubuntu22.04';
+/** What a choice with nothing on the GPU runs in, and what the GPU check asks nvidia-smi with: no CUDA toolchain, so no multi-GB download. */
+export const BASE_IMAGE = 'ubuntu:22.04';
+/** The image a choice runs in: the CUDA one wherever the GPU is used, else the small base. */
+export const imageFor = (choice: VoiceChoice) => usesGpu(choice) ? IMAGE : BASE_IMAGE;
 const VOLUME = 'pithagoras_voice-models';
 export const whisperUrl = managedWhisperUrl;
 export const breezeUrl = speechUrl;
@@ -63,17 +67,21 @@ export async function voiceNetworkMode(): Promise<string> {
   return `container:${detail.body.Id}`;
 }
 /**
- * `plan.gpuIndex` names the card when the host has several; without it Docker gives
- * the container one, as it always has. `plan.note` is what the check found, and
- * the script prints it as the first line of the setup log.
+ * `plan.gpuIndex` names the card when the host has several; without it Docker gives the container one, as it
+ * always has. A choice with nothing on the GPU asks for none, and runs in the small base image. `plan.threads` is
+ * what recognition on the CPU gets, and `plan.note` is what the check found, which the script prints as the
+ * first line of the setup log.
  */
-export function containerSpec(script: string, networkMode: string, choice: VoiceChoice = DEFAULT_CHOICE, plan: { gpuIndex?: number; note?: string } = {}) {
+export function containerSpec(script: string, networkMode: string, choice: VoiceChoice = DEFAULT_CHOICE, plan: { gpuIndex?: number; note?: string; threads?: number } = {}) {
   const gpu = plan.gpuIndex === undefined ? { Count: 1 } : { DeviceIDs: [String(plan.gpuIndex)] };
-  return { Image: IMAGE, Tty: true, Cmd: ['bash', '-c', script],
-    Env: [`VOICE_TTS=${choice.tts}`, `VOICE_ASR=${choice.asr}`, `VOICE_ASR_MODEL=${choice.asrModel}`, `VOICE_SERVER_CONFIG=${JSON.stringify(serverConfig(choice))}`, ...(plan.note ? [`VOICE_PLAN=${plan.note}`] : [])],
+  const server = serverConfig(choice), cpuServer = cpuServerConfig(choice, plan.threads);
+  return { Image: imageFor(choice), Tty: true, Cmd: ['bash', '-c', script],
+    Env: [`VOICE_TTS=${choice.tts}`, `VOICE_ASR=${choice.asr}`, `VOICE_ASR_MODEL=${choice.asrModel}`, `VOICE_ASR_DEVICE=${asrDevice(choice)}`,
+      ...(server ? [`VOICE_SERVER_CONFIG=${JSON.stringify(server)}`] : []), ...(cpuServer ? [`VOICE_ASR_CPU_CONFIG=${JSON.stringify(cpuServer)}`] : []),
+      ...(plan.threads ? [`VOICE_THREADS=${plan.threads}`] : []), ...(plan.note ? [`VOICE_PLAN=${plan.note}`] : [])],
     Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1', 'pithagoras.voice-recipe': choiceKey(choice) },
     HostConfig: { Binds: [`${VOLUME}:/voice`], NetworkMode: networkMode,
-      DeviceRequests: [{ Driver: 'nvidia', ...gpu, Capabilities: [['gpu']] }],
+      ...(usesGpu(choice) ? { DeviceRequests: [{ Driver: 'nvidia', ...gpu, Capabilities: [['gpu']] }] } : {}),
       RestartPolicy: { Name: 'no' }, LogConfig: { Type: 'json-file', Config: { 'max-size': '10m', 'max-file': '2' } } } };
 }
 /** The card a container was given by index. One made before the card was chosen asked Docker for any one GPU, and has no ids. */
@@ -81,7 +89,7 @@ const deviceIndex = (requests?: { DeviceIDs?: string[] | null }[] | null) => {
   const id = requests?.flatMap(r => r.DeviceIDs ?? [])[0];
   return id !== undefined && /^\d+$/.test(id) ? Number(id) : undefined;
 };
-async function ensureContainer(script: string, choice: VoiceChoice, plan: { gpuIndex?: number; note?: string }) {
+async function ensureContainer(script: string, choice: VoiceChoice, plan: { gpuIndex?: number; note?: string; threads?: number }) {
   const networkMode = await voiceNetworkMode();
   const existing = await request<{Config?: {Labels?: Record<string,string>}; HostConfig?: {NetworkMode?: string; DeviceRequests?: { DeviceIDs?: string[] | null }[] | null}; State?: {Running?: boolean}}>('GET', `/containers/${CONTAINER}/json`);
   if (existing.status !== 404) {
@@ -89,7 +97,7 @@ async function ensureContainer(script: string, choice: VoiceChoice, plan: { gpuI
     if (existing.body.Config?.Labels?.['pithagoras.addon'] !== 'voice') throw new Error('The pithagoras-voice container is not a managed voice add-on. Rename it before installing.');
     const labels = existing.body.Config.Labels;
     // A card that is asked for and is not the one it has makes it another container, so that Start moves it. Docker's any-one-GPU is the first.
-    const onCard = plan.gpuIndex === undefined || plan.gpuIndex === (deviceIndex(existing.body.HostConfig?.DeviceRequests) ?? 0);
+    const onCard = !usesGpu(choice) || plan.gpuIndex === undefined || plan.gpuIndex === (deviceIndex(existing.body.HostConfig?.DeviceRequests) ?? 0);
     const current = labels['pithagoras.voice-network'] === 'shared-v1' && existing.body.HostConfig?.NetworkMode === networkMode && sameChoice(choiceFromKey(labels['pithagoras.voice-recipe']), choice) && onCard;
     if (current) { await checked('POST', `/containers/${CONTAINER}/start`); return; }
     // Container config is immutable. Retain /voice and the cached model/build
@@ -111,18 +119,31 @@ async function installedContainer(): Promise<{ choice: VoiceChoice; gpuIndex?: n
   return { choice: choiceFromKey(labels['pithagoras.voice-recipe']), gpuIndex: deviceIndex(found.body.HostConfig?.DeviceRequests), running: Boolean(found.body.State?.Running) };
 }
 
+/** The image is there, or is downloaded; `timeoutMs` stops waiting for a download that does not come, which then goes on without being waited for. */
+async function ensureImage(image: string, onProgress: (line: string) => void = () => {}, timeoutMs?: number) {
+  if (await imagePresent(image)) return;
+  const pull = pullImage(image, onProgress);
+  if (!timeoutMs) return pull;
+  pull.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { await Promise.race([pull, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${image} was not downloaded in time`)), timeoutMs); })]); }
+  finally { clearTimeout(timer); }
+}
+
 /**
- * nvidia-smi inside a short-lived container of the CUDA image, for a portal that runs in
- * a container itself and has no GPU tool. It never pulls the image: before the install
- * has, there is nothing to ask, and the install asks again once it has.
+ * nvidia-smi inside a short-lived container, for a portal that runs in a container itself and has no GPU
+ * tool. The container is of the small base image, which the toolkit gives nvidia-smi to as it does to any
+ * other: the CUDA image is many gigabytes, and a host without a GPU has no use for it. Docker refusing
+ * to start a container that asks for a GPU is the answer "no GPU" here.
  */
 const dockerProbe: Probe = {
   name: 'docker',
   async run() {
     if (!dockerAvailable()) throw new NoGpu('Docker is unavailable');
-    if (!(await imagePresent(IMAGE).catch(unanswered))) throw new Error('the CUDA image is not downloaded yet');
-    const created = await checked<{ Id: string }>('POST', '/containers/create', { Image: IMAGE, Tty: true, Cmd: ['nvidia-smi', ...SMI_ARGS],
-      Labels: { 'pithagoras.addon': 'voice-probe' }, HostConfig: { DeviceRequests: [{ Driver: 'nvidia', Count: -1, Capabilities: [['gpu']] }] } }).catch(unanswered);
+    await ensureImage(BASE_IMAGE, () => {}, 120000).catch(unanswered);
+    const created = await checked<{ Id: string }>('POST', '/containers/create', { Image: BASE_IMAGE, Tty: true, Cmd: ['nvidia-smi', ...SMI_ARGS],
+      // nvidia-smi is a utility of the driver: the image says nothing of it, so it is asked for.
+      Env: ['NVIDIA_DRIVER_CAPABILITIES=utility'], Labels: { 'pithagoras.addon': 'voice-probe' }, HostConfig: { DeviceRequests: [{ Driver: 'nvidia', Count: -1, Capabilities: [['gpu']] }] } }).catch(unanswered);
     const id = created.body.Id;
     try {
       await checked('POST', `/containers/${id}/start`);
@@ -146,8 +167,12 @@ function detect(): Promise<Detected> {
 const preferredGpu = () => /^\d+$/.test(process.env.VOICE_GPU ?? '') ? Number(process.env.VOICE_GPU) : undefined;
 const reserveMiB = () => { const n = Math.round(Number(process.env.VOICE_VRAM_RESERVE_MIB)); return n > 0 ? n : 0; };
 
+/** What recognition on the CPU has to run on. Replaceable, so that what a host has can be told without being that host. */
+export const hostReader = { read: (): Host => readHost() };
+
 /**
  * What the GPU check finds, and what it would suggest, for the page to show before anything is installed.
+ * `cpuOnly` is that the check found there is no GPU: what is suggested is then recognition alone on the CPU.
  * With a container, the card shown is the one it is on and not the one with the most room: the memory
  * the service holds is what makes its own card look full.
  */
@@ -156,8 +181,10 @@ export async function hardware() {
   const existing = dockerAvailable() ? await installedContainer().catch(() => undefined) : undefined;
   const found = await detect();
   const reserve = reserveMiB();
-  const gpu = pickGpu(found.gpus, existing ? existing.gpuIndex ?? 0 : preferredGpu());
-  return { ...found, selected: gpu?.index ?? null, reserveMiB: reserve, suggestion: suggestChoice(gpu, reserve) };
+  const host = hostReader.read();
+  const cpuOnly = found.checked && !found.gpus.length;
+  const gpu = pickGpu(found.gpus, existing && usesGpu(existing.choice) ? existing.gpuIndex ?? 0 : preferredGpu());
+  return { ...found, host, cpuOnly, selected: gpu?.index ?? null, reserveMiB: reserve, suggestion: cpuOnly ? suggestCpuChoice(host) : suggestChoice(gpu, reserve) };
 }
 
 /**
@@ -177,11 +204,10 @@ export async function install(requested?: VoiceChoice) {
   catch (e) { pending = false; throw e; }
   void (async () => {
     try {
-      if (!(await imagePresent(IMAGE))) await pullImage(IMAGE, line => { progress = line; });
       const existing = await installedContainer();
       let choice = wanted ?? existing?.choice;
-      // Recreated with the engines it has, the container stays on the card it was given.
-      let plan: { gpuIndex?: number; note?: string } = { gpuIndex: existing?.gpuIndex };
+      // Recreated with the engines it has, the container stays on the card it was given, if it was given one.
+      let plan: { gpuIndex?: number; note?: string; threads?: number } = { gpuIndex: existing && usesGpu(existing.choice) ? existing.gpuIndex : undefined };
       // An installed choice that is kept ran before this check existed, and a restart must not be refused for it.
       if (!existing || (wanted && !sameChoice(wanted, existing.choice))) {
         // The running container is about to be replaced. Left up, the memory it holds would count as used by other programs,
@@ -191,26 +217,32 @@ export async function install(requested?: VoiceChoice) {
         try {
           progress = 'Checking the GPU';
           const found = await detect();
-          // Nothing for Docker to give: say so before anything is created, not as what Docker answers to a start.
-          if (!found.gpus.length && found.checked) throw new Error(NO_GPU_MESSAGE);
-          const decision = decide(wanted, found.gpus, { reserveMiB: reserveMiB(), preferredGpu: preferredGpu() });
+          // A host that was found to have no GPU gets recognition alone, on the CPU, in the small image.
+          const decision = decide(wanted, found.gpus, { reserveMiB: reserveMiB(), preferredGpu: preferredGpu(), host: hostReader.read(), noGpu: found.checked && !found.gpus.length });
           choice = decision.choice;
-          // With one card Docker's own pick is the card; only a choice among several needs naming.
-          plan = { gpuIndex: found.gpus.length > 1 ? decision.gpu?.index : found.gpus.length ? undefined : preferredGpu(), note: decision.summary };
+          // With one card Docker's own pick is the card; only a choice among several needs naming. A choice with nothing on the GPU names none.
+          plan = { gpuIndex: !usesGpu(choice) ? undefined : found.gpus.length > 1 ? decision.gpu?.index : found.gpus.length ? undefined : preferredGpu(), note: decision.summary };
           progress = decision.summary;
+          await ensureImage(imageFor(choice), line => { progress = line; });
         } catch (e) {
-          // Refused: the service that was running goes on running.
+          // Refused, or the image did not come: the service that was running goes on running.
           if (stopped) await request('POST', `/containers/${CONTAINER}/start`).catch(() => {});
           throw e;
         }
-      } else if (preferredGpu() !== undefined) {
-        // A kept choice is not checked against the card, but `VOICE_GPU` has to name one that is there, as an install insists.
-        // Where no GPU can be read it is taken as it is, as an install does.
-        const asked = preferredGpu()!;
-        const { gpus } = await detect();
-        if (!gpus.length || gpus.some(g => g.index === asked)) plan = { gpuIndex: asked };
+      } else {
+        if (usesGpu(existing.choice) && preferredGpu() !== undefined) {
+          // A kept choice is not checked against the card, but `VOICE_GPU` has to name one that is there, as an install insists.
+          // Where no GPU can be read it is taken as it is, as an install does.
+          const asked = preferredGpu()!;
+          const { gpus } = await detect();
+          if (!gpus.length || gpus.some(g => g.index === asked)) plan = { gpuIndex: asked };
+        }
+        await ensureImage(imageFor(existing.choice), line => { progress = line; });
       }
-      await ensureContainer(script, choice ?? DEFAULT_CHOICE, plan);
+      const final = choice ?? DEFAULT_CHOICE;
+      // Recognition on the CPU gets the threads the host has, up to the ones its speeds were measured on; what is on the GPU keeps its four.
+      if (!usesGpu(final) || (final.asr === 'qwen3-asr' && asrDevice(final) === 'cpu')) plan.threads = cpuThreads(hostReader.read().threads);
+      await ensureContainer(script, final, plan);
     } catch (e) { error = explain((e as Error).message); }
     finally { pending = false; }
   })();

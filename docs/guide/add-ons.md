@@ -79,12 +79,13 @@ The socket grants control of the Docker host, including creating containers and 
 
 ## GPU access for Voice
 
-**Browser users can skip this section.** Voice requires:
+**Browser users can skip this section.** **Speech synthesis** (spoken replies) requires:
 
 - A compatible NVIDIA GPU and working host driver.
 - NVIDIA Container Toolkit configured for Docker.
-- At least **30 GB free disk space** during setup.
-- Enough RAM and VRAM for the voice runtime alongside your LLM.
+- Enough VRAM for the voice runtime alongside your LLM.
+
+**Speech recognition alone** (dictation) needs no GPU and none of the above: on a host without one the installer sets up recognition on the CPU (see [No GPU](#no-gpu-recognition-only)). Both need at least **30 GB free disk space** during setup, and enough RAM.
 
 ### Check the host driver
 
@@ -183,32 +184,43 @@ The installer downloads an image, builds the runtimes, and downloads the models 
 
 Once the services are healthy, the installer enables voice and saves the endpoints automatically. If you previously used custom endpoints, click **Use installed voice** to reconnect.
 
-### Engines and GPU memory
+### Engines, devices and memory
 
 | | Choices | Runs on |
 | --- | --- | --- |
-| **Speech synthesis** | **Breeze** (English and Chinese, streams while it speaks) · **Chatterbox** (nineteen languages, clones a reference voice) | GPU |
-| **Speech recognition** | **Whisper** base or small · **Qwen3-ASR** 0.6B or 1.7B | Whisper on the CPU, Qwen3-ASR on the GPU |
+| **Speech synthesis** | **Breeze** (English and Chinese, streams while it speaks) · **Chatterbox** (nineteen languages, clones a reference voice) | The GPU |
+| **Speech recognition** | **Whisper** base or small · **Qwen3-ASR** 0.6B or 1.7B | Whisper always on the CPU; Qwen3-ASR on the CPU or the GPU, as you choose |
 
-The default, and what every earlier installation has, is Breeze with Whisper base. Whisper takes no GPU memory; Qwen3-ASR recognises more languages and is more accurate, and shares one audio.cpp process with the speech engine.
+The default, and what every earlier installation has, is Breeze with Whisper base. Qwen3-ASR recognises more languages and is more accurate than Whisper. Beside a speech engine it is on the GPU unless you set **Speech recognition runs on** to **CPU**, which spares the card the model at the cost of CPU threads and memory. Whisper takes no GPU memory at all.
 
-The page and the installer estimate the GPU memory each combination needs, from the measured Breeze process and the size of the other model files:
+Recognition on the CPU runs in an audio.cpp process of its own (port `7863`); on the GPU it shares the speech engine's process (port `7862`). With the speech engine on the GPU and recognition on the CPU, the container has the GPU and the CUDA image; with nothing on the GPU it has neither (see [No GPU](#no-gpu-recognition-only)).
 
-| Model | About |
-| --- | --- |
-| Breeze | 4.5 GiB |
-| Chatterbox | 2.9 GiB |
-| Qwen3-ASR 0.6B | 1.4 GiB |
-| Qwen3-ASR 1.7B | 2.5 GiB |
+The page and the installer estimate what each combination needs: the GPU memory from the measured Breeze process and the size of the other model files, and the memory of the host for recognition on the CPU.
 
-These are estimates, not guarantees. A combination **fits** when the GPU has that much free now, is **tight** when the card is big enough but other programs hold part of it right now (the models load only when voice is used, so it can still work), and does **not fit** when the card is smaller than the combination needs.
+| Model | GPU memory | Memory on the CPU |
+| --- | --- | --- |
+| Breeze | 4.5 GiB | not on the CPU |
+| Chatterbox | 2.9 GiB | not on the CPU |
+| Whisper base / small | none | 0.4 / 0.9 GiB |
+| Qwen3-ASR 0.6B | 1.4 GiB | 1.6 GiB |
+| Qwen3-ASR 1.7B | 2.5 GiB | 2.9 GiB |
 
-Before installing, Pithagoras reads the GPU with `nvidia-smi`. A portal in a container has no `nvidia-smi` of its own, so once the CUDA image is downloaded it asks a throwaway container of that image. The **Speech engines** block then says **GPU detected** with its name and memory, or **No GPU detected**; before anything could be asked it says **GPU not checked yet**. A host without `nvidia-smi`, without an NVIDIA runtime for Docker, with a driver that finds no device, or with a Docker that does not answer, has no GPU for voice: that is an answer, not an error. At install time it checks again:
+These are estimates, not guarantees. A combination **fits** when the GPU, or the host's memory for what runs on the CPU, has that much free now, is **tight** when it is big enough but other programs hold part of it right now (the models load only when voice is used, so it can still work), and does **not fit** when it is smaller than the combination needs. Recognition on the CPU is also judged by the threads of the host: measured on 8 threads of a desktop CPU, Qwen3-ASR 0.6B recognised speech about 5.4 times faster than it was spoken and 1.7B about 2.6 times. The page scales that by the threads the host has and warns when recognition is expected to fall behind the speaker; **Choose for me** only picks a model that stays well ahead of it, else Whisper base. Whisper's speed was not measured, so it is never called slow.
 
-- With **Choose for me**, it picks the best combination that fits: Breeze, and the largest of Whisper base, Qwen3-ASR 0.6B and 1.7B that fits next to it; Chatterbox only when Breeze does not fit. It writes what it found as the first line of the setup log.
-- With your own pick, it keeps it, and refuses one the card cannot hold at all, naming the combination that would fit. A tight pick installs, with that noted in the log.
-- If the check finds that there is no GPU Docker can use, it stops before it creates anything, with one sentence on what is missing: install the NVIDIA Container Toolkit and restart Docker, or run voice on a host that has a GPU. A Docker that fails to start the container for the same reason is told that way too, not in its own words.
+Before installing, Pithagoras reads the GPU with `nvidia-smi`. A portal in a container has no `nvidia-smi` of its own, so it asks a throwaway container of the small `ubuntu:22.04` base image, to which the NVIDIA Container Toolkit gives `nvidia-smi` as it does to any image; the multi-gigabyte CUDA image is not needed for that. The **Speech engines** block then says **GPU detected** with its name and memory, or warns **No GPU detected**; before anything could be asked it says **GPU not checked yet**. A host without `nvidia-smi`, without an NVIDIA runtime for Docker, with a driver that finds no device, or with a Docker that does not answer, has no GPU for voice: that is an answer, not an error. At install time it checks again:
+
+- With **Choose for me**, it picks the best combination that fits: Breeze, and the largest of Whisper base, Qwen3-ASR 0.6B and 1.7B that fits next to it on the GPU; Chatterbox only when Breeze does not fit. Without a GPU it picks recognition alone (see below). It writes what it found as the first line of the setup log.
+- With your own pick, it keeps it, and refuses one that the card or the host's memory cannot hold at all, naming the combination that would fit. A tight pick installs, with that noted in the log.
+- If the check finds there is no GPU, a pick with speech synthesis is refused in one sentence (install recognition only, or add a GPU), and a recognition-only pick installs. A Docker that fails to start a container that asks for a GPU is told in one plain sentence about the NVIDIA Container Toolkit, not in its own words.
 - If it cannot tell at all (for instance the check itself failed for another reason), it installs your pick unchecked and Docker has the last word.
+
+### No GPU: recognition only
+
+Speech synthesis needs a GPU: on a CPU Breeze took about 3.5 seconds to compute each second of speech and Chatterbox about 7 (measured on 8 threads of a desktop CPU, with the model already loaded), too slow for conversation. Speech recognition runs on a CPU, so a host without a GPU can still install the part that listens:
+
+- The **Speech engines** block warns **No GPU detected. Only speech recognition works: you can dictate, but replies are not spoken.** The speech synthesis engine is greyed out as **No speech synthesis**, with that reason. Recognition stays selectable: Whisper base or small, Qwen3-ASR 0.6B or 1.7B, on the CPU, each with the memory it needs and a warning where the host has too few threads.
+- **Install voice** (also with **Choose for me**) builds a container with no GPU request, from the small base image, with a CPU-only audio.cpp build for Qwen3-ASR (no CUDA toolchain, no CUDA image) or only Whisper.cpp for Whisper. Nothing is refused and nothing fails because there is no GPU.
+- The saved settings then have no speech runtime. **Dictation** works. The voice-conversation control is not offered, because it speaks the replies, and the voice settings drop what concerns speaking (the voice, how it is generated, the speaking instructions). A GPU added later offers speech synthesis in the same block, and **Rebuild with these engines** installs it.
 
 With several GPUs it uses the one with the most memory free and gives the container that one. When the container is recreated later with the engines it has, for instance after a portal update, it stays on that card. Settings on the portal change this, as in the multilingual Compose service. Put them in `.env` (the shipped Compose files and the Portainer stack pass both on to the portal) or set them in the portal's environment:
 
@@ -239,7 +251,7 @@ Use **Add voice** for your own designed or reference-cloned voice. Installing th
 The managed installer:
 
 - Creates `pithagoras-voice` and the named volume `pithagoras_voice-models`, mounted at `/voice`.
-- Builds pinned audio.cpp with CUDA, with the families of the engines you chose (Breeze, Chatterbox, Qwen3-ASR), and Whisper.cpp without CUDA when Whisper is chosen. A build keeps every family it has been given, so switching engines back and forth compiles once.
+- Builds pinned audio.cpp with CUDA, with the families of the engines you chose (Breeze, Chatterbox, Qwen3-ASR), and Whisper.cpp without CUDA when Whisper is chosen. Without any GPU use it builds audio.cpp for the CPU alone instead, in a directory of its own, or none for Whisper alone. A build keeps every family it has been given, so switching engines back and forth compiles once.
 - Downloads what the choice needs: multilingual Whisper `base` or `small`; Breeze-TTS-2 BF16 GGUF, quantized to **Q8_0** on CPU, verified, and the BF16 source removed after successful conversion; the Chatterbox Multilingual and Qwen3-ASR Q8_0 GGUF files from a pinned revision of the audio.cpp repository, checked against their SHA-256.
 - Retains source trees, compiled binaries and model files in the named volume.
 - Starts the services on the portal’s loopback interface by sharing its Docker network namespace. No voice ports are published on the host.
@@ -249,12 +261,12 @@ The managed installer:
 
 | Setting | Managed value |
 | --- | --- |
-| Speech runtime | **Breeze audio.cpp · streaming**, or **Chatterbox audio.cpp · multilingual** |
-| Speech synthesis URL | `http://127.0.0.1:7862/v1/audio/speech` |
-| Speech recognition URL | Whisper: `http://127.0.0.1:8188/inference`. Qwen3-ASR: `http://127.0.0.1:7862/v1/audio/transcriptions` |
+| Speech runtime | **Breeze audio.cpp · streaming**, **Chatterbox audio.cpp · multilingual**, or **No speech synthesis** (recognition only) |
+| Speech synthesis URL | `http://127.0.0.1:7862/v1/audio/speech`; none without speech synthesis |
+| Speech recognition URL | Whisper: `http://127.0.0.1:8188/inference`. Qwen3-ASR: `http://127.0.0.1:7862/v1/audio/transcriptions` on the GPU, `http://127.0.0.1:7863/v1/audio/transcriptions` on the CPU |
 | Speech recognition model | Whisper: empty. Qwen3-ASR: `qwen3-asr` |
 
-Check readiness from inside the portal container. With Whisper chosen both ports answer; with Qwen3-ASR everything is on `7862`:
+Check readiness from inside the portal container. Each port answers where its service is part of the choice (`8188` Whisper, `7862` the GPU process, `7863` Qwen3-ASR on the CPU); for the default, both `8188` and `7862`:
 
 ```sh
 docker exec pithagoras node -e 'Promise.all([8188,7862].map(async p => console.log(p, (await fetch(`http://127.0.0.1:${p}/health`)).status)))'
@@ -311,7 +323,7 @@ Run the socket `_ping` check above. Verify the mount and process permissions. So
 :::
 
 ::: details NVIDIA driver/device error
-Run the CUDA `docker run --gpus all` check. Fix host driver, toolkit or passthrough before retrying Voice. Voice has no CPU-only mode: on a host without an NVIDIA GPU that Docker can use, the page says **No GPU detected**, and an install stops with the sentence that says what to install.
+Run the CUDA `docker run --gpus all` check. Fix host driver, toolkit or passthrough before retrying Voice. On a host without an NVIDIA GPU that Docker can use, the page says **No GPU detected** and installs speech recognition only (see [No GPU](#no-gpu-recognition-only)); speech synthesis needs the NVIDIA Container Toolkit and a GPU.
 :::
 
 ::: details Setup stays at Starting

@@ -212,8 +212,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       ttsPrefetch.current = config.ttsPrefetch === true;
       setPrefetchMode(ttsPrefetch.current);
       vadSettings.current = { ...DEFAULT_VAD, ...config.vad };
-      setAvailable(config.enabled);
-      if (!config.enabled) stop();
+      // Voice mode speaks its replies: without speech synthesis there is nothing for it to do. Dictation, which only listens, stays.
+      const usable = config.enabled && config.speech !== false;
+      setAvailable(usable);
+      if (!usable) stop();
       // Voice mode was on in this tab when the page was reloaded: carry on.
       else if (resume.current && !voice.current && !restoring.current) { restoring.current = true; void start(true); }
     }).catch(() => { if (mounted.current) { setAvailable(false); stop(); } });

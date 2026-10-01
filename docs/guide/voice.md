@@ -668,7 +668,14 @@ engines later recreates the container and builds or downloads only what is new;
 an installation made before the choice existed is the default combination, and
 keeps working unchanged.
 
-Once both health checks pass, Settings connects the installed services automatically.
+**Without a GPU** the installer sets up speech recognition alone, on the CPU: Whisper, or
+Qwen3-ASR in a CPU-only audio.cpp build, in the small base image rather than the CUDA one. Dictation
+works; the voice-conversation control is not offered, because it speaks its replies, and speech
+synthesis needs a GPU (Breeze and Chatterbox take several seconds of CPU time per second of speech).
+Qwen3-ASR on a GPU host can be put on the CPU too, to spare the card. See
+[Docker add-ons](/guide/add-ons#no-gpu-recognition-only).
+
+Once the health checks of what was installed pass, Settings connects the installed services automatically.
 Existing voice choices and Aria reference files are preserved. A reference clone
 still needs the private reference WAV and transcript described above.
 
