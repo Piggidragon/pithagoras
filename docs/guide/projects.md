@@ -32,11 +32,13 @@ chats start without them.
 has and when one last moved.
 
 - **Click a project** to open its latest chat, or start one if it has none.
-- **New project** asks for a name and, optionally, instructions, then creates the
-  folder and opens a chat in it. "Cool Project" becomes the folder `cool-project`.
+- **New project** asks for a name and, optionally, instructions and tools, then creates
+  the folder and opens a chat in it. "Cool Project" becomes the folder `cool-project`.
   A name that is taken, or `home`, is refused.
 - **New chat here** (the plus on a row) starts another chat in that folder.
 - **Instructions** (the document icon) edits the folder's instructions.
+- **Tools** (the blocks icon) sets which tools the project's chats start with, see
+  [Tools](#tools). A project that does this carries a *tools* mark on its row.
 - **Delete** removes the project: its chats and its folder, after a confirmation
   that says how many chats and files go with it. It is refused while a chat in
   the project is running. When the folder holds git repositories — it is one,
@@ -72,6 +74,48 @@ file. Home has none of its own.
 
 Chats started after a change pick it up. A chat that is already open does after
 `/reload`.
+
+## Tools
+
+A project can have tools of its own: **Tools** on its row lists the tools the portal has
+seen registered, as a chat's tools control does, and what you switch there is what
+every chat in the project starts with. "The research project never goes online" and
+"the dev project always has the shell tools" are then said once, not at the start of
+every chat.
+
+There are three layers, each an exception to the one before it:
+
+1. **Settings → Tools** is the default for every conversation.
+2. **The project** switches tools on or off against that default, for every chat in it.
+3. **A chat** switches tools on or off against what its project leaves, from the blocks
+   icon beside the composer.
+
+What a project stores is only where it disagrees with the portal-wide default, so a tool
+the project never mentioned still follows Settings → Tools. A chat belongs to a project
+when its folder is the project's or is inside it, judged by where the path really leads.
+Chats in Home belong to none, and are as before.
+
+A project that has not said anything changes nothing, which is every project there was.
+When a project starts to, a chat that already has switches of its own **keeps them as
+they are**: a tool it switched on or off is its decision, and stays so whatever the
+project says. The tools it never mentioned follow the project from then on. A chat that
+was running is told at once and has it from its next message. A routine that runs in a
+project gets the project's tools like a chat does.
+
+The tools can be chosen as the project is made: **New project** has the same list in a
+**Tools** section under the instructions, shut until you open it and starting from the
+portal-wide default, and what is switched there is stored with the project. Left alone, the project says nothing about tools. If the folder is
+made and its tools cannot be stored, the page says so and stays where it is, rather than
+opening the chat over the message; **Tools** on the project's row is where to choose them
+again. Over the API, `POST /api/projects` takes the same `toolsOff` list as the tools
+endpoint, and checks it before any folder is made.
+
+The settings are kept in the portal's database, by the project's name, and not as a file
+in the folder: the agent works in that folder and can write to it, and which tools it
+has is not something it should be able to give itself back. They go when the project is
+deleted. They do not travel with a copy of the folder. As with the other tool switches,
+there is nothing to switch with `EXECUTOR=container`, where the portal never sees what
+pi registered.
 
 ## Folders that already exist
 
