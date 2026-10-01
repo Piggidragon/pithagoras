@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSparkles } from 'react-icons/lu';
 import type { PortalEvent } from '../api';
 import { describeCall, describeOutcome, elapsed, type ToolCall, type ToolTarget } from '../tool-activity';
+import { shownPicture } from '../transcript';
 import { msg, t } from "../i18n";
 
 /** A card for one tool call, in one of four places around the orb. */
@@ -25,6 +26,7 @@ const SLOTS = 4;
  * shows how long it has been. When the call ends it says what came of it, and
  * goes a few seconds later. One that can be looked at opens it when tapped:
  * the file in Files, the terminal, the browser, the document, the picture.
+ * That is a role it takes on, not another element: see the card below.
  */
 /** Where a card leads, as its title names it. */
 const TARGET: Record<ToolTarget, string> = {
@@ -76,7 +78,9 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
         const card = next.find(c => c.callId && c.callId === String(p.toolCallId ?? '') && c.status === 'running');
         if (!card) continue;
         const status = p.isError ? 'failed' as const : 'done' as const;
-        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p) } : c);
+        // A card leads to the pictures once its call has shown one: a generate_image has no picture to open before that, nor when it is another extension's tool.
+        const target = shownPicture(p) ? 'pictures' as const : undefined;
+        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}) } : c);
         later(STAYS[status], () => leave(card.id));
       } else if (event.type === 'agent_end' || (event.type === 'portal_status' && p.status !== 'running')) {
         // The run is over: a call that never reported its end is not still going.
@@ -109,9 +113,16 @@ export function VoiceToolActivity({ events, folder, onOpen }: { events: PortalEv
           {!note && card.status === 'failed' && <p className="voice-tool-note">{t("Failed")}</p>}
         </div>
       </>;
-      return card.target
-        ? <button key={card.id} type="button" className={className} onClick={() => onOpen(card)} title={t('Show {what}', { what: card.target === 'files' && card.path ? card.path : t(TARGET[card.target]) })}>{body}</button>
-        : <div key={card.id} className={className}>{body}</div>;
+      // One element for the card's whole life, a button only by its role: a card that is given something to
+      // open when its call ends (a generate_image's picture) would otherwise be a new element, flying out of the
+      // orb again and read out again by a screen reader.
+      const open = () => onOpen(card);
+      const lead = card.target ? {
+        role: 'button', tabIndex: 0, onClick: open,
+        onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } },
+        title: t('Show {what}', { what: card.target === 'files' && card.path ? card.path : t(TARGET[card.target]) }),
+      } : {};
+      return <div key={card.id} className={className} {...lead}>{body}</div>;
     })}
   </div>;
 }

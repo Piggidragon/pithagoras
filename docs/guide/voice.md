@@ -81,7 +81,10 @@ a chart, a diagram or a screenshot in the chat's folder and calls it, and a
 **Pictures** window opens on it, like the browser and terminal do. Tap the
 picture to see it at full size, use the arrows to go back through earlier ones,
 or open it in a new tab. Outside voice mode the picture appears under the tool
-line in the chat. Canvases can include pictures from the folder too (see
+line in the chat. With [image generation](/guide/features#image-generation)
+switched on, the agent also has `generate_image`, which makes a new picture from
+a description and shows it the same way; the voice instructions mention it only
+while it is there. Canvases can include pictures from the folder too (see
 [Canvases](/guide/canvases)).
 
 **Tool cards.** The cards that fly out of the orb say what the agent is doing

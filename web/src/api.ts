@@ -574,6 +574,8 @@ export const api = {
   features: () => json<Features>("/api/features"),
   /** The subagent tool alone: nothing of Understory or Docker asked for. */
   subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
+  /** Image generation alone: nothing of Understory or Docker asked for. */
+  imagesFeature: () => json<{ images: ImagesFeature }>("/api/features/images"),
   /** Only whether each is on — cheap, for the sidebar and the chat's menus. */
   featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
@@ -602,6 +604,12 @@ export const api = {
   wipeMemory: () => json<{ health: MemoryHealth }>("/api/memory/wipe", { method: "POST" }),
   setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) =>
     json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  /** `apiKey` left out keeps the saved one; "" takes it away. `changed`: the agent got or lost the tool, which chats have from their next load. */
+  setImagesFeature: (patch: { enabled?: boolean; baseUrl?: string; model?: string; size?: string; apiKey?: string }) =>
+    json<{ images: ImagesFeature; changed: boolean; reloaded: number; waiting: number }>("/api/features/images", {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
@@ -1160,6 +1168,17 @@ export interface SubagentFeature {
   model: string;
 }
 
+/** Image generation as the page is told it: never the key, only whether one is set. */
+export interface ImagesFeature {
+  enabled: boolean;
+  /** The API's base, such as https://host/v1. */
+  baseUrl: string;
+  model: string;
+  /** "1024x1024" or empty for the endpoint's own. */
+  size: string;
+  keySet: boolean;
+}
+
 /** The model that keeps Understory's memory, as the page is told it: never the key. */
 export type UnderstoryLlm =
   | { source: "auto" }
@@ -1273,6 +1292,7 @@ export interface MemoryValidation {
 export interface Features {
   subagent: SubagentFeature;
   understory: UnderstoryFeature;
+  images: ImagesFeature;
 }
 
 export interface BrowserStatus {

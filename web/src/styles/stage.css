@@ -164,7 +164,7 @@
 .voice-stage-action.voice-end:hover { background: #92505c; }
 .voice-utilities button, .voice-browser-window header button, .voice-terminal-window header button { color: rgb(var(--fg)); background: rgb(var(--fg) / .09); border: 1px solid rgb(var(--fg) / .3); }
 .voice-utilities button:hover, .voice-browser-window header button:hover, .voice-terminal-window header button:hover { background: rgb(var(--fg) / .18); }
-.voice-stage button:focus-visible { outline: 2px solid #a2d5ff; outline-offset: 4px; }
+.voice-stage button:focus-visible, .voice-tool-float[role="button"]:focus-visible { outline: 2px solid #a2d5ff; outline-offset: 4px; }
 .voice-live-transcript { color: rgb(var(--fg)); }
 .voice-browser-window, .voice-terminal-window { border-color: #62718a; }
 .voice-browser-window > header, .voice-terminal-window > header { color: rgb(var(--fg)); font-weight: 500; border-bottom-color: #62718a; }
@@ -351,11 +351,11 @@
 @media (prefers-reduced-motion: reduce) { .voice-files-window { transition: none; } }
 
 /* Tool cards stay while their call runs, say what came of it, and go when it is read.
-   A card that can be looked at is a button that opens it. */
+   A card that can be looked at is a button, by its role, that opens it. */
 .voice-tool-float { animation: voice-tool-arrive .8s cubic-bezier(.22,1,.36,1) both; transform: translate(calc(-50% + var(--flight-x)), var(--flight-y)); text-align: left; }
 .voice-tool-float.is-leaving { animation: voice-tool-leave .6s ease forwards; }
-button.voice-tool-float { pointer-events: auto; cursor: pointer; transition: border-color .2s, background .2s; }
-button.voice-tool-float:hover { border-color: #9fb6d6; background: #243752; }
+.voice-tool-float[role="button"] { pointer-events: auto; cursor: pointer; transition: border-color .2s, background .2s; }
+.voice-tool-float[role="button"]:hover { border-color: #9fb6d6; background: #243752; }
 .voice-tool-float.is-failed { border-color: #c88490; }
 .voice-tool-float.is-failed > svg { color: #f1a3ae; }
 .voice-tool-float .voice-tool-note { color: #9fe3d6; font-variant-numeric: tabular-nums; }

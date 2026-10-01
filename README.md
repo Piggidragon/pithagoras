@@ -59,8 +59,8 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
   removing it.
 - **Voice mode** — local speech-to-text and text-to-speech in a managed container, pictures
   both ways, push-to-talk.
-- **Add-ons** — the agent's own browser, and opt-in features: a subagent tool and Understory
-  memory with a Memory page.
+- **Add-ons** — the agent's own browser, and opt-in features: a subagent tool, Understory
+  memory with a Memory page, and image generation through an endpoint you choose.
 - **Channels and people** — reach the agent from Telegram, Slack, Discord or a webhook, with
   roles, approvals and an audit log.
 - **Routines** — scheduled runs that report to a channel.

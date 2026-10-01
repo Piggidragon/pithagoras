@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,14 +20,18 @@ mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
 
 /** Each request's system prompt, in the order they came. */
 const sent = [];
+/** The names of the tools each request offered the model, in the same order. */
+const offered = [];
 /** Held until let go, for a run that is still going when the next message comes. */
 let hold;
 const model = createServer((req, res) => {
   let body = "";
   req.on("data", (d) => { body += d; });
   req.on("end", async () => {
-    const system = JSON.parse(body).messages.find((m) => m.role === "system" || m.role === "developer");
+    const request = JSON.parse(body);
+    const system = request.messages.find((m) => m.role === "system" || m.role === "developer");
     sent.push(typeof system?.content === "string" ? system.content : system?.content?.map((c) => c.text).join("") ?? "");
+    offered.push((request.tools ?? []).map((t) => t.function?.name));
     if (hold) await hold;
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const chunk = (delta, finish = null) =>
@@ -74,10 +78,11 @@ function saveInstructions(text) {
 }
 
 let chats = 0;
-const open = (sessionFile) => {
+/** `more` is what a conversation of the portal has beside these: its `sessionId`, as the portal opens one. */
+const open = (sessionFile, more = {}) => {
   const dir = path.join(home, "chats", String(++chats));
   mkdirSync(dir, { recursive: true });
-  return SdkPiClient.create({ cwd: process.env.WORKSPACE_ROOT, sessionDir: dir, sessionFile, provider: "fake", modelId: "m" });
+  return SdkPiClient.create({ cwd: process.env.WORKSPACE_ROOT, sessionDir: dir, sessionFile, provider: "fake", modelId: "m", ...more });
 };
 /** Waits for `ready`, and fails rather than waiting for ever. */
 async function until(ready, what) {
@@ -465,5 +470,165 @@ test("a prompt that could not be built again with new instructions keeps the ear
     client.activate = activate;
     client.dispose();
     saveInstructions(undefined);
+  }
+});
+
+test("image generation: the tool and what the voice rule says of it come and go together, with the add-on and a reload", async () => {
+  const { saveImageGeneration } = await import("../dist/image-generation.js");
+  const { GENERATE_IMAGE_VOICE_LINE } = await import("../dist/pi/generate-image-tool.js");
+  const withLine = audioSystemRule(DEFAULT_VOICE_INSTRUCTIONS, GENERATE_IMAGE_VOICE_LINE);
+  saveInstructions(undefined);
+  saveImageGeneration({ enabled: false, baseUrl: "", apiKey: "" });
+  // Said after each message: what the model was sent, in the system prompt and as tools.
+  const state = (prompt) => ({ tool: offered.at(-1).includes("generate_image"), line: prompt.includes(GENERATE_IMAGE_VOICE_LINE) });
+
+  // A conversation of the portal (it has a session id), with the add-on off: nothing of it, rule or no rule.
+  const client = await open(undefined, { sessionId: "image-generation-chat" });
+  try {
+    assert.deepEqual(state(await say(client, "Typed, add-on off")), { tool: false, line: false });
+    const off = await say(client, "Spoken, add-on off", true);
+    assert.ok(off.includes(AUDIO_SYSTEM_RULE));
+    assert.deepEqual(state(off), { tool: false, line: false });
+    assert.ok(offered.at(-1).includes("show_image"), "the tools beside it are there");
+
+    // Switched on, and the chat reloaded, as the page's switch does it: the tool and the line are in
+    // the very next message, a typed one — not only from the next spoken message on.
+    saveImageGeneration({ baseUrl: "http://127.0.0.1:9/v1", enabled: true });
+    await client.reload();
+    const on = await say(client, "Typed, after switching on");
+    assert.deepEqual(state(on), { tool: true, line: true });
+    assert.ok(on.includes(withLine));
+    assert.deepEqual(state(await say(client, "Spoken, add-on on", true)), { tool: true, line: true });
+
+    // And off again: both go with the reload.
+    saveImageGeneration({ enabled: false });
+    await client.reload();
+    const gone = await say(client, "Typed, after switching off");
+    assert.deepEqual(state(gone), { tool: false, line: false });
+    assert.ok(gone.includes(AUDIO_SYSTEM_RULE), "the rule itself stays: the conversation is a spoken one");
+  } finally {
+    client.dispose();
+  }
+
+  // A typed conversation has the tool when the add-on is on, and no voice rule to say anything in.
+  saveImageGeneration({ enabled: true });
+  const typed = await open(undefined, { sessionId: "image-generation-typed" });
+  try {
+    const prompt = await say(typed, "Only typed");
+    assert.deepEqual(state(prompt), { tool: true, line: false });
+    assert.doesNotMatch(prompt, /Audio mode/);
+  } finally {
+    typed.dispose();
+  }
+
+  // Without a session id there is no tool: it is a conversation of the portal's that has pictures.
+  const bare = await open();
+  try {
+    await say(bare, "No session id");
+    assert.equal(offered.at(-1).includes("generate_image"), false);
+    assert.equal(offered.at(-1).includes("show_image"), false);
+  } finally {
+    bare.dispose();
+    saveImageGeneration({ enabled: false });
+  }
+});
+
+test("image generation: the voice line is said only while the model has the tool, switched off in the chat or not", async () => {
+  const { saveImageGeneration } = await import("../dist/image-generation.js");
+  const { GENERATE_IMAGE_VOICE_LINE } = await import("../dist/pi/generate-image-tool.js");
+  saveInstructions(undefined);
+  saveImageGeneration({ baseUrl: "http://127.0.0.1:9/v1", enabled: true });
+  const state = (prompt) => ({ tool: offered.at(-1).includes("generate_image"), line: prompt.includes(GENERATE_IMAGE_VOICE_LINE) });
+  try {
+    // Opened with it switched off (the chat's menu, a project's default, Settings → Tools): not offered, not spoken of.
+    const client = await open(undefined, { sessionId: "image-generation-switched-off", toolsOff: ["generate_image"] });
+    try {
+      assert.deepEqual(state(await say(client, "Spoken, tool off", true)), { tool: false, line: false });
+      // Switched on in the chat's menu: both come at the next message, a typed one.
+      await client.setToolsOff([]);
+      assert.deepEqual(state(await say(client, "Typed, tool on")), { tool: true, line: true });
+      // And off again.
+      await client.setToolsOff(["generate_image"]);
+      assert.deepEqual(state(await say(client, "Typed, tool off again")), { tool: false, line: false });
+      // Another tool switched off changes nothing about it.
+      await client.setToolsOff(["show_image"]);
+      assert.deepEqual(state(await say(client, "Typed, another tool off")), { tool: true, line: true });
+    } finally {
+      client.dispose();
+    }
+  } finally {
+    saveImageGeneration({ enabled: false });
+  }
+});
+
+test("image generation: where an extension has a tool of the same name, pi keeps that one and the voice line says nothing of the portal's", async () => {
+  const { saveImageGeneration } = await import("../dist/image-generation.js");
+  const { GENERATE_IMAGE_VOICE_LINE } = await import("../dist/pi/generate-image-tool.js");
+  const extension = path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "image-package.ts");
+  writeFileSync(extension, `
+export default function (pi: any) {
+  pi.registerTool({ name: "generate_image", label: "generate image", description: "THIRD-PARTY generate_image", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "ok" }] }) });
+}
+`);
+  saveInstructions(undefined);
+  saveImageGeneration({ baseUrl: "http://127.0.0.1:9/v1", enabled: true });
+  const client = await open(undefined, { sessionId: "image-generation-clash" });
+  try {
+    const prompt = await say(client, "Spoken, with an extension's tool of that name", true);
+    assert.ok(offered.at(-1).includes("generate_image"), "the extension's tool is the one the model has");
+    assert.equal(client.session.getAllTools().find((t) => t.name === "generate_image").sourceInfo.path.includes("image-package"), true);
+    assert.equal(prompt.includes(GENERATE_IMAGE_VOICE_LINE), false, "not told of a tool it does not have");
+    assert.ok(prompt.includes(AUDIO_SYSTEM_RULE));
+  } finally {
+    client.dispose();
+    rmSync(extension, { force: true });
+    saveImageGeneration({ enabled: false });
+  }
+});
+
+test("image generation: only the portal's own generate_image is told from an extension's, whatever the extension is called", async () => {
+  const { saveImageGeneration } = await import("../dist/image-generation.js");
+  const { remembered, rememberTools, shownTools } = await import("../dist/db.js");
+  const folder = path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "image-generation");
+  const listed = async (client) => (await client.getTools()).find((t) => t.name === "generate_image");
+  const menu = () => shownTools().some((t) => t.name === "generate_image");
+  saveImageGeneration({ enabled: false, baseUrl: "", apiKey: "" });
+
+  // A user's own extension in a folder named as the portal's is, with a tool of the same name, and the add-on never touched.
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(path.join(folder, "index.ts"), `
+export default function (pi: any) {
+  pi.registerTool({ name: "generate_image", label: "generate image", description: "MY OWN generate_image", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "ok" }] }) });
+}
+`);
+  try {
+    const theirs = await open(undefined, { sessionId: "image-generation-own-extension" });
+    try {
+      const tool = await listed(theirs);
+      assert.equal(tool.source, "image-generation", "the label is the same as the portal's tool has");
+      assert.equal(tool.inline, undefined);
+      rememberTools((await theirs.getTools()).map(remembered));
+      assert.equal(menu(), true, "their tool stays in the menus while the add-on is off");
+    } finally {
+      theirs.dispose();
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+
+  // The portal's own, as a chat with the add-on on reports it: marked, and gone from the menus once it is off.
+  saveImageGeneration({ baseUrl: "http://127.0.0.1:9/v1", enabled: true });
+  const ours = await open(undefined, { sessionId: "image-generation-portal-tool" });
+  try {
+    const tool = await listed(ours);
+    assert.equal(tool.source, "image-generation");
+    assert.equal(tool.inline, true);
+    rememberTools((await ours.getTools()).map(remembered));
+    assert.equal(menu(), true);
+    saveImageGeneration({ enabled: false });
+    assert.equal(menu(), false);
+  } finally {
+    ours.dispose();
+    saveImageGeneration({ enabled: false });
   }
 });
