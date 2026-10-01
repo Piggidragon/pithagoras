@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { choiceLabel, fitOn, pickGpu, sameChoice, suggestChoice, vramNeeded, type Gpu, type VoiceChoice } from "./voice-engines.js";
+import { LEAN_CHOICE, choiceLabel, fitOn, pickGpu, sameChoice, suggestChoice, vramNeeded, type Gpu, type VoiceChoice } from "./voice-engines.js";
 
 /** The query every probe runs. Not `compute_cap`: older drivers refuse the whole query over it. */
 export const SMI_ARGS = ["--query-gpu=index,name,memory.total,memory.free", "--format=csv,noheader,nounits"];
@@ -67,7 +67,7 @@ export function decide(requested: VoiceChoice | undefined, gpus: readonly Gpu[],
     const kept = reserve ? `, plus ${gib(reserve)} kept free` : "";
     throw new Error(requested
       ? `${label} needs about ${need} of GPU memory${kept}, but ${card} has less.${hint}`
-      : `Even the smallest voice setup (${label}) needs about ${need} of GPU memory${kept}, but ${card} has less.`);
+      : `Even the smallest voice setup (${choiceLabel(LEAN_CHOICE)}) needs about ${gib(vramNeeded(LEAN_CHOICE))} of GPU memory${kept}, but ${card} has less.`);
   }
   if (!gpu) return { choice, gpu, summary: `No GPU could be read here; installing ${label} unchecked.` };
   const verdict = fit === "tight" ? `needs about ${need}; the card is big enough, but other programs use part of it now`

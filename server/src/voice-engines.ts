@@ -93,6 +93,9 @@ export function pickGpu(gpus: readonly Gpu[], preferred?: number): Gpu | undefin
   return asked ?? [...gpus].sort((a, b) => (b.freeMiB ?? b.totalMiB ?? -1) - (a.freeMiB ?? a.totalMiB ?? -1))[0];
 }
 
+/** The combination that needs the least GPU memory: Chatterbox, with Whisper on the CPU. */
+export const LEAN_CHOICE: VoiceChoice = { tts: "chatterbox", asr: "whisper", asrModel: "base" };
+
 /**
  * The best combination that fits with room to spare right now. Breeze stays the
  * speech engine as long as it fits, since it streams; recognition then gets the
@@ -106,8 +109,7 @@ export function suggestChoice(gpu: Gpu | undefined, reserveMiB = 0): VoiceChoice
     const best = ASR_MODELS.filter((o) => o.recommended && fitOn({ tts, asr: o.asr, asrModel: o.model }, gpu, reserveMiB) === "fits").at(-1);
     if (best) return { tts, asr: best.asr, asrModel: best.model };
   }
-  const lean: VoiceChoice = { tts: "chatterbox", asr: "whisper", asrModel: "base" };
-  return [DEFAULT_CHOICE, lean].find((c) => fitOn(c, gpu, reserveMiB) !== "too-large") ?? DEFAULT_CHOICE;
+  return [DEFAULT_CHOICE, LEAN_CHOICE].find((c) => fitOn(c, gpu, reserveMiB) !== "too-large") ?? DEFAULT_CHOICE;
 }
 
 const MODELS = {

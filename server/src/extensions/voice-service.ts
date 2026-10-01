@@ -96,11 +96,14 @@ async function ensureContainer(script: string, choice: VoiceChoice, plan: { gpuI
   await checked('POST', `/containers/${CONTAINER}/start`);
 }
 
-/** The engines the managed container is built for; none when there is no managed container. */
-async function installedChoice(): Promise<VoiceChoice | undefined> {
-  const found = await request<{Config?: {Labels?: Record<string,string>}}>('GET', `/containers/${CONTAINER}/json`);
+/** The managed container as far as a recreation has to keep it: its engines and the card it was given. None when there is no managed container. */
+async function installedContainer(): Promise<{ choice: VoiceChoice; gpuIndex?: number; running: boolean } | undefined> {
+  const found = await request<{Config?: {Labels?: Record<string,string>}; HostConfig?: {DeviceRequests?: {DeviceIDs?: string[] | null}[] | null}; State?: {Running?: boolean}}>('GET', `/containers/${CONTAINER}/json`);
   const labels = found.status === 200 ? found.body?.Config?.Labels : undefined;
-  return labels?.['pithagoras.addon'] === 'voice' ? choiceFromKey(labels['pithagoras.voice-recipe']) : undefined;
+  if (labels?.['pithagoras.addon'] !== 'voice') return undefined;
+  // One made before the card was chosen asked Docker for any one GPU, and has no ids.
+  const id = found.body.HostConfig?.DeviceRequests?.flatMap(r => r.DeviceIDs ?? [])[0];
+  return { choice: choiceFromKey(labels['pithagoras.voice-recipe']), gpuIndex: id !== undefined && /^\d+$/.test(id) ? Number(id) : undefined, running: Boolean(found.body.State?.Running) };
 }
 
 /**
@@ -162,18 +165,29 @@ export async function install(requested?: VoiceChoice) {
   void (async () => {
     try {
       if (!(await imagePresent(IMAGE))) await pullImage(IMAGE, line => { progress = line; });
-      const existing = await installedChoice();
-      let choice = wanted ?? existing;
-      let plan: { gpuIndex?: number; note?: string } = {};
+      const existing = await installedContainer();
+      let choice = wanted ?? existing?.choice;
+      // Recreated with the engines it has, the container stays on the card it was given, unless `VOICE_GPU` names another.
+      let plan: { gpuIndex?: number; note?: string } = { gpuIndex: preferredGpu() ?? existing?.gpuIndex };
       // An installed choice that is kept ran before this check existed, and a restart must not be refused for it.
-      if (!existing || (wanted && !sameChoice(wanted, existing))) {
-        progress = 'Checking the GPU';
-        const found = await detect();
-        const decision = decide(wanted, found.gpus, { reserveMiB: reserveMiB(), preferredGpu: preferredGpu() });
-        choice = decision.choice;
-        // With one card Docker's own pick is the card; only a choice among several needs naming.
-        plan = { gpuIndex: found.gpus.length > 1 ? decision.gpu?.index : undefined, note: decision.summary };
-        progress = decision.summary;
+      if (!existing || (wanted && !sameChoice(wanted, existing.choice))) {
+        // The running container is about to be replaced. Left up, the memory it holds would count as used by other programs,
+        // and the card with the most room could be another one than its own.
+        const stopped = existing?.running;
+        if (stopped) await checked('POST', `/containers/${CONTAINER}/stop?t=10`);
+        try {
+          progress = 'Checking the GPU';
+          const found = await detect();
+          const decision = decide(wanted, found.gpus, { reserveMiB: reserveMiB(), preferredGpu: preferredGpu() });
+          choice = decision.choice;
+          // With one card Docker's own pick is the card; only a choice among several needs naming.
+          plan = { gpuIndex: found.gpus.length > 1 ? decision.gpu?.index : found.gpus.length ? undefined : preferredGpu(), note: decision.summary };
+          progress = decision.summary;
+        } catch (e) {
+          // Refused: the service that was running goes on running.
+          if (stopped) await request('POST', `/containers/${CONTAINER}/start`).catch(() => {});
+          throw e;
+        }
       }
       await ensureContainer(script, choice ?? DEFAULT_CHOICE, plan);
     } catch (e) { error = (e as Error).message; }

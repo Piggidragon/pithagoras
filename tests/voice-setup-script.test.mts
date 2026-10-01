@@ -24,7 +24,7 @@ cd() { if [ "\${1:-}" = /voice ]; then builtin cd "$VOLUME"; else builtin cd "$@
 touch() { case "\${1:-}" in /usr/*) log "touch $1";; *) command touch "$@";; esac; }
 dpkg() { log "dpkg $*"; }
 apt-get() { log "apt-get $*"; }
-nvidia-smi() { echo 8.6; }
+nvidia-smi() { echo "\${ARCH:-8.6}"; }
 git() {
   log "git $*"
   if [ "$1" = clone ]; then mkdir -p "$3/.git" "$3/scripts"; fi
@@ -45,7 +45,9 @@ bash() {
       printf '${SERVER_STUB.replace(/\n/g, '\\n')}' > "$bin/audiocpp_server"
       printf '${GGUF_STUB.replace(/\n/g, '\\n')}' > "$bin/audiocpp_gguf"
       chmod +x "$bin/audiocpp_server" "$bin/audiocpp_gguf"
-      echo 'AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER:BOOL=ON' > "$VOLUME/audio/build/portal/CMakeCache.txt" ;;
+      local arch
+      while [ $# -gt 0 ]; do [ "$1" = --cuda-arch ] && arch="$2"; shift; done
+      printf 'AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER:BOOL=ON\\nCMAKE_CUDA_ARCHITECTURES:STRING=%s\\n' "$arch" > "$VOLUME/audio/build/portal/CMakeCache.txt" ;;
     whisper/models/download-ggml-model.sh) : > "models/ggml-$2.bin" ;;
   esac
 }
@@ -136,6 +138,24 @@ test('a second run reuses the volume, and switching engines builds only what is 
   assert.deepEqual(JSON.parse(readFileSync(path.join(volume, 'server.json'), 'utf8')), serverConfig(DEFAULT_CHOICE));
 });
 
+test('a card of another architecture rebuilds the runtime, because its kernels are compiled for one card only', () => {
+  fresh();
+  const arch = (log: string[]) => /--cuda-arch (\d+)/.exec(built(log)[0] ?? '')?.[1];
+  const first = run({ ...environment(DEFAULT_CHOICE), ARCH: '8.9' });
+  assert.equal(arch(first.log), '89');
+  // The same families on a card of another architecture: only Whisper changes, yet the kernels are for the other card.
+  const other: VoiceChoice = { tts: 'breeze', asr: 'whisper', asrModel: 'small' };
+  const moved = run({ ...environment(other), ARCH: '8.6' });
+  assert.equal(arch(moved.log), '86');
+  assert.match(moved.log.find(l => l.startsWith('bash scripts/build_linux.sh'))!, /--models breeze_tts /);
+  // Built for it: the same card again builds nothing, and going back to the first card builds once more.
+  assert.deepEqual(built(run({ ...environment(other), ARCH: '8.6' }).log), []);
+  assert.equal(arch(run({ ...environment(other), ARCH: '8.9' }).log), '89');
+  // The marker, not the CMake cache, is what is compared once a build wrote it: a cache that spells the architecture differently does not loop.
+  writeFileSync(path.join(volume, 'audio/build/portal/CMakeCache.txt'), 'AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER:BOOL=ON\nCMAKE_CUDA_ARCHITECTURES:STRING=89-real\n');
+  assert.deepEqual(built(run({ ...environment(other), ARCH: '8.9' }).log), []);
+});
+
 test('a volume from before engines could be chosen is neither rebuilt nor downloaded again for the same combination', () => {
   fresh();
   // What the old installer left: Breeze-only binaries without a families file, the quantized model, Whisper.
@@ -148,12 +168,14 @@ test('a volume from before engines could be chosen is neither rebuilt nor downlo
   for (const f of ['audio/build/portal/bin/audiocpp_server', 'audio/build/portal/bin/audiocpp_gguf', 'whisper/build/bin/whisper-server']) {
     writeFileSync(path.join(volume, f), SERVER_STUB); chmodSync(path.join(volume, f), 0o755);
   }
-  writeFileSync(path.join(volume, 'audio/build/portal/CMakeCache.txt'), 'AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER:BOOL=ON\n');
+  writeFileSync(path.join(volume, 'audio/build/portal/CMakeCache.txt'), 'AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER:BOOL=ON\nCMAKE_CUDA_ARCHITECTURES:STRING=86\n');
   writeFileSync(path.join(volume, 'models/breeze-q8_0.gguf'), 'weights');
   const { status, log, stderr } = run();
   assert.equal(status, 0, stderr);
   assert.deepEqual([built(log), downloads(log), log.filter(l => l.startsWith('cmake'))], [[], [], []]);
   assert.equal(started(log).length, 2);
+  // Such a volume has its architecture in the CMake cache only; another card still rebuilds it.
+  assert.match(built(run({ ARCH: '8.9' }).log)[0], /--cuda-arch 89 /);
   // The same volume grows when another engine is chosen: Breeze stays in the build.
   const next = run(environment({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' }));
   assert.match(built(next.log)[0], /--models breeze_tts,qwen3_asr /);

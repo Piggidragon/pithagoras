@@ -229,3 +229,27 @@ test('engine choice: an installed service shows its engines, and another pick of
  await expect(recognition).toContainText('Qwen3-ASR 1.7B');
  await expect(page.getByRole('button',{name:'Rebuild with these engines'})).toHaveCount(0);
 });
+
+test('engine choice: a first install with a pick of its own is no rebuild while the image is still being pulled',async({page})=>{
+ let state='absent';
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/hardware',r=>r.fulfill({json:hardware([card])}));
+ await page.route('**/api/voice',r=>r.fulfill({json:config}));
+ // There is no container yet, so no choice to report: the daemon is still pulling the image.
+ await page.route('**/api/voice/install',r=>{
+  if(r.request().method()==='POST'){state='installing';return r.fulfill({json:{ok:true}});}
+  return r.fulfill({json:{available:true,state,busy:state==='installing',progress:state==='installing'?'Downloading layer':'',error:''}});
+ });
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Voice service'}).click();
+ await page.getByRole('checkbox',{name:'Choose for me, based on my GPU'}).uncheck();
+ await page.getByRole('combobox',{name:'Speech synthesis engine'}).click();
+ await page.getByRole('option',{name:/Chatterbox/}).click();
+ await page.getByRole('button',{name:'Install voice',exact:true}).click();
+ await expect(page.getByLabel('Voice setup log')).toContainText('Downloading layer');
+ await expect(page.getByRole('button',{name:'Rebuild with these engines'})).toHaveCount(0);
+ await expect(page.getByText('Switching engines recreates the voice container.')).toHaveCount(0);
+ // What was picked stays shown, and cannot be changed while the install runs.
+ await expect(page.getByRole('combobox',{name:'Speech synthesis engine'})).toContainText('Chatterbox');
+ await expect(page.getByRole('combobox',{name:'Speech synthesis engine'})).toBeDisabled();
+});

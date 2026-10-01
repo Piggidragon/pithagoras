@@ -55,6 +55,6 @@ export function VoiceEngines({ installed, fresh, busy, hardware, picked, onPick 
             : t("Needs about {gb} GB of GPU memory. Fits.", { gb: need })}
         {fit === "too-large" && suggestion && !sameChoice(suggestion, shown) && <> <button type="button" className={btnCls} onClick={() => onPick(installed && sameChoice(suggestion, installed) ? null : suggestion)}>{t("Use the suggestion")}</button></>}
       </p>}
-    {!fresh && picked && <p className="text-xs text-fg-faint">{t("Switching engines recreates the voice container. Downloaded models are kept.")}</p>}
+    {installed && picked && <p className="text-xs text-fg-faint">{t("Switching engines recreates the voice container. Downloaded models are kept.")}</p>}
   </div>;
 }

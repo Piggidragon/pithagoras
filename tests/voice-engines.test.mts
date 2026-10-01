@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  ASR_MODELS, DEFAULT_CHOICE, TTS_ENGINES, choiceFromKey, choiceKey, endpoints, fitOn, healthUrls, parseChoice, pickGpu, serverConfig, suggestChoice, ttsModel, vramNeeded,
+  ASR_MODELS, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, choiceFromKey, choiceKey, endpoints, fitOn, healthUrls, parseChoice, pickGpu, serverConfig, suggestChoice, ttsModel, vramNeeded,
   type Gpu, type VoiceChoice,
 } from '../server/src/voice-engines.js';
 import { decide, detectGpus, parseGpus, type Probe } from '../server/src/voice-gpu.js';
@@ -71,6 +71,12 @@ test('the suggestion is the best combination that fits, and the original one whe
   assert.deepEqual(suggestChoice(card(null)), DEFAULT_CHOICE);
 });
 
+test('the leanest choice is the one that needs the least GPU memory of all that are offered', () => {
+  assert.equal(vramNeeded(LEAN_CHOICE), Math.min(...combos.map(vramNeeded)));
+  // The suggestion falls back to it when the card is too small for the original combination but holds this one.
+  assert.deepEqual(suggestChoice(card(vramNeeded(LEAN_CHOICE), 10)), LEAN_CHOICE);
+});
+
 test('the GPU is the one asked for, else the one with the most memory free', () => {
   const gpus = [card(8192, 1000, 0), card(12288, 11000, 1), card(24576, 2000, 2)];
   assert.equal(pickGpu(gpus)?.index, 1);
@@ -133,7 +139,10 @@ test('what the install decides tells the person what fits and what does not', ()
   // Too large for the card: refused, with the combination that would fit.
   assert.throws(() => decide({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' }, [card(6144)]),
     /Breeze speech with Qwen3-ASR 1\.7B needs about 7\.0 GiB of GPU memory, but Test GPU 0 \(6\.0 GiB, 6\.0 GiB free\) has less\. Breeze speech with Qwen3-ASR 0\.6B would fit\./);
-  assert.throws(() => decide(undefined, [card(1024)]), /Even the smallest voice setup \(Breeze speech with Whisper base\) needs about 4\.5 GiB/);
+  // The smallest is named as what it is, not as the original combination.
+  assert.throws(() => decide(undefined, [{ index: 0, name: 'Small GPU', totalMiB: 2048, freeMiB: 2000 }]),
+    /^Error: Even the smallest voice setup \(Chatterbox speech with Whisper base\) needs about 2\.9 GiB of GPU memory, but Small GPU \(2\.0 GiB, 2\.0 GiB free\) has less\.$/);
+  assert.throws(() => decide(undefined, [card(2048)], { reserveMiB: 1000 }), /smallest voice setup \(Chatterbox speech with Whisper base\) needs about 2\.9 GiB of GPU memory, plus 1\.0 GiB kept free/);
   assert.throws(() => decide(DEFAULT_CHOICE, [card(20000)], { reserveMiB: 16000 }), /plus 15\.6 GiB kept free/);
   // No GPU read at all: the choice is kept, unchecked, and Docker has the last word.
   const blind = decide({ tts: 'chatterbox', asr: 'whisper', asrModel: 'base' }, []);

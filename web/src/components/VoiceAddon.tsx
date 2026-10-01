@@ -46,8 +46,8 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const builtIn = config.defaultResponseInstructions ?? "";
   // Text that is still the built-in one this page was given is sent as nothing: the portal may have been updated since, and its newer text is then the one to follow.
   const toSave = () => instructions.trim() === builtIn.trim() ? { ...config, responseInstructions: "" } : config;
-  // Another choice than the installed one, picked for a service that exists: it is a rebuild, not a start.
-  const rebuild = !!picked && !!install && install.state !== 'absent';
+  // Another choice than the installed one, picked for a container that exists: it is a rebuild, not a start. While a first install is still pulling the image there is no container, and nothing to rebuild.
+  const rebuild = !!picked && !!install?.choice;
   const chatterbox = config.runtime === "chatterbox";
   const languages = chatterbox ? INPUT_LANGUAGES.filter(([code]) => CHATTERBOX_LANGUAGES.includes(code)) : INPUT_LANGUAGES;
   // Switching runtime must not leave a language the runtime will refuse on save.

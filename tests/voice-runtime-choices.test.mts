@@ -24,6 +24,7 @@ const hostGpus = (output: string | null) => {
 };
 
 let container: any = null;
+let portalId = 'portal-one';
 let dockerGpus: string | null = null;   // what nvidia-smi inside the CUDA image prints; null: no GPU runtime
 let imageThere = true;
 let calls: { method: string; url: string; body: any }[] = [];
@@ -32,7 +33,7 @@ const server = http.createServer(async (req, res) => {
   const body = raw ? JSON.parse(raw) : undefined; const url = req.url!; const method = req.method!;
   calls.push({ method, url, body });
   res.setHeader('Content-Type', 'application/json');
-  if (url === '/containers/portal-test/json') return res.end(JSON.stringify({ Id: 'portal-one', State: { Running: true } }));
+  if (url === '/containers/portal-test/json') return res.end(JSON.stringify({ Id: portalId, State: { Running: true } }));
   if (url === '/containers/pithagoras-voice/json') { res.statusCode = container ? 200 : 404; return res.end(JSON.stringify(container)); }
   if (url.startsWith('/containers/pithagoras-voice/logs')) return res.end(JSON.stringify('services ready'));
   if (url.startsWith('/images/')) { res.statusCode = imageThere ? 200 : 404; return res.end('{}'); }
@@ -61,7 +62,7 @@ after(async () => {
 const voice = await import('../server/src/extensions/voice-service.js');
 const { DEFAULT_CHOICE } = await import('../server/src/voice-engines.js');
 
-const reset = () => { container = null; dockerGpus = null; imageThere = true; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
+const reset = () => { portalId = 'portal-one'; container = null; dockerGpus = null; imageThere = true; calls = []; unhealthy = []; delete process.env.VOICE_GPU; delete process.env.VOICE_VRAM_RESERVE_MIB; };
 const settle = async () => { for (let n = 0; n < 200 && (await voice.status()).busy; n++) await new Promise(r => setTimeout(r, 10)); };
 const created = () => calls.filter(c => c.url === '/containers/create?name=pithagoras-voice');
 const GPU = (index: number, total: number, free: number) => `${index}, Test GPU ${index}, ${total}, ${free}\n`;
@@ -176,6 +177,56 @@ test('a legacy container moved to a new network namespace is recreated as the or
   assert.deepEqual(spec.HostConfig.DeviceRequests, [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }]);
   assert.equal('VOICE_PLAN' in env(spec), false, 'no check was made, so there is nothing to report');
   assert.equal(calls.some(c => c.url === '/containers/create'), false);
+});
+
+test('a container recreated for a new portal namespace stays on the card it was given', async () => {
+  reset(); hostGpus(GPU(0, 12288, 2000) + GPU(1, 12288, 12000));
+  await voice.install({ tts: 'breeze', asr: 'whisper', asrModel: 'base' });
+  await settle();
+  assert.deepEqual(created()[0].body.HostConfig.DeviceRequests, [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }]);
+  // A portal update gives the portal container a new id, and the voice container is made again for it.
+  portalId = 'portal-two'; calls = [];
+  assert.equal((await voice.status()).state, 'installing');
+  await settle();
+  assert.equal(created()[0].body.HostConfig.NetworkMode, 'container:portal-two');
+  assert.deepEqual(created()[0].body.HostConfig.DeviceRequests, [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }]);
+  assert.equal(created()[0].body.Labels['pithagoras.voice-recipe'], 'breeze+whisper:base');
+  assert.equal(calls.some(c => c.url === '/containers/create'), false, 'a kept choice is not checked again');
+});
+
+test('VOICE_GPU decides the card of a recreated container, and of one installed without a GPU reading', async () => {
+  reset(); hostGpus(GPU(0, 12288, 12000));
+  container = { Config: { Labels: { 'pithagoras.addon': 'voice' } }, HostConfig: { NetworkMode: 'bridge' }, State: { Running: true } };
+  process.env.VOICE_GPU = '1';
+  assert.equal((await voice.status()).state, 'installing');
+  await settle();
+  assert.deepEqual(created()[0].body.HostConfig.DeviceRequests, [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }]);
+  reset(); hostGpus(null);
+  process.env.VOICE_GPU = '1';
+  await voice.install({ tts: 'chatterbox', asr: 'whisper', asrModel: 'base' });
+  await settle();
+  assert.deepEqual(created()[0].body.HostConfig.DeviceRequests, [{ Driver: 'nvidia', DeviceIDs: ['1'], Capabilities: [['gpu']] }]);
+});
+
+test('a rebuild reads the GPU after the running service is stopped, and starts it again when the choice is refused', async () => {
+  reset(); hostGpus(null); dockerGpus = GPU(0, 6144, 6000);
+  const running = () => ({ Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1', 'pithagoras.voice-recipe': 'breeze+whisper:base' } }, HostConfig: { NetworkMode: 'container:portal-one' }, State: { Running: true } });
+  container = running();
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' });
+  await settle();
+  const at = (test: (c: { url: string }) => boolean) => calls.findIndex(test);
+  assert.ok(at(c => c.url.includes('/stop?')) >= 0 && at(c => c.url.includes('/stop?')) < at(c => c.url === '/containers/create'), 'its own memory is not counted as taken by others');
+  assert.match((await voice.status()).error, /needs about 7\.0 GiB/);
+  assert.equal(container.State.Running, true, 'the refusal leaves the service running');
+  assert.equal(calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice'), false);
+  assert.equal(calls.filter(c => c.url === '/containers/pithagoras-voice/start').length, 1);
+  // A choice that fits is stopped once, probed, and replaced.
+  calls = []; container = running();
+  await voice.install({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' });
+  await settle();
+  assert.equal(calls.filter(c => c.url.includes('/stop?')).length, 1);
+  assert.ok(at(c => c.url.includes('/stop?')) < at(c => c.url === '/containers/create'));
+  assert.equal(created()[0].body.Labels['pithagoras.voice-recipe'], 'breeze+qwen3-asr:0.6b');
 });
 
 test('another choice recreates the container, keeps the volume and is not mistaken for a network change', async () => {

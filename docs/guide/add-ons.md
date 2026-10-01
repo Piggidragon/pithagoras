@@ -209,15 +209,15 @@ Before installing, Pithagoras reads the GPU with `nvidia-smi`. A portal in a con
 - With your own pick, it keeps it, and refuses one the card cannot hold at all, naming the combination that would fit. A tight pick installs, with that noted in the log.
 - If it cannot read a GPU at all, it installs your pick unchecked and Docker has the last word.
 
-With several GPUs it uses the one with the most memory free and gives the container that one. Two settings on the portal change that, as in the multilingual Compose service:
+With several GPUs it uses the one with the most memory free and gives the container that one. When the container is recreated later with the engines it has, for instance after a portal update, it stays on that card. Settings on the portal change this, as in the multilingual Compose service:
 
 | Variable | Meaning |
 | --- | --- |
-| `VOICE_GPU` | The GPU index (as `nvidia-smi` lists it) the voice container uses. |
+| `VOICE_GPU` | The GPU index (as `nvidia-smi` lists it) the voice container uses, also when no GPU can be read. |
 | `VOICE_VRAM_RESERVE_MIB` | GPU memory, in MiB, to keep free for something else on the same card, such as a model you run in the container later. Counted against every combination. |
 | `NVIDIA_SMI` | The `nvidia-smi` binary to run, when it is not on the portal's `PATH`. |
 
-To change the engines of an installed service, pick others under **Speech engines** and click **Rebuild with these engines**. The container is recreated, with the models and builds in the volume kept; only what the new choice needs is built or downloaded, and a runtime already built for an engine is not built again. **Use installed voice** then points the settings at the new engines. A Chatterbox choice needs an input language (not auto-detect) and a voice with a recording, as in [voice control](/guide/voice#other-languages-chatterbox-and-qwen3-asr).
+To change the engines of an installed service, pick others under **Speech engines** and click **Rebuild with these engines**. The running service is stopped first, so the memory it holds is not counted against the new choice, and started again if the choice is refused. The container is recreated, with the models and builds in the volume kept; only what the new choice needs is built or downloaded, and a runtime already built for an engine is not built again. The CUDA kernels are compiled for the architecture of one card, so a different card, such as another `VOICE_GPU`, rebuilds the runtime once. **Use installed voice** then points the settings at the new engines. A Chatterbox choice needs an input language (not auto-detect) and a voice with a recording, as in [voice control](/guide/voice#other-languages-chatterbox-and-qwen3-asr).
 
 ### Choose your voice settings
 

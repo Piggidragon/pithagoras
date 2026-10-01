@@ -43,11 +43,15 @@ checkout audio https://github.com/0xShug0/audio.cpp.git efb04233dab73aeee4b29120
 built=audio/build/portal/pithagoras-families
 if [ -f "$built" ]; then have=$(cat "$built"); elif [ -x audio/build/portal/bin/audiocpp_server ]; then have=breeze_tts; else have=; fi
 models=$(printf '%s,' "$have" "${families[@]}" | tr ',' '\n' | sed '/^$/d' | sort -u | paste -sd, -)
-if [ "$models" != "$have" ] || [ ! -x audio/build/portal/bin/audiocpp_gguf ] || [ ! -x audio/build/portal/bin/audiocpp_server ] || ! grep -q 'AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER:BOOL=ON' audio/build/portal/CMakeCache.txt; then
-  echo "VOICE_STAGE: Building CUDA speech runtime and quantizer ($models)"
-  architecture=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '. ')
+# The kernels are compiled for this card's architecture alone, and the card the container gets can change
+# between installs. A volume from before this was written down has it in the CMake cache.
+architecture=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '. ')
+built_architecture=$(cat audio/build/portal/pithagoras-architecture 2>/dev/null || sed -n 's/^CMAKE_CUDA_ARCHITECTURES:[A-Z]*=//p' audio/build/portal/CMakeCache.txt 2>/dev/null || true)
+if [ "$models" != "$have" ] || { [ -n "$built_architecture" ] && [ "$built_architecture" != "$architecture" ]; } || [ ! -x audio/build/portal/bin/audiocpp_gguf ] || [ ! -x audio/build/portal/bin/audiocpp_server ] || ! grep -q 'AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER:BOOL=ON' audio/build/portal/CMakeCache.txt; then
+  echo "VOICE_STAGE: Building CUDA speech runtime and quantizer ($models, sm_$architecture)"
   (cd audio && bash scripts/build_linux.sh --native-model-manager --system-openssl --cuda on --cuda-arch "$architecture" --build-dir /voice/audio/build/portal --build-type Release --model-set custom --models "$models" --target audiocpp_server --target audiocpp_gguf --jobs 4) 2>&1 | tr '\r' '\n'
   echo "$models" > "$built"
+  echo "$architecture" > audio/build/portal/pithagoras-architecture
 fi
 if [ "$asr" = whisper ]; then
   echo 'VOICE_STAGE: Preparing CPU speech recognition'
