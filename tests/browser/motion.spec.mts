@@ -12,8 +12,8 @@ import { test, expect, type Page } from '@playwright/test';
  */
 test.use({ storageState: { cookies: [], origins: [] } });
 
-interface Played { on: string; keys: string[]; ghost: boolean }
-interface Picture { text: string; hidden: string | null; pointer: string; roles: number; dock: string | null }
+interface Played { on: string; keys: string[]; ghost: boolean; duration: number }
+interface Picture { text: string; hidden: string | null; pointer: string; roles: number; dock: string | null; scrollTop: number }
 
 const at = new Date().toISOString();
 const chat = (id: string, title: string, extra: object = {}) => ({ id, title, workspace: `/w/${id}`, status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null, ...extra });
@@ -33,8 +33,12 @@ const conversation = (tag: string) => {
 };
 
 /** The portal over canned answers: chats that can be deleted, a stream that replays them, and a log of what is played. */
-async function portal(page: Page, { off = false, confirms = true, places }: { off?: boolean; confirms?: boolean; places?: Record<string, string> } = {}) {
-  const state = { sessions: [chat('a', 'First chat'), chat('b', 'Second chat'), chat('c', 'Third chat'), chat('d', 'Fourth chat')], events: { a: conversation('A'), b: conversation('B'), c: [] as any[], d: [] as any[] } as Record<string, any[]> };
+async function portal(page: Page, { off = false, confirms = true, places, many = false }: { off?: boolean; confirms?: boolean; places?: Record<string, string>; many?: boolean } = {}) {
+  // More than the sidebar lists without a search box, when asked.
+  const extra = many ? Array.from({ length: 10 }, (_, i) => chat(`x${i}`, `Extra chat ${i}`)) : [];
+  const state = { sessions: [chat('a', 'First chat'), chat('b', 'Second chat'), chat('c', 'Third chat'), chat('d', 'Fourth chat'), ...extra], events: { a: conversation('A'), b: conversation('B'), c: [] as any[], d: [] as any[], r: conversation('R') } as Record<string, any[]> };
+  // A routine's chat: opened by its address, and not in the list of chats.
+  const routine = chat('r', 'Routine chat', { kind: 'routine' });
   await page.route('**/api/**', async (route) => {
     const p = new URL(route.request().url()).pathname;
     const method = route.request().method();
@@ -42,6 +46,12 @@ async function portal(page: Page, { off = false, confirms = true, places }: { of
     let m: RegExpMatchArray | null;
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
     else if (p === '/api/sessions' && method === 'GET') reply = { sessions: state.sessions, executor: 'host' };
+    else if (p === '/api/sessions' && method === 'POST') {
+      const made = chat(`n${state.sessions.length}`, 'A new chat');
+      state.sessions = [made, ...state.sessions];
+      state.events[made.id] = [];
+      reply = made;
+    } else if (p === '/api/sessions/r') reply = routine;
     else if ((m = p.match(/^\/api\/sessions\/(\w+)\/messages\/(\d+)$/)) && method === 'DELETE') {
       const [id, seq] = [m[1], Number(m[2])];
       const next = state.events[id].find((e) => e.seq > seq && e.type === 'portal_prompt');
@@ -76,7 +86,7 @@ async function portal(page: Page, { off = false, confirms = true, places }: { of
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (this: Element, frames: any, options: any) {
       const first = Array.isArray(frames) ? frames[0] : frames;
-      played.push({ on: `${this.tagName.toLowerCase()}${this.className && typeof this.className === 'string' ? '.' + this.className.split(' ')[0] : ''}`, keys: Object.keys(first ?? {}), ghost: !!this.closest('[data-ghost]') });
+      played.push({ on: `${this.tagName.toLowerCase()}${this.className && typeof this.className === 'string' ? '.' + this.className.split(' ')[0] : ''}`, keys: Object.keys(first ?? {}), ghost: !!this.closest('[data-ghost]'), duration: options?.duration ?? 0 });
       return animate.call(this, frames, options);
     };
     const pictures: Picture[] = ((window as any).pictures = []);
@@ -84,7 +94,7 @@ async function portal(page: Page, { off = false, confirms = true, places }: { of
     new MutationObserver((records) => {
       for (const r of records) for (const n of r.addedNodes) {
         if (!(n instanceof HTMLElement)) continue;
-        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length, dock: n.firstElementChild?.getAttribute('data-dock') ?? null });
+        if (n.hasAttribute('data-ghost')) pictures.push({ text: (n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000), hidden: n.getAttribute('aria-hidden'), pointer: getComputedStyle(n).pointerEvents, roles: n.querySelectorAll('[role], [aria-modal], [id]').length, dock: n.firstElementChild?.getAttribute('data-dock') ?? null, scrollTop: (n.firstElementChild as HTMLElement | null)?.scrollTop ?? 0 });
         if (n.classList.contains('app-intro')) intro.push({ pointer: getComputedStyle(n).pointerEvents, at: performance.now() });
       }
     }).observe(document, { childList: true, subtree: true });
@@ -422,4 +432,124 @@ test('turning the animations on or off does not play again what is on the page',
   await page.getByRole('switch', { name: 'Fancy animations' }).click();
   await expect(motion(page)).toHaveAttribute('data-motion', 'fancy');
   expect(await going()).toBe(0);
+});
+
+test('a chat that is left keeps in its picture where its conversation was scrolled to', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  await portal(page);
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await expect(page.locator('.chat-list')).not.toHaveClass(/is-opening/);
+  const at = await page.locator('[data-transcript]').evaluate((el) => el.scrollTop);
+  expect(at).toBeGreaterThan(100);
+
+  await row(page, 'Second chat').click();
+  await expect.poll(async () => (await pictures(page)).filter((p) => p.text.includes('A answer 5')).length).toBeGreaterThan(0);
+  // The end of it, where it was read, and not its start.
+  const seen = (await pictures(page)).find((p) => p.text.includes('A answer 5'))!;
+  expect(Math.abs(seen.scrollTop - at)).toBeLessThanOrEqual(1);
+});
+
+test('a chat that is deleted dissolves, and one the list never had does not', async ({ page }) => {
+  await portal(page);
+  // A routine's chat, opened by its address and left for another.
+  await page.goto('/s/r');
+  await expect(page.getByText('R answer 5')).toBeVisible();
+  await expect(page.locator('.chat-list')).not.toHaveClass(/is-opening/);
+  await row(page, 'Second chat').click();
+  await expect(page.getByText('B answer 5')).toBeVisible();
+  // Drifts away (340 ms), as any chat does.
+  expect((await played(page)).filter((p) => p.ghost).map((p) => p.duration)).toEqual([340]);
+
+  // One that is deleted, open, shrinks away (520 ms).
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await deleteChat(page, 'First chat');
+  await expect.poll(async () => (await played(page)).filter((p) => p.ghost).map((p) => p.duration)).toContain(520);
+});
+
+test('a new chat is not shown its empty state twice', async ({ page }) => {
+  await portal(page);
+  await page.goto('/s/a');
+  await expect(page.getByText('A answer 5')).toBeVisible();
+  await sidebar(page).getByRole('button', { name: 'New', exact: true }).click();
+  await expect(page.getByText('Give pi a task.')).toBeVisible();
+  // Past the second in which a chat that has just loaded plays its messages in (not the copy of the one that was left, which has the same list).
+  await expect(page.locator('main .chat-list')).not.toHaveClass(/is-opening/);
+  await page.waitForTimeout(150);
+  expect(await page.locator('.chat-empty').evaluate((el) => el.getAnimations().filter((a) => a.playState === 'running').length)).toBe(0);
+});
+
+test('a panel that has flown to its place does not come in again', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  await portal(page);
+  await page.goto('/s/a');
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  const aside = page.locator('aside[data-dock="right"]');
+  await expect(aside).toBeVisible();
+  await page.waitForTimeout(900);
+  const head = (await aside.locator('.chat-aside-head').boundingBox())!;
+  await page.mouse.move(head.x + head.width - 60, head.y + head.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(head.x + head.width - 120, head.y + 60, { steps: 4 });
+  await page.mouse.move(30, 380, { steps: 10 });
+  await page.mouse.up();
+  const there = page.locator('aside[data-dock="left"]');
+  await expect(there).toBeVisible();
+  // Its flight is 620 ms; a moment after it, nothing of the entrance a panel that opens has is going.
+  await page.waitForTimeout(900);
+  expect(await there.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => 'animationName' in a && a.playState === 'running').length)).toBe(0);
+});
+
+test('a search that ends does not bring the rows it hid in as new ones', async ({ page }) => {
+  await portal(page, { many: true });
+  await page.goto('/s/a');
+  await expect(sidebar(page).getByRole('searchbox', { name: 'Search chats' })).toBeVisible();
+  await page.waitForTimeout(1500);
+  const search = sidebar(page).getByRole('searchbox', { name: 'Search chats' });
+  await search.fill('Fourth');
+  await expect(row(page, 'Extra chat 3')).toHaveCount(0);
+  await page.waitForTimeout(700);
+
+  const before = (await played(page)).length;
+  await search.fill('');
+  await expect(row(page, 'Extra chat 3')).toBeVisible();
+  await page.waitForTimeout(900);
+  expect((await played(page)).slice(before).filter((p) => p.on.includes('session-row'))).toEqual([]);
+});
+
+test("Settings' rail is not drawn in again when its search ends", async ({ page }) => {
+  await portal(page);
+  await page.goto('/s/a');
+  await sidebar(page).getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  // Past the dialog's own entrance, rail included.
+  await page.waitForTimeout(1500);
+  const search = page.getByRole('combobox', { name: 'Search settings' });
+  await search.fill('theme');
+  await expect(page.getByRole('listbox', { name: 'Settings found' })).toBeVisible();
+  await search.press('Escape');
+  await expect(page.locator('.rail-item').first()).toBeVisible();
+  expect(await page.evaluate(() => [...document.querySelectorAll('.rail-item')].flatMap((el) => el.getAnimations()).length)).toBe(0);
+});
+
+test("the Stop button of voice mode is there at once when a run starts, and the controls come in together when the stage does", async ({ page }) => {
+  // The voice fixture, as voice-windows has it; it does not start the animations itself.
+  await page.addInitScript(() => { (window as any).EventSource = class { close() {} }; });
+  await page.route('**/api/sessions/test/commands', (route) => route.fulfill({ json: { commands: [] } }));
+  await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
+  await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
+  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
+  await page.setViewportSize({ width: 1400, height: 860 });
+  await page.goto('/tests/voice.html');
+  await page.evaluate(() => { document.documentElement.dataset.motion = 'fancy'; });
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+  // As one: not a delay for each, which a button drawn later would wait through too.
+  expect(await page.locator('.voice-stage-controls').evaluate((el) => getComputedStyle(el).animationName)).toBe('fx-controls-in');
+
+  await page.getByRole('button', { name: 'Stream reply' }).click();
+  const stop = page.getByRole('button', { name: 'Stop the agent' });
+  await expect(stop).toBeVisible();
+  expect(await stop.evaluate((el) => [getComputedStyle(el).animationName, getComputedStyle(el).opacity])).toEqual(['none', '1']);
 });

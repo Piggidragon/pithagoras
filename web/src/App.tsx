@@ -432,13 +432,19 @@ function Shell({
   // chat is the same page: only its conversation goes. A chat that was
   // deleted dissolves, and the empty page it is left on for a moment does not.
   const main = useRef<HTMLElement>(null);
+  /** The chats the list had when it was last drawn. */
+  const knownIds = useRef(new Set<string>());
+  useEffect(() => {
+    knownIds.current = new Set(sessions.map((s) => s.id));
+  }, [sessions]);
   const pageKey = view === "chat" ? `chat:${active?.id ?? ""}` : view;
   const leaving = useRef<{ key: string; leave: ((how: Leave) => void) | null; how: Leave }>({ key: pageKey, leave: null, how: "page" });
   if (leaving.current.key !== pageKey) {
     const was = leaving.current.key;
     const page = main.current?.lastElementChild as HTMLElement | null | undefined;
     const chats = was.startsWith("chat:") && pageKey.startsWith("chat:");
-    const deleted = was.startsWith("chat:") && was !== "chat:" && !sessions.some((s) => s.id === was.slice(5));
+    // Gone from the list it was in: not one the list never has (an agent's or a routine's chat is opened by its address).
+    const deleted = was.startsWith("chat:") && knownIds.current.has(was.slice(5)) && !sessions.some((s) => s.id === was.slice(5));
     leaving.current = {
       key: pageKey,
       leave: was === "chat:" ? null : keep((chats && page?.querySelector<HTMLElement>("[data-transcript]")) || page || null),

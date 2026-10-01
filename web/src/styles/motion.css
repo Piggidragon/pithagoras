@@ -142,18 +142,18 @@
  * The last few messages come in one after another, from the bottom of the
  * window, whenever a chat has just loaded (Chat.tsx sets is-opening for
  * a second). Further up there is nothing to see in. */
-[data-motion="fancy"] .chat-list.is-opening > * { animation: fx-open .66s var(--spring) backwards; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(n+11) { animation: none; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(10) { animation-delay: 0ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(9) { animation-delay: 40ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(8) { animation-delay: 80ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(7) { animation-delay: 120ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(6) { animation-delay: 160ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(5) { animation-delay: 200ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(4) { animation-delay: 240ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(3) { animation-delay: 280ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(2) { animation-delay: 320ms; }
-[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(1) { animation-delay: 360ms; }
+[data-motion="fancy"] .chat-list.is-opening > :not(.chat-empty, .chat-enter) { animation: fx-open .66s var(--spring) backwards; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(n+11):not(.chat-empty, .chat-enter) { animation: none; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(10):not(.chat-empty, .chat-enter) { animation-delay: 0ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(9):not(.chat-empty, .chat-enter) { animation-delay: 40ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(8):not(.chat-empty, .chat-enter) { animation-delay: 80ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(7):not(.chat-empty, .chat-enter) { animation-delay: 120ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(6):not(.chat-empty, .chat-enter) { animation-delay: 160ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(5):not(.chat-empty, .chat-enter) { animation-delay: 200ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(4):not(.chat-empty, .chat-enter) { animation-delay: 240ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(3):not(.chat-empty, .chat-enter) { animation-delay: 280ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(2):not(.chat-empty, .chat-enter) { animation-delay: 320ms; }
+[data-motion="fancy"] .chat-list.is-opening > :nth-last-child(1):not(.chat-empty, .chat-enter) { animation-delay: 360ms; }
 @keyframes fx-open { from { opacity: 0; transform: translateY(46px) scale(.95); filter: blur(7px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
 /* The chat's name slides in from the side its row was on. */
 [data-motion="fancy"] .chat-title { animation: fx-title .6s var(--spring) backwards; }
@@ -190,9 +190,7 @@
 @keyframes fx-aside-left { from { translate: -90px 0; scale: .94; clip-path: inset(0 45% 0 0); } 50% { clip-path: inset(0); } to { translate: 0 0; scale: 1; clip-path: inset(0); } }
 @keyframes fx-aside-up { from { translate: 0 70px; scale: .93; clip-path: inset(40% 0 0 0); } 50% { clip-path: inset(0); } to { translate: 0 0; scale: 1; clip-path: inset(0); } }
 [data-motion="fancy"] .chat-aside-panel { animation: aside-panel-in .5s var(--ease-out) .1s backwards; }
-/* A panel on its way from one place to another (motion.ts `glide`): its own entrance is off while it flies. */
-[data-motion="fancy"] .chat-aside[data-flown], [data-motion="fancy"] .chat-aside[data-flown] .chat-aside-panel { animation: none; }
-/* And it is not cut off at the edge of the place it is going to, for the length of the move. */
+/* A panel on its way from one place to another (motion.ts `glide`) is not cut off at the edge of the place it is going to, for the length of the move. */
 [data-motion="fancy"] .chat-aside[data-flown] { overflow: visible; }
 /* A floating window lifted by its header casts a deeper shadow. */
 [data-motion="fancy"] body.is-carrying .chat-aside[data-dock="float"] { box-shadow: 0 30px 70px -18px #000a, 0 0 0 1px rgb(var(--accent) / .35); }
@@ -213,12 +211,12 @@
 [data-motion="fancy"] .settings-page > :nth-child(5) { animation-delay: 160ms; }
 [data-motion="fancy"] .settings-page > :nth-child(n+6) { animation-delay: 200ms; }
 @keyframes fx-settings-in { from { opacity: 0; transform: translateX(-34px); filter: blur(4px); } 40% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
-/* The rail's entries come after the dialog, from the left. */
-[data-motion="fancy"] .rail-item { animation: fx-rail-item .5s var(--spring) .18s backwards; }
-[data-motion="fancy"] .rail-item:nth-child(2) { animation-delay: .22s; }
-[data-motion="fancy"] .rail-item:nth-child(3) { animation-delay: .26s; }
-[data-motion="fancy"] .rail-item:nth-child(4) { animation-delay: .30s; }
-[data-motion="fancy"] .rail-item:nth-child(n+5) { animation-delay: .34s; }
+/* The rail's entries come after the dialog, from the left: while the dialog is new, not each time the rail is drawn again (a search ending). */
+[data-motion="fancy"] .is-fresh .rail-item { animation: fx-rail-item .5s var(--spring) .18s backwards; }
+[data-motion="fancy"] .is-fresh .rail-item:nth-child(2) { animation-delay: .22s; }
+[data-motion="fancy"] .is-fresh .rail-item:nth-child(3) { animation-delay: .26s; }
+[data-motion="fancy"] .is-fresh .rail-item:nth-child(4) { animation-delay: .30s; }
+[data-motion="fancy"] .is-fresh .rail-item:nth-child(n+5) { animation-delay: .34s; }
 @keyframes fx-rail-item { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: none; } }
 /* A switch's knob stretches under the finger and lands with a bounce. */
 [data-motion="fancy"] [role="switch"] > span { transition-duration: .3s; }
@@ -228,16 +226,14 @@
 [data-motion="fancy"] [role="radio"][aria-checked="true"] { animation: fx-toggle .5s var(--spring-loose); }
 [data-motion="fancy"] .setup-pane { animation-duration: .5s; animation-timing-function: var(--spring); }
 
-/* ── Voice mode: the stage blooms around the orb, and the orb comes up out of it ── */
+/* ── Voice mode: the stage blooms around the orb, and the orb comes up out of it ──
+ * The controls come up together, as one: a button that is drawn later (Stop, when a run starts) is not to wait for an entrance of its own. */
 [data-motion="fancy"] .voice-stage::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background: radial-gradient(circle at 50% 49%, rgb(var(--voice-hue) / .4), transparent 55%); animation: fx-bloom 1.3s var(--ease-out) both; }
 @keyframes fx-bloom { from { transform: scale(.15); opacity: 0; } 25% { opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
 [data-motion="fancy"] .voice-stage .voice-orb { animation: fx-orb-in 1s var(--spring-loose) backwards; }
 @keyframes fx-orb-in { from { scale: .2; opacity: 0; filter: blur(10px); } 35% { filter: blur(0); } to { scale: 1; opacity: 1; filter: none; } }
-[data-motion="fancy"] .voice-stage-action { animation: fx-pop-in .6s var(--spring-loose) .35s backwards; }
-[data-motion="fancy"] .voice-stage-action:nth-child(2) { animation-delay: .43s; }
-[data-motion="fancy"] .voice-stage-action:nth-child(3) { animation-delay: .51s; }
-[data-motion="fancy"] .voice-stage-action:nth-child(n+4) { animation-delay: .59s; }
-@keyframes fx-pop-in { from { transform: scale(.2); opacity: 0; } to { transform: none; opacity: 1; } }
+[data-motion="fancy"] .voice-stage-controls { animation: fx-controls-in .7s var(--spring-loose) .35s backwards; }
+@keyframes fx-controls-in { from { scale: .3; opacity: 0; } to { scale: 1; opacity: 1; } }
 [data-motion="fancy"] .voice-stage-header { animation: fx-item-in .6s var(--ease-out) .5s backwards; }
 /* The windows that open on the stage overshoot into place; where they sit still moves as it did. */
 [data-motion="fancy"] .voice-browser-window, [data-motion="fancy"] .voice-terminal-window, [data-motion="fancy"] .voice-files-window {

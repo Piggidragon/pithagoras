@@ -39,6 +39,12 @@ export function Modal({
   const [inRail, setInRail] = useState(startInRail);
   // Closed, it sinks away as a picture of itself (see motion.ts).
   const leaving = useLeaveRef<HTMLDivElement>("dialog");
+  // Only for its first moment, so that what comes in with it (the rail's lines) does not come in again when it is drawn again.
+  const [fresh, setFresh] = useState(true);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setFresh(false), 1000);
+    return () => window.clearTimeout(timer);
+  }, []);
   useEffect(() => {
     // Not the Escape that takes back an input method's word in one of its fields.
     const onKey = (e: KeyboardEvent) => isEscape(e) && onClose();
@@ -62,7 +68,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === "string" ? title : undefined}
-        className={`ui-dialog flex max-h-[94dvh] w-full sm:max-h-[88vh] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
+        className={`ui-dialog${fresh ? " is-fresh" : ""} flex max-h-[94dvh] w-full sm:max-h-[88vh] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
           // Grows with the viewport rather than to it: the rail plus a settings
           // form has a comfortable width, and a 34-inch screen should not
           // stretch a two-column form across all of it.

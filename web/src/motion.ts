@@ -50,13 +50,16 @@ function sync(): void {
  * ones that go on for ever are left going.
  */
 function finishRestarted(): void {
-  for (const a of document.getAnimations()) {
-    if (!("animationName" in a) || !Number.isFinite(a.effect?.getComputedTiming().iterations ?? Infinity)) continue;
-    try {
-      a.finish();
-    } catch {
-      // Already at its end.
-    }
+  for (const a of document.getAnimations()) if ("animationName" in a) finishQuietly(a);
+}
+
+/** An animation taken to its end, unless it goes on for ever. */
+function finishQuietly(a: Animation): void {
+  if (!Number.isFinite(a.effect?.getComputedTiming().iterations ?? Infinity)) return;
+  try {
+    a.finish();
+  } catch {
+    // Already at its end.
   }
 }
 
@@ -152,6 +155,8 @@ function scrub(copy: HTMLElement): void {
 export interface Picture {
   frame: HTMLElement;
   el: HTMLElement;
+  /** Where the boxes in the copy that scroll were scrolled to: a copy starts at the top, and cannot be moved before it is on the page. */
+  scrolled: [HTMLElement, number, number][];
 }
 
 /**
@@ -164,6 +169,10 @@ export function picture(source: HTMLElement | null, clip?: HTMLElement | null): 
   const rect = source.getBoundingClientRect();
   if (rect.width < 1 || rect.height < 1) return null;
   const el = source.cloneNode(true) as HTMLElement;
+  // Read before the copy is scrubbed: the two are alike now, element for element.
+  const scrolled: Picture["scrolled"] = [];
+  const was = [source, ...source.querySelectorAll<HTMLElement>("*")], now = [el, ...el.querySelectorAll<HTMLElement>("*")];
+  was.forEach((from, i) => from.scrollTop || from.scrollLeft ? scrolled.push([now[i], from.scrollTop, from.scrollLeft]) : undefined);
   scrub(el);
   const bounds = clip ? clip.getBoundingClientRect() : new DOMRect(0, 0, innerWidth, innerHeight);
   const frame = document.createElement("div");
@@ -182,7 +191,7 @@ export function picture(source: HTMLElement | null, clip?: HTMLElement | null): 
     animation: "none", transition: "none", pointerEvents: "none",
   });
   frame.append(el);
-  return { frame, el };
+  return { frame, el, scrolled };
 }
 
 /** Puts a picture on the page and plays it out. */
@@ -192,6 +201,11 @@ export function out(shot: Picture | null, how: Leave, delay = 0): void {
   for (const old of ghosts) if (ghosts.size >= MAX_GHOSTS) { old.remove(); ghosts.delete(old); }
   document.body.append(frame);
   ghosts.add(frame);
+  // Where what scrolls was: the end of a conversation, not its start.
+  for (const [box, top, left] of shot.scrolled) {
+    box.scrollTop = top;
+    box.scrollLeft = left;
+  }
   const done = () => {
     frame.remove();
     ghosts.delete(frame);
@@ -250,12 +264,17 @@ export function useLeaveRef<T extends HTMLElement>(how: Leave | (() => Leave | n
 /**
  * A panel carried from one place to another: it goes from where it was to
  * where it now is as one move, over the page, not out of one place and into
- * the other. Measured from `from`, which was taken before the change. What
- * is in `hold` has the entrance of its own taken off for the while.
+ * the other. Measured from `from`, which was taken before the change. What is
+ * in `hold` has the entrance it has just been given taken to its end first, so
+ * that it is measured where it will rest, and is not cut off at its edge while
+ * the panel is on its way.
  */
 export function glide(el: HTMLElement, from: DOMRect, hold: HTMLElement[] = []): void {
   if (!fancy() || typeof el.animate !== "function") return;
-  for (const h of hold) h.setAttribute("data-flown", "");
+  for (const h of hold) {
+    for (const a of h.getAnimations({ subtree: true })) if ("animationName" in a) finishQuietly(a);
+    h.setAttribute("data-flown", "");
+  }
   const to = el.getBoundingClientRect();
   const done = () => hold.forEach((h) => h.removeAttribute("data-flown"));
   if (to.width < 1 || to.height < 1 || from.width < 1 || from.height < 1) return done();
@@ -346,7 +365,7 @@ function reflow(box: HTMLElement, attr: string, before: Map<string, number>, now
  */
 export function useFlip<T extends HTMLElement>(order: string, quiet = false, entering = true): RefObject<T> {
   const box = useRef<T>(null);
-  const last = useRef<{ order: string; spots: Map<string, number> } | null>(null);
+  const last = useRef<{ order: string; quiet: boolean; spots: Map<string, number> } | null>(null);
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -354,8 +373,9 @@ export function useFlip<T extends HTMLElement>(order: string, quiet = false, ent
     if (!fancy()) return void (last.current = null);
     const spots = spotsOf(el, "data-flip", true);
     const before = last.current;
-    last.current = { order, spots };
-    if (before && before.order !== order && !quiet) reflow(el, "data-flip", before.spots, spots, entering);
+    last.current = { order, quiet, spots };
+    // Not in the draw in which a search ends either: the rows it had hidden are back, not new.
+    if (before && before.order !== order && !quiet && !before.quiet) reflow(el, "data-flip", before.spots, spots, entering);
   });
   return box;
 }
