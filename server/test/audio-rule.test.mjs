@@ -431,3 +431,39 @@ test("with VOICE_RESPONSE_INSTRUCTIONS=false saved speaking instructions are not
     saveInstructions(undefined);
   }
 });
+
+test("a prompt that could not be built again with new instructions keeps the earlier ones", async () => {
+  saveInstructions("First wording.");
+  const client = await open();
+  let release;
+  const activate = client.activate;
+  const errors = console.error;
+  try {
+    assert.ok((await say(client, "Spoken", true)).includes(audioSystemRule("First wording.")));
+    hold = new Promise((resolve) => { release = resolve; });
+    const before = sent.length;
+    const done = settled(client);
+    await client.prompt("Typed, and slow");
+    await until(() => sent.length > before, "the first request");
+    saveInstructions("Second wording.");
+    client.activate = () => { throw new Error("an extension failed to load"); };
+    console.error = () => {};
+    await client.prompt("Spoken meanwhile", { voice: true });
+    hold = undefined;
+    release();
+    await done;
+    assert.equal(sent.length, before + 2, "one run, two answers");
+    // Not spoken to without any rules: the turn after it still has the first wording.
+    assert.ok(sent[before + 1].includes(audioSystemRule("First wording.")));
+    // And the next spoken message tries again.
+    client.activate = activate;
+    assert.ok((await say(client, "Spoken once more", true)).includes(audioSystemRule("Second wording.")));
+  } finally {
+    console.error = errors;
+    hold = undefined;
+    release?.();
+    client.activate = activate;
+    client.dispose();
+    saveInstructions(undefined);
+  }
+});

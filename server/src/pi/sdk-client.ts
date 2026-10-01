@@ -810,8 +810,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private sayAudioRule(spoken: boolean): boolean {
     if (!spoken || !this.audioRule?.set(true)) return false;
     if (this.buildPromptAgain()) return true;
-    // Off again, so the next spoken message tries once more.
-    this.audioRule.set(false);
+    // As it was, so the next spoken message tries once more.
+    this.audioRule.undo();
     return false;
   }
 

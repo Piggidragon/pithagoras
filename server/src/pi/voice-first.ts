@@ -53,6 +53,8 @@ export class AudioRule {
   private said = '';
   /** What it said before, for a prompt built then that is still around: see into. */
   private readonly past = new Set<string>();
+  /** What it said before the last change. */
+  private before = '';
   constructor(private readonly saved: () => unknown = () => undefined) {}
   lines(): string[] { return this.said ? [this.said] : []; }
   /** Whether that changed what it says. */
@@ -60,8 +62,18 @@ export class AudioRule {
     const next = on && voiceRulesOn() ? audioSystemRule(voiceInstructions(this.saved())) : '';
     if (next === this.said) return false;
     if (this.said) this.past.add(this.said);
+    this.before = this.said;
     this.said = next;
     return true;
+  }
+  /**
+   * What it said before the last change, again: for a change the prompt could
+   * not be built with, which leaves pi's prompt as it was — with the earlier
+   * wording where there was one, not with none.
+   */
+  undo(): void {
+    if (this.said) this.past.add(this.said);
+    this.said = this.before;
   }
   /**
    * `prompt` as it should be now: with the rule, after `after` where it holds

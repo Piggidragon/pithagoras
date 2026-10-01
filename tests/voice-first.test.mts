@@ -155,3 +155,22 @@ test('VOICE_RESPONSE_INSTRUCTIONS=false switches the rule off whatever is saved'
   else process.env.VOICE_RESPONSE_INSTRUCTIONS=previous;
  }
 });
+test('a change the prompt could not be built with goes back to what the rule said, not to off', () => {
+ let saved = 'First wording.';
+ const rule = new AudioRule(() => saved);
+ rule.set(true);
+ const first = audioSystemRule('First wording.');
+ saved = 'Second wording.';
+ assert.equal(rule.set(true), true);
+ rule.undo();
+ assert.deepEqual(rule.lines(), [first], 'pi\'s prompt still has the first wording');
+ assert.equal(rule.into(`Base\n\nAppended\n\n${first}`, 'Appended'), `Base\n\nAppended\n\n${first}`);
+ assert.equal(rule.set(true), true, 'the next spoken message tries again');
+ assert.deepEqual(rule.lines(), [audioSystemRule('Second wording.')]);
+ // Turned on for the first time, it goes back to off.
+ const fresh = new AudioRule();
+ fresh.set(true);
+ fresh.undo();
+ assert.deepEqual(fresh.lines(), []);
+ assert.equal(fresh.set(true), true);
+});

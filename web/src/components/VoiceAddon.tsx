@@ -33,6 +33,8 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const update = (patch: Partial<VoiceConfig>) => { setConfig({ ...config, ...patch }); setSaved(false); };
   const instructions = config.responseInstructions ?? "";
   const builtIn = config.defaultResponseInstructions ?? "";
+  // Text that is still the built-in one this page was given is sent as nothing: the portal may have been updated since, and its newer text is then the one to follow.
+  const toSave = () => instructions.trim() === builtIn.trim() ? { ...config, responseInstructions: "" } : config;
   const chatterbox = config.runtime === "chatterbox";
   const languages = chatterbox ? INPUT_LANGUAGES.filter(([code]) => CHATTERBOX_LANGUAGES.includes(code)) : INPUT_LANGUAGES;
   // Switching runtime must not leave a language the runtime will refuse on save.
@@ -111,7 +113,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     </details>
     <div className="sticky -bottom-4 z-10 -mx-5 !-mb-4 flex justify-end border-t border-line bg-raised px-5 pt-3 pb-7">
     <button disabled={busy} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-black disabled:opacity-40" onClick={async () => {
-      setBusy(true); try { setConfig(await api.setVoice(config)); setSaved(true); window.dispatchEvent(new Event('voice-config-changed')); } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+      setBusy(true); try { setConfig(await api.setVoice(toSave())); setSaved(true); window.dispatchEvent(new Event('voice-config-changed')); } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
     }}>{busy ? t("Saving…") : saved ? t("Saved") : t("Save voice settings")}</button>
     </div>
   </div>;

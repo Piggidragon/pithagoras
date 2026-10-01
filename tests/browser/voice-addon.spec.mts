@@ -74,6 +74,7 @@ test('speaking instructions show the built-in text, save an edit and reset to th
  await save.click();
  await expect(saved).toBeVisible();
  expect(puts).toHaveLength(2);
+ expect(puts[1].responseInstructions).toBe('');
  expect(config.responseInstructions).toBe('');
  // Emptied to write a new text, it stays empty while being written, and is the built-in text once saved.
  await text.fill('');
@@ -97,4 +98,35 @@ test('speaking instructions say when the portal is set to send none',async({page
  await page.locator('summary').filter({hasText:'Speaking instructions'}).click();
  await expect(page.getByRole('status').filter({hasText:'VOICE_RESPONSE_INSTRUCTIONS=false'})).toBeVisible();
  await expect(page.getByRole('textbox',{name:'Speaking instructions'})).toHaveValue('Kept text.');
+});
+
+test('saving other voice settings does not pin the built-in text of an older portal',async({page})=>{
+ // The portal is updated, with new built-in text, while this page is open.
+ let builtIn='Built-in text before the update.';
+ let config:any={enabled:true,whisperUrl:'http://localhost:8188/inference',breezeUrl:'http://localhost:7862/v1/audio/speech',instruction:'Clear speech',voice:'aria',runtime:'audio-cpp',responseInstructions:''};
+ const puts:any[]=[];
+ const shown=()=>({...config,responseInstructions:config.responseInstructions||builtIn,defaultResponseInstructions:builtIn,responseInstructionsOff:false});
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'running',busy:false}}));
+ await page.route('**/api/voice',async r=>{
+  if(r.request().method()==='PUT'){const body=r.request().postDataJSON();puts.push(body);config={...body,responseInstructions:body.responseInstructions.trim()===builtIn?'':body.responseInstructions.trim()};}
+  return r.fulfill({json:shown()});
+ });
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Speaking instructions'}).click();
+ const text=page.getByRole('textbox',{name:'Speaking instructions'});
+ await expect(text).toHaveValue('Built-in text before the update.');
+ builtIn='Built-in text after the update.';
+ await page.locator('summary').filter({hasText:'Speech detection'}).click();
+ await page.getByRole('slider',{name:/End-of-turn silence/}).fill('500');
+ await page.getByRole('button',{name:'Save voice settings'}).click();
+ await expect(page.getByRole('button',{name:'Saved',exact:true})).toBeVisible();
+ expect(puts[0].responseInstructions).toBe('');
+ expect(config.responseInstructions).toBe('');
+ await expect(text).toHaveValue('Built-in text after the update.');
+ // A text of the user's own is saved as it is.
+ await text.fill('Answer in one word.');
+ await page.getByRole('button',{name:'Save voice settings'}).click();
+ await expect(page.getByRole('button',{name:'Saved',exact:true})).toBeVisible();
+ expect(puts[1].responseInstructions).toBe('Answer in one word.');
 });
