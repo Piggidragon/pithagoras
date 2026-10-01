@@ -1,5 +1,5 @@
 import express, { type Router } from "express";
-import { extensionStash, getSession, sessionSubagentModel, setExtensionStash, setSessionSubagentModel } from "../db.js";
+import { getSession, packageRemoved, sessionSubagentModel, setSessionSubagentModel } from "../db.js";
 import {
   SUBAGENT_MAX_PARALLEL,
   UNDERSTORY,
@@ -215,19 +215,7 @@ export function featuresRouter(): Router {
         // to `pi remove` as it is, pi reads it from where the portal runs.
         const local = !/^(npm|git|https?):/.test(state.source);
         await pi(["remove", local ? localPackagePath(state.source) : state.source]);
-        // What was kept aside for switching it back on has nothing left to go
-        // to — dropped in turn with the other switches, which read and write it too.
-        const source = state.source;
-        await updatePiSettings(
-          () => {},
-          () => {
-            const stash = extensionStash();
-            if (source in stash) {
-              delete stash[source];
-              setExtensionStash(stash);
-            }
-          },
-        );
+        await packageRemoved(state.source);
       }
       // The mode changes what the tool tells the model, which it reads when it is loaded.
       const { reloaded, waiting } = await sessions.reloadIdle();

@@ -66,6 +66,9 @@ an empty field inherits, and clearing one hands the setting back.
 | `GIT_SSH_COMMAND` | `ssh -o BatchMode=yes` | What the Git panel's fetch, pull and push run ssh with. |
 | `LLAMA_DISK_CACHE_MODELS` | — | Comma-separated model names whose llama.cpp prompt cache is kept on disk between chats. |
 | `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume holding that Understory's memory. |
+| `VOICE_GPU` | — | The GPU index the managed voice container uses, as `nvidia-smi` lists them, where no GPU is chosen on the page (which wins). Empty: the card with the most free memory. See [Docker add-ons](/guide/add-ons#engines-and-gpu-memory). |
+| `VOICE_VRAM_RESERVE_MIB` | — | GPU memory in MiB the voice installer keeps free on its card for something else. |
+| `NVIDIA_SMI` | `nvidia-smi` | The binary the voice installer reads the GPUs with, for a native portal where it is not on `PATH`. |
 
 The Browser add-on's `BROWSER_*` variables are in [Docker add-ons](/guide/add-ons), and the `VOICE_*` ones in [Voice control](/guide/voice).
 

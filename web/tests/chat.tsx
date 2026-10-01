@@ -1,10 +1,11 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted to see each state,
+// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted|turns to see each state,
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { Chat } from '../src/components/Chat';
+import { ConfirmHost } from '../src/components/ConfirmDialog';
 import { fillFrom } from '../src/editor-fills';
 import { Select } from '../src/components/Select';
 import type { PortalEvent, Session } from '../src/api';
@@ -64,6 +65,15 @@ if (phase === 'args') events.push(
   ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'pgvector is enough below ten million vectors; both open issues are UI polish.' }] } }, 10),
   ev('agent_end', {}, 9),
 );
+// Two more questions, each answered in a run of its own as pi reports it: the answer to the first keeps its Copy after the second is asked.
+const asked = (message: string, answer: string, ago: number) => [
+  ev('portal_prompt', { message }, ago),
+  ev('agent_start', {}, ago),
+  ev('message_start', { message: { role: 'user', content: [{ type: 'text', text: message }] } }, ago),
+  ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: answer }] } }, ago - 1),
+  ev('agent_end', {}, ago - 1),
+];
+if (phase === 'turns') events.push(...asked('Which database?', 'pgvector is enough for now.', 20), ...asked('And the cache?', 'Redis is fine for the cache.', 10));
 // A model that thinks a few words and a model that thinks a lot, fast: `window.think(text)` adds reasoning as it streams.
 if (phase === 'brief') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'Short one.' } }, 1));
 // A reply being written under a conversation long enough to scroll: `window.say(text)` adds to it as it streams.
@@ -247,4 +257,4 @@ function Fixture() {
   </div>;
 }
 // Inside a router, as in the app: the chat's links go through it.
-createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /></BrowserRouter>);
+createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /><ConfirmHost /></BrowserRouter>);

@@ -67,8 +67,10 @@ you trust.
 Opened from the Providers page (**Setup assistant**), and offered on its own,
 once, when the portal has no model to talk to. It takes three steps — where the
 models come from, what new chats start with (model and effort), and what the
-agent can do besides, with a shortlist of packages. **Skip for now** dismisses it
-in this browser; everything can be changed later in Settings.
+agent can do besides, with a shortlist of packages. **Back** returns to the step
+before, and **Set up later** dismisses it in this browser; everything can be
+changed later in Settings, and **Setup assistant** on the Providers page opens
+it again.
 
 ## Defaults
 

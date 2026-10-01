@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import type { Host, VoiceChoice } from "../../server/src/voice-engines";
 import type { OrbStyle } from "../../server/src/orb-style";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -129,9 +130,22 @@ export interface Project {
   isGit: boolean;
   /** Whether the folder has an AGENTS.md — the project's instructions. */
   hasInstructions: boolean;
+  /** Whether the project switches tools differently from the portal-wide default. */
+  hasTools?: boolean;
   /** How many chats work in it, and when one last moved. */
   sessions: number;
   lastActive: string | null;
+}
+
+/** What a delete would lose that only the folder holds: nothing else has a copy of these. */
+export interface Unsaved {
+  /** Changes that are not committed. */
+  changed: number;
+  /** Commits that no remote has. */
+  unpushed: number;
+  stashes: number;
+  /** Not everything could be read, so there may be more than this says. */
+  unknown?: true;
 }
 
 /** What deleting a project would take with it. */
@@ -142,6 +156,8 @@ export interface ProjectContents extends Project {
   complete: boolean;
   /** The routines that run here and are on, by name. Deleting the project switches them off. */
   routines?: string[];
+  /** Set when the folder is a git repository: what only the folder holds, and so what deleting it loses. */
+  unsaved?: Unsaved;
 }
 
 export interface CompactionSettings {
@@ -233,8 +249,22 @@ export async function json<T>(url: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
   if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(body.error || `HTTP ${res.status}`, res.status, body);
+  }
   return res.json();
+}
+
+/** A request the server refused, with what it said besides the message: some refusals carry what to ask next. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: Record<string, unknown>;
+  constructor(message: string, status: number, body: Record<string, unknown>) {
+    super(message);
+    this.status = status;
+    this.body = body;
+  }
 }
 
 export const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
@@ -243,13 +273,20 @@ export interface VoiceConfig {
   ttsPrefetch?: boolean;
   comparison?: boolean;
   statusSpeech?: boolean;
+  // The speaking instructions in use, the built-in ones to go back to, and whether the portal sends none at all.
+  responseInstructions?: string;
+  defaultResponseInstructions?: string;
+  responseInstructionsOff?: boolean;
   pipelineMode?: "parallel" | "sequential";
+  // False with no speech synthesis (runtime "none"): the page can listen, but replies are not spoken.
+  speech?: boolean;
   vad?: typeof DEFAULT_VAD;
-  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox"; sttModel?: string; exaggeration?: number;
+  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "none"; sttModel?: string; exaggeration?: number;
 }
 
-export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; }
-export interface VoiceGpu { index: number; uuid: string; name: string; totalMiB: number; usedMiB: number; }
+export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; }
+/** The GPUs the voice container can use, as nvidia-smi reports them, and the combination that fits the one it would take. */
+export interface VoiceHardware { gpus: { index: number; uuid?: string; name: string; totalMiB: number | null; freeMiB: number | null }[]; source: string; error: string; /** False while nothing could be asked yet, so that no GPU is not yet the same as none. */ checked: boolean; /** The check found there is no GPU: what is suggested is speech recognition alone, on the CPU. */ cpuOnly: boolean; /** Cards the host lists that Docker cannot hand to a container: for voice there are none. */ unusable?: string[]; /** What recognition on the CPU has to run on. */ host: Host; selected: number | null; /** The UUID of the GPU chosen on the page, empty where none is, or the one chosen is no longer there. */ chosen: string; reserveMiB: number; suggestion: VoiceChoice; }
 export const api = {
   listFiles: (sessionId: string, dir: string) =>
     json<{ path: string; entries: FileEntry[]; truncated: boolean }>(
@@ -296,17 +333,22 @@ export const api = {
     if (!res.ok) throw new Error(body.error || t("Could not upload {name} ({status})", { name, status: res.status }));
     return body;
   },
-  deleteFile: (sessionId: string, file: string) =>
-    json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}`, { method: "DELETE" }),
+  /** What deleting `file` would lose that nothing else has (see Unsaved), null for nothing. */
+  fileUnsaved: (sessionId: string, file: string) =>
+    json<{ unsaved: Unsaved | null }>(`/api/sessions/${sessionId}/unsaved?path=${encodeURIComponent(file)}`),
+  /** `discard` says that git work in a folder, which nothing else has, may go with it; without it the server refuses, with code "unsaved-work". */
+  deleteFile: (sessionId: string, file: string, discard = false) =>
+    json<{ ok: true }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}${discard ? "&discard=1" : ""}`, { method: "DELETE" }),
   fileDownloadUrl: (sessionId: string, file: string) =>
     `/api/sessions/${sessionId}/file?path=${encodeURIComponent(file)}&download=1`,
   /** The whole folder, or a folder in it. */
   archiveDownloadUrl: (sessionId: string, dir = "") =>
     `/api/sessions/${sessionId}/archive${dir ? `?path=${encodeURIComponent(dir)}` : ""}`,
   voiceInstallStatus: () => json<VoiceInstallStatus>('/api/voice/install'),
-  voiceAction: (action: 'install' | 'start' | 'stop') => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST'}),
+  // `choice` is for install: the engines to build for. Without it an install keeps what is installed, or picks for the GPU.
+  voiceAction: (action: 'install' | 'start' | 'stop', choice?: VoiceChoice) => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST', ...(choice ? {body: JSON.stringify(choice)} : {})}),
+  voiceHardware: () => json<VoiceHardware>('/api/voice/hardware'),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
-  voiceGpus: () => json<{ gpus: VoiceGpu[]; selected: string }>('/api/voice/gpus'),
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
@@ -327,8 +369,12 @@ export const api = {
   projects: () => json<{ root: string; home: string; projects: Project[] }>("/api/projects"),
   /** Only where Home is and which projects there are, without their counts: see /api/projects. */
   places: () => json<{ root: string; home: string; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
-  createProject: (name: string, instructions?: string) =>
-    json<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name, instructions }) }),
+  /** `toolsOff`: the tools its chats start with off, as for setProjectTools. `toolsError` says the project was made without them. */
+  createProject: (name: string, instructions?: string, toolsOff?: string[]) =>
+    json<Project & { toolsError?: string }>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ name, instructions, toolsOff }),
+    }),
   projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),
   projectInstructions: (name: string) =>
     json<{ text: string }>(`/api/projects/${encodeURIComponent(name)}/instructions`),
@@ -337,8 +383,22 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ text }),
     }),
-  deleteProject: (name: string) =>
-    json<{ ok: true; sessionsDeleted: number }>(`/api/projects/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  /** What chats in the project start with: the same list as a chat's, `live` always false. */
+  projectTools: (name: string) =>
+    json<{ tools: PortalTool[]; live: boolean; off: string[]; names: Record<string, string> }>(
+      `/api/projects/${encodeURIComponent(name)}/tools`
+    ),
+  /** Switch tools off for the project's chats by name; everything not named is on. */
+  setProjectTools: (name: string, off: string[]) =>
+    json<{ off: string[]; applied: number }>(`/api/projects/${encodeURIComponent(name)}/tools`, {
+      method: "PUT",
+      body: JSON.stringify({ off }),
+    }),
+  /** `discard` says that unsaved work in the folder (see ProjectContents) may go with it; without it the server refuses. */
+  deleteProject: (name: string, discard = false) =>
+    json<{ ok: true; sessionsDeleted: number }>(`/api/projects/${encodeURIComponent(name)}${discard ? "?discard=1" : ""}`, {
+      method: "DELETE",
+    }),
   renameSession: (id: string, title: string) =>
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
@@ -571,6 +631,8 @@ export const api = {
     }),
 
   audit: (limit = 200) => json<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
+  /** Up to and including `through`, the newest entry the caller has seen. */
+  clearAudit: (through: number) => json<{ removed: number }>(`/api/audit?through=${through}`, { method: "DELETE" }),
   toolRules: () => json<{ rules: ToolRule[] }>("/api/tool-rules"),
   addToolRule: (rule: {
     role: string;
@@ -1067,7 +1129,7 @@ export interface ToolRule {
 export interface AuditEntry {
   id: number;
   at: string;
-  kind: "refused" | "allowed-by-rule" | "allowed-by-approval" | "stranger" | "answered" | string;
+  kind: "refused" | "allowed-by-rule" | "allowed-by-approval" | "stranger" | "answered" | "cleared" | string;
   tool: string;
   subject: string;
   reason: string;

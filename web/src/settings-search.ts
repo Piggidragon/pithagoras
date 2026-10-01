@@ -42,6 +42,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "browser", section: msg("Appearance"), title: msg("Theme"), words: "dark light mode appearance colour color design dunkel hell" },
   { tab: "browser", section: msg("Language"), title: msg("Language"), words: "language locale translation german english deutsch englisch sprache übersetzung" },
   { tab: "browser", section: msg("Notifications"), title: msg("Notifications"), words: "notify alert done finished benachrichtigung" },
+  { tab: "browser", section: msg("Command character"), title: msg("Command character"), words: "command trigger prefix slash palette skill start type befehl zeichen auslöser schrägstrich" },
   { tab: "browser", section: msg("Confirmations"), title: msg("Ask before deleting"), words: "confirm delete question prompt bestätigen löschen" },
   { tab: "browser", section: msg("Signed in"), title: msg("Sign out"), words: "logout log out password session abmelden" },
   { tab: "add-ons", title: msg("Add-ons"), words: "portal addon optional voice browser terminal" },

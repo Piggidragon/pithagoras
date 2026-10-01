@@ -182,7 +182,7 @@ test('with no model yet, the setup assistant walks through provider, model and p
   await expect(setup.getByText('pi-web-access')).toBeVisible();
 
   // Skipped, it stays away after a reload.
-  await setup.getByRole('button', { name: 'Skip for now' }).click();
+  await setup.getByRole('button', { name: 'Set up later' }).click();
   await expect(setup).toBeHidden();
   await page.reload();
   await page.waitForTimeout(2000);
@@ -208,6 +208,59 @@ test('with models, the assistant saves the model and effort, then offers package
   await expect.poll(() => api.installed()).toEqual(['npm:pi-subagents']);
   await setup.getByRole('button', { name: 'Done' }).click();
   await expect(setup).toBeHidden();
+});
+
+test('Back leads to the step before on every step after the first, and leaving says where the assistant is found again', async ({ page }) => {
+  await portal(page);
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Setup assistant' }).click();
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  const current = setup.locator('.setup-step[aria-current="step"]');
+  // Said where every device shows it, whichever way the assistant is left.
+  await expect(setup.getByText('Settings → Providers opens this assistant again.')).toBeInViewport({ ratio: 1 });
+  // The first step has nothing before it: what leaves is named for what it does, not as a skip.
+  await expect(current).toContainText('1. Provider');
+  await expect(setup.getByRole('button', { name: 'Back' })).toHaveCount(0);
+  await expect(setup.getByRole('button', { name: 'Set up later' })).toBeVisible();
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(current).toContainText('2. Model');
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(current).toContainText('3. Agent');
+  await setup.getByRole('button', { name: 'Back' }).click();
+  await expect(current).toContainText('2. Model');
+  await setup.getByRole('button', { name: 'Back' }).click();
+  await expect(current).toContainText('1. Provider');
+});
+
+test('on a phone the way forward stays at the right of the assistant, away from the way back', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await portal(page);
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Setup assistant' }).click();
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  const later = (await setup.getByRole('button', { name: 'Set up later' }).boundingBox())!;
+  const next = (await setup.getByRole('button', { name: 'Next' }).boundingBox())!;
+  const later2next = next.x - (later.x + later.width);
+  expect(later2next).toBeGreaterThan(100);
+  // Where it is found again is said in full, not cut off as the one-line subtitle would.
+  const hint = setup.getByText('Settings → Providers opens this assistant again.');
+  expect(await hint.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+  await expect(hint).toBeInViewport({ ratio: 1 });
+});
+
+test('while the model saves, Back and the choice wait: the save would land on the step before, or miss the change', async ({ page }) => {
+  const api = await portal(page, { settingsSaveDelay: () => 800 });
+  await page.goto('/settings/models');
+  await page.getByRole('button', { name: 'Setup assistant' }).click();
+  const setup = page.getByRole('dialog', { name: 'Set up Pithagoras' });
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.getByLabel('Model for new chats')).toContainText('Ornith 1.5');
+  await setup.getByRole('button', { name: 'Next' }).click();
+  await expect(setup.getByRole('button', { name: 'Back' })).toBeDisabled();
+  await expect(setup.getByLabel('Model for new chats')).toBeDisabled();
+  await expect(setup.locator('.setup-step[aria-current="step"]')).toContainText('3. Agent');
+  await expect(setup.getByRole('button', { name: 'Back' })).toBeEnabled();
+  expect(api.settingsSaves).toHaveLength(1);
 });
 
 test('a stored model no one offers any more is not kept: the assistant offers one that is, and saves it', async ({ page }) => {

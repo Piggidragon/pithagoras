@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { forgetPerson, getPerson, listPeople, setRole, type Role } from "../people.js";
-import { AUDIT_KEEP, addToolRule, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
+import { AUDIT_KEEP, addToolRule, clearAudit, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
 import { nanoid } from "nanoid";
 
 /**
@@ -60,6 +60,20 @@ export function peopleRouter(): Router {
         person_name: e.person_key ? (people.get(e.person_key) ?? e.person_key) : null,
       })),
     });
+  });
+
+  /**
+   * Wipes the history, up to `?through=<id>` when given: the web sends the
+   * newest entry it showed, so a decision recorded while the question was open
+   * survives. A `through` that is not an id is refused rather than read as
+   * "everything". The web asks first; here it is the caller's word.
+   */
+  router.delete("/audit", (req, res) => {
+    const through = req.query.through;
+    if (through !== undefined && !(typeof through === "string" && /^\d+$/.test(through))) {
+      return res.status(400).json({ error: "through must be an entry id" });
+    }
+    res.json({ removed: clearAudit(through === undefined ? undefined : Number(through)) });
   });
 
   /** Exceptions: what a non-primary role is allowed to run despite the default. */

@@ -11,7 +11,7 @@ import { useBackground } from "../use-background";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
-import { displaySpeechText } from "../voice";
+import { assistantText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
 import { DictationButton, DictationStrip } from "./Dictation";
@@ -24,12 +24,13 @@ import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
-import { activity, buildTranscript, lastReplyId, type Item, type SentImage } from "../transcript";
+import { activity, buildTranscript, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { confirmDialog } from "./ConfirmDialog";
-import { moveHighlight, paletteMatches, slashToken } from "../slash-palette";
+import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
+import { useCommandTrigger } from "../command-trigger";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
 import { GIT_TABS, GitPanel, type GitTab } from "./git/GitPanel";
@@ -39,7 +40,7 @@ import { caretFrom, drafts, withUnsent } from "../drafts";
 import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
 import { copyText } from "../clipboard";
-import { isClientCommand, isCommand } from "../client-commands";
+import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
 import { msg, t, tp } from "../i18n";
@@ -724,7 +725,6 @@ export function Chat({
     }
     return undefined;
   }, [items]);
-  const lastReply = useMemo(() => lastReplyId(items), [items]);
   // A switch to another version, by the message clicked: until the chat has
   // loaded again without it, a second click would ask about a message that is
   // on its way out, and fail after the first had worked.
@@ -906,11 +906,13 @@ export function Chat({
   // Commands come from pi at runtime, so anything a newly installed package
   // registers shows up here without the portal knowing about it in advance.
   //
-  // Asked for only once a "/" is typed. Listing them starts pi for the chat,
-  // and it stays up — so fetching them on open started a runtime for every chat
-  // looked at, which the config route goes out of its way not to do.
+  // Asked for only once the command character is typed. Listing them starts pi
+  // for the chat, and it stays up — so fetching them on open started a runtime
+  // for every chat looked at, which the config route goes out of its way not to do.
   const [commands, setCommands] = useState<PiCommand[]>([]);
   const commandList = useRef<{ key: string; list: Promise<PiCommand[]> } | null>(null);
+  /** Per chat, a send that is waiting for the command list, which what is sent after it queues behind. */
+  const held = useRef(new Map<string, Promise<unknown>>());
   /** The commands for this chat, fetched once per chat and again after each run. */
   const loadCommands = (): Promise<PiCommand[]> => {
     // A run can install an extension, whose commands should then be offered.
@@ -959,8 +961,10 @@ export function Chat({
   }, [statusNamesCommand, session.id, turns]);
   const commandNames = useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
 
-  // Show the palette while the composer holds a bare "/name" prefix.
-  const slashText = slashToken(input);
+  // Show the palette while the composer holds a bare "/name" prefix — with
+  // whatever character commands start with in this browser.
+  const trigger = useCommandTrigger();
+  const slashText = slashToken(input, trigger);
   const wantsCommands = slashText !== null;
   useEffect(() => {
     if (wantsCommands) void loadCommands();
@@ -985,7 +989,7 @@ export function Chat({
   /** What is left in the box once a command is chosen: its name, ready for arguments. */
   const complete = (c: PiCommand) => {
     caret.current = null;
-    changeInput(`/${c.name} `);
+    changeInput(`${trigger}${c.name} `);
   };
 
   useEffect(() => {
@@ -1036,49 +1040,86 @@ export function Chat({
    * there looking unsent while it is on its way — and put back if it does not
    * get there. Throws, for the caller to say what went wrong.
    */
-  const submit = async (msg: string, fromBox: boolean) => {
+  const submit = async (msg: string, fromBox: boolean): Promise<void> => {
     const sent = session.id;
-    // Some builtins are UI, not prompts: /model opens the picker the pill uses,
-    // /settings opens the modal. Sending them to pi would just be a chat line.
-    const parsed = /^\/([\w:-]+)\s*(.*)$/.exec(msg);
-    const command = parsed && isClientCommand(parsed[1], commands) ? parsed : null;
+    const typed = typedCommand(msg, trigger);
+    // pi is told "/name" whatever character the command was typed with, so the
+    // page has to know it is one: the server cannot tell "!name" from a message.
+    // Typed before the list has come — it starts pi for the chat, which can take
+    // a while — it is waited for, rather than the command going out as words.
+    // The list held may be the one from before the last run, which can have
+    // added commands — a skill the agent wrote, an extension it installed — so
+    // that is waited for too, and it comes at once when it is the current one.
+    // The box is emptied first all the same: what is typed while waiting is for
+    // the next message, and the chat may have been left by then. The portal's
+    // own commands do not wait, as under the slash: they open UI here and need
+    // nothing from pi.
+    const listCurrent = commandList.current?.key === `${session.id}:${turns}`;
+    const waits = typed !== null && !msg.startsWith("/") && (!commands.length || !listCurrent) && !CLIENT_COMMANDS.has(typed.name);
+    const knownIn = (list: PiCommand[]) => (typed && isCommand(typed.name, list) ? typed : null);
     // The pictures in the box go with what came from it, and nothing else. A
     // command is run rather than said — this one here, any other by pi — so
     // they stay in the box for later rather than going where nothing shows them.
-    const keepsPictures = parsed !== null && isCommand(parsed[1], commands);
-    const images = fromBox && !keepsPictures ? attached : [];
+    let known = waits ? null : knownIn(commands);
+    let images = fromBox && !known ? attached : [];
 
     if (fromBox) {
-      if (keepsPictures) {
+      if (known) {
         caret.current = null;
         changeInput("");
       } else clearBox();
     }
-    try {
-      if (command) {
-        if (command[1] === "model") setPanelRequest("model");
-        else await onClientCommand(command[1], command[2]);
-        return;
-      }
-      setSending(true);
+    const run = async () => {
       try {
-        // Mid-run, typed words steer the run — taken in after the step it is on
-        // — rather than waiting for it to finish, which on a long run looked
-        // like the message had gone nowhere. Voice mode has its own switch.
-        const steer = running && !voiceMode;
-        await onSend(
-          msg,
-          voiceMode || images.length || steer
-            ? { voice: voiceMode || undefined, images: images.length ? images : undefined, steer: steer || undefined }
-            : undefined,
-        );
-      } finally {
-        setSending(false);
+        let listed = commands;
+        if (waits) {
+          listed = await loadCommands();
+          known = knownIn(listed);
+          // It was a command after all: its pictures go back where they were.
+          if (known && images.length) putBack(sent, "", images);
+          if (known) images = [];
+        }
+        // Some builtins are UI, not prompts: /model opens the picker the pill uses,
+        // /settings opens the modal. Sending them to pi would just be a chat line.
+        const command = typed && isClientCommand(typed.name, listed) ? typed : null;
+        if (command) {
+          if (command.name === "model") setPanelRequest("model");
+          else await onClientCommand(command.name, command.args);
+          return;
+        }
+        setSending(true);
+        try {
+          // Mid-run, typed words steer the run — taken in after the step it is on
+          // — rather than waiting for it to finish, which on a long run looked
+          // like the message had gone nowhere. Voice mode has its own switch.
+          const steer = running && !voiceMode;
+          await onSend(
+            known ? known.wire : msg,
+            voiceMode || images.length || steer
+              ? { voice: voiceMode || undefined, images: images.length ? images : undefined, steer: steer || undefined }
+              : undefined,
+          );
+        } finally {
+          setSending(false);
+        }
+      } catch (e) {
+        if (fromBox) putBack(sent, msg, images);
+        throw e;
       }
-    } catch (e) {
-      if (fromBox) putBack(sent, msg, images);
-      throw e;
-    }
+    };
+    // In the order they were said: a command still waiting for the list is not
+    // overtaken by what is sent after it, which may depend on it. What opens UI
+    // here is not part of that order.
+    const earlier = held.current.get(sent);
+    const opensUi = typed !== null && isClientCommand(typed.name, commands);
+    if (!waits && (!earlier || opensUi)) return run();
+    const mine = (earlier ?? Promise.resolve()).then(run);
+    const settled = mine.then(() => undefined, () => undefined);
+    held.current.set(sent, settled);
+    void settled.then(() => {
+      if (held.current.get(sent) === settled) held.current.delete(sent);
+    });
+    return mine;
   };
 
   /** A message that did not go, back where it was typed — in that chat, if you have left it. */
@@ -1209,20 +1250,21 @@ export function Chat({
     caretTo.current = null;
   }, [input]);
 
-  // "/" from anywhere on the page: the box, with the command list open.
+  // The command character from anywhere on the page: the box, with the command list open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       // Not behind a dialog: the box is not what is being talked to.
       if (voiceMode || document.querySelector('[aria-modal="true"]')) return;
-      if (!opensComposer({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, target })) return;
+      const altGraph = e.getModifierState?.("AltGraph");
+      if (!opensComposer({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, altGraph, target }, trigger)) return;
       e.preventDefault();
       box.current?.focus();
-      if (!draft.current.trim()) changeInput("/");
+      if (!draft.current.trim()) changeInput(trigger);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [voiceMode, session.id]);
+  }, [voiceMode, session.id, trigger]);
 
   // Phrases sent as they are said go one at a time: a second must not overtake
   // the first, and one that fails goes back in the box rather than being lost.
@@ -1796,12 +1838,13 @@ export function Chat({
                     </Streamdown>
                   </div>
                 )}
-                {/* Under the answer, where it ends: only the last bubble of the
-                    reply, and only once nothing follows it. One per tool call
-                    in between would be a Copy button after every paragraph,
-                    and one beside the words sat in the margin where the eye
-                    does not go. */}
-                {item.id === lastReply && item.text && (
+                {/* Under the answer, where it ends: only the last bubble of it,
+                    and only once nothing in the run follows it. One per tool
+                    call in between would be a Copy button after every
+                    paragraph, and one beside the words sat in the margin where
+                    the eye does not go. Each answer keeps its button when
+                    another message comes. */}
+                {item.final && (
                   <div className="reply-actions -ml-1.5 mt-1 flex items-center gap-0.5">
                     <CopyAction text={assistantText(item)} />
                   </div>
@@ -1933,7 +1976,7 @@ export function Chat({
                   i === picked ? "bg-fg/5" : ""
                 }`}
               >
-                <span className="font-mono text-xs text-accent">/{c.name}</span>
+                <span className="font-mono text-xs text-accent">{trigger}{c.name}</span>
                 <span className="truncate text-xs text-fg-subtle">{c.description}</span>
                 <span className="ml-auto shrink-0 text-[10px] text-fg-faint">{c.source}</span>
               </button>
@@ -2051,7 +2094,7 @@ export function Chat({
                 e.preventDefault();
                 if (sending) return;
                 if (chosen.needsArgument) complete(chosen);
-                else void attempt(() => submit(`/${chosen.name}`, true));
+                else void attempt(() => submit(`${trigger}${chosen.name}`, true));
                 return;
               }
             }
@@ -2159,10 +2202,6 @@ export function Chat({
     </div>
   );
 }
-
-/** What the agent said, as it is read — without the reasoning model's stray tags. */
-const assistantText = (item: Extract<Item, { kind: "assistant" }>) =>
-  (item.audio ? displaySpeechText(item.text, item.done) : item.text).replace(/<\/?think(ing)?>/gi, "");
 
 /**
  * The shape of a conversation while it is fetched: a question, an answer,

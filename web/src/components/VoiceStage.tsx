@@ -207,7 +207,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     const down = (e: KeyboardEvent) => {
       const { bindings, actions, ptt, onHold } = keys.current;
       // A dialog, or the voice settings card closing on Escape, has the key.
-      if (e.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
+      // So has the confirmation a link in a reply asks before it leaves: it is no aria-modal, and Escape there would otherwise stop the agent or end voice mode.
+      if (e.defaultPrevented || document.querySelector('[aria-modal="true"], [data-streamdown="link-safety-modal"]')) return;
       if (e.code === "Escape" && document.querySelector(".voice-settings")) return;
       // Escape gives a maximized browser its place back before it stops anything.
       if (e.code === "Escape" && keys.current.maximized && !editing(e.target)) {
@@ -424,7 +425,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     </section>
     <section ref={filesWindow} className={`voice-files-window ${filesMain ? 'as-main' : 'as-side'} ${filesShown ? 'is-open' : ''}`} aria-label={t("Files")} aria-hidden={!filesShown}>
       <header><span><LuFolderOpen />{t("Files")}</span><div><button type="button" aria-label={t("Minimize files")} title={t("Minimize files")} onClick={() => { setFilesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
-      {filesUsed && <FilesPanel sessionId={sessionId} folder={folder} activity={fileActivity} since={filesSince} />}
+      {filesUsed && <FilesPanel key={sessionId} sessionId={sessionId} folder={folder} activity={fileActivity} since={filesSince} />}
       <ResizeHandles target={filesWindow} />
     </section>
     <section ref={picturesWindow} className={`voice-files-window voice-pictures-window ${picturesMain ? 'as-main' : 'as-side'} ${picturesShown ? 'is-open' : ''}`} aria-label={t("Pictures")} aria-hidden={!picturesShown}>

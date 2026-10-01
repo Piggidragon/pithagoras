@@ -24,6 +24,16 @@ export function readPiSettings(): Record<string, unknown> {
   }
 }
 
+/** A project's own pi settings, in `.pi` in its folder; empty when it has none. */
+export function readProjectPiSettings(folder: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(folder, ".pi", "settings.json"), "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 /** A string setting from pi's file, or undefined if absent or the wrong type. */
 export function piSetting(key: string): string | undefined {
   const value = readPiSettings()[key];

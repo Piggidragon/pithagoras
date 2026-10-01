@@ -16,7 +16,7 @@ import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
-import { contextWindowFor } from "../db.js";
+import { contextWindowFor, getVoiceInstructions } from "../db.js";
 import { configStamp } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { UNDERSTORY_RULE, understoryOn } from "../features.js";
@@ -261,6 +261,15 @@ function sourceLabel(info: any): string {
   return source || "built in";
 }
 
+/**
+ * The entry in pi's settings.json a tool's package is listed as. Only for the
+ * user's own packages: a project's are listed in the project, where the portal
+ * does not look.
+ */
+function packageOf(info: any): string | undefined {
+  return info?.origin === "package" && info?.scope === "user" && typeof info.source === "string" ? info.source : undefined;
+}
+
 /** Read a member that may be a getter or a method, without assuming which. */
 function callable(obj: any, key: string): any {
   const v = obj?.[key];
@@ -382,7 +391,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // prompt templates — so installed packages contribute no commands at all.
     // The CLI wires this up for you; here it has to be asked for.
     const voiceFirst = new VoiceFirstTurn();
-    const audioRule = new AudioRule();
+    const audioRule = new AudioRule(getVoiceInstructions);
     const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
     let resourceLoader: any;
     try {
@@ -801,8 +810,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   private sayAudioRule(spoken: boolean): boolean {
     if (!spoken || !this.audioRule?.set(true)) return false;
     if (this.buildPromptAgain()) return true;
-    // Off again, so the next spoken message tries once more.
-    this.audioRule.set(false);
+    // As it was, so the next spoken message tries once more.
+    this.audioRule.undo();
     return false;
   }
 
@@ -1180,6 +1189,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       name: String(tool.name),
       description: typeof tool.description === "string" ? tool.description : undefined,
       source: sourceLabel(tool.sourceInfo),
+      package: packageOf(tool.sourceInfo),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
   }

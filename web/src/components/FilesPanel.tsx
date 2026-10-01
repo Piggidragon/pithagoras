@@ -18,10 +18,12 @@ import {
   LuTrash2,
   LuUpload,
 } from "react-icons/lu";
-import { api, type FileEntry } from "../api";
+import { api, type FileEntry, type Unsaved } from "../api";
 import type { FileActivity } from "../file-activity";
 import { confirmDialog } from "./ConfirmDialog";
+import { within } from "../paths";
 import { isEnter, isEscape } from "../shortcuts";
+import { deleteAsking, unsavedNotes } from "../unsaved";
 import { t, tp } from "../i18n";
 
 /** What the server says when a save would put older text over newer. */
@@ -126,6 +128,13 @@ export function FilesPanel({
   const dirty = !!file && !file.binary && !file.loading && draft !== file.saved;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  // For what finishes later than it started, such as a delete that asked first.
+  const dirRef = useRef(dir);
+  dirRef.current = dir;
+  const fileRef = useRef(file);
+  fileRef.current = file;
+  /** Deletes on their way, by path: asking git first can take a moment, and a second click is not a second delete. */
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(() => new Set());
   // Answers that arrive after a newer question was asked are not the answer.
   const listAsk = useRef(0);
   const fileAsk = useRef(0);
@@ -319,33 +328,60 @@ export function FilesPanel({
     if (problem) setListError(problem);
   };
 
-  const remove = async (entry: FileEntry) => {
-    const path = join(dir, entry.name);
+  /** Whether to delete, and whether git work that only it holds goes with it: null for "no". */
+  const askToRemove = async (entry: FileEntry, unsaved: Unsaved | undefined): Promise<boolean | null> => {
+    const { lost, risky, sentences } = unsavedNotes(unsaved);
     // A link to a folder is listed as a folder, but only the link goes.
-    const message = entry.link
+    const what = entry.link
       ? t("This removes the link only. What it points to is not touched.")
       : entry.type === "dir"
         ? t("This removes the folder and everything in it. It cannot be undone.")
         : t("This removes the file. It cannot be undone.");
     const ok = await confirmDialog({
-      title: t("Delete \"{name}\"?", { name: entry.name }),
-      message,
-      confirmLabel: t("Delete"),
+      title: lost
+        ? t("Delete \"{name}\" and its unsaved work?", { name: entry.name })
+        : risky
+          ? t("Delete \"{name}\" anyway?", { name: entry.name })
+          : t("Delete \"{name}\"?", { name: entry.name }),
+      message: [...sentences, what].join(" "),
+      confirmLabel: risky ? t("Delete anyway") : t("Delete"),
       danger: true,
-      deletes: true,
+      // Asked whatever Settings says when there is work to lose: the server refuses without it, and it has no copy.
+      deletes: !risky,
     });
-    if (!ok) return;
+    return ok ? risky : null;
+  };
+
+  const remove = async (entry: FileEntry) => {
+    const path = join(dir, entry.name);
+    if (removing.has(path)) return;
+    setRemoving((now) => new Set(now).add(path));
     let problem: string | null = null;
     try {
-      await api.deleteFile(sessionId, path);
-      if (file && (file.path === path || file.path.startsWith(path + "/"))) {
+      // Only a folder can hold git work, and it is asked first so that the one question names it.
+      // When that cannot be asked, the plain question goes first, and the server's refusal brings this one.
+      const unsaved = entry.type === "dir" && !entry.link ? await api.fileUnsaved(sessionId, path).then((r) => r.unsaved, () => null) : null;
+      const gone = await deleteAsking(unsaved, (u) => askToRemove(entry, u), (discard) => api.deleteFile(sessionId, path, discard));
+      if (!gone) return;
+      // What is open and shown now, not when the delete was clicked: the person may have moved on while it was asked.
+      const open = fileRef.current;
+      if (open && within(path, open.path)) {
         fileAsk.current++;
         setFile(null);
       }
+      // Opened while it was asked, and gone now: up to the folder it was in, which the change of folder loads.
+      const shown = dirRef.current;
+      if (within(path, shown)) return setDir(path.split("/").slice(0, -1).join("/"));
     } catch (e) {
       problem = (e as Error).message;
+    } finally {
+      setRemoving((now) => {
+        const next = new Set(now);
+        next.delete(path);
+        return next;
+      });
     }
-    await loadDir(dir);
+    await loadDir(dirRef.current);
     if (problem) setListError(problem);
   };
 
@@ -685,11 +721,13 @@ export function FilesPanel({
                     </button>
                     <button
                       onClick={() => void remove(entry)}
+                      disabled={removing.has(join(dir, entry.name))}
+                      aria-busy={removing.has(join(dir, entry.name))}
                       title={t("Delete {name}", { name: entry.name })}
                       aria-label={t("Delete {name}", { name: entry.name })}
-                      className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger"
+                      className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger disabled:opacity-60"
                     >
-                      <LuTrash2 aria-hidden className="h-3.5 w-3.5" />
+                      {removing.has(join(dir, entry.name)) ? <LuRefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <LuTrash2 aria-hidden className="h-3.5 w-3.5" />}
                     </button>
                   </div>
                 </>

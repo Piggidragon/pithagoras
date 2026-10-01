@@ -1,15 +1,18 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
 import { speechChunks, newSpeech } from '../web/src/voice.js';
 const dir = mkdtempSync(join(tmpdir(), 'pithagoras-voice-'));
 process.env.DATA_DIR = dir;
+// No Docker here, whatever this machine has: the managed service is tested on its own.
+process.env.DOCKER_SOCKET = join(dir, 'no-docker.sock');
 const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice } = await import('../server/src/api/voice.js');
 const { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } = await import('../server/src/voice-languages.js');
-const { getDb } = await import('../server/src/db.js');
+const { getDb, getVoiceInstructions } = await import('../server/src/db.js');
+const { DEFAULT_VOICE_INSTRUCTIONS } = await import('../server/src/pi/voice-first.js');
 const upstream = express();
 let calls = 0;
 let busyAttempts = 0;
@@ -172,6 +175,41 @@ test('custom clone sends its saved recording, transcript and description to audi
   assert.equal(nativeRequest.options.instruction, 'Warm narrator.');
 });
 
+test('a changed voice description reaches the next phrase on both Breeze runtimes, and the recording stays', async () => {
+  const { addVoice } = await import('../server/src/voice-presets.js');
+  const { samplesWav } = await import('../web/src/voice.js');
+  const audio = Buffer.from(await samplesWav(new Float32Array(16000)).arrayBuffer()).toString('base64');
+  const preset = addVoice({ name: 'Edited narrator', kind: 'clone', instruction: 'Warm narrator.', transcript: 'Words on the tape.', audio });
+  const patch = (id: string, body: unknown) => fetch(`${base}/voice/presets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const speak = async () => { const response = await fetch(`${base}/sessions/test/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Edited voice response.' }) }); assert.equal(response.status, 200); await response.arrayBuffer(); };
+  const select = async (runtime: string) => assert.equal((await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, runtime, voice: preset.id }) })).status, 200);
+  await select('audio-cpp');
+  await speak();
+  assert.equal(nativeRequest.options.instruction, 'Warm narrator.');
+  const edited = await patch(preset.id, { instruction: '  A slow, low voice.  ' });
+  assert.equal(edited.status, 200);
+  assert.deepEqual(await edited.json(), { id: preset.id, name: 'Edited narrator', kind: 'clone', instruction: 'A slow, low voice.', transcript: 'Words on the tape.' });
+  await speak();
+  assert.equal(nativeRequest.options.instruction, 'A slow, low voice.');
+  assert.deepEqual(nativeRequest.voice_ref, { type: 'base64', data: audio });
+  assert.equal(nativeRequest.reference_text, 'Words on the tape.');
+  // The Python runtime takes the same text as a form field.
+  await select('breeze');
+  await speak();
+  assert.ok(speechBody.includes('name="instruction"\r\n\r\nA slow, low voice.\r\n'));
+  assert.ok(!speechBody.includes('Warm narrator.'));
+  assert.equal((await (await fetch(`${base}/voice/presets`)).json()).find((v: any) => v.id === preset.id).instruction, 'A slow, low voice.');
+  // A description that cannot be used, or a voice that is not there, changes nothing.
+  for (const instruction of ['', '   ', 'x'.repeat(1001), 7, undefined]) {
+    const refused = await patch(preset.id, { instruction });
+    assert.equal(refused.status, 400);
+    assert.match((await refused.json()).error, /1–1000 characters/);
+  }
+  assert.equal((await patch('voice-missing', { instruction: 'Clear.' })).status, 404);
+  await speak();
+  assert.ok(speechBody.includes('name="instruction"\r\n\r\nA slow, low voice.\r\n'));
+});
+
 test('Chatterbox clones a reference, writes numbers out and returns one buffered phrase', async () => {
   const chatterbox = { ...settings, runtime: 'chatterbox', voice: 'aria', language: 'de', exaggeration: 0.3, sttModel: 'qwen3-asr' };
   assert.equal((await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(chatterbox) })).status, 200);
@@ -243,4 +281,151 @@ test('connecting the managed voice drops a recognition model from another runtim
   // reach it in the multipart body of every transcription.
   assert.equal(connectManagedVoice().sttModel, '');
   assert.equal((await (await fetch(`${base}/voice`)).json()).sttModel, '');
+});
+
+test('connecting the managed voice points the settings at the engines it was built with', async () => {
+  const put = (patch: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, voice: 'aria', ...patch }) });
+  assert.equal((await put({ language: 'auto' })).status, 200);
+  // Whisper: its own endpoint, and no model field in the request.
+  const whisper = connectManagedVoice({ tts: 'breeze', asr: 'whisper', asrModel: 'small' });
+  assert.deepEqual([whisper.runtime, whisper.whisperUrl, whisper.breezeUrl, whisper.sttModel], ['audio-cpp', 'http://127.0.0.1:8188/inference', 'http://127.0.0.1:7862/v1/audio/speech', '']);
+  // Qwen3-ASR: audio.cpp's transcription endpoint, with the id of the model it loaded.
+  const qwen = connectManagedVoice({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' });
+  assert.deepEqual([qwen.runtime, qwen.whisperUrl, qwen.sttModel, qwen.language], ['audio-cpp', 'http://127.0.0.1:7862/v1/audio/transcriptions', 'qwen3-asr', 'auto']);
+  assert.equal((await (await fetch(`${base}/voice`)).json()).managed, true);
+  // Chatterbox refuses to guess a language: auto-detect becomes one it speaks, a chosen one stays.
+  const chatterbox = connectManagedVoice({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' });
+  assert.deepEqual([chatterbox.runtime, chatterbox.language, chatterbox.sttModel], ['chatterbox', 'en', 'qwen3-asr']);
+  const shown = await (await fetch(`${base}/voice`)).json();
+  assert.deepEqual([shown.runtime, shown.managed], ['chatterbox', true], 'the leases load the model the saved engine speaks with');
+  await put({ language: 'de' });
+  assert.equal(connectManagedVoice({ tts: 'chatterbox', asr: 'whisper', asrModel: 'base' }).language, 'de');
+  // Back to Breeze keeps the language and drops Chatterbox's runtime.
+  assert.deepEqual([connectManagedVoice().runtime, connectManagedVoice().language], ['audio-cpp', 'de']);
+});
+
+test('recognition alone: nothing is spoken, and dictation still has its transcription', async () => {
+  const put = (patch: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, ...patch }) });
+  // Connecting the managed services of a choice without speech synthesis saves no address to speak to.
+  const whisper = connectManagedVoice({ tts: 'none', asr: 'whisper', asrModel: 'base' });
+  assert.deepEqual([whisper.runtime, whisper.breezeUrl, whisper.whisperUrl, whisper.sttModel, whisper.enabled, whisper.managed], ['none', '', 'http://127.0.0.1:8188/inference', '', true, true]);
+  const qwen = connectManagedVoice({ tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' });
+  assert.deepEqual([qwen.runtime, qwen.breezeUrl, qwen.whisperUrl, qwen.sttModel], ['none', '', 'http://127.0.0.1:7863/v1/audio/transcriptions', 'qwen3-asr']);
+  // Beside a speech engine, Qwen3-ASR is on the GPU server's port, or on the CPU server's by choice.
+  assert.equal(connectManagedVoice({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' }).whisperUrl, 'http://127.0.0.1:7862/v1/audio/transcriptions');
+  assert.equal(connectManagedVoice({ tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b', asrDevice: 'cpu' }).whisperUrl, 'http://127.0.0.1:7863/v1/audio/transcriptions');
+  connectManagedVoice({ tts: 'none', asr: 'whisper', asrModel: 'base' });
+  // The page is told there is nothing to speak with, so that voice mode is not offered; dictation is.
+  const shown = await (await fetch(`${base}/voice`)).json();
+  assert.deepEqual([shown.enabled, shown.speech, shown.runtime, shown.managed], [true, false, 'none', false]);
+  // Replies are not synthesized, and the answer says why instead of failing on an address that is not there.
+  const spoken = await fetch(`${base}/sessions/test/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"text":"Hello"}' });
+  assert.equal(spoken.status, 409);
+  assert.match((await spoken.json()).error, /Speech synthesis is not installed/);
+  // What was heard is still transcribed: that is dictation. The tests' Whisper stands where the managed one would.
+  assert.equal((await put({ runtime: 'none', breezeUrl: '' })).status, 200);
+  const transcribed = await fetch(`${base}/sessions/test/voice/transcribe`, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: new Uint8Array(pcmWav(Buffer.alloc(32))) });
+  assert.deepEqual(await transcribed.json(), { text: 'Test the session.' });
+  // The settings are saved with no speech address only when there is no speech synthesis.
+  assert.equal((await put({ runtime: 'none', breezeUrl: '' })).status, 200);
+  assert.equal((await put({ runtime: 'audio-cpp', breezeUrl: '' })).status, 400);
+  assert.equal((await put({ runtime: 'none', breezeUrl: 'ftp://nowhere' })).status, 400);
+  // Back to speech: spoken again, and the page is told so.
+  assert.equal((await put({})).status, 200);
+  assert.equal((await (await fetch(`${base}/voice`)).json()).speech, true);
+});
+
+test('without Docker the setup says only that Docker is needed: recognition alone needs no GPU, and the requirement of speech synthesis is said where it applies', async () => {
+  // No Docker socket here, whatever this machine has.
+  const state = await (await fetch(`${base}/voice/install`)).json();
+  assert.deepEqual([state.available, state.state, state.busy], [false, 'unavailable', false]);
+  assert.equal(state.error, 'Automatic voice setup requires access to Docker.');
+  assert.doesNotMatch(state.error, /GPU|NVIDIA/);
+});
+
+test('install takes the engines to build, and refuses a choice the installer does not make', async () => {
+  const post = (body: object) => fetch(`${base}/voice/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  for (const body of [{ tts: 'kokoro', asr: 'whisper', asrModel: 'base' }, { tts: 'breeze', asr: 'whisper', asrModel: '1.7b' }, { tts: 'breeze' }, { asr: 'qwen3-asr', asrModel: '0.6b' }]) {
+    const answer = await post(body);
+    assert.equal(answer.status, 400, JSON.stringify(body));
+    assert.match((await answer.json()).error, /Choose a supported speech/);
+  }
+  // Nothing was started, so there is no setup to wait for either.
+  assert.equal((getDb().prepare("SELECT value FROM settings WHERE key='voice_setup_pending'").get() as any)?.value, undefined);
+});
+
+test('the hardware check reports the GPUs and what it would suggest, and degrades to the original combination without a tool', async () => {
+  const smi = join(dir, 'nvidia-smi');
+  writeFileSync(smi, '#!/bin/sh\nprintf "0, Test GPU A, 12288, 11000\\n1, Test GPU B, 24576, 24000\\n"\n');
+  chmodSync(smi, 0o755);
+  process.env.NVIDIA_SMI = smi;
+  // What the host has is told, not read from the machine the tests run on.
+  (await import('../server/src/extensions/voice-service.js')).hostReader.read = () => ({ totalMiB: 16384, freeMiB: 8192, threads: 8 });
+  const found = await (await fetch(`${base}/voice/hardware`)).json();
+  assert.deepEqual(found.gpus.map((g: any) => [g.index, g.name, g.totalMiB, g.freeMiB]), [[0, 'Test GPU A', 12288, 11000], [1, 'Test GPU B', 24576, 24000]]);
+  assert.deepEqual([found.source, found.selected, found.reserveMiB], ['host', 1, 0]);
+  assert.deepEqual(found.suggestion, { tts: 'breeze', asr: 'qwen3-asr', asrModel: '1.7b' });
+  process.env.NVIDIA_SMI = join(dir, 'missing-nvidia-smi');
+  const none = await fetch(`${base}/voice/hardware`);
+  assert.equal(none.status, 200);
+  const empty = await none.json();
+  // No tool and no Docker is no GPU, said plainly: what is suggested is recognition alone on the CPU, sized to the host.
+  assert.deepEqual([empty.gpus, empty.source, empty.selected, empty.checked, empty.cpuOnly], [[], 'none', null, true, true]);
+  assert.equal(empty.error, 'host: nvidia-smi was not found; docker: no GPU available');
+  assert.deepEqual(empty.host, { totalMiB: 16384, freeMiB: 8192, threads: 8 });
+  assert.deepEqual(empty.suggestion, { tts: 'none', asr: 'qwen3-asr', asrModel: '0.6b' });
+  delete process.env.NVIDIA_SMI;
+});
+
+test('speaking instructions: the built-in text is offered, a custom one is saved, and blank or equal goes back to the built-in', async () => {
+  const put = (responseInstructions: unknown) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, responseInstructions }) });
+  const get = async () => (await fetch(`${base}/voice`)).json();
+  // Nothing saved: the server's own text is what the page shows and resets to.
+  await put(undefined);
+  let shown = await get();
+  assert.equal(shown.responseInstructions, DEFAULT_VOICE_INSTRUCTIONS);
+  assert.equal(shown.defaultResponseInstructions, DEFAULT_VOICE_INSTRUCTIONS);
+  assert.equal(shown.responseInstructionsOff, false);
+  assert.equal(getVoiceInstructions(), '');
+  // A custom text is saved trimmed, and is what every turn is then given.
+  const saved = await put('  Answer in one word.\n');
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).responseInstructions, 'Answer in one word.');
+  assert.equal(getVoiceInstructions(), 'Answer in one word.');
+  shown = await get();
+  assert.equal(shown.responseInstructions, 'Answer in one word.');
+  assert.equal(shown.defaultResponseInstructions, DEFAULT_VOICE_INSTRUCTIONS, 'still there to go back to');
+  // Empty text, or the built-in text sent back, is not saved as a custom one: the built-in instructions then follow the portal's updates.
+  for (const back of ['', '   ', DEFAULT_VOICE_INSTRUCTIONS, `${DEFAULT_VOICE_INSTRUCTIONS}\n`]) {
+    await put('Answer in one word.');
+    assert.equal((await put(back)).status, 200);
+    assert.equal(getVoiceInstructions(), '', JSON.stringify(back));
+    assert.equal((await get()).responseInstructions, DEFAULT_VOICE_INSTRUCTIONS);
+  }
+  // Connecting the managed voice saves the settings again, and keeps it.
+  await put('Answer in one word.');
+  assert.equal(connectManagedVoice().responseInstructions, 'Answer in one word.');
+  assert.equal(getVoiceInstructions(), 'Answer in one word.');
+  // Text that cannot be, and a size that no turn should carry.
+  assert.equal((await put(42)).status, 400);
+  assert.equal((await put('x'.repeat(8001))).status, 400);
+  assert.equal((await put('x'.repeat(8000))).status, 200);
+  assert.equal(getVoiceInstructions(), 'x'.repeat(8000));
+  await put('');
+});
+test('VOICE_RESPONSE_INSTRUCTIONS=false is shown to the page, and leaves a saved text alone', async () => {
+  const previous = process.env.VOICE_RESPONSE_INSTRUCTIONS;
+  try {
+    await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, responseInstructions: 'Answer in one word.' }) });
+    process.env.VOICE_RESPONSE_INSTRUCTIONS = 'false';
+    const shown = await (await fetch(`${base}/voice`)).json();
+    assert.equal(shown.responseInstructionsOff, true);
+    assert.equal(shown.responseInstructions, 'Answer in one word.');
+    process.env.VOICE_RESPONSE_INSTRUCTIONS = 'true';
+    assert.equal((await (await fetch(`${base}/voice`)).json()).responseInstructionsOff, false);
+  } finally {
+    if (previous === undefined) delete process.env.VOICE_RESPONSE_INSTRUCTIONS;
+    else process.env.VOICE_RESPONSE_INSTRUCTIONS = previous;
+    await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) });
+  }
 });

@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { agentHomePath } from "./agent-home.js";
+import { isWithinText, pathBelow, realPath } from "./within.js";
 
 /** Where projects live. WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys. */
 export function workspaceRoot(): string {
@@ -18,7 +19,7 @@ export function checkWorkspace(raw: string): { path: string } | { error: string 
   const resolved = path.isAbsolute(raw) ? path.resolve(raw) : path.join(root, raw);
   if (resolved === home) return { path: home };
   // Keep pi inside the mounted workspace area — no escaping to the rest of the FS.
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+  if (!isWithinText(root, resolved)) {
     return { error: "workspace must be inside the workspace root" };
   }
   if (!existsSync(resolved)) return { error: "workspace does not exist" };
@@ -29,7 +30,7 @@ export function checkWorkspace(raw: string): { path: string } | { error: string 
     // passes it while leading anywhere. Where it really points must be inside too.
     const real = realpathSync(resolved);
     const realRoot = realpathSync(root);
-    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+    if (!isWithinText(realRoot, real)) {
       return { error: "workspace must be inside the workspace root" };
     }
     // A file would be taken as far as the launch, and every run would fail there.
@@ -41,26 +42,33 @@ export function checkWorkspace(raw: string): { path: string } | { error: string 
   return { path: resolved };
 }
 
+/**
+ * The project a chat or a routine works in, by its folder's name: the one
+ * directly under the root that `workspace` is, or is inside — a chat may run in
+ * a subfolder, and it belongs to the project all the same. Home, and anywhere
+ * else outside the root, is none.
+ *
+ * Judged by where the path really leads, as checkWorkspace does, so that a link
+ * in one project to another does not borrow the first one's settings while
+ * working in the second. The text of the path decides only where that cannot be
+ * followed, such as a folder that is gone.
+ */
+export function projectOf(workspace: string | null | undefined): string | undefined {
+  if (!workspace) return undefined;
+  const root = workspaceRoot();
+  const realRoot = realPath(root);
+  const real = realRoot && realPath(workspace);
+  const inside = realRoot && real ? pathBelow(realRoot, real) : pathBelow(root, workspace);
+  const name = inside?.split("/")[0];
+  // Not one resolveProject would accept either: a project's name is never a dot-name.
+  return name && !name.startsWith(".") ? name : undefined;
+}
+
 /** Why a routine's place cannot be used now, such as a project that was deleted; null when it can. Home always can. */
 export function placeProblem(workspace: string | null): string | null {
   if (!workspace) return null;
   const where = checkWorkspace(workspace);
   return "error" in where ? where.error : null;
-}
-
-/**
- * `where` is the folder `dir` or inside it: by the text of the path, or by
- * where it really leads, so that a link to a project counts as in the project.
- */
-export function isWithin(dir: string, where: string | null): boolean {
-  if (!where) return false;
-  const inside = (d: string, w: string) => w === d || w.startsWith(d + path.sep);
-  if (inside(dir, where)) return true;
-  try {
-    return inside(realpathSync(dir), realpathSync(where));
-  } catch {
-    return false;
-  }
 }
 
 /**

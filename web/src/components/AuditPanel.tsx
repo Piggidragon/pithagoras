@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuUserX } from "react-icons/lu";
+import { useEffect, useRef, useState } from "react";
+import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuTrash2, LuUserX } from "react-icons/lu";
+import { confirmDialog } from "./ConfirmDialog";
 import { PageHeader, Stat } from "./PageHeader";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
@@ -22,6 +23,7 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   stranger: { label: msg("Turned away"), icon: <LuUserX className="h-3.5 w-3.5" />, tone: "text-warn" },
   answered: { label: msg("You answered"), icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-accent" },
   browsed: { label: msg("Page opened"), icon: <LuGlobe className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
+  cleared: { label: msg("Log cleared"), icon: <LuTrash2 className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
 };
 
 const FILTERS = [
@@ -57,22 +59,73 @@ export function AuditPage() {
   );
 }
 
-function AuditPanel({ onError }: { onError: (e: string) => void }) {
+function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
+  // Shown by the button, as MemoryPage's log does, so a poll that works does
+  // not take it off the page banner before it is read.
+  const [clearFailed, setClearFailed] = useState<string | null>(null);
+  // Counts clears: an answer asked for before one must not bring the cleared
+  // entries back when it arrives after it. Only clears, not every poll — on a
+  // slow link each answer can land after the next poll went out, and must
+  // still count.
+  const cleared = useRef(0);
 
-  const load = () =>
-    api
+  const load = () => {
+    const since = cleared.current;
+    return api
       .audit(300)
-      .then((r) => setEntries(r.entries))
-      .catch((e) => onError((e as Error).message))
+      .then((r) => {
+        if (since !== cleared.current) return;
+        setEntries(r.entries);
+        onError(null);
+      })
+      .catch((e) => {
+        if (since === cleared.current) onError((e as Error).message);
+      })
       .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
     load();
     return pollWhileVisible(load, 10_000);
   }, []);
+
+  // The "cleared" notes are housekeeping, not decisions, and a clear keeps them.
+  const decisions = entries.filter((e) => e.kind !== "cleared");
+
+  /**
+   * The history up to the newest entry shown, after asking. Always asking: not
+   * `deletes`, which Settings can switch off — this is the record of what the
+   * guard decided, and one stray click should not end it.
+   */
+  const clear = async () => {
+    if (decisions.length === 0) return;
+    const through = Math.max(...entries.map((e) => e.id));
+    const ok = await confirmDialog({
+      title: t("Clear the audit log?"),
+      message: t("Every recorded decision is deleted, not only the ones the filter shows. This cannot be undone."),
+      confirmLabel: t("Clear the audit log"),
+      danger: true,
+    });
+    if (!ok) return;
+    setClearing(true);
+    setClearFailed(null);
+    try {
+      await api.clearAudit(through);
+      // Gone even if the reload below fails, which would otherwise leave the
+      // deleted entries on screen. The notes stay, as they do on the server.
+      cleared.current++;
+      setEntries((now) => now.filter((e) => e.id > through || e.kind === "cleared"));
+      await load();
+    } catch (e) {
+      setClearFailed((e as Error).message);
+    } finally {
+      setClearing(false);
+    }
+  };
 
   const shown = entries.filter((e) =>
     filter === "all"
@@ -104,7 +157,7 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
         className="mb-5"
         description={
           <>
-            {tp(entries.length, "What the agent was stopped from doing, what it was let through on, and who was turned away. The last decision.", "What the agent was stopped from doing, what it was let through on, and who was turned away. The last {n} decisions.")}
+            {tp(decisions.length, "What the agent was stopped from doing, what it was let through on, and who was turned away. The last decision.", "What the agent was stopped from doing, what it was let through on, and who was turned away. The last {n} decisions.")}
           </>
         }
       >
@@ -129,8 +182,16 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
             {t(f.label)}
           </button>
         ))}
-        <span className="ml-auto text-xs text-fg-faint">{shown.length}</span>
+        <span className="ml-auto text-xs text-fg-faint">{shown.filter((e) => e.kind !== "cleared").length}</span>
+        <button
+          onClick={clear}
+          disabled={decisions.length === 0 || clearing}
+          className="ml-2 flex items-center gap-1 rounded-lg bg-fg/5 px-2.5 py-1 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger disabled:pointer-events-none disabled:opacity-40"
+        >
+          <LuTrash2 className="h-3 w-3" /> {t("Clear the log")}
+        </button>
       </div>
+      {clearFailed && <p className="mb-3 text-xs text-danger">{clearFailed}</p>}
 
       {shown.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-fg-faint">
@@ -160,7 +221,13 @@ function AuditPanel({ onError }: { onError: (e: string) => void }) {
                     {e.subject}
                   </p>
                 )}
-                {e.reason && <p className="mt-0.5 text-[11px] text-fg-faint">{e.reason}</p>}
+                {e.kind === "cleared" && Number.isFinite(Number(e.reason)) ? (
+                  <p className="mt-0.5 text-[11px] text-fg-faint">
+                    {tp(Number(e.reason), "One entry was deleted.", "{n} entries were deleted.")}
+                  </p>
+                ) : (
+                  e.reason && <p className="mt-0.5 text-[11px] text-fg-faint">{e.reason}</p>
+                )}
               </li>
             );
           })}

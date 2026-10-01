@@ -1,6 +1,8 @@
 import Database from "better-sqlite3";
-import { piSetting } from "./pi-settings.js";
-import { browserTool, toolEnabled } from "./tool-policy.js";
+import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
+import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
+import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
+import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -316,6 +318,18 @@ export function getDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+
+    -- A project's exceptions to the portal-wide tool default, between that and
+    -- a chat's own. Kept here and not as a file in the folder: the agent works
+    -- in the folder and can write to it, and which tools it has is not
+    -- something it should be able to give itself back. A project is only a
+    -- folder, so it is known by its name; a row exists only while it says
+    -- something, and goes with the project.
+    CREATE TABLE IF NOT EXISTS project_tools (
+      project TEXT PRIMARY KEY,
+      tools_off TEXT NOT NULL DEFAULT '',
+      tools_on TEXT NOT NULL DEFAULT ''
     );
 
     -- Background subagents started and not yet ended, kept as their events
@@ -1111,6 +1125,19 @@ export function getSetting(key: string): string | undefined {
   return row?.value || undefined;
 }
 
+/**
+ * The speaking instructions saved with the voice settings; empty where the
+ * built-in ones are used. They live in the same JSON as the rest of them.
+ */
+export function getVoiceInstructions(): string {
+  try {
+    const saved = JSON.parse(getSetting("voice") ?? "{}").responseInstructions;
+    return typeof saved === "string" ? saved : "";
+  } catch {
+    return "";
+  }
+}
+
 /** Only what the portal was explicitly told; absent keys fall through. */
 export function getStoredSettings(): Partial<GlobalSettings> {
   const rows = getDb().prepare("SELECT key, value FROM settings").all() as {
@@ -1416,6 +1443,26 @@ export function recordAudit(entry: {
 export const listAudit = (limit = 200): AuditRow[] =>
   getDb().prepare("SELECT * FROM audit ORDER BY id DESC LIMIT ?").all(limit) as AuditRow[];
 
+/**
+ * Empties the log, for when its history is no longer wanted; returns how many
+ * entries went. With `through`, only entries up to that id go: the ones
+ * somebody saw before deciding, not whatever was recorded since. Earlier
+ * "cleared" notes survive a clear, and a clear that removed something leaves
+ * one more, in the same transaction, so an emptied log cannot pass for a quiet
+ * one. The trim to AUDIT_KEEP still ages notes out like any other entry; it
+ * only bounds the table's size.
+ */
+export function clearAudit(through?: number): number {
+  const db = getDb();
+  return db.transaction(() => {
+    const removed = db
+      .prepare("DELETE FROM audit WHERE kind != 'cleared' AND id <= ?")
+      .run(through ?? Number.MAX_SAFE_INTEGER).changes;
+    if (removed > 0) recordAudit({ kind: "cleared", reason: String(removed) });
+    return removed;
+  })();
+}
+
 /** Does this routine's runs get the guard's blocking rules? Unknown means yes. */
 export function routineGuards(slug: string | null | undefined): boolean {
   if (!slug) return true;
@@ -1520,7 +1567,7 @@ export function browserAllowed(session: SessionRow): boolean {
   }
   const browserNames = seenBrowserTools();
   if (!browserNames.length) return session.browser === 1 || !browserColumnDecides();
-  const defaults = toolDefaultsOff();
+  const defaults = toolDefaultsFor(session.workspace);
   const exceptions = sessionTools(session.id);
   return browserNames.some((name) => toolEnabled(name, defaults, exceptions));
 }
@@ -1571,6 +1618,20 @@ export function browserExceptions(): SessionRow[] {
        ORDER BY updated_at DESC`
     )
     .all() as SessionRow[];
+  // And the chats of a project that says something about tools, which differ
+  // from the default through it without having said anything themselves. Not
+  // routines: they answer for their own runs, project or not.
+  const projects = projectsWithTools();
+  if (projects.size) {
+    const own = new Set(rows.map((row) => row.id));
+    const all = getDb().prepare("SELECT * FROM sessions WHERE kind != 'routine' ORDER BY updated_at DESC").all() as SessionRow[];
+    for (const row of all) {
+      if (own.has(row.id)) continue;
+      const project = projectOf(row.workspace);
+      if (project && projects.has(project)) rows.push(row);
+    }
+    rows.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
+  }
   const byDefault = browserByDefault();
   return rows.filter((row) => browserAllowed(row) !== byDefault);
 }
@@ -1621,6 +1682,54 @@ export function setSessionTools(sessionId: string, tools: SessionTools): Session
     .prepare("UPDATE sessions SET tools_off = ?, tools_on = ? WHERE id = ?")
     .run(stored.off.join("\n"), stored.on.join("\n"), sessionId);
   return stored;
+}
+
+/**
+ * What a project says about tools, as exceptions to the portal-wide default —
+ * the same two lists a chat keeps, one layer up. Nothing for a project that
+ * never said anything, which is every project there was.
+ */
+export function projectTools(project: string): SessionTools {
+  const row = getDb().prepare("SELECT tools_off, tools_on FROM project_tools WHERE project = ?").get(
+    project
+  ) as { tools_off: string; tools_on: string } | undefined;
+  return { off: parseToolsOff(row?.tools_off), on: parseToolsOff(row?.tools_on) };
+}
+
+export function setProjectTools(project: string, tools: SessionTools): SessionTools {
+  const stored = { off: clean(tools.off), on: clean(tools.on) };
+  if (!stored.off.length && !stored.on.length) clearProjectTools(project);
+  else
+    getDb()
+      .prepare(
+        `INSERT INTO project_tools (project, tools_off, tools_on) VALUES (?, ?, ?)
+         ON CONFLICT(project) DO UPDATE SET tools_off = excluded.tools_off, tools_on = excluded.tools_on`
+      )
+      .run(project, stored.off.join("\n"), stored.on.join("\n"));
+  return stored;
+}
+
+/** Forgets what a project said about tools, as when it is deleted or made again. */
+export function clearProjectTools(project: string): void {
+  getDb().prepare("DELETE FROM project_tools WHERE project = ?").run(project);
+}
+
+/** The projects that say something about tools, by name. */
+export function projectsWithTools(): Set<string> {
+  return new Set(
+    (getDb().prepare("SELECT project FROM project_tools").all() as { project: string }[]).map((r) => r.project)
+  );
+}
+
+/**
+ * The tools that are off by default for a chat in `workspace`: the portal-wide
+ * default, bent by its project's exceptions where it is in a project. A chat's
+ * own exceptions are held against this.
+ */
+export function toolDefaultsFor(workspace: string | null | undefined): string[] {
+  const off = toolDefaultsOff();
+  const project = projectOf(workspace);
+  return project ? defaultsFor(off, projectTools(project)) : off;
 }
 
 /**
@@ -1695,6 +1804,12 @@ export interface KnownTool {
   source: string;
   /** What the tool says it does, for the list shown before a chat has started. */
   description?: string;
+  /**
+   * The entry in pi's settings that brought it, so it can go when that does;
+   * null for a tool that came from no package of the user's. Absent only in an
+   * entry remembered before this was recorded.
+   */
+  package?: string | null;
 }
 
 /**
@@ -1748,6 +1863,7 @@ export function knownTools(): KnownTool[] {
         name: String(t.name),
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
+        ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
       }));
   } catch {
     return [];
@@ -1755,18 +1871,106 @@ export function knownTools(): KnownTool[] {
 }
 
 /**
+ * The remembered tools that can still be used: not the ones of a package that
+ * is switched off or gone. What is remembered stays, for a package that comes
+ * back; this is what the settings page and an idle chat show — without the
+ * package, which is the portal's bookkeeping and not the page's business.
+ * For a chat, `folder` is where it runs, whose project may bring packages of
+ * its own.
+ */
+export function shownTools(folder?: string): Omit<KnownTool, "package">[] {
+  const project = folder ? readProjectPiSettings(folder).packages : undefined;
+  return knownTools()
+    .filter(toolAvailability(readPiSettings().packages, project))
+    .map(({ package: _package, ...tool }) => tool);
+}
+
+/** The keys of the packages pi's settings list, or undefined when they cannot be read. */
+function listedPackages(): Set<string> | undefined {
+  const index = packageIndex(readPiSettings().packages);
+  return index && new Set(index.byKey.keys());
+}
+
+/**
+ * A package was uninstalled: its tools are not remembered any more, whichever
+ * version of it they were recorded under. Run once it is gone from pi's
+ * settings, so every tool whose package is no longer listed goes — which also
+ * catches a folder written one way in the request and another in the settings.
+ * Entries from before the package was recorded are found by the name it is
+ * filed under. The defaults somebody set are kept, as for any tool that is not
+ * loaded.
+ *
+ * An MCP server's tools are kept although the adapter registers them: the
+ * server is configured apart from the package and comes back with it, and a
+ * browser tool seen as new again would be given the browser's old default.
+ */
+export function forgetPackageTools(spec: string): void {
+  const listed = listedPackages();
+  const key = packageKey(spec);
+  const label = packageLabel(spec);
+  const servers = mcpServerNames();
+  const gone = (t: KnownTool) => {
+    if (mcpServerOf(t.name, servers) !== undefined) return false;
+    if (typeof t.package === "string") return listed ? !listed.has(packageKey(t.package)) : packageKey(t.package) === key;
+    // A guess, for a folder or a repository especially; one that guesses wrong
+    // costs a loaded tool its entry only until the next chat reports it.
+    return t.package === undefined && label !== undefined && t.source === label;
+  };
+  const all = knownTools();
+  const kept = all.filter((t) => !gone(t));
+  if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
+}
+
+/**
+ * What a package that has been uninstalled leaves behind: its tools, and what
+ * was kept aside for switching it back on, which has nothing left to go to —
+ * dropped in turn with the switches, which read and write it too.
+ */
+export async function packageRemoved(source: string): Promise<void> {
+  forgetPackageTools(source);
+  await updatePiSettings(
+    () => {},
+    () => {
+      const stash = extensionStash();
+      if (source in stash) {
+        delete stash[source];
+        setExtensionStash(stash);
+      }
+    },
+  );
+}
+
+/**
  * Take up what a session reported. Merged rather than replaced: another
  * session may have extensions this one does not, and an extension that is
  * merely not loaded today should not lose the default somebody set for it.
  */
-export function rememberTools(tools: KnownTool[]): void {
+export function rememberTools(reported: KnownTool[]): void {
+  // A session that still has a package loaded which has since been uninstalled
+  // would write its tools straight back; a package no longer listed is not
+  // remembered. One switched off still is, for when it comes back.
+  const listed = listedPackages();
+  const tools = reported.filter((t) => typeof t.package !== "string" || !listed || listed.has(packageKey(t.package)));
   if (!tools.length) return;
   const merged = new Map(knownTools().map((t) => [t.name, t]));
   const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
   for (const tool of tools) {
+    const before = merged.get(tool.name);
     // Kept short: it is a hint beside a checkbox, and the catalogue is one settings row.
-    const description = tool.description?.trim().slice(0, 300) || merged.get(tool.name)?.description;
-    merged.set(tool.name, { name: tool.name, source: tool.source, ...(description ? { description } : {}) });
+    const description = tool.description?.trim().slice(0, 300) || before?.description;
+    // A project that brings a package of the user's in its own settings reports
+    // its tools as no package of the user's. The user's package still brings
+    // them everywhere else, so they stay its while it is listed.
+    const pkg =
+      tool.package === null && typeof before?.package === "string" && listed?.has(packageKey(before.package))
+        ? before.package
+        : tool.package;
+    merged.set(tool.name, {
+      name: tool.name,
+      source: tool.source,
+      ...(description ? { description } : {}),
+      ...(pkg !== undefined ? { package: pkg } : {}),
+    });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   putSetting("tools_seen", JSON.stringify(sorted));

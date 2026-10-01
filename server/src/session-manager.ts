@@ -10,6 +10,7 @@ import path from "node:path";
 import type { Draft, PiClient, PiTool, PromptTaken } from "./pi/types.js";
 import { effectiveOff, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
+import { projectOf } from "./workspaces.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/session-edit.js";
 import { AUDIO_MESSAGE_PREFIX } from "./pi/voice-first.js";
@@ -49,9 +50,10 @@ import {
   browserAllowed,
   sessionTools,
   setSessionTools,
-  toolDefaultsOff,
+  toolDefaultsFor,
   rememberTools,
   knownTools,
+  shownTools,
   browserAllowlist,
   routineGuards,
   updateSession,
@@ -947,7 +949,7 @@ class SessionManager extends EventEmitter {
     // before you can say "off everywhere" would be the wrong way round.
     void client
       .getTools?.()
-      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source, description: t.description }))))
+      .then((tools) => rememberTools(tools.map((t) => ({ name: t.name, source: t.source, description: t.description, package: t.package ?? null }))))
       .catch(() => {
         // A session that cannot list its tools still works; the catalogue
         // simply stays as it was.
@@ -2106,15 +2108,15 @@ class SessionManager extends EventEmitter {
   }
 
   /**
-   * Everything off for this conversation: the default, bent by its own
-   * exceptions. The whole picture, including tools that are not loaded right
-   * now — which is what the page has to be given, or its next answer would
-   * drop the exceptions it was never shown.
+   * Everything off for this conversation: the portal-wide default, bent by its
+   * project's exceptions and then by its own. The whole picture, including
+   * tools that are not loaded right now — which is what the page has to be
+   * given, or its next answer would drop the exceptions it was never shown.
    */
   offFor(sessionId: string, names: string[] = []): string[] {
     return effectiveOff(
       [...names, ...knownTools().map((t) => t.name)],
-      toolDefaultsOff(),
+      toolDefaultsFor(getSession(sessionId)?.workspace),
       sessionTools(sessionId)
     );
   }
@@ -2134,17 +2136,20 @@ class SessionManager extends EventEmitter {
   async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
     const client = this.live.get(sessionId)?.client;
     const listed = client?.getTools ? await client.getTools() : [];
-    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source, description: t.description })));
-    const defaults = toolDefaultsOff();
+    if (listed.length) rememberTools(listed.map((t) => ({ name: t.name, source: t.source, description: t.description, package: t.package ?? null })));
+    const workspace = getSession(sessionId)?.workspace;
+    // What the chat's project starts it with, which is what it is "default" against.
+    const defaults = toolDefaultsFor(workspace);
     const exceptions = sessionTools(sessionId);
     const servers = mcpServerNames();
-    const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : knownTools();
+    const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : shownTools(workspace);
     return {
-      tools: shown.map((tool) => ({
-        ...tool,
-        source: toolSource(tool.name, tool.source, servers),
-        enabled: toolEnabled(tool.name, defaults, exceptions),
-        defaultOn: !defaults.includes(tool.name),
+      tools: shown.map(({ name, source, description }) => ({
+        name,
+        ...(description !== undefined ? { description } : {}),
+        source: toolSource(name, source, servers),
+        enabled: toolEnabled(name, defaults, exceptions),
+        defaultOn: !defaults.includes(name),
       })),
       live: Boolean(listed.length),
     };
@@ -2177,7 +2182,10 @@ class SessionManager extends EventEmitter {
       ...held.off,
       ...held.on,
     ];
-    setSessionTools(sessionId, exceptionsFor(wantedOff, toolDefaultsOff(), answered, held));
+    // Against the project's default: an exception here is to what the chat would
+    // otherwise have, so a project that switches a tool off needs no entry for it
+    // in every chat, and one that is switched back on in the chat needs one.
+    setSessionTools(sessionId, exceptionsFor(wantedOff, toolDefaultsFor(getSession(sessionId)?.workspace), answered, held));
     const off = this.offFor(sessionId, listed.map((t) => t.name));
     await client?.setToolsOff?.(off);
     return off;
@@ -2187,10 +2195,16 @@ class SessionManager extends EventEmitter {
    * A default changed. Every conversation that did not disagree about the tool
    * is affected, including the ones running right now — otherwise the setting
    * would only mean anything to chats started afterwards.
+   *
+   * `project` when it was a project's exceptions that changed: only the chats
+   * in it are told, the others have nothing new to hear.
    */
-  async applyToolDefaults(): Promise<number> {
+  async applyToolDefaults(project?: string): Promise<number> {
+    const affected = [...this.live.entries()].filter(
+      ([sessionId]) => project === undefined || projectOf(getSession(sessionId)?.workspace) === project
+    );
     const done = await Promise.all(
-      [...this.live.entries()].map(async ([sessionId, { client }]) => {
+      affected.map(async ([sessionId, { client }]) => {
         // Per session, like refreshSettings: the default is already stored, so
         // one chat that is mid-teardown must not fail the save and leave the
         // page showing the opposite of what the database now holds.

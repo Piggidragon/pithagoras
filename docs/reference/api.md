@@ -36,11 +36,13 @@ them. See [Projects](/guide/projects).
 
 | | |
 | --- | --- |
-| `GET /api/projects` | `{ root, projects: [{ name, path, isGit, hasInstructions, sessions, lastActive }] }` |
-| `POST /api/projects` | `{ name, instructions? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home` |
+| `GET /api/projects` | `{ root, projects: [{ name, path, isGit, hasInstructions, hasTools, sessions, lastActive }] }`; `hasTools` is whether the project switches tools differently from the portal-wide default |
+| `POST /api/projects` | `{ name, instructions?, toolsOff? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home`. `toolsOff` is the tools its chats start with off, as for `PUT /api/projects/:name/tools`, checked before the folder is made. If the folder is made and the tools cannot be stored, the answer is the project with a `toolsError` |
 | `GET /api/projects/:name` | The project plus `{ files, bytes, complete }` — what deleting it would remove |
 | `GET /api/projects/:name/instructions` | `{ text }` |
 | `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it. |
+| `GET /api/projects/:name/tools` | `{ tools, live, off, names }`, shaped like a conversation's list: every tool the portal has seen and whether it is on for chats in this project, with `defaultOn` the portal-wide default. `live` is always false |
+| `PUT /api/projects/:name/tools` | `{ off: string[] }` — the tools chats in this project start with; what is not named is on. Stored as the difference from the portal-wide default, and told to the running chats in the project. Answers `{ off, applied }` |
 | `DELETE /api/projects/:name` | Deletes its chats (with their conversation files) and its folder; 409 while one is running |
 
 ## Sessions
@@ -104,7 +106,7 @@ out of it, by `..` or by a link, is refused with 400.
 | `POST /api/sessions/:id/abort` | Stop the current run |
 | `POST /api/sessions/:id/ui-response` | `{ id, value?, cancelled? }` — answer an extension dialog |
 | `GET /api/tools` | `{ tools, off }` — every tool the portal has seen, and which are off by default |
-| `PUT /api/tools` | `{ off: string[] }` — the default for every conversation; applied to the running ones too |
+| `PUT /api/tools` | `{ off: string[] }` — the default for every conversation; applied to the running ones too. A [project](#projects) can bend it with `PUT /api/projects/:name/tools`, and a conversation then holds its exceptions against that |
 | `GET /api/sessions/:id/tools` | `{ tools, live, off }` — every tool the conversation could use and whether it is on. `live` is false when pi is not running to be asked |
 | `PUT /api/sessions/:id/tools` | `{ off: string[] }` — switch tools off by name; everything not named is on |
 | `GET /api/tool-names` | What each package is called here; everything unnamed keeps its own name |
@@ -261,11 +263,12 @@ See [The agent's browser](/guide/browser).
 
 | | |
 | --- | --- |
-| `GET /api/voice` · `PUT /api/voice` | The voice settings |
-| `GET /api/voice/install` · `POST /api/voice/install` · `/start` · `/stop` | The managed voice container and its readiness |
+| `GET /api/voice` · `PUT /api/voice` | The voice settings, including the speaking instructions in use and the built-in ones to go back to. `runtime` may be `none` (no speech synthesis, with no speech URL), and `speech` is then `false`: the page offers dictation and not voice mode, and `…/voice/speech` answers 409 |
+| `GET /api/voice/install` · `POST /api/voice/install` · `/start` · `/stop` | The managed voice container and its readiness, with the `choice` it was built for. `POST /api/voice/install` takes `{ tts, asr, asrModel, asrDevice? }` — `tts` is `breeze`, `chatterbox` or `none` (speech recognition only, which needs no GPU); `asr` and `asrModel` are `whisper` with `base` or `small`, or `qwen3-asr` with `0.6b` or `1.7b`; `asrDevice` is `cpu` or `gpu`, where `gpu` is the default for Qwen3-ASR beside a speech engine and Whisper and recognition-only are always `cpu` — and builds for it, recreating an installed container that has other engines. Without a body it keeps the installed engines, or picks the combination that fits the GPU, or recognition alone where there is none. A choice the GPU or the host's memory cannot hold at all, and speech synthesis on a host without a GPU, is refused after the check, in the status `error`; `400` for a combination that does not exist |
+| `GET /api/voice/hardware` | The GPUs the voice container can use (`gpus`, each with `index`, `uuid`, `name`, `totalMiB`, `freeMiB`; `source` says how they were read), the one it would take (`selected`, an index), the one chosen with `PUT /api/voice/gpu` (`chosen`, a UUID, empty where none is or the one chosen is no longer there), the memory kept free (`reserveMiB`), the combination that fits (`suggestion`), what recognition on the CPU has to run on (`host`: `totalMiB`, `freeMiB`, `threads`), whether the check could tell (`checked`) and whether it found there is no GPU (`cpuOnly`, with recognition alone as the suggestion). No GPU and no tool is `gpus: []`, not an error |
 | `POST /api/voice/connect` | Use the managed services in the settings |
-| `GET /api/voice/gpus` · `PUT /api/voice/gpu` | The GPUs the managed voice can run on, and the one chosen (`{ gpu: uuid }`, or `""` for any); a running service is recreated on a new choice |
-| `GET/POST /api/voice/presets` · `GET …/presets/:id/audio` · `DELETE …/presets/:id` | Saved voices |
+| `PUT /api/voice/gpu` | Choose the GPU the managed voice runs on: `{ gpu: uuid }` (a UUID from `GET /api/voice/hardware`), or `""` to leave it to `VOICE_GPU`, else to the card with the most free memory when engines are installed or rebuilt (a restart keeps the card the service is on). `400` for a UUID that no GPU has, and for a GPU that cannot hold the engines installed (the error says what would fit); nothing is saved or stopped then. A running service is recreated on a new choice at once, any other on its next start; `409` says the choice is saved but the restart could not begin |
+| `GET/POST /api/voice/presets` · `GET …/presets/:id/audio` · `PATCH …/presets/:id` · `DELETE …/presets/:id` | Saved voices. `PATCH` takes `{ instruction }`, the voice description (1–1000 characters), and returns the voice; 404 for an unknown voice |
 | `POST /api/sessions/:id/voice/connection` | Take or give back a lease on the voice services |
 | `POST /api/sessions/:id/voice/transcribe` | `audio/wav` body (12 MB at most) → `{ text }` |
 | `POST /api/sessions/:id/voice/speech` | Text → audio |

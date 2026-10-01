@@ -22,7 +22,8 @@ import {
   listSessions,
   updateSession,
 } from "./db.js";
-import { checkWorkspace, isWithin, workspaceRoot } from "./workspaces.js";
+import { checkWorkspace, workspaceRoot } from "./workspaces.js";
+import { insideReal, isUnderText, isWithinText } from "./within.js";
 import { agentHomePath } from "./agent-home.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import {
@@ -33,7 +34,7 @@ import {
 } from "./agent-setup.js";
 import { sessions, CommandFailed, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
-import { toolSource } from "./tool-policy.js";
+import { defaultsFor, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
 import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth, signOut } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
@@ -42,6 +43,7 @@ import { channelsRouter } from "./api/channels.js";
 import { routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
 import { gitRouter } from "./api/git.js";
+import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { featuresRouter } from "./api/features.js";
@@ -92,7 +94,11 @@ import {
   getSettings,
   getStoredSettings,
   shownStoredSettings,
-  knownTools,
+  shownTools,
+  clearProjectTools,
+  projectTools,
+  projectsWithTools,
+  setProjectTools,
   toolGroupNames,
   setToolGroupNames,
   setToolDefaultsOff,
@@ -283,7 +289,7 @@ app.post("/api/workspaces", (req, res) => {
   }
 
   const target = path.join(WORKSPACE_ROOT, name);
-  if (path.resolve(target) !== target || !target.startsWith(WORKSPACE_ROOT + path.sep)) {
+  if (path.resolve(target) !== target || !isUnderText(WORKSPACE_ROOT, target)) {
     return res.status(400).json({ error: "Invalid workspace name" });
   }
   if (existsSync(target)) return res.status(409).json({ error: `Workspace "${name}" already exists` });
@@ -293,6 +299,7 @@ app.post("/api/workspaces", (req, res) => {
   } catch (e) {
     return res.status(500).json({ error: (e as Error).message });
   }
+  clearProjectTools(name);
   res.json({ name, path: target, isGit: false });
 });
 
@@ -310,7 +317,7 @@ const projectFailure = (res: express.Response, e: unknown) => {
  * in a subfolder, and it belongs to the project all the same.
  */
 const chatsIn = (dir: string, all = listSessions()) =>
-  all.filter((s) => s.workspace === dir || s.workspace.startsWith(dir + path.sep));
+  all.filter((s) => isWithinText(dir, s.workspace));
 
 /**
  * The same, and those that reach the folder through a link too: what deleting
@@ -319,9 +326,10 @@ const chatsIn = (dir: string, all = listSessions()) =>
  */
 function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[] {
   const seen = new Map<string, boolean>();
+  const reaches = insideReal(dir);
   return rows.filter((row) => {
     let inside = seen.get(row.workspace);
-    if (inside === undefined) seen.set(row.workspace, (inside = isWithin(dir, row.workspace)));
+    if (inside === undefined) seen.set(row.workspace, (inside = reaches(row.workspace)));
     return inside;
   });
 }
@@ -341,10 +349,12 @@ app.get("/api/projects", (req, res) => {
     }
     // Read once, not once per project.
     const all = listSessions();
+    const withTools = projectsWithTools();
     const projects = listProjects(WORKSPACE_ROOT).map((p) => {
       const chats = chatsIn(p.path, all);
       return {
         ...p,
+        hasTools: withTools.has(p.name),
         sessions: chats.length,
         lastActive: chats.reduce((latest, s) => (s.updated_at > latest ? s.updated_at : latest), "") || null,
       };
@@ -355,25 +365,62 @@ app.get("/api/projects", (req, res) => {
   }
 });
 
+/**
+ * Stores what a project's chats start with, given the tools it wants off: the
+ * difference from the portal-wide default, which is all that is kept. What the
+ * page was shown is what the portal has seen registered, and what the project
+ * already holds an exception for.
+ */
+function saveProjectTools(project: { name: string; path: string }, off: string[]) {
+  const held = projectTools(project.name);
+  const answered = [...shownTools(project.path).map((t) => t.name), ...held.off, ...held.on];
+  return setProjectTools(project.name, exceptionsFor(off, toolDefaultsOff(), answered, held));
+}
+
+/**
+ * `toolsOff`, when given, is the tools the new project's chats start with off,
+ * as for PUT .../tools. It is checked before the folder is made, like the
+ * instructions, so that a refusal leaves no project behind.
+ */
 app.post("/api/projects", (req, res) => {
-  const { name, instructions } = req.body ?? {};
+  const { name, instructions, toolsOff } = req.body ?? {};
   if (typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "name required" });
   if (instructions !== undefined && typeof instructions !== "string") {
     return res.status(400).json({ error: "instructions must be text" });
   }
+  if (toolsOff !== undefined) {
+    if (!Array.isArray(toolsOff) || toolsOff.some((tool) => typeof tool !== "string")) {
+      return res.status(400).json({ error: "toolsOff must be a list of tool names" });
+    }
+    if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+  }
   try {
-    res.json(createProject(WORKSPACE_ROOT, name, instructions));
+    const project = createProject(WORKSPACE_ROOT, name, instructions);
+    // A new project says nothing about tools: whatever an earlier folder of this
+    // name left behind, such as one removed outside the portal, is not its.
+    // The folder exists by now, and it stays whatever happens to its tools: the
+    // project is made, only its tools are not. Said in the answer rather than as
+    // a failure, so that the page can tell the two apart and offer them again.
+    try {
+      clearProjectTools(project.name);
+      if (toolsOff !== undefined) saveProjectTools(project, toolsOff);
+    } catch (e) {
+      return res.json({ ...project, toolsError: (e as Error).message });
+    }
+    res.json(project);
   } catch (e) {
     projectFailure(res, e);
   }
 });
 
 /** What deleting a project would take with it, for the confirmation. */
-app.get("/api/projects/:name", (req, res) => {
+app.get("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
+    const unsaved = await unsavedWork(project.path);
     res.json({
       ...project,
+      ...(unsaved ? { unsaved } : {}),
       sessions: workingIn(project.path, listSessions()).length,
       // The ones a delete would switch off: one already off is not changed by it.
       routines: routinesIn(project.path).filter((r) => r.enabled).map((r) => r.name),
@@ -404,8 +451,66 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 });
 
 /**
+ * The tools a chat in this project starts with, and whether each is on: the
+ * portal-wide default, bent by what the project says. Shaped like a chat's own
+ * list, so the page draws both the same way; `defaultOn` is the portal-wide
+ * default, which is what the project disagrees with. No pi is running for a
+ * project, so what is listed is what the portal has seen registered.
+ */
+app.get("/api/projects/:name/tools", (req, res) => {
+  try {
+    const project = getProject(WORKSPACE_ROOT, req.params.name);
+    if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+    const defaults = toolDefaultsOff();
+    const exceptions = projectTools(project.name);
+    const servers = mcpServerNames();
+    res.json({
+      tools: shownTools(project.path).map((tool) => ({
+        ...tool,
+        source: toolSource(tool.name, tool.source, servers),
+        enabled: toolEnabled(tool.name, defaults, exceptions),
+        defaultOn: !defaults.includes(tool.name),
+      })),
+      live: false,
+      names: toolGroupNames(),
+      // The whole picture, as for a chat: the page sends it back on the next flip.
+      off: defaultsFor(defaults, exceptions),
+    });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/**
+ * Say which tools chats in this project start with: what is not named is on.
+ * What is stored is the difference from the portal-wide default, as for a chat,
+ * so a change to that default still reaches every tool the project never
+ * disagreed about. Chats running in the project are told at once; what a chat
+ * itself switched stays as it was.
+ */
+app.put("/api/projects/:name/tools", async (req, res) => {
+  const off = req.body?.off;
+  if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
+    return res.status(400).json({ error: "off must be a list of tool names" });
+  }
+  try {
+    const project = getProject(WORKSPACE_ROOT, req.params.name);
+    if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+    const stored = saveProjectTools(project, off);
+    const applied = await sessions.applyToolDefaults(project.name);
+    res.json({ off: defaultsFor(toolDefaultsOff(), stored), applied });
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/**
  * The project, its chats and its folder. Refused while any chat or routine run
- * in it is working.
+ * in it is working, and while its folder holds repositories — itself, submodules,
+ * clones in subfolders — with work that only the folder has — uncommitted
+ * changes, commits no remote has, stashes —
+ * unless `?discard=1` says that is meant. Folders here can be repositories the
+ * portal never made, and nothing brings one back.
  *
  * A routine that runs here keeps its sessions, the record of what it did, as
  * deleting the routine itself does. It is switched off once the folder is gone:
@@ -414,6 +519,13 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 app.delete("/api/projects/:name", async (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
+    // First, before the checks below: git can take seconds, and a chat or a
+    // routine may start in that time, which is what those checks are for. Not
+    // asked at all once ?discard=1 says the answer does not matter.
+    if (req.query.discard !== "1") {
+      const unsaved = await unsavedWork(project.path);
+      if (unsaved && holdsWork(unsaved)) return res.status(409).json(unsavedRefusal(unsaved));
+    }
     const chats = workingIn(project.path, listSessions());
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat in this project is still working. Stop it first." });
@@ -445,6 +557,7 @@ app.delete("/api/projects/:name", async (req, res) => {
         return res.status(409).json({ error: "A routine started running in this project meanwhile. Wait for it to finish, or stop it." });
       }
       deleteProjectFolder(WORKSPACE_ROOT, project.name);
+      clearProjectTools(project.name);
       const switchedOff = switchOffRoutines([...routines, ...late]);
       getDb().transaction(() => {
         for (const chat of chats) deleteSession(chat.id);
@@ -821,7 +934,7 @@ app.get("/api/tools", (_req, res) => {
   const off = new Set(toolDefaultsOff());
   const servers = mcpServerNames();
   res.json({
-    tools: knownTools().map((tool) => ({
+    tools: shownTools().map((tool) => ({
       ...tool,
       source: toolSource(tool.name, tool.source, servers),
       defaultOn: !off.has(tool.name),

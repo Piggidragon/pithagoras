@@ -92,7 +92,8 @@ file in Files, the terminal, the browser, the document or the picture.
 | **Stop** | Shown while the agent works. Stops the task without ending voice mode. |
 
 The buttons at the bottom right open the **conversation** — a window like Files,
-with what you said as it was transcribed and what came back as written — the
+with what you said as it was transcribed and what came back as written, with
+its markdown (lists, code, links) rendered as in the chat, each in a speech bubble — the
 canvases, Files, pictures, the browser and the terminal, and the **voice
 settings**:
 
@@ -235,8 +236,13 @@ Hindi, Italian, Korean, Malay, Norwegian, Polish, Portuguese, Spanish, Swahili,
 Swedish and Turkish. Qwen3-ASR covers those and more. Both are MIT/Apache-2.0
 licensed, unlike Breeze's research-only weights.
 
-This is a separate deployment; it does not replace Breeze or the managed
-installer, and both keep working unchanged.
+The managed **Install voice** button in Settings builds this combination for
+you: pick **Chatterbox** and **Qwen3-ASR** under **Speech engines** (see
+[Docker add-ons](/guide/add-ons#engines-and-gpu-memory)), and the installer
+downloads both models, sets up the one audio.cpp process and points the settings
+at it. The rest of this section is the alternative: running audio.cpp yourself,
+as a separate deployment. It does not replace Breeze or the managed installer,
+and both keep working unchanged.
 
 ### Download the models
 
@@ -323,9 +329,9 @@ Recognition uses the OpenAI transcription API, which needs the model name that
 leaving **Speech recognition model** empty keeps the existing Whisper setup
 byte for byte.
 
-The managed **Install voice** button still installs Breeze and Whisper; it does
-not know about this runtime. Do not run both on the same GPU unless it has the
-memory for both.
+Do not run this deployment and the managed service on the same GPU unless it has
+the memory for both: the Settings page shows what each combination needs, and the
+managed installer reads the GPU before it installs.
 
 ### Behind llama-swap
 
@@ -443,14 +449,31 @@ Other providers and the container executor retain their normal thinking behavior
 
 ### Speaking instructions
 
-The rules above — a short spoken sentence before tools, plain text without
-Markdown, long reports in a canvas, pictures through `show_image`, the
-`(laugh)` / `(sigh)` cues — are one built-in block of text
-(`server/src/pi/voice-first.ts`), not a field in the UI. They are switched off as
-a whole with `VOICE_RESPONSE_INSTRUCTIONS=false` on the portal: no `[Audio mode]`
-prefix is added and the system-prompt rule is never sent, which is what the
-[comparison baseline](/guide/voice-comparison) does. Any other value leaves them
-on. `VOICE_SKIP_FIRST_THINKING=false` keeps thinking on for the first call. The
+The rules for how the agent talks — a short spoken sentence before tools, plain
+text without Markdown, long reports in a canvas, pictures through `show_image`,
+the `(laugh)` / `(sigh)` cues — are a block of text that is part of the rule
+above. **Settings → Add-ons → Voice → Speaking instructions** shows the text in
+use and lets you change it: shorter or longer replies, another tone, no
+announcing before tools. Save, and it applies from the next spoken message,
+also in conversations that are already open; typed messages keep the prompt they
+had. A local model reads the conversation again once after a change, as it
+does at the first spoken message.
+
+The built-in text comes from the portal, so a portal update improves it for
+everyone who has not changed it. **Reset to default** puts it back in the
+field. Saving empty text, or the built-in text unchanged, stores nothing and
+keeps following the portal's own. Text can be up to 8000 characters.
+
+What the `[Audio mode]` marker means, and that a message without it is an
+ordinary chat message, is said in a fixed note around your text and is not part
+of what you edit.
+
+`VOICE_RESPONSE_INSTRUCTIONS=false` on the portal switches the speaking
+instructions off as a whole, whatever is saved: no `[Audio mode]` prefix is added
+and the system-prompt rule is never sent, which is what the
+[comparison baseline](/guide/voice-comparison) does. The page says so, and keeps
+your text for when the variable is removed. Any other value leaves them on.
+`VOICE_SKIP_FIRST_THINKING=false` keeps thinking on for the first call. The
 remaining `VOICE_*` variables (`VOICE_PIPELINE_MODE`, `VOICE_SENTENCE_CHUNKS`,
 `VOICE_TTS_PREFETCH`, `VOICE_STATUS_SPEECH`, `VOICE_COMPARISON`) are described in
 the comparison guide.
@@ -619,19 +642,40 @@ prefill; subsequent turns can reuse it. No custom chat template is needed.
 
 On a Linux NVIDIA host with Docker and NVIDIA Container Toolkit, open
 **Settings → Add-ons → Voice → Install voice**. Pithagoras creates a separate
-`pithagoras-voice` container and displays the setup log. It builds pinned audio.cpp
-and Whisper.cpp revisions, downloads the full-precision Breeze-TTS-2 GGUF package,
-quantizes that package locally to Q8_0, and downloads multilingual Whisper base.
-The GGUF source is the audio.cpp repack of BreezeBlue/Breeze-TTS-2. No Python TTS
-runtime is installed. Whisper runs on CPU; Breeze uses the GPU.
+`pithagoras-voice` container and displays the setup log. Under **Speech engines**
+you choose the speech synthesis engine (Breeze or Chatterbox) and the speech
+recognition model (Whisper base or small, Qwen3-ASR 0.6B or 1.7B), or leave the
+choice to the installer, which reads the GPU and its free memory and picks the
+best combination that fits; [Docker add-ons](/guide/add-ons#engines-and-gpu-memory)
+lists what each needs and what happens when a choice does not fit. The default is
+the original combination: Breeze with Whisper base.
+
+For that default, it builds pinned audio.cpp and Whisper.cpp revisions, downloads
+the full-precision Breeze-TTS-2 GGUF package, quantizes that package locally to
+Q8_0, and downloads multilingual Whisper base. The GGUF source is the audio.cpp
+repack of BreezeBlue/Breeze-TTS-2. No Python TTS runtime is installed. Whisper runs
+on CPU; Breeze uses the GPU. Chatterbox and Qwen3-ASR are downloaded as Q8_0 GGUF
+files from a pinned revision of the same repository and verified by checksum;
+audio.cpp serves them from one process, with Qwen3-ASR's recognition on
+`/v1/audio/transcriptions` of the same port, and no Whisper then runs.
 
 Allow about 30 GB free disk space during setup. First installation can take several
 minutes or longer depending on compilation and download speeds. Source downloads
 resume, completed models and builds are reused, and the quantized model is moved
 into place only after the converter inspects it successfully. The full-precision
-file is then removed. Models persist in `pithagoras_voice-models`.
+file is then removed. Models persist in `pithagoras_voice-models`. Choosing other
+engines later recreates the container and builds or downloads only what is new;
+an installation made before the choice existed is the default combination, and
+keeps working unchanged.
 
-Once both health checks pass, Settings connects the installed services automatically.
+**Without a GPU** the installer sets up speech recognition alone, on the CPU: Whisper, or
+Qwen3-ASR in a CPU-only audio.cpp build, in the small base image rather than the CUDA one. Dictation
+works; the voice-conversation control is not offered, because it speaks its replies, and speech
+synthesis needs a GPU (Breeze and Chatterbox take several seconds of CPU time per second of speech).
+Qwen3-ASR on a GPU host can be put on the CPU too, to spare the card. See
+[Docker add-ons](/guide/add-ons#no-gpu-recognition-only).
+
+Once the health checks of what was installed pass, Settings connects the installed services automatically.
 Existing voice choices and Aria reference files are preserved. A reference clone
 still needs the private reference WAV and transcript described above.
 
@@ -675,7 +719,19 @@ instead. Each preset stores its own voice description.
 
 Click **Save new voice**, then **Save voice settings** to activate the selected
 voice. Saved voices appear in the Speaking voice dropdown. Clones include a
-reference preview and transcript. Delete voice removes the preset and falls back
+reference preview and transcript.
+
+To change a saved voice's description later, select the voice, edit **Voice
+description** and click **Save description**. The change is stored at once and
+applies from the next phrase spoken, for a clone as well as a designed voice;
+the recording and its transcript stay as they are. **Save voice settings** also
+saves a description you edited and have not saved yet, and stops with an error,
+without saving the other settings, if the description cannot be saved. Breeze is
+the engine that reads the description. Chatterbox takes no description: it speaks
+from the recording alone, so editing the description of a voice used with
+Chatterbox changes nothing you can hear.
+
+Delete voice removes the preset and falls back
 to the default designed voice if it was active. Presets and recordings persist in
 the portal's SQLite database; they are shared across sessions and require portal
 authentication to access. Adding a voice does not retrain or download another model.

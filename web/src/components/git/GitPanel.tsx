@@ -9,6 +9,7 @@ import { History } from "./History";
 import { Pulls } from "./Pulls";
 import { ViewHost } from "./views";
 import { msg, t, tp } from "../../i18n";
+import { below } from "../../paths";
 
 export type GitTab = "changes" | "history" | "branches" | "pulls";
 export const GIT_TABS: { id: GitTab; label: string }[] = [
@@ -154,7 +155,10 @@ export function GitPanel({
 
   const ctx: GitCtx | null = useMemo(() => {
     if (!state?.repo) return null;
-    const prefix = state.prefix ? `${state.prefix}/` : "";
+    // A path of the repository as one in the chat's folder, undefined outside
+    // it. At the repository's top every path is in it; the folder itself is
+    // not a file in it.
+    const inFolder = (p: string) => (state.prefix ? below(state.prefix, p) || undefined : p);
     return {
       id: sessionId,
       repo: { ...state, gh },
@@ -164,8 +168,13 @@ export function GitPanel({
       show: (view) => setStack((s) => [...s, view]),
       // Files shows the chat's folder; a file of the repository outside it is
       // not there to open, and is offered no button that would do nothing.
-      inFolder: (p) => p.startsWith(prefix),
-      openFile: onOpenFile ? (p) => p.startsWith(prefix) && onOpenFile(p.slice(prefix.length)) : undefined,
+      inFolder: (p) => inFolder(p) !== undefined,
+      openFile: onOpenFile
+        ? (p) => {
+            const rel = inFolder(p);
+            if (rel !== undefined) onOpenFile(rel);
+          }
+        : undefined,
     };
   }, [state, gh, sessionId, reload, act, busy, onOpenFile]);
 

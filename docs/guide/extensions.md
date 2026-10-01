@@ -150,6 +150,25 @@ It takes effect from the next message — pi is told at once and there is no nee
 to restart the conversation — and it is remembered per chat, including across a
 restart.
 
+Before a chat has started, and in Settings → Tools, the list is what the portal
+has seen registered. The tools of a package that is switched off, narrowed to
+none of its extensions, or uninstalled are left out of it, since nothing
+registers them any more. A switched-off package's are remembered and come back
+with it; an uninstalled one's are forgotten. MCP servers' tools go with
+`pi-mcp-adapter` when it is off or gone, but are remembered even when it is
+uninstalled, since the servers are configured apart from it. A package is the
+same package at any version, so updating one keeps its tools. One narrowed to
+some of its extensions keeps all its tools listed here; a started chat shows
+only what is loaded. Before a chat in a project starts, a package the project
+lists and loads itself counts, whatever the user's entry says.
+
+A tool remembered before the portal recorded which package it came from is
+left out when its npm package is switched off, until a conversation reports it
+again, and is forgotten when its package is uninstalled here — matched by the
+npm name, or the folder or repository name, it is filed under. If that package
+was uninstalled outside the portal, nothing says the tool was a package's, and
+it stays listed until it is removed from `tools_seen` in the portal's database.
+
 The list is what the model could be offered. pi registers `grep`, `find` and
 `ls` and leaves them inactive, so they are not there to tick. A switch holds
 against everything that would turn a tool back on — an extension that registers
@@ -187,6 +206,11 @@ A chat may still disagree with the default in either direction, and the row
 says so where it does. What a chat stores is only its disagreement, so changing
 a default reaches every conversation that never said anything about that tool —
 including the ones open right now.
+
+A [project](/guide/projects#tools) can sit between the two: it switches tools
+against this default for all of its chats, and a chat then disagrees with what
+its project leaves, not with this default. The row in a chat says "default on"
+or "default off" against that.
 
 The list there is what the portal has seen a session register, not what is
 loaded this second: pi builds its registry when a conversation starts, and
