@@ -206,6 +206,35 @@ test('a portal that had no voice set up is back to that: the defaults, with voic
   assert.equal(back.managed, false);
 });
 
+test('voice that was off before the install is off after it, however the sides were connected over: the flag goes with each side', async () => {
+  // Nothing was set up: voice off, on the default addresses. The user then moves the speech side to their own server and keeps the managed recognition, and a connect follows (Use installed voice, or Stop and Start).
+  reset(); seedContainer();
+  assert.equal((await get('/voice')).enabled, false);
+  assert.equal((await post('/voice/connect')).status, 200);
+  const up = await get('/voice');
+  assert.equal(up.enabled, true);
+  assert.equal((await put({ ...up, runtime: 'breeze', breezeUrl: OWN.breezeUrl })).status, 200);
+  assert.equal((await post('/voice/connect')).status, 200);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  // The speech server is theirs and stays; the recognition address is only a default, and voice is not left on against it.
+  assert.deepEqual(fields(await get('/voice')), { enabled: false, runtime: 'breeze', whisperUrl: DEFAULTS.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: '' });
+  // The same with their own recognition server and the managed speech.
+  reset(); seedContainer();
+  assert.equal((await post('/voice/connect')).status, 200);
+  assert.equal((await put({ ...await get('/voice'), whisperUrl: OWN.whisperUrl, sttModel: 'my-model' })).status, 200);
+  assert.equal((await post('/voice/connect')).status, 200);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  assert.deepEqual(fields(await get('/voice')), { enabled: false, runtime: 'breeze', whisperUrl: OWN.whisperUrl, breezeUrl: DEFAULTS.breezeUrl, sttModel: 'my-model' });
+  // Voice that was on, with both sides theirs, stays on when one side was moved to another server of theirs in between.
+  reset(); seedContainer();
+  assert.equal((await put(OWN)).status, 200);
+  assert.equal((await post('/voice/connect')).status, 200);
+  assert.equal((await put({ ...await get('/voice'), runtime: 'breeze', breezeUrl: 'http://tts2.example.test:9001/v1/audio/speech' })).status, 200);
+  assert.equal((await post('/voice/connect')).status, 200);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'breeze', whisperUrl: OWN.whisperUrl, breezeUrl: 'http://tts2.example.test:9001/v1/audio/speech', sttModel: 'my-model' });
+});
+
 test('a service installed before settings were remembered: only what points at it is reset, and every other address stays', async () => {
   // Speech and recognition both the managed service's: both go back to a portal with nothing set up, and voice is off.
   reset(); seedContainer();

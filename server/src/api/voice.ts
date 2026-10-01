@@ -168,13 +168,13 @@ setImmediate(maintain);
  * What the portal keeps of the settings a connect overwrites, for the uninstall to put back. Kept for each side on its own, so
  * that an address the user sets up after the install is remembered as well: `listening` is the recognition address with its
  * model, `speaking` the speech address with its runtime. A side is there once it held something that was not the managed
- * service's; `enabled` is whether voice was on then. `noSpeech`: the last connect saved no speech address, which is how
- * recognition alone leaves the speech side, and which is then the managed service's and not the user's.
+ * service's, with whether voice was on then: that goes with the side, as the connect itself saves voice as on, and a side that
+ * stays the service's while the other is set up again must not take the other's flag over. `noSpeech`: the last connect saved
+ * no speech address, which is how recognition alone leaves the speech side, and which is then the managed service's and not the user's.
  */
 interface Remembered {
-  listening?: { whisperUrl: string; sttModel: string };
-  speaking?: { breezeUrl: string; runtime: NonNullable<VoiceConfig["runtime"]> };
-  enabled?: boolean;
+  listening?: { whisperUrl: string; sttModel: string; enabled: boolean };
+  speaking?: { breezeUrl: string; runtime: NonNullable<VoiceConfig["runtime"]>; enabled: boolean };
   noSpeech?: boolean;
 }
 const REMEMBERED_KEY = "voice_before_managed";
@@ -186,9 +186,8 @@ function remembered(): Remembered {
     const value = JSON.parse((getStoredSettings() as Record<string, string>)[REMEMBERED_KEY] ?? "{}");
     const { listening, speaking } = value;
     return {
-      ...(typeof listening?.whisperUrl === "string" ? { listening: { whisperUrl: listening.whisperUrl, sttModel: typeof listening.sttModel === "string" ? listening.sttModel : "" } } : {}),
-      ...(typeof speaking?.breezeUrl === "string" && typeof speaking.runtime === "string" ? { speaking: { breezeUrl: speaking.breezeUrl, runtime: speaking.runtime } } : {}),
-      ...(typeof value.enabled === "boolean" ? { enabled: value.enabled } : {}),
+      ...(typeof listening?.whisperUrl === "string" ? { listening: { whisperUrl: listening.whisperUrl, sttModel: typeof listening.sttModel === "string" ? listening.sttModel : "", enabled: listening.enabled === true } } : {}),
+      ...(typeof speaking?.breezeUrl === "string" && typeof speaking.runtime === "string" ? { speaking: { breezeUrl: speaking.breezeUrl, runtime: speaking.runtime, enabled: speaking.enabled === true } } : {}),
       ...(typeof value.noSpeech === "boolean" ? { noSpeech: value.noSpeech } : {}),
     };
   } catch { return {}; }
@@ -211,9 +210,8 @@ export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
   const kept = remembered();
   const { listening, speaking } = managedSides(current, kept.noSpeech);
   const next: Remembered = { ...kept, noSpeech: runtime === "none" };
-  if (!listening) next.listening = { whisperUrl: current.whisperUrl, sttModel: current.sttModel ?? "" };
-  if (!speaking) next.speaking = { breezeUrl: current.breezeUrl, runtime: current.runtime ?? "breeze" };
-  if (!listening || !speaking) next.enabled = current.enabled;
+  if (!listening) next.listening = { whisperUrl: current.whisperUrl, sttModel: current.sttModel ?? "", enabled: current.enabled };
+  if (!speaking) next.speaking = { breezeUrl: current.breezeUrl, runtime: current.runtime ?? "breeze", enabled: current.enabled };
   getDb().prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(REMEMBERED_KEY, JSON.stringify(next));
   // Chatterbox is told a language and has no detection mode; keep one it speaks rather than save a setting it refuses.
   const language = runtime === 'chatterbox' && !CHATTERBOX_LANGUAGES.includes(current.language) ? 'en' : current.language;
@@ -239,10 +237,10 @@ export function disconnectManagedVoice() {
     ...(listening ? { whisperUrl: kept.listening?.whisperUrl ?? DEFAULT_WHISPER_URL, sttModel: kept.listening?.sttModel ?? "" } : {}),
     ...(speaking ? { breezeUrl: kept.speaking?.breezeUrl ?? DEFAULT_BREEZE_URL, runtime: kept.speaking?.runtime ?? "breeze" } : {}),
   };
-  // Voice was switched on by the connect, and is left on only where everything put back is what the user had, it was on then, and it
-  // has not been turned off since; an address that is only a default is no use switched on.
-  const known = (!listening || kept.listening) && (!speaking || kept.speaking);
-  const saved: VoiceConfig = { ...current, ...back, enabled: !!known && !!kept.enabled && current.enabled };
+  // Voice was switched on by the connect, and is left on only where everything put back is what the user had, it was on when each
+  // part of it was, and it has not been turned off since; an address that is only a default is no use switched on.
+  const on = (!listening || kept.listening?.enabled === true) && (!speaking || kept.speaking?.enabled === true);
+  const saved: VoiceConfig = { ...current, ...back, enabled: on && current.enabled };
   saveVoice(saved);
   return saved;
 }
