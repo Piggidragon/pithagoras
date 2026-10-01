@@ -692,7 +692,19 @@ instead. Each preset stores its own voice description.
 
 Click **Save new voice**, then **Save voice settings** to activate the selected
 voice. Saved voices appear in the Speaking voice dropdown. Clones include a
-reference preview and transcript. Delete voice removes the preset and falls back
+reference preview and transcript.
+
+To change a saved voice's description later, select the voice, edit **Voice
+description** and click **Save description**. The change is stored at once and
+applies from the next phrase spoken, for a clone as well as a designed voice;
+the recording and its transcript stay as they are. **Save voice settings** also
+saves a description you edited and have not saved yet, and stops with an error,
+without saving the other settings, if the description cannot be saved. Breeze is
+the engine that reads the description. Chatterbox takes no description: it speaks
+from the recording alone, so editing the description of a voice used with
+Chatterbox changes nothing you can hear.
+
+Delete voice removes the preset and falls back
 to the default designed voice if it was active. Presets and recordings persist in
 the portal's SQLite database; they are shared across sessions and require portal
 authentication to access. Adding a voice does not retrain or download another model.

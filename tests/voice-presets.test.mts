@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 process.env.DATA_DIR=mkdtempSync(tmpdir()+'/voice-presets-');
-const {addVoice,readVoice,listVoices,deleteVoice}=await import('../server/src/voice-presets.js');
+const {addVoice,readVoice,listVoices,updateVoice,deleteVoice,VoiceNotFound}=await import('../server/src/voice-presets.js');
 const {getDb}=await import('../server/src/db.js');
 const {validateConfig}=await import('../server/src/api/voice.js');
 const {samplesWav}=await import('../web/src/voice.ts');
@@ -21,4 +21,24 @@ test('designed voices need no recording; invalid references and unknown selectio
  assert.throws(()=>addVoice({name:'Bad',kind:'clone',instruction:'Clear',transcript:'Hello',audio:'YWJj'}),/Invalid reference/);
  assert.throws(()=>addVoice({name:'Bad',kind:'clone',instruction:'Clear',transcript:'',audio:''}),/exact words/);
  assert.throws(()=>validateConfig({enabled:true,voice:'missing',instruction:'Clear',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b'}),/not found/);
+});
+test('a saved voice\'s description can be changed, and only the description',async()=>{
+ const audio=Buffer.from(await samplesWav(new Float32Array(16000)).arrayBuffer()).toString('base64');
+ const voice=addVoice({name:'Editable',kind:'clone',instruction:'Warm delivery',transcript:'A reference line',audio});
+ const before=readVoice(voice.id);
+ const row=updateVoice(voice.id,{instruction:'  Bright and quick  '});
+ assert.deepEqual(row,{id:voice.id,name:'Editable',kind:'clone',instruction:'Bright and quick',transcript:'A reference line'});
+ assert.equal(readVoice(voice.id).instruction,'Bright and quick');
+ assert.deepEqual((listVoices() as any[]).find(v=>v.id===voice.id),row);
+ assert.deepEqual(readVoice(voice.id).audio,before.audio);
+ for(const instruction of ['','  ','x'.repeat(1001),null,7])assert.throws(()=>updateVoice(voice.id,{instruction}),/1–1000 characters/);
+ assert.throws(()=>updateVoice(voice.id,undefined),/1–1000 characters/);
+ assert.equal(readVoice(voice.id).instruction,'Bright and quick');
+ assert.equal(updateVoice(voice.id,{instruction:'x'.repeat(1000)}).instruction.length,1000);
+});
+test('changing the description of a voice that is not there says so and adds nothing',()=>{
+ const count=listVoices().length;
+ assert.throws(()=>updateVoice('voice-missing',{instruction:'Clear'}),(e:unknown)=>e instanceof VoiceNotFound&&/not found/.test(e.message));
+ assert.throws(()=>readVoice('voice-missing'),(e:unknown)=>e instanceof VoiceNotFound);
+ assert.equal(listVoices().length,count);
 });
