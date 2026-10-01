@@ -1387,7 +1387,7 @@ test("the API says whether several pictures are taken, and reloads chats when th
 
 test("a tool rule for edit_image is matched on each picture, whether it is named by path or by a list, never on the list's JSON", async () => {
   const { ruleAllows, guardExtension } = await import("../server/src/pi/guard.ts");
-  const { addGrant, addToolRule, deleteToolRule, listToolRules } = await import("../server/src/db.ts");
+  const { addToolRule, deleteToolRule, listToolRules } = await import("../server/src/db.ts");
   const rule = (pattern: string, more: Record<string, unknown> = {}) =>
     ({ id: `r-${pattern}`, role: "colleague", tool: "edit_image", pattern, note: "", created_at: "", person_key: null, ...more }) as Parameters<typeof ruleAllows>[0][number];
   const allows = (rules: ReturnType<typeof rule>[], input: Record<string, unknown>, role = "colleague") => ruleAllows(rules, role, "edit_image", input);
@@ -1449,14 +1449,74 @@ test("a tool rule for edit_image is matched on each picture, whether it is named
     assert.equal(asked({ paths: ["shared/a.png"], prompt: "like shared/x" }), undefined);
     assert.equal(asked({ paths: ["private.png"], prompt: "like shared/x" })?.block, true, "refused: the prompt is not a rule's business");
     assert.equal(asked({ paths: ["shared/a.png", "private.png"], prompt: "p" })?.block, true);
-    // A one-off approval is for the call as it was shown, arguments and all, and is spent by it.
-    const approved = { paths: ["private.png", "shared/a.png"], prompt: "p" };
-    addGrant("issue90-grant", "chat-issue90", "edit_image", JSON.stringify(approved));
-    assert.equal(asked({ ...approved, prompt: "another" })?.block, true, "not for another call");
-    assert.equal(asked(approved), undefined);
-    assert.equal(asked(approved)?.block, true, "and once");
   } finally {
     for (const r of added) deleteToolRule(r.id);
+  }
+});
+
+test("a colleague's edit_image call can be approved once or always, with the action the guard asks for, in either shape of the tool", async () => {
+  const { guardExtension, callSubject, rulePatterns } = await import("../server/src/pi/guard.ts");
+  const { deleteToolRule, listToolRules } = await import("../server/src/db.ts");
+  const { askQuestion, readAnswer } = await import("../server/src/questions.ts");
+  const { recordApproval } = await import("../server/src/approvals.ts");
+
+  // What the guard calls a call: the path, or the path of each picture, one to a line, never the prompt.
+  assert.equal(callSubject("edit_image", { path: "shared/a.png", prompt: "p" }), "shared/a.png", "as it was");
+  assert.equal(callSubject("edit_image", { paths: ["shared/a.png"], prompt: "p" }), "shared/a.png", "a list of one is its picture");
+  assert.equal(callSubject("edit_image", { paths: ["shared/a.png", " shared/b.jpg "], prompt: "other" }), "shared/a.png\nshared/b.jpg");
+  assert.equal(callSubject("edit_image", { prompt: "p" }), JSON.stringify({ prompt: "p" }), "a call that names nothing is shown as it is");
+  assert.equal(callSubject("bash", { command: " ls " }), "ls");
+  assert.equal(callSubject("write", { path: "docs/a.md" }), "docs/a.md");
+  assert.deepEqual(rulePatterns("edit_image", "shared/a.png\n shared/b.jpg \n"), ["shared/a.png", "shared/b.jpg"], "one rule for each picture");
+  assert.deepEqual(rulePatterns("edit_image", "Summer, 2026.png"), ["Summer, 2026.png"], "a comma is part of a name");
+  assert.deepEqual(rulePatterns("bash", "ls\nmore"), ["ls\nmore"], "other tools' actions are one pattern as they were");
+
+  const session = "chat-issue90-approval";
+  const person = { role: "colleague", key: "priya" };
+  let handler: ((event: any) => any) | undefined;
+  let who: { role: string; key?: string } = person;
+  guardExtension("/tmp/none", () => who, session)({ on: (name: string, fn: (event: any) => any) => { if (name === "tool_call") handler = fn; } });
+  const call = (input: Record<string, unknown>) => handler!({ toolName: "edit_image", input });
+  /** What the agent does with a refusal: asks with the action it names, as ask_primary files it, and the primary answers. */
+  const approve = (refused: any, answer: string) => {
+    assert.equal(refused?.block, true);
+    assert.match(refused.reason, /actionTool is edit_image/);
+    const action = refused.reason.split("exactly:\n")[1].trim();
+    const row = askQuestion({ sessionId: session, personKey: "priya", personName: "Priya", channelSlug: "chat", channelKey: "k", question: "may I?", actionTool: "edit_image", action });
+    const pending = readAnswer(`#${row.id} ${answer}`)!;
+    recordApproval(pending.question, { id: session }, pending.approves, pending.always);
+    return action;
+  };
+  try {
+    // Once, for several pictures: refused, told what to ask for, approved, then it runs, and only once.
+    const several = { paths: ["shared/logo.png", "Summer, banner.png"], prompt: "put the logo on the banner" };
+    assert.equal(approve(call(several), "approve"), "shared/logo.png\nSummer, banner.png");
+    assert.equal(call({ ...several, prompt: "another words" }), undefined, "it is the pictures that were approved");
+    assert.equal(call(several)?.block, true, "and once");
+    assert.equal(call({ paths: ["shared/logo.png"], prompt: "p" })?.block, true, "not for fewer or other pictures");
+
+    // The path the agent would write for one picture works for a list of one, as for the tool's other shape.
+    const row = askQuestion({ sessionId: session, personKey: "priya", personName: "Priya", channelSlug: "chat", channelKey: "k", question: "may I?", actionTool: "edit_image", action: "shared/a.png" });
+    recordApproval(readAnswer(`#${row.id} approve`)!.question, { id: session }, true, false);
+    assert.equal(call({ paths: ["shared/a.png"], prompt: "p" }), undefined);
+    const again = askQuestion({ sessionId: session, personKey: "priya", personName: "Priya", channelSlug: "chat", channelKey: "k", question: "may I?", actionTool: "edit_image", action: "shared/a.png" });
+    recordApproval(readAnswer(`#${again.id} approve`)!.question, { id: session }, true, false);
+    assert.equal(call({ path: "shared/a.png", prompt: "p" }), undefined, "and for one path");
+
+    // Always: one rule for each picture, for her alone, which lets the same call through every time and nothing else.
+    approve(call(several), "always");
+    const made = listToolRules().filter((r) => r.tool === "edit_image" && r.person_key === "priya");
+    assert.deepEqual(made.map((r) => r.pattern).sort(), ["Summer, banner.png", "shared/logo.png"], "a rule that held both would match neither");
+    assert.equal(call(several), undefined);
+    assert.equal(call(several), undefined, "not spent");
+    assert.equal(call({ paths: ["Summer, banner.png"], prompt: "p" }), undefined, "each picture is allowed on its own now");
+    assert.equal(call({ paths: ["shared/logo.png", "private.png"], prompt: "p" })?.block, true, "a picture that was not approved is not");
+    // "Always" is also an approval of the call once, which her rules did not need and left open for this conversation: spent here.
+    who = { role: "colleague", key: "sam" };
+    assert.equal(call(several), undefined, "the one-off approval is the conversation's, whoever speaks");
+    assert.equal(call(several)?.block, true, "the rules are Priya's alone");
+  } finally {
+    for (const r of listToolRules().filter((rule) => rule.tool === "edit_image")) deleteToolRule(r.id);
   }
 });
 

@@ -304,8 +304,12 @@ What was decided for it:
   picture, as ever. With a list, **each picture's path** is matched, and the call
   is allowed only if every one is: a rule for `shared/*` allows a list of pictures
   in `shared/` and nothing with another picture in it, and neither the prompt nor
-  another picture of the list can satisfy a rule meant for one. A one-off approval
-  is for the call as it was shown to you, arguments and all, and is spent by it.
+  another picture of the list can satisfy a rule meant for one. An
+  [approval](/people/approvals) is for the pictures, not the prompt, as for one
+  picture: the agent is told to ask with each picture's path on a line of its own,
+  in the order of the call, and the refusal it got says exactly which. **Approve
+  once** allows that call's pictures once, and **Always allow** writes one rule for
+  each of them, for the person who asked.
 - **A mask goes with the first picture** where a caller gives one, as for one
   picture; the agent's tool still has none.
 - **The setting is read at each call.** A list is refused when the endpoint is no

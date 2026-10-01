@@ -297,7 +297,36 @@ const subjectOf = (toolName: string, input: Record<string, unknown>) =>
 function subjectsOf(toolName: string, input: Record<string, unknown>): string[] {
   if (toolName !== EDIT_IMAGE_TOOL) return [subjectOf(toolName, input)];
   const named = (value: unknown): unknown[] => (Array.isArray(value) ? value : value === undefined ? [] : [value]);
-  return [...named(input.path), ...named(input.paths)].map((name) => (typeof name === "string" ? name : ""));
+  return [...named(input.path), ...named(input.paths)].map((name) => (typeof name === "string" ? name.trim() : ""));
+}
+
+/**
+ * Between the pictures of an edit_image call where somebody approves it. A line
+ * break, not a comma: a picture's name may hold a comma and a space, hardly a
+ * line break, so the pictures can be told apart again (see rulePatterns).
+ */
+const PICTURE_SEP = "\n";
+
+/**
+ * What a call is called where a person is asked to approve it, and in the log:
+ * what a one-off approval is matched on, exactly. The command, or the path, and
+ * for an edit_image the path of each picture, one to a line, in the order of the
+ * call, so that the agent can write it as an `action` however the pictures were
+ * named. The prompt is not part of it, as the prompt of one picture never was.
+ */
+export function callSubject(toolName: string, input: Record<string, unknown>): string {
+  if (toolName !== EDIT_IMAGE_TOOL) return subjectOf(toolName, input).trim();
+  return subjectsOf(toolName, input).join(PICTURE_SEP).trim() || JSON.stringify(input);
+}
+
+/**
+ * The patterns a standing approval of `action` is written as: the action itself,
+ * and for an edit_image one for each picture of it, since a rule is matched on
+ * each picture (see subjectsOf) and one that held them all would match none.
+ */
+export function rulePatterns(toolName: string, action: string): string[] {
+  if (toolName !== EDIT_IMAGE_TOOL) return [action];
+  return action.split(PICTURE_SEP).map((line) => line.trim()).filter(Boolean);
 }
 
 /**
@@ -404,7 +433,7 @@ export function guardExtension(
 
     pi.on("tool_call", (event: any) => {
       const { role, key } = whoNow();
-      const subject = subjectOf(event.toolName, event.input ?? {}).trim();
+      const subject = callSubject(event.toolName, event.input ?? {});
       const note = (kind: string, reason: string) =>
         recordAudit({
           kind,
@@ -475,7 +504,12 @@ export function guardExtension(
             `command makes it something else and it is refused. Tell them plainly that this ` +
             `needs the primary user, and pass the request along — with the exact command as the ` +
             `action, so they can approve that and only that. If you have already asked about ` +
-            `this, do not ask again: say you are waiting.`,
+            `this, do not ask again: say you are waiting.` +
+            // The pictures of a list have no one path to write: say what the action is, so that it matches.
+            (event.toolName === EDIT_IMAGE_TOOL
+              ? ` For this call the actionTool is edit_image and the action is the path of each ` +
+                `picture, one to a line, in this order, exactly:\n${subject}`
+              : ""),
         };
       }
 
