@@ -35,6 +35,8 @@ export const EDIT_IMAGE_TOOL = "edit_image";
 export const GENERATE_IMAGE_SOURCE = "image-generation";
 /** The same for the editing tool, which is an extension of its own: `<inline:image-editing>`. */
 export const EDIT_IMAGE_SOURCE = "image-editing";
+/** And for `show_image`, which the portal registers beside the canvases: `<inline:pictures>`. */
+export const SHOW_IMAGE_SOURCE = "pictures";
 
 export interface ImageGenerationConfig {
   enabled: boolean;
@@ -320,7 +322,7 @@ export async function requestPicture(
     // The chat was stopped: nobody is told it failed.
     if (options.signal?.aborted) return e as Error;
     if (signal.aborted) return new ImageGenerationError(
-        `The image endpoint did not answer within ${seconds(timeoutMs)} seconds. Raise the time limit in the settings of the Images add-on if it needs longer.`,
+        `The image endpoint did not answer within ${seconds(timeoutMs)} seconds. Raise the time limit in Settings → Images if it needs longer.`,
       );
     if (e instanceof ImageGenerationError) return e;
     const why = (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code ?? (e as Error)?.message ?? "unknown error";

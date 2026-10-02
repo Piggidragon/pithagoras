@@ -884,12 +884,12 @@ test("a picture that takes longer than the old limit is waited for, one past the
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 1 }), { prompt: "p" }), (e: Error) => {
       assert.ok(e instanceof gen.ImageGenerationError);
       assert.match(e.message, /did not answer within 1 seconds/, "it names the limit");
-      assert.match(e.message, /time limit in the settings of the Images add-on/, "and where to change it");
+      assert.match(e.message, /time limit in Settings → Images/, "and where to change it");
       return true;
     });
     // Editing has the same limit, from its target.
     assert.equal((await editing.editImage(target(origin, { timeoutSeconds: 3 }), { prompt: "p", image: PNG })).ext, "png");
-    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in the settings of the Images add-on/);
+    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Images/);
     // An explicit limit of the call still wins, as the tests above use it.
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 3 }), { prompt: "p" }, { timeoutMs: 150 }), /did not answer within 0 seconds/);
   } finally {
