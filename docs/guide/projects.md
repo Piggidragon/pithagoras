@@ -85,13 +85,14 @@ every chat.
 
 There are three layers, each an exception to the one before it:
 
-1. **Settings → Tools** is the default for every conversation.
+1. **Settings → Tools** is the default for every conversation (for the picture tools
+   `show_image`, `generate_image` and `edit_image`, **Settings → Images**).
 2. **The project** switches tools on or off against that default, for every chat in it.
 3. **A chat** switches tools on or off against what its project leaves, from the blocks
    icon beside the composer.
 
 What a project stores is only where it disagrees with the portal-wide default, so a tool
-the project never mentioned still follows Settings → Tools. A chat belongs to a project
+the project never mentioned still follows that default. A chat belongs to a project
 when its folder is the project's or is inside it, judged by where the path really leads.
 Chats in Home belong to none, and are as before.
 

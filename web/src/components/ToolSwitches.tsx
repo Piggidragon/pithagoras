@@ -197,7 +197,7 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
       })}
       {live && (
         <p className="px-3 py-1.5 text-[10px] text-fg-faint">
-          {t("Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with.")}
+          {t("Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with, and Settings → Images does for the picture tools.")}
         </p>
       )}
       {project !== undefined && (

@@ -105,6 +105,32 @@ export type CommandState = "running" | "done" | "quiet" | "started" | "queued" |
 /** Enough of a tool's output to read in the transcript; the whole of it is in the agent terminal. */
 const TOOL_OUTPUT_MAX = 60_000;
 
+/**
+ * Where, in a text that is still being written, the end it shows starts: the
+ * start so far, moved on only once the text from there has grown long, and
+ * then to a line break, so the lines after it wrap as they did.
+ *
+ * A start that followed the newest token — the last 600 characters, say — is
+ * a different text with each one: it begins at another word, so every line
+ * wraps anew and what is on show jumps back and forth, which at a fast
+ * model's speed read as the text racing rather than growing. The text is
+ * laid out from the same start instead, and the window only cuts off its
+ * top. Inside a paragraph with no line break to move on to, it is laid out
+ * from the same start for much longer, `longest` characters, and only then cut
+ * at a word, leaving little: that reflows what is shown, so it is rare (once
+ * in about `longest`, tens of seconds of even a fast model's reasoning).
+ */
+export function shownFrom(text: string, from: number, most = 6000, longest = 30000): number {
+  if (from > text.length) return 0;
+  if (text.length - from <= most) return from;
+  // The last line break that still leaves far more than the window shows.
+  const lineBreak = text.lastIndexOf("\n", text.length - 600);
+  if (lineBreak >= from) return lineBreak + 1;
+  if (text.length - from <= longest) return from;
+  const space = text.indexOf(" ", text.length - 600);
+  return space >= 0 ? space + 1 : text.length - 600;
+}
+
 /** Lines in a text, not counting a newline at its very end. */
 export function lineCount(text: string): number {
   if (!text) return 0;
