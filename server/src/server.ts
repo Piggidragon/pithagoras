@@ -19,6 +19,7 @@ import {
   getSession,
   listAgentSessions,
   listChatSessions,
+  listHeartbeatSessions,
   listRoutineSessions,
   listSessions,
   updateSession,
@@ -29,6 +30,8 @@ import { agentHomePath } from "./agent-home.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import { AgentError, agentOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
 import { agentsRouter } from "./api/agents.js";
+import { heartbeat } from "./heartbeat.js";
+import { deleteNotesOf } from "./activity.js";
 import {
   agentFileStatus,
   runWizard,
@@ -63,7 +66,7 @@ import { MARKER, clearFinished, listJobs, readOutput, stopJob } from "./backgrou
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
-import { pinConnection } from "./api/browser.js";
+import { adoptPortalBrowser, pinConnection } from "./api/browser.js";
 import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -595,10 +598,14 @@ app.delete("/api/agents/:id", async (req, res) => {
   try {
     // Checked before anything is stopped; deleteAgent checks again once they are.
     const agent = deletable(req.params.id);
-    // Its chats and its conversations: those started on the Agent page and through channels.
-    const chats = workingIn(agent.home, [...listSessions(), ...listAgentSessions()]);
+    // Its chats and its conversations — those started on the Agent page and
+    // through channels — and the one its heartbeat looks around in.
+    const chats = workingIn(agent.home, [...listSessions(), ...listAgentSessions(), ...listHeartbeatSessions()]);
     if (chats.some((s) => sessions.isBusy(s.id) || sessions.backgroundWork(s.id))) {
       return res.status(409).json({ error: "A chat with this agent is still working. Stop it first." });
+    }
+    if (heartbeat.isRunning(agent.id)) {
+      return res.status(409).json({ error: "This agent is looking around right now. Wait for it to finish." });
     }
     const routines = routinesIn(agent.home);
     const runs = workingIn(agent.home, listRoutineSessions().filter((s) => sessions.isLoaded(s.id)));
@@ -612,6 +619,7 @@ app.delete("/api/agents/:id", async (req, res) => {
       deleteAgent(agent.id, { deleteFolder: req.query.folder === "delete" });
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
       if (req.query.folder === "delete") forgetPicturesIn(agent.home);
+      deleteNotesOf(agent.id);
       const switchedOff = switchOffRoutines(routines);
       getDb().transaction(() => {
         for (const chat of chats) deleteSession(chat.id);
@@ -1601,6 +1609,8 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   // leave the agent unreachable.
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();
+  // Agents with a heartbeat look around on their own, when nothing else is using the model.
+  heartbeat.start();
 
   // pi's catalogue, built now rather than when the first chat is opened:
   // that chat's effort pill waits for it to say which levels its model has.
@@ -1638,6 +1648,7 @@ startLlamaProxy(
 sessions.recoverOrphans();
 getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
 pinConnection();
+adoptPortalBrowser();
 // The memory tidied up at its set time, when the portal runs Understory.
 scheduleDreams();
 
