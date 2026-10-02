@@ -577,7 +577,8 @@ export const api = {
   /** Image generation alone: nothing of Understory or Docker asked for. */
   imagesFeature: () => json<{ images: ImagesFeature }>("/api/features/images"),
   /** Only whether each is on — cheap, for the sidebar and the chat's menus. */
-  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean } }>("/api/features/flags"),
+  /** `images`: image generation is on and has an address, which is when the Images page is in the sidebar. */
+  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
   subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
   setSubagentModel: (id: string, model: string | null) =>
@@ -613,6 +614,40 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
+  /** A page of the gallery, newest first; `before` is the `next` of the page before. */
+  galleryPage: (query: { origin?: PictureOrigin; kind?: PictureKind; before?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    for (const [name, value] of Object.entries(query)) if (value !== undefined) params.set(name, String(value));
+    return json<GalleryPage>(`/api/images${params.size ? `?${params}` : ""}`);
+  },
+  /** Some pictures of the gallery by their ids, as far as they are there. */
+  galleryPictures: (ids: string[]) => json<{ pictures: GalleryPicture[] }>(`/api/images?ids=${ids.join(",")}`),
+  /** What is being made, and what was, with the most that run at once. */
+  pictureJobs: () => json<{ jobs: PictureJob[]; limit: number }>("/api/images/jobs"),
+  /** Stops a picture that is being made, or clears one that is done. */
+  stopPictureJob: (id: string) => json<{ ok: true }>(`/api/images/jobs/${id}`, { method: "DELETE" }),
+  /** One job for each picture; answers at once. */
+  makePictures: (request: PictureRequest) => json<{ jobs: PictureJob[] }>("/api/images/generate", { method: "POST", body: JSON.stringify(request) }),
+  /** `mask` is a PNG as base64: the transparent part is what changes. */
+  changePicture: (request: { prompt: string; sources: string[]; mask?: string }) =>
+    json<{ jobs: PictureJob[] }>("/api/images/edit", { method: "POST", body: JSON.stringify(request) }),
+  /** A picture from this computer, into the gallery to be changed. */
+  uploadPicture: async (file: File): Promise<GalleryPicture> => {
+    const res = await fetch(`/api/images/upload?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      // Always the bytes themselves: the portal says what they are.
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || t("Could not upload {name} ({status})", { name: file.name, status: res.status }));
+    return body.picture;
+  },
+  /** The picture as the file it is. Its address never changes what it shows, unless it is in a chat's folder, which the browser then asks about. */
+  galleryFileUrl: (id: string) => `/api/images/${id}/file`,
+  /** Each as asked, files and all: what could not be deleted is said for each. */
+  deletePictures: (ids: string[]) => json<{ deleted: string[]; failed: { id: string; error: string }[] }>("/api/images/delete", { method: "POST", body: JSON.stringify({ ids }) }),
   setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string }) =>
     json<{ understory: UnderstoryFeature }>("/api/features/understory/config", { method: "PUT", body: JSON.stringify(config) }),
   dreamUnderstory: () => json<{ understory: UnderstoryFeature }>("/api/features/understory/dream", { method: "POST" }),
@@ -1188,6 +1223,60 @@ export interface ImagesFeature {
   editKeySet: boolean;
   /** Whether the agent has an edit tool: switched on, and with an address to ask. */
   editReady: boolean;
+}
+
+export type PictureOrigin = "page" | "chat";
+/** Made from a description, changed from another picture, or put in by the person to be changed. */
+export type PictureKind = "generated" | "edited" | "uploaded";
+
+/** A picture of the gallery, as the portal tells of it. */
+export interface GalleryPicture {
+  id: string;
+  origin: PictureOrigin;
+  /** The chat whose agent made it, for the agent's pictures. */
+  chat: { id: string; title: string } | null;
+  kind: PictureKind;
+  prompt: string;
+  /** What it was asked for with, as far as that is known. */
+  params: { model?: string; size?: string; extra?: Record<string, string | number | boolean>; sources?: string[]; masked?: boolean };
+  /** The picture an edit was made from, when that one is in the gallery. */
+  from: string | null;
+  createdAt: number;
+  bytes: number;
+  fileName: string;
+}
+
+export interface GalleryPage {
+  pictures: GalleryPicture[];
+  /** Where the next page starts, or null at the end. */
+  next: string | null;
+  /** How many there are with the filters, and how much of the disk the page's own take. */
+  total: number;
+  pageBytes: number;
+}
+
+/** A picture that is being made, was, or was not. */
+export interface PictureJob {
+  id: string;
+  kind: "generate" | "edit";
+  state: "running" | "done" | "failed";
+  prompt: string;
+  size?: string;
+  /** An edit's first picture. */
+  from?: string;
+  startedAt: number;
+  finishedAt?: number;
+  pictureId?: string;
+  error?: string;
+}
+
+/** What the page asks the portal to make: the extra fields are text as typed, which the portal reads. */
+export interface PictureRequest {
+  prompt: string;
+  size?: string;
+  model?: string;
+  extra?: Record<string, string>;
+  count?: number;
 }
 
 /** What the page may change of it. A key left out keeps the saved one; "" takes it away. */

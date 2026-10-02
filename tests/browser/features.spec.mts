@@ -34,7 +34,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     else if (p === '/api/workspaces') body = { root: '/w', workspaces: [] };
     else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
     else if (p === '/api/features/subagent' && method === 'GET') body = { subagent: state.subagent };
-    else if (p === '/api/features/flags') body = { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled } };
+    else if (p === '/api/features/flags') body = { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled }, images: { enabled: images.enabled && images.baseUrl !== '' } };
     else if (p === '/api/features/images' && method === 'GET') body = { images };
     else if (p === '/api/features/images' && method === 'PUT') {
       const patch = route.request().postDataJSON();
@@ -367,6 +367,24 @@ test('image generation needs an endpoint before it can be switched on, and the k
   await panel.getByRole('button', { name: 'Remove the saved key' }).click();
   await expect(panel.getByLabel('API key')).toHaveAttribute('placeholder', 'none needed for a local server');
   expect(sent.at(-1)!.body).toEqual({ apiKey: '' });
+});
+
+test('the Images page is in the sidebar while image generation is on, and the switch moves it at once', async ({ page }) => {
+  await portal(page);
+  await page.goto('/settings/add-ons');
+  const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Images' });
+  await expect(entry).toHaveCount(0);
+  await addons(page).getByRole('tab', { name: 'Images' }).click();
+  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  await panel.getByLabel('API address').fill('https://images.example.com/v1');
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  // An address is not enough: the tool is still off.
+  await expect(entry).toHaveCount(0);
+  await panel.getByRole('switch', { name: 'Image generation tool' }).click();
+  await expect(entry).toHaveCount(1);
+  await panel.getByRole('switch', { name: 'Image generation tool' }).click();
+  await expect(entry).toHaveCount(0);
 });
 
 test('image editing has a switch and an endpoint of its own: it needs an address, may use the one above, and its key is sent once', async ({ page }) => {

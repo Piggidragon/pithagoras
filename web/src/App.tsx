@@ -19,6 +19,7 @@ import { RoutinesPage } from "./components/RoutinesPage";
 import { AuditPage } from "./components/AuditPanel";
 import { BrowserPage } from "./components/BrowserPage";
 import { MemoryPage } from "./components/MemoryPage";
+import { ImagesPage } from "./components/ImagesPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { pollWhileVisible, reconnectDelay } from "./poll";
@@ -81,6 +82,7 @@ export default function App() {
       <Route path="/routines" element={<Shell view="routines" />} />
       <Route path="/browser" element={<Shell view="browser" />} />
       <Route path="/memory" element={<Shell view="memory" />} />
+      <Route path="/images" element={<Shell view="images" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
@@ -101,7 +103,7 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "audit";
+  view?: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "images" | "audit";
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
@@ -138,10 +140,19 @@ function Shell({
   const [hasBrowser, setHasBrowser] = useState(false);
   // Whether Understory is the agent's memory, which is when its page is in the sidebar.
   const [hasMemory, setHasMemory] = useState(false);
+  // Likewise whether image generation is on and has an address, which is when the Images page is.
+  const [hasImages, setHasImages] = useState(false);
   useEffect(() => {
-    const ask = () => api.featureFlags().then((f) => setHasMemory(f.understory?.enabled === true)).catch(() => {});
+    const ask = () =>
+      api
+        .featureFlags()
+        .then((f) => {
+          setHasMemory(f.understory?.enabled === true);
+          setHasImages(f.images?.enabled === true);
+        })
+        .catch(() => {});
     ask();
-    // Said by Settings → Add-ons when it switches Understory, so the sidebar follows at once.
+    // Said by Settings → Add-ons when it switches Understory or the images, so the sidebar follows at once.
     window.addEventListener("features-changed", ask);
     return () => window.removeEventListener("features-changed", ask);
   }, []);
@@ -512,6 +523,7 @@ function Shell({
         view={view}
         hasBrowser={hasBrowser}
         hasMemory={hasMemory}
+        hasImages={hasImages}
         places={places}
         onNavigate={(to) => { setMobileNav(false); navigate(`/${to}`); }}
         onOpenFolder={(key) => { setMobileNav(false); navigate(`/sessions?folder=${encodeURIComponent(key)}`); }}
@@ -597,6 +609,8 @@ function Shell({
           <BrowserPage onOpenSession={(id) => navigate(`/s/${id}`)} />
         ) : view === "memory" ? (
           <MemoryPage />
+        ) : view === "images" ? (
+          <ImagesPage />
         ) : view === "audit" ? (
           <AuditPage />
         ) : active ? (

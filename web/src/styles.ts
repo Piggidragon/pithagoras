@@ -9,3 +9,4 @@ import "./styles/chat.css";
 import "./styles/preview.css";
 import "./styles/motion.css";
 import "./styles/viewer.css";
+import "./styles/gallery.css";
