@@ -96,8 +96,6 @@ import {
   getStoredSettings,
   shownStoredSettings,
   shownTools,
-  knownTools,
-  portalOwned,
   clearProjectTools,
   projectTools,
   projectsWithTools,
@@ -936,14 +934,11 @@ app.get("/api/tools", (_req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   const off = new Set(toolDefaultsOff());
   const servers = mcpServerNames();
-  // The portal's own tools are told apart from an extension's of the same name, as no label can: the page keeps them where they are set up.
-  const inline = new Set(knownTools().filter(portalOwned).map((tool) => tool.name));
   res.json({
     tools: shownTools().map((tool) => ({
       ...tool,
       source: toolSource(tool.name, tool.source, servers),
       defaultOn: !off.has(tool.name),
-      ...(inline.has(tool.name) ? { inline: true as const } : {}),
     })),
     off: [...off].sort(),
     names: toolGroupNames(),

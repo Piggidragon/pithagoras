@@ -78,12 +78,10 @@ share pi's event bus with the tool.
 
 ## Image generation
 
-**Settings → Images.** The one page for the agent's pictures: it holds the
-switches that say whether a new chat starts with `show_image`, `generate_image`
-and `edit_image` (the same defaults as Settings → Tools, which leaves these three
-out), and below them the image endpoint, generation, editing and the
-several-pictures switch. It was a tab of Settings → Add-ons before; nothing stored
-changed with the move. A `generate_image` tool: the agent describes a
+**Settings → Images.** The page for the image endpoint, generation, editing and
+the several-pictures switch. It was a tab of Settings → Add-ons before; nothing
+stored changed with the move. The tools themselves are switched in the tool lists,
+see below. A `generate_image` tool: the agent describes a
 picture, an image model you set up makes it, and it appears in the chat — and
 in voice mode's picture window — just like one the agent showed with
 `show_image`. It is off until you have saved an address and switched it on;
@@ -135,7 +133,8 @@ no picture — is an error result the agent sees and can pass on, never a
 silent success.
 
 The tool is a tool like the others: it can be switched off for a chat, a project
-or everywhere in the tool menus and Settings → Images, and then the model does not
+or everywhere in the tool menus and Settings → Tools, where it sits in one **Images**
+group with `show_image` and `edit_image`, and then the model does not
 have it and the voice instructions say nothing of it either. Its name is
 `generate_image`, which an image extension you installed may use too. pi keeps
 the first tool of a name it loads, and the portal's loads last, so then the
@@ -249,7 +248,7 @@ What was decided for it:
 The same rules as for generation apply to who may use it: the primary user's
 conversations only, unless a [tool rule](/people/rules) allows it, and each edit
 can cost money at a hosted endpoint. The tool is a tool like the others and can
-be switched off in the tool menus and Settings → Images; an extension's tool of
+be switched off in the tool menus and Settings → Tools, in the same **Images** group; an extension's tool of
 the name `edit_image` is the one pi keeps, as for `generate_image`.
 
 | | |
