@@ -68,9 +68,11 @@ Two keys work from anywhere on the page:
 
 ## Looking at a picture
 
-The pictures the agent shows with `show_image`, makes with `generate_image` or
-changes with `edit_image` are drawn under their tool line, in the middle of the
-conversation, with the same room above and below. A very wide or very tall one is
+The pictures the agent shows with `show_image` are drawn under their tool line,
+in the middle of the conversation, with the same room above and below. One it
+makes with `generate_image` or changes with `edit_image` has no tool line: it is
+the [preview](#pictures-the-agent-makes) that held its place while it was made,
+in the middle of the conversation as well. A very wide or very tall picture is
 smaller there, never cropped: the viewer shows it whole. The pictures you sent
 are in your message.
 
@@ -164,6 +166,52 @@ possible while nothing is running.
 If an edit's replacement is refused — the model is unreachable, say — the
 conversation is put back as it was, rather than left without the messages the
 edit meant to replace.
+
+## Pictures the agent makes
+
+With the [Images add-on](/guide/features#image-generation) on, a `generate_image`
+or `edit_image` call is not shown as a tool line but as the picture itself, from
+the moment it is asked for:
+
+- **While it is made**, a frame in the shape of the coming picture holds its
+  place: the size the agent asked for, or, for an edit, the shape of the picture
+  being changed (the first, when it was given several), which is shown under the
+  wait; a square when nothing says. It
+  says "Making a picture" or "Editing a picture" and, after a few seconds, how
+  long it has taken. Image endpoints do not report how far they are, so the
+  animation does not pretend to: a soft light drifts over the frame and a sheen
+  passes, and that is all.
+- **When the call is over**, the wait is over too: the frame says "Loading the
+  picture", still, until the file has come, however long a large picture over a
+  slow connection takes, and the picture is fetched at once rather than when
+  the browser sees fit. The picture then fades in over it, in the same place.
+  Where the shape was right nothing under it moves; where it was not, the frame
+  takes the picture's own shape. A click opens it in the
+  [viewer](#looking-at-a-picture), with the conversation's other pictures to
+  step through; the file is the one the preview has loaded, not fetched again.
+  If the file cannot be fetched, it says so, and not that the picture is gone.
+- **When it fails**, the frame says so quietly, with the reason in a line or
+  two — the endpoint's answer, a setting that was switched off — and the whole of
+  it under **Details**. A call that was cut off, because the run was stopped or
+  the portal restarted before the picture came back, says it was interrupted.
+- **The call itself** — the tool's name and what the agent gave it: the prompt,
+  the title, the size, the picture to change — is under **Details**, below the
+  picture.
+- **Opening a chat again** draws the pictures that were made at once, with no
+  fade, in the shape asked for when the agent asked for one and otherwise
+  taking their own as they load; one whose file is gone from the folder says so.
+- **A tool of the same name** that another extension brings, and which pi may
+  keep in the portal's place, is the plain tool line it always was, whatever
+  state it is in: only the portal's own calls are drawn as pictures.
+
+The movement is one of the [animations](/guide/interface#animations): with them
+switched off, or when your system asks for reduced motion, the frame is the same
+and still, with the same words, and the picture simply appears. Only a picture
+being made, or just arriving, moves, and only as layers of the frame slide —
+nothing is laid out again — so several in a long chat cost nothing once they
+are made. In
+[voice mode](/guide/voice) the card of such a call carries the same preview as a
+small tile.
 
 ## Drafts and what is running
 

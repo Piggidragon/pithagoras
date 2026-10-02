@@ -58,6 +58,9 @@ default**:
 - **The Browser page.** Its screen switches on like an old tube.
 - **Voice mode.** The orb comes up out of a swell of light, and the windows that
   open on its stage overshoot into place.
+- **Pictures being made.** While the agent has a picture made or changed, a soft
+  light drifts over the frame that holds its place and a sheen passes; the
+  picture then fades in over it. See [Sessions](/guide/sessions#pictures-the-agent-makes).
 
 None of it waits for you or takes a click away: what is leaving is a picture of
 what was there, laid over the page, while the page itself is already as it

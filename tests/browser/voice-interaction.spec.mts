@@ -50,18 +50,20 @@ test('a picture goes with what is said next, and the agent can show one back', a
   expect(failures).toEqual([]);
 });
 
-test('a picture the agent had generated is drawn in the chat under its tool line, and in the voice picture window', async ({ page }) => {
+test('a picture the agent had generated is drawn in the chat as a preview, and in the voice picture window', async ({ page }) => {
   const failures: string[] = [];
   page.on('pageerror', e => failures.push(e.message));
   const asked: string[] = [];
   await page.route('**/api/sessions/test/picture?**', route => { asked.push(new URL(route.request().url()).searchParams.get('path') ?? ''); return route.fulfill({ body: png, contentType: 'image/png' }); });
   await page.goto('/tests/voice.html');
-  // In the chat: a thumbnail under the line that made it, fetched from the chat's folder like one that was shown.
+  // In the chat: the picture in its preview, fetched from the chat's folder like one that was shown.
   await page.getByRole('button', { name: 'Generate picture' }).click();
   const thumbnail = page.getByTestId('workspace').getByRole('img', { name: 'A lighthouse at dusk' });
   await expect(thumbnail).toBeVisible();
   await expect.poll(() => asked).toContain('generated-images/image-20261001-101500-a1b2c3.png');
-  await expect(page.getByTestId('workspace').getByRole('button', { name: /^generate_image/ })).toBeVisible();
+  // In place of the tool card, with the call under Details.
+  await expect(page.getByTestId('workspace').getByRole('button', { name: 'Details' })).toBeVisible();
+  await expect(page.getByTestId('workspace').getByRole('button', { name: /^generate_image/ })).toHaveCount(0);
 
   // In voice mode: the picture window opens on the next one, and keeps the earlier.
   await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();

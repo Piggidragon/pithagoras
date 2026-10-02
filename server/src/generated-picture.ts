@@ -9,5 +9,9 @@
  * one relative to somewhere else; taken for a picture here it would show a
  * broken thumbnail, or the wrong file. In a module of its own, with nothing
  * it imports, so that the page can take it from here as it takes `below`.
+ *
+ * The same field is on the `tool_execution_start` event of the portal's own
+ * call (see the SDK client), so that a call that is still going, failed, or was
+ * cut off is told from an extension's too: those have no answer with a path.
  */
 export const GENERATED_PICTURE_MARK = "portalImage";

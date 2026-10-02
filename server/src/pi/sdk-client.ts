@@ -4,6 +4,7 @@ import { GENERATE_IMAGE_VOICE_LINE, GenerateImageTool } from "./generate-image-t
 import { EDIT_IMAGE_VOICE_LINE, EditImageTool } from "./edit-image-tool.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL } from "../image-generation.js";
 import { declaredArguments } from "../argument-sources.js";
+import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
@@ -589,7 +590,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // As pi emits it, not as forward() passes it on: a queue_update held
       // behind a settle would be too late for the prompt() that caused it.
       client.noteQueue(event);
-      client.forward(event);
+      // The start of a call of the portal's own picture tools says so: the page draws a picture for those from then on, and never for the tool of that name an extension may bring, which pi keeps instead. Only here is it known which of the two it is, and only the end of a call that made a picture would say so later.
+      const own = event?.type === "tool_execution_start" && ((event.toolName === GENERATE_IMAGE_TOOL && imageTool?.registered()) || (event.toolName === EDIT_IMAGE_TOOL && editTool?.registered()));
+      client.forward(own ? { ...event, [GENERATED_PICTURE_MARK]: true } : event);
     });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};

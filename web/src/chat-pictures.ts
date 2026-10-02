@@ -39,7 +39,8 @@ export function chatPictures(items: Item[], folder: string, urls: PictureUrls): 
       const from = changed && latestByPath.get(changed);
       list.push({
         id,
-        src: urls.shown(path, item.id),
+        // By the end that showed it, which is the version every other place draws it by (voice mode's window, a card's tile), so that the browser has one download for it, not one for each.
+        src: urls.shown(path, String(item.pictureSeq ?? item.id)),
         alt: title ?? path,
         ...(title ? { caption: title } : {}),
         fileName: path.split("/").pop() || undefined,
