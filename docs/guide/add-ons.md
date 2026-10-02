@@ -6,7 +6,7 @@ The portal talks directly to the host Docker API; no Docker CLI inside the porta
 
 This guide covers the managed Linux Docker installation. Add-ons are separate from [pi extensions](/guide/extensions) and [channel packages](/channels/index).
 
-The **Subagents** and **Memory** tabs beside them switch on the [opt-in features](/guide/features) — a subagent tool and Understory as the agent's memory. The portal can run Understory itself with the same Docker access; pointed at one you run, it needs none. Image generation and editing, which need no Docker at all, are set up under [Settings → Images](/guide/features#image-generation).
+The **Subagents** and **Memory** tabs beside them switch on the [opt-in features](/guide/features) — a subagent tool and Understory as the agent's memory. The portal can run Understory itself with the same Docker access; pointed at one you run, it needs none. Image generation and editing, which need no Docker at all, are set up under [Settings → Agent → Images](/guide/features#image-generation).
 
 ## Choose your next step
 
@@ -175,7 +175,7 @@ Browser uses Docker's `unless-stopped` restart policy. If `BROWSER_EXTERNAL=true
 ### Choose engines, install and wait for Ready
 
 1. Open **Settings → Add-ons → Voice**.
-2. Expand **Voice service**. Under **Speech engines** the page shows the GPU it can read and what fits it. Leave **Choose for me, based on my GPU** on, or turn it off and pick the engines yourself (see [the engines](#engines-and-gpu-memory) below).
+2. Expand **Voice service**. Under **Speech engines** the page shows the GPU it can read and what fits it. Leave **Choose for me, based on my GPU** on, or turn it off and pick the engines yourself (see [the engines](#engines-devices-and-memory) below).
 3. Click **Install voice** and follow **Setup log** until the service shows **Ready**.
 
 ::: info First setup takes time

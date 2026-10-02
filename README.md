@@ -109,8 +109,8 @@ The rest is in [Configuration](https://thecodacus.github.io/pithagoras/reference
 ## Settings
 
 **Settings** (bottom of the sidebar) is the web equivalent of pi's slash commands:
-**Providers** and **Defaults** for models, **Tools**, **Skills**, **MCP** and **Extensions**
-for the agent, **Channels** and **People**, and **This browser**, **Add-ons**, **Shortcuts**,
+**Providers** and **Defaults** for models, **Tools**, **Images**, **Skills**, **MCP** and
+**Extensions** for the agent, **Channels** and **People**, and **This browser**, **Add-ons**, **Shortcuts**,
 **About** and **Advanced** for the portal. What a chat uses lives on the pills under its
 composer. Defaults you set apply to **newly started** sessions only.
 

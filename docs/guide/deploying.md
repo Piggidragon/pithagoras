@@ -16,7 +16,7 @@ Create a `.env` next to `docker-compose.yml`:
 ```bash
 PORTAL_PASSWORD=something-long
 PORTAL_SECRET=$(openssl rand -hex 32)
-WORKSPACES_DIR=/root/repos
+WORKSPACES_DIR=/path/to/repos
 ```
 
 `.env.example` lists every variable Compose reads. `WORKSPACES_DIR` is the host
@@ -116,7 +116,8 @@ git pull && docker compose up -d --build
 
 Your data lives on the `portal-data` volume, not in the image. Sessions,
 transcripts, installed pi packages and installed channel packages all survive a
-rebuild.
+rebuild. When the new version changes the database, the portal copies it aside
+and upgrades it before it starts serving; see [Upgrading](/guide/upgrading).
 
 ## Volumes
 
@@ -130,11 +131,15 @@ Inside `/data`:
 
 | Path | Holds |
 | --- | --- |
-| `/data/portal.db` | Sessions, event log, channels, settings |
+| `/data/portal.db` | Sessions, event log, channels, agents, routines, settings |
+| `/data/portal.sock` | Held while the portal runs, so a second one cannot start on this data |
+| `/data/backups` | The copies of the database made before an [upgrade](/guide/upgrading) |
 | `/data/sessions/<id>` | Per-session working area |
-| `/data/home` | `HOME` for pi — `~/.pi/agent`, its settings and packages |
+| `/data/home` | `HOME` for pi — `~/.pi/agent`, its settings, skills and packages |
 | `/data/channels` | Installed third-party channel packages |
-| `/data/agent-home` | The agent's fixed working directory |
+| `/data/agent-home` | The first agent's home: its `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` |
+| `/data/agents/<id>` | The home of every other [agent](/guide/agents) |
+| `/data/images` | The pictures the [Images page](/guide/images) made itself |
 | `/data/bin` | CLIs you add yourself — on `PATH`, survives rebuilds |
 
 `HOME` deliberately points at the volume. Otherwise every image rebuild would
@@ -184,10 +189,10 @@ Everything here is optional except the password.
 | `PI_IMAGE` | `pithagoras-runner:latest` | Container executor's image. |
 | `TASK_MEMORY_MB` / `TASK_CPUS` / `TASK_PIDS_LIMIT` | `2048` / `2` / `512` | Container executor limits. |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the add-ons and container executor talk to. |
-| `VOICE_GPU` / `VOICE_VRAM_RESERVE_MIB` | — | Managed voice: the GPU it uses where none is chosen on the voice page, and memory in MiB to keep free on it. Both Compose files pass them from `.env`; see [Docker add-ons](/guide/add-ons#engines-and-gpu-memory). |
+| `VOICE_GPU` / `VOICE_VRAM_RESERVE_MIB` | — | Managed voice: the GPU it uses where none is chosen on the voice page, and memory in MiB to keep free on it. Both Compose files pass them from `.env`; see [Docker add-ons](/guide/add-ons#engines-devices-and-memory). |
 | `NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the package catalogue searches. |
 | `CHANNELS_DIR` | `/data/channels` | Where third-party channel packages install. |
-| `AGENT_HOME` | `/data/agent-home` | The agent session's working directory. |
+| `AGENT_HOME` | `/data/agent-home` | The first agent's directory. Other agents are made in `agents/` beside it. |
 | `PI_PROVIDER` | — | Overrides pi's `defaultProvider`. |
 | `PI_MODEL` | — | Overrides pi's `defaultModel`. |
 | `PI_THINKING_LEVEL` | — | Overrides pi's `defaultThinkingLevel`. |

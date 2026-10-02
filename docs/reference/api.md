@@ -94,7 +94,8 @@ out of it, by `..` or by a link, is refused with 400.
 | `POST /api/sessions/:id/folder?path=` | `{ name }` → makes a folder in the folder at `path`, answers `{ path }`. 409 if the name is taken |
 | `POST /api/sessions/:id/upload?path=&name=` | The file as the request body, sent as `application/octet-stream` → put in the folder at `path` as `name`, or `name (2)` and so on if that is taken; answers `{ path, size }`. Streamed to disk and put in place only once complete. 413 over 2 GB |
 | `PATCH /api/sessions/:id/file?path=` | `{ name }` → gives a file or folder another name in the same folder, and answers `{ path }`. 400 for a name with a `/` or `\`, or `.` or `..`; 409 if the name is taken. A link is renamed as the link |
-| `DELETE /api/sessions/:id/file?path=` | Removes a file, or a folder and all in it; a link is removed as the link. The folder itself is refused |
+| `DELETE /api/sessions/:id/file?path=` | Removes a file, or a folder and all in it; a link is removed as the link. The folder itself is refused. A folder holding git work that exists nowhere else — uncommitted changes, commits no remote has, stashes — is refused with 409 and `code: "unsaved-work"` unless `discard=1` says it may go |
+| `GET /api/sessions/:id/unsaved?path=` | `{ unsaved }` — what deleting `path` would lose that nothing else has: `{ changed, unpushed, stashes, unknown? }`, or `null` for nothing. `unknown` means not everything could be read |
 | `GET /api/sessions/:id/archive?path=` | The folder — or, with `path`, a folder in it — as a `.tar.gz`, without `node_modules`, `.git`, `dist`, `build` and virtual environments. If `tar` cannot run the answer is a 500; if it fails part-way the download is cut off, so it does not end as if it were whole. A file that changes while it is read is not a failure |
 
 ## Prompting
@@ -190,7 +191,6 @@ model.
 | `POST /api/sessions/:id/messages/:seq/version` | `{ to }` — shows another version of the message, and what followed it then |
 | `PUT /api/sessions/:id/draft` | `{ text, caret?: { start, end } }` — what is in the chat box, which an extension can ask for. Starts nothing |
 | `GET /api/sessions/:id/stats` | Context usage and token counts, without the model catalogue |
-| `GET /api/sessions/:id/models` | The live model list; starts pi when necessary |
 
 ## Git
 
@@ -317,6 +317,7 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `GET /api/features` | `{ subagent: { available, installed, enabled, source, mode, maxParallel }, understory: { enabled, url, tokenSet, adapterInstalled, reachable, managed: { available, image, container, pulling, url, config, providers } }, images: { enabled, baseUrl, model, size, keySet, editEnabled, editBaseUrl, editModel, editMultiple, editMaxSize, timeoutSeconds, editKeySet, editReady } }` — `config` never holds a key, and `images` only whether one is set |
 | `GET /api/features/images` | `{ images: { enabled, baseUrl, model, size, keySet, editEnabled, editBaseUrl, editModel, editMultiple, editMaxSize, timeoutSeconds, editKeySet, editReady } }` — the image endpoint alone; no key is ever returned. `editReady` is whether editing is available: it is switched on and has an address to ask, its own or generation's. It is what makes the agent's `edit_image` tool exist. `editMultiple` is whether the editing endpoint is said to take several pictures: with it, and `editReady`, the tool has a list of pictures (`paths`) instead of one (`path`) |
 | `PUT /api/features/images` | `{ enabled?, baseUrl?, model?, size?, apiKey?, editEnabled?, editBaseUrl?, editModel?, editApiKey?, editMultiple?, editMaxSize?, timeoutSeconds? }` — `baseUrl` is an http(s) base with no login, query or fragment (empty clears it), `size` is `WIDTHxHEIGHT` or `auto` (empty clears it), `apiKey` left out keeps the saved one and `""` removes it; an address of another origin than the saved one, without a key, drops the saved key (a key saved before any address stays for the first). The `edit…` fields are editing's own switch, address, model and key, checked and kept the same way: an empty `editBaseUrl` means the address of generation, `editModel` is the only model sent on an edit (the one of generation never is), and the key of generation goes to the edit address only when it is the same server, while `editApiKey` is the key of the address edits go to and is dropped when that address changes to another server without one. `editMaxSize` is `WIDTHxHEIGHT` (empty, the default, is no limit): the most pixels a picture sent to be edited may have, either way up, checked before anything is sent and read at each call, so it needs no reload. `editMultiple` (a boolean, off by default) says the editing endpoint takes several pictures in one request, up to 8 and 50 MB together, sent as `image[]`; it is said of that endpoint, so an `editBaseUrl` (or, with none of its own, a `baseUrl`) of another origin takes it off again unless the same request says it. `timeoutSeconds` is how long a request for a picture, generated or edited, may take, in whole seconds from 30 to 3600 (300 when none was saved; `null` takes a saved one away; anything else is a 400); it is read at each request, so changing it reloads no chat. 400 for anything else, for `enabled: true` with no address, and for `editEnabled: true` with no address, its own or generation's. Answers `{ images, changed, reloaded, waiting }`; idle open sessions are reloaded only when a tool came or went, or the edit tool's shape changed (`changed`: generation's or editing's, or whether the edit tool takes a list) |
+| `GET /api/features/subagent` | `{ subagent }` — the subagent tool's state alone |
 | `PUT /api/features/subagent` | `{ enabled?, mode?: "interrupt" \| "background", maxParallel?: 1–16, model?: "auto" \| "provider/model" }` — installs or removes the bundled subagent tool, writes `subagentMode`, `subagentMaxParallel` and `subagentModel`; reloads idle open sessions |
 | `GET /api/sessions/:id/subagent-model` | `{ model, default }` — what this chat's subagents run on: its own choice (`null` follows `default`) |
 | `PUT /api/sessions/:id/subagent-model` | `{ model: null \| "auto" \| "provider/model" }` |
@@ -340,6 +341,7 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `POST /api/memory/repair` | The model mends links to nothing and wires in orphans, only when there are any; answers `{ ran, reason?, summary?, filesChanged?, health }` |
 | `POST /api/memory/clear-log` | log.md back to its heading and the query paths removed; the notes stay |
 | `POST /api/memory/wipe` | Every note and folder deleted, the root index and log as new, Understory started again |
+| `GET /understory-llm/v1/models` · `POST /understory-llm/v1/chat/completions` | Not under `/api`, and not for browsers: an OpenAI-compatible model server for the portal's own Understory, which signs in with its own bearer token rather than a portal login. A request goes to the model of the chat whose memory tool is running |
 
 ## Images
 
@@ -408,6 +410,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `POST /api/agents/:id/heartbeat/run` | A look now. Answers at once; `heartbeat.running` and `heartbeat.status` follow it |
 | `GET /api/agents/:id/activity` | `{ notes, unread }` — what it noticed on its own, newest first |
 | `POST /api/agents/:id/activity/read` | Marks its notes read |
+| `POST /api/agents/:id/activity/:note/read` | Marks one note read; answers `{ unread }`, 404 for an unknown note |
 | `DELETE /api/agents/:id/activity/:note` | Deletes a note |
 | `PUT /api/agents/:id/voice` | `{ voice }` — the voice it speaks with in voice mode: `"design"`, a voice library id, or `""` for the one in the voice settings |
 | `GET /api/agent/orb?session=` | The avatar voice mode shows for that chat: its agent's, or the first agent's |
@@ -422,6 +425,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `PATCH /api/people/:key` | Update name, role or notes. |
 | `DELETE /api/people/:key` | Forget a person. |
 | `GET /api/audit?limit=2000` | Read up to all 2,000 retained decisions (default 200), newest first. |
+| `DELETE /api/audit?through=<id>` | Clear the log: every entry up to and including `through` (the newest one the caller saw, so a decision recorded since survives), or all of them without it. A `through` that is not an entry id is refused with 400. Answers `{ removed }`, and a clear that removed something leaves one `cleared` entry saying how many. |
 | `GET /api/tool-rules` | List standing tool permissions. |
 | `POST /api/tool-rules` | Add a role/tool/pattern rule. The role is `colleague`, `guest`, `heartbeat` (an agent looking around on its own) or `all`. |
 | `DELETE /api/tool-rules/:id` | Remove a rule. |

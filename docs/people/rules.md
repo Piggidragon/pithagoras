@@ -9,6 +9,11 @@ A person's page in Settings → **People**, under *Allowed anyway*. Rules with n
 person apply to a whole role and stay on the list behind it, since they belong
 to nobody in particular.
 
+The role `heartbeat` takes rules too: the commands an agent's
+[heartbeat](/guide/agents#its-heartbeat) may run on a look, added under
+**Commands it may run** on the agent's Heartbeat tab and listed here as for every
+agent's heartbeat. A rule for all roles applies to it as well.
+
 Choosing **Always allow** on a request writes one here for that person. Deleting
 it takes the permission back — there is no separate revocation mechanism to
 learn or to audit.

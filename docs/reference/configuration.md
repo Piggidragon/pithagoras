@@ -8,7 +8,7 @@ confusion.
 | Layer | Set from | Applies to |
 | --- | --- | --- |
 | Session | The pills under the composer | One session |
-| Portal | Settings → General | New sessions |
+| Portal | Settings → Defaults | New sessions |
 | Environment | Compose / `.env` | The deployment |
 | pi | `~/.pi/agent/settings.json` | pi itself, everywhere |
 
@@ -25,7 +25,7 @@ own choice keeps it, and changing a default never rewrites a running session.
 ::: tip Empty means inherit
 `PI_PROVIDER`, `PI_MODEL` and `PI_THINKING_LEVEL` are overrides, and they are
 empty in the compose file on purpose. Give them a value and pi's own
-`settings.json` can never be reached. The same is true in Settings → General:
+`settings.json` can never be reached. The same is true in Settings → Defaults:
 an empty field inherits, and clearing one hands the setting back.
 :::
 
@@ -37,16 +37,16 @@ an empty field inherits, and clearing one hands the setting back.
 | `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. |
 | `PORTAL_SECRET` | random | Signs the cookie. Set it to survive restarts. |
 | `PORT` | `4100` | Listen port. |
-| `DATA_DIR` | `./data` (image: `/data`) | Where `portal.db` lives. |
+| `DATA_DIR` | `./data` (image: `/data`) | Where `portal.db` lives, with the `backups/` made before a database upgrade and the `images/` the agent made. Only one portal may run on it at a time. |
 | `PITHAGORAS_VERSION` | `latest` | The release the Portainer stack runs, such as `0.2.0`. See [Upgrading](/guide/upgrading#pin-a-version). |
 | `PORTAL_UPGRADE_BACKUP` | — | `skip` upgrades the database without backing it up first, for a disk that cannot hold the copy. See [Upgrading](/guide/upgrading). |
 | `SESSION_DIR` | `./data/sessions` (image: `/data/sessions`) | One folder per session, holding pi's conversation file. Removed when the session is deleted — with the container executor, a file written by another user can keep a folder from going; that is logged. |
-| `WORKSPACE_ROOT` | `/workspaces` | Directories sessions can be created against. |
+| `WORKSPACE_ROOT` | `/workspaces` | Directories sessions can be created against. `WORKSPACES_DIR` is read as well, when this is unset. |
 | `BIN_DIR` | `/data/bin` | Persistent CLI installation directory added to PATH. |
 | `PI_CODING_AGENT_DIR` | `$HOME/.pi/agent` | Override pi’s settings/package directory. |
 | `LLAMA_BASE_URL` | — | Read by pi’s installed llama extension; not by the portal directly. |
 | `CHANNELS_DIR` | `/data/channels` | Installed channel packages. |
-| `AGENT_HOME` | `/data/agent-home` | The agent session's directory. |
+| `AGENT_HOME` | `/data/agent-home` | The first agent's directory. Any other agent gets one under `agents/`, beside it. See [Agents](/guide/agents). |
 | `HOME` | `/data/home` | pi's home — its settings and packages. |
 | `EXECUTOR` | `host` | `host` or `container`. |
 | `PI_IMAGE` | `pithagoras-runner:latest` | Image for the container executor. |
@@ -68,7 +68,7 @@ an empty field inherits, and clearing one hands the setting back.
 | `GIT_SSH_COMMAND` | `ssh -o BatchMode=yes` | What the Git panel's fetch, pull and push run ssh with. |
 | `LLAMA_DISK_CACHE_MODELS` | — | Comma-separated model names whose llama.cpp prompt cache is kept on disk between chats. |
 | `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume holding that Understory's memory. |
-| `VOICE_GPU` | — | The GPU index the managed voice container uses, as `nvidia-smi` lists them, where no GPU is chosen on the page (which wins). Empty: the card with the most free memory. See [Docker add-ons](/guide/add-ons#engines-and-gpu-memory). |
+| `VOICE_GPU` | — | The GPU index the managed voice container uses, as `nvidia-smi` lists them, where no GPU is chosen on the page (which wins). Empty: the card with the most free memory. See [Docker add-ons](/guide/add-ons#engines-devices-and-memory). |
 | `VOICE_VRAM_RESERVE_MIB` | — | GPU memory in MiB the voice installer keeps free on its card for something else. |
 | `NVIDIA_SMI` | `nvidia-smi` | The binary the voice installer reads the GPUs with, for a native portal where it is not on `PATH`. |
 
@@ -92,11 +92,10 @@ before writing; a broken file stops every future session from starting.
 
 ```json
 {
-  "defaultProvider": "llama-server=http://192.168.1.101:8080",
-  "defaultModel": "qwen36-35b-a3b-mtp",
+  "defaultProvider": "anthropic",
+  "defaultModel": "my-model",
   "defaultThinkingLevel": "high",
-  "packages": ["npm:pi-llama-cpp"],
-  "llamaServerUrl": "http://192.168.1.101:8080",
+  "packages": ["npm:pi-lens"],
   "compaction": { "enabled": true }
 }
 ```
@@ -113,7 +112,7 @@ take the `packages` list with it.
 
 ## Portal settings
 
-Stored in the `settings` table, edited in Settings → General. Saving an empty
+Stored in the `settings` table, edited in Settings → Defaults. Saving an empty
 value **deletes** the row rather than storing an empty string, which is what
 makes "inherit" reachable again after you have set something.
 
@@ -122,9 +121,9 @@ apart:
 
 ```json
 {
-  "settings": { "provider": "llama-server=…", "model": "qwen36-35b-a3b-mtp" },
+  "settings": { "provider": "my-provider", "model": "my-model" },
   "stored":   {},
-  "defaults": { "provider": "llama-server=…", "model": "qwen36-35b-a3b-mtp" }
+  "defaults": { "provider": "my-provider", "model": "my-model" }
 }
 ```
 
