@@ -1811,8 +1811,11 @@ export interface KnownTool {
    * entry remembered before this was recorded.
    */
   package?: string | null;
-  /** Registered by one of the portal's own inline extensions, which nothing of anyone's can be mistaken for. */
-  inline?: true;
+  /**
+   * Registered by one of the portal's own inline extensions, which nothing of anyone's can be mistaken for.
+   * Every report says it, one way or the other; absent only in an entry remembered before this was recorded.
+   */
+  inline?: boolean;
 }
 
 /** A tool a session reported, as it is remembered. */
@@ -1821,7 +1824,7 @@ export const remembered = (t: { name: string; source: string; description?: stri
   source: t.source,
   description: t.description,
   package: t.package ?? null,
-  ...(t.inline ? { inline: true as const } : {}),
+  inline: t.inline === true,
 });
 
 /**
@@ -1876,7 +1879,7 @@ export function knownTools(): KnownTool[] {
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
         ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
-        ...(t.inline === true ? { inline: true as const } : {}),
+        ...(typeof t.inline === "boolean" ? { inline: t.inline } : {}),
       }));
   } catch {
     return [];
@@ -1915,11 +1918,12 @@ const pictureSource = (name: string): string | undefined =>
 /**
  * Whether the portal registered this tool itself, for the page to keep it where it is set up.
  *
- * An entry remembered before `inline` was recorded has no mark, so a picture tool of no package, filed
- * under the label the portal files it under, counts too: it is rewritten with the mark by the next chat.
+ * An entry remembered before `inline` was recorded has no mark at all, so a picture tool of no package,
+ * filed under the label the portal files it under, counts too. A report always carries the mark, `false`
+ * for an extension's tool, so a loose file called image-generation.ts is never taken for the portal's.
  */
 export function portalOwned(tool: KnownTool): boolean {
-  return tool.inline === true || (typeof tool.package !== "string" && pictureSource(tool.name) === tool.source);
+  return tool.inline === true || (tool.inline === undefined && typeof tool.package !== "string" && pictureSource(tool.name) === tool.source);
 }
 
 /** The keys of the packages pi's settings list, or undefined when they cannot be read. */
@@ -2009,7 +2013,7 @@ export function rememberTools(reported: KnownTool[]): void {
       source: tool.source,
       ...(description ? { description } : {}),
       ...(pkg !== undefined ? { package: pkg } : {}),
-      ...(tool.inline ? { inline: true as const } : {}),
+      ...(tool.inline !== undefined ? { inline: tool.inline } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
