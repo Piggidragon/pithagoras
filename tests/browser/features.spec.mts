@@ -15,7 +15,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       },
     },
   };
-  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, editReady: false };
+  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editMaxSize: '', editKeySet: false, timeoutSeconds: 300, editReady: false };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -34,7 +34,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     else if (p === '/api/workspaces') body = { root: '/w', workspaces: [] };
     else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
     else if (p === '/api/features/subagent' && method === 'GET') body = { subagent: state.subagent };
-    else if (p === '/api/features/flags') body = { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled } };
+    else if (p === '/api/features/flags') body = { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled }, images: { enabled: images.enabled && images.baseUrl !== '' } };
     else if (p === '/api/features/images' && method === 'GET') body = { images };
     else if (p === '/api/features/images' && method === 'PUT') {
       const patch = route.request().postDataJSON();
@@ -44,6 +44,8 @@ async function portal(page: Page, { reachable = true, available = true, docker =
         || (patch.editMultiple !== undefined && patch.editMultiple !== images.editMultiple && images.editReady);
       const { apiKey, editApiKey, ...rest } = patch;
       Object.assign(images, rest);
+      // null takes a saved limit away: the default again.
+      if (patch.timeoutSeconds === null) images.timeoutSeconds = 300;
       if (apiKey !== undefined) images.keySet = apiKey !== '';
       if (editApiKey !== undefined) images.editKeySet = editApiKey !== '';
       images.editReady = images.editEnabled && (images.editBaseUrl || images.baseUrl) !== '';
@@ -287,15 +289,15 @@ test('forgetting the memory asks first', async ({ page }) => {
   expect(sent.at(-1)!.path).toBe('/api/features/understory/install?memory=forget');
 });
 
-test('the five add-on tabs fit a phone', async ({ page }) => {
+test('the four add-on tabs fit a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await portal(page);
   await page.goto('/settings/add-ons');
   const tabs = addons(page).getByRole('tab');
-  await expect(tabs).toHaveCount(5);
+  await expect(tabs).toHaveCount(4);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
-  for (const name of ['Browser', 'Voice', 'Subagents', 'Memory', 'Images']) await expect(addons(page).getByRole('tab', { name })).toBeVisible();
+  for (const name of ['Browser', 'Voice', 'Subagents', 'Memory']) await expect(addons(page).getByRole('tab', { name })).toBeVisible();
 });
 
 test("a tidy-up that fails says why, not the status it came with", async ({ page }) => {
@@ -329,9 +331,8 @@ test("the Subagents tab opens whatever Docker's state: it asks nothing of it", a
 
 test('image generation needs an endpoint before it can be switched on, and the key is sent once and never shown again', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/add-ons');
-  await addons(page).getByRole('tab', { name: 'Images' }).click();
-  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  await page.goto('/settings/images');
+  const panel = addons(page);
   const tool = panel.getByRole('switch', { name: 'Image generation tool' });
   await expect(tool).toHaveAttribute('aria-checked', 'false');
   await expect(tool).toBeDisabled();
@@ -369,11 +370,66 @@ test('image generation needs an endpoint before it can be switched on, and the k
   expect(sent.at(-1)!.body).toEqual({ apiKey: '' });
 });
 
+test('the Images page is in the sidebar while image generation is on, and the switch moves it at once', async ({ page }) => {
+  await portal(page);
+  await page.goto('/settings/images');
+  const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Images' });
+  await expect(entry).toHaveCount(0);
+  const panel = addons(page);
+  await panel.getByLabel('API address').fill('https://images.example.com/v1');
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  // An address is not enough: the tool is still off.
+  await expect(entry).toHaveCount(0);
+  await panel.getByRole('switch', { name: 'Image generation tool' }).click();
+  await expect(entry).toHaveCount(1);
+  await panel.getByRole('switch', { name: 'Image generation tool' }).click();
+  await expect(entry).toHaveCount(0);
+});
+
+test('the time limit of a picture is a field of the image endpoint: five minutes, whole seconds from 30 to 3600, sent only when changed', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/images');
+  const panel = addons(page);
+  const field = panel.getByLabel('Time limit (seconds)');
+  await expect(field).toHaveValue('300');
+
+  // Out of bounds: nothing to save.
+  await field.fill('10');
+  const save = panel.getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toBeDisabled();
+  await field.fill('4000');
+  await expect(save).toBeDisabled();
+  // Text that is not a number is no limit either, and is not taken for the default.
+  await field.fill('600s');
+  await expect(save).toBeDisabled();
+  await field.fill('900');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: '', size: '', timeoutSeconds: 900 });
+  await expect(field).toHaveValue('900');
+
+  // Saving something else does not state the limit again.
+  await panel.getByLabel('Model', { exact: true }).fill('image-model');
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: 'image-model', size: '' });
+
+  // Empty is the default, which is what the placeholder says: a saved limit is taken away, not stored as 300.
+  await expect(field).toHaveValue('900');
+  await field.fill('');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: 'image-model', size: '', timeoutSeconds: null });
+  await expect(field).toHaveValue('300');
+});
+
 test('image editing has a switch and an endpoint of its own: it needs an address, may use the one above, and its key is sent once', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/add-ons');
-  await addons(page).getByRole('tab', { name: 'Images' }).click();
-  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  await page.goto('/settings/images');
+  const panel = addons(page);
   const editing = panel.getByRole('switch', { name: 'Image editing tool' });
   await expect(editing).toHaveAttribute('aria-checked', 'false');
   await expect(editing).toBeDisabled();
@@ -424,11 +480,48 @@ test('image editing has a switch and an endpoint of its own: it needs an address
   await expect(panel.getByRole('button', { name: 'Remove the saved key' })).toBeVisible();
 });
 
+test('image editing has a maximum picture size of its own, sent only when changed, and refuses what is no size', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/images');
+  const panel = addons(page);
+  const field = panel.getByLabel('Maximum picture size');
+  const save = panel.getByRole('button', { name: 'Save', exact: true });
+  await expect(field).toHaveValue('');
+  await expect(field).toHaveAttribute('placeholder', '2048x2048');
+  await expect(panel.getByText(/The maximum picture size is the most pixels a picture sent to be edited may have/)).toBeVisible();
+  // Generation's size is its own field, and is not the maximum.
+  await expect(panel.getByLabel('Picture size', { exact: true })).toHaveValue('');
+
+  // A side of zero is no limit at all, so it is refused as well.
+  await field.fill('00x00');
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  await expect(save).toBeDisabled();
+  await field.fill('huge');
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  await expect(save).toBeDisabled();
+  await field.fill(' 2048x1024 ');
+  await expect(field).toHaveAttribute('aria-invalid', 'false');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ editBaseUrl: '', editModel: '', editMaxSize: '2048x1024' });
+  await expect(field).toHaveValue('2048x1024');
+
+  // Saving something else does not state it again; emptied, it is taken away.
+  await panel.getByLabel('Editing model').fill('image-edit-model');
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ editBaseUrl: '', editModel: 'image-edit-model' });
+  await field.fill('');
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ editBaseUrl: '', editModel: 'image-edit-model', editMaxSize: '' });
+});
+
 test('several pictures per edit is a switch of its own that waits for the editing address, and says what the tool takes', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/add-ons');
-  await addons(page).getByRole('tab', { name: 'Images' }).click();
-  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  await page.goto('/settings/images');
+  const panel = addons(page);
   const several = panel.getByRole('switch', { name: 'Several pictures per edit' });
   await expect(several).toHaveAttribute('aria-checked', 'false');
   await expect(panel.getByText('Off: edit_image takes one picture.')).toBeVisible();
@@ -456,4 +549,28 @@ test('several pictures per edit is a switch of its own that waits for the editin
   await several.click();
   await expect(several).toHaveAttribute('aria-checked', 'false');
   expect(sent.at(-1)!.body).toEqual({ editMultiple: false });
+});
+
+test('the Images page holds the image settings and no switch for the tools themselves', async ({ page }) => {
+  await portal(page);
+  await page.goto('/settings/images');
+  const here = addons(page);
+  await expect(here.getByRole('switch', { name: 'Image generation tool' })).toBeVisible();
+  await expect(here.getByRole('switch', { name: 'Image editing tool' })).toBeVisible();
+  await expect(here.getByRole('switch', { name: 'Several pictures per edit' })).toBeVisible();
+  // The tools are switched in the tool lists, in their one group.
+  await expect(here.getByText('Picture tools', { exact: true })).toHaveCount(0);
+  for (const name of ['show_image', 'generate_image', 'edit_image']) await expect(here.getByRole('switch', { name: `${name} in new chats` })).toHaveCount(0);
+  // Settings → Add-ons has no Images tab.
+  await page.goto('/settings/add-ons');
+  await expect(here.getByRole('tab', { name: 'Images' })).toHaveCount(0);
+});
+
+test('the Images section fits a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await portal(page);
+  await page.goto('/settings/images');
+  await expect(addons(page).getByRole('switch', { name: 'Image editing tool' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  expect(await addons(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });

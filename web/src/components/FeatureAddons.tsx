@@ -687,17 +687,29 @@ interface ImagesDraft {
   baseUrl: string;
   model: string;
   size: string;
+  /** As typed: whole seconds, or not yet. */
+  timeout: string;
   /** Typed anew; empty keeps the one saved. */
   apiKey: string;
 }
+
+/** What the server takes as a time limit, in seconds (TIMEOUT_SECONDS there). */
+const TIMEOUT = { default: 300, min: 30, max: 3600 };
+/** Empty is the default, as it is for the model and the size: it takes a saved limit away. */
+const timeoutOk = (typed: string) => typed.trim() === "" || (/^\d+$/.test(typed.trim()) && Number(typed) >= TIMEOUT.min && Number(typed) <= TIMEOUT.max);
 
 /** The same for editing, which has its own address, model and key. */
 interface ImagesEditDraft {
   baseUrl: string;
   model: string;
+  /** As typed: "2048x2048", or empty for no limit. */
+  maxSize: string;
   /** Typed anew; empty keeps the one saved. */
   apiKey: string;
 }
+
+/** What the server takes as a maximum size (MAX_SIZE there): empty is none. */
+const maxSizeOk = (typed: string) => typed.trim() === "" || /^[1-9]\d{1,4}x[1-9]\d{1,4}$/.test(typed.trim());
 
 const originOf = (address: string): string => {
   try {
@@ -720,9 +732,9 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   }, []);
 
   if (!images) return <Loading />;
-  const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, apiKey: "" };
+  const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, timeout: String(images.timeoutSeconds), apiKey: "" };
   const edit = (patch: Partial<ImagesDraft>) => setDraft({ ...form, ...patch });
-  const editForm = editDraft ?? { baseUrl: images.editBaseUrl, model: images.editModel, apiKey: "" };
+  const editForm = editDraft ?? { baseUrl: images.editBaseUrl, model: images.editModel, maxSize: images.editMaxSize, apiKey: "" };
   const editEdit = (patch: Partial<ImagesEditDraft>) => setEditDraft({ ...editForm, ...patch });
   // The key of generation goes along when edits go to the same server and have none of their own: the server says the same.
   const usesKeyAbove = images.keySet && !images.editKeySet && originOf(editForm.baseUrl || images.baseUrl) === originOf(images.baseUrl);
@@ -737,6 +749,8 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       if (patch.baseUrl !== undefined) setDraft(null);
       if (patch.editBaseUrl !== undefined) setEditDraft(null);
       if (changed) setNote(() => () => reloadNote(waiting));
+      // The Images page is in the sidebar while there is an endpoint to make pictures with.
+      window.dispatchEvent(new Event("features-changed"));
       return true;
     } catch (e) {
       onError((e as Error).message);
@@ -801,16 +815,40 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
               className={`${inputCls} mt-1 font-mono text-xs`}
             />
           </label>
+          <label className="text-xs text-fg-muted">
+            {t("Time limit (seconds)")}
+            <input
+              inputMode="numeric"
+              value={form.timeout}
+              onChange={(e) => edit({ timeout: e.target.value })}
+              placeholder={String(TIMEOUT.default)}
+              aria-invalid={!timeoutOk(form.timeout)}
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
         </div>
         <p className="text-[11px] text-fg-faint">
           {tx("Any server with an OpenAI-style {route}: the portal sends the model, the prompt and the size, and takes a picture back as base64 or as an address. The key goes only to this address. Leave the model and the size empty for the server's own.", { route: <code>images/generations</code> })}
+        </p>
+        <p className="text-[11px] text-fg-faint">
+          {t("The time limit is how long the portal waits for one picture, made or edited, before it gives up: {min} to {max} seconds, {default} by default. A slow or local model may need more.", TIMEOUT)}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {draft && (
             <button
               type="button"
               className={primaryCls}
-              onClick={() => void change({ baseUrl: form.baseUrl, model: form.model, size: form.size, ...(form.apiKey ? { apiKey: form.apiKey } : {}) })}
+              disabled={!timeoutOk(form.timeout)}
+              onClick={() =>
+                void change({
+                  baseUrl: form.baseUrl,
+                  model: form.model,
+                  size: form.size,
+                  // Only when changed, so that saving the rest does not state a limit the person never chose.
+                  ...(form.timeout.trim() === "" ? { timeoutSeconds: null } : Number(form.timeout) !== images.timeoutSeconds ? { timeoutSeconds: Number(form.timeout) } : {}),
+                  ...(form.apiKey ? { apiKey: form.apiKey } : {}),
+                })
+              }
             >
               {t("Save")}
             </button>
@@ -886,16 +924,32 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
               className={`${inputCls} mt-1 font-mono text-xs`}
             />
           </label>
+          <label className="text-xs text-fg-muted">
+            {t("Maximum picture size")}
+            <input
+              value={editForm.maxSize}
+              onChange={(e) => editEdit({ maxSize: e.target.value })}
+              placeholder="2048x2048"
+              spellCheck={false}
+              autoComplete="off"
+              aria-invalid={!maxSizeOk(editForm.maxSize)}
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
         </div>
         <p className="text-[11px] text-fg-faint">
           {t("Leave the address empty to edit with the server above, with its key. The model above is not used for editing, as a model that makes pictures may not change them; leave this one empty for the server's own. A key goes only to the address it was given for.")}
+        </p>
+        <p className="text-[11px] text-fg-faint">
+          {t("The maximum picture size is the most pixels a picture sent to be edited may have, such as 2048x2048, whichever way up it is. A picture beyond it is not sent: the agent is told the limit is exceeded and what it is. Leave it empty for no limit.")}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {editDraft && (
             <button
               type="button"
               className={primaryCls}
-              onClick={() => void change({ editBaseUrl: editForm.baseUrl, editModel: editForm.model, ...(editForm.apiKey ? { editApiKey: editForm.apiKey } : {}) })}
+              disabled={!maxSizeOk(editForm.maxSize)}
+              onClick={() => void change({ editBaseUrl: editForm.baseUrl, editModel: editForm.model, ...(editForm.maxSize.trim() !== images.editMaxSize ? { editMaxSize: editForm.maxSize.trim() } : {}), ...(editForm.apiKey ? { editApiKey: editForm.apiKey } : {}) })}
             >
               {t("Save")}
             </button>

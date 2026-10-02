@@ -1,13 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { Type } from "typebox";
 import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
+import { GENERATED_DIR, recordChatPicture } from "../image-gallery.js";
 import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, MAX_PROMPT, SIZE, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
 import { FileError, baseDir, makeFolder, saveNewFile } from "../workspace-files.js";
 import { pictureIn } from "./show-image-tool.js";
 
 /**
  * Making a picture from a description, with the image model the person set up
- * in Settings → Add-ons → Images, and putting it in front of them.
+ * in Settings → Images, and putting it in front of them.
  *
  * What it returns is what show_image returns — the picture's path in the chat's
  * folder, and a title, with a mark that it is this tool's (see generated-picture.ts)
@@ -15,7 +16,8 @@ import { pictureIn } from "./show-image-tool.js";
  * a thumbnail under the tool line in the chat, the picture window in voice
  * mode. The picture is written into a folder of its own inside the chat's, which
  * is where /sessions/:id/picture serves from, under a name made here, never
- * one the agent or the endpoint chose.
+ * one the agent or the endpoint chose. It is also listed in the Images page's
+ * gallery, with what it was asked for (see image-gallery.ts).
  */
 
 /** Said to the model in a spoken conversation, where it is the only way the person sees a picture. */
@@ -23,7 +25,7 @@ export const GENERATE_IMAGE_VOICE_LINE =
   "To make a new picture from a description, call generate_image: it saves the picture in the chat folder and shows it, so do not call show_image on it afterwards.";
 
 /** Where generated pictures go, inside the chat's folder, so that they do not mix with the work. */
-export const GENERATED_DIR = "generated-images";
+export { GENERATED_DIR };
 
 /** A name made here: the time, and something that tells two in one second apart. */
 const fileName = (ext: string): string =>
@@ -69,6 +71,8 @@ export class GenerateImageTool {
   constructor(
     private readonly folder: string,
     private readonly extensions: () => readonly any[] = () => [],
+    /** The chat, for the gallery to say whose a picture is; without it a picture is made and not listed. */
+    private readonly sessionId?: string,
   ) {}
 
   registered = (): boolean => this.on && !takenByAnother(this.extensions());
@@ -76,7 +80,7 @@ export class GenerateImageTool {
   extension = (pi: any) => {
     this.on = false;
     if (!imageGenerationReady()) return;
-    const folder = this.folder;
+    const { folder, sessionId } = this;
     pi.registerTool({
       name: GENERATE_IMAGE_TOOL,
       label: "generate image",
@@ -104,6 +108,10 @@ export class GenerateImageTool {
         if (size && !SIZE.test(size)) throw new Error('The size looks like "1024x1024".');
         const { bytes, ext } = await generateImage(config, { prompt, ...(size ? { size } : {}) }, { signal });
         const rel = saveGenerated(folder, bytes, ext);
+        if (sessionId) {
+          const asked = size || config.size;
+          recordChatPicture({ sessionId, path: rel, kind: "generated", prompt, bytes: bytes.length, params: { ...(config.model ? { model: config.model } : {}), ...(asked ? { size: asked } : {}) } });
+        }
         const title = (typeof p.title === "string" && p.title.trim() ? p.title : prompt).replace(/\s+/g, " ").trim().slice(0, 120);
         const details = { path: rel, ...(title ? { title } : {}), [GENERATED_PICTURE_MARK]: true };
         return { content: [{ type: "text", text: `Generated and shown to the user: ${rel}` }], details };

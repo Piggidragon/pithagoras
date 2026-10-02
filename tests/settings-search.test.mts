@@ -15,6 +15,14 @@ test("a setting is found by its title first, then by what it is about", () => {
   assert.deepEqual(titles("nothing like this"), []);
 });
 
+test("the picture tools are found in Tools, the image endpoint on the Images page", () => {
+  for (const q of ["show_image", "generate_image", "edit_image"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
+  for (const q of ["image generation", "image editing", "bildgenerierung"]) {
+    const found = searchSettings(q, SETTINGS_INDEX);
+    assert.ok(found.length && found.every((e) => e.tab === "images"), `${q} leads to Images`);
+  }
+});
+
 test("where an entry is, is searched too", () => {
   const found = searchSettings("web access brave", [{ tab: "extensions", ext: "npm:pi-web-access", title: "Brave API key", where: "pi-web-access" }]);
   assert.equal(found.length, 1);

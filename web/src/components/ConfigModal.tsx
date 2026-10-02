@@ -11,6 +11,7 @@ import {
   LuFileJson,
   LuFolder,
   LuHammer,
+  LuImage,
   LuInfo,
   LuKeyboard,
   LuMonitor,
@@ -42,6 +43,7 @@ import { useNotifyState } from "../notify";
 import { setCommandTrigger, typedCharacter, useCommandTrigger, validTrigger } from "../command-trigger";
 import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
+import { PicturesPanel } from "./PicturesPanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
@@ -67,6 +69,7 @@ export type Tab =
   | "people"
   | "add-ons"
   | "tools"
+  | "images"
   | "skills"
   | "mcp"
   | "extensions"
@@ -97,6 +100,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
     label: msg("Agent"),
     tabs: [
       { id: "tools", label: msg("Tools"), icon: <LuHammer />, hint: msg("What the agent may reach for, by default") },
+      { id: "images", label: msg("Images"), icon: <LuImage />, hint: msg("The image model behind making and changing pictures") },
       { id: "skills", label: msg("Skills"), icon: <LuWrench />, hint: msg("Procedures the agent can reach for") },
       { id: "mcp", label: msg("MCP"), icon: <LuPlug />, hint: msg("Servers the agent can pull tools from") },
       { id: "extensions", label: msg("Extensions"), icon: <LuBlocks />, hint: msg("Install and manage packages") },
@@ -304,6 +308,7 @@ export function ConfigModal({
       {nav.kind === "tab" && nav.id === "people" && <PeoplePanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "add-ons" && <PortalExtensions onError={setError} />}
       {nav.kind === "tab" && nav.id === "tools" && <ToolDefaults onError={setError} />}
+      {nav.kind === "tab" && nav.id === "images" && <PicturesPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "mcp" && <McpPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "extensions" && (

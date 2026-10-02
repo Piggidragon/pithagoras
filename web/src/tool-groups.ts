@@ -21,10 +21,29 @@ export interface ToolGroup {
 /** What the portal registers itself, which is not an extension anyone installed. */
 const BUILT_IN = msg("built in");
 
+/**
+ * The key of the group the portal's picture tools share. Brackets, as no package, file or MCP server
+ * is called: a group an extension's tool of the same name could be filed in by accident.
+ */
+const PICTURES = "<portal:images>";
+
+/** The tools that make up pictures: showing one, making one, changing one. */
+const PICTURE_TOOLS = ["show_image", "generate_image", "edit_image"];
+
+/**
+ * What to file a tool under. The portal's own picture tools share one group, whichever way each was
+ * registered; an extension's tool of the same name is not the portal's and stays in its own.
+ */
+const sourceOf = (tool: PortalTool): string =>
+  tool.inline && PICTURE_TOOLS.includes(tool.name) ? PICTURES : tool.source?.trim() || BUILT_IN;
+
+/** Where a group goes in the list: what is installed first, what the portal brings after it, what is built in last. */
+const shippedRank = (source: string): number => (source === BUILT_IN ? 2 : source === PICTURES ? 1 : 0);
+
 export function groupTools(tools: PortalTool[]): ToolGroup[] {
   const groups = new Map<string, PortalTool[]>();
   for (const tool of tools) {
-    const source = tool.source?.trim() || BUILT_IN;
+    const source = sourceOf(tool);
     const list = groups.get(source);
     if (list) list.push(tool);
     else groups.set(source, [tool]);
@@ -38,13 +57,7 @@ export function groupTools(tools: PortalTool[]): ToolGroup[] {
     }))
     // What the portal ships is last: somebody opening this came for the thing
     // they installed, not for the tools that were always there.
-    .sort((a, b) =>
-      a.source === BUILT_IN
-        ? 1
-        : b.source === BUILT_IN
-          ? -1
-          : a.source.localeCompare(b.source)
-    );
+    .sort((a, b) => shippedRank(a.source) - shippedRank(b.source) || a.source.localeCompare(b.source));
 }
 
 /**
@@ -93,11 +106,12 @@ export function toggleOpen(open: string[], source: string): string[] {
  * heading's tooltip.
  */
 /** Where a group of tools comes from, as it is: a package's spec, or what the portal brings itself, in words. */
-export const sourceName = (source: string): string => (source === BUILT_IN ? t(BUILT_IN) : source);
+export const sourceName = (source: string): string => (source === BUILT_IN ? t(BUILT_IN) : source === PICTURES ? t("Images") : source);
 
 export function displayName(source: string, names: Record<string, string> = {}): string {
   const given = names[source]?.trim();
   if (given) return given;
   if (source === BUILT_IN) return t(BUILT_IN);
+  if (source === PICTURES) return t("Images");
   return source.replace(/^@[^/]+\//, "") || source;
 }

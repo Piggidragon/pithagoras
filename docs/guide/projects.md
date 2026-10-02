@@ -78,7 +78,7 @@ Chats started after a change pick it up. A chat that is already open does after
 ## Tools
 
 A project can have tools of its own: **Tools** on its row lists the tools the portal has
-seen registered, as a chat's tools control does, and what you switch there is what
+seen registered, as a chat's tools control does (the picture tools together in one **Images** group), and what you switch there is what
 every chat in the project starts with. "The research project never goes online" and
 "the dev project always has the shell tools" are then said once, not at the start of
 every chat.

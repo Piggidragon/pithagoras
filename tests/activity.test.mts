@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {activity} from '../web/src/transcript.ts';
+import {activity,shownFrom} from '../web/src/transcript.ts';
 const event=(type:string,at:number,payload:any={})=>({type,at,payload,seq:at});
 test('empty assistant events retain prefill percentage and stable elapsed start',()=>{
  const events=[event('portal_prompt',100),event('message_start',110,{message:{role:'assistant'}}),event('portal_prefill',120,{total:10000,processed:3000,cache:1000}),event('message_update',130,{assistantMessageEvent:{type:'start'}})];
@@ -36,4 +36,23 @@ test('the last turn\'s progress is not carried into the next one',()=>{
   event('message_update',130,{assistantMessageEvent:{type:'text_delta',delta:'Hi'}}),event('message_end',140),event('agent_end',150),
   event('portal_prompt',200),event('agent_start',201),event('message_start',210,{message:{role:'assistant'}})];
  assert.equal(activity(events).prefill,undefined);
+});
+test('the end of the reasoning shown starts where it did while the text is short, and moves only to a line break',()=>{
+ const line='a line of reasoning that goes on a while. ';
+ const text=(n:number)=>Array.from({length:n},()=>line.repeat(5)).join('\n');
+ // Growing a token at a time, the start stays until the text from it passes 6000 characters.
+ let from=0;
+ for(let n=1;n<40;n++){const next=shownFrom(text(n),from);if(text(n).length<=6000)assert.equal(next,0);from=next}
+ // Then it moves on to just after a line break, leaving far more than a window shows.
+ assert.ok(from>0&&text(39)[from-1]==='\n'&&text(39).length-from>=600);
+ // Not a letter at a time after that: it holds until the text from it is long again.
+ const held=shownFrom(text(39)+'more',from);
+ assert.equal(held,from);
+ // A text with no line break holds its start far longer, and is then cut at a word, once, leaving little.
+ const flat=(n:number)=>line.repeat(n);
+ assert.equal(shownFrom(flat(700),0),0);
+ const cut=shownFrom(flat(800),0);
+ assert.ok(cut>0&&flat(800)[cut-1]===' '&&flat(800).length-cut>=500&&flat(800).length-cut<=700);
+ // A shorter text than the start (a new reasoning) starts over.
+ assert.equal(shownFrom('short',cut),0);
 });

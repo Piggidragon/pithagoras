@@ -20,7 +20,7 @@ import {
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { Streamdown } from "streamdown";
-import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, stripAnsi, type Activity, type Item } from "../transcript";
+import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, shownFrom, stripAnsi, type Activity, type Item } from "../transcript";
 import { SHELL_TOOL, unwrapCall } from "../tool-activity";
 import { argLabel, isBlock, isScalar } from "../tool-args";
 import { useFollowBottom } from "../use-follow-bottom";
@@ -99,7 +99,11 @@ export function ThinkingBlock({
   const seconds = since ? Math.max(0, Math.round(((streaming ? now : until ?? since) - since) / 1000)) : undefined;
   const label = streaming ? t("Thinking") : seconds && seconds >= 1 ? t("Thought for {time}", { time: formatElapsed(seconds) }) : t("Thought process");
   // The end of what it is thinking, under a closed header.
-  const tail = streaming && !open ? recentText(thinking) : "";
+  // Where the end starts is only moved on rarely (see shownFrom): a start that
+  // followed the newest token made every line wrap anew with each one.
+  const from = useRef(0);
+  from.current = shownFrom(thinking, from.current);
+  const tail = streaming && !open ? tidyText(thinking.slice(from.current)) : "";
   // As high as what it shows, up to three lines — a sentence of reasoning is
   // not a sentence and two empty lines — and never lower again while it runs:
   // a window that shrank and grew with the text as it wrapped jumped with every
@@ -175,20 +179,9 @@ function ThinkingBody({ thinking, streaming, open }: { thinking: string; streami
   );
 }
 
-/**
- * The end of a text that is still being written, for a window a few lines
- * high that shows its last lines: enough to fill it, cut at a word.
- *
- * It is one block that grows, not a line swapped for the next: that one was
- * drawn anew, and faded in, with every token, which at a fast model's speed
- * was a flicker rather than something to read.
- */
-function recentText(text: string, chars = 600): string {
-  const trimmed = text.replace(/\n{2,}/g, "\n").trimEnd();
-  if (trimmed.length <= chars) return trimmed.trimStart();
-  const cut = trimmed.slice(-chars);
-  const space = cut.search(/\s/);
-  return (space >= 0 && space < 40 ? cut.slice(space + 1) : cut).trimStart();
+/** The text the end shows, with its blank lines closed up. */
+function tidyText(text: string): string {
+  return text.replace(/\n{2,}/g, "\n").trim();
 }
 
 /** The last few lines of a command's output that say something, oldest first. */
