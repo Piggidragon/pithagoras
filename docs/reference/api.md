@@ -49,7 +49,7 @@ them. See [Projects](/guide/projects).
 
 | | |
 | --- | --- |
-| `GET /api/sessions` | `{ sessions, executor }` — pinned first, then most recent. The chats, and the conversations started on the Agent page; not those that came through a channel, nor routine runs. |
+| `GET /api/sessions` | `{ sessions, executor }` — pinned first, then most recent. The chats, and the conversations started on an agent's page; not those that came through a channel, nor routine runs. |
 | `GET /api/agent/sessions` | `{ sessions, agentHome }` — one agent's conversations (`?agent=`, the first agent without it), each with the channel that owns it |
 | `POST /api/sessions` | `{ workspace?, agent?, title? }` — `agent` starts it in that agent's home; neither means Home, the first agent's; no title means "New chat", replaced by the first message |
 | `GET /api/sessions/:id` | One session |
@@ -425,7 +425,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `PATCH /api/people/:key` | Update name, role or notes. |
 | `DELETE /api/people/:key` | Forget a person. |
 | `GET /api/audit?limit=2000` | Read up to all 2,000 retained decisions (default 200), newest first. |
-| `DELETE /api/audit?through=<id>` | Clear the log: every entry up to and including `through` (the newest one the caller saw, so a decision recorded since survives), or all of them without it. A `through` that is not an entry id is refused with 400. Answers `{ removed }`, and a clear that removed something leaves one `cleared` entry saying how many. |
+| `DELETE /api/audit?through=<id>` | Clear the log: every decision up to and including `through` (the newest one the caller saw, so a decision recorded since survives), or every decision without it. Earlier `cleared` entries stay. A `through` that is not an entry id is refused with 400. Answers `{ removed }`, and a clear that removed something leaves one `cleared` entry saying how many. |
 | `GET /api/tool-rules` | List standing tool permissions. |
 | `POST /api/tool-rules` | Add a role/tool/pattern rule. The role is `colleague`, `guest`, `heartbeat` (an agent looking around on its own) or `all`. |
 | `DELETE /api/tool-rules/:id` | Remove a rule. |

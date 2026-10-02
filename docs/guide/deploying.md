@@ -139,7 +139,7 @@ Inside `/data`:
 | `/data/channels` | Installed third-party channel packages |
 | `/data/agent-home` | The first agent's home: its `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` |
 | `/data/agents/<id>` | The home of every other [agent](/guide/agents) |
-| `/data/images` | The pictures the [Images page](/guide/images) made itself |
+| `/data/images` | The pictures the [Images page](/guide/images) made itself, and the pictures sent with each chat's messages, in a folder per chat. What the agent makes is in the chat's folder, under `generated-images` |
 | `/data/bin` | CLIs you add yourself — on `PATH`, survives rebuilds |
 
 `HOME` deliberately points at the volume. Otherwise every image rebuild would

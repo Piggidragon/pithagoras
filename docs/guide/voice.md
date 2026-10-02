@@ -504,6 +504,29 @@ remaining `VOICE_*` variables (`VOICE_PIPELINE_MODE`, `VOICE_SENTENCE_CHUNKS`,
 `VOICE_TTS_PREFETCH`, `VOICE_STATUS_SPEECH`, `VOICE_COMPARISON`) are described in
 the comparison guide.
 
+## Status lines while it works
+
+Voice mode says a few short lines of its own while the agent is busy, so a silence
+is not mistaken for a hang. They come from the portal, in English, and not from the
+model; they are not part of the conversation and are not added to the transcript.
+
+- **Thinking.** When the agent has been thinking for about two seconds and has not
+  started to answer, a phrase such as "Let me think about that for a moment." is
+  spoken. It is chosen from a few, never the same one twice in a row, at most once
+  for each thing you say and no more often than every twenty seconds. It is
+  skipped once the answer has begun, and while you are talking.
+- **Compaction.** When the conversation is compacted to free context, a line
+  says so ("Let me do a quick context compaction so I can keep going."), and another
+  when it is over ("Context compaction is done. I'm ready to continue.") or when it
+  stopped before it finished.
+- **Talking during compaction.** What you say while it compacts is dropped, not
+  sent: the agent cannot take it in until the compaction is over. The portal says
+  "I'm still compacting our conversation. Please wait a moment; I'll let you know
+  when I'm ready.", at most every eight seconds, so say it again afterwards.
+
+All of them are off in the [sequential baseline](/guide/voice-comparison), and
+`VOICE_STATUS_SPEECH=false` on the portal turns them off everywhere.
+
 ## Speech runtimes
 
 **Settings → Add-ons → Voice → Speech runtime** selects how speech is made, and
@@ -572,7 +595,9 @@ is slower than playback. Barge-in cancels both queued audio and the upstream req
 The first sentence still needs model synthesis time before audio is available.
 
 Code blocks are
-replaced with a short spoken notice. Thinking and tool output are not spoken.
+replaced with a short spoken notice. The agent's thinking and tool output are not
+read out; the portal's own [status lines](#status-lines-while-it-works) are the
+only thing spoken besides the reply.
 
 If transcription or sending fails, the error appears beside the controls; a
 failed send leaves the recognized text visible for copying. If Breeze reports
