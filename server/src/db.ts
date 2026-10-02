@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
-import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL, imageEditingReady, imageGenerationReady } from "./image-generation.js";
+import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
@@ -1906,6 +1906,19 @@ export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
     .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))
     .map(({ package: _package, inline: _inline, ...tool }) => tool);
+}
+
+/** What the portal files its own picture tools under, by name. */
+const PICTURE_SOURCES: Record<string, string> = { show_image: SHOW_IMAGE_SOURCE, [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE, [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE };
+
+/**
+ * Whether the portal registered this tool itself, for the page to keep it where it is set up.
+ *
+ * An entry remembered before `inline` was recorded has no mark, so a picture tool of no package, filed
+ * under the label the portal files it under, counts too: it is rewritten with the mark by the next chat.
+ */
+export function portalOwned(tool: KnownTool): boolean {
+  return tool.inline === true || (typeof tool.package !== "string" && PICTURE_SOURCES[tool.name] === tool.source);
 }
 
 /** The keys of the packages pi's settings list, or undefined when they cannot be read. */

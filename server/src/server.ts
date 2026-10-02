@@ -96,6 +96,7 @@ import {
   shownStoredSettings,
   shownTools,
   knownTools,
+  portalOwned,
   clearProjectTools,
   projectTools,
   projectsWithTools,
@@ -935,7 +936,7 @@ app.get("/api/tools", (_req, res) => {
   const off = new Set(toolDefaultsOff());
   const servers = mcpServerNames();
   // The portal's own tools are told apart from an extension's of the same name, as no label can: the page keeps them where they are set up.
-  const inline = new Set(knownTools().filter((tool) => tool.inline).map((tool) => tool.name));
+  const inline = new Set(knownTools().filter(portalOwned).map((tool) => tool.name));
   res.json({
     tools: shownTools().map((tool) => ({
       ...tool,
