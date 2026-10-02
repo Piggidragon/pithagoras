@@ -26,6 +26,13 @@ test("a chat's pictures are what was sent and what the agent showed, in the orde
   assert.equal(list[3].fileName, "plain.png");
 });
 
+test("a picture made by a call is asked for by the end that showed it, the address every other place draws it by", () => {
+  // Voice mode's window and a card's tile version theirs by the end's seq, and the browser shares one download only between the same address.
+  const [made, shown] = chatPictures([{ ...tool("t4", "generate_image", { path: "generated-images/x.png" }), pictureSeq: 9 }, tool("t5", "show_image", { path: "docs/plain.png" })], folder, urls);
+  assert.equal(made.src, "/shown/generated-images/x.png?v=9");
+  assert.equal(shown.src, "/shown/docs/plain.png?v=t5", "from an item that does not say, by the item");
+});
+
 test("an edit is tied to the latest picture of the file it was given, by a relative or an absolute path", () => {
   const items: Item[] = [
     tool("t1", "generate_image", { path: "generated-images/x.png" }),

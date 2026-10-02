@@ -443,7 +443,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       {conversation && <VoiceConversation sessionId={sessionId} items={items} />}
       <ResizeHandles target={conversationWindow} />
     </section>
-    <VoiceToolActivity events={toolEvents} folder={folder} onOpen={openCall} />
+    <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} />
     <div className="voice-presence">
       <div className="voice-avatar"><VoiceOrb mode={mode} levels={levels} look={orbStyle} /></div>
       <div className="voice-dock-center">

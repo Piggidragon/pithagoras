@@ -72,6 +72,10 @@ export type Item =
       status: "running" | "done" | "error";
       detail?: string;
       picture?: ShownPicture;
+      /** The seq of the end that showed `picture`: what versions its URL, so that every place that draws it asks for the same one (see PictureCall). */
+      pictureSeq?: number;
+      /** A call of the portal's own generate_image or edit_image, as its start says (see generated-picture.ts), not of a tool of that name an extension brings. */
+      portalPicture?: true;
       args?: unknown;
       output?: string;
       /** How many lines `output` had before it was cut to its end. */
@@ -361,6 +365,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           name: String(p.toolName ?? p.name ?? "tool"),
           status: "running",
           detail: summarizeToolInput(p),
+          ...(p[GENERATED_PICTURE_MARK] === true ? { portalPicture: true as const } : {}),
           ...(args !== undefined ? { args } : {}),
           ...(ev.at !== undefined ? { since: ev.at } : {}),
         });
@@ -416,7 +421,10 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             // Its updates were live only; how many there were is kept on its end.
             if (typeof p.updates === "number") it.updates = Math.max(it.updates ?? 0, p.updates);
             const picture = shownPicture(p);
-            if (picture) it.picture = picture;
+            if (picture) {
+              it.picture = picture;
+              it.pictureSeq = ev.seq;
+            }
             break;
           }
         }

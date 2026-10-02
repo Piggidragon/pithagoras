@@ -25,6 +25,15 @@ test('the chat puts a generated picture under the tool line that made it', () =>
   assert.deepEqual(tool.picture, { path: generated.path, title: generated.title });
 });
 
+test('the call knows which end showed its picture: that is what versions the URL every place draws it from asks for', () => {
+  // The picture window in voice mode versions its address by the end's seq. The chat's preview and a card's tile take the same one, so that the file is fetched once, not once for each.
+  const items = buildTranscript([start('generate_image', { prompt: 'a lighthouse at dusk' }), end('generate_image', generated)]);
+  const tool = items.find((i) => i.kind === 'tool') as any;
+  assert.equal(tool.pictureSeq, 2);
+  const failed = buildTranscript([start('generate_image', { prompt: 'a lighthouse at dusk' }), end('generate_image', generated, { isError: true })]);
+  assert.equal((failed.find((i) => i.kind === 'tool') as any).pictureSeq, undefined, 'no picture, no address');
+});
+
 test('the tool line says a picture is being made; what tapping it opens is settled when the call ends', () => {
   // Not here: the start cannot tell the portal's tool from an extension's of the same name, whose card must open nothing.
   assert.deepEqual(describeCall(start('generate_image', { prompt: 'a lighthouse\nat dusk' }).payload, '/work'), { label: 'Making a picture', detail: 'a lighthouse at dusk' });

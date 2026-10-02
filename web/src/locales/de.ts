@@ -1591,6 +1591,13 @@ const de: Locale = {
     // components/VoicePictures.tsx
     "No pictures yet. Ask the agent to show you one.": "Noch keine Bilder. Bitte den Agenten, dir eines zu zeigen.",
     "This picture is no longer in the folder.": "Dieses Bild ist nicht mehr im Ordner.",
+    "The picture could not be loaded.": "Das Bild konnte nicht geladen werden.",
+    "Loading the picture": "Lädt das Bild",
+    "The picture is ready": "Das Bild ist fertig",
+    "No picture was made": "Es wurde kein Bild erstellt",
+    "The picture was not changed": "Das Bild wurde nicht geändert",
+    "Interrupted before the picture arrived": "Unterbrochen, bevor das Bild ankam",
+    "Details": "Details",
     "Fit the picture": "Bild einpassen",
     "Show the picture at full size": "Bild in voller Größe zeigen",
     "Previous picture": "Vorheriges Bild",
@@ -1604,7 +1611,6 @@ const de: Locale = {
     "Show the edited version": "Die bearbeitete Version zeigen",
     "Edited version": "Bearbeitete Version",
     "Download the picture": "Das Bild herunterladen",
-    "The picture could not be loaded.": "Das Bild konnte nicht geladen werden.",
     // components/VoiceProfile.tsx
     "Voice latency profiler": "Profiler der Sprachlatenz",
     "Voice latency": "Sprachlatenz",

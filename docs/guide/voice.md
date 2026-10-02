@@ -80,12 +80,12 @@ The model has to take images; if it does not, the chat says so.
 a chart, a diagram or a screenshot in the chat's folder and calls it, and a
 **Pictures** window opens on it, like the browser and terminal do. Tap the
 picture to see it at full size, use the arrows to go back through earlier ones,
-or open it in a new tab. Outside voice mode the picture appears under the tool
-line in the chat. With [image generation](/guide/features#image-generation)
-switched on, the agent also has `generate_image`, which makes a new picture from
-a description and shows it the same way, and, with image editing switched on,
-`edit_image`, which changes a picture in the chat's folder into a new one; the
-voice instructions mention each only while it is there. Canvases can include pictures from the folder too (see
+or open it in a new tab. Outside voice mode the picture appears in the chat. With
+[image generation](/guide/features#image-generation) switched on, the agent also
+has `generate_image`, which makes a new picture from a description and shows it
+the same way, and, with image editing switched on, `edit_image`, which changes a
+picture in the chat's folder into a new one; the voice instructions mention each
+only while it is there. Canvases can include pictures from the folder too (see
 [Canvases](/guide/canvases)).
 
 **Tool cards.** The cards that fly out of the orb say what the agent is doing
@@ -93,7 +93,11 @@ in words — "Editing app.ts", "Searching for “retry”", "Opening a page ·
 example.com" — and stay while the call runs, counting its time. When it ends
 they say what came of it: `+12 −3` lines for an edit, "8 matches", "Nothing
 found", or the first line of an error. Tap a card to open what it is about: the
-file in Files, the terminal, the browser, the document or the picture.
+file in Files, the terminal, the browser, the document or the picture. The card
+of a `generate_image` or `edit_image` call has the chat's picture preview in the
+place of its mark, as a small tile: a frame while the picture is made (it moves
+only while the [animations](/guide/interface#animations) are on), the picture
+itself once it is there, and a quiet mark where none was made.
 
 **Controls.** Beside the microphone and End:
 

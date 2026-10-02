@@ -1,4 +1,6 @@
 import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
+import { PictureCall } from "./PictureCall";
+import { isPictureCall } from "../picture-call";
 import { workingText } from "./StatusDot";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
@@ -1937,6 +1939,14 @@ export function Chat({
             );
           }
           if (item.kind === "tool") {
+            // The portal's picture tools are a preview of the picture, not a tool card.
+            if (isPictureCall(item)) {
+              return (
+                <div key={item.id} className={`tool-row${enter}`}>
+                  <PictureCall item={item} sessionId={session.id} folder={session.workspace} onOpen={pictures.open} />
+                </div>
+              );
+            }
             return (
               <div key={item.id} className={`tool-row${enter}`}>
               <ToolCall item={item} onOpenTerminal={showInTerminal} onOpenAgent={agentFor(item.callId) ? () => openAgent(agentFor(item.callId)!.id) : undefined} />
@@ -1945,7 +1955,7 @@ export function Chat({
                 <div className="chat-picture my-3 flex justify-center">
                   <PictureButton id={shownPictureId(item.id)} onOpen={pictures.open} title={item.picture.title ?? item.picture.path}>
                     <img
-                      src={api.pictureUrl(session.id, item.picture.path, item.id)}
+                      src={api.pictureUrl(session.id, item.picture.path, item.pictureSeq)}
                       alt={item.picture.title ?? item.picture.path}
                       loading="lazy"
                       className="max-h-80 max-w-full rounded-lg border border-line object-contain"
