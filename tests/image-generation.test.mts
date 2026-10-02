@@ -1676,7 +1676,7 @@ test("the maximum size of an edit is saved as the size of generation is written,
   const parse = gen.parseImageGenerationPatch;
   assert.deepEqual(parse({ editMaxSize: " 2048x1024 " }), { editMaxSize: "2048x1024" });
   assert.deepEqual(parse({ editMaxSize: "" }), { editMaxSize: "" }, "emptied is no limit");
-  for (const bad of ["auto", "2048", "2048*1024", "big", "1x1", "123456x10", 2048, null]) {
+  for (const bad of ["auto", "2048", "2048*1024", "big", "1x1", "123456x10", "00x00", "0x2048", "2048x00", "02048x2048", 2048, null]) {
     assert.match(String(parse({ editMaxSize: bad })), /maximum size looks like/, String(bad));
   }
 
@@ -1723,6 +1723,7 @@ test("an edit beyond the maximum size is refused before anything is sent, and sa
     await refused({ prompt: "p", image: [pngOf(100, 100), pngOf(5000, 100)] }, /^Picture 2 is 5000x100 pixels/);
     // The pixels are not read from a picture that is not one, or from one with no header to read.
     await refused({ prompt: "p", image: PNG }, /^The image has a size that cannot be read.*maximum of 2048x1024/);
+    await refused({ prompt: "p", image: Buffer.from([0xff, 0xd8, 0xff, 0xff, 0xff, 0xe0]) }, /^The image has a size that cannot be read.*maximum of 2048x1024/);
     assert.equal(seen.length, 0, "no request reached the endpoint");
 
     // Within it, either way up, and exactly at it: sent as it always was.

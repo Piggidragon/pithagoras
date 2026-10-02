@@ -177,8 +177,8 @@ export interface ImageGenerationPatch {
 
 /** `1024x1024`, or `auto`, as the OpenAI-style APIs take it. */
 export const SIZE = /^(auto|\d{2,5}x\d{2,5})$/;
-/** The same without `auto`, which is no size to limit by: what a maximum is given as. */
-export const MAX_SIZE = /^\d{2,5}x\d{2,5}$/;
+/** The same without `auto`, which is no size to limit by, and with no side of zero, which would limit nothing: what a maximum is given as. */
+export const MAX_SIZE = /^[1-9]\d{1,4}x[1-9]\d{1,4}$/;
 
 /** An API address as the settings keep it, or the reason it is not one. */
 function parseBase(value: unknown): { base: string } | { error: string } {

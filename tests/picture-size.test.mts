@@ -42,6 +42,7 @@ test("what has no header to read has no size", () => {
   assert.equal(pictureSize(png(0, 10)), undefined, "zero is no size");
   assert.equal(pictureSize(jpeg(10, 10).subarray(0, 12)), undefined);
   assert.equal(pictureSize(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 2, 0xff, 0xda, 0, 2])), undefined, "a scan before any frame");
+  assert.equal(pictureSize(Buffer.from([0xff, 0xd8, 0xff, 0xff, 0xff, 0xe0])), undefined, "cut off inside the padding of a marker");
   assert.equal(pictureSize(webpLossy(10, 10).subarray(0, 24)), undefined);
   assert.equal(pictureSize(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBPXXXX"), Buffer.alloc(20)])), undefined);
 });

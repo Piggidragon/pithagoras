@@ -709,7 +709,7 @@ interface ImagesEditDraft {
 }
 
 /** What the server takes as a maximum size (MAX_SIZE there): empty is none. */
-const maxSizeOk = (typed: string) => typed.trim() === "" || /^\d{2,5}x\d{2,5}$/.test(typed.trim());
+const maxSizeOk = (typed: string) => typed.trim() === "" || /^[1-9]\d{1,4}x[1-9]\d{1,4}$/.test(typed.trim());
 
 const originOf = (address: string): string => {
   try {

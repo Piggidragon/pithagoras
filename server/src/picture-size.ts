@@ -20,6 +20,8 @@ function jpegSize(b: Buffer): PictureSize | undefined {
     if (b[at] !== 0xff) return undefined;
     // Any number of 0xFF may pad a marker.
     while (b[at + 1] === 0xff) at++;
+    // A file cut off inside the padding has no marker left to read.
+    if (at + 4 > b.length) return undefined;
     const marker = b[at + 1];
     // Markers that stand alone have no length: the start of an image, a restart, a bare 0x01.
     if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {

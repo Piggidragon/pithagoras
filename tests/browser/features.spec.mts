@@ -475,6 +475,10 @@ test('image editing has a maximum picture size of its own, sent only when change
   // Generation's size is its own field, and is not the maximum.
   await expect(panel.getByLabel('Picture size', { exact: true })).toHaveValue('');
 
+  // A side of zero is no limit at all, so it is refused as well.
+  await field.fill('00x00');
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  await expect(save).toBeDisabled();
   await field.fill('huge');
   await expect(field).toHaveAttribute('aria-invalid', 'true');
   await expect(save).toBeDisabled();
