@@ -2,7 +2,7 @@ import path from "node:path";
 import { Type } from "typebox";
 import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { recordChatPicture } from "../image-gallery.js";
-import { MAX_EDIT_PICTURES, checkCount, checkTotal, editImage } from "../image-editing.js";
+import { MAX_EDIT_PICTURES, MAX_EDIT_TOTAL_BYTES, checkCount, checkTotal, editImage } from "../image-editing.js";
 import {
   EDIT_IMAGE_SOURCE,
   EDIT_IMAGE_TOOL,
@@ -18,7 +18,7 @@ import { pictureIn } from "./show-image-tool.js";
 
 /**
  * Changing a picture that is in the chat's folder, with the image endpoint the
- * person set up in Settings → Images, and putting the result in front
+ * person set up in Settings → Agent → Images, and putting the result in front
  * of them. The same call makes a new picture from one or several pictures used
  * as references: the route has no other way to take pictures in, so there is no
  * second tool for it.
@@ -49,10 +49,14 @@ const ONE_PICTURE =
   "The picture is a PNG, JPEG, GIF or WebP in the chat's folder (a path relative to it, or absolute inside it). " +
   "It stays as it is: the result is a new picture in the chat's generated-images folder, named after it, and appears on their screen as show_image's does, " +
   "so do not call show_image on it. Say what should change; what is not mentioned should stay as it is. " +
-  "It can also be the reference for a new picture: say what the new one should show. ";
+  "It can also be the reference for a new picture: say what the new one should show. " +
+  // Said, not left out: with no word of it an agent given several pictures would use one and go on as if it had used them all.
+  "The editing endpoint is set up to take ONE picture per edit, so there is only one to give. If the person wants several pictures combined or used together as references, " +
+  "do not make the edit with one of them as if it were all: say that this endpoint takes one picture per edit, and that several can be switched on under Settings → Agent → Images (Several pictures per edit) if the endpoint takes them. ";
 const SEVERAL_PICTURES =
   "Change pictures in the chat's folder as told, or make a new picture from them as references, with the image model the person has set up for editing, and show the result to them. " +
-  `Give one to ${MAX_EDIT_PICTURES} pictures, each a PNG, JPEG, GIF or WebP in the chat's folder (a path relative to it, or absolute inside it). ` +
+  `Give one to ${MAX_EDIT_PICTURES} pictures, each a PNG, JPEG, GIF or WebP in the chat's folder (a path relative to it, or absolute inside it), ` +
+  `together at most ${MAX_EDIT_TOTAL_BYTES / 1024 / 1024} MB; a picture over the size limit set for edits is refused, and the error names it. ` +
   "They are sent in the order of the list, and the model knows them by nothing but their place in it, so refer to them in the prompt by place (\"the first picture\", \"the second picture\") " +
   "and say what each is for: the one to change, a style to follow, a person or an object to take over. Name only those that matter: if one is refused, none is sent. " +
   "They stay as they are: the result is one new picture in the chat's generated-images folder, named after the first, and appears on their screen as show_image's does, " +

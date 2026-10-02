@@ -886,12 +886,12 @@ test("a picture that takes longer than the old limit is waited for, one past the
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 1 }), { prompt: "p" }), (e: Error) => {
       assert.ok(e instanceof gen.ImageGenerationError);
       assert.match(e.message, /did not answer within 1 seconds/, "it names the limit");
-      assert.match(e.message, /time limit in Settings → Images/, "and where to change it");
+      assert.match(e.message, /time limit in Settings → Agent → Images/, "and where to change it");
       return true;
     });
     // Editing has the same limit, from its target.
     assert.equal((await editing.editImage(target(origin, { timeoutSeconds: 3 }), { prompt: "p", image: PNG })).ext, "png");
-    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Images/);
+    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Agent → Images/);
     // An explicit limit of the call still wins, as the tests above use it.
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 3 }), { prompt: "p" }, { timeoutMs: 150 }), /did not answer within 0 seconds/);
   } finally {
@@ -1279,6 +1279,49 @@ test("an endpoint that takes one picture gets a tool with one path, and one that
   gen.saveImageGeneration({ editEnabled: false });
   assert.deepEqual(loadEdit(folder).registered, []);
   reset();
+});
+
+test("an agent whose endpoint takes one picture is told so, and what to do about several, rather than left to use one and say nothing", () => {
+  reset();
+  const folder = chatWith();
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true });
+  const one = loadEdit(folder).registered[0];
+  assert.match(one.description, /set up to take ONE picture per edit/, "the limit is said, not left out");
+  assert.match(one.description, /do not make the edit with one of them as if it were all/, "no picture is dropped without a word");
+  assert.match(one.description, /Settings → Agent → Images \(Several pictures per edit\)/, "and where several are switched on");
+  assert.match(one.description, /reference for a new picture/, "one reference picture is still what it can be given");
+
+  // With several taken, the same sentence is not there, and the limits are: the count and the weight.
+  gen.saveImageGeneration({ editMultiple: true });
+  const many = loadEdit(folder).registered[0];
+  assert.doesNotMatch(many.description, /ONE picture|as if it were all/);
+  assert.match(many.description, new RegExp(`one to ${editing.MAX_EDIT_PICTURES} pictures`));
+  assert.match(many.description, new RegExp(`at most ${editing.MAX_EDIT_TOTAL_BYTES / 1024 / 1024} MB`));
+  assert.match(many.description, /size limit set for edits is refused, and the error names it/);
+  reset();
+});
+
+test("a list of pictures for an endpoint that takes one is refused before anything is sent, with the count and the switch that changes it", async () => {
+  const folder = chatWith({ "a.png": PNG, "b.jpg": JPEG, "c.gif": GIF });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true });
+    // A call that was loaded when several were on, or by a model that sends a list anyway: asked of the setting as it is now.
+    await assert.rejects(
+      loadEdit(folder).call({ paths: ["a.png", "b.jpg", "c.gif"], prompt: "p" }),
+      /not set up to take several pictures, so none was sent \(3 were given\)\. .*"Several pictures per edit" can be switched on in Settings → Agent → Images/,
+    );
+    assert.equal(seen.length, 0, "nothing reached the endpoint");
+    assert.deepEqual(readdirSync(folder).sort(), ["a.png", "b.jpg", "c.gif"], "and nothing was written");
+    // Switched on, the same three go, in one request, as image[] each.
+    gen.saveImageGeneration({ editMultiple: true });
+    await loadEdit(folder).call({ paths: ["a.png", "b.jpg", "c.gif"], prompt: "p" });
+    assert.equal(partList(seen[0]).filter((part) => part.name === "image[]").length, 3);
+  } finally {
+    server.close();
+    reset();
+  }
 });
 
 test("the tool makes one picture of several, in the order given, named after the first, and the originals stay", async () => {
@@ -1747,7 +1790,7 @@ test("edit_image tells the agent that the maximum size is exceeded, and sends an
     reset();
     gen.saveImageGeneration({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "2048x2048" });
     const { call } = loadEdit(folder);
-    await assert.rejects(call({ path: "wide.png", prompt: "p" }), /^Error: The image is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit\. Nothing was sent\..*Settings → Images/);
+    await assert.rejects(call({ path: "wide.png", prompt: "p" }), /^Error: The image is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit\. Nothing was sent\..*Settings → Agent → Images/);
     await assert.rejects(call({ paths: ["small.png", "tall.png"], prompt: "p" }), /^Error: Picture 2 is 300x3000 pixels, which is over the maximum of 2048x2048/);
     assert.equal(seen.length, 0, "no request reached the endpoint");
     assert.deepEqual(readdirSync(folder).sort(), ["small.png", "tall.png", "wide.png"], "no file or folder was made");

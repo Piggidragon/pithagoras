@@ -194,7 +194,7 @@ On the same page, under the generation settings:
 | **Editing model** | Sent as `model`. Empty sends none. It is never the model above, which may be one that only makes pictures. |
 | **Maximum picture size** | The most pixels a picture sent to be edited may have, as `WIDTHxHEIGHT` such as `2048x2048`: the box it must fit, whichever way up it is (a `1024x2048` picture fits a `2048x1024` limit). Empty is no limit, as an empty size sends none. It applies to the picture, to each of [several pictures](#several-pictures) and to a mask, and is what an endpoint with a limit on its input needs; an edit comes out about as large as the picture it is made from. A picture beyond it is not sent: see below. Read at each call, so a change needs no restart. A setup saved before there was one has none. |
 | **Image editing tool** | The switch. It needs an address, its own or generation's; like generation's it is decided when a chat loads, so a change reloads the idle open chats. |
-| **Several pictures per edit** | Off by default. Switch it on only if the editing endpoint takes more than one picture in a request. Then `edit_image` is given a list of pictures instead of one (see [several pictures](#several-pictures)). It is said of this endpoint: when edits move to another server (a new editing address, or a new generation address while editing has none of its own), it goes off again until you say the new one takes them. The tool's shape is decided when a chat loads, so a change reloads the idle open chats. |
+| **Several pictures per edit** | Off by default. Switch it on only if the editing endpoint takes more than one picture in a request. Then `edit_image` is given a list of pictures instead of one, and the [Images page](/guide/images#changing-a-picture) takes up to eight (see [several pictures](#several-pictures)). **While it is off, an edit uses exactly one picture** — if the agent or the Images page seems to use only one of several, this switch is the first thing to check — and both say so (below). It is said of this endpoint: when edits move to another server (a new editing address, or a new generation address while editing has none of its own), it goes off again until you say the new one takes them. The tool's shape is decided when a chat loads, so a change reloads the idle open chats. |
 
 The request is the OpenAI-style `images/edits` one: a `multipart/form-data` form
 with `image`, `prompt`, `n` (always 1), `model` when there is one, and `mask`
@@ -280,6 +280,15 @@ or fail on a list. So this is opt-in and off by default, with a switch of its ow
 under the editing settings (**Several pictures per edit**), and while it is off the
 tool is exactly what it was: `edit_image(path, prompt, title?)` with one picture.
 
+**While it is off** the agent is not left to guess: the tool's description says that the
+editing endpoint is set up to take one picture per edit, and tells it, when you want several
+pictures combined or used as references, to say so and to point you to this switch rather than
+make the edit with one of them as if it were all. A call that gives a list anyway (a chat that
+was loaded with several taken, a model that sends one) is refused before anything is sent, with
+the count and the name of the switch: `The editing endpoint is not set up to take several
+pictures, so none was sent (3 were given). …`. On the [Images page](/guide/images#changing-a-picture)
+the form works with one picture, says that this endpoint takes one, and links to this setting.
+
 Switched on, the tool is `edit_image(paths, prompt, title?)` instead: `paths` is a
 list of one to eight pictures of the chat's folder, and one path is a list of one.
 The agent is told how the pictures are known: **by their place in the list**. The
@@ -306,6 +315,11 @@ What was decided for it:
   it), at most 25 MB, sent under a neutral name, and never changed. The key stays
   in the portal and goes to the editing address only; the result is read, limited
   and written as for one picture.
+- **On the Images page, too.** The page's form sends the same request for the same pictures: up
+  to eight, in the order of the row, `image[]` once for each, with the same count, weight and
+  [maximum size](#editing-a-picture) checks per picture, and the same refusal for an endpoint that
+  takes one. It adds ways to put the pictures in: several files at once, a drop, a paste, and
+  ticking pictures of the gallery (see [Changing a picture](/guide/images#changing-a-picture)).
 - **A count and a weight.** At most **8 pictures**, and **50 MB together**: all of
   them are held in memory and go up within the time limit of the request. More
   is refused with the numbers, never scaled, cut or dropped to fit. The endpoint's

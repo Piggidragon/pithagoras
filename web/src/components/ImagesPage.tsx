@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { LuCheck, LuDownload, LuFolder, LuImage, LuImagePlus, LuInfo, LuListChecks, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles, LuX } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob, type PictureKind, type PictureOrigin } from "../api";
+import { MAX_SOURCES, addSources } from "../edit-sources";
 import { appendPage, fieldsOf, fieldsText, madeButNotListed, mergeTop, readFilter, sameList, tiles, viewerList, viewerPicture, type Filter, type Tile } from "../images-gallery";
 import { pollWhileVisible } from "../poll";
 import { bytesLabel } from "../projects";
@@ -10,7 +11,7 @@ import { sinceThen } from "../time";
 import { formatDateTime, msg, t, tp } from "../i18n";
 import { useNow } from "./ChatActivity";
 import { confirmDialog } from "./ConfirmDialog";
-import { ImageMaker, MAX_SOURCES } from "./ImageMaker";
+import { ImageMaker } from "./ImageMaker";
 import { ImagePreview, type PreviewState } from "./ImagePreview";
 import { ImageViewer } from "./ImageViewer";
 import { PageHeader, Stat } from "./PageHeader";
@@ -360,8 +361,18 @@ export function ImagesPage() {
     setSources([picture]);
     toForm();
   };
-  const reference = (picture: GalleryPicture) =>
-    setSources((cur) => (cur.some((p) => p.id === picture.id) ? cur.filter((p) => p.id !== picture.id) : [...cur, picture].slice(0, MAX_SOURCES)));
+  /** Takes a picture into the edit, or out of it again; one that would be a ninth is not taken, and the viewer's button says so. */
+  const reference = (picture: GalleryPicture) => setSources((cur) => (cur.some((p) => p.id === picture.id) ? cur.filter((p) => p.id !== picture.id) : addSources(cur, [picture], true).list));
+  /** The pictures ticked in the gallery, in the order they were ticked, are what an edit works from. */
+  const editSelected = () => {
+    const chosen = [...picked].map((id) => byId.get(id)).filter((p): p is GalleryPicture => !!p);
+    if (!chosen.length) return;
+    const { list, left } = addSources([], chosen, true);
+    setSources(list);
+    setError(left > 0 ? tp(left, "One picture was left out: an edit takes at most {max}.", "{n} pictures were left out: an edit takes at most {max}.", { max: MAX_SOURCES }) : null);
+    stopSelecting();
+    toForm();
+  };
 
   /** The same again: a picture made from a description is made once more, as it was asked for; a change is shown in the form first, since the mask it had is not kept. */
   const runAgain = async (picture: GalleryPicture) => {
@@ -481,6 +492,12 @@ export function ImagesPage() {
                   <button type="button" onClick={() => setPicked(new Set(everyId))} disabled={!everyId.length} className={ghostCls}>
                     {t("Select all shown")}
                   </button>
+                  {changes && (
+                    <button type="button" onClick={editSelected} disabled={!picked.size} className={btnCls}>
+                      <LuWandSparkles aria-hidden className="h-4 w-4" />
+                      {t("Edit the selected")}
+                    </button>
+                  )}
                   <button type="button" onClick={() => download([...picked])} disabled={!picked.size} className={btnCls}>
                     <LuDownload aria-hidden className="h-4 w-4" />
                     {t("Download")}
@@ -551,6 +568,7 @@ export function ImagesPage() {
                 picture={picture}
                 features={features}
                 referenced={sources.some((p) => p.id === picture.id)}
+                roomLeft={sources.length < MAX_SOURCES}
                 onShown={shown}
                 onEdit={editIt}
                 onAgain={runAgain}
@@ -641,6 +659,7 @@ function ViewerActions({
   picture,
   features,
   referenced,
+  roomLeft,
   onShown,
   onEdit,
   onAgain,
@@ -650,6 +669,8 @@ function ViewerActions({
   picture: GalleryPicture;
   features: ImagesFeature | null;
   referenced: boolean;
+  /** Whether the edit can take one more picture. */
+  roomLeft: boolean;
   onShown: (picture: GalleryPicture) => void;
   onEdit: (picture: GalleryPicture) => void;
   onAgain: (picture: GalleryPicture) => void;
@@ -688,9 +709,10 @@ function ViewerActions({
         <button
           type="button"
           onClick={() => onReference(picture)}
+          disabled={!referenced && !roomLeft}
           aria-pressed={referenced}
           aria-label={referenced ? t("Do not use as a reference") : t("Use as a reference")}
-          title={referenced ? t("Do not use as a reference") : t("Use as a reference")}
+          title={referenced ? t("Do not use as a reference") : roomLeft ? t("Use as a reference") : t("An edit takes at most {n} pictures", { n: MAX_SOURCES })}
           className={viewerButton}
         >
           {referenced ? <LuCheck aria-hidden className="h-[18px] w-[18px]" /> : <LuImagePlus aria-hidden className="h-[18px] w-[18px]" />}

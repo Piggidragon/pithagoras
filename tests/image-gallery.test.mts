@@ -417,6 +417,45 @@ test("an edit is made from pictures of the gallery, with a mask if one is given,
   }
 });
 
+/** A picture of this many pixels, as far as its header says: the rest is padding. */
+const pngOf = (w: number, h: number) => {
+  const dim = (n: number) => Buffer.from([n >>> 24, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff]);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]), Buffer.from("IHDR"), dim(w), dim(h), Buffer.alloc(16)]);
+};
+
+test("an edit of several pictures from the page holds each one to the maximum size, says which is over, and sends nothing", async () => {
+  const { origin, seen, server } = await answering(png("edited"));
+  await clearJobs();
+  try {
+    const small = (await call("POST", "/images/upload?name=small.png", undefined, { raw: pngOf(512, 512) })).body.picture;
+    const wide = (await call("POST", "/images/upload?name=wide.png", undefined, { raw: pngOf(4000, 500) })).body.picture;
+    const fine = (await call("POST", "/images/upload?name=fine.png", undefined, { raw: pngOf(1024, 768) })).body.picture;
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "2048x2048" });
+
+    // The second of three is over: the job fails with its place, and no request is made.
+    const started = await call("POST", "/images/edit", { prompt: "the first, in the style of the second", sources: [small.id, wide.id, fine.id] });
+    assert.equal(started.status, 202);
+    const [refused] = await settled();
+    assert.equal(refused.state, "failed");
+    assert.match(refused.error, /^Picture 2 is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit\. Nothing was sent\./);
+    assert.equal(seen.length, 0, "none of the three was sent");
+
+    // Raised, the same three go in one request, in the order given.
+    settings({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "4096x4096" });
+    await clearJobs();
+    await call("POST", "/images/edit", { prompt: "the first, in the style of the second", sources: [small.id, wide.id, fine.id] });
+    const [done] = await settled();
+    assert.equal(done.state, "done", done.error);
+    assert.equal(seen.length, 1);
+    assert.deepEqual(partList(seen[0]).filter((part) => part.name === "image[]").map((part) => part.bytes.length), [pngOf(512, 512).length, pngOf(4000, 500).length, pngOf(1024, 768).length]);
+  } finally {
+    server.close();
+    // The maximum is the setting of every test after this one, too.
+    gen.saveImageGeneration({ editMaxSize: "", editMultiple: false });
+    gone();
+  }
+});
+
 test("the pictures of the page are made within the time limit of the settings, generated and edited alike", async () => {
   const { origin, server } = await answering();
   await clearJobs();

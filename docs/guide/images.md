@@ -42,16 +42,17 @@ that were being made; nothing is made of them.
 A picture has as long as the **Time limit** of the [image endpoint](/guide/features#the-endpoint)
 gives it: five minutes unless you set another, from 30 to 3600 seconds, the same for
 making and for changing a picture. When it runs out the frame says so, and the message
-names **Settings → Images**, where the limit is raised for a slow or local model.
+names **Settings → Agent → Images**, where the limit is raised for a slow or local model.
 
 Each picture can cost money at a hosted endpoint, as it does for the agent.
 
 ## Changing a picture
 
-Choose **Edit it** on a picture in the viewer, or **Change a picture from this
-computer** to put one in from your own files; the form then says **Change a picture**
-and shows the picture or pictures it works from. Describe what should change and
-choose **Change the picture**. It needs [editing](/guide/features#editing-a-picture)
+Choose **Edit it** on a picture in the viewer, put pictures in from your own files
+(**Change a picture from this computer**, a drop on the form, or a paste), or tick
+pictures in the gallery and choose **Edit the selected**; the form then says **Change a
+picture** and shows the picture or pictures it works from. Describe what should change
+and choose **Change the picture**. It needs [editing](/guide/features#editing-a-picture)
 switched on; where it is not, there is no **Edit it** and no upload, and with it on and
 generation off, **Run again** is there for a change only, since making a picture from a
 description needs generation. An edit goes to
@@ -59,19 +60,48 @@ the editing endpoint with the model set for it, and the options above do not app
 
 - **The result is a new picture.** The original is never changed, and the new one
   is a gallery picture of its own that the viewer links back to the original.
-- **Several pictures.** Where the editing endpoint is [said to take several](/guide/features#several-pictures),
-  **Use as a reference** in the viewer adds a picture to the edit (it is a toggle:
-  pressed, it takes it out again), up to eight. They are named in the description by
-  their order, which is the one shown on the small pictures. This also makes a new
+- **Several pictures.** Where the editing endpoint is [said to take several](/guide/features#several-pictures)
+  (**Several pictures per edit**, off until you switch it on), the form shows the pictures
+  as a row of small pictures, up to eight, in the order the request sends them. This also makes a new
   picture from references; the endpoint cannot tell the two apart, the description does.
+  - **Adding.** The **Add** button after the last picture takes several files at once
+    (`Ctrl`/`Shift` in the file dialog). Files can also be **dropped anywhere on the form** — a
+    drop on the form with no pictures yet starts an edit — and a picture on the clipboard (a
+    screenshot, or "Copy image") is **pasted** with `Ctrl`/`Cmd` + `V` into the description or
+    anywhere in the form. Each file is checked by its bytes as a PNG, JPEG, GIF or WebP; one
+    that is not a picture is named in the message and the others are still added. In the
+    gallery, **Select** and tick pictures, then **Edit the selected**: they go in the order you
+    ticked them. In the viewer, **Use as a reference** adds the picture shown and takes it out
+    again (a toggle).
+  - **Their order.** Each picture has its place on it (1, 2, …), which is how the
+    description names them: "the first picture", "the second picture". The arrows under a picture
+    move it one place earlier or later, and **×** takes it out; every one of these is a button, so a
+    keyboard reaches them with `Tab` and `Enter`. The picture itself opens in the
+    [viewer](/guide/sessions#looking-at-a-picture), which steps through them in this order.
+  - **The limit.** The header of the row shows how many there are of the eight. At eight the
+    **Add** button goes until one is taken out, **Use as a reference** is greyed out for a
+    ninth, with the reason as its tooltip, and pictures that did not fit — in a pick, a drop or a paste — are **not uploaded** and are
+    said to be left out, never dropped without a word. Together they may weigh 50 MB; a row that weighs more
+    says so, and **Change the picture** waits.
+  - **An endpoint that takes one.** With the switch off, the form works with one picture:
+    a picture you add or drop takes the place of the one there is, any others in the same pick are
+    said to be left out, and the form says what to switch on and links to it. Several that came in anyway
+    (a change made from several, run again) are said to be too many, and **Change the picture** waits until one is left.
+  - **The size limit applies to each.** The [maximum picture size](/guide/features#editing-a-picture) of
+    the editing settings is checked for every picture; one that is over it fails the whole change in its frame
+    with a message such as "Picture 2 is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit",
+    and nothing is sent.
 - **A mask.** **Only change a part: paint a mask** shows the first picture with a
   brush: paint over what should change. The mask is made at the picture's own size,
   transparent where you painted and opaque elsewhere — the area OpenAI-style endpoints
-  change — and goes with the first picture. Without a stroke, no mask is sent and the
-  whole picture may change. A mask is made with a pointer or a finger, and is not kept.
+  change — and goes with the first picture, and only with it. While a mask is on, the first picture
+  in the row has a **Mask** tag and the line over the brush names it ("picture 1, …"). To
+  paint on another picture, move it to the first place: the mask then starts over on that one.
+  Without a stroke, no mask is sent and the whole picture may change. A mask is made with a pointer or a finger, and is not kept.
 - **From this computer.** The picture is checked by its bytes as a PNG, JPEG, GIF or
   WebP, at most 25 MB, and put in the gallery, listed under the name it had, so that it can
   be looked at, changed again and deleted like the others. A file that is no picture is refused.
+  Only as many pictures as the row has room for are put in the gallery.
 
 Pictures are sent as the agent's tool sends them: under a neutral name, as they are,
 and never scaled or cut — a picture over the limit is refused, not shrunk.
@@ -108,8 +138,8 @@ Beside its own buttons, the viewer has these for a gallery picture:
 | Button | Does |
 | --- | --- |
 | **Details** | The full description, when and how it was made, the model, the size, the other fields it was asked with, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
-| **Edit it** | Puts the picture in the form to be changed. |
-| **Use as a reference** | Adds it to the pictures an edit works from. Only where the editing endpoint takes several. |
+| **Edit it** | Puts the picture in the form to be changed, in place of any that were there. |
+| **Use as a reference** | Adds it to the pictures an edit works from, or takes it out again; not offered once there are eight. Only where the editing endpoint takes several. |
 | **Run again** | A picture made from a description is made once more, with the model, size and other fields it was made with: one click, one more picture. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
 | **Delete** | See below. |
 | **Open in a new tab**, **Download** | The file itself. |
@@ -119,6 +149,8 @@ Beside its own buttons, the viewer has these for a gallery picture:
 **Select** puts a box on every picture: a click selects instead of opening, and
 **Select all shown** takes what is on screen. **Download** saves each selected picture
 as a file of its own — the browser may ask once whether this page may download several —
+**Edit the selected** makes them the pictures of an [edit](#changing-a-picture), in the order
+they were ticked (the first eight; the rest are said to be left out), where editing is set up,
 and **Delete** takes them away after asking. What is selected belongs to what is shown: a
 change of filter, or **Back** to another one, clears it, so that nothing that is not on
 screen is deleted with what is. `Esc` or **Done** ends selecting.

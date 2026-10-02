@@ -983,7 +983,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
         disabled={busy || !!editDraft}
       />
       <p className="text-[11px] text-fg-faint">
-        {t("Switch on several pictures only if the editing endpoint takes more than one in a request, to combine subjects or keep a style. The agent then names its pictures in the order the prompt refers to them. What an endpoint takes is said of that endpoint, so editing moved to another server switches it off again.")}
+        {t("Switch on several pictures only if the editing endpoint takes more than one in a request, to combine subjects or keep a style. The agent then names its pictures in the order the prompt refers to them, and the Images page takes up to eight pictures for an edit. What an endpoint takes is said of that endpoint, so editing moved to another server switches it off again.")}
       </p>
       <p className="text-[11px] text-fg-faint">
         {t("The result is a new picture in the generated-images folder, named after the original, which is not changed. Editing can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it.")}

@@ -168,6 +168,32 @@ const grid = (page: Page) => page.getByRole('list', { name: 'Pictures' });
 const viewer = (page: Page) => page.getByRole('dialog', { name: 'Picture viewer' });
 const maker = (page: Page) => page.getByRole('region', { name: /Make a picture|Change a picture/ });
 
+/** The pictures an edit works from, as the form lists them. */
+const strip = (page: Page) => maker(page).getByRole('list', { name: /to work from|to change/ });
+const thumbs = (page: Page) => strip(page).getByRole('img');
+const names = (page: Page) => thumbs(page).evaluateAll((els) => els.map((e) => e.getAttribute('alt')));
+const describe = (page: Page) => page.getByPlaceholder('Describe the change: what to add, remove or make different');
+
+/** Files dropped on `target`, as a browser delivers them: a drag over it and then the drop. */
+async function drop(target: Locator, files: string[]) {
+  await target.evaluate((el, files) => {
+    const data = new DataTransfer();
+    for (const name of files) data.items.add(new File([`bytes of ${name}`], name, { type: 'image/png' }));
+    el.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+  }, files);
+}
+/** A paste into `target`: pictures, and the text that came with them where there is some. */
+async function paste(target: Locator, files: string[], text = '') {
+  await target.evaluate((el, [files, text]: [string[], string]) => {
+    const data = new DataTransfer();
+    for (const name of files) data.items.add(new File([`bytes of ${name}`], name, { type: 'image/png' }));
+    if (text) data.setData('text/plain', text);
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, [files, text] as [string[], string]);
+}
+const png = (name: string) => ({ name, mimeType: 'image/png', buffer: Buffer.from(`bytes of ${name}`) });
+
 async function loaded(image: Locator) {
   await expect.poll(() => image.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
 }
@@ -713,7 +739,7 @@ test('Use as a reference adds pictures to an edit, in order, only where the endp
   await viewer(page).getByRole('button', { name: 'Use as a reference' }).click();
   await expect(viewer(page).getByRole('button', { name: 'Do not use as a reference' })).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');
-  await expect(maker(page).getByRole('listitem')).toHaveCount(2);
+  await expect(thumbs(page)).toHaveCount(2);
   await page.getByPlaceholder('Describe the change: what to add, remove or make different').fill('Put the second into the first');
   await page.getByRole('button', { name: 'Change the picture' }).click();
   expect(p.state.edited).toEqual([{ prompt: 'Put the second into the first', sources: [a.id, b.id] }]);
@@ -725,6 +751,372 @@ test('without several pictures taken there is no Use as a reference', async ({ p
   await tile(page, 'Alpha').click();
   await expect(viewer(page).getByRole('button', { name: 'Edit it' })).toBeVisible();
   await expect(viewer(page).getByRole('button', { name: /reference/ })).toHaveCount(0);
+});
+
+test('several pictures are picked at once, shown in the order picked with their place and the limit, and sent in that order', async ({ page }) => {
+  const p = await portal(page, { images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await page.getByLabel('Upload a picture').setInputFiles([png('a.png'), png('b.png'), png('c.png')]);
+  await expect(maker(page)).toHaveAccessibleName('Change a picture');
+  await expect.poll(() => names(page)).toEqual(['a.png', 'b.png', 'c.png']);
+  expect(p.state.uploads.map((u) => u.name)).toEqual(['a.png', 'b.png', 'c.png']);
+  // Their places, which the description refers to, and how many more there is room for.
+  await expect(strip(page).getByRole('listitem').filter({ hasText: /^[123]$/ })).toHaveCount(3);
+  await expect(maker(page).getByText('3 of 8 pictures')).toBeVisible();
+  await expect(maker(page).getByText('The 3 pictures to work from, in the order the description can refer to them')).toBeVisible();
+  await describe(page).fill('The first, painted like the second, on the third');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0]).toEqual({ prompt: 'The first, painted like the second, on the third', sources: p.pics.slice(0, 3).map((x) => x.id) });
+});
+
+test('more pictures are added one after another, also from the add button in the row of them', async ({ page }) => {
+  const made = pic({ prompt: 'A fox' });
+  const p = await portal(page, { pictures: [made], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await tile(page, 'A fox').click();
+  await viewer(page).getByRole('button', { name: 'Edit it' }).click();
+  await expect.poll(() => names(page)).toEqual(['A fox']);
+  // The button is in the row, after the last of them, and takes more than one.
+  const add = strip(page).getByRole('button', { name: 'Add pictures from this computer' });
+  const chooser = page.waitForEvent('filechooser');
+  await add.click();
+  expect((await chooser).isMultiple()).toBe(true);
+  await page.getByLabel('Upload a picture').setInputFiles(png('b.png'));
+  await expect.poll(() => names(page)).toEqual(['A fox', 'b.png']);
+  await page.getByLabel('Upload a picture').setInputFiles([png('c.png'), png('d.png')]);
+  await expect.poll(() => names(page)).toEqual(['A fox', 'b.png', 'c.png', 'd.png']);
+  await describe(page).fill('Mix');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toEqual([made.id, ...p.pics.filter((x) => x.kind === 'uploaded').map((x) => x.id)]);
+});
+
+test('the add button is reachable and works from the keyboard', async ({ page }) => {
+  await portal(page, { pictures: [pic({ prompt: 'A fox' })], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await tile(page, 'A fox').click();
+  await viewer(page).getByRole('button', { name: 'Edit it' }).click();
+  const add = strip(page).getByRole('button', { name: 'Add pictures from this computer' });
+  await add.focus();
+  const chooser = page.waitForEvent('filechooser');
+  await page.keyboard.press('Enter');
+  await chooser;
+  // The mouse is not needed for anything else in the row either: each button is a stop of Tab.
+  await page.getByLabel('Upload a picture').setInputFiles(png('b.png'));
+  await expect.poll(() => names(page)).toEqual(['A fox', 'b.png']);
+  const remove = strip(page).getByRole('button', { name: 'Remove b.png' });
+  await remove.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => names(page)).toEqual(['A fox']);
+});
+
+test('moving or removing a picture from the keyboard leaves focus in the row, so that the next press goes on from there', async ({ page }) => {
+  const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
+  await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  for (const at of [2, 1, 0]) await page.getByRole('checkbox', { name: 'Select this picture' }).nth(at).check();
+  await page.getByRole('button', { name: 'Edit the selected' }).click();
+  await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta', 'Gamma']);
+  // Later, again and again: the same button has focus after each, and the picture goes on to the end.
+  await strip(page).getByRole('button', { name: 'Move Alpha later' }).focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => names(page)).toEqual(['Beta', 'Alpha', 'Gamma']);
+  await expect(strip(page).getByRole('button', { name: 'Move Alpha later' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => names(page)).toEqual(['Beta', 'Gamma', 'Alpha']);
+  // At the end that button is off: focus goes to the one that is left, which moves it back.
+  await expect(strip(page).getByRole('button', { name: 'Move Alpha earlier' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => names(page)).toEqual(['Beta', 'Alpha', 'Gamma']);
+  // Taken out, focus goes to the picture that took its place, and not to the top of the page.
+  await strip(page).getByRole('button', { name: 'Remove Alpha' }).focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => names(page)).toEqual(['Beta', 'Gamma']);
+  await expect(strip(page).getByRole('button', { name: 'Look at Gamma' })).toBeFocused();
+  // The last of them: the one before it.
+  await strip(page).getByRole('button', { name: 'Remove Gamma' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(strip(page).getByRole('button', { name: 'Look at Beta' })).toBeFocused();
+  // The only one left: out of the row, to the description, where the next thing is typed.
+  await strip(page).getByRole('button', { name: 'Remove Beta' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(maker(page)).toHaveAccessibleName('Make a picture');
+  await expect(page.getByPlaceholder('Describe the picture')).toBeFocused();
+});
+
+test('pictures dropped on the form are added after the ones there, and a drop shows where it will go', async ({ page }) => {
+  const p = await portal(page, { images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  // From nothing: a drop starts an edit, as choosing a picture from this computer does.
+  await drop(maker(page), ['one.png', 'two.png']);
+  await expect(maker(page)).toHaveAccessibleName('Change a picture');
+  await expect.poll(() => names(page)).toEqual(['one.png', 'two.png']);
+  await drop(maker(page), ['three.png']);
+  await expect.poll(() => names(page)).toEqual(['one.png', 'two.png', 'three.png']);
+  expect(p.state.uploads.map((u) => u.name)).toEqual(['one.png', 'two.png', 'three.png']);
+  // While files are over the form it says what a drop does, and not after.
+  await maker(page).evaluate((el) => {
+    const data = new DataTransfer();
+    data.items.add(new File(['x'], 'x.png', { type: 'image/png' }));
+    el.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
+  });
+  await expect(maker(page).getByText('Drop pictures here to change them, or to use them as references')).toBeVisible();
+  await maker(page).evaluate((el) => el.dispatchEvent(new DragEvent('dragleave', { bubbles: true, cancelable: true, relatedTarget: document.body })));
+  await expect(maker(page).getByText('Drop pictures here to change them, or to use them as references')).toHaveCount(0);
+});
+
+test('a picture pasted in the description is added, and text that came with it is the text', async ({ page }) => {
+  const p = await portal(page, { images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await paste(page.getByPlaceholder('Describe the picture'), ['image.png']);
+  await expect(maker(page)).toHaveAccessibleName('Change a picture');
+  await expect.poll(() => names(page)).toEqual(['image.png']);
+  await paste(describe(page), ['shot.png', 'shot2.png']);
+  await expect.poll(() => names(page)).toEqual(['image.png', 'shot.png', 'shot2.png']);
+  // Cells copied from a spreadsheet come with a picture of themselves: the words are what was meant.
+  await paste(describe(page), ['cells.png'], 'a\tb');
+  await page.waitForTimeout(150);
+  expect(p.state.uploads.map((u) => u.name)).toEqual(['image.png', 'shot.png', 'shot2.png']);
+});
+
+test('a picture is taken out with its button, and moved earlier or later, and the places and the request follow', async ({ page }) => {
+  const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
+  const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  // The gallery is newest first, Gamma at the top: ticked from the bottom up, the order the edit is to have.
+  for (const at of [2, 1, 0]) await page.getByRole('checkbox', { name: 'Select this picture' }).nth(at).check();
+  await page.getByRole('button', { name: 'Edit the selected' }).click();
+  await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta', 'Gamma']);
+  // The first cannot go earlier, the last not later.
+  await expect(strip(page).getByRole('button', { name: 'Move Alpha earlier' })).toBeDisabled();
+  await expect(strip(page).getByRole('button', { name: 'Move Gamma later' })).toBeDisabled();
+  await strip(page).getByRole('button', { name: 'Move Gamma earlier' }).click();
+  await expect.poll(() => names(page)).toEqual(['Alpha', 'Gamma', 'Beta']);
+  await strip(page).getByRole('button', { name: 'Move Alpha later' }).click();
+  await expect.poll(() => names(page)).toEqual(['Gamma', 'Alpha', 'Beta']);
+  // The number on each is its place now.
+  await expect(strip(page).getByRole('listitem').filter({ has: page.getByRole('img', { name: 'Gamma' }) })).toContainText('1');
+  await strip(page).getByRole('button', { name: 'Remove Alpha' }).click();
+  await expect.poll(() => names(page)).toEqual(['Gamma', 'Beta']);
+  await describe(page).fill('Gamma on Beta');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toEqual([c.id, b.id]);
+});
+
+test('at most eight pictures go into an edit: the rest of a pick is not uploaded, and it is said', async ({ page }) => {
+  const p = await portal(page, { images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await page.getByLabel('Upload a picture').setInputFiles(Array.from({ length: 6 }, (_, i) => png(`p${i + 1}.png`)));
+  await expect.poll(() => names(page)).toHaveLength(6);
+  await page.getByLabel('Upload a picture').setInputFiles(Array.from({ length: 4 }, (_, i) => png(`q${i + 1}.png`)));
+  await expect.poll(() => names(page)).toEqual(['p1.png', 'p2.png', 'p3.png', 'p4.png', 'p5.png', 'p6.png', 'q1.png', 'q2.png']);
+  await expect(maker(page).getByRole('status').filter({ hasText: '2 pictures were left out: an edit takes at most 8.' })).toBeVisible();
+  // The two that did not fit were never put in the gallery.
+  expect(p.state.uploads.map((u) => u.name)).toEqual(['p1.png', 'p2.png', 'p3.png', 'p4.png', 'p5.png', 'p6.png', 'q1.png', 'q2.png']);
+  await expect(maker(page).getByText('8 of 8 pictures')).toBeVisible();
+  // Full: there is no add button until one is taken out.
+  await expect(strip(page).getByRole('button', { name: 'Add pictures from this computer' })).toHaveCount(0);
+  await strip(page).getByRole('button', { name: 'Remove q2.png' }).click();
+  await expect(strip(page).getByRole('button', { name: 'Add pictures from this computer' })).toBeVisible();
+});
+
+test('where the endpoint takes one picture, a picture put in replaces it, the extra ones are said to be left out, and the setting is named', async ({ page }) => {
+  const p = await portal(page);
+  await page.goto('/images');
+  await drop(maker(page), ['one.png', 'two.png', 'three.png']);
+  await expect.poll(() => names(page)).toEqual(['one.png']);
+  expect(p.state.uploads.map((u) => u.name)).toEqual(['one.png'], 'only the one that is used was put in the gallery');
+  await expect(maker(page).getByRole('status').filter({ hasText: '2 more pictures were left out: this editing endpoint takes one picture per edit.' })).toBeVisible();
+  // No row of several: no count, no add button, no way to move one; the picker takes one file.
+  await expect(maker(page).getByText(/of 8 pictures/)).toHaveCount(0);
+  await expect(strip(page).getByRole('button', { name: 'Add pictures from this computer' })).toHaveCount(0);
+  await expect(page.getByLabel('Upload a picture')).not.toHaveAttribute('multiple', '');
+  // What is said of the setting, with the way to it.
+  await expect(maker(page).getByText(/takes one picture per edit, so a picture you add takes the place of this one/)).toBeVisible();
+  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
+  // Another put in takes the place of the one there is.
+  await drop(maker(page), ['four.png']);
+  await expect.poll(() => names(page)).toEqual(['four.png']);
+});
+
+test('several pictures chosen for an endpoint that takes one are said to be too many, and are not sent until one is left', async ({ page }) => {
+  const a = pic({ prompt: 'Alpha', age: 3 });
+  const b = pic({ prompt: 'Beta', age: 2 });
+  const edit = pic({ prompt: 'Both', kind: 'edited', from: a.id, params: { sources: [a.id, b.id] }, age: 1 });
+  const p = await portal(page, { pictures: [a, b, edit] });
+  await page.goto('/images');
+  await tile(page, 'Both').click();
+  await viewer(page).getByRole('button', { name: 'Run again' }).click();
+  await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta']);
+  await expect(maker(page).getByRole('alert').filter({ hasText: 'takes one picture per edit, and 2 are chosen' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Change the picture' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Change the picture' })).toHaveAttribute('title', /takes one picture per edit, and 2 are chosen/);
+  await strip(page).getByRole('button', { name: 'Remove Beta' }).click();
+  await expect(page.getByRole('button', { name: 'Change the picture' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toEqual([a.id]);
+});
+
+test('the mask belongs to the first picture, which says so, and moving another first starts the mask over', async ({ page }) => {
+  const a = pic({ prompt: 'Alpha', age: 2 });
+  const b = pic({ prompt: 'Beta', age: 1 });
+  const p = await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Select this picture' }).nth(1).check();
+  await page.getByRole('checkbox', { name: 'Select this picture' }).nth(0).check();
+  await page.getByRole('button', { name: 'Edit the selected' }).click();
+  // Ticked in this order: Alpha, then Beta.
+  await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta']);
+  await page.getByRole('button', { name: 'Only change a part: paint a mask' }).click();
+  const painter = page.getByRole('img', { name: 'The picture to change' });
+  await expect(painter).toHaveAttribute('src', `/api/images/${a.id}/file`);
+  await expect(maker(page).getByText(/Paint over what should change in picture 1, “Alpha”\. The mask belongs to the first picture only/)).toBeVisible();
+  await expect(strip(page).getByText('Mask', { exact: true })).toBeVisible();
+  // The tag is on the first one.
+  await expect(strip(page).getByRole('listitem').filter({ has: page.getByRole('img', { name: 'Alpha' }) }).getByText('Mask', { exact: true })).toBeVisible();
+  // Another one in the first place is another picture to paint on: the mask starts over.
+  await strip(page).getByRole('button', { name: 'Move Beta earlier' }).click();
+  await expect.poll(() => names(page)).toEqual(['Beta', 'Alpha']);
+  await expect(strip(page).getByText('Mask', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Only change a part: paint a mask' })).toBeVisible();
+  await page.getByRole('button', { name: 'Only change a part: paint a mask' }).click();
+  await expect(page.getByRole('img', { name: 'The picture to change' })).toHaveAttribute('src', `/api/images/${b.id}/file`);
+  await describe(page).fill('Beta, as Alpha');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0]).toEqual({ prompt: 'Beta, as Alpha', sources: [b.id, a.id] });
+});
+
+test('a picture of the row opens larger in the viewer, which steps through them and gives focus back', async ({ page }) => {
+  const a = pic({ prompt: 'Alpha', age: 2 });
+  const b = pic({ prompt: 'Beta', age: 1 });
+  await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Select this picture' }).nth(1).check();
+  await page.getByRole('checkbox', { name: 'Select this picture' }).nth(0).check();
+  await page.getByRole('button', { name: 'Edit the selected' }).click();
+  await strip(page).getByRole('button', { name: 'Look at Beta' }).click();
+  await expect(viewer(page).getByText('2 / 2', { exact: true })).toBeVisible();
+  await expect(viewer(page).locator('img[data-picture]')).toHaveAttribute('src', `/api/images/${b.id}/file`);
+  await viewer(page).getByRole('button', { name: 'Previous picture' }).click();
+  await expect(viewer(page).locator('img[data-picture]')).toHaveAttribute('src', `/api/images/${a.id}/file`);
+  await page.keyboard.press('Escape');
+  await expect(viewer(page)).toHaveCount(0);
+  await expect(strip(page).getByRole('button', { name: 'Look at Alpha' })).toBeFocused();
+});
+
+test('pictures ticked in the gallery are what an edit works from, in the order they were ticked; more than eight are said to be cut', async ({ page }) => {
+  const many = Array.from({ length: 10 }, (_, i) => pic({ prompt: `Pic ${i + 1}`, age: i }));
+  const p = await portal(page, { pictures: many, images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  // Nothing ticked: nothing to edit.
+  await expect(page.getByRole('button', { name: 'Edit the selected' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Select all shown' }).click();
+  await page.getByRole('button', { name: 'Edit the selected' }).click();
+  // Back to the form, the gallery out of selecting, and what did not fit said.
+  await expect.poll(() => names(page)).toHaveLength(8);
+  await expect(page.getByRole('button', { name: 'Select', exact: true })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: '2 pictures were left out: an edit takes at most 8.' })).toBeVisible();
+  await describe(page).fill('All of them');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toHaveLength(8);
+});
+
+test('the viewer takes no ninth picture as a reference, and says why', async ({ page }) => {
+  const many = Array.from({ length: 9 }, (_, i) => pic({ prompt: `Pic ${i + 1}`, age: i }));
+  await portal(page, { pictures: many, images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await tile(page, 'Pic 1').click();
+  await viewer(page).getByRole('button', { name: 'Edit it' }).click();
+  for (const n of [2, 3, 4, 5, 6, 7, 8]) {
+    await tile(page, `Pic ${n}`).click();
+    await viewer(page).getByRole('button', { name: 'Use as a reference' }).click();
+    await page.keyboard.press('Escape');
+  }
+  await expect.poll(() => names(page)).toHaveLength(8);
+  await tile(page, 'Pic 9').click();
+  const more = viewer(page).getByRole('button', { name: 'Use as a reference' });
+  await expect(more).toBeDisabled();
+  await expect(more).toHaveAttribute('title', 'An edit takes at most 8 pictures');
+  // One that is in can still be taken out again.
+  await page.keyboard.press('Escape');
+  await tile(page, 'Pic 8').click();
+  await expect(viewer(page).getByRole('button', { name: 'Do not use as a reference' })).toBeEnabled();
+});
+
+test('a file that is no picture is said so by name, and the pictures with it are still added', async ({ page }) => {
+  await portal(page, { images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await maker(page).evaluate((el) => {
+    const data = new DataTransfer();
+    data.items.add(new File(['x'], 'notes.pdf', { type: 'application/pdf' }));
+    data.items.add(new File(['y'], 'ok.png', { type: 'image/png' }));
+    el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+  });
+  await expect.poll(() => names(page)).toEqual(['ok.png']);
+  await expect(maker(page).getByRole('alert')).toContainText('notes.pdf is not a PNG, JPEG, GIF or WebP picture');
+});
+
+test('where only generation is set up a drop or a paste does nothing, and the browser does not open the file', async ({ page }) => {
+  const p = await portal(page, { images: feature({ editEnabled: false, editReady: false }) });
+  await page.goto('/images');
+  await drop(maker(page), ['one.png']);
+  await paste(page.getByPlaceholder('Describe the picture'), ['two.png']);
+  await page.waitForTimeout(150);
+  expect(p.state.uploads).toEqual([]);
+  await expect(maker(page)).toHaveAccessibleName('Make a picture');
+});
+
+test('on a phone eight pictures in the row stay on the screen, each reachable, and the form needs no sideways scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 760 });
+  const p = await portal(page, { images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await page.getByLabel('Upload a picture').setInputFiles(Array.from({ length: 8 }, (_, i) => png(`phone${i + 1}.png`)));
+  await expect.poll(() => names(page)).toHaveLength(8);
+  expect(p.state.uploads).toHaveLength(8);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  for (const name of ['phone1.png', 'phone8.png']) {
+    for (const button of [`Remove ${name}`, `Move ${name} ${name === 'phone1.png' ? 'later' : 'earlier'}`]) {
+      const box = await strip(page).getByRole('button', { name: button }).boundingBox();
+      expect(box, button).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+      // A finger can hit it: nothing smaller than a small button.
+      expect(box!.width).toBeGreaterThanOrEqual(24);
+      expect(box!.height).toBeGreaterThanOrEqual(24);
+    }
+  }
+});
+
+test('the row of pictures reads in the dark theme as in the light: the places, the mask tag and the add button are not the colour of what is behind them', async ({ page }) => {
+  await portal(page, { images: feature({ editMultiple: true }) });
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto('/images');
+    await page.getByLabel('Upload a picture').setInputFiles([png('x.png'), png('y.png')]);
+    await expect.poll(() => names(page)).toHaveLength(2);
+    await page.getByRole('button', { name: 'Only change a part: paint a mask' }).click();
+    const colours = await strip(page).evaluate((el) => {
+      const read = (node: Element) => {
+        const style = getComputedStyle(node);
+        return { ink: style.color, ground: style.backgroundColor };
+      };
+      const tag = [...el.querySelectorAll('span')].find((x) => x.textContent === 'Mask')!;
+      const place = [...el.querySelectorAll('span')].find((x) => x.textContent === '2')!;
+      const add = el.querySelector('button[aria-label="Add pictures from this computer"]')!;
+      return { tag: read(tag), place: read(place), add: { ink: getComputedStyle(add).color, ground: getComputedStyle(el.closest('section')!).backgroundColor } };
+    });
+    for (const [name, c] of Object.entries(colours)) expect(c.ink, `${scheme}: ${name}`).not.toBe(c.ground);
+  }
 });
 
 test('Run again makes a picture from a description once more, as it was asked for', async ({ page }) => {

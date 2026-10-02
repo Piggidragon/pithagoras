@@ -389,7 +389,7 @@ export async function requestPicture(
     // The chat was stopped: nobody is told it failed.
     if (options.signal?.aborted) return e as Error;
     if (signal.aborted) return new ImageGenerationError(
-        `The image endpoint did not answer within ${seconds(timeoutMs)} seconds. Raise the time limit in Settings → Images if it needs longer.`,
+        `The image endpoint did not answer within ${seconds(timeoutMs)} seconds. Raise the time limit in Settings → Agent → Images if it needs longer.`,
       );
     if (e instanceof ImageGenerationError) return e;
     const why = (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code ?? (e as Error)?.message ?? "unknown error";

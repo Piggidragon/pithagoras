@@ -73,7 +73,7 @@ export function checkPictureSize(bytes: Buffer, maxSize: string, who: string): v
   if (!maxWidth || !maxHeight) return;
   const size = pictureSize(bytes);
   const limit = `${maxWidth}x${maxHeight}`;
-  const advice = "Nothing was sent. Use a smaller picture (it is not scaled or cut), or tell the person; the limit is set in Settings → Images.";
+  const advice = "Nothing was sent. Use a smaller picture (it is not scaled or cut), or tell the person; the limit is set in Settings → Agent → Images.";
   if (!size) throw new ImageGenerationError(`${who} has a size that cannot be read, so it cannot be shown to be within the maximum of ${limit} pixels for an edit. ${advice}`);
   const fits = (size.width <= maxWidth && size.height <= maxHeight) || (size.width <= maxHeight && size.height <= maxWidth);
   if (!fits) throw new ImageGenerationError(`${who} is ${size.width}x${size.height} pixels, which is over the maximum of ${limit} for an edit. ${advice}`);
@@ -93,7 +93,9 @@ function toSend(bytes: Buffer, who: string, name: string, max: number, maxSize: 
 export function checkCount(count: number, multiple: boolean): void {
   if (count < 1) throw new ImageGenerationError("There is no picture to change");
   if (count > 1 && !multiple) {
-    throw new ImageGenerationError("The editing endpoint is not set up to take several pictures, so none was sent. Use one, or tell the person that several can be switched on in Settings → Images.");
+    throw new ImageGenerationError(
+      `The editing endpoint is not set up to take several pictures, so none was sent (${count} were given). Use one, or tell the person that "Several pictures per edit" can be switched on in Settings → Agent → Images if the endpoint takes them.`,
+    );
   }
   if (count > MAX_EDIT_PICTURES) throw new ImageGenerationError(`An edit takes at most ${MAX_EDIT_PICTURES} pictures, and ${count} were given`);
 }
