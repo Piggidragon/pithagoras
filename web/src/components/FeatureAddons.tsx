@@ -687,9 +687,15 @@ interface ImagesDraft {
   baseUrl: string;
   model: string;
   size: string;
+  /** As typed: whole seconds, or not yet. */
+  timeout: string;
   /** Typed anew; empty keeps the one saved. */
   apiKey: string;
 }
+
+/** What the server takes as a time limit, in seconds (TIMEOUT_SECONDS there). */
+const TIMEOUT = { default: 300, min: 30, max: 3600 };
+const timeoutOk = (typed: string) => /^\d+$/.test(typed.trim()) && Number(typed) >= TIMEOUT.min && Number(typed) <= TIMEOUT.max;
 
 /** The same for editing, which has its own address, model and key. */
 interface ImagesEditDraft {
@@ -720,7 +726,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   }, []);
 
   if (!images) return <Loading />;
-  const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, apiKey: "" };
+  const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, timeout: String(images.timeoutSeconds), apiKey: "" };
   const edit = (patch: Partial<ImagesDraft>) => setDraft({ ...form, ...patch });
   const editForm = editDraft ?? { baseUrl: images.editBaseUrl, model: images.editModel, apiKey: "" };
   const editEdit = (patch: Partial<ImagesEditDraft>) => setEditDraft({ ...editForm, ...patch });
@@ -801,16 +807,44 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
               className={`${inputCls} mt-1 font-mono text-xs`}
             />
           </label>
+          <label className="text-xs text-fg-muted">
+            {t("Time limit (seconds)")}
+            <input
+              type="number"
+              inputMode="numeric"
+              min={TIMEOUT.min}
+              max={TIMEOUT.max}
+              step={1}
+              value={form.timeout}
+              onChange={(e) => edit({ timeout: e.target.value })}
+              placeholder={String(TIMEOUT.default)}
+              aria-invalid={!timeoutOk(form.timeout)}
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
         </div>
         <p className="text-[11px] text-fg-faint">
           {tx("Any server with an OpenAI-style {route}: the portal sends the model, the prompt and the size, and takes a picture back as base64 or as an address. The key goes only to this address. Leave the model and the size empty for the server's own.", { route: <code>images/generations</code> })}
+        </p>
+        <p className="text-[11px] text-fg-faint">
+          {t("The time limit is how long the portal waits for one picture, made or edited, before it gives up: {min} to {max} seconds, {default} by default. A slow or local model may need more.", TIMEOUT)}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {draft && (
             <button
               type="button"
               className={primaryCls}
-              onClick={() => void change({ baseUrl: form.baseUrl, model: form.model, size: form.size, ...(form.apiKey ? { apiKey: form.apiKey } : {}) })}
+              disabled={!timeoutOk(form.timeout)}
+              onClick={() =>
+                void change({
+                  baseUrl: form.baseUrl,
+                  model: form.model,
+                  size: form.size,
+                  // Only when changed, so that saving the rest does not state a limit the person never chose.
+                  ...(Number(form.timeout) !== images.timeoutSeconds ? { timeoutSeconds: Number(form.timeout) } : {}),
+                  ...(form.apiKey ? { apiKey: form.apiKey } : {}),
+                })
+              }
             >
               {t("Save")}
             </button>

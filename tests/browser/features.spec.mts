@@ -15,7 +15,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       },
     },
   };
-  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, editReady: false };
+  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, timeoutSeconds: 300, editReady: false };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -367,6 +367,34 @@ test('image generation needs an endpoint before it can be switched on, and the k
   await panel.getByRole('button', { name: 'Remove the saved key' }).click();
   await expect(panel.getByLabel('API key')).toHaveAttribute('placeholder', 'none needed for a local server');
   expect(sent.at(-1)!.body).toEqual({ apiKey: '' });
+});
+
+test('the time limit of a picture is a field of the image endpoint: five minutes, whole seconds from 30 to 3600, sent only when changed', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Images' }).click();
+  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  const field = panel.getByLabel('Time limit (seconds)');
+  await expect(field).toHaveValue('300');
+
+  // Out of bounds: nothing to save.
+  await field.fill('10');
+  const save = panel.getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toBeDisabled();
+  await field.fill('4000');
+  await expect(save).toBeDisabled();
+  await field.fill('900');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: '', size: '', timeoutSeconds: 900 });
+  await expect(field).toHaveValue('900');
+
+  // Saving something else does not state the limit again.
+  await panel.getByLabel('Model', { exact: true }).fill('image-model');
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: 'image-model', size: '' });
 });
 
 test('image editing has a switch and an endpoint of its own: it needs an address, may use the one above, and its key is sent once', async ({ page }) => {

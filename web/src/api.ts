@@ -1186,6 +1186,8 @@ export interface ImagesFeature {
   /** The edit endpoint takes several pictures, so edit_image has a list; off until said, and off again when edits move to another server. */
   editMultiple: boolean;
   editKeySet: boolean;
+  /** How long a request for a picture, made or edited, may take, in whole seconds. */
+  timeoutSeconds: number;
   /** Whether the agent has an edit tool: switched on, and with an address to ask. */
   editReady: boolean;
 }
@@ -1202,6 +1204,7 @@ export interface ImagesFeaturePatch {
   editModel?: string;
   editApiKey?: string;
   editMultiple?: boolean;
+  timeoutSeconds?: number;
 }
 
 /** The model that keeps Understory's memory, as the page is told it: never the key. */
