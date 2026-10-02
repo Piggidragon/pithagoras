@@ -99,7 +99,7 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
         }
         const pageOf = all.slice(0, limit);
         const last = pageOf[pageOf.length - 1];
-        body = { pictures: pageOf, next: all.length > limit && last ? `${last.createdAt}:${last.id}` : null, total, pageBytes: 0 };
+        body = { pictures: pageOf, next: all.length > limit && last ? `${last.createdAt}:${last.id}` : null, total, pageBytes: pics.filter((x) => x.origin === 'page').reduce((sum, x) => sum + x.bytes, 0) };
       }
     } else if (p === '/api/images/jobs' && method === 'GET') body = { jobs: state.jobs, limit: state.limit };
     else if (p.startsWith('/api/images/jobs/') && method === 'DELETE') {
@@ -403,6 +403,27 @@ test('the original and its edit reach each other, also when the original is furt
   await expect(viewer(page)).toContainText('Make it blue');
 });
 
+test('an original that was reached from its edit and is deleted there is gone from the viewer, and the edit no longer points at it', async ({ page }) => {
+  const original = pic({ prompt: 'The original', age: 500 });
+  const filler = Array.from({ length: 60 }, (_, i) => pic({ prompt: `Filler ${i}`, age: 10 + i }));
+  const edit = pic({ prompt: 'Make it blue', kind: 'edited', from: original.id, age: 1 });
+  const p = await portal(page, { pictures: [original, ...filler, edit] });
+  await page.goto('/images');
+  await tile(page, 'Make it blue').click();
+  await viewer(page).getByRole('button', { name: 'Show the original' }).click();
+  await expect(viewer(page)).toContainText('The original');
+  await expect(viewer(page).getByText('2 / 49', { exact: true })).toBeVisible();
+  await viewer(page).getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog', { name: 'Delete this picture?' }).getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => p.state.deleted).toEqual([[original.id]]);
+  // The viewer goes on with the next picture of the gallery, and the deleted one is not in what it steps through.
+  await expect(viewer(page).getByText('2 / 48', { exact: true })).toBeVisible();
+  await expect(viewer(page).locator('img[data-picture]')).not.toHaveAttribute('src', `/api/images/${original.id}/file`);
+  await viewer(page).getByRole('button', { name: 'Previous picture' }).click();
+  await expect(viewer(page)).toContainText('Make it blue');
+  await expect(viewer(page).getByRole('button', { name: 'Show the original' })).toHaveCount(0);
+});
+
 test('stepping on in the viewer asks for the next page of the gallery', async ({ page }) => {
   const many = Array.from({ length: 60 }, (_, i) => pic({ prompt: `Step ${i + 1}`, age: i }));
   await portal(page, { pictures: many });
@@ -599,6 +620,25 @@ test('deleting a picture of the page asks, and takes it away', async ({ page }) 
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
 });
 
+test('the page says how much of the disk its own pictures take, and the number goes down with a delete', async ({ page }) => {
+  const mine = pic({ prompt: 'Mine' });
+  const more = pic({ prompt: 'More', age: 1 });
+  const theirs = pic({ prompt: 'From a chat', origin: 'chat', chat: { id: 'c1', title: 'A chat' }, age: 2 });
+  await portal(page, { pictures: [mine, more, theirs] });
+  await page.goto('/images');
+  // A chat’s files are the chat’s: only the two of the page are counted, and a filter does not change it.
+  const kept = page.getByText('kept from this page').locator('..');
+  await expect(kept).toContainText('234.4 KB');
+  await page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'From chats' }).click();
+  await expect(tile(page, 'From a chat')).toBeVisible();
+  await expect(kept).toContainText('234.4 KB');
+  await page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'All' }).click();
+  await tile(page, 'Mine').click();
+  await viewer(page).getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog', { name: 'Delete this picture?' }).getByRole('button', { name: 'Delete' }).click();
+  await expect(kept).toContainText('117.2 KB');
+});
+
 test('a picture in a chat’s folder is deleted only on purpose, with a warning, whatever Settings says', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('confirmDeletes', 'off'));
   const theirs = pic({ prompt: 'From a chat', origin: 'chat', chat: { id: 'c1', title: 'Holiday plans' } });
@@ -649,6 +689,30 @@ test('several pictures can be selected, to download or delete together', async (
   await expect(page.getByText('0 selected')).toBeVisible();
   await page.getByRole('button', { name: 'Done' }).click();
   await expect(page.getByRole('button', { name: 'Select', exact: true })).toBeVisible();
+});
+
+test('a selection does not follow a change of filter: a chat’s picture that is not shown is never deleted with another, whatever Settings says', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('confirmDeletes', 'off'));
+  const theirs = pic({ prompt: 'From a chat', origin: 'chat', chat: { id: 'c1', title: 'Holiday plans' }, age: 5 });
+  const mine = pic({ prompt: 'Mine' });
+  const p = await portal(page, { pictures: [theirs, mine] });
+  await page.goto('/images?origin=chat');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await tile(page, 'From a chat').click();
+  await expect(page.getByText('1 selected')).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'Made here' }).click();
+  await expect(tile(page, 'Mine')).toBeVisible();
+  // What is not shown is not selected.
+  await expect(page.getByText('0 selected')).toBeVisible();
+  await tile(page, 'Mine').click();
+  await expect(page.getByText('1 selected')).toBeVisible();
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => p.state.deleted).toEqual([[mine.id]]);
+  // Back to the chats: still there, and not selected.
+  await page.goBack();
+  await expect(tile(page, 'From a chat')).toBeVisible();
+  await expect(page.getByLabel('Select this picture')).not.toBeChecked();
+  expect(p.state.deleted).toEqual([[mine.id]]);
 });
 
 test('on a phone the grid has two columns, the viewer reaches every action, and nothing runs off the screen', async ({ page }) => {

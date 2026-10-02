@@ -1616,6 +1616,7 @@ const de: Locale = {
     "Look for new pictures": "Nach neuen Bildern suchen",
     "pictures": "Bilder",
     "being made": "in Arbeit",
+    "kept from this page": "von dieser Seite gespeichert",
     "Image generation is switched off, or has no address.": "Die Bildgenerierung ist ausgeschaltet oder hat keine Adresse.",
     "Set it up in Settings → Add-ons": "In den Einstellungen → Add-ons einrichten",
     "Gallery": "Galerie",

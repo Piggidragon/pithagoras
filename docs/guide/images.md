@@ -105,7 +105,9 @@ Beside its own buttons, the viewer has these for a gallery picture:
 **Select** puts a box on every picture: a click selects instead of opening, and
 **Select all shown** takes what is on screen. **Download** saves each selected picture
 as a file of its own — the browser may ask once whether this page may download several —
-and **Delete** takes them away after asking. `Esc` or **Done** ends selecting.
+and **Delete** takes them away after asking. What is selected belongs to what is shown: a
+change of filter, or **Back** to another one, clears it, so that nothing that is not on
+screen is deleted with what is. `Esc` or **Done** ends selecting.
 
 ### Deleting
 
@@ -127,10 +129,19 @@ every file is opened with the checks the Files panel's pictures have: a path ins
 folder, no link followed out of it, and what its bytes say it is.
 
 - The agent's pictures are listed from the moment its tools save them. **Pictures made
-  before the gallery existed are not in it**; they stay in their chats' folders.
+  before the gallery existed are not in it**; they stay in their chats' folders. A name
+  the agent used before, whose file was taken away, is a new picture when it makes
+  one under it again: the gallery shows the new one with its own description and time.
+- **The page's own pictures are kept until you delete them.** Nothing is removed by age
+  or by how many there are, and the pictures you put in from your computer, up to 25 MB
+  each, are kept the same way. **kept from this page**, in the header, shows what they take
+  of the disk; the agent's pictures are in their chats' folders and are not counted.
 - A picture whose file is gone — taken in the Files panel, or by hand — is dropped from
   the list the next time it is loaded, and the pictures of a chat go from the list with
-  the chat, while their files stay in its folder.
+  the chat, while their files stay in its folder. A chat's folder that cannot be reached
+  for the moment, such as a drive that is not mounted, is not a file that is gone: its
+  pictures stay in the list, are shown again when it is back, and a delete of one says it
+  could not reach the file.
 - The list is refreshed when you return to the tab, every half minute while it is on
   screen, and with **Refresh**, so what the agent makes while you are here shows up.
 

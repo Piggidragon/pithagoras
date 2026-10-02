@@ -645,6 +645,77 @@ test("a picture whose file is gone is dropped when the page looks, and the pictu
   }
 });
 
+test("the page's own requests do not drop a chat's pictures while its folder cannot be reached, and a delete does not say it is done", async () => {
+  getDb().prepare("DELETE FROM images").run();
+  const { origin, server } = await answering();
+  try {
+    settings({ baseUrl: origin });
+    const away = chat("chat-8", "Offline drive");
+    const tool: any[] = [];
+    new GenerateImageTool(away, () => [], "chat-8").extension({ registerTool: (t: any) => tool.push(t) });
+    const made = await tool[0].execute("id", { prompt: "stays" });
+    const id = (await listed("?origin=chat")).pictures[0].id;
+    const moved = `${away}-moved`;
+    renameSync(away, moved);
+    // What every tile of the grid asks for: not found for the moment, and not a reason to forget it.
+    assert.equal((await call("GET", `/images/${id}/file`)).status, 404);
+    // A delete cannot reach the file, so it does not say the file is gone.
+    assert.equal((await call("DELETE", `/images/${id}`)).status, 404);
+    const several = await call("POST", "/images/delete", { ids: [id] });
+    assert.deepEqual(several.body.deleted, []);
+    assert.deepEqual(several.body.failed.map((f: any) => f.id), [id]);
+    assert.equal((await listed("?origin=chat")).total, 1, "still listed");
+    renameSync(moved, away);
+    assert.equal((await listed("?origin=chat")).total, 1, "and still, with the folder back");
+    assert.equal((await call("GET", `/images/${id}/file`)).status, 200, "shown again");
+    assert.equal(existsSync(path.join(away, made.details.path)), true);
+    // A file that is gone from a folder that is there is dropped by a request for it.
+    rmSync(path.join(away, made.details.path));
+    assert.equal((await call("GET", `/images/${id}/file`)).status, 404);
+    assert.equal((await listed("?origin=chat")).total, 0);
+    // A chat that is gone: a delete has nothing left to remove.
+    getDb().prepare("INSERT INTO images (id, origin, session_id, path, kind, prompt, params, source_id, bytes, created_at) VALUES (?, 'chat', ?, ?, 'generated', 'orphan', '{}', NULL, 1, ?)").run("0000000000aa", "no-such-chat", `${GENERATED_DIR}/x.png`, Date.now());
+    assert.equal((await call("DELETE", "/images/0000000000aa")).status, 200);
+    assert.equal((await listed("?origin=chat")).total, 0);
+  } finally {
+    server.close();
+    gone();
+  }
+});
+
+test("a file name that comes back in a chat is a new picture, with its own words, time and links", async () => {
+  getDb().prepare("DELETE FROM images").run();
+  const folder = chat("chat-9", "Retries");
+  mkdirSync(path.join(folder, GENERATED_DIR), { recursive: true });
+  const write = (name: string, tag: string) => writeFileSync(path.join(folder, GENERATED_DIR, name), png(tag));
+  const record = (over: Partial<Parameters<typeof gallery.recordChatPicture>[0]>) =>
+    gallery.recordChatPicture({ sessionId: "chat-9", path: `${GENERATED_DIR}/x-edited.png`, kind: "edited", prompt: "", params: {}, bytes: 70, ...over });
+  write("x.png", "x");
+  record({ path: `${GENERATED_DIR}/x.png`, kind: "generated", prompt: "the original" });
+  write("x-edited.png", "1");
+  record({ prompt: "old edit", from: [`${GENERATED_DIR}/x.png`] });
+  write("x-edited-edited.png", "2");
+  record({ path: `${GENERATED_DIR}/x-edited-edited.png`, prompt: "edit of the old edit", from: [`${GENERATED_DIR}/x-edited.png`] });
+  const old = (await listed("?origin=chat")).pictures.find((p: any) => p.prompt === "old edit");
+  assert.ok(old);
+
+  // The file was taken away by something that did not tell the list, and an edit of the original makes the name again.
+  rmSync(path.join(folder, GENERATED_DIR, "x-edited.png"));
+  write("x-edited.png", "3");
+  record({ prompt: "new edit", from: [`${GENERATED_DIR}/x.png`], params: { model: "m2" } });
+  const all = (await listed("?origin=chat")).pictures;
+  const mine = all.filter((p: any) => p.fileName === "x-edited.png");
+  assert.equal(mine.length, 1, "one picture for the name");
+  assert.equal(mine[0].prompt, "new edit");
+  assert.equal(mine[0].params.model, "m2");
+  assert.notEqual(mine[0].id, old.id);
+  assert.equal(all.some((p: any) => p.id === old.id), false);
+  assert.equal(mine[0].from, all.find((p: any) => p.prompt === "the original").id);
+  // What was made of the old one is not made of this.
+  assert.equal(all.find((p: any) => p.prompt === "edit of the old edit").from, null);
+  assert.ok(mine[0].createdAt >= old.createdAt, "it is as new as it is, not as old as the first");
+});
+
 test("the sidebar is told whether the page is there: on while an address is set and the add-on is on", async () => {
   gone();
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1" });

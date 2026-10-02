@@ -55,6 +55,8 @@ interface Listing {
   pictures: GalleryPicture[];
   next: string | null;
   total: number;
+  /** What the page's own pictures take of the disk, whatever the filters show. */
+  pageBytes: number;
 }
 
 /**
@@ -84,7 +86,7 @@ export function ImagesPage() {
   }, []);
 
   // The gallery, as far as it has been loaded. A filter asks again from the top, and an answer to what was asked before it is not wanted.
-  const [list, setList] = useState<Listing>({ pictures: [], next: null, total: 0 });
+  const [list, setList] = useState<Listing>({ pictures: [], next: null, total: 0, pageBytes: 0 });
   const listRef = useRef(list);
   listRef.current = list;
   const [loading, setLoading] = useState(true);
@@ -92,14 +94,17 @@ export function ImagesPage() {
   const loadingMoreRef = useRef(false);
   const asked = useRef(0);
 
+  // What was selected is of the list that was shown: another filter, or Back to one, shows other pictures, and what is not on screen is not to be deleted with what is.
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     const mine = ++asked.current;
     setLoading(true);
-    setList({ pictures: [], next: null, total: 0 });
+    setPicked(new Set());
+    setList((cur) => ({ pictures: [], next: null, total: 0, pageBytes: cur.pageBytes }));
     api.galleryPage({ ...filter, limit: PAGE }).then(
       (page) => {
         if (asked.current !== mine) return;
-        setList({ pictures: page.pictures, next: page.next, total: page.total });
+        setList({ pictures: page.pictures, next: page.next, total: page.total, pageBytes: page.pageBytes });
         setLoading(false);
       },
       (e: Error) => {
@@ -120,7 +125,7 @@ export function ImagesPage() {
           const pictures = mergeTop(cur.pictures, page);
           const next = pictures.length > page.pictures.length ? cur.next : page.next;
           // Nothing moved: nothing is drawn again.
-          return sameList(pictures, cur.pictures) && next === cur.next && page.total === cur.total ? cur : { pictures, total: page.total, next };
+          return sameList(pictures, cur.pictures) && next === cur.next && page.total === cur.total && page.pageBytes === cur.pageBytes ? cur : { pictures, total: page.total, next, pageBytes: page.pageBytes };
         });
       },
       () => {},
@@ -138,7 +143,7 @@ export function ImagesPage() {
       .then(
         (page) => {
           if (asked.current !== mine) return;
-          setList((cur) => ({ pictures: appendPage(cur.pictures, page.pictures), next: page.next, total: page.total }));
+          setList((cur) => ({ pictures: appendPage(cur.pictures, page.pictures), next: page.next, total: page.total, pageBytes: page.pageBytes }));
         },
         (e: Error) => asked.current === mine && setError(e.message),
       )
@@ -211,6 +216,8 @@ export function ImagesPage() {
 
   // Deleted here: their jobs are not shown any more either, though the server may still have them.
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  const goneRef = useRef(gone);
+  goneRef.current = gone;
   const [opened, setOpened] = useState<string | null>(null);
   const [originals, setOriginals] = useState<ReadonlyMap<string, GalleryPicture>>(new Map());
 
@@ -220,7 +227,6 @@ export function ImagesPage() {
   const viewerPictures: ViewerPicture[] = useMemo(() => forViewer.map((p) => viewerPicture(p, api.galleryFileUrl)), [forViewer]);
 
   const [selecting, setSelecting] = useState(false);
-  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const toggle = useCallback((id: string) => {
     setPicked((cur) => {
       const next = new Set(cur);
@@ -245,8 +251,11 @@ export function ImagesPage() {
   const open = useCallback((id: string) => setOpened(id), []);
 
   /** Takes pictures away, after asking: the page's own as the person's, a chat's with the warning that they are the chat's files. */
-  const remove = async (ids: string[]) => {
-    const chosen = ids.map((id) => byId.get(id)).filter((p): p is GalleryPicture => !!p);
+  const remove = async (wanted: string[]) => {
+    // Only what the page knows is deleted, so that what the question says is all of what goes: a picture it cannot tell the origin of is not one to take away.
+    const chosen = wanted.map((id) => byId.get(id)).filter((p): p is GalleryPicture => !!p);
+    const ids = chosen.map((p) => p.id);
+    if (!ids.length) return;
     const inChats = chosen.filter((p) => p.origin === "chat");
     const only = chosen.length === 1 ? chosen[0] : undefined;
     const ok = await confirmDialog({
@@ -269,7 +278,11 @@ export function ImagesPage() {
     try {
       const done = await api.deletePictures(ids);
       const deleted = new Set(done.deleted);
-      setList((cur) => ({ ...cur, pictures: cur.pictures.filter((p) => !deleted.has(p.id)), total: Math.max(0, cur.total - deleted.size) }));
+      // What was made of a deleted picture does not name it any more, as the portal says it either; and an original that was fetched to be reached from an edit is not reached.
+      const unlink = (p: GalleryPicture) => (p.from && deleted.has(p.from) ? { ...p, from: null } : p);
+      const freed = chosen.filter((p) => deleted.has(p.id) && p.origin === "page").reduce((sum, p) => sum + p.bytes, 0);
+      setList((cur) => ({ ...cur, pictures: cur.pictures.filter((p) => !deleted.has(p.id)).map(unlink), total: Math.max(0, cur.total - deleted.size), pageBytes: Math.max(0, cur.pageBytes - freed) }));
+      setOriginals((cur) => new Map([...cur].filter(([id]) => !deleted.has(id)).map(([id, p]) => [id, unlink(p)])));
       setGone((cur) => new Set([...cur, ...deleted]));
       setPicked((cur) => new Set([...cur].filter((id) => !deleted.has(id))));
       setSources((cur) => cur.filter((p) => !deleted.has(p.id)));
@@ -342,7 +355,7 @@ export function ImagesPage() {
       const from = picture.from;
       if (from && !loaded.pictures.some((p) => p.id === from)) {
         api.galleryPictures([from]).then(
-          (r) => r.pictures[0] && setOriginals((cur) => new Map(cur).set(from, r.pictures[0])),
+          (r) => r.pictures[0] && !goneRef.current.has(from) && setOriginals((cur) => new Map(cur).set(from, r.pictures[0])),
           () => {},
         );
       }
@@ -372,6 +385,7 @@ export function ImagesPage() {
         >
           <div className="mt-3 flex flex-wrap gap-2">
             <Stat value={list.total} label={t("pictures")} />
+            {list.pageBytes > 0 && <Stat value={bytesLabel(list.pageBytes)} label={t("kept from this page")} />}
             {makingNow > 0 && <Stat value={makingNow} label={t("being made")} tone="text-accent" />}
           </div>
         </PageHeader>

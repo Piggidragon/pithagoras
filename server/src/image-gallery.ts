@@ -163,16 +163,19 @@ function locate(row: Row, folders: Map<string, string | FileError> = new Map()):
 }
 
 /**
- * Whether a picture is still to be shown: its file is there as a plain file.
- * A chat's folder that cannot be reached for the moment — a drive that is not
- * mounted — is not a file that is gone, and its pictures are kept.
+ * Whether a picture's folder is only out of reach for the moment: a chat's
+ * folder on a drive that is not mounted. Its pictures are not gone, and what
+ * looks at them leaves them in the list. A chat that is gone is another thing.
  */
+const unreachable = (row: Row, e: unknown): boolean => row.origin === "chat" && e instanceof FileError && e.code === "missing" && !(e instanceof ChatGone);
+
+/** Whether a picture is still to be shown: its file is there as a plain file, or its folder is out of reach and it may be. */
 function isThere(row: Row, folders: Map<string, string | FileError>): boolean {
   let at: { base: string; rel: string };
   try {
     at = locate(row, folders);
   } catch (e) {
-    return row.origin === "chat" && e instanceof FileError && e.code === "missing" && !(e instanceof ChatGone);
+    return unreachable(row, e);
   }
   try {
     return lstatSync(path.join(at.base, at.rel)).isFile();
@@ -220,20 +223,26 @@ export function recordChatPicture(picture: { sessionId: string; path: string; ki
   // A picture that was made is made: that it could not be listed is not the tool's failure, and the agent has nothing to do about it.
   try {
     const known = (file: string) => (getDb().prepare("SELECT id FROM images WHERE session_id = ? AND path = ?").get(picture.sessionId, file) as { id: string } | undefined)?.id;
-    const sources = (picture.from ?? []).map(known).filter((id): id is string => !!id);
-    insert({
-      id: newId(),
-      origin: "chat",
-      session_id: picture.sessionId,
-      path: picture.path,
-      kind: picture.kind,
-      prompt: picture.prompt,
-      params: JSON.stringify({ ...picture.params, ...(sources.length ? { sources } : {}) }),
-      // The first of them, as the picture the edit is named after: only when that very one is in the list.
-      source_id: picture.from?.[0] !== undefined ? (known(picture.from[0]) ?? null) : null,
-      bytes: picture.bytes,
-      created_at: Date.now(),
-    });
+    // A file name that comes back — an edit is named after its original — is a new picture: its file was taken away by something that did not tell the list, and the old row is not this file's.
+    const before = known(picture.path);
+    const sources = (picture.from ?? []).map(known).filter((id): id is string => !!id && id !== before);
+    const first = picture.from?.[0] !== undefined ? known(picture.from[0]) : undefined;
+    getDb().transaction(() => {
+      if (before) forget([before]);
+      insert({
+        id: newId(),
+        origin: "chat",
+        session_id: picture.sessionId,
+        path: picture.path,
+        kind: picture.kind,
+        prompt: picture.prompt,
+        params: JSON.stringify({ ...picture.params, ...(sources.length ? { sources } : {}) }),
+        // The first of them, as the picture the edit is named after: only when that very one is in the list.
+        source_id: first && first !== before ? first : null,
+        bytes: picture.bytes,
+        created_at: Date.now(),
+      });
+    })();
   } catch (e) {
     console.error("[portal] images: could not list the picture in the gallery:", (e as Error).message);
   }
@@ -329,9 +338,16 @@ export const pictureById = (id: string): GalleryPicture | undefined => {
 export function openListed(id: string): { fd: number; size: number; name: string; mimeType: string; origin: PictureOrigin } {
   const row = rowOf(id);
   if (!row) throw new FileError("missing", "There is no such picture");
+  let at: { base: string; rel: string };
   try {
-    const { base, rel } = locate(row);
-    return { ...openPicture(base, rel), origin: row.origin };
+    at = locate(row);
+  } catch (e) {
+    // Out of reach is not gone: the picture is shown again when its folder is back.
+    if (e instanceof FileError && e.code === "missing" && !unreachable(row, e)) forget([id]);
+    throw e;
+  }
+  try {
+    return { ...openPicture(at.base, at.rel), origin: row.origin };
   } catch (e) {
     if (e instanceof FileError && e.code === "missing") forget([id]);
     throw e;
@@ -350,17 +366,25 @@ export function readListed(id: string): { bytes: Buffer; picture: GalleryPicture
  * Takes a picture away: its file, and its place in the list. A picture in a
  * chat's folder is that chat's file, so this is only ever asked for on
  * purpose, by the person (see the page's confirmation). A file that is gone
- * already is as good as deleted.
+ * already is as good as deleted. A folder that cannot be reached is not: the
+ * file may well be in it, so this says so and leaves the picture in the list.
  */
 export async function deletePicture(id: string): Promise<void> {
   const row = rowOf(id);
   if (!row) throw new FileError("missing", "There is no such picture");
+  const missing = (e: unknown) => e instanceof FileError && e.code === "missing";
+  let at: { base: string; rel: string } | undefined;
   try {
-    const { base, rel } = locate(row);
-    await removeEntry(base, rel);
+    at = locate(row);
   } catch (e) {
-    // Gone since, or its chat is: nothing is left of it to delete.
-    if (!(e instanceof FileError && e.code === "missing")) throw e;
+    // Its chat is gone: nothing is left of it to delete. Out of reach is something else.
+    if (!missing(e) || unreachable(row, e)) throw e;
+  }
+  try {
+    if (at) await removeEntry(at.base, at.rel);
+  } catch (e) {
+    // Gone since: what was asked for.
+    if (!missing(e)) throw e;
   }
   forget([id]);
 }
