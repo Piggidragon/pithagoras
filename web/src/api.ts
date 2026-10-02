@@ -221,11 +221,22 @@ export interface BackgroundJob {
   attached: boolean;
 }
 
+/** One of the building blocks of a screen: what the page draws is by its `type` (see screens.ts). */
+export type ScreenBlock = { type: string; [key: string]: unknown };
+
+/** What an extension shows in the Screens panel, as it said it. */
+export interface Screen {
+  id: string;
+  title?: string;
+  blocks: ScreenBlock[];
+}
+
 export interface BackgroundState {
   supported: boolean;
   jobs: BackgroundJob[];
   statuses: { key: string; text: string }[];
   widgets: { key: string; lines: string[] }[];
+  screens: Screen[];
   /** Whether the chat's pi is up, for the chat box's text to be worth telling it. */
   piRunning?: boolean;
 }
@@ -833,6 +844,9 @@ export const api = {
   /** `ifRunning`: only from a pi that is up, rather than starting one; `notRunning` when none was. */
   commands: (id: string, opts?: { ifRunning?: boolean }) =>
     json<{ commands: PiCommand[]; notRunning?: boolean }>(`/api/sessions/${id}/commands${opts?.ifRunning ? "?ifRunning=1" : ""}`),
+  /** The values a command's argument may take in this chat. */
+  argumentChoices: (id: string, source: string) =>
+    json<{ choices: ArgumentChoice[] }>(`/api/sessions/${id}/arguments/${encodeURIComponent(source)}`),
   /** What is in the chat box, for an extension that asks. */
   draft: (id: string, text: string, caret?: { start: number; end: number }) =>
     json<{ ok: true }>(`/api/sessions/${id}/draft`, { method: "PUT", body: JSON.stringify({ text, caret }) }),
@@ -1089,6 +1103,17 @@ export interface PiCommand {
   /** Builtins only: does nothing without one, so choosing it leaves the box open for it. */
   needsArgument?: boolean;
   sourceInfo?: { path?: string; scope?: string; origin?: string };
+  /** Prompts: where its argument's values come from, for suggesting them (the server's argument sources). */
+  argumentSource?: string;
+}
+
+/** A value an argument may take, as the portal offers it. */
+export interface ArgumentChoice {
+  value: string;
+  /** Where it comes from. */
+  detail?: string;
+  /** Short words for what is to be said of it: see `ARGUMENT_NOTES`. */
+  notes?: string[];
 }
 
 /** One MCP server as pi-mcp-adapter reads it. Unlisted keys are kept verbatim. */

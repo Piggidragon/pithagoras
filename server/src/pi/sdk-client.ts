@@ -3,6 +3,7 @@ import { showImageTool } from "./show-image-tool.js";
 import { GENERATE_IMAGE_VOICE_LINE, GenerateImageTool } from "./generate-image-tool.js";
 import { EDIT_IMAGE_VOICE_LINE, EditImageTool } from "./edit-image-tool.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE } from "../image-generation.js";
+import { declaredArguments } from "../argument-sources.js";
 import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
@@ -19,6 +20,7 @@ import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
+import { bridgeScreens, type Screen, type ScreenBridge } from "../screens.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { contextWindowFor, getVoiceInstructions } from "../db.js";
 import { configStamp } from "../providers.js";
@@ -181,22 +183,33 @@ function portalLoader(pi: any): new (options: unknown, rule: AudioRule, said?: (
 }
 
 /**
- * Skills shipped with the portal, loaded from the image rather than installed.
+ * A directory the portal ships beside its code, loaded from the image rather
+ * than installed.
  *
  * Resolved relative to the compiled file so it works from dist and from source,
  * the same way the builtin channels are found.
  */
-export function builtinSkillsDir(): string | undefined {
+function shippedDir(name: string): string | undefined {
   const here = path.dirname(fileURLToPath(import.meta.url));
   for (const candidate of [
-    path.resolve(here, "../../../skills"),
-    path.resolve(here, "../../skills"),
-    path.resolve(process.cwd(), "skills"),
-    path.resolve(process.cwd(), "../skills"),
+    path.resolve(here, "../../..", name),
+    path.resolve(here, "../..", name),
+    path.resolve(process.cwd(), name),
+    path.resolve(process.cwd(), "..", name),
   ]) {
     if (existsSync(candidate)) return candidate;
   }
   return undefined;
+}
+
+/** Skills shipped with the portal. */
+export function builtinSkillsDir(): string | undefined {
+  return shippedDir("skills");
+}
+
+/** Prompt templates shipped with the portal: its own slash commands that are a prompt (`/screen`). */
+export function builtinPromptsDir(): string | undefined {
+  return shippedDir("prompts");
 }
 
 /**
@@ -274,6 +287,15 @@ function packageOf(info: any): string | undefined {
   return info?.origin === "package" && info?.scope === "user" && typeof info.source === "string" ? info.source : undefined;
 }
 
+/**
+ * The same for a project's own packages, kept apart from `packageOf`: a tool
+ * with a `package` is one the user's settings list, which is what the lists of
+ * known tools are cleaned by, and a project's must not be taken for that.
+ */
+function projectPackageOf(info: any): string | undefined {
+  return info?.origin === "package" && info?.scope === "project" && typeof info.source === "string" ? info.source : undefined;
+}
+
 /** Whether the portal's own inline extension registered it: pi names those <inline:name>, which no file's path is. */
 function isInline(info: any): boolean {
   return typeof info?.path === "string" && /^<inline:[^>]+>$/.test(info.path);
@@ -316,6 +338,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   /** The extensions' event bus, when this client made one. */
   bus?: { emit(channel: string, data: unknown): void };
   unbridge?: Bridge;
+  /** What the extensions put on screen over the screen protocol: see screens.ts. */
+  unscreens?: ScreenBridge;
+
+  screens(): Screen[] {
+    return this.unscreens?.list() ?? [];
+  }
 
   // Only to one running here that takes it: after a restart, the bus is new
   // and nobody on it, and "sent" would be a message that went nowhere.
@@ -418,6 +446,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // Both are required: the constructor resolves each and throws on
       // undefined, which previously left every session with no extensions.
       const builtinSkills = builtinSkillsDir();
+      const builtinPrompts = builtinPromptsDir();
       // Every session, unconditionally: the point is to limit what a turn can do
       // after it reads something untrusted, and any session can read something.
       const factories: { name: string; factory: (pi: any) => void }[] = [
@@ -457,6 +486,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // place: they belong to the image, so an edit would be lost on the next
         // deploy without saying so.
         ...(builtinSkills ? { additionalSkillPaths: [builtinSkills] } : {}),
+        // The same way, for the commands that are a prompt: they ship with the skill they invoke.
+        ...(builtinPrompts ? { additionalPromptTemplatePaths: [builtinPrompts] } : {}),
         // Inline rather than an installed package: the portal owns routines, so
         // a package would have to call back over HTTP to reach the database it
         // sits beside. Absent unless asked, so a task session never sees them.
@@ -543,6 +574,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           return model ? { model } : {};
         },
       );
+      client.unscreens = bridgeScreens(eventBus, (event) => client.emit("event", event));
     }
     if (resourceLoader) {
       client.voiceFirst = voiceFirst;
@@ -996,6 +1028,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   dispose(): void {
     this.unbridge?.();
+    this.unscreens?.();
     if (this.disposed) return;
     this.disposed = true;
     this.canvases?.interrupt();
@@ -1217,6 +1250,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       description: typeof tool.description === "string" ? tool.description : undefined,
       source: sourceLabel(tool.sourceInfo),
       package: packageOf(tool.sourceInfo),
+      projectPackage: projectPackageOf(tool.sourceInfo),
       ...(isInline(tool.sourceInfo) ? { inline: true as const } : {}),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
@@ -1261,7 +1295,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       });
     }
     for (const t of asArray(this.session.promptTemplates)) {
-      commands.push({ name: t.name, description: t.description, source: "prompt" });
+      const argumentSource = typeof t.filePath === "string" ? declaredArguments(t.filePath) : undefined;
+      commands.push({ name: t.name, description: t.description, source: "prompt", ...(argumentSource ? { argumentSource } : {}) });
     }
     for (const skill of asArray(this.session.resourceLoader?.getSkills?.()?.skills)) {
       commands.push({

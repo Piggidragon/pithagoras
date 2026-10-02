@@ -1,5 +1,6 @@
 import type { EventEmitter } from "node:events";
 import type { ImageContent } from "../prompt-images.js";
+import type { Screen } from "../screens.js";
 
 export interface PiState {
   model: {
@@ -35,6 +36,8 @@ export interface PiTool {
   source: string;
   /** The entry in pi's settings that brought it, where a package of the user's did. */
   package?: string;
+  /** The entry in the chat's project settings that brought it, where a package of the project's did (and so no `package`). */
+  projectPackage?: string;
   /** One of the portal's own, from an inline extension: no file or package of anyone's has a path like that, so it is not mistaken for an extension's of the same name. */
   inline?: true;
   /** False when this conversation has it switched off. */
@@ -65,6 +68,8 @@ export interface PiCommand {
   name: string;
   description?: string;
   source: string;
+  /** Prompt templates: where the values of its argument come from, for the page to suggest (see argument-sources.ts). */
+  argumentSource?: string;
 }
 
 /**
@@ -88,6 +93,11 @@ export interface PiClient extends EventEmitter {
   subagentsRunning?(): number;
   /** Says each subagent still running has stopped: its pi is about to go. */
   endSubagents?(why: string): void;
+  /**
+   * What the extensions show on the page's Screens panel (see screens.ts).
+   * Optional: only the in-process client shares the event bus they say it on.
+   */
+  screens?(): Screen[];
   /**
    * Where the chat box's text is kept — by the portal, one copy for the page
    * and pi alike — for an extension's getEditorText, and for what it puts in

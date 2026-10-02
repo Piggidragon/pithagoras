@@ -34,6 +34,7 @@ import {
 } from "./agent-setup.js";
 import { sessions, CommandFailed, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
+import { argumentChoices } from "./argument-sources.js";
 import { defaultsFor, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
 import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth, signOut } from "./auth.js";
@@ -1297,6 +1298,19 @@ app.post("/api/sessions/:id/compact", async (req, res) => {
  * installed packages. Discovered at runtime, so installing a package makes its
  * commands available immediately.
  */
+/**
+ * The values a command's argument may take, for the page to suggest as it is typed:
+ * from one of the portal's own sources (see argument-sources.ts), in the chat's own terms.
+ * It does not start pi; the sources read what the portal keeps.
+ */
+app.get("/api/sessions/:id/arguments/:source", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const choices = argumentChoices(req.params.source, { workspace: session.workspace, off: new Set(sessions.offFor(session.id)) });
+  if (!choices) return res.status(404).json({ error: "No such source" });
+  res.json({ choices });
+});
+
 app.get("/api/sessions/:id/commands", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });

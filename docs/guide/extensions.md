@@ -105,10 +105,17 @@ so they are there without anyone adding them. They appear in Settings → Skills
 under "Built in and from packages", read-only — editing one in place would be
 lost on the next deploy without saying so.
 
-There is one so far. **`skill-creator`** teaches the agent to write skills: the
+There are two so far. **`skill-creator`** teaches the agent to write skills: the
 format, the frontmatter and the ways it silently fails, how to split detail into
 supporting files, and where to write one so it loads. Ask the agent to remember
 a procedure and it has somewhere to put it.
+
+**`extension-screens`** teaches it to show an installed extension's data, a todo
+list say, in the chat's [Screens panel](/guide/screens). It is what the
+**`/screen <extension>`** command asks for: the command is a prompt template the
+portal ships beside the skill (`/screen` is listed as a `prompt` in the
+[palette](/guide/commands#where-they-come-from)), and it has the agent follow the
+skill step by step.
 
 ::: tip A skills directory holds directories
 pi treats any `.md` file sitting directly in a skills root as a skill in its own
@@ -122,6 +129,10 @@ Extensions can ask questions. `ctx.ui.select`, `confirm`, `input` and `editor`
 all render as a modal in the browser, standing in for the menu the TUI would
 draw. `notify`, `setStatus` and `setWidget` are one-way and do not open
 anything.
+
+`setStatus` lines show in the tray above the message box. An extension's own
+screen, which pi's terminal draws itself, has no equivalent in the browser; the
+[Screens panel](/guide/screens) shows its data from building blocks instead.
 
 An unanswered dialog times out after five minutes rather than wedging the
 session forever.

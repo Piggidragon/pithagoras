@@ -72,3 +72,37 @@ export function moveHighlight(index: number, delta: 1 | -1, count: number): numb
   if (count <= 0) return 0;
   return (index + delta + count) % count;
 }
+
+/**
+ * The argument being typed, if the composer holds a command, a space and one
+ * word: `/screen rpiv`. The command is whatever name was typed, for the caller
+ * to say whether it is one that takes suggestions. Only the first argument is
+ * suggested, so a second word, or a line break, ends it.
+ *
+ * Read under any trigger, as `typedCommand` is: the slash form is what pi is
+ * sent, and what somebody who changed the trigger since may have typed.
+ */
+export function argumentToken(input: string, trigger = DEFAULT_TRIGGER): { name: string; typed: string } | null {
+  const text = input.trimStart();
+  for (const lead of trigger === DEFAULT_TRIGGER ? [trigger] : [trigger, DEFAULT_TRIGGER]) {
+    if (!text.startsWith(lead)) continue;
+    const m = /^([\w:-]+)[ \t]+(\S*)$/.exec(text.slice(lead.length));
+    if (m) return { name: m[1], typed: m[2] };
+  }
+  return null;
+}
+
+/**
+ * The values that fit what has been typed of an argument: those that start
+ * with it first, then those that have it inside — `rpiv` finds
+ * `@scope/rpiv-todo` — in the order they were offered. Nothing once what was
+ * typed is one of them in full: there is nothing left to suggest, and Enter
+ * is then the message.
+ */
+export function argumentMatches<T extends { value: string }>(choices: T[], typed: string): T[] {
+  const wanted = typed.toLowerCase();
+  const has = (c: T) => c.value.toLowerCase();
+  if (wanted && choices.some((c) => has(c) === wanted)) return [];
+  const starts = choices.filter((c) => has(c).startsWith(wanted));
+  return [...starts, ...choices.filter((c) => !starts.includes(c) && has(c).includes(wanted))];
+}

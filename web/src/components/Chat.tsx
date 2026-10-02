@@ -7,6 +7,7 @@ import { RunningTray } from "./RunningTray";
 import { CommandLine } from "./CommandLine";
 import { mentionsCommand } from "../status-commands";
 import { SubagentPanel } from "./SubagentPanel";
+import { ScreensPanel } from "./ScreensPanel";
 import { BackgroundJobs } from "./BackgroundJobs";
 import { stableSubagents, subagents, type Subagent } from "../subagents";
 import { useBackground } from "../use-background";
@@ -23,8 +24,8 @@ import { createPortal } from "react-dom";
 import { Fragment, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
-import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuLayoutDashboard, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { api, type ArgumentChoice, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
@@ -33,7 +34,7 @@ import { ComposerBar } from "./ComposerBar";
 import { PictureButton, useChatPictures } from "./ChatPictures";
 import { sentPictureId, shownPictureId } from "../chat-pictures";
 import { confirmDialog } from "./ConfirmDialog";
-import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
+import { argumentMatches, argumentToken, moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
 import { TerminalPanel } from "./TerminalPanel";
 import { FilesPanel } from "./FilesPanel";
@@ -48,7 +49,13 @@ import { copyText } from "../clipboard";
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
-import { msg, t, tp } from "../i18n";
+import { labelOf, msg, t, tp } from "../i18n";
+
+/** What the portal says of a value it suggests, in words: the labels of the short words it uses. */
+const ARGUMENT_NOTES: Record<string, string> = {
+  screen: msg("has a screen"),
+  project: msg("this project"),
+};
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -73,11 +80,12 @@ const ASIDE: Record<Dock, string> = {
 };
 
 /** The panels that sit beside the conversation, each in a place of its own. */
-type AsidePanel = "browser" | "agents" | "files" | "git" | "terminal";
+type AsidePanel = "browser" | "agents" | "screens" | "files" | "git" | "terminal";
 /** What each panel is called: in its header, and on its close button. */
 const PANEL: Record<AsidePanel, { label: string; close: string }> = {
   browser: { label: msg("Browser"), close: msg("Close the browser") },
   agents: { label: msg("Subagents"), close: msg("Close the subagents") },
+  screens: { label: msg("Screens"), close: msg("Close the screens") },
   files: { label: msg("Files"), close: msg("Close the files") },
   git: { label: msg("Git"), close: msg("Close the git panel") },
   terminal: { label: msg("Terminal"), close: msg("Close the terminal") },
@@ -316,6 +324,7 @@ export function Chat({
   const [terminalTab, setTerminalTab] = useState<"agent" | "jobs" | "shell">("agent");
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const [screensOpen, setScreensOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [shellStarted, setShellStarted] = useState(false);
   const [terminalFocus, setTerminalFocus] = useState<{ id: string; at: number } | null>(null);
@@ -366,8 +375,8 @@ export function Chat({
   const fileAnswered = useCallback(() => setFileAsked(null), []);
   useEffect(() => setFileAsked(null), [session.id]);
   useWorkPanels(
-    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else setCanvasOpen(false); },
+    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen, screens: !voiceMode && screensOpen },
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else if (panel === "screens") setScreensOpen(false); else setCanvasOpen(false); },
     // A third panel closes another one instead, while Files has an edit in it.
     // An edit not saved outweighs keeping Git in view: with both kept nothing
     // could go, and the fallback closed Files — edit and all — unasked.
@@ -383,7 +392,7 @@ export function Chat({
     setFiles(false);
   };
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", terminal && "terminal"].filter(Boolean) as AsidePanel[];
+  const asidePanels = [watching && "browser", agentsOpen && "agents", screensOpen && "screens", files && "files", git && "git", terminal && "terminal"].filter(Boolean) as AsidePanel[];
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where each panel goes, the
@@ -1024,13 +1033,35 @@ export function Chat({
   // whatever character commands start with in this browser.
   const trigger = useCommandTrigger();
   const slashText = slashToken(input, trigger);
-  const wantsCommands = slashText !== null;
+  // Past the command's name, a space and a word: what the command takes as its argument is suggested,
+  // where it says where the values come from (a prompt that takes an installed extension, say). The
+  // commands are wanted for that too: a draft that already holds "/name x" has not passed the list.
+  const argToken = argumentToken(input, trigger);
+  const wantsCommands = slashText !== null || argToken !== null;
   useEffect(() => {
     if (wantsCommands) void loadCommands();
   }, [wantsCommands, session.id, turns]);
   const allMatches = useMemo(
     () => (slashText === null ? [] : paletteMatches(commands, slashText)),
     [commands, slashText],
+  );
+  const argSource = argToken ? commands.find((c) => c.name === argToken.name)?.argumentSource : undefined;
+  const [argChoices, setArgChoices] = useState<{ chat: string; source: string; choices: ArgumentChoice[] } | null>(null);
+  useEffect(() => {
+    if (!argSource) return;
+    // Asked each time an argument is begun, so what a run installed is there; what was asked before stays until then.
+    let live = true;
+    api.argumentChoices(session.id, argSource).then(
+      (r) => live && setArgChoices({ chat: session.id, source: argSource, choices: r.choices }),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [argSource, session.id, turns]);
+  const allArgMatches = useMemo(
+    () => (argToken && argSource && argChoices?.chat === session.id && argChoices.source === argSource ? argumentMatches(argChoices.choices, argToken.typed) : []),
+    [argChoices, argSource, argToken?.typed, session.id],
   );
   /** Escape puts the list away until something else is typed. */
   const [paletteShut, setPaletteShut] = useState(false);
@@ -1039,19 +1070,28 @@ export function Chat({
   useEffect(() => {
     setPicked(0);
     setPaletteShut(false);
-  }, [slashText]);
+  }, [slashText, argToken?.typed, argSource]);
   const matches = paletteShut ? [] : allMatches;
+  const argMatches = paletteShut ? [] : allArgMatches;
+  /** Whether something is listed above the box: the commands, or what one of them may be given. */
+  const listed = matches.length > 0 || argMatches.length > 0;
   const paletteBox = useRef<HTMLDivElement>(null);
   // Shut, the command list and the way back to the end drop away as pictures of themselves (see motion.ts).
   const paletteRef = useLeaveRef<HTMLDivElement>("menu", paletteBox);
   const jumpRef = useLeaveRef<HTMLButtonElement>("menu");
   useEffect(() => {
     paletteBox.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [picked, matches.length]);
+  }, [picked, matches.length, argMatches.length]);
   /** What is left in the box once a command is chosen: its name, ready for arguments. */
   const complete = (c: PiCommand) => {
     caret.current = null;
     changeInput(`${trigger}${c.name} `);
+  };
+  /** And once one of its argument's values is: the command and the value, to be sent as it stands. */
+  const completeArgument = (choice: ArgumentChoice) => {
+    if (!argToken) return;
+    caret.current = null;
+    changeInput(`${trigger}${argToken.name} ${choice.value}`);
   };
 
   useEffect(() => {
@@ -1355,6 +1395,7 @@ export function Chat({
   const closePanel: Record<AsidePanel, () => void> = {
     browser: () => setWatching(false),
     agents: () => setAgentsOpen(false),
+    screens: () => setScreensOpen(false),
     files: () => void closeFiles(),
     git: () => setGit(false),
     terminal: () => setTerminal(false),
@@ -1431,6 +1472,11 @@ export function Chat({
       {kind === "agents" && (
         <div className="min-h-0 flex-1 bg-surface">
           <SubagentPanel sessionId={session.id} agents={agents} items={items} selected={selectedAgent} onSelect={setSelectedAgent} />
+        </div>
+      )}
+      {kind === "screens" && (
+        <div className="min-h-0 flex-1 bg-surface">
+          <ScreensPanel screens={background.screens} />
         </div>
       )}
       {kind === "files" && (
@@ -1590,6 +1636,16 @@ export function Chat({
               live={agents.some((a) => a.status === "running")}
             >
               <LuBot />
+            </PanelToggle>
+          )}
+          {(background.screens.length > 0 || screensOpen) && (
+            <PanelToggle
+              open={screensOpen}
+              onClick={() => setScreensOpen((v) => !v)}
+              label={t("Screens")}
+              title={screensOpen ? t("Hide the screens") : t("What the extensions of this chat show")}
+            >
+              <LuLayoutDashboard />
             </PanelToggle>
           )}
           {browserUp && (
@@ -2019,7 +2075,7 @@ export function Chat({
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
         {/* Scrolled up to read, the way back to the end is one click rather
             than a long drag — and during a run, where the new output is. */}
-        {scroller.away && !loading && matches.length === 0 && (
+        {scroller.away && !loading && !listed && (
           <button
             ref={jumpRef}
             type="button"
@@ -2033,13 +2089,37 @@ export function Chat({
             {running ? t("Latest output") : t("Jump to the end")}
           </button>
         )}
-        {matches.length > 0 && (
+        {listed && (
           <div
             ref={paletteRef}
             role="listbox"
-            aria-label={t("Commands")}
+            aria-label={argMatches.length > 0 ? t("Suggestions") : t("Commands")}
             className="float-in absolute bottom-full left-0 right-0 mb-2 max-h-[min(18rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop"
           >
+            {argMatches.map((c, i) => (
+              <button
+                key={c.value}
+                type="button"
+                role="option"
+                aria-selected={i === picked}
+                onMouseEnter={() => setPicked(i)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  completeArgument(c);
+                }}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left transition ${i === picked ? "bg-fg/5" : ""}`}
+              >
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-mono text-xs text-accent">{c.value}</span>
+                  {c.detail && <span className="truncate text-[11px] text-fg-subtle">{c.detail}</span>}
+                </span>
+                {c.notes?.map((note) => (
+                  <span key={note} className="shrink-0 rounded-full border border-line px-1.5 text-[10px] text-fg-muted">
+                    {labelOf(ARGUMENT_NOTES, note)}
+                  </span>
+                ))}
+              </button>
+            ))}
             {matches.map((c, i) => (
               <button
                 key={c.name}
@@ -2149,6 +2229,26 @@ export function Chat({
             void addFiles(files);
           }}
           onKeyDown={(e) => {
+            // The values a command's argument may take, listed above the box: the same keys, and
+            // Enter and Tab put the lit one in the box. What is sent is then what the box holds.
+            if (argMatches.length > 0 && !isComposing(e)) {
+              const chosen = argMatches[Math.min(picked, argMatches.length - 1)];
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setPicked((i) => moveHighlight(i, e.key === "ArrowDown" ? 1 : -1, argMatches.length));
+                return;
+              }
+              if ((e.key === "Tab" && !e.shiftKey) || (isEnter(e) && !e.shiftKey)) {
+                e.preventDefault();
+                completeArgument(chosen);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setPaletteShut(true);
+                return;
+              }
+            }
             if (matches.length > 0 && !isComposing(e)) {
               const chosen = matches[Math.min(picked, matches.length - 1)];
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -2197,7 +2297,7 @@ export function Chat({
                 key: e.key,
                 running,
                 composing: isComposing(e),
-                paletteOpen: matches.length > 0,
+                paletteOpen: listed,
               })
             ) {
               e.preventDefault();

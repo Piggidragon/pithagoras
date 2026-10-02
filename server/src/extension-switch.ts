@@ -99,7 +99,7 @@ export function packageLabel(source: string): string | undefined {
  * switched off entirely does. With `autoload: false` only what its list names
  * is loaded, so no list is no extensions.
  */
-function loadsExtensions(entry: unknown): boolean {
+export function loadsExtensions(entry: unknown): boolean {
   if (!entry || typeof entry !== "object") return true;
   const o = entry as Record<string, unknown>;
   if (o.autoload === false) return Array.isArray(o.extensions) && o.extensions.length > 0;

@@ -54,6 +54,8 @@ COPY channels channels
 # Skills the portal ships. Loaded from here for every session; anything the
 # agent writes goes to the data volume instead.
 COPY skills skills
+# The slash commands the portal ships (prompt templates), loaded the same way.
+COPY prompts prompts
 # The opt-in pi extensions the portal ships (the subagent tool). Nothing loads
 # them until a feature is switched on in Settings → Add-ons, which installs one
 # as a local pi package pointing here.
