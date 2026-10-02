@@ -18,7 +18,7 @@ import { pictureIn } from "./show-image-tool.js";
 
 /**
  * Changing a picture that is in the chat's folder, with the image endpoint the
- * person set up in Settings → Add-ons → Images, and putting the result in front
+ * person set up in Settings → Images, and putting the result in front
  * of them. The same call makes a new picture from one or several pictures used
  * as references: the route has no other way to take pictures in, so there is no
  * second tool for it.

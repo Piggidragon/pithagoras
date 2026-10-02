@@ -588,7 +588,7 @@ export default function (pi: any) {
 
 test("image generation: only the portal's own generate_image is told from an extension's, whatever the extension is called", async () => {
   const { saveImageGeneration } = await import("../dist/image-generation.js");
-  const { remembered, rememberTools, shownTools } = await import("../dist/db.js");
+  const { knownTools, portalOwned, remembered, rememberTools, shownTools } = await import("../dist/db.js");
   const folder = path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "image-generation");
   const listed = async (client) => (await client.getTools()).find((t) => t.name === "generate_image");
   const menu = () => shownTools().some((t) => t.name === "generate_image");
@@ -609,6 +609,8 @@ export default function (pi: any) {
       assert.equal(tool.inline, undefined);
       rememberTools((await theirs.getTools()).map(remembered));
       assert.equal(menu(), true, "their tool stays in the menus while the add-on is off");
+      // Under the portal's label, but reported as not its own: the settings pages keep it with the extension.
+      assert.equal(portalOwned(knownTools().find((t) => t.name === "generate_image")), false);
     } finally {
       theirs.dispose();
     }

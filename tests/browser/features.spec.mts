@@ -287,15 +287,15 @@ test('forgetting the memory asks first', async ({ page }) => {
   expect(sent.at(-1)!.path).toBe('/api/features/understory/install?memory=forget');
 });
 
-test('the five add-on tabs fit a phone', async ({ page }) => {
+test('the four add-on tabs fit a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await portal(page);
   await page.goto('/settings/add-ons');
   const tabs = addons(page).getByRole('tab');
-  await expect(tabs).toHaveCount(5);
+  await expect(tabs).toHaveCount(4);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
-  for (const name of ['Browser', 'Voice', 'Subagents', 'Memory', 'Images']) await expect(addons(page).getByRole('tab', { name })).toBeVisible();
+  for (const name of ['Browser', 'Voice', 'Subagents', 'Memory']) await expect(addons(page).getByRole('tab', { name })).toBeVisible();
 });
 
 test("a tidy-up that fails says why, not the status it came with", async ({ page }) => {
@@ -329,9 +329,8 @@ test("the Subagents tab opens whatever Docker's state: it asks nothing of it", a
 
 test('image generation needs an endpoint before it can be switched on, and the key is sent once and never shown again', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/add-ons');
-  await addons(page).getByRole('tab', { name: 'Images' }).click();
-  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  await page.goto('/settings/images');
+  const panel = addons(page);
   const tool = panel.getByRole('switch', { name: 'Image generation tool' });
   await expect(tool).toHaveAttribute('aria-checked', 'false');
   await expect(tool).toBeDisabled();
@@ -389,9 +388,8 @@ test('the Images page is in the sidebar while image generation is on, and the sw
 
 test('image editing has a switch and an endpoint of its own: it needs an address, may use the one above, and its key is sent once', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/add-ons');
-  await addons(page).getByRole('tab', { name: 'Images' }).click();
-  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  await page.goto('/settings/images');
+  const panel = addons(page);
   const editing = panel.getByRole('switch', { name: 'Image editing tool' });
   await expect(editing).toHaveAttribute('aria-checked', 'false');
   await expect(editing).toBeDisabled();
@@ -444,9 +442,8 @@ test('image editing has a switch and an endpoint of its own: it needs an address
 
 test('several pictures per edit is a switch of its own that waits for the editing address, and says what the tool takes', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/add-ons');
-  await addons(page).getByRole('tab', { name: 'Images' }).click();
-  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  await page.goto('/settings/images');
+  const panel = addons(page);
   const several = panel.getByRole('switch', { name: 'Several pictures per edit' });
   await expect(several).toHaveAttribute('aria-checked', 'false');
   await expect(panel.getByText('Off: edit_image takes one picture.')).toBeVisible();
@@ -474,4 +471,28 @@ test('several pictures per edit is a switch of its own that waits for the editin
   await several.click();
   await expect(several).toHaveAttribute('aria-checked', 'false');
   expect(sent.at(-1)!.body).toEqual({ editMultiple: false });
+});
+
+test('the Images page holds the image settings and no switch for the tools themselves', async ({ page }) => {
+  await portal(page);
+  await page.goto('/settings/images');
+  const here = addons(page);
+  await expect(here.getByRole('switch', { name: 'Image generation tool' })).toBeVisible();
+  await expect(here.getByRole('switch', { name: 'Image editing tool' })).toBeVisible();
+  await expect(here.getByRole('switch', { name: 'Several pictures per edit' })).toBeVisible();
+  // The tools are switched in the tool lists, in their one group.
+  await expect(here.getByText('Picture tools', { exact: true })).toHaveCount(0);
+  for (const name of ['show_image', 'generate_image', 'edit_image']) await expect(here.getByRole('switch', { name: `${name} in new chats` })).toHaveCount(0);
+  // Settings → Add-ons has no Images tab.
+  await page.goto('/settings/add-ons');
+  await expect(here.getByRole('tab', { name: 'Images' })).toHaveCount(0);
+});
+
+test('the Images section fits a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await portal(page);
+  await page.goto('/settings/images');
+  await expect(addons(page).getByRole('switch', { name: 'Image editing tool' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  expect(await addons(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });

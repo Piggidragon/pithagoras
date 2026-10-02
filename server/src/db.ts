@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
-import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL, imageEditingReady, imageGenerationReady } from "./image-generation.js";
+import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
@@ -1857,8 +1857,11 @@ export interface KnownTool {
    * entry remembered before this was recorded.
    */
   package?: string | null;
-  /** Registered by one of the portal's own inline extensions, which nothing of anyone's can be mistaken for. */
-  inline?: true;
+  /**
+   * Registered by one of the portal's own inline extensions, which nothing of anyone's can be mistaken for.
+   * Every report says it, one way or the other; absent only in an entry remembered before this was recorded.
+   */
+  inline?: boolean;
 }
 
 /** A tool a session reported, as it is remembered. */
@@ -1867,7 +1870,7 @@ export const remembered = (t: { name: string; source: string; description?: stri
   source: t.source,
   description: t.description,
   package: t.package ?? null,
-  ...(t.inline ? { inline: true as const } : {}),
+  inline: t.inline === true,
 });
 
 /**
@@ -1922,7 +1925,7 @@ export function knownTools(): KnownTool[] {
         source: String(t.source ?? ""),
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
         ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
-        ...(t.inline === true ? { inline: true as const } : {}),
+        ...(typeof t.inline === "boolean" ? { inline: t.inline } : {}),
       }));
   } catch {
     return [];
@@ -1937,7 +1940,7 @@ export function knownTools(): KnownTool[] {
  * For a chat, `folder` is where it runs, whose project may bring packages of
  * its own.
  */
-export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline">[] {
+export function shownTools(folder?: string): (Omit<KnownTool, "package" | "inline"> & { inline?: true })[] {
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
   // The portal's own tools belong to no package, so the packages cannot say
   // that one is not offered: image generation and image editing say so
@@ -1947,11 +1950,46 @@ export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline
   // called image-generation.ts has the label the portal's factory has.
   const images = imageGenerationReady();
   const editing = imageEditingReady();
-  return knownTools()
-    .filter(toolAvailability(readPiSettings().packages, project))
+  const available = knownTools().filter(toolAvailability(readPiSettings().packages, project));
+  return [...available, ...notYetSeen(available, images, editing)]
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
     .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))
-    .map(({ package: _package, inline: _inline, ...tool }) => tool);
+    .map((known) => {
+      const { package: _package, inline: _inline, ...tool } = known;
+      return portalOwned(known) ? { ...tool, inline: true as const } : tool;
+    });
+}
+
+/**
+ * The portal's own tools that a setting just made, for the lists to show before any chat has reported them.
+ *
+ * What the lists show is what a chat once registered, and one that is open while the add-on is switched on
+ * registers the tool after a reload without telling anyone. The tool is the portal's, so the lists know it
+ * without waiting; a tool of the same name that a chat has reported, an extension's included while its package is on, is kept as it is.
+ */
+function notYetSeen(available: KnownTool[], images: boolean, editing: boolean): KnownTool[] {
+  // Of the tools that can be loaded: an extension's of the same name in a package that is switched off is not, and the portal's is then the one chats have.
+  const seen = new Set(available.map((tool) => tool.name));
+  const wanted: [string, string, boolean][] = [
+    [GENERATE_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, images],
+    [EDIT_IMAGE_TOOL, EDIT_IMAGE_SOURCE, editing],
+  ];
+  return wanted.filter(([name, , ready]) => ready && !seen.has(name)).map(([name, source]) => ({ name, source, package: null, inline: true }));
+}
+
+/** What the portal files its own picture tools under, by name. Read when asked: image-generation.ts imports this module. */
+const pictureSource = (name: string): string | undefined =>
+  ({ show_image: SHOW_IMAGE_SOURCE, [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE, [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE } as Record<string, string>)[name];
+
+/**
+ * Whether the portal registered this tool itself, for the pages to group its picture tools apart from an extension's of the same name.
+ *
+ * An entry remembered before `inline` was recorded has no mark at all, so a picture tool of no package,
+ * filed under the label the portal files it under, counts too. A report always carries the mark, `false`
+ * for an extension's tool, so a loose file called image-generation.ts is never taken for the portal's.
+ */
+export function portalOwned(tool: KnownTool): boolean {
+  return tool.inline === true || (tool.inline === undefined && typeof tool.package !== "string" && pictureSource(tool.name) === tool.source);
 }
 
 /** The keys of the packages pi's settings list, or undefined when they cannot be read. */
@@ -2041,7 +2079,7 @@ export function rememberTools(reported: KnownTool[]): void {
       source: tool.source,
       ...(description ? { description } : {}),
       ...(pkg !== undefined ? { package: pkg } : {}),
-      ...(tool.inline ? { inline: true as const } : {}),
+      ...(tool.inline !== undefined ? { inline: tool.inline } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));

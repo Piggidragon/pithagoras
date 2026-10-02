@@ -190,6 +190,8 @@ export interface PortalTool {
   enabled: boolean;
   /** Whether it is on by default, so a chat can show where it disagrees. */
   defaultOn?: boolean;
+  /** One of the portal's own, not an extension's of the same name: the list groups its picture tools. */
+  inline?: true;
 }
 
 /** A picture going with a message: a data: URL, which the box also shows it from. */
@@ -440,7 +442,7 @@ export const api = {
   /** Every tool the portal has seen, for setting a default without opening a chat. */
   toolDefaults: () =>
     json<{
-      tools: { name: string; source: string; defaultOn: boolean }[];
+      tools: { name: string; source: string; defaultOn: boolean; inline?: true }[];
       off: string[];
       names: Record<string, string>;
     }>("/api/tools"),

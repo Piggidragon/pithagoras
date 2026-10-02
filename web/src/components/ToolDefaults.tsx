@@ -20,7 +20,7 @@ import { t } from "../i18n";
  * wrong way round.
  */
 export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
-  const [tools, setTools] = useState<{ name: string; source: string }[]>([]);
+  const [tools, setTools] = useState<{ name: string; source: string; inline?: true }[]>([]);
   const [off, setOff] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   /** Why there is nothing to switch here, where the deployment cannot do it. */
