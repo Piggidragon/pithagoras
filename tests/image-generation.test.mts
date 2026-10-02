@@ -11,7 +11,7 @@ process.env.SESSION_DIR = path.join(temp, "sessions");
 process.env.PI_CODING_AGENT_DIR = path.join(temp, "agent");
 process.env.AGENT_HOME = path.join(temp, "agent-home");
 
-const { putSetting } = await import("../server/src/db.ts");
+const { getSetting, putSetting } = await import("../server/src/db.ts");
 const gen = await import("../server/src/image-generation.ts");
 const { GENERATED_PICTURE_MARK } = await import("../server/src/generated-picture.ts");
 const { GenerateImageTool, GENERATED_DIR, takenByAnother } = await import("../server/src/pi/generate-image-tool.ts");
@@ -849,6 +849,16 @@ test("the time limit is a setting: five minutes without one, whole seconds from 
   assert.equal(gen.imageEditingTarget().timeoutSeconds, 900, "generation and editing share it");
   gen.saveImageGeneration({ model: "m" });
   assert.equal(gen.imageGenerationConfig().timeoutSeconds, 900, "another change leaves it");
+
+  // Saving something else does not store the default as if it had been chosen: a setup that never chose one keeps getting the default of the day.
+  reset();
+  putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https://images.example.com/v1" }));
+  gen.saveImageGeneration({ model: "m" });
+  assert.ok(!("timeoutSeconds" in JSON.parse(getSetting("image_generation")!)), "not written");
+  gen.saveImageGeneration({ timeoutSeconds: 300 });
+  assert.equal(JSON.parse(getSetting("image_generation")!).timeoutSeconds, 300, "written once chosen");
+  gen.saveImageGeneration({ model: "n" });
+  assert.equal(JSON.parse(getSetting("image_generation")!).timeoutSeconds, 300, "and kept");
 
   // A setup saved before there was a limit, or with one that is no limit, gets the default.
   putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https://images.example.com/v1" }));

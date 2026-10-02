@@ -383,6 +383,9 @@ test('the time limit of a picture is a field of the image endpoint: five minutes
   await expect(save).toBeDisabled();
   await field.fill('4000');
   await expect(save).toBeDisabled();
+  // Empty is the default, which is what the placeholder says: it saves as the rest does.
+  await field.fill('');
+  await expect(save).toBeEnabled();
   await field.fill('900');
   await expect(save).toBeEnabled();
   await save.click();

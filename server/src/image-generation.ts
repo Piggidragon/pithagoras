@@ -73,14 +73,19 @@ const text = (v: unknown): string => (typeof v === "string" ? v : "");
 export const TIMEOUT_SECONDS = { default: 300, min: 30, max: 3600 };
 const validTimeout = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= TIMEOUT_SECONDS.min && (v as number) <= TIMEOUT_SECONDS.max;
 
-export function imageGenerationConfig(): ImageGenerationConfig {
-  let raw: Record<string, unknown> = {};
+/** What is saved, as it is: without the defaults the config fills in. */
+function savedSettings(): Record<string, unknown> {
   try {
     const parsed = JSON.parse(getSetting(KEY) || "{}");
-    if (parsed && typeof parsed === "object") raw = parsed;
+    if (parsed && typeof parsed === "object") return parsed;
   } catch {
     // Unreadable is as good as nothing saved.
   }
+  return {};
+}
+
+export function imageGenerationConfig(): ImageGenerationConfig {
+  const raw = savedSettings();
   return {
     enabled: raw.enabled === true,
     baseUrl: text(raw.baseUrl),
@@ -242,7 +247,9 @@ export function saveImageGeneration(patch: ImageGenerationPatch): ImageGeneratio
   if (patch.editMultiple === undefined && movedEdits) next.editMultiple = false;
   if (next.enabled && !next.baseUrl) throw new ImageGenerationError("Set the address of the image endpoint before switching it on");
   if (next.editEnabled && !(next.editBaseUrl || next.baseUrl)) throw new ImageGenerationError("Set the address of the image endpoint before switching editing on");
-  putSetting(KEY, JSON.stringify(next));
+  // The default stays unsaved until a limit is chosen, so that it is the default of the day for every setup that never chose one.
+  const { timeoutSeconds, ...rest } = next;
+  putSetting(KEY, JSON.stringify(patch.timeoutSeconds !== undefined || "timeoutSeconds" in savedSettings() ? next : rest));
   return next;
 }
 
@@ -367,7 +374,6 @@ async function post(endpoint: URL, apiKey: string, body: string | FormData, sign
       {
         method: "POST",
         signal,
-        agent: false,
         headers: { ...(type ? { "content-type": type } : {}), "content-length": bytes.length, accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
       },
       (res) => {
