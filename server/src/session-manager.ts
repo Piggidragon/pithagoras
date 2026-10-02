@@ -2176,12 +2176,13 @@ class SessionManager extends EventEmitter {
     //
     // Except when nothing is running to have registered anything: the page
     // that is answering was drawn while it was, and the tools it showed are the
-    // ones the portal has seen. Without them a tool switched *on* would be in
-    // neither list, no exception would be written, and the write would answer
-    // 200 while the tool went on following the default.
+    // ones the portal lists (shownTools, which is what getTools shows an idle
+    // chat). Without them a tool switched *on* would be in neither list, no
+    // exception would be written, and the write would answer 200 while the
+    // tool went on following the default.
     const held = sessionTools(sessionId);
     const answered = [
-      ...(listed.length ? listed.map((t) => t.name) : knownTools().map((t) => t.name)),
+      ...(listed.length ? listed : shownTools(getSession(sessionId)?.workspace)).map((t) => t.name),
       ...held.off,
       ...held.on,
     ];

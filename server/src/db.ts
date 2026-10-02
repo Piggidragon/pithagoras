@@ -1904,8 +1904,8 @@ export function shownTools(folder?: string): (Omit<KnownTool, "package" | "inlin
   // called image-generation.ts has the label the portal's factory has.
   const images = imageGenerationReady();
   const editing = imageEditingReady();
-  return [...knownTools(), ...notYetSeen(images, editing)]
-    .filter(toolAvailability(readPiSettings().packages, project))
+  const available = knownTools().filter(toolAvailability(readPiSettings().packages, project));
+  return [...available, ...notYetSeen(available, images, editing)]
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
     .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))
     .map((known) => {
@@ -1919,10 +1919,11 @@ export function shownTools(folder?: string): (Omit<KnownTool, "package" | "inlin
  *
  * What the lists show is what a chat once registered, and one that is open while the add-on is switched on
  * registers the tool after a reload without telling anyone. The tool is the portal's, so the lists know it
- * without waiting; a tool of the same name that a chat has reported, an extension's included, is kept as it is.
+ * without waiting; a tool of the same name that a chat has reported, an extension's included while its package is on, is kept as it is.
  */
-function notYetSeen(images: boolean, editing: boolean): KnownTool[] {
-  const seen = new Set(knownTools().map((tool) => tool.name));
+function notYetSeen(available: KnownTool[], images: boolean, editing: boolean): KnownTool[] {
+  // Of the tools that can be loaded: an extension's of the same name in a package that is switched off is not, and the portal's is then the one chats have.
+  const seen = new Set(available.map((tool) => tool.name));
   const wanted: [string, string, boolean][] = [
     [GENERATE_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, images],
     [EDIT_IMAGE_TOOL, EDIT_IMAGE_SOURCE, editing],
