@@ -17,6 +17,12 @@ import { ghostCls, inputCls, primaryCls } from "./SettingsUi";
 /** What an edit takes in: what the editing endpoints are known to read, the same as the portal checks by the bytes. */
 const ACCEPT = IMAGE_TYPES.join(",");
 
+/** What is said of pictures that were put in and not taken: there was no room, or the editing endpoint takes one. */
+export const leftOutText = (left: number, multiple: boolean): string =>
+  multiple
+    ? tp(left, "One picture was left out: an edit takes at most {max}.", "{n} pictures were left out: an edit takes at most {max}.", { max: MAX_SOURCES })
+    : tp(left, "One more picture was left out: this editing endpoint takes one picture per edit.", "{n} more pictures were left out: this editing endpoint takes one picture per edit.");
+
 /**
  * Where a picture is made or changed: a description and a button, with the
  * settings of the request under "Options". With pictures to change it is an
@@ -70,6 +76,7 @@ export function ImageMaker({
   const [looking, setLooking] = useState<string | null>(null);
   const mask = useRef<MaskHandle>(null);
   const file = useRef<HTMLInputElement>(null);
+  const upload = useRef<HTMLButtonElement>(null);
 
   const editing = sources.length > 0;
   const multiple = features.editMultiple;
@@ -101,8 +108,9 @@ export function ImageMaker({
     if (!todo) return;
     if ("gone" in todo) {
       // The picture that took its place, or the one before it where it was the last; with none left, the description, where the next thing is typed.
+      // Where only changing is set up there is no description, and the button that puts a picture in is where the next thing is done.
       const looks = row.current?.querySelectorAll<HTMLElement>("[data-source-id]");
-      (looks?.length ? looks[Math.min(todo.gone, looks.length - 1)] : promptRef.current)?.focus();
+      (looks?.length ? looks[Math.min(todo.gone, looks.length - 1)] : (promptRef.current ?? upload.current))?.focus();
       return;
     }
     const button = (by: -1 | 1) => row.current?.querySelector<HTMLButtonElement>(`[data-move="${by}"][data-move-id="${CSS.escape(todo.moved.id)}"]`);
@@ -159,19 +167,16 @@ export function ImageMaker({
         problems.push((e as Error).message);
       }
     }
+    // The row may have filled meanwhile, from the gallery's viewer: what was uploaded and does not fit is in the gallery, and said to be left out.
+    let late = 0;
     if (got.length) {
       onUploaded(got[0]);
-      const { list } = addSources(sourcesNow.current, got, multiple);
-      sourcesNow.current = list;
-      onSources(list);
+      const added = addSources(sourcesNow.current, got, multiple);
+      late = added.left;
+      sourcesNow.current = added.list;
+      onSources(added.list);
     }
-    if (left > 0) {
-      setNotice(
-        multiple
-          ? tp(left, "One picture was left out: an edit takes at most {max}.", "{n} pictures were left out: an edit takes at most {max}.", { max: MAX_SOURCES })
-          : tp(left, "One more picture was left out: this editing endpoint takes one picture per edit.", "{n} more pictures were left out: this editing endpoint takes one picture per edit."),
-      );
-    }
+    if (left + late > 0) setNotice(leftOutText(left + late, multiple));
     if (problems.length) setError(problems.join(" "));
   };
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -466,7 +471,7 @@ export function ImageMaker({
             />
             {/* With pictures to work from and room for more, the add button is in their row. */}
             {!(editing && multiple) && (
-              <button type="button" onClick={() => file.current?.click()} disabled={adding > 0} className={ghostCls}>
+              <button ref={upload} type="button" onClick={() => file.current?.click()} disabled={adding > 0} className={ghostCls}>
                 {adding > 0 ? <LuLoader aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <LuUpload aria-hidden className="h-3.5 w-3.5" />}
                 {t("Change a picture from this computer")}
               </button>

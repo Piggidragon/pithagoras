@@ -81,7 +81,8 @@ the editing endpoint with the model set for it, and the options above do not app
   - **The limit.** The header of the row shows how many there are of the eight. At eight the
     **Add** button goes until one is taken out, **Use as a reference** is greyed out for a
     ninth, with the reason as its tooltip, and pictures that did not fit — in a pick, a drop or a paste — are **not uploaded** and are
-    said to be left out, never dropped without a word. Together they may weigh 50 MB; a row that weighs more
+    said to be left out, never dropped without a word (if the row filled up while a pick was still being
+    uploaded, say from the viewer, the one that no longer fits stays in the gallery and is said to be left out). Together they may weigh 50 MB; a row that weighs more
     says so, and **Change the picture** waits.
   - **An endpoint that takes one.** With the switch off, the form works with one picture:
     a picture you add or drop takes the place of the one there is, any others in the same pick are
@@ -150,7 +151,7 @@ Beside its own buttons, the viewer has these for a gallery picture:
 **Select all shown** takes what is on screen. **Download** saves each selected picture
 as a file of its own — the browser may ask once whether this page may download several —
 **Edit the selected** makes them the pictures of an [edit](#changing-a-picture), in the order
-they were ticked (the first eight; the rest are said to be left out), where editing is set up,
+they were ticked (the first eight, or only the first where the endpoint takes one; the rest are said to be left out), where editing is set up,
 and **Delete** takes them away after asking. What is selected belongs to what is shown: a
 change of filter, or **Back** to another one, clears it, so that nothing that is not on
 screen is deleted with what is. `Esc` or **Done** ends selecting.

@@ -438,6 +438,8 @@ test("an edit of several pictures from the page holds each one to the maximum si
     const [refused] = await settled();
     assert.equal(refused.state, "failed");
     assert.match(refused.error, /^Picture 2 is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit\. Nothing was sent\./);
+    // The way to the limit is where the person finds it: Settings → Agent → Images, not a page that is not there.
+    assert.match(refused.error, /the limit is set in Settings → Agent → Images\.$/);
     assert.equal(seen.length, 0, "none of the three was sent");
 
     // Raised, the same three go in one request, in the order given.

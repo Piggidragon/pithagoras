@@ -245,6 +245,14 @@ What was decided for it:
   cut:** the endpoint gets the picture that is in the folder or nothing, and
   where its own limit is lower it says so in its answer, which is passed on
   without the key.
+- **A picture attached to a message is not in the folder.** Pictures pasted,
+  dropped or picked in the message box go to the model with the message and are
+  kept beside the chat, not in its folder, so `edit_image` has no path for them.
+  The tool's description says so: the agent tells you and asks you to put the
+  picture in the chat's folder (the Files panel), or to change it on the
+  [Images page](/guide/images#changing-a-picture), rather than guess a path or
+  edit another picture. Taking attached pictures straight into an edit is not
+  built.
 - **A picture beyond the maximum size is refused, naming the limit.** With a
   **Maximum picture size** set, a picture (or mask) with more pixels than it is
   not sent: the portal reads its size from its header, makes no request, and

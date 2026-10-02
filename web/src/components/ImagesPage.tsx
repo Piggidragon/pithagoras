@@ -11,7 +11,7 @@ import { sinceThen } from "../time";
 import { formatDateTime, msg, t, tp } from "../i18n";
 import { useNow } from "./ChatActivity";
 import { confirmDialog } from "./ConfirmDialog";
-import { ImageMaker } from "./ImageMaker";
+import { ImageMaker, leftOutText } from "./ImageMaker";
 import { ImagePreview, type PreviewState } from "./ImagePreview";
 import { ImageViewer } from "./ImageViewer";
 import { PageHeader, Stat } from "./PageHeader";
@@ -367,9 +367,11 @@ export function ImagesPage() {
   const editSelected = () => {
     const chosen = [...picked].map((id) => byId.get(id)).filter((p): p is GalleryPicture => !!p);
     if (!chosen.length) return;
-    const { list, left } = addSources([], chosen, true);
+    // As the form takes pictures in: where the endpoint takes one, the first of them is what is changed, and the rest is said to be left out.
+    const multiple = !!features?.editMultiple;
+    const { list, left } = addSources([], chosen, multiple);
     setSources(list);
-    setError(left > 0 ? tp(left, "One picture was left out: an edit takes at most {max}.", "{n} pictures were left out: an edit takes at most {max}.", { max: MAX_SOURCES }) : null);
+    setError(left > 0 ? leftOutText(left, multiple) : null);
     stopSelecting();
     toForm();
   };

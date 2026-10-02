@@ -846,6 +846,18 @@ test('moving or removing a picture from the keyboard leaves focus in the row, so
   await expect(page.getByPlaceholder('Describe the picture')).toBeFocused();
 });
 
+test('taking out the only picture from the keyboard, where only changing is set up, leaves focus on the button that puts one in', async ({ page }) => {
+  await portal(page, { images: feature({ enabled: false, baseUrl: '', editBaseUrl: 'https://edits.example.com/v1' }) });
+  await page.goto('/images');
+  await page.getByLabel('Upload a picture').setInputFiles([png('only.png')]);
+  await expect.poll(() => names(page)).toEqual(['only.png']);
+  await strip(page).getByRole('button', { name: 'Remove only.png' }).focus();
+  await page.keyboard.press('Enter');
+  // No description is there to go to, and focus is not lost to the top of the page.
+  await expect(page.getByPlaceholder('Describe the change: what to add, remove or make different')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Change a picture from this computer' })).toBeFocused();
+});
+
 test('pictures dropped on the form are added after the ones there, and a drop shows where it will go', async ({ page }) => {
   const p = await portal(page, { images: feature({ editMultiple: true }) });
   await page.goto('/images');
@@ -922,6 +934,33 @@ test('at most eight pictures go into an edit: the rest of a pick is not uploaded
   await expect(strip(page).getByRole('button', { name: 'Add pictures from this computer' })).toHaveCount(0);
   await strip(page).getByRole('button', { name: 'Remove q2.png' }).click();
   await expect(strip(page).getByRole('button', { name: 'Add pictures from this computer' })).toBeVisible();
+});
+
+test('pictures that were uploaded while the row filled up from the viewer are said to be left out, not dropped without a word', async ({ page }) => {
+  const extra = pic({ prompt: 'Zeta' });
+  const p = await portal(page, { pictures: [extra], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await page.getByLabel('Upload a picture').setInputFiles(Array.from({ length: 6 }, (_, i) => png(`p${i + 1}.png`)));
+  await expect.poll(() => names(page)).toHaveLength(6);
+  // Two more are on their way up, slowly, and there is room for both when they set out.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/images/upload*', async (route) => {
+    await gate;
+    await route.fallback();
+  });
+  await drop(maker(page), ['q1.png', 'q2.png']);
+  await expect(maker(page).getByRole('status').filter({ hasText: 'Adding…' })).toBeAttached();
+  // Meanwhile the viewer takes a seventh, so that only one of the two fits.
+  await tile(page, 'Zeta').click();
+  await viewer(page).getByRole('button', { name: 'Use as a reference' }).click();
+  await page.keyboard.press('Escape');
+  await expect.poll(() => names(page)).toHaveLength(7);
+  release();
+  await expect.poll(() => names(page)).toEqual(['p1.png', 'p2.png', 'p3.png', 'p4.png', 'p5.png', 'p6.png', 'Zeta', 'q1.png']);
+  await expect(maker(page).getByRole('status').filter({ hasText: 'One picture was left out: an edit takes at most 8.' })).toBeVisible();
+  // It is in the gallery, as every upload is; it is the notice that tells it was not taken.
+  expect(p.state.uploads.map((u) => u.name)).toContain('q2.png');
 });
 
 test('where the endpoint takes one picture, a picture put in replaces it, the extra ones are said to be left out, and the setting is named', async ({ page }) => {
@@ -1029,6 +1068,24 @@ test('pictures ticked in the gallery are what an edit works from, in the order t
   await page.getByRole('button', { name: 'Change the picture' }).click();
   await expect.poll(() => p.state.edited.length).toBe(1);
   expect(p.state.edited[0].sources).toHaveLength(8);
+});
+
+test('pictures ticked in the gallery for an endpoint that takes one: the first is what is changed, and the rest is said to be left out', async ({ page }) => {
+  const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
+  const p = await portal(page, { pictures: [a, b, c] });
+  await page.goto('/images');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  for (const at of [1, 2, 0]) await page.getByRole('checkbox', { name: 'Select this picture' }).nth(at).check();
+  await page.getByRole('button', { name: 'Edit the selected' }).click();
+  await expect.poll(() => names(page)).toEqual(['Beta']);
+  // What this endpoint takes is said, and not the limit of one that takes several.
+  await expect(page.getByRole('alert').filter({ hasText: '2 more pictures were left out: this editing endpoint takes one picture per edit.' })).toBeVisible();
+  await expect(page.getByText(/an edit takes at most 8/)).toHaveCount(0);
+  // The form is not refused: it is one picture, and goes as it is.
+  await describe(page).fill('Make it night');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toEqual([b.id]);
 });
 
 test('the viewer takes no ninth picture as a reference, and says why', async ({ page }) => {

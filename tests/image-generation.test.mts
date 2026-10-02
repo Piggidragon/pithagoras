@@ -1290,6 +1290,8 @@ test("an agent whose endpoint takes one picture is told so, and what to do about
   assert.match(one.description, /do not make the edit with one of them as if it were all/, "no picture is dropped without a word");
   assert.match(one.description, /Settings → Agent → Images \(Several pictures per edit\)/, "and where several are switched on");
   assert.match(one.description, /reference for a new picture/, "one reference picture is still what it can be given");
+  const attached = /attached to a message is not a file in the chat's folder, so it cannot be given here[^]*Files panel[^]*Images page/;
+  assert.match(one.description, attached, "a picture only attached to a message has no path: the agent says so rather than guess one");
 
   // With several taken, the same sentence is not there, and the limits are: the count and the weight.
   gen.saveImageGeneration({ editMultiple: true });
@@ -1298,6 +1300,7 @@ test("an agent whose endpoint takes one picture is told so, and what to do about
   assert.match(many.description, new RegExp(`one to ${editing.MAX_EDIT_PICTURES} pictures`));
   assert.match(many.description, new RegExp(`at most ${editing.MAX_EDIT_TOTAL_BYTES / 1024 / 1024} MB`));
   assert.match(many.description, /size limit set for edits is refused, and the error names it/);
+  assert.match(many.description, attached, "and the same for a list: attached pictures cannot be named in it");
   reset();
 });
 
