@@ -37,8 +37,8 @@ Nothing is thrown away to be typed again.
 Paste a screenshot into the box, drop pictures on it, or pick them with the
 paperclip, and they wait above the words as thumbnails — the × takes one back
 out. They go to the model with the message, up to eight of them, and a message
-can be a picture alone. The sent message shows them; click one to open it
-full size.
+can be a picture alone. The sent message shows them; click one to
+[look at it in the viewer](#looking-at-a-picture).
 
 A photo straight off a phone is made smaller in the browser before it goes:
 2048 pixels on its longer side, as a JPEG. Models scale anything bigger down on
@@ -65,6 +65,47 @@ Two keys work from anywhere on the page:
 | --- | --- |
 | `/` | Jump to the message box with the command list open. Not while you are typing somewhere else, where it is a character. It is the [command character](/guide/commands#the-command-character), so it is another key if you chose one |
 | `Esc` | In the message box, **stop the run**. Only when the box is empty — the moment the send button is a stop button — so it can never cost you words |
+
+## Looking at a picture
+
+The pictures the agent shows with `show_image`, makes with `generate_image` or
+changes with `edit_image` are drawn under their tool line, in the middle of the
+conversation, with the same room above and below. A very wide or very tall one is
+smaller there, never cropped: the viewer shows it whole. The pictures you sent
+are in your message.
+
+A click or a tap on any of them opens it **in the viewer**, over the chat,
+fitted to the screen on a calm backdrop. The chat stays where it was: nothing
+opens in a tab of its own. The viewer covers the whole window, whatever panels
+are docked beside the conversation, and does not move them.
+
+- **Closing it.** The × button, `Esc`, a click beside the picture, or the
+  browser's **back** button — on a phone the way out, which here closes the viewer
+  and does not leave the chat. Focus returns to the picture it was opened from,
+  or to the one shown last.
+- **Looking closely.** The wheel and a pinch zoom in on the spot they are over;
+  a double click or double tap goes between the whole picture and its own size,
+  one screen pixel for one of the picture's; a drag moves a zoomed picture. The
+  buttons at the bottom do the same and say how far it is zoomed (`+`, `-` and
+  `0` on the keyboard). A picture smaller than the screen is shown at its own
+  size, not enlarged.
+- **Several pictures.** The arrows at the sides, `←` and `→`, or a swipe go
+  through every picture of the conversation in the order they came, the ones you
+  sent and the ones the agent showed, with the place in them at the top left.
+- **Its title.** What the agent called the picture is shown under it.
+- **An edit and what it came from.** When a picture was changed with
+  `edit_image` and the original was shown in the conversation too, **Original**
+  and **Edited version** at the top go from one to the other. For an edit made
+  from several pictures, the original is the first of them.
+- **The file itself.** The two icons at the top open the picture in a new tab or
+  download it. That is the only way a picture opens in a tab, and it is on purpose.
+
+The viewer is a dialog: the keyboard stays inside it (`Tab` goes round), and the
+page behind it does not scroll. It opens as quietly as every dialog does, and with
+**Settings → This browser → Animations** on it swings up out of the page and sinks
+away when it closes; with reduced motion asked for by the system it does not move
+at all (see [Animations](/guide/interface#animations)). Voice mode's Pictures
+window is its own place and works as before.
 
 ## Queued channel messages and questions
 
