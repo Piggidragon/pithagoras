@@ -1,4 +1,4 @@
-import { test, after } from "node:test";
+import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, get, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -413,6 +413,34 @@ test("an edit is made from pictures of the gallery, with a mask if one is given,
     assert.match(none.body.error, /no such picture/);
   } finally {
     server.close();
+    gone();
+  }
+});
+
+test("the pictures of the page are made within the time limit of the settings, generated and edited alike", async () => {
+  const { origin, server } = await answering();
+  await clearJobs();
+  const timeouts = mock.method(AbortSignal, "timeout");
+  const limits = () => timeouts.mock.calls.map((c) => c.arguments[0]);
+  try {
+    const source = (await call("POST", "/images/upload?name=a.png", undefined, { raw: png("limit") })).body.picture;
+    settings({ baseUrl: origin, editEnabled: true });
+    await call("POST", "/images/generate", { prompt: "no limit saved" });
+    await settled();
+    await call("POST", "/images/edit", { prompt: "no limit saved", sources: [source.id] });
+    await settled();
+    assert.deepEqual(limits(), [300_000, 300_000], "five minutes without a setting");
+
+    gen.saveImageGeneration({ timeoutSeconds: 900 });
+    await call("POST", "/images/generate", { prompt: "limit saved" });
+    await settled();
+    await call("POST", "/images/edit", { prompt: "limit saved", sources: [source.id] });
+    await settled();
+    assert.deepEqual(limits().slice(2), [900_000, 900_000], "the limit of the settings, read at each request");
+  } finally {
+    timeouts.mock.restore();
+    server.close();
+    gen.saveImageGeneration({ timeoutSeconds: null });
     gone();
   }
 });

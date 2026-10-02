@@ -39,6 +39,11 @@ picture comes of it. A picture that is not made says why in its frame, in the en
 words, and **Dismiss** takes it off the page. A restart of the portal ends the pictures
 that were being made; nothing is made of them.
 
+A picture has as long as the **Time limit** of the [image endpoint](/guide/features#the-endpoint)
+gives it: five minutes unless you set another, from 30 to 3600 seconds, the same for
+making and for changing a picture. When it runs out the frame says so, and the message
+names **Settings → Images**, where the limit is raised for a slow or local model.
+
 Each picture can cost money at a hosted endpoint, as it does for the agent.
 
 ## Changing a picture

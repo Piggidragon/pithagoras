@@ -63,7 +63,7 @@ const svg = (id: string, w = 800, h = 600) => {
 /** An ImagesFeature as the portal tells of it. */
 const feature = (over: Record<string, unknown> = {}) => ({
   enabled: true, baseUrl: 'https://images.example.com/v1', model: 'image-model', size: '1024x1024', keySet: true,
-  editEnabled: true, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, editReady: true, ...over,
+  editEnabled: true, editBaseUrl: '', editModel: '', editMultiple: false, timeoutSeconds: 300, editKeySet: false, editReady: true, ...over,
 });
 
 async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false } = {}) {
