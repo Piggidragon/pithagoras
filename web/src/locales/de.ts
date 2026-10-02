@@ -1597,6 +1597,14 @@ const de: Locale = {
     "Next picture": "Nächstes Bild",
     "Open the picture in a new tab": "Bild in einem neuen Tab öffnen",
     "Open in a new tab": "In neuem Tab öffnen",
+    // components/ImageViewer.tsx
+    "Picture viewer": "Bildbetrachter",
+    "Show the original": "Das Original zeigen",
+    "Original": "Original",
+    "Show the edited version": "Die bearbeitete Version zeigen",
+    "Edited version": "Bearbeitete Version",
+    "Download the picture": "Das Bild herunterladen",
+    "The picture could not be loaded.": "Das Bild konnte nicht geladen werden.",
     // components/VoiceProfile.tsx
     "Voice latency profiler": "Profiler der Sprachlatenz",
     "Voice latency": "Sprachlatenz",

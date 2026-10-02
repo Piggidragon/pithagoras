@@ -7,3 +7,4 @@ import "./styles/shell.css";
 import "./styles/stage.css";
 import "./styles/chat.css";
 import "./styles/motion.css";
+import "./styles/viewer.css";

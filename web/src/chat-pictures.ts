@@ -1,0 +1,63 @@
+import type { Item } from "./transcript";
+import { insideFolder } from "./file-activity";
+import type { ViewerPicture } from "./image-viewer";
+import { t } from "./i18n";
+
+/** Where a chat's pictures are fetched from: the portal's address for a sent one and for one in the folder. */
+export interface PictureUrls {
+  sent: (name: string) => string;
+  shown: (path: string, version: string) => string;
+}
+
+/** The id of a picture the person sent, and of one the agent showed, as the viewer is told. */
+export const sentPictureId = (itemId: string, name: string) => `sent:${itemId}:${name}`;
+export const shownPictureId = (itemId: string) => `shown:${itemId}`;
+
+/**
+ * Every picture in a conversation, oldest first: what the person sent and what
+ * the agent showed, made or changed. This is what the viewer steps through.
+ *
+ * A changed picture is tied to the one it was changed from when that was shown
+ * in the conversation too: the call says its path (the first of them, when it
+ * was given several), and the latest picture by that path before it is the one
+ * it started from. An original that never
+ * appeared here — a file the agent was told about, a picture it had not shown —
+ * has nothing to reach it, and the link is left out.
+ */
+export function chatPictures(items: Item[], folder: string, urls: PictureUrls): ViewerPicture[] {
+  const list: ViewerPicture[] = [];
+  const latestByPath = new Map<string, string>();
+  for (const item of items) {
+    if (item.kind === "user" && item.images) {
+      for (const image of item.images) {
+        list.push({ id: sentPictureId(item.id, image.name), src: urls.sent(image.name), alt: t("A picture sent with this message"), fileName: image.name });
+      }
+    } else if (item.kind === "tool" && item.picture) {
+      const { path, title } = item.picture;
+      const id = shownPictureId(item.id);
+      const changed = item.name === "edit_image" ? editedPath(item.args, folder) : undefined;
+      const from = changed && latestByPath.get(changed);
+      list.push({
+        id,
+        src: urls.shown(path, item.id),
+        alt: title ?? path,
+        ...(title ? { caption: title } : {}),
+        fileName: path.split("/").pop() || undefined,
+        ...(from ? { from } : {}),
+      });
+      const own = insideFolder(folder, path);
+      if (own) latestByPath.set(own, id);
+    }
+  }
+  return list;
+}
+
+/**
+ * The picture an edit_image call was given, as a path in the chat's folder: its one
+ * path, or the first of a list, which is the one the result is named after.
+ */
+function editedPath(args: unknown, folder: string): string | undefined {
+  const { path, paths } = (args ?? {}) as { path?: unknown; paths?: unknown };
+  const given = Array.isArray(paths) ? paths[0] : path;
+  return typeof given === "string" ? insideFolder(folder, given) : undefined;
+}

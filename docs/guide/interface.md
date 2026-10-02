@@ -51,7 +51,7 @@ default**:
   away when closed, and a panel carried to another place flies there from where
   you let go of it.
 - **Dialogs, menus and lists.** A dialog swings up out of the page and sinks
-  when it closes; a menu unrolls from its button, its lines one after another;
+  when it closes, and so does the picture viewer; a menu unrolls from its button, its lines one after another;
   a drop-down list does the same.
 - **Settings.** The side navigation comes in line by line, the page you pick
   slides in, and a switch's knob bounces.
