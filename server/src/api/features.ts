@@ -154,10 +154,11 @@ export function featuresRouter(): Router {
   /**
    * Only whether each is on: for the sidebar and every chat's menus, which
    * need no more. Reads two small files; nothing is asked of Understory or Docker.
+   * Images is on when it can make a picture: switched on, and with an address to ask.
    */
   router.get("/features/flags", (_req, res) => {
     try {
-      res.json({ subagent: { enabled: subagentState().enabled }, understory: { enabled: understoryOn() } });
+      res.json({ subagent: { enabled: subagentState().enabled }, understory: { enabled: understoryOn() }, images: { enabled: imageGenerationReady() } });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }

@@ -405,8 +405,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let switchedOff: () => ReadonlySet<string> = () => new Set(opts.toolsOff ?? []);
     // Whether the model has the tool is settled when pi loads it and by the tool switches: the rule says
     // so only while it has — and it is the portal's, not an extension's of the same name that pi keeps.
-    const imageTool = opts.sessionId ? new GenerateImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? []) : undefined;
-    const editTool = opts.sessionId ? new EditImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? []) : undefined;
+    const imageTool = opts.sessionId ? new GenerateImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
+    const editTool = opts.sessionId ? new EditImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
     const audioRule = new AudioRule(getVoiceInstructions, () =>
       [
         imageTool?.registered() && !switchedOff().has(GENERATE_IMAGE_TOOL) ? GENERATE_IMAGE_VOICE_LINE : "",

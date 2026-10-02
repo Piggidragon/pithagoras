@@ -47,6 +47,7 @@ import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { featuresRouter } from "./api/features.js";
+import { imagesRouter } from "./api/images.js";
 import { memoryRouter } from "./api/memory.js";
 import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
@@ -138,10 +139,12 @@ const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BY
 // An upload is the file itself, streamed to disk by its route, whatever type
 // the browser gave it — a .json file must not be read as a request.
 const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
+// An edit on the Images page may carry a mask, a picture: its route reads its own, after the login too.
+const IMAGE_EDIT_ROUTE = "/api/images/edit";
 const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => {
   // Understory's requests for a model carry whole conversations: its route reads its own.
-  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path.startsWith("/understory-llm/")) return next();
+  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path === IMAGE_EDIT_ROUTE || req.path.startsWith("/understory-llm/")) return next();
   smallJson(req, res, next);
 });
 app.use(cookieParser());
@@ -1314,6 +1317,7 @@ app.get("/api/sessions/:id/commands", async (req, res) => {
 app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
 app.use("/api", featuresRouter());
+app.use("/api", imagesRouter());
 app.use("/api", memoryRouter());
 app.use("/api", channelsRouter());
 app.use("/api", routinesRouter());

@@ -342,6 +342,29 @@ export function getDb(): Database.Database {
       PRIMARY KEY (session_id, id)
     );
 
+    -- The pictures of the Images page: the ones it made itself, which are files
+    -- in the portal's own images folder, and the ones the agent made in a chat
+    -- with generate_image or edit_image, which are files in that chat's folder
+    -- and are listed here as they are made (see image-gallery.ts). A row names
+    -- the file, never holds it; one whose file is gone is dropped when the
+    -- page next looks, and a chat's go with the chat. "path" is a file name in
+    -- the images folder for the page's, and a path from the chat's folder for
+    -- the agent's. "params" is what the request was made with, as JSON.
+    CREATE TABLE IF NOT EXISTS images (
+      id TEXT PRIMARY KEY,
+      origin TEXT NOT NULL,
+      session_id TEXT,
+      path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      prompt TEXT NOT NULL DEFAULT '',
+      params TEXT NOT NULL DEFAULT '{}',
+      source_id TEXT,
+      bytes INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_images_created ON images(created_at DESC, id DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_images_chat_file ON images(session_id, path) WHERE session_id IS NOT NULL;
+
     -- Logins signed out before they ran out, by the signature of their cookie.
     -- The cookie carries no state of its own, so without this a copy of one
     -- would go on working for the rest of its thirty days.
@@ -645,6 +668,8 @@ export function deleteSession(id: string): void {
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   d.prepare("DELETE FROM settings WHERE key = ?").run(`subagent_model:${id}`);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
+  // The pictures stay in the chat's folder, which is not the chat's to take away: only their place in the gallery goes.
+  d.prepare("DELETE FROM images WHERE session_id = ?").run(id);
 }
 
 /**

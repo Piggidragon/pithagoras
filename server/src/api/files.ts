@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, createReadStream, createWriteStream, fstatSync } from "node:fs";
 import path from "node:path";
-import express, { type Response, type Router } from "express";
+import express, { type Request, type Response, type Router } from "express";
 import { getSession } from "../db.js";
 import { unsavedRefusal } from "../git.js";
 import {
@@ -36,12 +36,41 @@ export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
 const STATUS = { invalid: 400, missing: 404, conflict: 409, exists: 409, too_large: 413, failed: 500, unsaved: 409 } as const;
 
-function fail(res: Response, e: unknown) {
+export function fail(res: Response, e: unknown) {
   // Told apart from the other 409s by its code, so that the page can ask about it instead of showing an error.
   if (e instanceof FileError && e.unsaved) return res.status(STATUS[e.code]).json(unsavedRefusal(e.unsaved));
   if (e instanceof FileError) return res.status(STATUS[e.code]).json({ error: e.message });
   console.error("[portal] files:", e);
   res.status(500).json({ error: "Could not read or change the files" });
+}
+
+/**
+ * Sends a picture that was opened by openPicture: its bytes as the type they
+ * say, under a policy that would stop it running anything even if a browser
+ * disagreed. The descriptor is read to the size that was announced and closed
+ * with the response. `cache` is what the browser may keep it for.
+ */
+export function sendPicture(req: Request, res: Response, opened: ReturnType<typeof openPicture>, cache: string): void {
+  const { fd, size, mimeType } = opened;
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+  res.setHeader("Cache-Control", cache);
+  const modified = fstatSync(fd).mtime;
+  res.setHeader("ETag", `W/"${size.toString(16)}-${modified.getTime().toString(16)}"`);
+  res.setHeader("Last-Modified", modified.toUTCString());
+  if (req.fresh) {
+    closeSync(fd);
+    return void res.status(304).end();
+  }
+  res.setHeader("Content-Type", mimeType);
+  res.setHeader("Content-Length", size);
+  const stream = createReadStream("", { fd, start: 0, end: Math.max(0, size - 1) });
+  stream.on("error", (e) => {
+    console.error("[portal] files: picture failed:", e.message);
+    res.destroy();
+  });
+  res.on("close", () => stream.destroy());
+  stream.pipe(res);
 }
 
 export function filesRouter(): Router {
@@ -127,28 +156,9 @@ export function filesRouter(): Router {
     } catch (e) {
       return fail(res, e);
     }
-    const { fd, size, mimeType } = opened;
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
     // The agent rewrites files in place, so the browser asks every time — and
     // is told it already has it unless the file changed.
-    res.setHeader("Cache-Control", "private, no-cache");
-    const modified = fstatSync(fd).mtime;
-    res.setHeader("ETag", `W/"${size.toString(16)}-${modified.getTime().toString(16)}"`);
-    res.setHeader("Last-Modified", modified.toUTCString());
-    if (req.fresh) {
-      closeSync(fd);
-      return void res.status(304).end();
-    }
-    res.setHeader("Content-Type", mimeType);
-    res.setHeader("Content-Length", size);
-    const stream = createReadStream("", { fd, start: 0, end: Math.max(0, size - 1) });
-    stream.on("error", (e) => {
-      console.error("[portal] files: picture failed:", e.message);
-      res.destroy();
-    });
-    res.on("close", () => stream.destroy());
-    stream.pipe(res);
+    sendPicture(req, res, opened, "private, no-cache");
   });
 
   router.put("/sessions/:id/file", (req, res) => {
