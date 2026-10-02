@@ -101,13 +101,14 @@ in.
 | **API key** | Sent as `Authorization: Bearer …` to this address, and nowhere else. Left empty for a server that needs none. A saved key is never shown again — the page is only told that one is set — so leave the field empty to keep it, or choose **Remove the saved key**. Giving the address of another server without a key drops the saved one: a key belongs to the server it was given for. (A key saved before any address belongs to the first one.) |
 | **Model** | Sent as `model`. Empty sends none, for a server that has only one. |
 | **Picture size** | Sent as `size`, such as `1024x1024`. Empty sends none. The agent can ask for another size in a call. |
+| **Time limit** | How long the portal waits for one picture, in whole seconds: **300** (five minutes) unless you set another, from 30 to 3600. It is one limit for making and for [editing](#editing-a-picture), and counts the endpoint's answer and the picture's arrival together. A setup saved before there was a limit has the default. When it runs out, the error names the limit and this setting. A slow or local model, or an edit of several pictures, may need more. |
 
 The request is `{ model?, prompt, n: 1, size? }`. The answer's first picture is
 taken from `data[0].b64_json`, or from `data[0].url` — an address, or a `data:`
 URL. Other request and answer shapes are not translated; an endpoint that
 speaks one needs a small adapter in front.
 
-The address, model, size and key are read at each call, so changing them needs
+The address, model, size, time limit and key are read at each call, so changing them needs
 no restart. Switching the tool on or off, though, is decided when a chat loads:
 like the other features, a switch reloads the idle open chats, and a busy one
 has it after it is idle and reloaded (`/reload`). The tool belongs to the
@@ -152,8 +153,8 @@ money at a hosted endpoint.
 - **A real picture.** What the endpoint sends must be a PNG, JPEG, GIF or WebP
   by its first bytes, whatever it is called or served as. Anything else —
   an SVG, an HTML page — is refused and not kept.
-- **A size and a time.** At most 20 MB per picture, and three minutes in all
-  for the endpoint to answer and the picture to arrive. Stopping the chat stops
+- **A size and a time.** At most 20 MB per picture, and the [time limit](#the-endpoint)
+  (five minutes unless set) in all for the endpoint to answer and the picture to arrive. Stopping the chat stops
   the request.
 - **Where an address may lead.** When the endpoint answers with an address, the
   portal fetches the picture from it, which means fetching from a place the
@@ -199,7 +200,7 @@ of more than one picture has `image[]` once for each, in order (`image-1.png`,
 say, usually the picture's own, and the size set for generation need not be one
 an edit takes. The answer is read as a generation's is — the first picture from
 `data[0].b64_json` or `data[0].url`, with the same rules for where an address may
-lead, the same check of its bytes and the same limits (20 MB, three minutes
+lead, the same check of its bytes and the same limits (20 MB, and the one time limit
 for the upload and the making together). Other request and answer shapes are not
 translated.
 
@@ -291,7 +292,7 @@ What was decided for it:
   in the portal and goes to the editing address only; the result is read, limited
   and written as for one picture.
 - **A count and a weight.** At most **8 pictures**, and **50 MB together**: all of
-  them are held in memory and go up within the three minutes of the request. More
+  them are held in memory and go up within the time limit of the request. More
   is refused with the numbers, never scaled, cut or dropped to fit. The endpoint's
   own limit, if lower, is its to say, in its answer, which is passed on without the
   key. The count is also what the tool's list accepts, so the model is held to it

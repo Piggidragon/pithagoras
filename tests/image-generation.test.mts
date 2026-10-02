@@ -11,6 +11,7 @@ process.env.SESSION_DIR = path.join(temp, "sessions");
 process.env.PI_CODING_AGENT_DIR = path.join(temp, "agent");
 process.env.AGENT_HOME = path.join(temp, "agent-home");
 
+const { getSetting, putSetting } = await import("../server/src/db.ts");
 const gen = await import("../server/src/image-generation.ts");
 const { GENERATED_PICTURE_MARK } = await import("../server/src/generated-picture.ts");
 const { GenerateImageTool, GENERATED_DIR, takenByAnother } = await import("../server/src/pi/generate-image-tool.ts");
@@ -27,7 +28,7 @@ const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1
 
 const KEY = "sk-test-0123456789";
 
-interface Seen { method?: string; url?: string; auth?: string; body?: any; type?: string; raw?: Buffer }
+interface Seen { method?: string; url?: string; auth?: string; agent?: string; body?: any; type?: string; raw?: Buffer }
 /** A fake image endpoint: `handler` answers, and every request it gets is kept. */
 async function fake(handler: (req: IncomingMessage, res: ServerResponse, seen: Seen) => void): Promise<{ origin: string; seen: Seen[]; server: Server }> {
   const seen: Seen[] = [];
@@ -39,7 +40,7 @@ async function fake(handler: (req: IncomingMessage, res: ServerResponse, seen: S
       const raw = whole.toString("utf8");
       let body: any;
       try { body = raw ? JSON.parse(raw) : undefined; } catch { body = raw; }
-      const one: Seen = { method: req.method, url: req.url, auth: req.headers.authorization, body, type: req.headers["content-type"], raw: whole };
+      const one: Seen = { method: req.method, url: req.url, auth: req.headers.authorization, agent: req.headers["user-agent"], body, type: req.headers["content-type"], raw: whole };
       seen.push(one);
       handler(req, res, one);
     });
@@ -72,11 +73,11 @@ function parts(seen: Seen): Record<string, { filename?: string; type?: string; b
 const json = (res: ServerResponse, body: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
 const b64 = (bytes: Buffer) => bytes.toString("base64");
 const config = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageGenerationConfig>> = {}) => ({
-  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, ...more,
+  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, timeoutSeconds: 300, ...more,
 });
 /** What the page is told of a fresh install, with `more` changed. */
 const fresh = (more: Record<string, unknown> = {}) => ({
-  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, editKeySet: false, editReady: false, ...more,
+  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, timeoutSeconds: 300, editKeySet: false, editReady: false, ...more,
 });
 
 test("a request is checked: the address is a base with no secret in it, the size a real one", () => {
@@ -156,6 +157,7 @@ test("a picture comes back as base64 and is asked for with the model, the prompt
     assert.equal(seen[0].url, "/v1/images/generations");
     assert.equal(seen[0].auth, `Bearer ${KEY}`);
     assert.deepEqual(seen[0].body, { model: "image-model", prompt: "a red square", n: 1, size: "512x512" });
+    assert.ok(seen[0].agent, "a user agent is sent, as some endpoints sit behind a firewall that refuses a request with none");
 
     // What the agent asks for wins over the default; no model and no key send neither.
     await gen.generateImage(config(origin, { model: "", apiKey: "" }), { prompt: "p", size: "1024x768" });
@@ -303,7 +305,7 @@ test("the endpoint itself is never followed elsewhere: the key stays with it", a
   const inner = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
   const { origin, server } = await fake((_req, res) => res.writeHead(307, { location: `${inner.origin}/v1/images/generations` }).end());
   try {
-    await assert.rejects(gen.generateImage(config(origin), { prompt: "p" }), /Could not reach the image endpoint/);
+    await assert.rejects(gen.generateImage(config(origin), { prompt: "p" }), /answered with a redirect, which is not followed/);
     assert.equal(inner.seen.length, 0, "no request, and so no key, went there");
   } finally {
     server.close();
@@ -616,7 +618,7 @@ test("an extension's tool of the same name is the one pi keeps, so the portal's 
 
 /** As a fresh install has the settings, whatever the tests before left. */
 const reset = () => gen.saveImageGeneration({
-  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false,
+  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, timeoutSeconds: 300,
 });
 
 test("a request for editing is checked as one for generation is", () => {
@@ -666,7 +668,7 @@ test("a key goes only to the server it was given for: generation's never to anot
   reset();
   const target = gen.imageEditingTarget;
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", apiKey: KEY, editEnabled: true, editModel: "edit-model" });
-  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY, multiple: false }, "edits to the generation server have its key");
+  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY, multiple: false, timeoutSeconds: 300 }, "edits to the generation server have its key");
   assert.equal(target().model, "edit-model", "and never the model of generation, which may only make pictures");
 
   gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
@@ -710,7 +712,7 @@ test("the route for edits is added to the address unless it is there, and genera
   assert.equal(editing.editEndpointUrl("http://localhost:8080").href, "http://localhost:8080/images/edits");
 });
 
-const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, multiple: false, ...more });
+const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, multiple: false, timeoutSeconds: 300, ...more });
 
 test("an edit is a form with the picture, the prompt and the model, sent with the key to this address", async () => {
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
@@ -808,7 +810,7 @@ test("an edit's picture is never fetched from another place on this machine, and
   const redirecting = await fake((_req, res) => res.writeHead(307, { location: `${inner.origin}/v1/images/edits` }).end());
   try {
     await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: PNG }), /another host than the endpoint, and is only fetched from there over https/);
-    await assert.rejects(editing.editImage(target(redirecting.origin), { prompt: "p", image: PNG }), /Could not reach the image endpoint/);
+    await assert.rejects(editing.editImage(target(redirecting.origin), { prompt: "p", image: PNG }), /answered with a redirect, which is not followed/);
     assert.equal(inner.seen.length, 0, "nothing was asked of the other place, and it was sent no key");
   } finally {
     server.close();
@@ -825,6 +827,73 @@ test("an edit that is never answered is given up on, and a chat that is stopped 
     const slow = editing.editImage(target(origin), { prompt: "p", image: PNG }, { signal: stop.signal });
     setTimeout(() => stop.abort(), 50);
     await assert.rejects(slow, (e: Error) => !(e instanceof gen.ImageGenerationError) && /abort/i.test(e.name));
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test("the time limit is a setting: five minutes without one, whole seconds from 30 to 3600, and kept", () => {
+  reset();
+  assert.equal(gen.imageGenerationConfig().timeoutSeconds, 300, "a fresh install has five minutes, not the old 180 seconds");
+  assert.equal(gen.imageGenerationState().timeoutSeconds, 300);
+  assert.equal(gen.imageEditingTarget().timeoutSeconds, 300, "editing has the same limit");
+
+  const parse = gen.parseImageGenerationPatch;
+  assert.deepEqual(parse({ timeoutSeconds: 30 }), { timeoutSeconds: 30 });
+  assert.deepEqual(parse({ timeoutSeconds: 3600 }), { timeoutSeconds: 3600 });
+  for (const bad of [29, 3601, 0, -300, 90.5, "300", NaN, Infinity]) {
+    assert.match(String(parse({ timeoutSeconds: bad })), /whole number of seconds from 30 to 3600/, String(bad));
+  }
+
+  gen.saveImageGeneration({ timeoutSeconds: 900 });
+  assert.equal(gen.imageGenerationConfig().timeoutSeconds, 900);
+  assert.equal(gen.imageGenerationState().timeoutSeconds, 900);
+  assert.equal(gen.imageEditingTarget().timeoutSeconds, 900, "generation and editing share it");
+  gen.saveImageGeneration({ model: "m" });
+  assert.equal(gen.imageGenerationConfig().timeoutSeconds, 900, "another change leaves it");
+
+  // Saving something else does not store the default as if it had been chosen: a setup that never chose one keeps getting the default of the day.
+  reset();
+  putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https://images.example.com/v1" }));
+  gen.saveImageGeneration({ model: "m" });
+  assert.ok(!("timeoutSeconds" in JSON.parse(getSetting("image_generation")!)), "not written");
+  gen.saveImageGeneration({ timeoutSeconds: 300 });
+  assert.equal(JSON.parse(getSetting("image_generation")!).timeoutSeconds, 300, "written once chosen");
+  gen.saveImageGeneration({ model: "n" });
+  assert.equal(JSON.parse(getSetting("image_generation")!).timeoutSeconds, 300, "and kept");
+  gen.saveImageGeneration({ timeoutSeconds: 900 });
+  assert.deepEqual(parse({ timeoutSeconds: null }), { timeoutSeconds: null }, "null takes it away");
+  assert.equal(gen.saveImageGeneration({ timeoutSeconds: null }).timeoutSeconds, 300);
+  assert.ok(!("timeoutSeconds" in JSON.parse(getSetting("image_generation")!)), "the default is the default of the day again");
+  assert.equal(gen.imageGenerationConfig().timeoutSeconds, 300);
+
+  // A setup saved before there was a limit, or with one that is no limit, gets the default.
+  putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https://images.example.com/v1" }));
+  assert.equal(gen.imageGenerationConfig().timeoutSeconds, 300);
+  for (const bad of [0, 5, 99999, "600", null, 12.5]) {
+    putSetting("image_generation", JSON.stringify({ timeoutSeconds: bad }));
+    assert.equal(gen.imageGenerationConfig().timeoutSeconds, 300, `stored ${JSON.stringify(bad)}`);
+  }
+  reset();
+});
+
+test("a picture that takes longer than the old limit is waited for, one past the setting is not, and the message says so", async () => {
+  // A fake slow endpoint: it answers after 1.4 seconds.
+  const { origin, server } = await fake((_req, res) => setTimeout(() => json(res, { data: [{ b64_json: b64(PNG) }] }), 1400));
+  try {
+    assert.equal((await gen.generateImage(config(origin, { timeoutSeconds: 3 }), { prompt: "p" })).ext, "png", "within the setting");
+    await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 1 }), { prompt: "p" }), (e: Error) => {
+      assert.ok(e instanceof gen.ImageGenerationError);
+      assert.match(e.message, /did not answer within 1 seconds/, "it names the limit");
+      assert.match(e.message, /time limit in Settings → Images/, "and where to change it");
+      return true;
+    });
+    // Editing has the same limit, from its target.
+    assert.equal((await editing.editImage(target(origin, { timeoutSeconds: 3 }), { prompt: "p", image: PNG })).ext, "png");
+    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Images/);
+    // An explicit limit of the call still wins, as the tests above use it.
+    await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 3 }), { prompt: "p" }, { timeoutMs: 150 }), /did not answer within 0 seconds/);
   } finally {
     server.closeAllConnections();
     server.close();
@@ -1563,4 +1632,34 @@ test("an extension's edit_image is the one pi keeps, so the portal's is not coun
   loaded = [ext("/x/image-package.ts", "generate_image"), own];
   assert.equal(tool.registered(), true, "another name is no clash: the generation tool is not this one");
   reset();
+});
+
+test("the API saves the time limit and refuses one out of bounds, without reloading chats", async () => {
+  const express = (await import("express")).default;
+  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const app = express().use(express.json()).use("/api", featuresRouter());
+  const portal = app.listen(0, "127.0.0.1");
+  await new Promise((r) => portal.once("listening", r));
+  const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/api`;
+  const call = async (method: string, p: string, body?: unknown) => {
+    const r = await fetch(`${at}${p}`, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, body: await r.json() as any };
+  };
+  try {
+    reset();
+    assert.equal((await call("GET", "/features/images")).body.images.timeoutSeconds, 300, "five minutes by default");
+    assert.equal((await call("GET", "/features")).body.images.timeoutSeconds, 300);
+    const saved = await call("PUT", "/features/images", { timeoutSeconds: 600 });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.body, { images: fresh({ timeoutSeconds: 600 }), changed: false, reloaded: 0, waiting: 0 });
+    for (const bad of [10, 4000, 1.5, "600"]) {
+      const refused = await call("PUT", "/features/images", { timeoutSeconds: bad });
+      assert.equal(refused.status, 400, String(bad));
+      assert.match(refused.body.error, /from 30 to 3600/);
+    }
+    assert.equal((await call("GET", "/features/images")).body.images.timeoutSeconds, 600, "a refused one changes nothing");
+  } finally {
+    portal.close();
+    reset();
+  }
 });

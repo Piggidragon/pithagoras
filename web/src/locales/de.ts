@@ -720,6 +720,8 @@ const de: Locale = {
     "A {tool} tool: the agent describes a picture and an image model you set up makes it. It appears in the chat, and in voice mode's picture window, as one shown with {show} does.": "Ein {tool}-Tool: Der Agent beschreibt ein Bild, und ein Bildmodell, das du einrichtest, erstellt es. Es erscheint im Chat und im Bilderfenster der Sprachsteuerung, genau wie eines, das mit {show} gezeigt wird.",
     "The image endpoint": "Der Bild-Endpunkt",
     "Picture size": "Bildgröße",
+    "Time limit (seconds)": "Zeitlimit (Sekunden)",
+    "The time limit is how long the portal waits for one picture, made or edited, before it gives up: {min} to {max} seconds, {default} by default. A slow or local model may need more.": "Das Zeitlimit ist, wie lange das Portal auf ein Bild wartet, erzeugt oder bearbeitet, bevor es aufgibt: {min} bis {max} Sekunden, standardmäßig {default}. Ein langsames oder lokales Modell braucht vielleicht mehr.",
     "Any server with an OpenAI-style {route}: the portal sends the model, the prompt and the size, and takes a picture back as base64 or as an address. The key goes only to this address. Leave the model and the size empty for the server's own.": "Jeder Server mit einem OpenAI-artigen {route}: Das Portal schickt Modell, Prompt und Größe und nimmt ein Bild als Base64 oder als Adresse zurück. Der Schlüssel geht nur an diese Adresse. Lass Modell und Größe leer, um die des Servers zu verwenden.",
     "Remove the saved key": "Gespeicherten Schlüssel entfernen",
     "Image generation tool": "Tool zur Bildgenerierung",
