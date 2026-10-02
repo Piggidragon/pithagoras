@@ -1,4 +1,5 @@
 import { ImageGenerationError, requestPicture, type GenerateOptions, type ImageEditingTarget } from "./image-generation.js";
+import { pictureSize } from "./picture-size.js";
 import { pictureExt, pictureType } from "./prompt-images.js";
 import { MAX_PICTURE_BYTES } from "./workspace-files.js";
 
@@ -62,11 +63,28 @@ export interface EditOptions extends GenerateOptions {
   maxTotalBytes?: number;
 }
 
-/** A picture to send: what its first bytes say it is, and not larger than the limit. `who` starts the sentence that says what is wrong with it. */
-function toSend(bytes: Buffer, who: string, name: string, max: number): { blob: Blob; name: string } {
+/**
+ * Refuses a picture with more pixels than the maximum for an edit (`maxSize`, such as `2048x1024`; empty is none).
+ * The picture must fit the box either way up, so that a portrait one is not refused by a landscape limit. One whose
+ * size cannot be read is refused too, since it cannot be shown to be within the limit. `who` starts the sentence.
+ */
+export function checkPictureSize(bytes: Buffer, maxSize: string, who: string): void {
+  const [maxWidth, maxHeight] = (maxSize || "x").split("x").map(Number);
+  if (!maxWidth || !maxHeight) return;
+  const size = pictureSize(bytes);
+  const limit = `${maxWidth}x${maxHeight}`;
+  const advice = "Nothing was sent. Use a smaller picture (it is not scaled or cut), or tell the person; the limit is set in Settings → Images.";
+  if (!size) throw new ImageGenerationError(`${who} has a size that cannot be read, so it cannot be shown to be within the maximum of ${limit} pixels for an edit. ${advice}`);
+  const fits = (size.width <= maxWidth && size.height <= maxHeight) || (size.width <= maxHeight && size.height <= maxWidth);
+  if (!fits) throw new ImageGenerationError(`${who} is ${size.width}x${size.height} pixels, which is over the maximum of ${limit} for an edit. ${advice}`);
+}
+
+/** A picture to send: what its first bytes say it is, not larger than the limit and within the maximum size. `who` starts the sentence that says what is wrong with it. */
+function toSend(bytes: Buffer, who: string, name: string, max: number, maxSize: string): { blob: Blob; name: string } {
   const type = pictureType(bytes.subarray(0, 12));
   if (!type) throw new ImageGenerationError(`${who} is not a PNG, JPEG, GIF or WebP picture`);
   if (bytes.length > max) throw new ImageGenerationError(`${who} is over ${Math.round(max / 1024 / 1024)} MB`);
+  checkPictureSize(bytes, maxSize, who);
   // Never the file's own name, which says where it came from: a neutral one, with the extension its bytes say.
   return { blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type }), name: `${name}.${pictureExt(bytes.subarray(0, 12))}` };
 }
@@ -91,8 +109,8 @@ export function checkTotal(bytes: number, max = MAX_EDIT_TOTAL_BYTES): void {
  * Asks for a picture changed and returns the result, checked as a generated
  * one is: a PNG, JPEG, GIF or WebP by its first bytes, and not too large.
  *
- * A picture that is no picture, or is over the limit, is refused before anything
- * is sent, so that nothing leaves the portal that should not. With several, one
+ * A picture that is no picture, or is over the limit or beyond the maximum size
+ * of the editing settings, is refused before anything is sent, so that nothing leaves the portal that should not. With several, one
  * that is refused refuses them all: the prompt refers to them by their place in
  * the list, which a result made of the others would not match. `size` is not
  * sent: what an edit comes out as is the endpoint's to say, usually the
@@ -107,8 +125,8 @@ export async function editImage(
   const given = Array.isArray(request.image) ? request.image : [request.image];
   checkCount(given.length, target.multiple);
   checkTotal(given.reduce((sum, bytes) => sum + bytes.length, 0), options.maxTotalBytes);
-  const images = given.map((bytes, i) => (given.length > 1 ? toSend(bytes, `Picture ${i + 1}`, `image-${i + 1}`, max) : toSend(bytes, "The image", "image", max)));
-  const mask = request.mask ? toSend(request.mask, "The mask", "mask", max) : undefined;
+  const images = given.map((bytes, i) => (given.length > 1 ? toSend(bytes, `Picture ${i + 1}`, `image-${i + 1}`, max, target.maxSize) : toSend(bytes, "The image", "image", max, target.maxSize)));
+  const mask = request.mask ? toSend(request.mask, "The mask", "mask", max, target.maxSize) : undefined;
   const form = new FormData();
   // One picture as the first OpenAI-style endpoints took it; several as the list form, once each, in order.
   for (const image of images) form.append(images.length > 1 ? "image[]" : "image", image.blob, image.name);

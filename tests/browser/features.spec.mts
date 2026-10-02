@@ -15,7 +15,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       },
     },
   };
-  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, timeoutSeconds: 300, editReady: false };
+  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editMaxSize: '', editKeySet: false, timeoutSeconds: 300, editReady: false };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -461,6 +461,40 @@ test('image editing has a switch and an endpoint of its own: it needs an address
   expect(sent.at(-1)!.body).toEqual({ editApiKey: '' });
   // Generation's key is still there to remove on its own.
   await expect(panel.getByRole('button', { name: 'Remove the saved key' })).toBeVisible();
+});
+
+test('image editing has a maximum picture size of its own, sent only when changed, and refuses what is no size', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/images');
+  const panel = addons(page);
+  const field = panel.getByLabel('Maximum picture size');
+  const save = panel.getByRole('button', { name: 'Save', exact: true });
+  await expect(field).toHaveValue('');
+  await expect(field).toHaveAttribute('placeholder', '2048x2048');
+  await expect(panel.getByText(/The maximum picture size is the most pixels a picture sent to be edited may have/)).toBeVisible();
+  // Generation's size is its own field, and is not the maximum.
+  await expect(panel.getByLabel('Picture size', { exact: true })).toHaveValue('');
+
+  await field.fill('huge');
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  await expect(save).toBeDisabled();
+  await field.fill(' 2048x1024 ');
+  await expect(field).toHaveAttribute('aria-invalid', 'false');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ editBaseUrl: '', editModel: '', editMaxSize: '2048x1024' });
+  await expect(field).toHaveValue('2048x1024');
+
+  // Saving something else does not state it again; emptied, it is taken away.
+  await panel.getByLabel('Editing model').fill('image-edit-model');
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ editBaseUrl: '', editModel: 'image-edit-model' });
+  await field.fill('');
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ editBaseUrl: '', editModel: 'image-edit-model', editMaxSize: '' });
 });
 
 test('several pictures per edit is a switch of its own that waits for the editing address, and says what the tool takes', async ({ page }) => {

@@ -1187,6 +1187,8 @@ export interface ImagesFeature {
   editModel: string;
   /** The edit endpoint takes several pictures, so edit_image has a list; off until said, and off again when edits move to another server. */
   editMultiple: boolean;
+  /** "2048x2048", the most pixels a picture sent to be edited may have, or empty for no limit. */
+  editMaxSize: string;
   editKeySet: boolean;
   /** How long a request for a picture, made or edited, may take, in whole seconds. */
   timeoutSeconds: number;
@@ -1206,6 +1208,7 @@ export interface ImagesFeaturePatch {
   editModel?: string;
   editApiKey?: string;
   editMultiple?: boolean;
+  editMaxSize?: string;
   /** null takes a saved limit away: the default again. */
   timeoutSeconds?: number | null;
 }

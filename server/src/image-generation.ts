@@ -61,6 +61,11 @@ export interface ImageGenerationConfig {
    * endpoint: moving edits to another server takes it off again.
    */
   editMultiple: boolean;
+  /**
+   * The most pixels a picture sent to be edited may have, as `1024x1024`: the size of the box it must fit, turned
+   * either way. Empty is none, as an empty `size` sends none; a request beyond it is refused before anything is sent.
+   */
+  editMaxSize: string;
   /** How long a request for a picture, generated or edited, may take in all; see TIMEOUT_SECONDS. */
   timeoutSeconds: number;
 }
@@ -99,6 +104,8 @@ export function imageGenerationConfig(): ImageGenerationConfig {
     editModel: text(raw.editModel),
     editApiKey: text(raw.editApiKey),
     editMultiple: raw.editMultiple === true,
+    // A setup saved before there was a maximum has none, and an unreadable one is as good as none.
+    editMaxSize: typeof raw.editMaxSize === "string" && MAX_SIZE.test(raw.editMaxSize) ? raw.editMaxSize : "",
     // A setup saved before there was a limit has none, and an unreadable one is as good as none.
     timeoutSeconds: validTimeout(raw.timeoutSeconds) ? raw.timeoutSeconds : TIMEOUT_SECONDS.default,
   };
@@ -124,6 +131,8 @@ export interface ImageEditingTarget {
   apiKey: string;
   /** Whether the endpoint takes more than one picture: otherwise an edit with several is refused before anything is sent. */
   multiple: boolean;
+  /** The most pixels a picture may have, as `1024x1024`, or empty for no limit; see ImageGenerationConfig.editMaxSize. */
+  maxSize: string;
   /** How long the request may take; see TIMEOUT_SECONDS. */
   timeoutSeconds: number;
 }
@@ -136,7 +145,7 @@ export interface ImageEditingTarget {
 export function imageEditingTarget(config: ImageGenerationConfig = imageGenerationConfig()): ImageEditingTarget {
   const baseUrl = config.editBaseUrl || config.baseUrl;
   const sameServer = baseUrl !== "" && originOf(baseUrl) === originOf(config.baseUrl);
-  return { baseUrl, model: config.editModel, apiKey: config.editApiKey || (sameServer ? config.apiKey : ""), multiple: config.editMultiple, timeoutSeconds: config.timeoutSeconds };
+  return { baseUrl, model: config.editModel, apiKey: config.editApiKey || (sameServer ? config.apiKey : ""), multiple: config.editMultiple, maxSize: config.editMaxSize, timeoutSeconds: config.timeoutSeconds };
 }
 
 /** What the page is told of the settings: never a key itself. */
@@ -160,12 +169,16 @@ export interface ImageGenerationPatch {
   /** "" takes the saved one away. */
   editApiKey?: string;
   editMultiple?: boolean;
+  /** `1024x1024`; "" takes the limit away. */
+  editMaxSize?: string;
   /** Whole seconds, from TIMEOUT_SECONDS.min to its max; null takes the saved one away, which is the default again. */
   timeoutSeconds?: number | null;
 }
 
 /** `1024x1024`, or `auto`, as the OpenAI-style APIs take it. */
 export const SIZE = /^(auto|\d{2,5}x\d{2,5})$/;
+/** The same without `auto`, which is no size to limit by: what a maximum is given as. */
+export const MAX_SIZE = /^\d{2,5}x\d{2,5}$/;
 
 /** An API address as the settings keep it, or the reason it is not one. */
 function parseBase(value: unknown): { base: string } | { error: string } {
@@ -207,6 +220,10 @@ export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch |
   if (b.size !== undefined) {
     if (typeof b.size !== "string" || (b.size.trim() && !SIZE.test(b.size.trim()))) return 'The size looks like "1024x1024"';
     patch.size = b.size.trim();
+  }
+  if (b.editMaxSize !== undefined) {
+    if (typeof b.editMaxSize !== "string" || (b.editMaxSize.trim() && !MAX_SIZE.test(b.editMaxSize.trim()))) return 'The maximum size looks like "2048x2048"';
+    patch.editMaxSize = b.editMaxSize.trim();
   }
   if (b.timeoutSeconds !== undefined) {
     if (b.timeoutSeconds !== null && !validTimeout(b.timeoutSeconds)) return `The time limit must be a whole number of seconds from ${TIMEOUT_SECONDS.min} to ${TIMEOUT_SECONDS.max}`;

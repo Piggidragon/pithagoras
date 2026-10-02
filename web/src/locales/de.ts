@@ -737,6 +737,8 @@ const de: Locale = {
     "Editing key": "Schlüssel für die Bearbeitung",
     "the key above is used": "der Schlüssel oben wird verwendet",
     "Editing model": "Modell für die Bearbeitung",
+    "Maximum picture size": "Maximale Bildgröße",
+    "The maximum picture size is the most pixels a picture sent to be edited may have, such as 2048x2048, whichever way up it is. A picture beyond it is not sent: the agent is told the limit is exceeded and what it is. Leave it empty for no limit.": "Die maximale Bildgröße ist die größte Pixelzahl, die ein zur Bearbeitung gesendetes Bild haben darf, etwa 2048x2048, egal ob hoch oder quer. Ein größeres Bild wird nicht gesendet: Der Agent erfährt, dass das Limit überschritten ist und wie hoch es liegt. Leer lassen für kein Limit.",
     "Leave the address empty to edit with the server above, with its key. The model above is not used for editing, as a model that makes pictures may not change them; leave this one empty for the server's own. A key goes only to the address it was given for.": "Lass die Adresse leer, um mit dem Server oben und seinem Schlüssel zu bearbeiten. Das Modell oben wird nicht zum Bearbeiten verwendet, denn ein Modell, das Bilder erstellt, ändert sie vielleicht nicht; lass dieses leer, um das des Servers zu verwenden. Ein Schlüssel geht nur an die Adresse, für die er gegeben wurde.",
     "Remove the saved editing key": "Gespeicherten Bearbeitungs-Schlüssel entfernen",
     "Image editing tool": "Tool zur Bildbearbeitung",
