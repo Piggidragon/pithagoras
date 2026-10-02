@@ -18,6 +18,9 @@ export interface ToolGroup {
   allOff: boolean;
 }
 
+/** The tools that make up pictures; Settings → Images has their defaults, so the Tools list leaves them out. */
+export const PICTURE_TOOLS = ["show_image", "generate_image", "edit_image"];
+
 /** What the portal registers itself, which is not an extension anyone installed. */
 const BUILT_IN = msg("built in");
 

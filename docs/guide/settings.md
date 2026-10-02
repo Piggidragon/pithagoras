@@ -7,7 +7,7 @@ German. Navigation runs down the left edge, in four groups:
 | Group | Pages |
 | --- | --- |
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
-| **Agent** | **Tools**, **Skills**, **MCP**, **Extensions** |
+| **Agent** | **Tools**, **Images**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
 | **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **About**, **Advanced** |
 
@@ -84,6 +84,11 @@ that, a session asking for a local model silently started on pi's fallback.
 [The interface](/guide/interface#tools). **Skills** lists, creates, imports and
 switches the agent's procedures. **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
+
+**Images** is the one page for the agent's pictures: whether a new chat starts
+with `show_image`, `generate_image` and `edit_image`, and the image endpoint
+behind generation and editing, see [Opt-in features](/guide/features#image-generation).
+The three tools are left out of the Tools list, so each switch is in one place.
 
 ## Channels
 

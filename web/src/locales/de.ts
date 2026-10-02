@@ -745,6 +745,16 @@ const de: Locale = {
     "Off: edit_image takes one picture.": "Aus: edit_image nimmt ein Bild.",
     "Switch on several pictures only if the editing endpoint takes more than one in a request, to combine subjects or keep a style. The agent then names its pictures in the order the prompt refers to them. What an endpoint takes is said of that endpoint, so editing moved to another server switches it off again.": "Schalte mehrere Bilder nur ein, wenn der Bearbeitungs-Endpunkt in einer Anfrage mehr als eines nimmt, etwa um Motive zu kombinieren oder einen Stil zu halten. Der Agent nennt seine Bilder dann in der Reihenfolge, auf die sich der Prompt bezieht. Was ein Endpunkt nimmt, gilt für genau diesen Endpunkt; wird die Bearbeitung auf einen anderen Server verlegt, ist die Einstellung wieder aus.",
     "The result is a new picture in the generated-images folder, named after the original, which is not changed. Editing can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it.": "Das Ergebnis ist ein neues Bild im Ordner generated-images, benannt nach dem Original, das nicht verändert wird. Bearbeiten kann bei einem gehosteten Endpunkt Geld kosten, darum wird das Tool für Personen, mit denen der Agent in deinem Namen spricht, abgelehnt, sofern keine Tool-Regel es erlaubt.",
+    // components/PicturesPanel.tsx
+    "Showing, making and changing pictures": "Bilder zeigen, erzeugen und ändern",
+    "Picture tools": "Bild-Tools",
+    "Which of them a conversation starts with. One chat can still switch any of them the other way for itself, from the blocks icon beside the box.": "Mit welchen davon ein Gespräch beginnt. Ein Chat kann jedes für sich anders einstellen, über das Bausteine-Symbol neben dem Eingabefeld.",
+    "{tool} in new chats": "{tool} in neuen Chats",
+    "Puts a picture from the chat's folder on your screen: a chart it drew, a screenshot, a photo.": "Zeigt ein Bild aus dem Ordner des Chats auf deinem Bildschirm: ein gezeichnetes Diagramm, einen Screenshot, ein Foto.",
+    "Makes a new picture from a description. It exists only while image generation, below, is on.": "Erzeugt aus einer Beschreibung ein neues Bild. Es gibt es nur, solange die Bildgenerierung unten an ist.",
+    "Changes a picture in the chat's folder. It exists only while image editing, below, is on.": "Ändert ein Bild im Ordner des Chats. Es gibt es nur, solange die Bildbearbeitung unten an ist.",
+    "Making and changing pictures": "Bilder erzeugen und ändern",
+    "The image model behind generate_image and edit_image, and whether the agent has them at all.": "Das Bildmodell hinter generate_image und edit_image, und ob der Agent sie überhaupt hat.",
     // components/FilesPanel.tsx
     "Not a picture that can be shown here. Download it to open it.": "Kein Bild, das sich hier zeigen lässt. Lade es herunter, um es zu öffnen.",
     "The file has changes that are not saved.": "Die Datei hat ungespeicherte Änderungen.",

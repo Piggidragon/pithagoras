@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuChevronDown, LuChevronRight, LuCheck, LuPencil, LuX } from "react-icons/lu";
 import { api } from "../api";
-import { displayName, groupSummary, groupTools, nextOff, sourceName } from "../tool-groups";
+import { PICTURE_TOOLS, displayName, groupSummary, groupTools, nextOff, sourceName } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 import { isEnter, isEscape } from "../shortcuts";
 import { t } from "../i18n";
@@ -35,7 +35,8 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
     api
       .toolDefaults()
       .then((r) => {
-        setTools(r.tools);
+        // The picture tools are switched in Settings → Images, not twice.
+        setTools(r.tools.filter((tool) => !PICTURE_TOOLS.includes(tool.name)));
         setOff(r.off);
         setNames(r.names ?? {});
       })
