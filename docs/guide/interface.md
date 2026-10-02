@@ -108,8 +108,9 @@ in two places:
   switched off there is not offered to the model at all; the extension stays
   installed and its slash commands keep working. Tools are listed once a
   conversation has run, because that is when pi builds the list of what its
-  extensions registered. A group can be switched off as a whole, and each
-  package can be given a name of your own — *Rename* — for the list. The
+  extensions registered. The portal's own `generate_image` and `edit_image` are the exception:
+  they are listed as soon as image generation or editing is switched on. A group
+  can be switched off as a whole, and each package can be given a name of your own — *Rename* — for the list. The
   portal's picture tools (`show_image`, `generate_image` and `edit_image`) share
   one group, **Images**, in every tool list; an extension's tool of one of those
   names stays in the group of its extension.

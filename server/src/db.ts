@@ -1904,7 +1904,7 @@ export function shownTools(folder?: string): (Omit<KnownTool, "package" | "inlin
   // called image-generation.ts has the label the portal's factory has.
   const images = imageGenerationReady();
   const editing = imageEditingReady();
-  return knownTools()
+  return [...knownTools(), ...notYetSeen(images, editing)]
     .filter(toolAvailability(readPiSettings().packages, project))
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
     .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))
@@ -1912,6 +1912,22 @@ export function shownTools(folder?: string): (Omit<KnownTool, "package" | "inlin
       const { package: _package, inline: _inline, ...tool } = known;
       return portalOwned(known) ? { ...tool, inline: true as const } : tool;
     });
+}
+
+/**
+ * The portal's own tools that a setting just made, for the lists to show before any chat has reported them.
+ *
+ * What the lists show is what a chat once registered, and one that is open while the add-on is switched on
+ * registers the tool after a reload without telling anyone. The tool is the portal's, so the lists know it
+ * without waiting; a tool of the same name that a chat has reported, an extension's included, is kept as it is.
+ */
+function notYetSeen(images: boolean, editing: boolean): KnownTool[] {
+  const seen = new Set(knownTools().map((tool) => tool.name));
+  const wanted: [string, string, boolean][] = [
+    [GENERATE_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, images],
+    [EDIT_IMAGE_TOOL, EDIT_IMAGE_SOURCE, editing],
+  ];
+  return wanted.filter(([name, , ready]) => ready && !seen.has(name)).map(([name, source]) => ({ name, source, package: null, inline: true }));
 }
 
 /** What the portal files its own picture tools under, by name. Read when asked: image-generation.ts imports this module. */
