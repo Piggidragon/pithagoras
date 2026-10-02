@@ -78,21 +78,20 @@ Chats started after a change pick it up. A chat that is already open does after
 ## Tools
 
 A project can have tools of its own: **Tools** on its row lists the tools the portal has
-seen registered, as a chat's tools control does, and what you switch there is what
+seen registered, as a chat's tools control does (the picture tools together in one **Images** group), and what you switch there is what
 every chat in the project starts with. "The research project never goes online" and
 "the dev project always has the shell tools" are then said once, not at the start of
 every chat.
 
 There are three layers, each an exception to the one before it:
 
-1. **Settings → Tools** is the default for every conversation (for the picture tools
-   `show_image`, `generate_image` and `edit_image`, **Settings → Images**).
+1. **Settings → Tools** is the default for every conversation.
 2. **The project** switches tools on or off against that default, for every chat in it.
 3. **A chat** switches tools on or off against what its project leaves, from the blocks
    icon beside the composer.
 
 What a project stores is only where it disagrees with the portal-wide default, so a tool
-the project never mentioned still follows that default. A chat belongs to a project
+the project never mentioned still follows Settings → Tools. A chat belongs to a project
 when its folder is the project's or is inside it, judged by where the path really leads.
 Chats in Home belong to none, and are as before.
 

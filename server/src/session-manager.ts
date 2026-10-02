@@ -2143,12 +2143,14 @@ class SessionManager extends EventEmitter {
     const defaults = toolDefaultsFor(workspace);
     const exceptions = sessionTools(sessionId);
     const servers = mcpServerNames();
-    const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : shownTools(workspace);
+    const shown: { name: string; source: string; description?: string; inline?: true }[] = listed.length ? listed : shownTools(workspace);
     return {
-      tools: shown.map(({ name, source, description }) => ({
+      tools: shown.map(({ name, source, description, inline }) => ({
         name,
         ...(description !== undefined ? { description } : {}),
         source: toolSource(name, source, servers),
+        // The portal's own tools are told from an extension's of the same name, so the page can group its picture tools.
+        ...(inline ? { inline: true as const } : {}),
         enabled: toolEnabled(name, defaults, exceptions),
         defaultOn: !defaults.includes(name),
       })),
@@ -2174,12 +2176,13 @@ class SessionManager extends EventEmitter {
     //
     // Except when nothing is running to have registered anything: the page
     // that is answering was drawn while it was, and the tools it showed are the
-    // ones the portal has seen. Without them a tool switched *on* would be in
-    // neither list, no exception would be written, and the write would answer
-    // 200 while the tool went on following the default.
+    // ones the portal lists (shownTools, which is what getTools shows an idle
+    // chat). Without them a tool switched *on* would be in neither list, no
+    // exception would be written, and the write would answer 200 while the
+    // tool went on following the default.
     const held = sessionTools(sessionId);
     const answered = [
-      ...(listed.length ? listed.map((t) => t.name) : knownTools().map((t) => t.name)),
+      ...(listed.length ? listed : shownTools(getSession(sessionId)?.workspace)).map((t) => t.name),
       ...held.off,
       ...held.on,
     ];

@@ -554,13 +554,15 @@ test("the tool menus do not offer generate_image while the add-on is off, though
   gen.saveImageGeneration({ enabled: false });
   assert.deepEqual(names(), ["show_image"]);
   assert.equal(knownTools().find((t) => t.name === "generate_image")?.inline, true, "remembered for when it is on");
-  assert.ok(!("inline" in shownTools()[0]), "the page is not told how it is kept");
+  assert.ok(!("package" in shownTools()[0]), "the page is not told how it is kept");
+  assert.equal(shownTools()[0].inline, true, "only that it is the portal's own, for the lists to group it");
 
   // An extension's tool of the same name is loaded whatever the add-on says, so it is offered — also from a
   // file or a folder called image-generation, which has the same label the portal's extension has.
   for (const source of ["image-package", "image-generation"]) {
     rememberTools([remembered({ name: "generate_image", source })]);
     assert.deepEqual(names().sort(), ["generate_image", "show_image"], source);
+    assert.equal(shownTools().find((t) => t.name === "generate_image")?.inline, undefined, `${source}: not the portal's own`);
     rememberTools([remembered({ name: "generate_image", source: "image-generation", package: "npm:image-package" })]);
     assert.deepEqual(names().sort(), ["generate_image", "show_image"], `${source}, from a package`);
   }

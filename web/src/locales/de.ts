@@ -748,13 +748,7 @@ const de: Locale = {
     "Switch on several pictures only if the editing endpoint takes more than one in a request, to combine subjects or keep a style. The agent then names its pictures in the order the prompt refers to them. What an endpoint takes is said of that endpoint, so editing moved to another server switches it off again.": "Schalte mehrere Bilder nur ein, wenn der Bearbeitungs-Endpunkt in einer Anfrage mehr als eines nimmt, etwa um Motive zu kombinieren oder einen Stil zu halten. Der Agent nennt seine Bilder dann in der Reihenfolge, auf die sich der Prompt bezieht. Was ein Endpunkt nimmt, gilt für genau diesen Endpunkt; wird die Bearbeitung auf einen anderen Server verlegt, ist die Einstellung wieder aus.",
     "The result is a new picture in the generated-images folder, named after the original, which is not changed. Editing can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it.": "Das Ergebnis ist ein neues Bild im Ordner generated-images, benannt nach dem Original, das nicht verändert wird. Bearbeiten kann bei einem gehosteten Endpunkt Geld kosten, darum wird das Tool für Personen, mit denen der Agent in deinem Namen spricht, abgelehnt, sofern keine Tool-Regel es erlaubt.",
     // components/PicturesPanel.tsx
-    "Showing, making and changing pictures": "Bilder zeigen, erzeugen und ändern",
-    "Picture tools": "Bild-Tools",
-    "Which of them a conversation starts with. One chat can still switch any of them the other way for itself, from the blocks icon beside the box.": "Mit welchen davon ein Gespräch beginnt. Ein Chat kann jedes für sich anders einstellen, über das Bausteine-Symbol neben dem Eingabefeld.",
-    "{tool} in new chats": "{tool} in neuen Chats",
-    "Puts a picture from the chat's folder on your screen: a chart it drew, a screenshot, a photo.": "Zeigt ein Bild aus dem Ordner des Chats auf deinem Bildschirm: ein gezeichnetes Diagramm, einen Screenshot, ein Foto.",
-    "Makes a new picture from a description. It exists only while image generation, below, is on.": "Erzeugt aus einer Beschreibung ein neues Bild. Es gibt es nur, solange die Bildgenerierung unten an ist.",
-    "Changes a picture in the chat's folder. It exists only while image editing, below, is on.": "Ändert ein Bild im Ordner des Chats. Es gibt es nur, solange die Bildbearbeitung unten an ist.",
+    "The image model behind making and changing pictures": "Das Bildmodell hinter dem Erzeugen und Ändern von Bildern",
     "Making and changing pictures": "Bilder erzeugen und ändern",
     "The image model behind generate_image and edit_image, and whether the agent has them at all.": "Das Bildmodell hinter generate_image und edit_image, und ob der Agent sie überhaupt hat.",
     // components/FilesPanel.tsx
@@ -1378,7 +1372,7 @@ const de: Locale = {
     "Chats already running here have it from their next message. A chat that switched a tool for itself keeps its own choice.": "Chats, die hier schon laufen, übernehmen es ab ihrer nächsten Nachricht. Ein Chat, der ein Tool für sich umgeschaltet hat, behält seine eigene Wahl.",
     "default on": "Standard an",
     "default off": "Standard aus",
-    "Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with, and Settings → Images does for the picture tools.": "Gilt ab der nächsten Nachricht, für dieses Gespräch. Unter Einstellungen → Tools legst du fest, womit jedes Gespräch beginnt, unter Einstellungen → Bilder für die Bild-Tools.",
+    "Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with.": "Gilt ab der nächsten Nachricht, für dieses Gespräch. Unter Einstellungen → Tools legst du fest, womit jedes Gespräch beginnt.",
     // components/VoiceAddon.tsx
     "unavailable": "nicht verfügbar",
     "Talk naturally, interrupt anytime, and hear replies in your chosen voice.": "Sprich ganz natürlich, unterbrich jederzeit und hör die Antworten in der Stimme deiner Wahl.",

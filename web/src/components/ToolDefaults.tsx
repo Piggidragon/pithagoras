@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuChevronDown, LuChevronRight, LuCheck, LuPencil, LuX } from "react-icons/lu";
 import { api } from "../api";
-import { displayName, groupSummary, groupTools, isPictureTool, nextOff, sourceName } from "../tool-groups";
+import { displayName, groupSummary, groupTools, nextOff, sourceName } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 import { isEnter, isEscape } from "../shortcuts";
 import { t } from "../i18n";
@@ -20,7 +20,7 @@ import { t } from "../i18n";
  * wrong way round.
  */
 export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
-  const [tools, setTools] = useState<{ name: string; source: string }[]>([]);
+  const [tools, setTools] = useState<{ name: string; source: string; inline?: true }[]>([]);
   const [off, setOff] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   /** Why there is nothing to switch here, where the deployment cannot do it. */
@@ -35,8 +35,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
     api
       .toolDefaults()
       .then((r) => {
-        // The portal's picture tools are switched in Settings → Images, not twice; an extension's of the same name stays in its group.
-        setTools(r.tools.filter((tool) => !isPictureTool(tool)));
+        setTools(r.tools);
         setOff(r.off);
         setNames(r.names ?? {});
       })

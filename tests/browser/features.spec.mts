@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /** The portal with no server: Settings → Add-ons, over canned answers for the opt-in features. */
-async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true, dreamFails = false, container = 'absent', off = [] as string[], extensionImage = false } = {}) {
+async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true, dreamFails = false, container = 'absent' } = {}) {
   const sent: { path: string; body: any }[] = [];
   const state = {
     subagent: { available, installed: false, enabled: false, source: null as string | null, mode: 'interrupt', maxParallel: 1, model: 'auto' },
@@ -15,12 +15,6 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       },
     },
   };
-  // What the portal has seen the tools of, and which of them are off for new chats.
-  // The portal's own picture tools say so; an image extension's generate_image is a tool like any other.
-  const tools = ['show_image', 'generate_image', 'edit_image', 'web_search'].map((name) => (
-    name === 'generate_image' && extensionImage ? { name, source: 'my-images', defaultOn: true }
-      : { name, source: name === 'web_search' ? 'web' : name === 'show_image' ? 'pictures' : 'image-generation', defaultOn: true, ...(name === 'web_search' ? {} : { inline: true }) }));
-  const toolsOff: string[] = [...off];
   const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, timeoutSeconds: 300, editReady: false };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
@@ -41,13 +35,6 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
     else if (p === '/api/features/subagent' && method === 'GET') body = { subagent: state.subagent };
     else if (p === '/api/features/flags') body = { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled } };
-    else if (p === '/api/tools' && method === 'GET') body = { tools, off: toolsOff, names: {} };
-    else if (p === '/api/tools' && method === 'PUT') {
-      const { off } = route.request().postDataJSON();
-      sent.push({ path: p, body: { off } });
-      toolsOff.splice(0, toolsOff.length, ...off);
-      body = { off: toolsOff, applied: 0 };
-    }
     else if (p === '/api/features/images' && method === 'GET') body = { images };
     else if (p === '/api/features/images' && method === 'PUT') {
       const patch = route.request().postDataJSON();
@@ -509,32 +496,17 @@ test('several pictures per edit is a switch of its own that waits for the editin
   expect(sent.at(-1)!.body).toEqual({ editMultiple: false });
 });
 
-test('the picture tools, image generation and image editing are all in the Images section, and nowhere else', async ({ page }) => {
-  const { sent } = await portal(page, { off: ['edit_image', 'web_search'] });
+test('the Images page holds the image settings and no switch for the tools themselves', async ({ page }) => {
+  await portal(page);
   await page.goto('/settings/images');
   const here = addons(page);
-  // Showing, making and changing pictures: every switch of them is on this page.
-  const show = here.getByRole('switch', { name: 'show_image in new chats' });
-  await expect(show).toHaveAttribute('aria-checked', 'true');
-  await expect(here.getByRole('switch', { name: 'generate_image in new chats' })).toHaveAttribute('aria-checked', 'true');
-  // What was stored for new chats shows as it is stored.
-  await expect(here.getByRole('switch', { name: 'edit_image in new chats' })).toHaveAttribute('aria-checked', 'false');
   await expect(here.getByRole('switch', { name: 'Image generation tool' })).toBeVisible();
   await expect(here.getByRole('switch', { name: 'Image editing tool' })).toBeVisible();
   await expect(here.getByRole('switch', { name: 'Several pictures per edit' })).toBeVisible();
-
-  await show.click();
-  await expect(show).toHaveAttribute('aria-checked', 'false');
-  // The same list Settings → Tools writes: what was off stays off.
-  await expect.poll(() => sent.at(-1)).toEqual({ path: '/api/tools', body: { off: ['edit_image', 'show_image', 'web_search'] } });
-
-  // Settings → Tools does not list them a second time, and keeps what else it has.
-  await page.goto('/settings/tools');
-  await expect(here.getByText('web_search')).toHaveCount(1);
-  for (const name of ['show_image', 'generate_image', 'edit_image']) await expect(here.getByText(name, { exact: true })).toHaveCount(0);
-  await expect(here.getByText('pictures', { exact: true })).toHaveCount(0);
-
-  // Settings → Add-ons has no Images tab any more.
+  // The tools are switched in the tool lists, in their one group.
+  await expect(here.getByText('Picture tools', { exact: true })).toHaveCount(0);
+  for (const name of ['show_image', 'generate_image', 'edit_image']) await expect(here.getByRole('switch', { name: `${name} in new chats` })).toHaveCount(0);
+  // Settings → Add-ons has no Images tab.
   await page.goto('/settings/add-ons');
   await expect(here.getByRole('tab', { name: 'Images' })).toHaveCount(0);
 });
@@ -546,19 +518,4 @@ test('the Images section fits a phone', async ({ page }) => {
   await expect(addons(page).getByRole('switch', { name: 'Image editing tool' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   expect(await addons(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-});
-
-test("an image extension's generate_image stays in its group in Settings → Tools, and has no second switch under Images", async ({ page }) => {
-  const { sent } = await portal(page, { extensionImage: true });
-  await page.goto('/settings/images');
-  const here = addons(page);
-  await expect(here.getByRole('switch', { name: 'show_image in new chats' })).toBeVisible();
-  await expect(here.getByRole('switch', { name: 'generate_image in new chats' })).toHaveCount(0);
-
-  await page.goto('/settings/tools');
-  await expect(here.getByText('generate_image', { exact: true })).toHaveCount(1);
-  await expect(here.getByText('show_image', { exact: true })).toHaveCount(0);
-  // Its group's "all off" takes it along.
-  await here.getByRole('button', { name: 'all off' }).first().click();
-  await expect.poll(() => sent.at(-1)).toEqual({ path: '/api/tools', body: { off: ['generate_image'] } });
 });
