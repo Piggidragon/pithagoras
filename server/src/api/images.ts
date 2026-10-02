@@ -19,7 +19,7 @@ import { fail, sendPicture } from "./files.js";
 
 /**
  * The Images page: making pictures with the image endpoint the person set up
- * in Settings → Add-ons → Images, without the agent, and the gallery of
+ * in Settings → Agent → Images, without the agent, and the gallery of
  * what was made — here and in chats.
  *
  * The page asks the portal and the portal asks the endpoint, with the same

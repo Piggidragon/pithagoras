@@ -213,7 +213,7 @@ test('with image generation switched off the page says so and still shows what t
   await portal(page, { pictures: [pic({ prompt: 'Left over' })], images: feature({ enabled: false, editEnabled: false, editReady: false }), flagOn: false });
   await page.goto('/images');
   await expect(page.getByText('Image generation is switched off, or has no address.')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Set it up in Settings → Add-ons' })).toHaveAttribute('href', '/settings/add-ons');
+  await expect(page.getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
   await expect(maker(page)).toHaveCount(0);
   await expect(tile(page, 'Left over')).toBeVisible();
 });
@@ -225,7 +225,7 @@ test('with only changing set up the page is there: no form to make a picture, bu
   await page.goto('/images');
   // Where making a picture is not set up, that is said, and the rest of the form is there.
   await expect(page.getByText('Image generation is switched off, or has no address.')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Set it up in Settings → Add-ons' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toBeVisible();
   await expect(page.getByPlaceholder('Describe the picture')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Make the picture' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Options' })).toHaveCount(0);

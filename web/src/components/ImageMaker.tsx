@@ -196,8 +196,8 @@ export function ImageMaker({
       {!editing && !generating && (
         <p className="mb-3 text-sm text-fg-muted">
           {t("Image generation is switched off, or has no address.")}{" "}
-          <Link to="/settings/add-ons" className="text-accent hover:underline">
-            {t("Set it up in Settings → Add-ons")}
+          <Link to="/settings/images" className="text-accent hover:underline">
+            {t("Set it up in Settings → Agent → Images")}
           </Link>
           <span className="mt-1 block text-xs text-fg-subtle">{t("Pictures can still be changed: choose one in the gallery, or put one in from this computer.")}</span>
         </p>
@@ -276,7 +276,7 @@ export function ImageMaker({
       </div>
 
       {!editing && generating && form.open && <div className="mt-3 rounded-xl border border-line bg-canvas/40 p-3">{options}</div>}
-      {editing && <p className="mt-2 text-[11px] text-fg-faint">{t("A change goes to the editing endpoint with the model set for it in Settings → Add-ons → Images.")}</p>}
+      {editing && <p className="mt-2 text-[11px] text-fg-faint">{t("A change goes to the editing endpoint with the model set for it in Settings → Agent → Images.")}</p>}
       {error && (
         <p role="alert" className="mt-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
           {error}

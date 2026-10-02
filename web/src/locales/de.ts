@@ -1623,7 +1623,7 @@ const de: Locale = {
     "kept from this page": "von dieser Seite gespeichert",
     "Image generation is switched off, or has no address.": "Die Bildgenerierung ist ausgeschaltet oder hat keine Adresse.",
     "Pictures can still be changed: choose one in the gallery, or put one in from this computer.": "Bilder lassen sich weiterhin ändern: Wähle eines in der Galerie aus oder lege eines von diesem Computer ein.",
-    "Set it up in Settings → Add-ons": "In den Einstellungen → Add-ons einrichten",
+    "Set it up in Settings → Agent → Images": "In den Einstellungen → Agent → Bilder einrichten",
     "Gallery": "Galerie",
     "Where from": "Woher",
     "How it was made": "Wie es entstand",
@@ -1707,7 +1707,7 @@ const de: Locale = {
     "Add a picture from this computer": "Ein Bild von diesem Computer hinzufügen",
     "Change a picture from this computer": "Ein Bild von diesem Computer ändern",
     "Make a new picture instead": "Stattdessen ein neues Bild erstellen",
-    "A change goes to the editing endpoint with the model set for it in Settings → Add-ons → Images.": "Eine Änderung geht an den Bearbeitungs-Endpunkt, mit dem Modell, das dafür in den Einstellungen → Add-ons → Bilder eingestellt ist.",
+    "A change goes to the editing endpoint with the model set for it in Settings → Agent → Images.": "Eine Änderung geht an den Bearbeitungs-Endpunkt, mit dem Modell, das dafür in den Einstellungen → Agent → Bilder eingestellt ist.",
     // components/MaskPainter.tsx
     "Paint": "Malen",
     "Erase": "Radieren",

@@ -370,11 +370,10 @@ test('image generation needs an endpoint before it can be switched on, and the k
 
 test('the Images page is in the sidebar while image generation is on, and the switch moves it at once', async ({ page }) => {
   await portal(page);
-  await page.goto('/settings/add-ons');
+  await page.goto('/settings/images');
   const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Images' });
   await expect(entry).toHaveCount(0);
-  await addons(page).getByRole('tab', { name: 'Images' }).click();
-  const panel = addons(page).getByRole('tabpanel', { name: 'Images' });
+  const panel = addons(page);
   await panel.getByLabel('API address').fill('https://images.example.com/v1');
   await panel.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();

@@ -152,7 +152,7 @@ function Shell({
         })
         .catch(() => {});
     ask();
-    // Said by Settings → Add-ons when it switches Understory or the images, so the sidebar follows at once.
+    // Said by Settings when it switches Understory (Add-ons) or the images (Agent → Images), so the sidebar follows at once.
     window.addEventListener("features-changed", ask);
     return () => window.removeEventListener("features-changed", ask);
   }, []);

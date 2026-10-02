@@ -158,7 +158,7 @@ export interface GenerateJob {
  */
 export function startGenerations(request: GenerateJob): PictureJob[] {
   const config = imageGenerationConfig();
-  if (!imageGenerationReady(config)) throw new JobRefusal("Image generation is switched off, or has no address: set it up in Settings → Add-ons → Images", 409);
+  if (!imageGenerationReady(config)) throw new JobRefusal("Image generation is switched off, or has no address: set it up in Settings → Agent → Images", 409);
   room(request.count);
   const params: PictureParams = {
     ...((request.model || config.model) ? { model: request.model || config.model } : {}),
@@ -188,7 +188,7 @@ export interface EditJob {
  */
 export function startEdit(request: EditJob): PictureJob {
   const config = imageGenerationConfig();
-  if (!imageEditingReady(config)) throw new JobRefusal("Image editing is switched off, or has no address: set it up in Settings → Add-ons → Images", 409);
+  if (!imageEditingReady(config)) throw new JobRefusal("Image editing is switched off, or has no address: set it up in Settings → Agent → Images", 409);
   const target = imageEditingTarget(config);
   room(1);
   try {

@@ -7,7 +7,7 @@ looking through every picture made with it — here, and by the agent in its cha
 the page asks the portal, the portal asks the image endpoint you set up.
 
 Where there is no endpoint the page says so, with a link to
-**Settings → Add-ons → Images**, and still shows what is in the gallery. Making and
+**Settings → Agent → Images**, and still shows what is in the gallery. Making and
 changing a picture are set up apart: with only editing on there is no form to describe
 a new picture, which the page says, but a picture can be put in from your computer or
 chosen in the gallery to be changed; with only generation on there is no **Edit it** and

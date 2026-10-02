@@ -462,8 +462,8 @@ export function ImagesPage() {
           ) : (
             <Empty>
               {t("Image generation is switched off, or has no address.")}{" "}
-              <Link to="/settings/add-ons" className="text-accent hover:underline">
-                {t("Set it up in Settings → Add-ons")}
+              <Link to="/settings/images" className="text-accent hover:underline">
+                {t("Set it up in Settings → Agent → Images")}
               </Link>
             </Empty>
           ))}
