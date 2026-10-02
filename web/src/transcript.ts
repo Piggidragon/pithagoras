@@ -115,18 +115,20 @@ const TOOL_OUTPUT_MAX = 60_000;
  * wraps anew and what is on show jumps back and forth, which at a fast
  * model's speed read as the text racing rather than growing. The text is
  * laid out from the same start instead, and the window only cuts off its
- * top. Without a line break to move on to, it is cut at a word, which is
- * seen only once in `most` characters.
+ * top. Inside a paragraph with no line break to move on to, it is laid out
+ * from the same start for much longer, `longest` characters, and only then cut
+ * at a word, leaving little: that reflows what is shown, so it is rare (once
+ * in about `longest`, tens of seconds of even a fast model's reasoning).
  */
-export function shownFrom(text: string, from: number, most = 6000): number {
+export function shownFrom(text: string, from: number, most = 6000, longest = 30000): number {
   if (from > text.length) return 0;
   if (text.length - from <= most) return from;
   // The last line break that still leaves far more than the window shows.
   const lineBreak = text.lastIndexOf("\n", text.length - 600);
   if (lineBreak >= from) return lineBreak + 1;
-  const middle = text.length - most / 2;
-  const space = text.indexOf(" ", middle);
-  return space >= 0 ? space + 1 : middle;
+  if (text.length - from <= longest) return from;
+  const space = text.indexOf(" ", text.length - 600);
+  return space >= 0 ? space + 1 : text.length - 600;
 }
 
 /** Lines in a text, not counting a newline at its very end. */

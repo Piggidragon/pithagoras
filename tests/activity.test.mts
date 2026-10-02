@@ -48,9 +48,11 @@ test('the end of the reasoning shown starts where it did while the text is short
  // Not a letter at a time after that: it holds until the text from it is long again.
  const held=shownFrom(text(39)+'more',from);
  assert.equal(held,from);
- // A text with no line break is cut at a word, once; a shorter text than the start (a new reasoning) starts over.
- const flat=line.repeat(200);
- const cut=shownFrom(flat,0);
- assert.ok(cut>0&&flat[cut-1]===' '&&flat.length-cut>=2900);
+ // A text with no line break holds its start far longer, and is then cut at a word, once, leaving little.
+ const flat=(n:number)=>line.repeat(n);
+ assert.equal(shownFrom(flat(700),0),0);
+ const cut=shownFrom(flat(800),0);
+ assert.ok(cut>0&&flat(800)[cut-1]===' '&&flat(800).length-cut>=500&&flat(800).length-cut<=700);
+ // A shorter text than the start (a new reasoning) starts over.
  assert.equal(shownFrom('short',cut),0);
 });
