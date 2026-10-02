@@ -695,9 +695,8 @@ interface ImagesDraft {
 
 /** What the server takes as a time limit, in seconds (TIMEOUT_SECONDS there). */
 const TIMEOUT = { default: 300, min: 30, max: 3600 };
-/** Empty is the default, as it is for the model and the size. */
+/** Empty is the default, as it is for the model and the size: it takes a saved limit away. */
 const timeoutOk = (typed: string) => typed.trim() === "" || (/^\d+$/.test(typed.trim()) && Number(typed) >= TIMEOUT.min && Number(typed) <= TIMEOUT.max);
-const timeoutOf = (typed: string) => (typed.trim() === "" ? TIMEOUT.default : Number(typed));
 
 /** The same for editing, which has its own address, model and key. */
 interface ImagesEditDraft {
@@ -812,11 +811,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
           <label className="text-xs text-fg-muted">
             {t("Time limit (seconds)")}
             <input
-              type="number"
               inputMode="numeric"
-              min={TIMEOUT.min}
-              max={TIMEOUT.max}
-              step={1}
               value={form.timeout}
               onChange={(e) => edit({ timeout: e.target.value })}
               placeholder={String(TIMEOUT.default)}
@@ -843,7 +838,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
                   model: form.model,
                   size: form.size,
                   // Only when changed, so that saving the rest does not state a limit the person never chose.
-                  ...(timeoutOf(form.timeout) !== images.timeoutSeconds ? { timeoutSeconds: timeoutOf(form.timeout) } : {}),
+                  ...(form.timeout.trim() === "" ? { timeoutSeconds: null } : Number(form.timeout) !== images.timeoutSeconds ? { timeoutSeconds: Number(form.timeout) } : {}),
                   ...(form.apiKey ? { apiKey: form.apiKey } : {}),
                 })
               }

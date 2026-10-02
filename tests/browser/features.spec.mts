@@ -44,6 +44,8 @@ async function portal(page: Page, { reachable = true, available = true, docker =
         || (patch.editMultiple !== undefined && patch.editMultiple !== images.editMultiple && images.editReady);
       const { apiKey, editApiKey, ...rest } = patch;
       Object.assign(images, rest);
+      // null takes a saved limit away: the default again.
+      if (patch.timeoutSeconds === null) images.timeoutSeconds = 300;
       if (apiKey !== undefined) images.keySet = apiKey !== '';
       if (editApiKey !== undefined) images.editKeySet = editApiKey !== '';
       images.editReady = images.editEnabled && (images.editBaseUrl || images.baseUrl) !== '';
@@ -383,9 +385,9 @@ test('the time limit of a picture is a field of the image endpoint: five minutes
   await expect(save).toBeDisabled();
   await field.fill('4000');
   await expect(save).toBeDisabled();
-  // Empty is the default, which is what the placeholder says: it saves as the rest does.
-  await field.fill('');
-  await expect(save).toBeEnabled();
+  // Text that is not a number is no limit either, and is not taken for the default.
+  await field.fill('600s');
+  await expect(save).toBeDisabled();
   await field.fill('900');
   await expect(save).toBeEnabled();
   await save.click();
@@ -398,6 +400,15 @@ test('the time limit of a picture is a field of the image endpoint: five minutes
   await save.click();
   await expect(save).toBeHidden();
   expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: 'image-model', size: '' });
+
+  // Empty is the default, which is what the placeholder says: a saved limit is taken away, not stored as 300.
+  await expect(field).toHaveValue('900');
+  await field.fill('');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: 'image-model', size: '', timeoutSeconds: null });
+  await expect(field).toHaveValue('300');
 });
 
 test('image editing has a switch and an endpoint of its own: it needs an address, may use the one above, and its key is sent once', async ({ page }) => {

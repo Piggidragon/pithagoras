@@ -28,7 +28,7 @@ const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1
 
 const KEY = "sk-test-0123456789";
 
-interface Seen { method?: string; url?: string; auth?: string; body?: any; type?: string; raw?: Buffer }
+interface Seen { method?: string; url?: string; auth?: string; agent?: string; body?: any; type?: string; raw?: Buffer }
 /** A fake image endpoint: `handler` answers, and every request it gets is kept. */
 async function fake(handler: (req: IncomingMessage, res: ServerResponse, seen: Seen) => void): Promise<{ origin: string; seen: Seen[]; server: Server }> {
   const seen: Seen[] = [];
@@ -40,7 +40,7 @@ async function fake(handler: (req: IncomingMessage, res: ServerResponse, seen: S
       const raw = whole.toString("utf8");
       let body: any;
       try { body = raw ? JSON.parse(raw) : undefined; } catch { body = raw; }
-      const one: Seen = { method: req.method, url: req.url, auth: req.headers.authorization, body, type: req.headers["content-type"], raw: whole };
+      const one: Seen = { method: req.method, url: req.url, auth: req.headers.authorization, agent: req.headers["user-agent"], body, type: req.headers["content-type"], raw: whole };
       seen.push(one);
       handler(req, res, one);
     });
@@ -157,6 +157,7 @@ test("a picture comes back as base64 and is asked for with the model, the prompt
     assert.equal(seen[0].url, "/v1/images/generations");
     assert.equal(seen[0].auth, `Bearer ${KEY}`);
     assert.deepEqual(seen[0].body, { model: "image-model", prompt: "a red square", n: 1, size: "512x512" });
+    assert.ok(seen[0].agent, "a user agent is sent, as some endpoints sit behind a firewall that refuses a request with none");
 
     // What the agent asks for wins over the default; no model and no key send neither.
     await gen.generateImage(config(origin, { model: "", apiKey: "" }), { prompt: "p", size: "1024x768" });
@@ -839,7 +840,7 @@ test("the time limit is a setting: five minutes without one, whole seconds from 
   const parse = gen.parseImageGenerationPatch;
   assert.deepEqual(parse({ timeoutSeconds: 30 }), { timeoutSeconds: 30 });
   assert.deepEqual(parse({ timeoutSeconds: 3600 }), { timeoutSeconds: 3600 });
-  for (const bad of [29, 3601, 0, -300, 90.5, "300", null, NaN, Infinity]) {
+  for (const bad of [29, 3601, 0, -300, 90.5, "300", NaN, Infinity]) {
     assert.match(String(parse({ timeoutSeconds: bad })), /whole number of seconds from 30 to 3600/, String(bad));
   }
 
@@ -859,6 +860,11 @@ test("the time limit is a setting: five minutes without one, whole seconds from 
   assert.equal(JSON.parse(getSetting("image_generation")!).timeoutSeconds, 300, "written once chosen");
   gen.saveImageGeneration({ model: "n" });
   assert.equal(JSON.parse(getSetting("image_generation")!).timeoutSeconds, 300, "and kept");
+  gen.saveImageGeneration({ timeoutSeconds: 900 });
+  assert.deepEqual(parse({ timeoutSeconds: null }), { timeoutSeconds: null }, "null takes it away");
+  assert.equal(gen.saveImageGeneration({ timeoutSeconds: null }).timeoutSeconds, 300);
+  assert.ok(!("timeoutSeconds" in JSON.parse(getSetting("image_generation")!)), "the default is the default of the day again");
+  assert.equal(gen.imageGenerationConfig().timeoutSeconds, 300);
 
   // A setup saved before there was a limit, or with one that is no limit, gets the default.
   putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https://images.example.com/v1" }));

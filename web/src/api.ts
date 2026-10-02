@@ -1204,7 +1204,8 @@ export interface ImagesFeaturePatch {
   editModel?: string;
   editApiKey?: string;
   editMultiple?: boolean;
-  timeoutSeconds?: number;
+  /** null takes a saved limit away: the default again. */
+  timeoutSeconds?: number | null;
 }
 
 /** The model that keeps Understory's memory, as the page is told it: never the key. */

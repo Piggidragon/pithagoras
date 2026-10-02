@@ -158,8 +158,8 @@ export interface ImageGenerationPatch {
   /** "" takes the saved one away. */
   editApiKey?: string;
   editMultiple?: boolean;
-  /** Whole seconds, from TIMEOUT_SECONDS.min to its max. */
-  timeoutSeconds?: number;
+  /** Whole seconds, from TIMEOUT_SECONDS.min to its max; null takes the saved one away, which is the default again. */
+  timeoutSeconds?: number | null;
 }
 
 /** `1024x1024`, or `auto`, as the OpenAI-style APIs take it. */
@@ -207,8 +207,8 @@ export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch |
     patch.size = b.size.trim();
   }
   if (b.timeoutSeconds !== undefined) {
-    if (!validTimeout(b.timeoutSeconds)) return `The time limit must be a whole number of seconds from ${TIMEOUT_SECONDS.min} to ${TIMEOUT_SECONDS.max}`;
-    patch.timeoutSeconds = b.timeoutSeconds;
+    if (b.timeoutSeconds !== null && !validTimeout(b.timeoutSeconds)) return `The time limit must be a whole number of seconds from ${TIMEOUT_SECONDS.min} to ${TIMEOUT_SECONDS.max}`;
+    patch.timeoutSeconds = b.timeoutSeconds as number | null;
   }
   for (const field of ["apiKey", "editApiKey"] as const) {
     if (b[field] === undefined) continue;
@@ -238,7 +238,8 @@ const originOf = (address: string): string => {
  */
 export function saveImageGeneration(patch: ImageGenerationPatch): ImageGenerationConfig {
   const had = imageGenerationConfig();
-  const next = { ...had, ...patch };
+  const { timeoutSeconds: asked, ...others } = patch;
+  const next = { ...had, ...others, ...(typeof asked === "number" ? { timeoutSeconds: asked } : asked === null ? { timeoutSeconds: TIMEOUT_SECONDS.default } : {}) };
   // Only from one server to another: a key saved before there was an address was given for none, and goes with the first.
   if (patch.apiKey === undefined && had.baseUrl !== "" && originOf(next.baseUrl) !== originOf(had.baseUrl)) next.apiKey = "";
   const wasEditedAt = had.editBaseUrl || had.baseUrl;
@@ -249,7 +250,7 @@ export function saveImageGeneration(patch: ImageGenerationPatch): ImageGeneratio
   if (next.editEnabled && !(next.editBaseUrl || next.baseUrl)) throw new ImageGenerationError("Set the address of the image endpoint before switching editing on");
   // The default stays unsaved until a limit is chosen, so that it is the default of the day for every setup that never chose one.
   const { timeoutSeconds, ...rest } = next;
-  putSetting(KEY, JSON.stringify(patch.timeoutSeconds !== undefined || "timeoutSeconds" in savedSettings() ? next : rest));
+  putSetting(KEY, JSON.stringify(typeof asked === "number" || (asked === undefined && "timeoutSeconds" in savedSettings()) ? next : rest));
   return next;
 }
 
@@ -374,7 +375,8 @@ async function post(endpoint: URL, apiKey: string, body: string | FormData, sign
       {
         method: "POST",
         signal,
-        headers: { ...(type ? { "content-type": type } : {}), "content-length": bytes.length, accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+        // fetch sent one, and some endpoints sit behind a firewall that refuses a request with none.
+        headers: { "user-agent": "pithagoras", ...(type ? { "content-type": type } : {}), "content-length": bytes.length, accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
       },
       (res) => {
         const status = res.statusCode ?? 0;
