@@ -30,6 +30,8 @@ import { activity, buildTranscript, type Item, type SentImage } from "../transcr
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
+import { PictureButton, useChatPictures } from "./ChatPictures";
+import { sentPictureId, shownPictureId } from "../chat-pictures";
 import { confirmDialog } from "./ConfirmDialog";
 import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
@@ -726,6 +728,8 @@ export function Chat({
   // Interrupted or failed, the process is gone: nothing it started is still going.
   const ended = session.status === "interrupted" || session.status === "error";
   const items = useMemo(() => buildTranscript(events, { ended }), [events, ended]);
+  // A click on a picture opens it over the chat, not in a tab of its own.
+  const pictures = useChatPictures(items, session);
   // What arrived while the chat was open slides in; what was there when it
   // opened, or was loaded from further up, is simply there.
   const entered = useRef<{ session: string; ready: boolean; at: Map<string, number> }>({ session: session.id, ready: false, at: new Map() });
@@ -1533,6 +1537,7 @@ export function Chat({
 
   return (
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
+      {pictures.viewer}
       <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} folder={session.workspace} open={canvasOpen} setOpen={setCanvasOpen}/>
       <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
       <header className={voiceMode ? "hidden" : "chat-header border-b border-line px-4 py-3 max-md:px-3 max-md:py-2"}>
@@ -1763,14 +1768,14 @@ export function Chat({
                   {item.images && (
                     <div className={`flex flex-wrap justify-end gap-1.5 ${text ? "mb-1.5" : ""}`}>
                       {item.images.map((image) => (
-                        <a key={image.name} href={api.imageUrl(session.id, image.name)} target="_blank" rel="noreferrer" title={t("Open the picture")}>
+                        <PictureButton key={image.name} id={sentPictureId(item.id, image.name)} onOpen={pictures.open} title={t("Open the picture")}>
                           <img
                             src={api.imageUrl(session.id, image.name)}
                             alt={t("A picture sent with this message")}
                             loading="lazy"
                             className="max-h-48 max-w-full rounded-lg object-contain ring-1 ring-line"
                           />
-                        </a>
+                        </PictureButton>
                       ))}
                     </div>
                   )}
@@ -1946,20 +1951,17 @@ export function Chat({
               <div key={item.id} className={`tool-row${enter}`}>
               <ToolCall item={item} onOpenTerminal={showInTerminal} onOpenAgent={agentFor(item.callId) ? () => openAgent(agentFor(item.callId)!.id) : undefined} />
               {item.picture && (
-                <a
-                  href={api.pictureUrl(session.id, item.picture.path, item.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mb-1 mt-0.5 block w-fit"
-                  title={item.picture.title ?? item.picture.path}
-                >
-                  <img
-                    src={api.pictureUrl(session.id, item.picture.path, item.id)}
-                    alt={item.picture.title ?? item.picture.path}
-                    loading="lazy"
-                    className="max-h-80 max-w-full rounded-lg border border-line object-contain"
-                  />
-                </a>
+                // In the middle of the column, with as much room above as below. Contained, never cropped: a wide or tall picture is smaller here, and whole in the viewer.
+                <div className="chat-picture my-3 flex justify-center">
+                  <PictureButton id={shownPictureId(item.id)} onOpen={pictures.open} title={item.picture.title ?? item.picture.path}>
+                    <img
+                      src={api.pictureUrl(session.id, item.picture.path, item.id)}
+                      alt={item.picture.title ?? item.picture.path}
+                      loading="lazy"
+                      className="max-h-80 max-w-full rounded-lg border border-line object-contain"
+                    />
+                  </PictureButton>
+                </div>
               )}
               </div>
             );

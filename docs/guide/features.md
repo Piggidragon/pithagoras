@@ -118,8 +118,9 @@ makes (`image-20261001-101500-a1b2c3.png`), never one the agent or the endpoint
 chose, and never over an existing file. Its answer is the picture's path and a
 title, the same as `show_image`'s, so the chat draws the picture, in a preview
 that holds its place while it is made (see
-[Sessions](/guide/sessions#pictures-the-agent-makes)), and voice mode opens the
-Pictures window through the path `show_image` already has. The portal marks
+[Sessions](/guide/sessions#pictures-the-agent-makes)) and opens in the
+[viewer](/guide/sessions#looking-at-a-picture) on a click, and voice mode opens
+the Pictures window through the path `show_image` already has. The portal marks
 its own calls, when they start and in their answer, and the page draws a call as
 a picture only with that mark: another extension's tool of the same name, which
 pi may keep in the portal's place, has no such mark and stays a plain tool card,
