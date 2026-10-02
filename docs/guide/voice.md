@@ -524,8 +524,10 @@ model; they are not part of the conversation and are not added to the transcript
   "I'm still compacting our conversation. Please wait a moment; I'll let you know
   when I'm ready.", at most every eight seconds, so say it again afterwards.
 
-All of them are off in the [sequential baseline](/guide/voice-comparison), and
-`VOICE_STATUS_SPEECH=false` on the portal turns them off everywhere.
+All the spoken lines are off in the [sequential baseline](/guide/voice-comparison),
+and `VOICE_STATUS_SPEECH=false` on the portal turns them off everywhere. Only the
+lines go: what you say during compaction is still dropped, with nothing said about
+it.
 
 ## Speech runtimes
 
