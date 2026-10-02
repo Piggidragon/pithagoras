@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, fstatSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { listAgents } from "./agents.js";
+import { agentsRoot, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
 import { getDb, getSession } from "./db.js";
 import type { ExtraValue } from "./image-generation.js";
@@ -119,13 +119,12 @@ function downloadName(row: Row): string {
   return `image-${stamp}-${row.id.slice(0, 4)}${path.extname(row.path)}`;
 }
 
-/** What a folder is called to the person: Home, an agent's name, else its place under the workspace root (a project's name, or the way to a folder in one). */
+/** What a folder is called to the person: its agent for an agent's home, else its place under the workspace root (a project's name, or the way to a folder in one). `home` marks the first agent's home. */
 function folderLabel(folder: string): { name: string; home: boolean } {
   const agents = listAgents();
-  // The first agent's home is Home, as it was before there were others.
-  if (agents[0] && realPath(agents[0].home) === folder) return { name: "", home: true };
   const agent = agents.find((a) => realPath(a.home) === folder);
-  if (agent) return { name: agent.name, home: false };
+  // Named after its agent, as the sidebar names it. The first agent's home stays the one that is Home.
+  if (agent) return { name: agent.name, home: agent === agents[0] };
   const inRoot = pathBelow(realPath(workspaceRoot()) ?? workspaceRoot(), folder);
   return { name: inRoot || path.basename(folder), home: false };
 }
@@ -191,13 +190,16 @@ function folderOf(sessionId: string): string | undefined {
 
 /**
  * Whether a folder, real, is one a picture may be found in or served from: the
- * home of an agent or inside the workspace root, as a chat's folder has to be.
- * Asked once for all the folders a pass looks at.
+ * home of an agent, a folder made for one in `agents/` (that of an agent that was
+ * deleted with its folder kept stays one, with its pictures, for the agent
+ * made under the same name to take up again) or inside the workspace root, as
+ * a chat's folder has to be. Asked once for all the folders a pass looks at.
  */
 function folderAllowed(): (real: string) => boolean {
   const homes = new Set(listAgents().map((a) => realPath(a.home)));
+  const made = realPath(agentsRoot());
   const root = realPath(workspaceRoot());
-  return (real) => homes.has(real) || (root !== null && isWithinText(root, real));
+  return (real) => homes.has(real) || (made !== null && path.dirname(real) === made) || (root !== null && isWithinText(root, real));
 }
 
 /** The real folder a picture that was found is in, the same for all of a pass; the reason it cannot be used otherwise. */

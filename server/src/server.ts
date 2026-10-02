@@ -610,6 +610,8 @@ app.delete("/api/agents/:id", async (req, res) => {
       for (const run of runs) await sessions.discard(run.id);
       for (const chat of chats) await sessions.discard(chat.id);
       deleteAgent(agent.id, { deleteFolder: req.query.folder === "delete" });
+      // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
+      if (req.query.folder === "delete") forgetPicturesIn(agent.home);
       const switchedOff = switchOffRoutines(routines);
       getDb().transaction(() => {
         for (const chat of chats) deleteSession(chat.id);

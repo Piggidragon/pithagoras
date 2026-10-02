@@ -163,7 +163,8 @@ test("every picture in the folders the tools write into is listed, recorded or n
   }
   assert.deepEqual(by("holiday.jpg").folder, { name: "alpha", home: false });
   assert.deepEqual(by("stray.png").folder, { name: "alpha/work", home: false }, "the way to a folder a chat works in, under the root");
-  assert.deepEqual(by("image-20260102-130000-def456.png").folder, { name: "", home: true });
+  // The first agent's home is named after the agent, as the sidebar names it (no SOUL.md here to name it otherwise).
+  assert.deepEqual(by("image-20260102-130000-def456.png").folder, { name: "Agent", home: true });
   // When it was made is when its file was written, and what it weighs is what it does.
   assert.equal(by("image-20260102-120000-abc123.png").createdAt, T);
   assert.equal(by("movie.gif").bytes, gif("m").length);
@@ -470,7 +471,7 @@ test("a gallery of hundreds in a folder is listed once and paged, and looking ag
   assert.equal((getDb().prepare("SELECT COUNT(*) AS n FROM images").get() as { n: number }).n, before);
 });
 
-test("the home of an agent other than the first is a folder of the gallery like Home: its pictures are found, kept when its chat goes, and named after it", async () => {
+test("the home of an agent other than the first is a folder of the gallery like the first one's: its pictures are found, kept when its chat goes, and named after it", async () => {
   const bot = createAgent({ name: "Research Bot" });
   chatIn("chat-bot", bot.home, "With the bot");
   const made = "image-20260102-190000-888888.png";
@@ -488,7 +489,7 @@ test("the home of an agent other than the first is a folder of the gallery like 
   ].sort());
   // The first agent's home is still Home.
   put(home, "image-20260102-200000-aaaaaa.png", png("home-again"), NEW + 1000);
-  assert.deepEqual((await listed("?origin=folder")).pictures.find((p: any) => p.fileName === "image-20260102-200000-aaaaaa.png").folder, { name: "", home: true });
+  assert.deepEqual((await listed("?origin=folder")).pictures.find((p: any) => p.fileName === "image-20260102-200000-aaaaaa.png").folder, { name: "Agent", home: true });
 
   // The chat goes, and its picture stays with the home it was made in, served as before.
   deleteSession("chat-bot");
@@ -496,9 +497,19 @@ test("the home of an agent other than the first is a folder of the gallery like 
   assert.deepEqual([kept.origin, kept.prompt, kept.folder], ["folder", "a lake", { name: "Research Bot", home: false }]);
   assert.equal((await call("GET", `/images/${kept.id}/file`)).status, 200);
 
-  // An agent that is taken away is no folder the gallery looks in, until one of that name is made again over the folder it left.
+  // An agent that is taken away with its folder kept leaves the pictures in the gallery, with what they were asked for and named by their folder, which no agent has now.
   deleteAgent(bot.id, { deleteFolder: false });
-  assert.deepEqual((await listed()).pictures.filter((p: any) => [made, older].includes(p.fileName)), []);
+  const left = (await listed()).pictures.filter((p: any) => [made, older].includes(p.fileName));
+  assert.deepEqual(left.map((p: any) => [p.fileName, p.prompt, p.folder]).sort(), [
+    [made, "a lake", { name: "research-bot", home: false }],
+    [older, "", { name: "research-bot", home: false }],
+  ].sort());
+  assert.equal((await call("GET", `/images/${left.find((p: any) => p.fileName === made).id}/file`)).status, 200);
+  // Made again under the name, the agent has them, with what they were asked for.
   createAgent({ name: "Research Bot" });
-  assert.deepEqual(names({ pictures: (await listed()).pictures.filter((p: any) => [made, older].includes(p.fileName)) }), [older, made].sort());
+  const back = (await listed()).pictures.filter((p: any) => [made, older].includes(p.fileName));
+  assert.deepEqual(back.map((p: any) => [p.fileName, p.prompt, p.folder]).sort(), [
+    [made, "a lake", { name: "Research Bot", home: false }],
+    [older, "", { name: "Research Bot", home: false }],
+  ].sort());
 });

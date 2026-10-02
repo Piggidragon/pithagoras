@@ -181,6 +181,11 @@ link followed out of it, and what its bytes say it is.
   file. A picture that was found has no chat to keep it, so it is dropped with its
   folder and found again when the folder is back, and a delete of one says the same while
   the folder cannot be reached.
+- **Deleting an agent** does the same with its chats' pictures. With **Keep its folder**
+  they stay in the gallery, with what they were asked for, as pictures of that folder
+  (named by its folder, as no agent has it), and an agent made under the same name takes
+  them up again. With **Delete its folder too** the files are gone, and so are they, those
+  of its routines' runs included.
 - Looking through the folders for the first time reads the first bytes of every file
   there; after that the portal only reads the folders' names, and opens a file again only
   when it is new or has changed, so a gallery of hundreds stays quick.

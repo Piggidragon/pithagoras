@@ -286,6 +286,18 @@ test('the filters ask the portal for what they say, and are in the address', asy
 /** A picture the portal found in a folder the agent's tools write into: nothing was kept of how it was made. */
 const found = (over: Partial<Pic> & { age?: number } = {}) => pic({ origin: 'folder', kind: 'unknown', prompt: '', folder: { name: 'garden', home: false }, ...over });
 
+test('a picture found in an agent\'s home says which agent, the first one included, and Home only where the server gave no name', async ({ page }) => {
+  const first = found({ fileName: 'owl.png', folder: { name: 'Nova', home: true }, age: 3 });
+  const other = found({ fileName: 'fox.png', folder: { name: 'Research Bot', home: false }, age: 2 });
+  const unnamed = found({ fileName: 'moth.png', folder: { name: '', home: true }, age: 1 });
+  await portal(page, { pictures: [first, other, unnamed] });
+  await page.goto('/images');
+  await expect(grid(page).getByRole('listitem')).toHaveCount(3);
+  await expect(grid(page).getByRole('listitem').filter({ hasText: 'Nova' })).toHaveCount(1);
+  await expect(grid(page).getByRole('listitem').filter({ hasText: 'Research Bot' })).toHaveCount(1);
+  await expect(grid(page).getByRole('listitem').filter({ hasText: 'Home' })).toHaveCount(1);
+});
+
 test('pictures that were found in a folder are in the gallery by their file name, say where they are, and are filtered', async ({ page }) => {
   const named = found({ fileName: 'fox.png', age: 3 });
   const home = found({ fileName: 'owl.png', folder: { name: '', home: true }, kind: 'generated', age: 2 });

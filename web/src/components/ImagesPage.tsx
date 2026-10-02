@@ -54,8 +54,8 @@ const KIND_SHORT: Record<PictureKind, string> = {
   unknown: msg("Not known"),
 };
 
-/** What a folder is called: Home, or its place under the workspace root. */
-const folderName = (folder: { name: string; home: boolean }): string => (folder.home ? t("Home") : folder.name);
+/** What a folder is called: its agent for an agent's home, as the sidebar names it (Home where the server gave no name), or its place under the workspace root. */
+const folderName = (folder: { name: string; home: boolean }): string => (folder.home ? folder.name || t("Home") : folder.name);
 
 /** The viewer's own buttons are this size; the ones this page adds match them. */
 const viewerButton =
