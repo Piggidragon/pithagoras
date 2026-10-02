@@ -71,8 +71,9 @@ Two keys work from anywhere on the page:
 The pictures the agent shows with `show_image`, makes with `generate_image` or
 changes with `edit_image` are drawn under their tool line, in the middle of the
 conversation, with the same room above and below. A very wide or very tall one is
-smaller there, never cropped: the viewer shows it whole. The pictures you sent
-are in your message.
+smaller there, never cropped: the viewer shows it whole. A picture the agent
+made or changed is the [preview](#pictures-the-agent-makes) that held its place
+while it was made. The pictures you sent are in your message.
 
 A click or a tap on any of them opens it **in the viewer**, over the chat,
 fitted to the screen on a calm backdrop. The chat stays where it was: nothing
@@ -184,8 +185,10 @@ the moment it is asked for:
   slow connection takes, and the picture is fetched at once rather than when
   the browser sees fit. The picture then fades in over it, in the same place.
   Where the shape was right nothing under it moves; where it was not, the frame
-  takes the picture's own shape. A click opens the picture in a new tab. If the
-  file cannot be fetched, it says so, and not that the picture is gone.
+  takes the picture's own shape. A click opens it in the
+  [viewer](#looking-at-a-picture), with the conversation's other pictures to
+  step through; the file is the one the preview has loaded, not fetched again.
+  If the file cannot be fetched, it says so, and not that the picture is gone.
 - **When it fails**, the frame says so quietly, with the reason in a line or
   two — the endpoint's answer, a setting that was switched off — and the whole of
   it under **Details**. A call that was cut off, because the run was stopped or

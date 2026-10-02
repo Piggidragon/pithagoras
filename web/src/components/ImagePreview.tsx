@@ -23,8 +23,9 @@ export interface ImagePreviewProps {
   reason?: string;
   /** Seconds the making has taken so far, for `making`. */
   elapsed?: number;
-  /** Where a click on the picture goes. */
-  href?: string;
+  /** The viewer's id for the picture, and what opens it: a click on the picture goes there, and focus comes back to it when the viewer closes. Neither, and the picture is not a button. */
+  pictureId?: string;
+  onOpen?: (id: string) => void;
   /** Only the frame, small, for where a label and a caption have no room (the cards of voice mode). */
   compact?: boolean;
   /** Beside the title under the picture. */
@@ -53,7 +54,7 @@ export interface ImagePreviewProps {
  * It knows nothing of chats or tools, so that the Images page can use it as
  * well; what goes in `actions` and around it is the caller's.
  */
-export function ImagePreview({ state, edit = false, src, before, ratio, title, reason, elapsed, href, compact = false, actions }: ImagePreviewProps) {
+export function ImagePreview({ state, edit = false, src, before, ratio, title, reason, elapsed, pictureId, onOpen, compact = false, actions }: ImagePreviewProps) {
   // Taken once: whether it was being made when it first appeared here.
   const arriving = useRef(state === "making").current;
   // What has loaded, and what has not, by the address: another picture in the same place starts over.
@@ -126,7 +127,7 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
           {!compact && making && elapsed !== undefined && elapsed >= 3 && <small className="tabular-nums">{formatElapsed(elapsed)}</small>}
         </div>
       )}
-      {picture && (href && !compact ? <a className="image-preview-link" href={href} target="_blank" rel="noreferrer" title={title}>{picture}</a> : picture)}
+      {picture && (onOpen && pictureId && !compact ? <button type="button" className="image-preview-link" data-picture-id={pictureId} aria-haspopup="dialog" title={title} onClick={() => onOpen(pictureId)}>{picture}</button> : picture)}
       {shown === "failed" && (
         <div className="image-preview-failed" aria-hidden>
           <LuImageOff aria-hidden />

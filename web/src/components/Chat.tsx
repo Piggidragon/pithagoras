@@ -1943,7 +1943,7 @@ export function Chat({
             if (isPictureCall(item)) {
               return (
                 <div key={item.id} className={`tool-row${enter}`}>
-                  <PictureCall item={item} sessionId={session.id} folder={session.workspace} />
+                  <PictureCall item={item} sessionId={session.id} folder={session.workspace} onOpen={pictures.open} />
                 </div>
               );
             }
@@ -1955,7 +1955,7 @@ export function Chat({
                 <div className="chat-picture my-3 flex justify-center">
                   <PictureButton id={shownPictureId(item.id)} onOpen={pictures.open} title={item.picture.title ?? item.picture.path}>
                     <img
-                      src={api.pictureUrl(session.id, item.picture.path, item.id)}
+                      src={api.pictureUrl(session.id, item.picture.path, item.pictureSeq)}
                       alt={item.picture.title ?? item.picture.path}
                       loading="lazy"
                       className="max-h-80 max-w-full rounded-lg border border-line object-contain"

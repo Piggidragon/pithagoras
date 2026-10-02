@@ -36,7 +36,8 @@ async function folder(page: Page, sessionId: string, held?: Promise<void>) {
   await page.route(`**/api/sessions/${sessionId}/picture?**`, async (route) => {
     const size = SIZES[new URL(route.request().url()).searchParams.get('path') ?? ''] ?? SIZES['generated-images/harbour.png'];
     await held;
-    await route.fulfill({ body: picture(...size), contentType: 'image/png' });
+    // As the portal's own route answers: the browser may keep the file in the page, but is to ask again for it in another.
+    await route.fulfill({ body: picture(...size), contentType: 'image/png', headers: { 'cache-control': 'private, no-cache' } });
   });
 }
 
@@ -76,7 +77,7 @@ test.describe('in the chat', () => {
     await expect(call(page, making).locator('.chat-tool-body')).toContainText('1024x1536');
   });
 
-  test('a picture that is made fills the frame it was given, and is a link to itself', async ({ page }) => {
+  test('a picture that is made fills the frame it was given, and is a button for the viewer', async ({ page }) => {
     let release!: () => void;
     await folder(page, 'preview', new Promise<void>((resolve) => (release = resolve)));
     await page.goto('/tests/pictures.html');
@@ -93,9 +94,45 @@ test.describe('in the chat', () => {
     await expect(done.getByRole('img', { name: 'A lighthouse at dusk' })).toBeVisible();
     // Where the guess was right, nothing moved.
     expect(await frame.boundingBox()).toEqual(before);
-    await expect(done.getByRole('link')).toHaveAttribute('href', /picture\?path=generated-images%2Flighthouse\.png/);
+    await expect(done.getByRole('button', { name: 'A lighthouse at dusk' })).toHaveAttribute('aria-haspopup', 'dialog');
+    await expect(done.getByRole('link')).toHaveCount(0);
     // From the history: it is there, it does not arrive.
     await expect(frame).not.toHaveClass(/is-arriving/);
+  });
+
+  test('a click on a finished picture opens it in the viewer, from the one download, and not in a tab of its own', async ({ page, context }) => {
+    const asked: string[] = [];
+    const tabs: string[] = [];
+    page.on('request', (request) => { if (request.url().includes('picture?path=generated-images%2F')) asked.push(request.url()); });
+    context.on('page', (tab) => tabs.push(tab.url()));
+    await page.goto('/tests/pictures.html');
+    const done = preview(page, 'A lighthouse at dusk');
+    await expect(done.locator('.image-preview-frame')).toHaveClass(/is-loaded/);
+    const opener = done.locator('[data-picture-id]');
+    await opener.click();
+    const viewer = page.getByRole('dialog', { name: 'Picture viewer' });
+    await expect(viewer).toBeVisible();
+    // The preview's own address: the file is in the page already, and is not fetched again for the viewer.
+    const shown = viewer.locator('img[data-picture]');
+    await expect(shown).toHaveAttribute('src', (await done.locator('.image-preview-img').getAttribute('src'))!);
+    await expect.poll(() => shown.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+    expect(asked.filter((url) => url.includes('lighthouse')), 'one download of the file').toHaveLength(1);
+    expect(tabs).toEqual([]);
+
+    // Out of the viewer, back to the picture it was opened from.
+    await page.keyboard.press('Escape');
+    await expect(viewer).toHaveCount(0);
+    await expect(opener).toBeFocused();
+
+    // One that was watched being made is the same once it has arrived, and the viewer has it with the others.
+    await page.evaluate(() => (window as any).emit('tool_execution_end', (window as any).madePayload('making', 'generated-images/harbour.png', 'A foggy harbour')));
+    const making = preview(page, 'A foggy harbour');
+    await expect(making.locator('.image-preview-frame')).toHaveClass(/is-loaded/);
+    await making.locator('[data-picture-id]').click();
+    await expect(viewer.locator('img[data-picture]')).toHaveAttribute('alt', 'A foggy harbour');
+    await expect(viewer.getByRole('button', { name: 'Previous picture' })).toBeEnabled();
+    expect(asked.filter((url) => url.includes('harbour')), 'one download of the file').toHaveLength(1);
+    expect(tabs).toEqual([]);
   });
 
   test('a call that made no picture says so quietly, with the reason, in place of the card', async ({ page }) => {

@@ -481,13 +481,15 @@ test('the pictures in the conversation are in the middle of the column, with the
       expect(Math.abs(box.x + box.width / 2 - (column.x + column.width / 2)), `${name} at ${width}`).toBeLessThan(1);
       // Between what is above it and what is below it, the same room.
       const [above, below] = await picture.evaluate((el) => {
-        const row = el.closest('.chat-picture')!;
+        const row = el.closest('.chat-picture');
+        // A picture the agent made or changed is a preview (ImagePreview), whose room is the chat's own spacing; it is in the middle, which is checked above.
+        if (!row) return [NaN, NaN];
         const [before, after] = [row.previousElementSibling!.getBoundingClientRect(), (row.parentElement!.nextElementSibling ?? row).getBoundingClientRect()];
         const own = row.getBoundingClientRect();
         return [own.top - before.bottom, after === own ? NaN : after.top - own.bottom];
       });
       if (!Number.isNaN(below)) expect(Math.abs(above - below), `${name} at ${width}`).toBeLessThan(1.5);
-      expect(above, `${name} at ${width}`).toBeGreaterThanOrEqual(8);
+      if (!Number.isNaN(above)) expect(above, `${name} at ${width}`).toBeGreaterThanOrEqual(8);
     }
     // Contained, not cropped: a picture 1600 wide is not wider than the column.
     const wide = (await thumb(page, 'A lighthouse at dusk').locator('img').boundingBox())!;

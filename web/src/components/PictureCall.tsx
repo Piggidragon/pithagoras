@@ -2,6 +2,7 @@ import { useState } from "react";
 import { LuChevronRight } from "react-icons/lu";
 import { api } from "../api";
 import { failureReason, pictureCall } from "../picture-call";
+import { shownPictureId } from "../chat-pictures";
 import { stripAnsi, type Item } from "../transcript";
 import { t } from "../i18n";
 import { Collapse, ToolArgs, useNow } from "./ChatActivity";
@@ -15,13 +16,13 @@ type ToolItem = Extract<Item, { kind: "tool" }>;
  * said whole — is under "Details", so that nothing the card showed is lost, and
  * is no longer the main thing.
  */
-export function PictureCall({ item, sessionId, folder }: { item: ToolItem; sessionId: string; folder: string }) {
+export function PictureCall({ item, sessionId, folder, onOpen }: { item: ToolItem; sessionId: string; folder: string; onOpen?: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const call = pictureCall(item.name, item.args, folder);
   const running = item.status === "running";
   const now = useNow(running);
   const state: PreviewState = running ? "making" : item.picture ? "done" : "failed";
-  // The URL voice mode's picture window has for it, too: the same one, so that the browser fetches the file once for the chat, the tile on a card and the window, not once for each.
+  // The URL voice mode's picture window and the chat's viewer have for it, too: the same one, so that the browser fetches the file once for the chat, the tile on a card, the window and the viewer, not once for each.
   const url = item.picture && api.pictureUrl(sessionId, item.picture.path, item.pictureSeq);
   const output = stripAnsi(item.output ?? "");
   // A run that ended with the call open never said how it came out: it did not bring a picture.
@@ -37,7 +38,8 @@ export function PictureCall({ item, sessionId, folder }: { item: ToolItem; sessi
         title={item.picture?.title ?? (call.title || undefined)}
         reason={reason}
         elapsed={running && item.since ? Math.max(0, Math.floor((now - item.since) / 1000)) : undefined}
-        href={url}
+        pictureId={shownPictureId(item.id)}
+        onOpen={onOpen}
         actions={
           <button type="button" className="picture-call-more" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
             {t("Details")}
