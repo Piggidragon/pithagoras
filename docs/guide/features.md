@@ -1,9 +1,10 @@
 # Opt-in features
 
 Three capabilities ship with Pithagoras and are **off** until you switch them on
-in **Settings → Add-ons**: a **subagent tool**, **Understory** as the agent's
-memory, and **image generation and editing**. A fresh install has none of them. (The same
-tab holds the Docker-based [Browser and Voice](/guide/add-ons).) Switching on
+in **Settings**: a **subagent tool** and **Understory** as the agent's memory
+under **Add-ons**, and **image generation and editing** under **Images**. A fresh
+install has none of them. (The Add-ons page also holds the Docker-based
+[Browser and Voice](/guide/add-ons).) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
 Settings → MCP. Switching one off removes it. Image generation and editing are
@@ -77,7 +78,12 @@ share pi's event bus with the tool.
 
 ## Image generation
 
-**Settings → Add-ons → Images.** A `generate_image` tool: the agent describes a
+**Settings → Images.** The one page for the agent's pictures: it holds the
+switches that say whether a new chat starts with `show_image`, `generate_image`
+and `edit_image` (the same defaults as Settings → Tools, which leaves these three
+out), and below them the image endpoint, generation, editing and the
+several-pictures switch. It was a tab of Settings → Add-ons before; nothing stored
+changed with the move. A `generate_image` tool: the agent describes a
 picture, an image model you set up makes it, and it appears in the chat — and
 in voice mode's picture window — just like one the agent showed with
 `show_image`. It is off until you have saved an address and switched it on;
@@ -129,7 +135,7 @@ no picture — is an error result the agent sees and can pass on, never a
 silent success.
 
 The tool is a tool like the others: it can be switched off for a chat, a project
-or everywhere in the tool menus and Settings → Tools, and then the model does not
+or everywhere in the tool menus and Settings → Images, and then the model does not
 have it and the voice instructions say nothing of it either. Its name is
 `generate_image`, which an image extension you installed may use too. pi keeps
 the first tool of a name it loads, and the portal's loads last, so then the
@@ -174,7 +180,7 @@ available. While it is off, or has no address, the agent has no `edit_image`
 at all, and the voice instructions say nothing of it. Generation and editing
 do not need each other; one may be on without the other.
 
-On the same tab, under the generation settings:
+On the same page, under the generation settings:
 
 | Field | Meaning |
 | --- | --- |
@@ -243,7 +249,7 @@ What was decided for it:
 The same rules as for generation apply to who may use it: the primary user's
 conversations only, unless a [tool rule](/people/rules) allows it, and each edit
 can cost money at a hosted endpoint. The tool is a tool like the others and can
-be switched off in the tool menus and Settings → Tools; an extension's tool of
+be switched off in the tool menus and Settings → Images; an extension's tool of
 the name `edit_image` is the one pi keeps, as for `generate_image`.
 
 | | |
