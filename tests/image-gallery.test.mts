@@ -766,6 +766,41 @@ test("chats in one folder share its files: a name that comes back replaces the o
   assert.deepEqual(edit.params.sources, [base.id]);
 });
 
+test("deleting a project takes the pictures of every chat that worked in it from the gallery, routine runs too, and no more", async () => {
+  getDb().prepare("DELETE FROM images").run();
+  const root = mkdtempSync(path.join(temp, "root-"));
+  const project = path.join(root, "site");
+  const sibling = path.join(root, "site-old");
+  for (const dir of [project, sibling]) mkdirSync(path.join(dir, GENERATED_DIR), { recursive: true });
+  createSession({ id: "run-1", title: "A run", workspace: project, executor: "host", kind: "routine" });
+  createSession({ id: "chat-p", title: "In the project", workspace: project, executor: "host" });
+  createSession({ id: "chat-s", title: "In its neighbour", workspace: sibling, executor: "host" });
+  for (const [id, dir] of [["run-1", project], ["chat-p", project], ["chat-s", sibling]]) {
+    writeFileSync(path.join(dir, GENERATED_DIR, `${id}.png`), png(id));
+    gallery.recordChatPicture({ sessionId: id, path: `${GENERATED_DIR}/${id}.png`, kind: "generated", prompt: id, params: {}, bytes: 70 });
+  }
+  assert.equal((await listed("?origin=chat")).total, 3);
+  // The folder goes, as the portal removes a project's: the run's session stays, as the record of what it did.
+  rmSync(project, { recursive: true });
+  assert.equal((await listed("?origin=chat")).total, 3, "a folder that cannot be reached is kept, since it may be a drive that is not mounted");
+  assert.equal(gallery.forgetPicturesIn(project), 2);
+  const left = (await listed("?origin=chat")).pictures;
+  assert.deepEqual(left.map((p: any) => p.prompt), ["chat-s"], "the neighbour whose name starts the same is another folder");
+});
+
+test("a deleted chat's pictures leave the gallery and what was made of them no longer names them", async () => {
+  getDb().prepare("DELETE FROM images").run();
+  const folder = chat("chat-13", "Going");
+  mkdirSync(path.join(folder, GENERATED_DIR), { recursive: true });
+  writeFileSync(path.join(folder, GENERATED_DIR, "a.png"), png("a"));
+  gallery.recordChatPicture({ sessionId: "chat-13", path: `${GENERATED_DIR}/a.png`, kind: "generated", prompt: "original", params: {}, bytes: 70 });
+  const original = (await listed("?origin=chat")).pictures[0];
+  const edited = gallery.addPagePicture({ bytes: png("b"), ext: "png", kind: "edited", prompt: "edit", params: { sources: [original.id] }, sourceId: original.id });
+  assert.equal((await listed(`?ids=${edited.id}`)).pictures[0].from, original.id);
+  deleteSession("chat-13");
+  assert.equal((await listed(`?ids=${edited.id}`)).pictures[0].from, null, "no link to what is not in the list");
+});
+
 test("the sidebar is told whether the page is there: on while an address is set and the add-on is on", async () => {
   gone();
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1" });

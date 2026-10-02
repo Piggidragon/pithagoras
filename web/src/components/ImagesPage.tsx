@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { LuCheck, LuDownload, LuImage, LuImagePlus, LuInfo, LuListChecks, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles, LuX } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob, type PictureKind, type PictureOrigin } from "../api";
-import { appendPage, fieldsOf, fieldsText, mergeTop, readFilter, sameList, tiles, viewerList, viewerPicture, type Filter, type Tile } from "../images-gallery";
+import { appendPage, fieldsOf, fieldsText, madeButNotListed, mergeTop, readFilter, sameList, tiles, viewerList, viewerPicture, type Filter, type Tile } from "../images-gallery";
 import { pollWhileVisible } from "../poll";
 import { bytesLabel } from "../projects";
 import { isEscape } from "../shortcuts";
@@ -19,6 +19,9 @@ import type { ViewerPicture } from "../image-viewer";
 
 /** How many pictures a page of the gallery has: enough to fill a screen and some, and few enough to be quick. */
 const PAGE = 48;
+/** The most pictures one request to delete may name (MAX_IDS on the portal). */
+const DELETE_AT_ONCE = 200;
+
 /** How close to the end of what is loaded the viewer has to get before the next page is asked for. */
 const AHEAD = 6;
 
@@ -93,6 +96,9 @@ export function ImagesPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
   const asked = useRef(0);
+  // What the callbacks below read, kept where they can: the jobs of the page, and what was deleted here.
+  const jobsRef = useRef<PictureJob[]>([]);
+  const goneRef = useRef<ReadonlySet<string>>(new Set());
 
   // What was selected is of the list that was shown: another filter, or Back to one, shows other pictures, and what is not on screen is not to be deleted with what is.
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
@@ -127,6 +133,18 @@ export function ImagesPage() {
           // Nothing moved: nothing is drawn again.
           return sameList(pictures, cur.pictures) && next === cur.next && page.total === cur.total && page.pageBytes === cur.pageBytes ? cur : { pictures, total: page.total, next, pageBytes: page.pageBytes };
         });
+        // A picture that a job made, which this list does not have: asked for, and if the portal has not got it, it was deleted somewhere else (another tab, a phone) and its job does not stand in for it.
+        const have = new Set(mergeTop(listRef.current.pictures, page).map((p) => p.id));
+        const lost = madeButNotListed(jobsRef.current, have, goneRef.current, latestFilter.current);
+        if (!lost.length) return;
+        api.galleryPictures(lost).then(
+          (found) => {
+            const there = new Set(found.pictures.map((p) => p.id));
+            const deleted = lost.filter((id) => !there.has(id));
+            if (deleted.length && asked.current === mine) setGone((cur) => new Set([...cur, ...deleted]));
+          },
+          () => {},
+        );
       },
       () => {},
     );
@@ -168,6 +186,7 @@ export function ImagesPage() {
 
   // What is being made. Asked after every start, and every second or two while something is, which is all it takes to see a picture arrive.
   const [jobs, setJobs] = useState<PictureJob[]>([]);
+  jobsRef.current = jobs;
   const [limit, setLimit] = useState(4);
   // What was done already when the page was opened: the pictures are in the gallery, and the jobs are not shown again.
   const ignored = useRef<Set<string> | null>(null);
@@ -216,7 +235,6 @@ export function ImagesPage() {
 
   // Deleted here: their jobs are not shown any more either, though the server may still have them.
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
-  const goneRef = useRef(gone);
   goneRef.current = gone;
   const [opened, setOpened] = useState<string | null>(null);
   const [originals, setOriginals] = useState<ReadonlyMap<string, GalleryPicture>>(new Map());
@@ -275,22 +293,31 @@ export function ImagesPage() {
       deletes: inChats.length === 0,
     });
     if (!ok) return;
+    // The portal takes so many at a time; the question was asked once for all of them.
+    const done: { deleted: string[]; failed: { id: string; error: string }[] } = { deleted: [], failed: [] };
+    let stopped: Error | undefined;
     try {
-      const done = await api.deletePictures(ids);
-      const deleted = new Set(done.deleted);
-      // What was made of a deleted picture does not name it any more, as the portal says it either; and an original that was fetched to be reached from an edit is not reached.
-      const unlink = (p: GalleryPicture) => (p.from && deleted.has(p.from) ? { ...p, from: null } : p);
-      const freed = chosen.filter((p) => deleted.has(p.id) && p.origin === "page").reduce((sum, p) => sum + p.bytes, 0);
-      setList((cur) => ({ ...cur, pictures: cur.pictures.filter((p) => !deleted.has(p.id)).map(unlink), total: Math.max(0, cur.total - deleted.size), pageBytes: Math.max(0, cur.pageBytes - freed) }));
-      setOriginals((cur) => new Map([...cur].filter(([id]) => !deleted.has(id)).map(([id, p]) => [id, unlink(p)])));
-      setGone((cur) => new Set([...cur, ...deleted]));
-      setPicked((cur) => new Set([...cur].filter((id) => !deleted.has(id))));
-      setSources((cur) => cur.filter((p) => !deleted.has(p.id)));
-      if (done.failed.length) setError(tp(done.failed.length, "One picture could not be deleted: {why}", "{n} pictures could not be deleted: {why}", { why: done.failed[0].error }));
-      else setError(null);
+      for (let at = 0; at < ids.length; at += DELETE_AT_ONCE) {
+        const part = await api.deletePictures(ids.slice(at, at + DELETE_AT_ONCE));
+        done.deleted.push(...part.deleted);
+        done.failed.push(...part.failed);
+      }
     } catch (e) {
-      setError((e as Error).message);
+      // What was deleted before it went wrong is gone, and is shown as gone.
+      stopped = e as Error;
     }
+    const deleted = new Set(done.deleted);
+    // What was made of a deleted picture does not name it any more, as the portal says it either; and an original that was fetched to be reached from an edit is not reached.
+    const unlink = (p: GalleryPicture) => (p.from && deleted.has(p.from) ? { ...p, from: null } : p);
+    const freed = chosen.filter((p) => deleted.has(p.id) && p.origin === "page").reduce((sum, p) => sum + p.bytes, 0);
+    setList((cur) => ({ ...cur, pictures: cur.pictures.filter((p) => !deleted.has(p.id)).map(unlink), total: Math.max(0, cur.total - deleted.size), pageBytes: Math.max(0, cur.pageBytes - freed) }));
+    setOriginals((cur) => new Map([...cur].filter(([id]) => !deleted.has(id)).map(([id, p]) => [id, unlink(p)])));
+    setGone((cur) => new Set([...cur, ...deleted]));
+    setPicked((cur) => new Set([...cur].filter((id) => !deleted.has(id))));
+    setSources((cur) => cur.filter((p) => !deleted.has(p.id)));
+    if (stopped) setError(stopped.message);
+    else if (done.failed.length) setError(tp(done.failed.length, "One picture could not be deleted: {why}", "{n} pictures could not be deleted: {why}", { why: done.failed[0].error }));
+    else setError(null);
   };
 
   /** Downloads, one file each: the browser may ask once whether this page may download several. */

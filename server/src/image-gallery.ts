@@ -4,7 +4,7 @@ import path from "node:path";
 import { DATA_DIR } from "./data-dir.js";
 import { getDb, getSession } from "./db.js";
 import type { ExtraValue } from "./image-generation.js";
-import { isUnderText } from "./within.js";
+import { isUnderText, isWithinText } from "./within.js";
 import { FileError, baseDir, openPicture, readPicture, removeEntry, saveNewFile } from "./workspace-files.js";
 
 /**
@@ -286,6 +286,22 @@ function forget(ids: string[]): void {
       d.prepare("UPDATE images SET source_id = NULL WHERE source_id = ?").run(id);
     }
   })();
+}
+
+/**
+ * Takes the pictures of a folder that was removed from the list: those of every
+ * chat that worked in it, routine runs included, which are kept when a project
+ * is deleted. A folder that is gone for good cannot be told from a drive that
+ * is not mounted, which keeps its pictures, so the portal says it when it is
+ * the one that removed the folder. The files went with the folder.
+ */
+export function forgetPicturesIn(dir: string): number {
+  const rows = getDb()
+    .prepare("SELECT images.id AS id, sessions.workspace AS workspace FROM images JOIN sessions ON sessions.id = images.session_id WHERE images.origin = 'chat'")
+    .all() as { id: string; workspace: string }[];
+  const gone = rows.filter((row) => isWithinText(dir, row.workspace)).map((row) => row.id);
+  if (gone.length) forget(gone);
+  return gone.length;
 }
 
 export interface ListQuery {

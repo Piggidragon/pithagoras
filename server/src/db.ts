@@ -668,7 +668,8 @@ export function deleteSession(id: string): void {
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   d.prepare("DELETE FROM settings WHERE key = ?").run(`subagent_model:${id}`);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
-  // The pictures stay in the chat's folder, which is not the chat's to take away: only their place in the gallery goes.
+  // The pictures stay in the chat's folder, which is not the chat's to take away: only their place in the gallery goes, and what was made of them no longer names them.
+  d.prepare("UPDATE images SET source_id = NULL WHERE source_id IN (SELECT id FROM images WHERE session_id = ?)").run(id);
   d.prepare("DELETE FROM images WHERE session_id = ?").run(id);
 }
 

@@ -48,6 +48,7 @@ import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { featuresRouter } from "./api/features.js";
 import { imagesRouter } from "./api/images.js";
+import { forgetPicturesIn } from "./image-gallery.js";
 import { memoryRouter } from "./api/memory.js";
 import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
@@ -560,6 +561,8 @@ app.delete("/api/projects/:name", async (req, res) => {
         return res.status(409).json({ error: "A routine started running in this project meanwhile. Wait for it to finish, or stop it." });
       }
       deleteProjectFolder(WORKSPACE_ROOT, project.name);
+      // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
+      forgetPicturesIn(project.path);
       clearProjectTools(project.name);
       const switchedOff = switchOffRoutines([...routines, ...late]);
       getDb().transaction(() => {

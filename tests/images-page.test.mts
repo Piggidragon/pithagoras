@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appendPage, fieldsOf, fieldsText, mergeTop, parseFields, readFilter, readForm, sameList, tiles, typed, viewerList, viewerPicture } from "../web/src/images-gallery.ts";
+import { appendPage, fieldsOf, fieldsText, madeButNotListed, mergeTop, parseFields, readFilter, readForm, sameList, tiles, typed, viewerList, viewerPicture } from "../web/src/images-gallery.ts";
 import type { GalleryPicture, PictureJob } from "../web/src/api.ts";
 
 let n = 0;
@@ -137,6 +137,21 @@ test("a filter leaves out the jobs that make what it does not show", () => {
   // What the page makes is of the page, not of a chat.
   assert.deepEqual(keys({ origin: "chat" }), []);
   assert.deepEqual(keys({ origin: "page", kind: "edited" }), ["edit"]);
+});
+
+test("a picture that a job made and the list has not got is asked for, unless the filter leaves the job out or it was deleted here", () => {
+  const listed = picture();
+  const there = job({ state: "done", pictureId: listed.id });
+  const lost = job({ state: "done", pictureId: "0000000000aa" });
+  const edit = job({ state: "done", kind: "edit", pictureId: "0000000000bb" });
+  const removed = job({ state: "done", pictureId: "0000000000cc" });
+  const running = job();
+  const all = [there, lost, edit, removed, running, job({ state: "failed", error: "no" }), job({ state: "done" })];
+  const have = new Set([listed.id]);
+  assert.deepEqual(madeButNotListed(all, have, new Set(["0000000000cc"]), {}), ["0000000000aa", "0000000000bb"]);
+  // What a filter does not show is not of the list it is looked for in.
+  assert.deepEqual(madeButNotListed(all, have, new Set(["0000000000cc"]), { kind: "edited" }), ["0000000000bb"]);
+  assert.deepEqual(madeButNotListed(all, have, new Set(), { origin: "chat" }), []);
 });
 
 test("extra fields are read one to a line, with what is wrong with a line said by its number", () => {

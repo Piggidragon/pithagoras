@@ -127,6 +127,8 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
       return route.fulfill({ status: 201, json: { picture: made } });
     } else if (p === '/api/images/delete' && method === 'POST') {
       const { ids } = route.request().postDataJSON();
+      // As the portal says it: the whole request is refused when it names more.
+      if (ids.length > 200) return route.fulfill({ status: 400, json: { error: 'At most 200 pictures at a time' } });
       state.deleted.push(ids);
       for (const id of ids) pics.splice(pics.findIndex((x) => x.id === id), 1);
       body = { deleted: ids, failed: [] };
@@ -324,6 +326,21 @@ test('making a picture starts a job that holds its place in the grid, and the pi
   // The same place: first, and the one that was made, once.
   await expect(grid(page).getByRole('listitem').first().getByRole('button')).toHaveAttribute('data-picture-id', made.id);
   await expect(page.getByText('1 of 4 being made')).toHaveCount(0);
+});
+
+test('a picture made here and deleted somewhere else is not kept as a tile by its job', async ({ page }) => {
+  const p = await portal(page, { pictures: [pic({ prompt: 'Older', age: 60 })] });
+  await page.goto('/images');
+  await page.getByPlaceholder('Describe the picture').fill('A fox in the snow');
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  const made = p.finish(p.state.jobs[0].id);
+  await expect(tile(page, 'A fox in the snow')).toBeVisible();
+  // Deleted in another tab: the portal has not got it any more, and its job, which it keeps for an hour, still says it made it.
+  p.pics.splice(p.pics.findIndex((x) => x.id === made.id), 1);
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(tile(page, 'A fox in the snow')).toHaveCount(0);
+  await expect(grid(page).getByRole('listitem')).toHaveCount(1);
+  await expect(tile(page, 'Older')).toBeVisible();
 });
 
 test('a picture made here does not stay above one that came after it: the grid is newest first, and the viewer steps in its order', async ({ page }) => {
@@ -767,6 +784,26 @@ test('a selection does not follow a change of filter: a chat’s picture that is
   await expect(tile(page, 'From a chat')).toBeVisible();
   await expect(page.getByLabel('Select this picture')).not.toBeChecked();
   expect(p.state.deleted).toEqual([[mine.id]]);
+});
+
+test('a gallery of hundreds can be selected whole and deleted: the portal takes 200 at a time, and one question covers them all', async ({ page }) => {
+  const many = Array.from({ length: 240 }, (_, i) => pic({ prompt: `Many ${i + 1}`, age: i }));
+  const p = await portal(page, { pictures: many });
+  await page.goto('/images');
+  // A page at a time, by the button, until all of it is loaded.
+  for (const shown of [96, 144, 192, 240]) {
+    await page.getByRole('button', { name: 'Show more' }).click();
+    await expect(grid(page).getByRole('listitem')).toHaveCount(shown);
+  }
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await page.getByRole('button', { name: 'Select all shown' }).click();
+  await expect(page.getByText('240 selected')).toBeVisible();
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog', { name: 'Delete these 240 pictures?' }).getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => p.state.deleted.map((ids) => ids.length)).toEqual([200, 40]);
+  await expect(grid(page).getByRole('listitem')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByText('0 selected')).toBeVisible();
 });
 
 test('on a phone the grid has two columns, the viewer reaches every action, and nothing runs off the screen', async ({ page }) => {

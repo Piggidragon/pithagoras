@@ -136,6 +136,16 @@ export function tiles(pictures: GalleryPicture[], jobs: PictureJob[], filter: Fi
 }
 
 /**
+ * The pictures that jobs say they made and that the list does not have, which
+ * the portal is asked about by their ids: one that it has not got any more was
+ * deleted somewhere else, and its job must not stand in for it. Only jobs the
+ * filter shows, and none whose picture was deleted here.
+ */
+export function madeButNotListed(jobs: PictureJob[], have: ReadonlySet<string>, gone: ReadonlySet<string>, filter: Filter): string[] {
+  return jobs.flatMap((job) => (job.state === "done" && job.pictureId && jobMatches(job, filter) && !have.has(job.pictureId) && !gone.has(job.pictureId) ? [job.pictureId] : []));
+}
+
+/**
  * The extra fields of a request as typed, one `name=value` to a line, or what
  * is wrong with them. The values are text: the portal reads `true`, `false` and
  * plain numbers as such, and a value in double quotes is text whatever it looks
