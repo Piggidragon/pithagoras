@@ -61,18 +61,33 @@ export interface ImageGenerationConfig {
    * endpoint: moving edits to another server takes it off again.
    */
   editMultiple: boolean;
+  /** How long a request for a picture, generated or edited, may take in all; see TIMEOUT_SECONDS. */
+  timeoutSeconds: number;
 }
 
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
-export function imageGenerationConfig(): ImageGenerationConfig {
-  let raw: Record<string, unknown> = {};
+/**
+ * The time a request for a picture may take, in whole seconds: a slow or local model needs minutes, so five by
+ * default. Under half a minute almost no endpoint answers, so a typo could not make every request fail; an hour is
+ * more than anyone should wait on one picture.
+ */
+export const TIMEOUT_SECONDS = { default: 300, min: 30, max: 3600 };
+const validTimeout = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= TIMEOUT_SECONDS.min && (v as number) <= TIMEOUT_SECONDS.max;
+
+/** What is saved, as it is: without the defaults the config fills in. */
+function savedSettings(): Record<string, unknown> {
   try {
     const parsed = JSON.parse(getSetting(KEY) || "{}");
-    if (parsed && typeof parsed === "object") raw = parsed;
+    if (parsed && typeof parsed === "object") return parsed;
   } catch {
     // Unreadable is as good as nothing saved.
   }
+  return {};
+}
+
+export function imageGenerationConfig(): ImageGenerationConfig {
+  const raw = savedSettings();
   return {
     enabled: raw.enabled === true,
     baseUrl: text(raw.baseUrl),
@@ -84,6 +99,8 @@ export function imageGenerationConfig(): ImageGenerationConfig {
     editModel: text(raw.editModel),
     editApiKey: text(raw.editApiKey),
     editMultiple: raw.editMultiple === true,
+    // A setup saved before there was a limit has none, and an unreadable one is as good as none.
+    timeoutSeconds: validTimeout(raw.timeoutSeconds) ? raw.timeoutSeconds : TIMEOUT_SECONDS.default,
   };
 }
 
@@ -107,6 +124,8 @@ export interface ImageEditingTarget {
   apiKey: string;
   /** Whether the endpoint takes more than one picture: otherwise an edit with several is refused before anything is sent. */
   multiple: boolean;
+  /** How long the request may take; see TIMEOUT_SECONDS. */
+  timeoutSeconds: number;
 }
 
 /**
@@ -117,7 +136,7 @@ export interface ImageEditingTarget {
 export function imageEditingTarget(config: ImageGenerationConfig = imageGenerationConfig()): ImageEditingTarget {
   const baseUrl = config.editBaseUrl || config.baseUrl;
   const sameServer = baseUrl !== "" && originOf(baseUrl) === originOf(config.baseUrl);
-  return { baseUrl, model: config.editModel, apiKey: config.editApiKey || (sameServer ? config.apiKey : ""), multiple: config.editMultiple };
+  return { baseUrl, model: config.editModel, apiKey: config.editApiKey || (sameServer ? config.apiKey : ""), multiple: config.editMultiple, timeoutSeconds: config.timeoutSeconds };
 }
 
 /** What the page is told of the settings: never a key itself. */
@@ -141,6 +160,8 @@ export interface ImageGenerationPatch {
   /** "" takes the saved one away. */
   editApiKey?: string;
   editMultiple?: boolean;
+  /** Whole seconds, from TIMEOUT_SECONDS.min to its max; null takes the saved one away, which is the default again. */
+  timeoutSeconds?: number | null;
 }
 
 /** `1024x1024`, or `auto`, as the OpenAI-style APIs take it. */
@@ -187,6 +208,10 @@ export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch |
     if (typeof b.size !== "string" || (b.size.trim() && !SIZE.test(b.size.trim()))) return 'The size looks like "1024x1024"';
     patch.size = b.size.trim();
   }
+  if (b.timeoutSeconds !== undefined) {
+    if (b.timeoutSeconds !== null && !validTimeout(b.timeoutSeconds)) return `The time limit must be a whole number of seconds from ${TIMEOUT_SECONDS.min} to ${TIMEOUT_SECONDS.max}`;
+    patch.timeoutSeconds = b.timeoutSeconds as number | null;
+  }
   for (const field of ["apiKey", "editApiKey"] as const) {
     if (b[field] === undefined) continue;
     const given = b[field];
@@ -215,7 +240,8 @@ const originOf = (address: string): string => {
  */
 export function saveImageGeneration(patch: ImageGenerationPatch): ImageGenerationConfig {
   const had = imageGenerationConfig();
-  const next = { ...had, ...patch };
+  const { timeoutSeconds: asked, ...others } = patch;
+  const next = { ...had, ...others, ...(typeof asked === "number" ? { timeoutSeconds: asked } : asked === null ? { timeoutSeconds: TIMEOUT_SECONDS.default } : {}) };
   // Only from one server to another: a key saved before there was an address was given for none, and goes with the first.
   if (patch.apiKey === undefined && had.baseUrl !== "" && originOf(next.baseUrl) !== originOf(had.baseUrl)) next.apiKey = "";
   const wasEditedAt = had.editBaseUrl || had.baseUrl;
@@ -224,7 +250,9 @@ export function saveImageGeneration(patch: ImageGenerationPatch): ImageGeneratio
   if (patch.editMultiple === undefined && movedEdits) next.editMultiple = false;
   if (next.enabled && !next.baseUrl) throw new ImageGenerationError("Set the address of the image endpoint before switching it on");
   if (next.editEnabled && !(next.editBaseUrl || next.baseUrl)) throw new ImageGenerationError("Set the address of the image endpoint before switching editing on");
-  putSetting(KEY, JSON.stringify(next));
+  // The default stays unsaved until a limit is chosen, so that it is the default of the day for every setup that never chose one.
+  const { timeoutSeconds, ...rest } = next;
+  putSetting(KEY, JSON.stringify(typeof asked === "number" || (asked === undefined && "timeoutSeconds" in savedSettings()) ? next : rest));
   return next;
 }
 
@@ -233,13 +261,12 @@ export class ImageGenerationError extends Error {}
 
 /** After decoding: what the portal serves back as a picture, with room to spare. */
 export const MAX_GENERATED_BYTES = 20 * 1024 * 1024;
-/** Image models are slow, a local one more so. */
-export const GENERATE_TIMEOUT_MS = 3 * 60_000;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 export interface GenerateOptions {
   /** The chat being stopped. */
   signal?: AbortSignal;
+  /** The limit of the request in milliseconds; without it, the default of TIMEOUT_SECONDS; the callers pass the one of the settings. */
   timeoutMs?: number;
   maxBytes?: number;
 }
@@ -322,7 +349,7 @@ export async function generateImage(
   const model = request.model || config.model;
   // The four fields last: an extra one cannot take their place, whatever got past the check.
   const body = JSON.stringify({ ...request.extra, ...(model ? { model } : {}), prompt: request.prompt, n: 1, ...(size ? { size } : {}) });
-  return requestPicture(endpointUrl(config.baseUrl), config.apiKey, body, options);
+  return requestPicture(endpointUrl(config.baseUrl), config.apiKey, body, { timeoutMs: config.timeoutSeconds * 1000, ...options });
 }
 
 /**
@@ -338,41 +365,37 @@ export async function requestPicture(
   body: string | FormData,
   options: GenerateOptions = {},
 ): Promise<{ bytes: Buffer; ext: string }> {
-  const timeoutMs = options.timeoutMs ?? GENERATE_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? TIMEOUT_SECONDS.default * 1000;
   const max = options.maxBytes ?? MAX_GENERATED_BYTES;
   const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(timeoutMs)]);
   const failed = (e: unknown): Error => {
     // The chat was stopped: nobody is told it failed.
     if (options.signal?.aborted) return e as Error;
-    if (signal.aborted) return new ImageGenerationError(`The image endpoint did not answer within ${seconds(timeoutMs)} seconds`);
+    if (signal.aborted) return new ImageGenerationError(
+        `The image endpoint did not answer within ${seconds(timeoutMs)} seconds. Raise the time limit in Settings → Images if it needs longer.`,
+      );
     if (e instanceof ImageGenerationError) return e;
-    const why = (e as { cause?: { code?: string } })?.cause?.code ?? (e as Error)?.message ?? "unknown error";
+    const why = (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code ?? (e as Error)?.message ?? "unknown error";
     return new ImageGenerationError(without(`Could not reach the image endpoint at ${endpoint.origin} (${why})`, apiKey));
   };
 
   try {
-    // Never followed elsewhere: the key goes with this request, to this address.
-    const res = await fetch(endpoint, {
-      method: "POST",
-      redirect: "error",
-      signal,
-      headers: { ...(typeof body === "string" ? { "content-type": "application/json" } : {}), accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
-      body,
-    });
+    const res = await post(endpoint, apiKey, body, signal);
     // The picture as base64 is a third larger than itself, and wrapped in JSON.
-    const answer = await readBody(res.body, Math.ceil((max * 4) / 3) + 64 * 1024, "The image endpoint's answer");
+    const answer = await readBody(res, Math.ceil((max * 4) / 3) + 64 * 1024, "The image endpoint's answer");
+    const ok = (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300;
     let parsed: any;
     try {
       parsed = JSON.parse(answer.toString("utf8"));
     } catch {
-      if (!res.ok) throw new ImageGenerationError(`The image endpoint answered ${res.status}`);
+      if (!ok) throw new ImageGenerationError(`The image endpoint answered ${res.statusCode}`);
       throw new ImageGenerationError("The image endpoint did not answer with JSON");
     }
-    if (!res.ok) {
+    if (!ok) {
       const said = text(parsed?.error?.message) || text(parsed?.error) || text(parsed?.message);
       // The key out first, then the cut: one that starts before the cut and ends after it would be found by neither.
       const shown = without(said, apiKey).replace(/\s+/g, " ").slice(0, 300);
-      throw new ImageGenerationError(`The image endpoint answered ${res.status}${shown ? `: ${shown}` : ""}`);
+      throw new ImageGenerationError(`The image endpoint answered ${res.statusCode}${shown ? `: ${shown}` : ""}`);
     }
     const first = Array.isArray(parsed?.data) ? parsed.data[0] : undefined;
     let bytes: Buffer;
@@ -384,6 +407,41 @@ export async function requestPicture(
   } catch (e) {
     throw failed(e);
   }
+}
+
+/**
+ * POSTs to the endpoint and returns its answer once the headers are in. Not
+ * `fetch`: its headers timeout is five minutes whatever the signal says, which
+ * would cut off a request the person gave longer. Never followed elsewhere: the
+ * key goes with this request, to this address, and a redirect is refused.
+ */
+async function post(endpoint: URL, apiKey: string, body: string | FormData, signal: AbortSignal): Promise<http.IncomingMessage> {
+  // A form has its type, with the boundary, from the Response that encodes it.
+  const sent = typeof body === "string" ? undefined : new Response(body);
+  const bytes = sent ? Buffer.from(await sent.arrayBuffer()) : Buffer.from(body as string);
+  const type = sent ? sent.headers.get("content-type") : "application/json";
+  return new Promise((resolve, reject) => {
+    const request = endpoint.protocol === "https:" ? https.request : http.request;
+    const req = request(
+      endpoint,
+      {
+        method: "POST",
+        signal,
+        // fetch sent one, and some endpoints sit behind a firewall that refuses a request with none.
+        headers: { "user-agent": "pithagoras", ...(type ? { "content-type": type } : {}), "content-length": bytes.length, accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400 && res.headers.location) {
+          res.resume();
+          return reject(new ImageGenerationError("The image endpoint answered with a redirect, which is not followed: give the address it redirects to"));
+        }
+        resolve(res);
+      },
+    );
+    req.on("error", reject);
+    req.end(bytes);
+  });
 }
 
 /** A picture, if these bytes are one. */
@@ -404,7 +462,7 @@ function fromBase64(given: string, max: number): Buffer {
 }
 
 /** A body read up to a limit, which is not read past. */
-async function readBody(stream: ReadableStream<Uint8Array> | null, max: number, what: string): Promise<Buffer> {
+async function readBody(stream: AsyncIterable<Uint8Array> | null, max: number, what: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
   if (!stream) return Buffer.alloc(0);

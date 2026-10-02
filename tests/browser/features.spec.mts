@@ -15,7 +15,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       },
     },
   };
-  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, editReady: false };
+  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, timeoutSeconds: 300, editReady: false };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -44,6 +44,8 @@ async function portal(page: Page, { reachable = true, available = true, docker =
         || (patch.editMultiple !== undefined && patch.editMultiple !== images.editMultiple && images.editReady);
       const { apiKey, editApiKey, ...rest } = patch;
       Object.assign(images, rest);
+      // null takes a saved limit away: the default again.
+      if (patch.timeoutSeconds === null) images.timeoutSeconds = 300;
       if (apiKey !== undefined) images.keySet = apiKey !== '';
       if (editApiKey !== undefined) images.editKeySet = editApiKey !== '';
       images.editReady = images.editEnabled && (images.editBaseUrl || images.baseUrl) !== '';
@@ -383,6 +385,45 @@ test('the Images page is in the sidebar while image generation is on, and the sw
   await expect(entry).toHaveCount(1);
   await panel.getByRole('switch', { name: 'Image generation tool' }).click();
   await expect(entry).toHaveCount(0);
+});
+
+test('the time limit of a picture is a field of the image endpoint: five minutes, whole seconds from 30 to 3600, sent only when changed', async ({ page }) => {
+  const { sent } = await portal(page);
+  await page.goto('/settings/images');
+  const panel = addons(page);
+  const field = panel.getByLabel('Time limit (seconds)');
+  await expect(field).toHaveValue('300');
+
+  // Out of bounds: nothing to save.
+  await field.fill('10');
+  const save = panel.getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toBeDisabled();
+  await field.fill('4000');
+  await expect(save).toBeDisabled();
+  // Text that is not a number is no limit either, and is not taken for the default.
+  await field.fill('600s');
+  await expect(save).toBeDisabled();
+  await field.fill('900');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: '', size: '', timeoutSeconds: 900 });
+  await expect(field).toHaveValue('900');
+
+  // Saving something else does not state the limit again.
+  await panel.getByLabel('Model', { exact: true }).fill('image-model');
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: 'image-model', size: '' });
+
+  // Empty is the default, which is what the placeholder says: a saved limit is taken away, not stored as 300.
+  await expect(field).toHaveValue('900');
+  await field.fill('');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeHidden();
+  expect(sent.at(-1)!.body).toEqual({ baseUrl: '', model: 'image-model', size: '', timeoutSeconds: null });
+  await expect(field).toHaveValue('300');
 });
 
 test('image editing has a switch and an endpoint of its own: it needs an address, may use the one above, and its key is sent once', async ({ page }) => {

@@ -37,7 +37,7 @@ export function editEndpointUrl(baseUrl: string): URL {
  * How many pictures one edit takes, and how much they weigh together. Endpoints
  * take fewer or more and say so in their answer, which is passed on; these keep
  * what the portal reads and sends within reason, since all of it is held in
- * memory and goes up within the three minutes of the request.
+ * memory and goes up within the time limit of the request.
  */
 export const MAX_EDIT_PICTURES = 8;
 export const MAX_EDIT_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -116,6 +116,6 @@ export async function editImage(
   form.append("prompt", request.prompt);
   if (target.model) form.append("model", target.model);
   form.append("n", "1");
-  // The time limit is generation's too: the picture goes up first, and then the endpoint makes the new one.
-  return requestPicture(editEndpointUrl(target.baseUrl), target.apiKey, form, options);
+  // The time limit is the one of generation: the picture goes up first, and then the endpoint makes the new one.
+  return requestPicture(editEndpointUrl(target.baseUrl), target.apiKey, form, { timeoutMs: target.timeoutSeconds * 1000, ...options });
 }
