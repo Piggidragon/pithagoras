@@ -13,6 +13,7 @@ import {
   LuFolderKanban,
   LuGlobe,
   LuBrain,
+  LuImage,
   LuMessagesSquare,
   LuPin,
   LuPinOff,
@@ -44,6 +45,7 @@ export function Sidebar({
   view,
   hasBrowser,
   hasMemory = false,
+  hasImages = false,
   places,
   onSelect,
   onNewChat,
@@ -59,11 +61,13 @@ export function Sidebar({
   executor: string;
   activeId: string | null;
   /** Which top-level destination is showing, so the nav can mark it. */
-  view: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "audit";
+  view: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "images" | "audit";
   /** Whether the optional browser service is there at all. */
   hasBrowser: boolean;
   /** Understory is the agent's memory: its page is there to read. */
   hasMemory?: boolean;
+  /** Image generation is on and has an address: the Images page is there to make pictures in and to look through them. */
+  hasImages?: boolean;
   /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
   places?: Places | null;
   onSelect: (id: string) => void;
@@ -182,6 +186,8 @@ export function Sidebar({
     ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: t("Browser") }] : []),
     // Likewise: only while Understory holds the agent's memory.
     ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: t("Memory") }] : []),
+    // And only while there is an image endpoint to make pictures with.
+    ...(hasImages ? [{ to: "images" as const, icon: <LuImage />, label: t("Images") }] : []),
     { to: "audit", icon: <LuShield />, label: t("Audit") },
   ];
   const anyRunning = sessions.some((s) => s.status === "running");
@@ -348,7 +354,7 @@ const GroupLabel = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
-type Destination = "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "audit";
+type Destination = "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "images" | "audit";
 
 function RailButton({
   icon,

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Type } from "typebox";
 import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
+import { recordChatPicture } from "../image-gallery.js";
 import { MAX_EDIT_PICTURES, checkCount, checkTotal, editImage } from "../image-editing.js";
 import {
   EDIT_IMAGE_SOURCE,
@@ -102,6 +103,8 @@ export class EditImageTool {
   constructor(
     private readonly folder: string,
     private readonly extensions: () => readonly any[] = () => [],
+    /** The chat, for the gallery to say whose a picture is; without it a picture is made and not listed. */
+    private readonly sessionId?: string,
   ) {}
 
   registered = (): boolean => this.on && !takenByAnother(this.extensions(), EDIT_IMAGE_TOOL, EDIT_IMAGE_SOURCE);
@@ -110,7 +113,7 @@ export class EditImageTool {
     this.on = false;
     const loaded = imageGenerationConfig();
     if (!imageEditingReady(loaded)) return;
-    const folder = this.folder;
+    const { folder, sessionId } = this;
     // The shape is settled now, as the tool's being there is: a change of it reloads the chats (see the features API).
     const several = imageEditingMultiple(loaded);
     const common = {
@@ -167,8 +170,11 @@ export class EditImageTool {
           // Stopped as soon as it is too much, not after the rest has been read.
           checkTotal(total);
         }
-        const { bytes, ext } = await editImage(imageEditingTarget(config), { prompt, image: images.length > 1 ? images : images[0] }, { signal });
+        const target = imageEditingTarget(config);
+        const { bytes, ext } = await editImage(target, { prompt, image: images.length > 1 ? images : images[0] }, { signal });
         const rel = saveGenerated(folder, bytes, ext, editedName(originals[0], ext));
+        // Listed in the Images page's gallery, tied to the pictures it was made from that are listed there.
+        if (sessionId) recordChatPicture({ sessionId, path: rel, kind: "edited", prompt, from: originals, bytes: bytes.length, params: target.model ? { model: target.model } : {} });
         const title = (typeof p.title === "string" && p.title.trim() ? p.title : prompt).replace(/\s+/g, " ").trim().slice(0, 120);
         const details = { path: rel, ...(title ? { title } : {}), [GENERATED_PICTURE_MARK]: true };
         const made = originals.length > 1 ? `Made from ${originals.join(", ")} (in this order)` : `Edited ${originals[0]}`;

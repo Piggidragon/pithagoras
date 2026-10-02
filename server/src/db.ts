@@ -5,7 +5,7 @@ import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMA
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { agentHome } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
@@ -342,6 +342,34 @@ export function getDb(): Database.Database {
       PRIMARY KEY (session_id, id)
     );
 
+    -- The pictures of the Images page: the ones it made itself, which are files
+    -- in the portal's own images folder, the ones the agent made in a chat with
+    -- generate_image or edit_image, which are files in that chat's folder and
+    -- are listed here as they are made, and those found lying in a folder the
+    -- tools write into that nobody listed (see image-gallery.ts). A row names
+    -- the file, never holds it; one whose file is gone is dropped when the
+    -- page next looks, and a chat's stay with its folder when the chat goes,
+    -- as pictures found there. "path" is a file name in
+    -- the images folder for the page's, and a path from the folder for the
+    -- agent's: from the chat's, or, for one that was found, from "folder", the
+    -- real path of the folder it was found in. "params" is what the request
+    -- was made with, as JSON.
+    CREATE TABLE IF NOT EXISTS images (
+      id TEXT PRIMARY KEY,
+      origin TEXT NOT NULL,
+      session_id TEXT,
+      folder TEXT,
+      path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      prompt TEXT NOT NULL DEFAULT '',
+      params TEXT NOT NULL DEFAULT '{}',
+      source_id TEXT,
+      bytes INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_images_created ON images(created_at DESC, id DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_images_chat_file ON images(session_id, path) WHERE session_id IS NOT NULL;
+
     -- Logins signed out before they ran out, by the signature of their cookie.
     -- The cookie carries no state of its own, so without this a copy of one
     -- would go on working for the rest of its thirty days.
@@ -487,6 +515,11 @@ function migrate(d: Database.Database): void {
     d.exec("ALTER TABLE routines ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
   }
   d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_slug ON routines(slug)");
+  // Where a picture that was found in a folder lies (see image-gallery.ts). The
+  // gallery was first kept without it, and CREATE TABLE above leaves such a table as it is.
+  const imageCols = (d.prepare("PRAGMA table_info(images)").all() as { name: string }[]).map((c) => c.name);
+  if (imageCols.length && !imageCols.includes("folder")) d.exec("ALTER TABLE images ADD COLUMN folder TEXT");
+  d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_images_folder_file ON images(folder, path) WHERE folder IS NOT NULL");
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_grants_open ON grants(session_id, tool, used_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC)");
@@ -639,12 +672,25 @@ export function updateSession(
 
 export function deleteSession(id: string): void {
   const d = getDb();
+  const folder = (d.prepare("SELECT workspace FROM sessions WHERE id = ?").get(id) as { workspace: string } | undefined)?.workspace;
   d.prepare("DELETE FROM canvases WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   d.prepare("DELETE FROM settings WHERE key = ?").run(`subagent_model:${id}`);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
+  // The pictures stay in the chat's folder, which is not the chat's to take away, and so they stay in the gallery, as pictures of that folder with what they were asked for.
+  // Nothing else may name the folder once the chat is gone, so it is kept with them (see image-gallery.ts).
+  let real: string | undefined;
+  try {
+    real = folder ? realpathSync(folder) : undefined;
+  } catch {
+    // A folder that cannot be reached is not one to keep pictures of: there is nothing to find them in.
+  }
+  if (real) d.prepare("UPDATE OR IGNORE images SET origin = 'folder', folder = ?, session_id = NULL WHERE session_id = ?").run(real, id);
+  // What is left is what could not be kept, and what was made of it no longer names it.
+  d.prepare("UPDATE images SET source_id = NULL WHERE source_id IN (SELECT id FROM images WHERE session_id = ?)").run(id);
+  d.prepare("DELETE FROM images WHERE session_id = ?").run(id);
 }
 
 /**

@@ -749,6 +749,8 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       if (patch.baseUrl !== undefined) setDraft(null);
       if (patch.editBaseUrl !== undefined) setEditDraft(null);
       if (changed) setNote(() => () => reloadNote(waiting));
+      // The Images page is in the sidebar while there is an endpoint to make pictures with.
+      window.dispatchEvent(new Event("features-changed"));
       return true;
     } catch (e) {
       onError((e as Error).message);

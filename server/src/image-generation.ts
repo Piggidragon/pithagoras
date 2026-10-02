@@ -304,6 +304,54 @@ const seconds = (ms: number) => Math.round(ms / 1000);
 /** What the endpoints take of a prompt: DALL-E 3's four thousand characters is the least. */
 export const MAX_PROMPT = 4000;
 
+/** A field of the request that an endpoint takes beyond the four it is made of: `quality`, `seed`, `style`, whatever it knows. */
+export type ExtraValue = string | number | boolean;
+
+/** What the request is made of, and so what an extra field cannot take the place of. */
+const CORE_FIELDS = new Set(["model", "prompt", "n", "size"]);
+const EXTRA_NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
+export const MAX_EXTRA_FIELDS = 12;
+const MAX_EXTRA_TEXT = 200;
+
+/**
+ * The extra fields of a request, checked, or the reason they are not fine. A
+ * value typed in a form is text: `true` and `false` are sent as such, a plain
+ * number as a number, and anything else as text — in double quotes it is
+ * text whatever it looks like. What is already a number or a boolean is kept.
+ */
+export function parseExtra(value: unknown): Record<string, ExtraValue> | string {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) return "The extra fields are a list of names with values";
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > MAX_EXTRA_FIELDS) return `At most ${MAX_EXTRA_FIELDS} extra fields can be sent`;
+  const extra: Record<string, ExtraValue> = {};
+  for (const [name, given] of entries) {
+    if (!EXTRA_NAME.test(name)) return `"${name.slice(0, 40)}" is not a name an extra field can have: letters, digits, _ . - and at most 40 characters, starting with a letter`;
+    if (CORE_FIELDS.has(name)) return `"${name}" is set by the form itself, not as an extra field`;
+    if (typeof given === "boolean" || (typeof given === "number" && Number.isFinite(given))) {
+      extra[name] = given;
+      continue;
+    }
+    if (typeof given !== "string" || given.length > MAX_EXTRA_TEXT) return `The value of "${name}" must be short text, a number, or true or false`;
+    const text = given.trim();
+    if (text === "true" || text === "false") extra[name] = text === "true";
+    else if (/^-?\d+(\.\d+)?$/.test(text)) extra[name] = Number(text);
+    else extra[name] = /^"[^"]*"$/.test(text) ? text.slice(1, -1) : text;
+  }
+  return extra;
+}
+
+/** What a request for a picture says, on top of the settings it is made with. */
+export interface GenerateRequest {
+  prompt: string;
+  /** Instead of the saved size. */
+  size?: string;
+  /** Instead of the saved model, for the Images page: the agent's tool has the saved one only. */
+  model?: string;
+  /** Beyond the four fields of the request, as `parseExtra` has them. */
+  extra?: Record<string, ExtraValue>;
+}
+
 /**
  * Asks for a picture and returns it, checked: what comes back is a PNG, JPEG,
  * GIF or WebP by its first bytes, whatever the server calls it, and not larger
@@ -311,11 +359,13 @@ export const MAX_PROMPT = 4000;
  */
 export async function generateImage(
   config: ImageGenerationConfig,
-  request: { prompt: string; size?: string },
+  request: GenerateRequest,
   options: GenerateOptions = {},
 ): Promise<{ bytes: Buffer; ext: string }> {
   const size = request.size || config.size;
-  const body = JSON.stringify({ ...(config.model ? { model: config.model } : {}), prompt: request.prompt, n: 1, ...(size ? { size } : {}) });
+  const model = request.model || config.model;
+  // The four fields last: an extra one cannot take their place, whatever got past the check.
+  const body = JSON.stringify({ ...request.extra, ...(model ? { model } : {}), prompt: request.prompt, n: 1, ...(size ? { size } : {}) });
   return requestPicture(endpointUrl(config.baseUrl), config.apiKey, body, { timeoutMs: config.timeoutSeconds * 1000, ...options });
 }
 

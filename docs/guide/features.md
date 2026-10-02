@@ -2,7 +2,7 @@
 
 Three capabilities ship with Pithagoras and are **off** until you switch them on
 in **Settings**: a **subagent tool** and **Understory** as the agent's memory
-under **Add-ons**, and **image generation and editing** under **Images**. A fresh
+under **Add-ons**, and **image generation and editing** under **Agent → Images**. A fresh
 install has none of them. (The Add-ons page also holds the Docker-based
 [Browser and Voice](/guide/add-ons).) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
@@ -78,7 +78,7 @@ share pi's event bus with the tool.
 
 ## Image generation
 
-**Settings → Images.** The page for the image endpoint, generation, editing and
+**Settings → Agent → Images.** The page for the image endpoint, generation, editing and
 the several-pictures switch. It was a tab of Settings → Add-ons before; nothing
 stored changed with the move. The tools themselves are switched in the tool lists,
 see below. A `generate_image` tool: the agent describes a
@@ -88,6 +88,11 @@ in voice mode's picture window — just like one the agent showed with
 until then the agent has no such tool at all, and the voice instructions say
 nothing of one. Changing a picture that already exists is a second tool with a
 switch of its own, [`edit_image`](#editing-a-picture).
+
+The same endpoint also makes pictures **without the agent**: while it is on and has
+an address the sidebar has an [Images](/guide/images) page, with a form to make and
+change pictures and a gallery of everything made, here and in chats. The page is there
+as well where only [editing](#editing-a-picture) is set up.
 
 ### The endpoint
 
@@ -252,8 +257,8 @@ What was decided for it:
 - **No mask in the agent's tool.** A mask is a second picture of the same size
   with the area to change cleared, which an agent has no good way to make
   and which endpoints treat differently. The endpoint support in the portal
-  does send one — checked as a picture by its bytes and size, sent as `mask` — so
-  that painting one in a page can use it without a second implementation; whether
+  does send one — checked as a picture by its bytes and size, sent as `mask` — and the
+  [Images page](/guide/images#changing-a-picture) paints one with a brush; whether
   its size matches the picture's is for the endpoint to say.
 
 The same rules as for generation apply to who may use it: the primary user's

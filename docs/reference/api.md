@@ -241,7 +241,7 @@ the folder is not a repository, except `init`. See [Git](/guide/git).
 | `DELETE /api/providers/:id` | Remove one |
 | `GET /api/models` | Every model pi can use now — the ones with a key |
 | `GET /api/packages/catalog?q=&topic=` | Packages published for pi; `topic=provider` narrows to provider packages |
-| `GET /api/features/flags` | Only which opt-in features are on — for the sidebar and menus |
+| `GET /api/features/flags` | Only which opt-in features are on — for the sidebar and menus: `{ subagent: { enabled }, understory: { enabled }, images: { enabled } }`, where `images.enabled` is that image generation, or editing, is on and has an address, which is when the Images page is offered |
 
 See [Models and providers](/guide/models).
 
@@ -340,6 +340,33 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `POST /api/memory/repair` | The model mends links to nothing and wires in orphans, only when there are any; answers `{ ran, reason?, summary?, filesChanged?, health }` |
 | `POST /api/memory/clear-log` | log.md back to its heading and the query paths removed; the notes stay |
 | `POST /api/memory/wipe` | Every note and folder deleted, the root index and log as new, Understory started again |
+
+## Images
+
+The [Images page](/guide/images): pictures made with the image add-on's endpoint without a
+chat, and the gallery of those, the ones the agent made in chats and the ones that lie in
+the folders its tools write into. A picture is named by its **id**, twelve lowercase hex
+digits, never by a path: the portal opens files only in the folder of the page's own
+pictures and in `generated-images` of Home, of the projects and of the folders chats work
+in, with the checks the Files panel's pictures have. Reading the list from the top also
+looks in those `generated-images` folders for pictures nobody recorded, such as ones made
+before the gallery kept an index, and lists each plain file there whose bytes show a PNG,
+JPEG, GIF or WebP of at most 25 MB (no link is followed, nothing is looked at that is not in
+such a folder), as a picture of `origin` `folder`. The endpoint's address, key and model are the add-on's
+(see [Opt-in features](#opt-in-features)); no key is ever in an answer.
+
+| | |
+| --- | --- |
+| `GET /api/images?origin=&kind=&before=&limit=` | A page of the gallery, newest first: `{ pictures, next, total, pageBytes }`, where `pageBytes` is what all the page's own pictures take of the disk, whatever the filters match. `origin` is `page`, `chat` or `folder`, `kind` is `generated`, `edited`, `uploaded` or `unknown`, `limit` is 1–100 (48 by default), and `before` is the `next` of the page before (`null` at the end). `total` counts what the filters match. A picture whose file is gone, or that cannot be served any more (its `generated-images` became a link out of the folder), is dropped from the list when it is read from the top; one in a chat's folder that cannot be reached for the moment (a drive that is not mounted) is kept. When a chat is deleted its pictures become pictures of its folder (`origin: "folder"`, with their `prompt` and `params`), unless the folder cannot be reached then. A picture found in a folder has `origin: "folder"` (which chat made it cannot be told), no `chat`, an empty `prompt`, a `kind` read from its file's name (`generated` for the tools' `image-…` names, `edited` for `…-edited`, else `unknown`), and is dropped with its folder, not kept. A picture is `{ id, origin, chat: { id, title } \| null, folder: { name, home } \| null, kind, prompt, params: { model?, size?, extra?, sources?, masked? }, from, createdAt, bytes, fileName }`, where `folder` is where a picture of origin `folder` was found (`home` for Home, else `name` is the project or the path under the workspace root), `createdAt` of such a picture is its file's modification time, and `from` is the picture an edit was made from, when that is in the list |
+| `GET /api/images?ids=a,b` | Those pictures alone, in the order given, as far as they are in the list: `{ pictures }`. At most 200 |
+| `GET /api/images/:id/file` | The picture as a file, with its type from its bytes (PNG, JPEG, GIF or WebP, else 400; 413 over 25 MB) and `ETag`/`304`. 404 when it is not in the list or its file is gone, which takes it from the list (not while a chat's folder cannot be reached: the picture stays, and is served again when it is back). The page's own pictures are sent to be kept a day, those in a chat's or another folder to be asked about again |
+| `POST /api/images/generate` | `{ prompt, size?, model?, extra?, count? }` — makes `count` pictures (1–4, one if left out), one request and one job for each, and answers `202 { jobs }` at once. `extra` is an object of field names to values (text, numbers or booleans; text of `true`, `false` or a plain number is read as such, and `"42"` in double quotes is text), at most 12 and not `model`, `prompt`, `n` or `size`. 400 for a bad request, 409 while image generation is off or has no address, 429 when `count` would go over the four that run at once |
+| `POST /api/images/edit` | `{ prompt, sources: [id…], mask? }` — changes the pictures, as `edit_image` does (the first is the one the result is named after; more than one only where editing is set to take several), and answers `202 { jobs: [job] }`. `mask` is a PNG, as base64 or a `data:` URL, up to 25 MB, checked as a picture. The pictures are read and checked, with the tool's rules and limits, before anything is sent: 400 with the reason, 409 while editing is off, 429 when four are being made. The only route that takes a body this large |
+| `POST /api/images/upload?name=` | The raw bytes of a picture as the body, up to 25 MB; kept only if they are a PNG, JPEG, GIF or WebP, as a picture of kind `uploaded` listed under `name`. Answers `201 { picture }`; 400 for anything else |
+| `GET /api/images/jobs` | `{ jobs, limit }`, newest first: `{ id, kind: "generate" \| "edit", state: "running" \| "done" \| "failed", prompt, size?, from?, startedAt, finishedAt?, pictureId?, error? }`. A done job has the `pictureId` of the picture in the gallery; a failed one says why, never with a key or a path. Finished jobs are kept an hour, up to 30; jobs are in memory and a restart ends the ones that run |
+| `DELETE /api/images/jobs/:id` | Stops a job that runs (its request is dropped, and no picture comes of it) or forgets one that has finished. 404 for none |
+| `DELETE /api/images/:id` | Takes the picture away, file and all, from the page's own folder, a chat's or the folder it was found in; a file that is gone already counts as deleted, but a chat's folder that cannot be reached is an error (404) and the picture stays in the list |
+| `POST /api/images/delete` | `{ ids }` (at most 200) — the same for several: `{ deleted, failed: [{ id, error }] }`, each as asked and what could not be said for each |
 
 ## Channels
 

@@ -1,0 +1,38 @@
+/* ───────────────────── The Images page's gallery ─────────────────────
+ * components/ImagesPage.tsx. Every tile is an ImagePreview — a picture, one
+ * being made, one that was not — made the same shape, so that a grid of them
+ * has no ragged edge and a picture arrives where its wait was.
+ *
+ * Hundreds of pictures stay cheap: a tile that is far off screen is not laid
+ * out or painted (content-visibility), and its picture is not fetched (the
+ * preview loads them lazily); the page itself asks for them 48 at a time.
+ */
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: .75rem; margin: 0; padding: 0; list-style: none; }
+.gallery-grid > li { min-width: 0; }
+.gallery-tile { position: relative; content-visibility: auto; contain-intrinsic-size: auto 13rem; }
+
+/* Square, whatever the picture's shape: what is made is shown whole when it is opened. */
+.gallery-tile .image-preview { --ratio: 1 !important; width: 100%; margin: 0; }
+.gallery-tile .image-preview-img { object-fit: cover; }
+.gallery-tile .image-preview.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: 1; }
+.gallery-tile .image-preview-failed { padding: 8px 10px; font-size: 11.5px; }
+.gallery-tile .image-preview-failed p { -webkit-line-clamp: 3; }
+.gallery-tile .image-preview-caption { margin-top: 4px; }
+
+/* Under the picture: where it is from and when, quietly. */
+.gallery-meta { display: flex; align-items: center; gap: 5px; min-width: 0; margin: 1px 0 0; font-size: 11px; color: rgb(var(--fg-faint)); }
+.gallery-meta > svg { flex-shrink: 0; width: 11px; height: 11px; }
+.gallery-meta > span { flex: 1; min-width: 0; }
+.gallery-meta > time { flex-shrink: 0; }
+
+/* Selecting: a box on the picture, and the picture marked. */
+.gallery-check { position: absolute; top: 8px; left: 8px; z-index: 5; width: 20px; height: 20px; margin: 0; cursor: pointer; accent-color: rgb(var(--accent)); }
+.gallery-tile.is-selected .image-preview-frame::after { content: ""; position: absolute; inset: 0; z-index: 4; border: 3px solid rgb(var(--accent)); border-radius: inherit; background: rgb(var(--accent) / .12); pointer-events: none; }
+
+/* Stop and Dismiss, in the place the title has company. */
+.gallery-tile-action { flex-shrink: 0; padding: 1px 6px; border-radius: 6px; font-size: 12px; color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
+.gallery-tile-action:hover { background: rgb(var(--fg) / .05); color: rgb(var(--fg)); }
+
+/* In the viewer, over a stage that takes every touch: this scrolls by itself. */
+.gallery-details { touch-action: pan-y; overscroll-behavior: contain; }
+@media (prefers-reduced-motion: reduce) { .gallery-tile-action { transition: none; } }
