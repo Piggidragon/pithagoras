@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /** The portal with no server: Settings → Add-ons, over canned answers for the opt-in features. */
-async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true, dreamFails = false, container = 'absent', off = [] as string[] } = {}) {
+async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true, dreamFails = false, container = 'absent', off = [] as string[], extensionImage = false } = {}) {
   const sent: { path: string; body: any }[] = [];
   const state = {
     subagent: { available, installed: false, enabled: false, source: null as string | null, mode: 'interrupt', maxParallel: 1, model: 'auto' },
@@ -16,7 +16,10 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     },
   };
   // What the portal has seen the tools of, and which of them are off for new chats.
-  const tools = ['show_image', 'generate_image', 'edit_image', 'web_search'].map((name) => ({ name, source: name === 'web_search' ? 'web' : name === 'show_image' ? 'pictures' : 'image-generation', defaultOn: true }));
+  // The portal's own picture tools say so; an image extension's generate_image is a tool like any other.
+  const tools = ['show_image', 'generate_image', 'edit_image', 'web_search'].map((name) => (
+    name === 'generate_image' && extensionImage ? { name, source: 'my-images', defaultOn: true }
+      : { name, source: name === 'web_search' ? 'web' : name === 'show_image' ? 'pictures' : 'image-generation', defaultOn: true, ...(name === 'web_search' ? {} : { inline: true }) }));
   const toolsOff: string[] = [...off];
   const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editKeySet: false, editReady: false };
   await page.route('**/api/**', async (route) => {
@@ -502,4 +505,19 @@ test('the Images section fits a phone', async ({ page }) => {
   await expect(addons(page).getByRole('switch', { name: 'Image editing tool' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   expect(await addons(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+});
+
+test("an image extension's generate_image stays in its group in Settings → Tools, and has no second switch under Images", async ({ page }) => {
+  const { sent } = await portal(page, { extensionImage: true });
+  await page.goto('/settings/images');
+  const here = addons(page);
+  await expect(here.getByRole('switch', { name: 'show_image in new chats' })).toBeVisible();
+  await expect(here.getByRole('switch', { name: 'generate_image in new chats' })).toHaveCount(0);
+
+  await page.goto('/settings/tools');
+  await expect(here.getByText('generate_image', { exact: true })).toHaveCount(1);
+  await expect(here.getByText('show_image', { exact: true })).toHaveCount(0);
+  // Its group's "all off" takes it along.
+  await here.getByRole('button', { name: 'all off' }).first().click();
+  await expect.poll(() => sent.at(-1)).toEqual({ path: '/api/tools', body: { off: ['generate_image'] } });
 });

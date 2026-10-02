@@ -1376,7 +1376,7 @@ const de: Locale = {
     "Chats already running here have it from their next message. A chat that switched a tool for itself keeps its own choice.": "Chats, die hier schon laufen, übernehmen es ab ihrer nächsten Nachricht. Ein Chat, der ein Tool für sich umgeschaltet hat, behält seine eigene Wahl.",
     "default on": "Standard an",
     "default off": "Standard aus",
-    "Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with.": "Gilt ab der nächsten Nachricht, für dieses Gespräch. Unter Einstellungen → Tools legst du fest, womit jedes Gespräch beginnt.",
+    "Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with, and Settings → Images does for the picture tools.": "Gilt ab der nächsten Nachricht, für dieses Gespräch. Unter Einstellungen → Tools legst du fest, womit jedes Gespräch beginnt, unter Einstellungen → Bilder für die Bild-Tools.",
     // components/VoiceAddon.tsx
     "unavailable": "nicht verfügbar",
     "Talk naturally, interrupt anytime, and hear replies in your chosen voice.": "Sprich ganz natürlich, unterbrich jederzeit und hör die Antworten in der Stimme deiner Wahl.",

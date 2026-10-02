@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
-import { PICTURE_TOOLS, nextOff } from "../tool-groups";
+import { PICTURE_TOOLS, isPictureTool, nextOff } from "../tool-groups";
 import { ImagesAddon } from "./FeatureAddons";
 import { Section, SwitchRow } from "./SettingsUi";
 
@@ -17,12 +17,17 @@ import { Section, SwitchRow } from "./SettingsUi";
  */
 export function PicturesPanel({ onError }: { onError: (e: string) => void }) {
   const [off, setOff] = useState<string[] | null>(null);
+  /** Picture tools of an extension, under a name of ours: switched in its group in Settings → Tools, where it is listed. */
+  const [taken, setTaken] = useState<string[]>([]);
   /** Why there is nothing to switch, where the deployment cannot do it. */
   const [refusal, setRefusal] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.toolDefaults().then((r) => setOff(r.off), (e) => setRefusal(String(e).replace(/^Error:\s*/, "")));
+    api.toolDefaults().then((r) => {
+      setOff(r.off);
+      setTaken(r.tools.filter((tool) => PICTURE_TOOLS.includes(tool.name) && !isPictureTool(tool)).map((tool) => tool.name));
+    }, (e) => setRefusal(String(e).replace(/^Error:\s*/, "")));
   }, []);
 
   const flip = async (name: string, enabled: boolean) => {
@@ -58,7 +63,7 @@ export function PicturesPanel({ onError }: { onError: (e: string) => void }) {
         ) : (
           <div className="space-y-3">
             {off &&
-              tools.map(({ name, detail }) => (
+              tools.filter(({ name }) => !taken.includes(name)).map(({ name, detail }) => (
                 <SwitchRow
                   key={name}
                   title={t("{tool} in new chats", { tool: name })}

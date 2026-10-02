@@ -75,7 +75,7 @@ function toSend(bytes: Buffer, who: string, name: string, max: number): { blob: 
 export function checkCount(count: number, multiple: boolean): void {
   if (count < 1) throw new ImageGenerationError("There is no picture to change");
   if (count > 1 && !multiple) {
-    throw new ImageGenerationError("The editing endpoint is not set up to take several pictures, so none was sent. Use one, or tell the person that several can be switched on in Settings → Add-ons → Images.");
+    throw new ImageGenerationError("The editing endpoint is not set up to take several pictures, so none was sent. Use one, or tell the person that several can be switched on in Settings → Images.");
   }
   if (count > MAX_EDIT_PICTURES) throw new ImageGenerationError(`An edit takes at most ${MAX_EDIT_PICTURES} pictures, and ${count} were given`);
 }

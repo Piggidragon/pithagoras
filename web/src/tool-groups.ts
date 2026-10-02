@@ -18,8 +18,11 @@ export interface ToolGroup {
   allOff: boolean;
 }
 
-/** The tools that make up pictures; Settings → Images has their defaults, so the Tools list leaves them out. */
+/** The tools that make up pictures; Settings → Images has their defaults, so the Tools list leaves out the portal's own of these names. */
 export const PICTURE_TOOLS = ["show_image", "generate_image", "edit_image"];
+
+/** The portal's own picture tool of this name, not an extension's: `inline` is what the server says of it. */
+export const isPictureTool = (tool: { name: string; inline?: boolean }) => tool.inline === true && PICTURE_TOOLS.includes(tool.name);
 
 /** What the portal registers itself, which is not an extension anyone installed. */
 const BUILT_IN = msg("built in");

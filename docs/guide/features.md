@@ -180,7 +180,7 @@ available. While it is off, or has no address, the agent has no `edit_image`
 at all, and the voice instructions say nothing of it. Generation and editing
 do not need each other; one may be on without the other.
 
-On the same tab, under the generation settings:
+On the same page, under the generation settings:
 
 | Field | Meaning |
 | --- | --- |
