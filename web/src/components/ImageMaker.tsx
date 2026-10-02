@@ -7,6 +7,7 @@ import { local } from "../safe-storage";
 import { isEnter } from "../shortcuts";
 import { t, tp } from "../i18n";
 import { MaskPainter, type MaskHandle } from "./MaskPainter";
+import { Select } from "./Select";
 import { ghostCls, inputCls, primaryCls } from "./SettingsUi";
 
 /** The most pictures one edit takes, as the portal sets it (MAX_EDIT_PICTURES). */
@@ -138,16 +139,17 @@ export function ImageMaker({
         {t("Picture size")}
         <input value={form.size} onChange={(e) => change({ size: e.target.value })} placeholder={features.size || "1024x1024"} spellCheck={false} autoComplete="off" className={`${inputCls} mt-1 font-mono text-xs`} />
       </label>
-      <label className="text-xs text-fg-muted">
+      {/* Not a label: the Select is a button of its own, and a label would pass a click on its text to it. */}
+      <div className="text-xs text-fg-muted">
         {t("How many")}
-        <select value={count} onChange={(e) => change({ count: Number(e.target.value) })} className={`${inputCls} mt-1 text-xs`}>
-          {Array.from({ length: limit }, (_, i) => i + 1).map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
-      </label>
+        <Select<number>
+          aria-label={t("How many")}
+          className="mt-1 w-full"
+          value={count}
+          onChange={(n) => change({ count: n })}
+          options={Array.from({ length: limit }, (_, i) => ({ value: i + 1, label: String(i + 1) }))}
+        />
+      </div>
       <label className="text-xs text-fg-muted sm:col-span-3">
         {t("Other fields of the request")}
         <textarea

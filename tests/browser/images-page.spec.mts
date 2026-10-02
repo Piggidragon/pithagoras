@@ -437,7 +437,8 @@ test('the settings of a request are sent as set, and are kept for the next visit
   await page.getByRole('button', { name: 'Options' }).click();
   await page.getByLabel('Model').fill('draw-2');
   await page.getByLabel('Picture size').fill('768x512');
-  await page.getByLabel('How many').selectOption('2');
+  await page.getByRole('combobox', { name: 'How many' }).click();
+  await page.getByRole('option', { name: '2', exact: true }).click();
   await page.getByLabel('Other fields of the request').fill('quality=high\nseed="42"\nsteps=30');
   await page.getByPlaceholder('Describe the picture').fill('Two boats');
   await page.getByRole('button', { name: 'Make 2 pictures' }).click();
@@ -446,9 +447,67 @@ test('the settings of a request are sent as set, and are kept for the next visit
   await page.reload();
   await expect(page.getByLabel('Model')).toHaveValue('draw-2');
   await expect(page.getByLabel('Picture size')).toHaveValue('768x512');
-  await expect(page.getByLabel('How many')).toHaveValue('2');
+  await expect(page.getByRole('combobox', { name: 'How many' })).toHaveText('2');
   await expect(page.getByLabel('Other fields of the request')).toHaveValue('quality=high\nseed="42"\nsteps=30');
   await expect(page.getByPlaceholder('Describe the picture')).toHaveValue('');
+});
+
+test('how many is the portal\'s own dropdown, not the browser\'s: it works by keyboard, and is drawn on the theme and within a phone', async ({ page }) => {
+  const p = await portal(page);
+  await page.goto('/images');
+  await page.getByRole('button', { name: 'Options' }).click();
+  // Nothing on the page is a native select, whose open list ignores the theme.
+  await expect(page.locator('select')).toHaveCount(0);
+  const many = page.getByRole('combobox', { name: 'How many' });
+  await expect(many).toHaveText('1');
+
+  // Keys alone: ArrowDown opens the list on the one that is set, the arrows move, Enter takes, and Escape leaves it as it was.
+  await many.focus();
+  await many.press('ArrowDown');
+  const list = page.getByRole('listbox', { name: 'How many' });
+  await expect(list.getByRole('option')).toHaveText(['1', '2', '3', '4']);
+  await many.press('ArrowDown');
+  await many.press('ArrowDown');
+  await many.press('Enter');
+  await expect(list).toHaveCount(0);
+  await expect(many).toHaveText('3');
+  await expect(many).toBeFocused();
+  await many.press('ArrowDown');
+  await many.press('End');
+  await many.press('Escape');
+  await expect(list).toHaveCount(0);
+  await expect(many).toHaveText('3');
+  // Typing a digit jumps to it.
+  await many.press('Space');
+  await many.press('2');
+  await many.press('Enter');
+  await expect(many).toHaveText('2');
+  await page.getByPlaceholder('Describe the picture').fill('Two boats');
+  await page.getByRole('button', { name: 'Make 2 pictures' }).click();
+  expect(p.state.generated.map((g) => g.count)).toEqual([2]);
+
+  // On the theme, and beside the fields of the row at their height; on a phone the list stays on the screen.
+  for (const [scheme, width] of [['light', 1100], ['dark', 1100], ['light', 375], ['dark', 375]] as const) {
+    await page.setViewportSize({ width, height: 760 });
+    await page.emulateMedia({ colorScheme: scheme });
+    await many.click();
+    await expect(list).toBeVisible();
+    const [ground, box, own, field] = await Promise.all([
+      list.evaluate((el) => getComputedStyle(el).backgroundColor.match(/\d+/g)!.slice(0, 3).map(Number)),
+      list.boundingBox(),
+      many.boundingBox(),
+      page.getByLabel('Picture size').boundingBox(),
+    ]);
+    const brightness = ground.reduce((a, b) => a + b, 0) / 3;
+    if (scheme === 'dark') expect(brightness, `${scheme} ${width}`).toBeLessThan(90);
+    else expect(brightness, `${scheme} ${width}`).toBeGreaterThan(165);
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    expect(Math.abs(own!.height - field!.height), `${scheme} ${width}`).toBeLessThanOrEqual(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await many.press('Escape');
+    await expect(list).toHaveCount(0);
+  }
 });
 
 test('a line of the extra fields that is not name=value is said before anything is sent', async ({ page }) => {
