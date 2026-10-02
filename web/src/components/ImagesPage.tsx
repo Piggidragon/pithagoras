@@ -75,7 +75,7 @@ export function ImagesPage() {
   const filterKey = `${filter.origin ?? ""}/${filter.kind ?? ""}`;
   const latestFilter = useRef(filter);
   latestFilter.current = filter;
-  const setFilter = (next: Filter) => setParams({ ...(next.origin ? { origin: next.origin } : {}), ...(next.kind ? { kind: next.kind } : {}) }, { replace: true });
+  const setFilter = (next: Filter) => setParams({ ...(next.origin ? { origin: next.origin } : {}), ...(next.kind ? { kind: next.kind } : {}) });
 
   const [features, setFeatures] = useState<ImagesFeature | null>(null);
   const [error, setError] = useState<string | null>(null);

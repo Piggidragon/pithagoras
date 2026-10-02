@@ -228,7 +228,15 @@ test('the filters ask the portal for what they say, and are in the address', asy
   await expect(page).toHaveURL(/\/images\?kind=edited$/);
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
   await expect(tile(page, 'Changed one')).toBeVisible();
-  // A link with a filter in it opens on it, and Back goes through them.
+  // Back goes through the filters, one at a time: the unfiltered list in between, and the chats before it.
+  await page.goBack();
+  await expect(page).toHaveURL(/\/images$/);
+  await expect(grid(page).getByRole('listitem')).toHaveCount(3);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/images\?origin=chat$/);
+  await expect(grid(page).getByRole('listitem')).toHaveCount(1);
+  await expect(tile(page, 'The agent’s')).toBeVisible();
+  // A link with a filter in it opens on it.
   await page.goto('/images?origin=chat&kind=generated');
   await expect(page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'From chats' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('radiogroup', { name: 'How it was made' }).getByRole('radio', { name: 'Made', exact: true })).toHaveAttribute('aria-checked', 'true');
@@ -646,19 +654,23 @@ test('several pictures can be selected, to download or delete together', async (
 test('on a phone the grid has two columns, the viewer reaches every action, and nothing runs off the screen', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 760 });
   const many = Array.from({ length: 6 }, (_, i) => pic({ prompt: `Phone ${i + 1}`, age: i }));
-  await portal(page, { pictures: many });
+  // Every button there can be: the row of them is longer than the screen.
+  await portal(page, { pictures: many, images: feature({ editMultiple: true }) });
   await page.goto('/images');
   await expect(grid(page).getByRole('listitem')).toHaveCount(6);
   const columns = await grid(page).evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
   expect(columns).toBe(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await tile(page, 'Phone 1').click();
-  for (const name of ['Details', 'Edit it', 'Run again', 'Delete', 'Close']) {
+  for (const name of ['Details', 'Edit it', 'Use as a reference', 'Run again', 'Delete', 'Close']) {
     const box = await viewer(page).getByRole('button', { name }).boundingBox();
     expect(box, name).not.toBeNull();
     expect(box!.x + box!.width).toBeLessThanOrEqual(375);
     expect(box!.x).toBeGreaterThanOrEqual(0);
   }
+  // Where the buttons are too many for one row, the one that wraps stays at the right, under the others, and not at the left under the count.
+  const close = await viewer(page).getByRole('button', { name: 'Close' }).boundingBox();
+  expect(close!.x + close!.width).toBeGreaterThan(375 - 16);
   await viewer(page).getByRole('button', { name: 'Details' }).click();
   const panel = await viewer(page).getByRole('region', { name: 'Details' }).boundingBox();
   expect(panel!.x).toBeGreaterThanOrEqual(0);
