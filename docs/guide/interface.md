@@ -110,8 +110,9 @@ in two places:
   conversation has run, because that is when pi builds the list of what its
   extensions registered. A group can be switched off as a whole, and each
   package can be given a name of your own — *Rename* — for the list. The
-  picture tools (`show_image`, `generate_image`, `edit_image`) are not listed
-  here: their defaults are in **Settings → Images**.
+  portal's picture tools (`show_image`, `generate_image` and `edit_image`) share
+  one group, **Images**, in every tool list; an extension's tool of one of those
+  names stays in the group of its extension.
 - **Projects → Tools** on a project's row sets what every chat in that project starts
   with, against the portal-wide default; see [Projects](/guide/projects#tools).
 - The **tools** control of a chat switches them for that chat only, from its

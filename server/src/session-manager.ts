@@ -2143,12 +2143,14 @@ class SessionManager extends EventEmitter {
     const defaults = toolDefaultsFor(workspace);
     const exceptions = sessionTools(sessionId);
     const servers = mcpServerNames();
-    const shown: { name: string; source: string; description?: string }[] = listed.length ? listed : shownTools(workspace);
+    const shown: { name: string; source: string; description?: string; inline?: true }[] = listed.length ? listed : shownTools(workspace);
     return {
-      tools: shown.map(({ name, source, description }) => ({
+      tools: shown.map(({ name, source, description, inline }) => ({
         name,
         ...(description !== undefined ? { description } : {}),
         source: toolSource(name, source, servers),
+        // The portal's own tools are told from an extension's of the same name, so the page can group its picture tools.
+        ...(inline ? { inline: true as const } : {}),
         enabled: toolEnabled(name, defaults, exceptions),
         defaultOn: !defaults.includes(name),
       })),

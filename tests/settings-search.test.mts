@@ -15,8 +15,9 @@ test("a setting is found by its title first, then by what it is about", () => {
   assert.deepEqual(titles("nothing like this"), []);
 });
 
-test("every picture tool and the image endpoint are found on the one Images page", () => {
-  for (const q of ["show_image", "generate_image", "edit_image", "image generation", "image editing", "bildgenerierung", "bilder"]) {
+test("the picture tools are found in Tools, the image endpoint on the Images page", () => {
+  for (const q of ["show_image", "generate_image", "edit_image"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
+  for (const q of ["image generation", "image editing", "bildgenerierung"]) {
     const found = searchSettings(q, SETTINGS_INDEX);
     assert.ok(found.length && found.every((e) => e.tab === "images"), `${q} leads to Images`);
   }

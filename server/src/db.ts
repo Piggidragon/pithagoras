@@ -1894,7 +1894,7 @@ export function knownTools(): KnownTool[] {
  * For a chat, `folder` is where it runs, whose project may bring packages of
  * its own.
  */
-export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline">[] {
+export function shownTools(folder?: string): (Omit<KnownTool, "package" | "inline"> & { inline?: true })[] {
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
   // The portal's own tools belong to no package, so the packages cannot say
   // that one is not offered: image generation and image editing say so
@@ -1908,7 +1908,10 @@ export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline
     .filter(toolAvailability(readPiSettings().packages, project))
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
     .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))
-    .map(({ package: _package, inline: _inline, ...tool }) => tool);
+    .map((known) => {
+      const { package: _package, inline: _inline, ...tool } = known;
+      return portalOwned(known) ? { ...tool, inline: true as const } : tool;
+    });
 }
 
 /** What the portal files its own picture tools under, by name. Read when asked: image-generation.ts imports this module. */
@@ -1916,7 +1919,7 @@ const pictureSource = (name: string): string | undefined =>
   ({ show_image: SHOW_IMAGE_SOURCE, [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE, [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE } as Record<string, string>)[name];
 
 /**
- * Whether the portal registered this tool itself, for the page to keep it where it is set up.
+ * Whether the portal registered this tool itself, for the pages to group its picture tools apart from an extension's of the same name.
  *
  * An entry remembered before `inline` was recorded has no mark at all, so a picture tool of no package,
  * filed under the label the portal files it under, counts too. A report always carries the mark, `false`
