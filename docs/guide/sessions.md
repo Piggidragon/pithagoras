@@ -213,6 +213,11 @@ are made. In
 [voice mode](/guide/voice) the card of such a call carries the same preview as a
 small tile.
 
+Every picture the agent makes this way is also in the [Images](/guide/images) page's
+gallery, from the moment it is saved, with the chat it is from, what it was asked for
+and how it was made. The page can open it, change it, make it again, and delete the
+file — which is the chat's, so that asks every time.
+
 ## Drafts and what is running
 
 What you have typed into a chat's box and not sent is kept per chat, so half a
