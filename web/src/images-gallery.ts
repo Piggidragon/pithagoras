@@ -13,8 +13,8 @@ export interface Filter {
   kind?: PictureKind;
 }
 
-const ORIGINS: readonly string[] = ["page", "chat"];
-const KINDS: readonly string[] = ["generated", "edited", "uploaded"];
+const ORIGINS: readonly string[] = ["page", "chat", "folder"];
+const KINDS: readonly string[] = ["generated", "edited", "uploaded", "unknown"];
 
 /** The filters in the address; what is not one of them is no filter, so that a link that is out of date shows everything. */
 export function readFilter(params: URLSearchParams): Filter {
@@ -100,8 +100,8 @@ export interface Tile {
 
 /** What a job makes, as a filter says it: a job of the page makes its pictures, and an upload is not made by one. */
 const jobMatches = (job: PictureJob, filter: Filter): boolean => {
-  if (filter.origin === "chat") return false;
-  if (filter.kind === "uploaded") return false;
+  if (filter.origin === "chat" || filter.origin === "folder") return false;
+  if (filter.kind === "uploaded" || filter.kind === "unknown") return false;
   if (filter.kind) return filter.kind === (job.kind === "edit" ? "edited" : "generated");
   return true;
 };

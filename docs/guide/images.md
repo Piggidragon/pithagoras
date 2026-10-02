@@ -73,17 +73,18 @@ and never scaled or cut — a picture over the limit is refused, not shrunk.
 
 ## The gallery
 
-The gallery is the main part of the page: every picture of **this page** and every
-one the agent made in a **chat** with `generate_image` or `edit_image`, newest first,
-in a grid that is two columns on a phone. Under each picture, its description, where
-it is from (the chat's title for one the agent made, how it was made for the others)
-and how long ago.
+The gallery is the main part of the page: every picture of **this page**, every one
+the agent made in a **chat** with `generate_image` or `edit_image`, and every one that
+lies in the folders those tools write into, newest first, in a grid that is two columns
+on a phone. Under each picture, its description (the file's name for one that was found
+in a folder), where it is from (the chat's title for one the agent made, the folder for
+one that was found, how it was made for the others) and how long ago.
 
 - **Paging.** 48 at a time. The next page is loaded as you near the end of what is
   there, and **Show more** does the same. A picture far down is not fetched until
   it is near the screen, so a gallery of hundreds stays quick.
-- **Filters.** *Where from*: all, made here, from chats. *How it was made*: all,
-  made, changed, from this computer. They are in the address
+- **Filters.** *Where from*: all, made here, from chats, from folders. *How it was made*:
+  all, made, changed, from this computer, not known. They are in the address
   (`/images?origin=chat&kind=edited`), so a link keeps them and **Back** goes through them.
 - **Looking at one.** A click opens it in the [viewer](/guide/sessions#looking-at-a-picture),
   which steps through the gallery with the arrows, `←` and `→`, or a swipe, and loads
@@ -101,10 +102,10 @@ Beside its own buttons, the viewer has these for a gallery picture:
 
 | Button | Does |
 | --- | --- |
-| **Details** | The full description, when and how it was made, the model, the size, the other fields it was asked with, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. |
+| **Details** | The full description, when and how it was made, the model, the size, the other fields it was asked with, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
 | **Edit it** | Puts the picture in the form to be changed. |
 | **Use as a reference** | Adds it to the pictures an edit works from. Only where the editing endpoint takes several. |
-| **Run again** | A picture made from a description is made once more, with the model, size and other fields it was made with: one click, one more picture. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, which has no description. |
+| **Run again** | A picture made from a description is made once more, with the model, size and other fields it was made with: one click, one more picture. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
 | **Delete** | See below. |
 | **Open in a new tab**, **Download** | The file itself. |
 
@@ -122,23 +123,39 @@ screen is deleted with what is. `Esc` or **Done** ends selecting.
 A picture is deleted with its file. For a picture the page made that is the portal's own
 folder, and the question can be switched off in Settings like the others that delete.
 
-The agent's pictures are files in the **folder of the chat** that made them
+The agent's pictures are files in the **folder a chat works in**
 (`generated-images`), and they are not the page's to take lightly: deleting one removes
-it from there for good, so the chat and its Files panel lose it. That is asked **every
-time, whatever Settings says**, with the chat named, and a delete of several says how
-many of them are a chat's.
+it from there for good, so the chats that work there and their Files panel lose it. That
+is asked **every time, whatever Settings says**, with the chat or the folder named, and a
+delete of several says how many of them are in a folder. A picture that was found in a
+folder is deleted the same way.
 
 ### What the gallery lists
 
-The page lists and serves pictures only from two places the portal knows: its own
-folder, `images`, under the portal's data folder, and the `generated-images` folder of a
-chat. It never opens a path the page names — a picture is asked for by its id — and
-every file is opened with the checks the Files panel's pictures have: a path inside the
-folder, no link followed out of it, and what its bytes say it is.
+The page lists and serves pictures only from the places the portal knows: its own
+folder, `images`, under the portal's data folder, and the `generated-images` folder of
+the folders the agent works in — Home, the projects, and the folder of every chat. It
+never opens a path the page names — a picture is asked for by its id — and every file is
+opened with the checks the Files panel's pictures have: a path inside the folder, no
+link followed out of it, and what its bytes say it is.
 
-- The agent's pictures are listed from the moment its tools save them. **Pictures made
-  before the gallery existed are not in it**; they stay in their chats' folders. A name
-  the agent used before, whose file was taken away, is a new picture when it makes
+- The agent's pictures are listed from the moment its tools save them, with what they
+  were asked for. **Pictures that nobody listed are found as well:** the ones made before
+  the gallery existed, or by a chat that has since been deleted. The portal looks in
+  `generated-images` of Home, of every project and of every folder a chat works in, and
+  lists each file there whose first bytes say it is a PNG, JPEG, GIF or WebP, of at most
+  25 MB, whatever it is called. A link is never followed, a file that is no picture is
+  left out, and nothing else in those folders — a project's other files, folders inside
+  `generated-images`, a hidden file — is looked at. It never looks in a folder the portal
+  does not know, so a path somewhere else on the machine is never listed.
+- A picture that was found is *from the folder*: which chat made it cannot be told, since
+  the chats of a project share its folder and the one that made it may be gone, and what
+  it was asked for was not kept. Its *how it was made* is read from its name — `image-…`
+  for one made from a description, `…-edited` for a change — and is *not known* for any
+  other. It is one entry with a picture the agent recorded, never two: the same file is
+  the same picture. It has no description, so a tile carries its file name instead, and
+  there is no **Run again** for it; **Edit it** works as for any picture.
+- A name the agent used before, whose file was taken away, is a new picture when it makes
   one under it again: the gallery shows the new one with its own description and time.
   Chats that work in one folder, such as the chats of a project, share its files, so this
   holds across them, and a picture one of them made is the original of an edit another makes.
@@ -148,10 +165,15 @@ folder, no link followed out of it, and what its bytes say it is.
   of the disk; the agent's pictures are in their chats' folders and are not counted.
 - A picture whose file is gone — taken in the Files panel, or by hand — is dropped from
   the list the next time it is loaded, and the pictures of a chat go from the list with
-  the chat, while their files stay in its folder. A chat's folder that cannot be reached
+  the chat, while their files stay in its folder, where they are found again as pictures
+  of the folder (without what they were asked for). A chat's folder that cannot be reached
   for the moment, such as a drive that is not mounted, is not a file that is gone: its
   pictures stay in the list, are shown again when it is back, and a delete of one says it
-  could not reach the file.
+  could not reach the file. A picture that was found has no chat to keep it, so it is
+  dropped with its folder and found again when the folder is back.
+- Looking through the folders for the first time reads the first bytes of every file
+  there; after that the portal only reads the folders' names, and opens a file again only
+  when it is new or has changed, so a gallery of hundreds stays quick.
 - The list is refreshed when you return to the tab, every half minute while it is on
   screen, and with **Refresh**, so what the agent makes while you are here shows up.
 

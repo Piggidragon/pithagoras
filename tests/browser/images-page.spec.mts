@@ -7,9 +7,10 @@ import { test, expect, type Locator, type Page, type Route } from '@playwright/t
 
 interface Pic {
   id: string;
-  origin: 'page' | 'chat';
+  origin: 'page' | 'chat' | 'folder';
   chat: { id: string; title: string } | null;
-  kind: 'generated' | 'edited' | 'uploaded';
+  folder: { name: string; home: boolean } | null;
+  kind: 'generated' | 'edited' | 'uploaded' | 'unknown';
   prompt: string;
   params: Record<string, unknown>;
   from: string | null;
@@ -42,6 +43,7 @@ const pic = (over: Partial<Pic> & { age?: number } = {}): Pic => {
     id: hex(n),
     origin: 'page',
     chat: null,
+    folder: null,
     kind: 'generated',
     prompt: `Picture ${n}`,
     params: {},
@@ -279,6 +281,74 @@ test('the filters ask the portal for what they say, and are in the address', asy
   await expect(page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'From chats' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('radiogroup', { name: 'How it was made' }).getByRole('radio', { name: 'Made', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
+});
+
+/** A picture the portal found in a folder the agent's tools write into: nothing was kept of how it was made. */
+const found = (over: Partial<Pic> & { age?: number } = {}) => pic({ origin: 'folder', kind: 'unknown', prompt: '', folder: { name: 'garden', home: false }, ...over });
+
+test('pictures that were found in a folder are in the gallery by their file name, say where they are, and are filtered', async ({ page }) => {
+  const named = found({ fileName: 'fox.png', age: 3 });
+  const home = found({ fileName: 'owl.png', folder: { name: '', home: true }, kind: 'generated', age: 2 });
+  const p = await portal(page, { pictures: [pic({ prompt: 'Mine', age: 1 }), named, home] });
+  await page.goto('/images');
+  await expect(grid(page).getByRole('listitem')).toHaveCount(3);
+  // Without a description a tile is called by its file, and says which folder it is in: Home or the project's.
+  await expect(tile(page, 'fox.png')).toBeVisible();
+  await expect(grid(page).getByRole('listitem').filter({ hasText: 'garden' })).toHaveCount(1);
+  await expect(grid(page).getByRole('listitem').filter({ hasText: 'Home' })).toHaveCount(1);
+  await page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'From folders' }).click();
+  await expect(page).toHaveURL(/\/images\?origin=folder$/);
+  await expect(grid(page).getByRole('listitem')).toHaveCount(2);
+  expect(p.state.listed.some((q) => q.includes('origin=folder'))).toBe(true);
+  await page.getByRole('radiogroup', { name: 'How it was made' }).getByRole('radio', { name: 'Not known' }).click();
+  await expect(page).toHaveURL(/\/images\?origin=folder&kind=unknown$/);
+  await expect(grid(page).getByRole('listitem')).toHaveCount(1);
+  await expect(tile(page, 'fox.png')).toBeVisible();
+  // A link with them in it opens on them.
+  await page.goto('/images?kind=unknown');
+  await expect(page.getByRole('radiogroup', { name: 'How it was made' }).getByRole('radio', { name: 'Not known' })).toHaveAttribute('aria-checked', 'true');
+  await expect(grid(page).getByRole('listitem')).toHaveCount(1);
+});
+
+test('Details of a picture that was found says where, and that nothing is kept of how it was made; it can be changed but not run again', async ({ page }) => {
+  await portal(page, { pictures: [found({ fileName: 'fox.png', createdAt: Date.parse('2026-09-30T08:15:00Z'), bytes: 2_500_000 })] });
+  await page.goto('/images');
+  await tile(page, 'fox.png').click();
+  await expect(viewer(page).getByRole('button', { name: 'Edit it' })).toBeVisible();
+  await expect(viewer(page).getByRole('button', { name: 'Run again' })).toHaveCount(0);
+  await viewer(page).getByRole('button', { name: 'Details' }).click();
+  const details = viewer(page).getByRole('region', { name: 'Details' });
+  await expect(details).toContainText('In the folder “garden”');
+  await expect(details).toContainText('Nothing tells how it was made');
+  await expect(details).toContainText('fox.png · 2.4 MB');
+  await expect(details).toContainText('Nothing was kept of what it was asked for');
+  await expect(details.getByText('Description')).toHaveCount(0);
+  await expect(details.getByRole('link', { name: 'Open the chat' })).toHaveCount(0);
+});
+
+test('a picture that was found is deleted only on purpose, with the folder named, whatever Settings says', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('confirmDeletes', 'off'));
+  const theirs = found({ fileName: 'fox.png', age: 5 });
+  const other = found({ fileName: 'owl.png', folder: { name: 'work/art', home: false }, age: 4 });
+  const mine = pic({ prompt: 'Mine' });
+  const p = await portal(page, { pictures: [theirs, other, mine] });
+  await page.goto('/images');
+  await tile(page, 'fox.png').click();
+  await viewer(page).getByRole('button', { name: 'Delete' }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'Delete this picture?' });
+  await expect(dialog).toContainText('the folder “garden”');
+  await expect(dialog).toContainText('for good');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  expect(p.state.deleted).toEqual([]);
+  // With others, one question for all of them, which says what is in a folder.
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await page.getByRole('button', { name: 'Select all shown' }).click();
+  await page.getByRole('button', { name: 'Delete' }).click();
+  const several = page.getByRole('alertdialog', { name: 'Delete these 3 pictures?' });
+  await expect(several).toContainText('2 of them are files in folders');
+  await several.getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => p.state.deleted.flat().sort()).toEqual([theirs.id, other.id, mine.id].sort());
 });
 
 test('a gallery of hundreds is asked for a page at a time, and pictures far down are not fetched', async ({ page }) => {

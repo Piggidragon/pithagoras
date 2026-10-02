@@ -6,7 +6,7 @@ import type { GalleryPicture, PictureJob } from "../web/src/api.ts";
 let n = 0;
 const picture = (over: Partial<GalleryPicture> = {}): GalleryPicture => {
   n++;
-  return { id: n.toString(16).padStart(12, "0"), origin: "page", chat: null, kind: "generated", prompt: `p${n}`, params: {}, from: null, createdAt: 1000 + n, bytes: 1, fileName: `f${n}.png`, ...over };
+  return { id: n.toString(16).padStart(12, "0"), origin: "page", chat: null, folder: null, kind: "generated", prompt: `p${n}`, params: {}, from: null, createdAt: 1000 + n, bytes: 1, fileName: `f${n}.png`, ...over };
 };
 /** A list as the server gives it: newest first. */
 const newestFirst = (...p: GalleryPicture[]) => [...p].sort((a, b) => b.createdAt - a.createdAt);
@@ -16,6 +16,7 @@ const job = (over: Partial<PictureJob> = {}): PictureJob => ({ id: `j${++n}`, ki
 test("the filters are read from the address, and what is not a filter is none", () => {
   assert.deepEqual(readFilter(new URLSearchParams("origin=chat&kind=edited")), { origin: "chat", kind: "edited" });
   assert.deepEqual(readFilter(new URLSearchParams("kind=uploaded")), { kind: "uploaded" });
+  assert.deepEqual(readFilter(new URLSearchParams("origin=folder&kind=unknown")), { origin: "folder", kind: "unknown" });
   assert.deepEqual(readFilter(new URLSearchParams("origin=elsewhere&kind=nonsense&other=1")), {});
   assert.deepEqual(readFilter(new URLSearchParams("")), {});
 });
@@ -136,6 +137,8 @@ test("a filter leaves out the jobs that make what it does not show", () => {
   assert.deepEqual(keys({ kind: "uploaded" }), []);
   // What the page makes is of the page, not of a chat.
   assert.deepEqual(keys({ origin: "chat" }), []);
+  assert.deepEqual(keys({ origin: "folder" }), []);
+  assert.deepEqual(keys({ kind: "unknown" }), [], "what is made here is never one nothing is known of");
   assert.deepEqual(keys({ origin: "page", kind: "edited" }), ["edit"]);
 });
 

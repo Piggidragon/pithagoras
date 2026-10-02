@@ -216,7 +216,9 @@ small tile.
 Every picture the agent makes this way is also in the [Images](/guide/images) page's
 gallery, from the moment it is saved, with the chat it is from, what it was asked for
 and how it was made. The page can open it, change it, make it again, and delete the
-file — which is the chat's, so that asks every time.
+file — which is the chat's, so that asks every time. What lies in these folders and was
+never listed, such as pictures made before the gallery existed, is found there too, as a
+picture of the folder.
 
 ## Drafts and what is running
 

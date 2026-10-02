@@ -33,8 +33,8 @@ import { fail, sendPicture } from "./files.js";
  */
 
 const IDS = /^[0-9a-f]{12}$/;
-const ORIGINS = new Set<string>(["page", "chat"]);
-const KINDS = new Set<string>(["generated", "edited", "uploaded"]);
+const ORIGINS = new Set<string>(["page", "chat", "folder"]);
+const KINDS = new Set<string>(["generated", "edited", "uploaded", "unknown"]);
 /** The most that go in one request to delete, or that are looked up by id. */
 const MAX_IDS = 200;
 
@@ -135,8 +135,8 @@ export function imagesRouter(): Router {
         return res.json({ pictures: picturesById(ids) });
       }
       const { origin, kind, before, limit } = req.query;
-      if (origin !== undefined && !(typeof origin === "string" && ORIGINS.has(origin))) return res.status(400).json({ error: "origin is page or chat" });
-      if (kind !== undefined && !(typeof kind === "string" && KINDS.has(kind))) return res.status(400).json({ error: "kind is generated, edited or uploaded" });
+      if (origin !== undefined && !(typeof origin === "string" && ORIGINS.has(origin))) return res.status(400).json({ error: "origin is page, chat or folder" });
+      if (kind !== undefined && !(typeof kind === "string" && KINDS.has(kind))) return res.status(400).json({ error: "kind is generated, edited, uploaded or unknown" });
       if (before !== undefined && !(typeof before === "string" && /^\d+:[0-9a-f]+$/.test(before))) return res.status(400).json({ error: "before is the next of the page before" });
       const asked = limit === undefined ? DEFAULT_PAGE : Number(limit);
       if (!Number.isInteger(asked) || asked < 1 || asked > MAX_PAGE) return res.status(400).json({ error: `limit is a whole number from 1 to ${MAX_PAGE}` });

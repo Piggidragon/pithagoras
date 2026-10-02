@@ -343,17 +343,21 @@ export function getDb(): Database.Database {
     );
 
     -- The pictures of the Images page: the ones it made itself, which are files
-    -- in the portal's own images folder, and the ones the agent made in a chat
-    -- with generate_image or edit_image, which are files in that chat's folder
-    -- and are listed here as they are made (see image-gallery.ts). A row names
+    -- in the portal's own images folder, the ones the agent made in a chat with
+    -- generate_image or edit_image, which are files in that chat's folder and
+    -- are listed here as they are made, and those found lying in a folder the
+    -- tools write into that nobody listed (see image-gallery.ts). A row names
     -- the file, never holds it; one whose file is gone is dropped when the
     -- page next looks, and a chat's go with the chat. "path" is a file name in
-    -- the images folder for the page's, and a path from the chat's folder for
-    -- the agent's. "params" is what the request was made with, as JSON.
+    -- the images folder for the page's, and a path from the folder for the
+    -- agent's: from the chat's, or, for one that was found, from "folder", the
+    -- real path of the folder it was found in. "params" is what the request
+    -- was made with, as JSON.
     CREATE TABLE IF NOT EXISTS images (
       id TEXT PRIMARY KEY,
       origin TEXT NOT NULL,
       session_id TEXT,
+      folder TEXT,
       path TEXT NOT NULL,
       kind TEXT NOT NULL,
       prompt TEXT NOT NULL DEFAULT '',
@@ -510,6 +514,11 @@ function migrate(d: Database.Database): void {
     d.exec("ALTER TABLE routines ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
   }
   d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_slug ON routines(slug)");
+  // Where a picture that was found in a folder lies (see image-gallery.ts). The
+  // gallery was first kept without it, and CREATE TABLE above leaves such a table as it is.
+  const imageCols = (d.prepare("PRAGMA table_info(images)").all() as { name: string }[]).map((c) => c.name);
+  if (imageCols.length && !imageCols.includes("folder")) d.exec("ALTER TABLE images ADD COLUMN folder TEXT");
+  d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_images_folder_file ON images(folder, path) WHERE folder IS NOT NULL");
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_grants_open ON grants(session_id, tool, used_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC)");

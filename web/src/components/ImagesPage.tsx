@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { LuCheck, LuDownload, LuImage, LuImagePlus, LuInfo, LuListChecks, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles, LuX } from "react-icons/lu";
+import { LuCheck, LuDownload, LuFolder, LuImage, LuImagePlus, LuInfo, LuListChecks, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles, LuX } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob, type PictureKind, type PictureOrigin } from "../api";
 import { appendPage, fieldsOf, fieldsText, madeButNotListed, mergeTop, readFilter, sameList, tiles, viewerList, viewerPicture, type Filter, type Tile } from "../images-gallery";
 import { pollWhileVisible } from "../poll";
@@ -29,18 +29,21 @@ const ORIGINS: { id: PictureOrigin | ""; label: string }[] = [
   { id: "", label: msg("All") },
   { id: "page", label: msg("Made here") },
   { id: "chat", label: msg("From chats") },
+  { id: "folder", label: msg("From folders") },
 ];
 const KINDS: { id: PictureKind | ""; label: string }[] = [
   { id: "", label: msg("All") },
   { id: "generated", label: msg("Made") },
   { id: "edited", label: msg("Changed") },
   { id: "uploaded", label: msg("From this computer") },
+  { id: "unknown", label: msg("Not known") },
 ];
 
 const KIND_NAME: Record<PictureKind, string> = {
   generated: msg("Made from a description"),
   edited: msg("Changed from another picture"),
   uploaded: msg("From this computer"),
+  unknown: msg("Nothing tells how it was made"),
 };
 
 /** What a tile says of how it was made, in as few words as there are room for under it. */
@@ -48,7 +51,11 @@ const KIND_SHORT: Record<PictureKind, string> = {
   generated: msg("Made"),
   edited: msg("Changed"),
   uploaded: msg("Uploaded"),
+  unknown: msg("Not known"),
 };
+
+/** What a folder is called: Home, or its place under the workspace root. */
+const folderName = (folder: { name: string; home: boolean }): string => (folder.home ? t("Home") : folder.name);
 
 /** The viewer's own buttons are this size; the ones this page adds match them. */
 const viewerButton =
@@ -268,29 +275,39 @@ export function ImagesPage() {
 
   const open = useCallback((id: string) => setOpened(id), []);
 
-  /** Takes pictures away, after asking: the page's own as the person's, a chat's with the warning that they are the chat's files. */
+  /** Takes pictures away, after asking: the page's own as the person's, the agent's with the warning that they are files in a folder the chats work in. */
   const remove = async (wanted: string[]) => {
     // Only what the page knows is deleted, so that what the question says is all of what goes: a picture it cannot tell the origin of is not one to take away.
     const chosen = wanted.map((id) => byId.get(id)).filter((p): p is GalleryPicture => !!p);
     const ids = chosen.map((p) => p.id);
     if (!ids.length) return;
     const inChats = chosen.filter((p) => p.origin === "chat");
+    const inFolders = chosen.filter((p) => p.origin === "folder");
+    const agents = inChats.length + inFolders.length;
     const only = chosen.length === 1 ? chosen[0] : undefined;
     const ok = await confirmDialog({
       title: tp(ids.length, "Delete this picture?", "Delete these {n} pictures?"),
-      message: inChats.length
+      message: agents
         ? only
-          ? t("It is a file in the folder of the chat “{chat}”, where the agent made it. Deleting it removes it from there for good: the chat will not find it any more, and neither will its Files panel. This cannot be undone.", { chat: only.chat?.title || t("a chat that is gone") })
-          : tp(
-              inChats.length,
-              "{n} of them is a file in the folder of a chat, where the agent made it. Deleting removes it from there for good: the chat will not find it any more. This cannot be undone.",
-              "{n} of them are files in the folders of chats, where the agent made them. Deleting removes them from there for good: the chats will not find them any more. This cannot be undone.",
-            )
+          ? only.folder
+            ? t("It is a file in the folder “{folder}”, where the agent made it. Deleting it removes it from there for good: the chats that work there will not find it any more, and neither will their Files panel. This cannot be undone.", { folder: folderName(only.folder) })
+            : t("It is a file in the folder of the chat “{chat}”, where the agent made it. Deleting it removes it from there for good: the chat will not find it any more, and neither will its Files panel. This cannot be undone.", { chat: only.chat?.title || t("a chat that is gone") })
+          : inFolders.length
+            ? tp(
+                agents,
+                "{n} of them is a file in a folder where the agent made it. Deleting removes it from there for good: the chats that work there will not find it any more. This cannot be undone.",
+                "{n} of them are files in folders where the agent made them. Deleting removes them from there for good: the chats that work there will not find them any more. This cannot be undone.",
+              )
+            : tp(
+                inChats.length,
+                "{n} of them is a file in the folder of a chat, where the agent made it. Deleting removes it from there for good: the chat will not find it any more. This cannot be undone.",
+                "{n} of them are files in the folders of chats, where the agent made them. Deleting removes them from there for good: the chats will not find them any more. This cannot be undone.",
+              )
         : t("The file is deleted from the portal. This cannot be undone."),
       confirmLabel: t("Delete"),
       danger: true,
-      // Asked whatever Settings says where the file is not the page's own: it is a chat's, and the agent may be working with it.
-      deletes: inChats.length === 0,
+      // Asked whatever Settings says where the file is not the page's own: it is in a folder the agent works in, and may be working with it.
+      deletes: agents === 0,
     });
     if (!ok) return;
     // The portal takes so many at a time; the question was asked once for all of them.
@@ -576,7 +593,10 @@ function PictureDetails({ picture }: { picture: GalleryPicture }) {
   const rows: [string, string][] = [
     [t("Made"), formatDateTime(picture.createdAt)],
     [t("How"), t(KIND_NAME[picture.kind])],
-    [t("Where"), picture.chat ? t("In the chat “{chat}”", { chat: picture.chat.title || t("a chat that is gone") }) : t("Made here")],
+    [
+      t("Where"),
+      picture.chat ? t("In the chat “{chat}”", { chat: picture.chat.title || t("a chat that is gone") }) : picture.folder ? t("In the folder “{folder}”", { folder: folderName(picture.folder) }) : t("Made here"),
+    ],
     ...(params.model ? [[t("Model"), params.model] as [string, string]] : []),
     ...(params.size ? [[t("Picture size"), params.size] as [string, string]] : []),
     ...(extra ? [[t("Other fields of the request"), extra] as [string, string]] : []),
@@ -607,6 +627,7 @@ function PictureDetails({ picture }: { picture: GalleryPicture }) {
           </Link>
         </p>
       )}
+      {picture.folder && <p className="text-xs text-fg-subtle">{t("It was found in this folder. Nothing was kept of what it was asked for, and which chat made it is not known.")}</p>}
     </div>
   );
 }
@@ -737,8 +758,10 @@ const GalleryTile = memo(function GalleryTile({
       )}
       {picture && (
         <p className="gallery-meta">
-          {picture.chat && <LuMessageSquare aria-hidden />}
-          <span className="truncate" title={t(KIND_NAME[picture.kind])}>{picture.chat ? picture.chat.title || t("a chat that is gone") : t(KIND_SHORT[picture.kind])}</span>
+          {picture.chat ? <LuMessageSquare aria-hidden /> : picture.folder && <LuFolder aria-hidden />}
+          <span className="truncate" title={picture.folder ? t("In the folder “{folder}”", { folder: folderName(picture.folder) }) : t(KIND_NAME[picture.kind])}>
+            {picture.chat ? picture.chat.title || t("a chat that is gone") : picture.folder ? folderName(picture.folder) : t(KIND_SHORT[picture.kind])}
+          </span>
           <time dateTime={new Date(picture.createdAt).toISOString()} title={formatDateTime(picture.createdAt)}>
             {sinceThen(picture.createdAt, { dateAfterDays: 7, dateFormat: { month: "short", day: "numeric" } })}
           </time>

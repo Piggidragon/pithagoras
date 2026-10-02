@@ -169,7 +169,7 @@ test("a picture is made without any chat: a job, a picture in the gallery that i
     const picture = all.pictures.find((p: any) => p.id === job.pictureId);
     assert.ok(picture, "the picture is in the gallery");
     assert.deepEqual({ ...picture, createdAt: 0, bytes: 0, fileName: "" }, {
-      id: job.pictureId, origin: "page", chat: null, kind: "generated", prompt: "a lighthouse at dusk",
+      id: job.pictureId, origin: "page", chat: null, folder: null, kind: "generated", prompt: "a lighthouse at dusk",
       params: { model: "other-model", size: "512x512", extra: { quality: "high", seed: 7, hd: true } },
       from: null, createdAt: 0, bytes: 0, fileName: "",
     });

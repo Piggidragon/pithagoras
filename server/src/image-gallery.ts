@@ -1,39 +1,47 @@
 import { randomBytes } from "node:crypto";
-import { lstatSync, mkdirSync } from "node:fs";
+import { closeSync, fstatSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { agentHomePath } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
 import { getDb, getSession } from "./db.js";
 import type { ExtraValue } from "./image-generation.js";
-import { isUnderText, isWithinText } from "./within.js";
+import { listProjects } from "./projects.js";
+import { isUnderText, isWithinText, pathBelow, realPath } from "./within.js";
+import { workspaceRoot } from "./workspaces.js";
 import { FileError, baseDir, openPicture, readPicture, removeEntry, saveNewFile } from "./workspace-files.js";
 
 /**
  * The pictures of the Images page, in one list: the ones the page made itself
- * and the ones the agent made in a chat with generate_image or edit_image.
+ * and the ones the agent made with generate_image or edit_image.
  *
  * A row in the `images` table names a picture and says what it was made from;
- * the picture is a file, in one of two places the portal knows. The page's own
- * are in a folder of its own under the portal's data, under a name made here.
- * The agent's are where its tools put them, in the `generated-images` folder
- * of the chat, and are listed from the moment they are made: the tools record
- * each one (see recordChatPicture), so the portal keeps an index and never
- * has to look through every folder there is. A file is only ever opened and
- * served through the same checks the Files panel's pictures have — a path
- * inside the folder, no link followed out of it, and what the bytes say it is.
+ * the picture is a file, in one of two kinds of place the portal knows. The
+ * page's own are in a folder of its own under the portal's data, under a name
+ * made here. The agent's are where its tools put them, in the `generated-images`
+ * folder of the folder a chat works in, and are listed from the moment they are
+ * made: the tools record each one (see recordChatPicture), with what it was
+ * asked for. Those that were never recorded — made before this index existed, or
+ * by a chat that has gone — are found by looking in exactly those folders (see
+ * scanFolders): the folders of the chats, Home and the projects, and in them
+ * only `generated-images`. A file is only ever opened and served through the
+ * same checks the Files panel's pictures have — a path inside the folder, no
+ * link followed out of it, and what the bytes say it is.
  *
  * What goes from the list when a file does: a picture whose file is gone — the
  * Files panel took it, or somebody did by hand — is dropped the next time the
  * page looks, and the pictures of a chat go from the list with the chat, while
- * the files stay in its folder, which is not the chat's to take away.
- * Pictures that were made before this index existed are not in it.
+ * the files stay in its folder, which is not the chat's to take away. Those
+ * that are still in a folder the portal looks in are found again, as pictures
+ * of the folder.
  */
 
 /** Where the agent's tools put what they make, inside the chat's folder, so that it does not mix with the work. */
 export const GENERATED_DIR = "generated-images";
 
-export type PictureOrigin = "page" | "chat";
-/** Made from a description, changed from another picture, or put in by the person to be changed. */
-export type PictureKind = "generated" | "edited" | "uploaded";
+/** Made on the page; made by the agent in a chat; or found in a folder the agent's tools write into, with no chat that could be named for it. */
+export type PictureOrigin = "page" | "chat" | "folder";
+/** Made from a description, changed from another picture, put in by the person to be changed, or found with nothing to tell how it was made. */
+export type PictureKind = "generated" | "edited" | "uploaded" | "unknown";
 
 /** What a picture was asked for with, as far as it is known. */
 export interface PictureParams {
@@ -53,6 +61,8 @@ export interface GalleryPicture {
   origin: PictureOrigin;
   /** The chat that made it, for the agent's pictures. */
   chat: { id: string; title: string } | null;
+  /** The folder it was found in, for a picture of the folder: Home, or the name of the project or folder. */
+  folder: { name: string; home: boolean } | null;
   kind: PictureKind;
   prompt: string;
   params: PictureParams;
@@ -68,6 +78,8 @@ interface Row {
   id: string;
   origin: PictureOrigin;
   session_id: string | null;
+  /** For a picture of a folder: the folder, as the portal knows it. A chat's picture has its chat's. */
+  folder: string | null;
   path: string;
   kind: PictureKind;
   prompt: string;
@@ -101,9 +113,16 @@ function readParams(text: string): PictureParams {
 
 /** What a download of a picture is called: the file's own name for the agent's, one made from the time for the page's. */
 function downloadName(row: Row): string {
-  if (row.origin === "chat") return path.basename(row.path);
+  if (row.origin !== "page") return path.basename(row.path);
   const stamp = new Date(row.created_at).toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
   return `image-${stamp}-${row.id.slice(0, 4)}${path.extname(row.path)}`;
+}
+
+/** What a folder is called to the person: Home, else its place under the workspace root (a project's name, or the way to a folder in one). */
+function folderLabel(folder: string): { name: string; home: boolean } {
+  if (realPath(agentHomePath()) === folder) return { name: "", home: true };
+  const inRoot = pathBelow(realPath(workspaceRoot()) ?? workspaceRoot(), folder);
+  return { name: inRoot || path.basename(folder), home: false };
 }
 
 function shown(row: ListedRow): GalleryPicture {
@@ -111,6 +130,7 @@ function shown(row: ListedRow): GalleryPicture {
     id: row.id,
     origin: row.origin,
     chat: row.session_id ? { id: row.session_id, title: row.chat_title ?? "" } : null,
+    folder: row.origin === "folder" && row.folder ? folderLabel(row.folder) : null,
     kind: row.kind,
     prompt: row.prompt,
     params: readParams(row.params),
@@ -164,11 +184,45 @@ function folderOf(sessionId: string): string | undefined {
   }
 }
 
+/**
+ * Whether a folder, real, is one a picture may be found in or served from: Home
+ * or inside the workspace root, as a chat's folder has to be. Asked once for
+ * all the folders a pass looks at.
+ */
+function folderAllowed(): (real: string) => boolean {
+  const home = realPath(agentHomePath());
+  const root = realPath(workspaceRoot());
+  return (real) => real === home || (root !== null && isWithinText(root, real));
+}
+
+/** The real folder a picture that was found is in, the same for all of a pass; the reason it cannot be used otherwise. */
+function foundFolder(folder: string, folders: Map<string, string | FileError>): string {
+  const key = `\0${folder}`;
+  let found = folders.get(key);
+  if (found === undefined) {
+    try {
+      found = baseDir(folder);
+      if (!folderAllowed()(found)) throw new FileError("invalid", "That is not a folder the portal looks for pictures in");
+    } catch (e) {
+      if (!(e instanceof FileError)) throw e;
+      found = e;
+    }
+    folders.set(key, found);
+  }
+  if (found instanceof FileError) throw found;
+  return found;
+}
+
 /** Where a picture's file is, as a folder the portal knows and a path inside it; the reason it is not anywhere that can be served otherwise. */
 function locate(row: Row, folders: Map<string, string | FileError> = new Map()): { base: string; rel: string } {
   if (row.origin === "page") return { base: baseDir(imagesDir()), rel: row.path };
   // Only what the agent's tools write: inside the folder of generated pictures, by where the path really goes and not by how it begins, wherever the index may have come from.
-  if (!row.session_id || !isUnderText(GENERATED_DIR, row.path)) throw new FileError("invalid", "That is not a picture the agent made");
+  if (!isUnderText(GENERATED_DIR, row.path)) throw new FileError("invalid", "That is not a picture the agent made");
+  if (row.origin === "folder") {
+    if (!row.folder) throw new FileError("invalid", "That is not a picture the agent made");
+    return { base: foundFolder(row.folder, folders), rel: row.path };
+  }
+  if (!row.session_id) throw new FileError("invalid", "That is not a picture the agent made");
   return { base: chatFolder(row.session_id, folders), rel: row.path };
 }
 
@@ -176,6 +230,8 @@ function locate(row: Row, folders: Map<string, string | FileError> = new Map()):
  * Whether a picture's folder is only out of reach for the moment: a chat's
  * folder on a drive that is not mounted. Its pictures are not gone, and what
  * looks at them leaves them in the list. A chat that is gone is another thing.
+ * A picture that was found has no chat to lose it with, and is found again
+ * when its folder is back, so it is not kept: only what was recorded is.
  */
 const unreachable = (row: Row, e: unknown): boolean => row.origin === "chat" && e instanceof FileError && e.code === "missing" && !(e instanceof ChatGone);
 
@@ -196,8 +252,8 @@ function isThere(row: Row, folders: Map<string, string | FileError>): boolean {
 
 const insert = (row: Row) =>
   getDb()
-    .prepare("INSERT OR IGNORE INTO images (id, origin, session_id, path, kind, prompt, params, source_id, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(row.id, row.origin, row.session_id, row.path, row.kind, row.prompt, row.params, row.source_id, row.bytes, row.created_at);
+    .prepare("INSERT OR IGNORE INTO images (id, origin, session_id, folder, path, kind, prompt, params, source_id, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(row.id, row.origin, row.session_id, row.folder, row.path, row.kind, row.prompt, row.params, row.source_id, row.bytes, row.created_at);
 
 const newId = (): string => randomBytes(6).toString("hex");
 
@@ -211,6 +267,7 @@ export function addPagePicture(picture: { bytes: Buffer; ext: string; kind: Pict
     id,
     origin: "page",
     session_id: null,
+    folder: null,
     path: rel,
     kind: picture.kind,
     prompt: picture.prompt,
@@ -232,12 +289,14 @@ export function addPagePicture(picture: { bytes: Buffer; ext: string; kind: Pict
 export function recordChatPicture(picture: { sessionId: string; path: string; kind: "generated" | "edited"; prompt: string; params: PictureParams; from?: string[]; bytes: number }): void {
   // A picture that was made is made: that it could not be listed is not the tool's failure, and the agent has nothing to do about it.
   try {
-    // Chats share a folder — every chat of a project, every one in Home — so a path names a file for all of them: the rows of the chats whose folder is this one, this chat's first.
+    // Chats share a folder — every chat of a project, every one in Home — so a path names a file for all of them: the rows of the chats whose folder is this one, this chat's first. A picture that was found in this folder before it was recorded (the page looked in between) is the same file, and goes last.
     const mine = folderOf(picture.sessionId);
-    const rowsOf = (file: string) =>
-      (getDb().prepare("SELECT id, session_id FROM images WHERE origin = 'chat' AND path = ? ORDER BY (session_id = ?) DESC, created_at DESC").all(file, picture.sessionId) as { id: string; session_id: string }[])
+    const rowsOf = (file: string) => [
+      ...(getDb().prepare("SELECT id, session_id FROM images WHERE origin = 'chat' AND path = ? ORDER BY (session_id = ?) DESC, created_at DESC").all(file, picture.sessionId) as { id: string; session_id: string }[])
         .filter((row) => row.session_id === picture.sessionId || (mine !== undefined && folderOf(row.session_id) === mine))
-        .map((row) => row.id);
+        .map((row) => row.id),
+      ...(mine === undefined ? [] : (getDb().prepare("SELECT id FROM images WHERE origin = 'folder' AND folder = ? AND path = ?").all(mine, file) as { id: string }[]).map((row) => row.id)),
+    ];
     const known = (file: string) => rowsOf(file)[0];
     // A file name that comes back — an edit is named after its original — is a new picture: its file was taken away by something that did not tell the list, and the old rows are not this file's.
     const before = rowsOf(picture.path);
@@ -249,6 +308,7 @@ export function recordChatPicture(picture: { sessionId: string; path: string; ki
         id: newId(),
         origin: "chat",
         session_id: picture.sessionId,
+        folder: null,
         path: picture.path,
         kind: picture.kind,
         prompt: picture.prompt,
@@ -275,6 +335,157 @@ export function pruneMissing(): number {
   const gone = rows.filter((row) => !isThere(row, folders)).map((row) => row.id);
   if (gone.length) forget(gone);
   return gone.length;
+}
+
+/** The most files of one folder that are looked through: a folder with more is not one the tools have been filling. */
+const MAX_LOOKED_AT = 5_000;
+
+/** What a file that is no picture looked like when it was looked at, so that it is not opened again until it changes. Kept to no more than this, and started again beyond it. */
+const refused = new Map<string, string>();
+const MAX_REFUSED = 10_000;
+
+/**
+ * The real folders the tools may have written into, each once: Home, the
+ * projects, the folders chats work in, and those that pictures were found in
+ * before. A folder that cannot be reached, or is not Home or inside the
+ * workspace root, is not one of them.
+ */
+function knownFolders(): string[] {
+  const allowed = folderAllowed();
+  const found = new Set<string>();
+  const add = (dir: string | null) => {
+    if (!dir) return;
+    try {
+      const real = baseDir(dir);
+      if (allowed(real)) found.add(real);
+    } catch {
+      // Not there, or out of reach: nothing to look at.
+    }
+  };
+  add(agentHomePath());
+  try {
+    for (const project of listProjects(workspaceRoot())) add(project.path);
+  } catch {
+    // No workspace root yet.
+  }
+  const d = getDb();
+  for (const row of d.prepare("SELECT DISTINCT workspace AS dir FROM sessions").all() as { dir: string | null }[]) add(row.dir);
+  for (const row of d.prepare("SELECT DISTINCT folder AS dir FROM images WHERE folder IS NOT NULL").all() as { dir: string }[]) add(row.dir);
+  return [...found];
+}
+
+/** What a file is, by its name: the tools name what they make by the time, and an edit after its original. */
+function kindByName(name: string): PictureKind {
+  if (/-edited(?: \(\d+\))?\.[^.]+$/.test(name)) return "edited";
+  if (/^image-\d{8}-\d{6}-[0-9a-f]{6}(?: \(\d+\))?\.[^.]+$/.test(name)) return "generated";
+  return "unknown";
+}
+
+/**
+ * Whether the file `name` of the `generated-images` folder of `real` is a picture
+ * to list, and then its size and time. It is opened as serving one opens it, so
+ * that nothing is listed that could not be shown. A file that is no picture is
+ * not opened again until it changes. One that went since the folder was read, or
+ * cannot be read, is no picture for now.
+ */
+function pictureAt(real: string, name: string): { size: number; mtimeMs: number } | undefined {
+  const rel = `${GENERATED_DIR}/${name}`;
+  const file = path.join(real, rel);
+  try {
+    const { size, mtimeMs } = lstatSync(file);
+    const stamp = `${size}:${mtimeMs}`;
+    if (refused.get(file) === stamp) return undefined;
+    try {
+      const opened = openPicture(real, rel);
+      try {
+        return { size: opened.size, mtimeMs: fstatSync(opened.fd).mtimeMs };
+      } finally {
+        closeSync(opened.fd);
+      }
+    } catch (e) {
+      if (e instanceof FileError && e.code !== "missing") refused.set(file, stamp);
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Lists the pictures that lie in the folders the tools write into and were never
+ * recorded: those made before the gallery kept an index, by a chat that has
+ * gone, or while the tool could not say whose they were. Only the folder
+ * `generated-images` of the folders the portal knows (see knownFolders) is
+ * looked in, and in it only plain files: no link is followed, and what is
+ * listed is what its bytes show to be a PNG, JPEG, GIF or WebP not over the size
+ * a picture may have, the check that serving one makes again. A file that is
+ * listed already, as a chat's picture or as found before, is not opened, and
+ * neither is one that was found not to be a picture, until it changes: a pass
+ * over hundreds of pictures is a read of the folders' names. What is found is a
+ * picture of its folder, with the kind its name tells, as which chat made it
+ * cannot be: chats share a folder, and the one that did may be gone. Returns
+ * how many were added.
+ */
+export function scanFolders(): number {
+  const d = getDb();
+  const folders = new Map<string, string | FileError>();
+  const key = (folder: string, rel: string) => `${folder}\0${rel}`;
+  // What the gallery has as a file of these folders, by where the file really is; worked out the first time a folder has something to look at.
+  let listed: Set<string> | undefined;
+  const listedFiles = (): Set<string> => {
+    if (listed) return listed;
+    listed = new Set();
+    for (const row of d.prepare("SELECT origin, session_id, folder, path FROM images WHERE origin != 'page'").all() as Pick<Row, "origin" | "session_id" | "folder" | "path">[]) {
+      try {
+        const folder = row.origin === "folder" ? row.folder : row.session_id ? chatFolder(row.session_id, folders) : null;
+        if (folder) listed.add(key(folder, row.path));
+      } catch (e) {
+        if (!(e instanceof FileError)) throw e;
+      }
+    }
+    return listed;
+  };
+  return d.transaction(() => {
+    let added = 0;
+    for (const real of knownFolders()) {
+      let names: string[];
+      try {
+        const dir = path.join(real, GENERATED_DIR);
+        // lstat, so that a link of that name is not followed into a folder it leads to.
+        if (!lstatSync(dir).isDirectory()) continue;
+        names = readdirSync(dir, { withFileTypes: true })
+          .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
+          .slice(0, MAX_LOOKED_AT)
+          .map((entry) => entry.name);
+      } catch {
+        // No such folder yet, or it cannot be read: not a failure.
+        continue;
+      }
+      for (const name of names) {
+        const rel = `${GENERATED_DIR}/${name}`;
+        if (listedFiles().has(key(real, rel))) continue;
+        const found = pictureAt(real, name);
+        if (!found) continue;
+        const row: Row = {
+          id: newId(),
+          origin: "folder",
+          session_id: null,
+          folder: real,
+          path: rel,
+          kind: kindByName(name),
+          prompt: "",
+          params: "{}",
+          source_id: null,
+          bytes: found.size,
+          created_at: Math.min(Date.now(), Math.round(found.mtimeMs)),
+        };
+        if (insert(row).changes) added++;
+        listedFiles().add(key(real, rel));
+      }
+    }
+    if (refused.size > MAX_REFUSED) refused.clear();
+    return added;
+  })();
 }
 
 /** Takes pictures from the list, and what pointed at them from the edits made of them. The files are not touched. */
@@ -317,8 +528,16 @@ export const MAX_PAGE = 100;
 
 /** A page of the list, newest first, the next one's start, and what there is in all. */
 export function listPictures(query: ListQuery = {}): { pictures: GalleryPicture[]; next: string | null; total: number; pageBytes: number } {
-  // The whole list is looked at when it is looked at from the top, not once for every page of it.
-  if (!query.before) pruneMissing();
+  // The whole list is looked at when it is looked at from the top, not once for every page of it. What is gone goes first, then what has come that nobody listed.
+  if (!query.before) {
+    pruneMissing();
+    try {
+      scanFolders();
+    } catch (e) {
+      // A gallery that cannot look in the folders is still a gallery.
+      console.error("[portal] images: could not look through the folders for pictures:", (e as Error).message);
+    }
+  }
   const where: string[] = [];
   const args: (string | number)[] = [];
   if (query.origin) {
@@ -415,7 +634,7 @@ export async function deletePicture(id: string): Promise<void> {
   try {
     if (at) await removeEntry(at.base, at.rel);
   } catch (e) {
-    // Gone since: what was asked for.
+    // ChatGone since: what was asked for.
     if (!missing(e)) throw e;
   }
   forget([id]);

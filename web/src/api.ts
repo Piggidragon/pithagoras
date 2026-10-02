@@ -1225,9 +1225,10 @@ export interface ImagesFeature {
   editReady: boolean;
 }
 
-export type PictureOrigin = "page" | "chat";
-/** Made from a description, changed from another picture, or put in by the person to be changed. */
-export type PictureKind = "generated" | "edited" | "uploaded";
+/** Made on the page, made by the agent in a chat, or found in a folder the agent's tools write into, with no chat to name. */
+export type PictureOrigin = "page" | "chat" | "folder";
+/** Made from a description, changed from another picture, put in by the person to be changed, or found with nothing to tell how it was made. */
+export type PictureKind = "generated" | "edited" | "uploaded" | "unknown";
 
 /** A picture of the gallery, as the portal tells of it. */
 export interface GalleryPicture {
@@ -1235,6 +1236,8 @@ export interface GalleryPicture {
   origin: PictureOrigin;
   /** The chat whose agent made it, for the agent's pictures. */
   chat: { id: string; title: string } | null;
+  /** The folder it was found in, for one that was found: Home, or the project's name or the way to the folder under the workspace root. */
+  folder: { name: string; home: boolean } | null;
   kind: PictureKind;
   prompt: string;
   /** What it was asked for with, as far as that is known. */
