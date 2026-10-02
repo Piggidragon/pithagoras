@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,8 +24,9 @@ const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64)]);
 const GIF = Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(64)]);
 
-/** What the model does at its next request: the arguments of a call to edit_image. */
+/** What the model does at its next request: the arguments of a call to `named`, edit_image unless a test says another. */
 let call;
+let named = "edit_image";
 /** The tools each request offered, by name, and as the model got them. */
 const offered = [];
 const definitions = [];
@@ -43,7 +44,7 @@ const model = createServer((req, res) => {
     const answered = request.messages.some((m) => m.role === "tool");
     res.end(answered
       ? chunk({ role: "assistant", content: "Done." }) + chunk({}, "stop") + "data: [DONE]\n\n"
-      : chunk({ role: "assistant", tool_calls: [{ index: 0, id: "call-1", type: "function", function: { name: "edit_image", arguments: JSON.stringify(call) } }] }) + chunk({}, "tool_calls") + "data: [DONE]\n\n");
+      : chunk({ role: "assistant", tool_calls: [{ index: 0, id: "call-1", type: "function", function: { name: named, arguments: JSON.stringify(call) } }] }) + chunk({}, "tool_calls") + "data: [DONE]\n\n");
   });
 });
 model.listen(0, "127.0.0.1");
@@ -76,6 +77,9 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.st
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { saveImageGeneration } = await import("../dist/image-generation.js");
 
+/** The start of every call the runs saw, as the chat is told of it. */
+const started = [];
+
 /** One message to a conversation in `folder`, and the results of the tool calls it led to. */
 async function run(folder) {
   const client = await SdkPiClient.create({
@@ -83,6 +87,7 @@ async function run(folder) {
   });
   const results = [];
   const settled = new Promise((resolve) => client.on("event", (e) => {
+    if (e?.type === "tool_execution_start") started.push(e);
     if (e?.type === "tool_execution_end") results.push(e);
     if (e?.type === "agent_settled") resolve();
   }));
@@ -110,6 +115,9 @@ test("a model that calls edit_image gets a new picture in the chat's folder, sho
     assert.equal(more.length, 0);
     assert.ok(offered.at(-1).includes("edit_image") && !offered.at(-1).includes("generate_image"), "the edit tool alone is offered");
     assert.equal(result.isError, false);
+    // The start of the call already says it is the portal's own: the chat draws its picture from then on, and a call that fails or is cut off never says it at its end.
+    assert.equal(started.at(-1).toolName, "edit_image");
+    assert.equal(started.at(-1).portalImage, true);
     assert.deepEqual(result.result.details, { path: "generated-images/photo-edited.jpg", title: "Red", portalImage: true });
     assert.deepEqual(readFileSync(path.join(folder, "generated-images", "photo-edited.jpg")), JPEG);
     assert.deepEqual(readFileSync(path.join(folder, "photo.png")), PNG, "the original stays");
@@ -222,5 +230,54 @@ test("with it off the model gets one path, and a list of several is not somethin
     assert.equal((await run(folder))[0].isError, false, "one picture is as it was");
   } finally {
     saveImageGeneration({ baseUrl: "", apiKey: "", editEnabled: false });
+  }
+});
+
+test("the start of a call is the portal's own for its tools, and is not for a tool of the same name that an extension brings", async () => {
+  const extensions = path.join(process.env.PI_CODING_AGENT_DIR, "extensions");
+  mkdirSync(extensions, { recursive: true });
+  const theirs = path.join(extensions, "pictures.ts");
+  // The extension that has the names: pi keeps its tools, and the portal's are left unused.
+  writeFileSync(theirs, `export default function (pi: any) {
+  for (const name of ["generate_image", "edit_image"]) {
+    pi.registerTool({
+      name, label: name, description: "An extension's own picture tool.",
+      parameters: { type: "object", properties: { prompt: { type: "string" } } },
+      execute: async () => ({ content: [{ type: "text", text: "Saved /out/cat.png" }], details: {} }),
+    });
+  }
+}
+`);
+  saveImageGeneration({ baseUrl: `http://127.0.0.1:${endpoint.address().port}/v1`, editEnabled: true });
+  try {
+    for (const tool of ["generate_image", "edit_image"]) {
+      named = tool;
+      call = { path: "photo.png", prompt: "a cat" };
+      const before = started.length;
+      const [result] = await run(chat());
+      assert.equal(result.isError, false, tool);
+      assert.equal(started.length, before + 1, tool);
+      assert.equal(started.at(-1).toolName, tool);
+      assert.equal(started.at(-1).portalImage, undefined, `${tool}: the extension's, so not the portal's`);
+      assert.match(JSON.stringify(result.result), /Saved \/out\/cat\.png/, "pi ran the extension's tool");
+    }
+  } finally {
+    named = "edit_image";
+    rmSync(theirs);
+    saveImageGeneration({ baseUrl: "", apiKey: "", editEnabled: false });
+  }
+
+  // Without it, the portal's generation tool is the one that runs, and says so.
+  saveImageGeneration({ baseUrl: `http://127.0.0.1:${endpoint.address().port}/v1`, enabled: true });
+  try {
+    named = "generate_image";
+    call = { prompt: "a cat" };
+    const [result] = await run(chat());
+    assert.equal(result.isError, false);
+    assert.equal(started.at(-1).toolName, "generate_image");
+    assert.equal(started.at(-1).portalImage, true);
+  } finally {
+    named = "edit_image";
+    saveImageGeneration({ baseUrl: "", enabled: false });
   }
 });
