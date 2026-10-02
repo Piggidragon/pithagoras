@@ -1908,8 +1908,9 @@ export function shownTools(folder?: string): Omit<KnownTool, "package" | "inline
     .map(({ package: _package, inline: _inline, ...tool }) => tool);
 }
 
-/** What the portal files its own picture tools under, by name. */
-const PICTURE_SOURCES: Record<string, string> = { show_image: SHOW_IMAGE_SOURCE, [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE, [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE };
+/** What the portal files its own picture tools under, by name. Read when asked: image-generation.ts imports this module. */
+const pictureSource = (name: string): string | undefined =>
+  ({ show_image: SHOW_IMAGE_SOURCE, [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE, [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE } as Record<string, string>)[name];
 
 /**
  * Whether the portal registered this tool itself, for the page to keep it where it is set up.
@@ -1918,7 +1919,7 @@ const PICTURE_SOURCES: Record<string, string> = { show_image: SHOW_IMAGE_SOURCE,
  * under the label the portal files it under, counts too: it is rewritten with the mark by the next chat.
  */
 export function portalOwned(tool: KnownTool): boolean {
-  return tool.inline === true || (typeof tool.package !== "string" && PICTURE_SOURCES[tool.name] === tool.source);
+  return tool.inline === true || (typeof tool.package !== "string" && pictureSource(tool.name) === tool.source);
 }
 
 /** The keys of the packages pi's settings list, or undefined when they cannot be read. */
