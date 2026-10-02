@@ -68,12 +68,13 @@ Two keys work from anywhere on the page:
 
 ## Looking at a picture
 
-The pictures the agent shows with `show_image`, makes with `generate_image` or
-changes with `edit_image` are drawn under their tool line, in the middle of the
-conversation, with the same room above and below. A very wide or very tall one is
-smaller there, never cropped: the viewer shows it whole. A picture the agent
-made or changed is the [preview](#pictures-the-agent-makes) that held its place
-while it was made. The pictures you sent are in your message.
+The pictures the agent shows with `show_image` are drawn under their tool line,
+in the middle of the conversation, with the same room above and below. One it
+makes with `generate_image` or changes with `edit_image` has no tool line: it is
+the [preview](#pictures-the-agent-makes) that held its place while it was made,
+in the middle of the conversation as well. A very wide or very tall picture is
+smaller there, never cropped: the viewer shows it whole. The pictures you sent
+are in your message.
 
 A click or a tap on any of them opens it **in the viewer**, over the chat,
 fitted to the screen on a calm backdrop. The chat stays where it was: nothing
