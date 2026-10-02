@@ -44,6 +44,7 @@ const express = (await import("express")).default;
 const gallery = await import("../server/src/image-gallery.ts");
 const { imagesRouter } = await import("../server/src/api/images.ts");
 const { createSession, deleteSession, getDb } = await import("../server/src/db.ts");
+const { createAgent, deleteAgent } = await import("../server/src/agents.ts");
 const { GENERATED_DIR } = gallery;
 
 const app = express().use(express.json({ limit: "2mb" })).use("/api", imagesRouter());
@@ -467,4 +468,37 @@ test("a gallery of hundreds in a folder is listed once and paged, and looking ag
   const before = (getDb().prepare("SELECT COUNT(*) AS n FROM images").get() as { n: number }).n;
   assert.equal(gallery.scanFolders(), 0);
   assert.equal((getDb().prepare("SELECT COUNT(*) AS n FROM images").get() as { n: number }).n, before);
+});
+
+test("the home of an agent other than the first is a folder of the gallery like Home: its pictures are found, kept when its chat goes, and named after it", async () => {
+  const bot = createAgent({ name: "Research Bot" });
+  chatIn("chat-bot", bot.home, "With the bot");
+  const made = "image-20260102-190000-888888.png";
+  // Newer than all the pictures before, so that they are on the first page of the list.
+  const NEW = T + 10_000_000;
+  put(bot.home, made, png("bot"), NEW);
+  gallery.recordChatPicture({ sessionId: "chat-bot", path: `${GENERATED_DIR}/${made}`, kind: "generated", prompt: "a lake", params: {}, bytes: 70 });
+  // Made before the gallery listed anything: found with the agent's home, which no chat has to name.
+  const older = "image-20260102-185000-999999.png";
+  put(bot.home, older, png("bot-older"), NEW - 1000);
+  const mine = (await listed()).pictures.filter((p: any) => [made, older].includes(p.fileName));
+  assert.deepEqual(mine.map((p: any) => [p.fileName, p.origin, p.chat?.title ?? null, p.folder]).sort(), [
+    [made, "chat", "With the bot", null],
+    [older, "folder", null, { name: "Research Bot", home: false }],
+  ].sort());
+  // The first agent's home is still Home.
+  put(home, "image-20260102-200000-aaaaaa.png", png("home-again"), NEW + 1000);
+  assert.deepEqual((await listed("?origin=folder")).pictures.find((p: any) => p.fileName === "image-20260102-200000-aaaaaa.png").folder, { name: "", home: true });
+
+  // The chat goes, and its picture stays with the home it was made in, served as before.
+  deleteSession("chat-bot");
+  const kept = (await listed()).pictures.find((p: any) => p.fileName === made);
+  assert.deepEqual([kept.origin, kept.prompt, kept.folder], ["folder", "a lake", { name: "Research Bot", home: false }]);
+  assert.equal((await call("GET", `/images/${kept.id}/file`)).status, 200);
+
+  // An agent that is taken away is no folder the gallery looks in, until one of that name is made again over the folder it left.
+  deleteAgent(bot.id, { deleteFolder: false });
+  assert.deepEqual((await listed()).pictures.filter((p: any) => [made, older].includes(p.fileName)), []);
+  createAgent({ name: "Research Bot" });
+  assert.deepEqual(names({ pictures: (await listed()).pictures.filter((p: any) => [made, older].includes(p.fileName)) }), [older, made].sort());
 });

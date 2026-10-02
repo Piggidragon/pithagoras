@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { DEFAULT_ORB } from '../../server/src/orb-style';
 
 test('a tool call reads as its parameters, closed and opened, not as JSON', async ({ page }) => {
   await page.goto('/tests/chat.html?phase=args');
@@ -187,8 +188,9 @@ test('an agent conversation keeps its title in place when it starts working', as
     let reply: unknown = {};
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
     else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
+    else if (p === '/api/agents') reply = { agents: [{ id: 'home', name: 'Nova', home: '/a', first: true, initialised: true, chats: 2, channels: [], orb: DEFAULT_ORB, voice: '' }] };
     else if (p === '/api/agent/sessions') reply = { sessions: [row('x', 'Working agent chat', 'running'), row('y', 'Resting agent chat', 'idle')], agentHome: '/a' };
-    else if (p === '/api/agent/setup') reply = { initialised: true, home: '/a', files: [] };
+    else if (p === '/api/agents/home/setup') reply = { initialised: true, home: '/a', files: [] };
     else if (p === '/api/models') reply = { models: [], providers: {} };
     await route.fulfill({ json: reply });
   });
@@ -196,7 +198,8 @@ test('an agent conversation keeps its title in place when it starts working', as
     (window as any).EventSource = class { addEventListener() {} close() {} };
     localStorage.setItem('pithagoras.setup', 'done');
   });
-  await page.goto('/agent');
+  // The agent's own page, opened from its card.
+  await page.goto('/agents?agent=home');
   const main = page.getByRole('main');
   const busy = (await main.getByText('Working agent chat').boundingBox())!;
   const idle = (await main.getByText('Resting agent chat').boundingBox())!;
@@ -211,12 +214,13 @@ test('the agent setup shows its steps as the assistant does, Back before Create,
     let reply: unknown = {};
     if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
     else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
+    else if (p === '/api/agents') reply = { agents: [{ id: 'home', name: 'Agent', home: '/a', first: true, initialised: false, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '' }] };
     else if (p === '/api/agent/sessions') reply = { sessions: [], agentHome: '/a' };
-    else if (p === '/api/agent/setup' && route.request().method() === 'POST') {
+    else if (p === '/api/agents/home/setup' && route.request().method() === 'POST') {
       await new Promise((r) => setTimeout(r, 400));
       return route.fulfill({ status: 409, json: { error: `That name is taken: /home/user/.pi/agent/${'deeply_nested_directory_'.repeat(5)}/SOUL.md` } });
     }
-    else if (p === '/api/agent/setup') reply = { initialised: false, home: '/a', files: [] };
+    else if (p === '/api/agents/home/setup') reply = { initialised: false, home: '/a', files: [] };
     else if (p === '/api/models') reply = { models: [], providers: {} };
     await route.fulfill({ json: reply });
   });
@@ -225,13 +229,14 @@ test('the agent setup shows its steps as the assistant does, Back before Create,
     localStorage.setItem('pithagoras.setup', 'done');
   });
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto('/agent');
+  // An agent that is not set up yet opens on its setup.
+  await page.goto('/agents?agent=home');
   const main = page.getByRole('main');
   const current = main.locator('.setup-step[aria-current="step"]');
   await expect(current).toHaveText('1. Who it is');
   await expect(main.getByText('Step 1 of 2')).toHaveClass(/sr-only/);
   await expect(main.getByRole('button', { name: 'Back' })).toHaveCount(0);
-  await main.getByLabel('Name').fill('Aria');
+  await main.getByLabel('Name').fill('Nova');
   await main.getByRole('button', { name: 'Next' }).click();
   await expect(current).toHaveText('2. Who it works for');
   // Back where it is in the assistant: at the left, the way forward at the right.
@@ -255,7 +260,7 @@ test('the agent setup shows its steps as the assistant does, Back before Create,
   expect(form.x + form.width).toBeLessThanOrEqual(390);
   await main.getByRole('button', { name: 'Back' }).click();
   await expect(current).toHaveText('1. Who it is');
-  await expect(main.getByLabel('Name')).toHaveValue('Aria');
+  await expect(main.getByLabel('Name')).toHaveValue('Nova');
   // Back again, the failure is not shown for a Create not yet sent.
   await main.getByRole('button', { name: 'Next' }).click();
   await expect(current).toHaveText('2. Who it works for');

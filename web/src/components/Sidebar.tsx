@@ -61,7 +61,7 @@ export function Sidebar({
   executor: string;
   activeId: string | null;
   /** Which top-level destination is showing, so the nav can mark it. */
-  view: "chat" | "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "images" | "audit";
+  view: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
   /** Whether the optional browser service is there at all. */
   hasBrowser: boolean;
   /** Understory is the agent's memory: its page is there to read. */
@@ -179,7 +179,7 @@ export function Sidebar({
   const destinations: { to: Destination; icon: ReactNode; label: string }[] = [
     { to: "sessions", icon: <LuMessagesSquare />, label: t("Sessions") },
     { to: "projects", icon: <LuFolderKanban />, label: t("Projects") },
-    { to: "agent", icon: <LuBot />, label: t("Agent") },
+    { to: "agents", icon: <LuBot />, label: t("Agents") },
     { to: "routines", icon: <LuClock />, label: t("Routines") },
     // Hidden unless there is one. The browser is an optional service, and
     // a dead link to a feature you did not install is just clutter.
@@ -282,7 +282,7 @@ export function Sidebar({
               isOpen={openFolders.isOpen}
               onToggle={openFolders.toggle}
               onMove={searching || !allKeys ? undefined : (shown, key, to) => move(shown, key, to, allKeys)}
-              onNewChat={(f) => newChat(f.kind === "home" ? undefined : f.path!)}
+              onNewChat={(f) => newChat(f.key === HOME ? undefined : f.path!)}
             >
               {(f) => {
                 const chats = listed.get(f.key)!;
@@ -354,7 +354,7 @@ const GroupLabel = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
-type Destination = "sessions" | "projects" | "agent" | "routines" | "browser" | "memory" | "images" | "audit";
+type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
 
 function RailButton({
   icon,

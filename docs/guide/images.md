@@ -139,7 +139,7 @@ folder is deleted the same way.
 
 The page lists and serves pictures only from the places the portal knows: its own
 folder, `images`, under the portal's data folder, and the `generated-images` folder of
-the folders the agent works in — Home, the projects, and the folder of every chat. It
+the folders the agent works in — the home of every agent, the projects, and the folder of every chat. It
 never opens a path the page names — a picture is asked for by its id — and every file is
 opened with the checks the Files panel's pictures have: a path inside the folder, no
 link followed out of it, and what its bytes say it is.
@@ -147,7 +147,7 @@ link followed out of it, and what its bytes say it is.
 - The agent's pictures are listed from the moment its tools save them, with what they
   were asked for. **Pictures that nobody listed are found as well:** the ones made before
   the gallery existed. The portal looks in
-  `generated-images` of Home, of every project and of every folder a chat works in, and
+  `generated-images` of every agent's home, of every project and of every folder a chat works in, and
   lists each file there whose first bytes say it is a PNG, JPEG, GIF or WebP, of at most
   25 MB, whatever it is called. A link is never followed, a file that is no picture is
   left out, and nothing else in those folders — a project's other files, folders inside

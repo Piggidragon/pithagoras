@@ -49,9 +49,9 @@ them. See [Projects](/guide/projects).
 
 | | |
 | --- | --- |
-| `GET /api/sessions` | `{ sessions, executor }` — pinned first, then most recent. Task sessions only. |
-| `GET /api/agent/sessions` | `{ sessions, agentHome }` — conversations reached through a channel, each with the channel that owns it |
-| `POST /api/sessions` | `{ workspace?, title? }` — no workspace means Home, the agent's directory; no title means "New chat", replaced by the first message |
+| `GET /api/sessions` | `{ sessions, executor }` — pinned first, then most recent. The chats, and the conversations started on the Agent page; not those that came through a channel, nor routine runs. |
+| `GET /api/agent/sessions` | `{ sessions, agentHome }` — one agent's conversations (`?agent=`, the first agent without it), each with the channel that owns it |
+| `POST /api/sessions` | `{ workspace?, agent?, title? }` — `agent` starts it in that agent's home; neither means Home, the first agent's; no title means "New chat", replaced by the first message |
 | `GET /api/sessions/:id` | One session |
 | `PATCH /api/sessions/:id` | `{ title?, pinned? }` — a title is cut to 120 characters |
 | `DELETE /api/sessions/:id` | Stops it if running, then deletes it, its events and pi's conversation file for it (in `SESSION_DIR`). The folder it worked in is left alone. |
@@ -347,7 +347,7 @@ The [Images page](/guide/images): pictures made with the image add-on's endpoint
 chat, and the gallery of those, the ones the agent made in chats and the ones that lie in
 the folders its tools write into. A picture is named by its **id**, twelve lowercase hex
 digits, never by a path: the portal opens files only in the folder of the page's own
-pictures and in `generated-images` of Home, of the projects and of the folders chats work
+pictures and in `generated-images` of the agents' homes, of the projects and of the folders chats work
 in, with the checks the Files panel's pictures have. Reading the list from the top also
 looks in those `generated-images` folders for pictures nobody recorded, such as ones made
 before the gallery kept an index, and lists each plain file there whose bytes show a PNG,
@@ -357,7 +357,7 @@ such a folder), as a picture of `origin` `folder`. The endpoint's address, key a
 
 | | |
 | --- | --- |
-| `GET /api/images?origin=&kind=&before=&limit=` | A page of the gallery, newest first: `{ pictures, next, total, pageBytes }`, where `pageBytes` is what all the page's own pictures take of the disk, whatever the filters match. `origin` is `page`, `chat` or `folder`, `kind` is `generated`, `edited`, `uploaded` or `unknown`, `limit` is 1–100 (48 by default), and `before` is the `next` of the page before (`null` at the end). `total` counts what the filters match. A picture whose file is gone, or that cannot be served any more (its `generated-images` became a link out of the folder), is dropped from the list when it is read from the top; one in a chat's folder that cannot be reached for the moment (a drive that is not mounted) is kept. When a chat is deleted its pictures become pictures of its folder (`origin: "folder"`, with their `prompt` and `params`), unless the folder cannot be reached then. A picture found in a folder has `origin: "folder"` (which chat made it cannot be told), no `chat`, an empty `prompt`, a `kind` read from its file's name (`generated` for the tools' `image-…` names, `edited` for `…-edited`, else `unknown`), and is dropped with its folder, not kept. A picture is `{ id, origin, chat: { id, title } \| null, folder: { name, home } \| null, kind, prompt, params: { model?, size?, extra?, sources?, masked? }, from, createdAt, bytes, fileName }`, where `folder` is where a picture of origin `folder` was found (`home` for Home, else `name` is the project or the path under the workspace root), `createdAt` of such a picture is its file's modification time, and `from` is the picture an edit was made from, when that is in the list |
+| `GET /api/images?origin=&kind=&before=&limit=` | A page of the gallery, newest first: `{ pictures, next, total, pageBytes }`, where `pageBytes` is what all the page's own pictures take of the disk, whatever the filters match. `origin` is `page`, `chat` or `folder`, `kind` is `generated`, `edited`, `uploaded` or `unknown`, `limit` is 1–100 (48 by default), and `before` is the `next` of the page before (`null` at the end). `total` counts what the filters match. A picture whose file is gone, or that cannot be served any more (its `generated-images` became a link out of the folder), is dropped from the list when it is read from the top; one in a chat's folder that cannot be reached for the moment (a drive that is not mounted) is kept. When a chat is deleted its pictures become pictures of its folder (`origin: "folder"`, with their `prompt` and `params`), unless the folder cannot be reached then. A picture found in a folder has `origin: "folder"` (which chat made it cannot be told), no `chat`, an empty `prompt`, a `kind` read from its file's name (`generated` for the tools' `image-…` names, `edited` for `…-edited`, else `unknown`), and is dropped with its folder, not kept. A picture is `{ id, origin, chat: { id, title } \| null, folder: { name, home } \| null, kind, prompt, params: { model?, size?, extra?, sources?, masked? }, from, createdAt, bytes, fileName }`, where `folder` is where a picture of origin `folder` was found (`home` for the first agent's Home, else `name` is the agent's name for another agent's home, or the project or the path under the workspace root), `createdAt` of such a picture is its file's modification time, and `from` is the picture an edit was made from, when that is in the list |
 | `GET /api/images?ids=a,b` | Those pictures alone, in the order given, as far as they are in the list: `{ pictures }`. At most 200 |
 | `GET /api/images/:id/file` | The picture as a file, with its type from its bytes (PNG, JPEG, GIF or WebP, else 400; 413 over 25 MB) and `ETag`/`304`. 404 when it is not in the list or its file is gone, which takes it from the list (not while a chat's folder cannot be reached: the picture stays, and is served again when it is back). The page's own pictures are sent to be kept a day, those in a chat's or another folder to be asked about again |
 | `POST /api/images/generate` | `{ prompt, size?, model?, extra?, count? }` — makes `count` pictures (1–4, one if left out), one request and one job for each, and answers `202 { jobs }` at once. `extra` is an object of field names to values (text, numbers or booleans; text of `true`, `false` or a plain number is read as such, and `"42"` in double quotes is text), at most 12 and not `model`, `prompt`, `n` or `size`. 400 for a bad request, 409 while image generation is off or has no address, 429 when `count` would go over the four that run at once |
@@ -373,8 +373,8 @@ such a folder), as a picture of `origin` `folder`. The endpoint's address, key a
 | | |
 | --- | --- |
 | `GET /api/channels` | `{ channels, kinds, broken, agentHome, channelsDir }` |
-| `POST /api/channels` | `{ kind, name, config }` |
-| `PATCH /api/channels/:id` | `{ name?, slug?, enabled?, config?, instructions? }` |
+| `POST /api/channels` | `{ kind, name, config, agentId? }` — it talks as the first agent unless given another |
+| `PATCH /api/channels/:id` | `{ name?, slug?, enabled?, config?, instructions?, agentId? }` — `agentId` is the agent it talks as |
 | `DELETE /api/channels/:id` | Keeps its conversations; `?sessions=delete` discards them too |
 | `POST /api/channel-packages` | `{ spec }` — install a channel package |
 | `DELETE /api/channel-packages/:name` | Uninstall; refuses builtins |
@@ -388,14 +388,26 @@ fields have a value, and sending a blank secret keeps the stored one.
 
 `broken` lists packages that failed to load, with the reason.
 
-## Agent setup
+## Agents
+
+Each agent has a home folder of its own, with its own `SOUL.md`,
+`PrimaryUser.md` and `MEMORY.md`. The first agent (`home`) is the one at
+`AGENT_HOME`; the others are made in `agents/` beside it.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/agent/setup` | Read setup status and editable agent files. |
-| `POST /api/agent/setup` | Initialize agent identity files. |
-| `PUT /api/agent/files/:name` | Save an editable identity/context file. |
-| `POST /api/agent/sessions` | Create an agent conversation. |
+| `GET /api/agents` | `{ agents }`, each `{ id, name, home, first, initialised, chats, channels, orb, voice }` |
+| `POST /api/agents` | `{ name, setup? }` — a new agent and its folder; `setup` takes the wizard's answers. A folder kept from a deleted agent of the same name is taken up again. |
+| `PATCH /api/agents/:id` | `{ name }` — its folder stays where it is |
+| `DELETE /api/agents/:id` | Deletes it and its chats, and its folder with `?folder=delete`. Refused for the first agent, for one a channel talks as, and while one of its chats or routines is working. Its routines are switched off. |
+| `GET /api/agents/:id/setup` | Setup status and its editable files |
+| `POST /api/agents/:id/setup` | Writes its identity files from the wizard's answers |
+| `PUT /api/agents/:id/files/:name` | Saves one of its files |
+| `PUT /api/agents/:id/orb` | Saves its avatar; answers the style as stored |
+| `PUT /api/agents/:id/voice` | `{ voice }` — the voice it speaks with in voice mode: `"design"`, a voice library id, or `""` for the one in the voice settings |
+| `GET /api/agent/orb?session=` | The avatar voice mode shows for that chat: its agent's, or the first agent's |
+| `POST /api/agent/sessions` | `{ agent?, title? }` — a conversation with that agent, the first without one |
+| `GET /api/agent/setup`, `POST /api/agent/setup`, `PUT /api/agent/files/:name` | The same for the first agent |
 
 ## People and audit
 

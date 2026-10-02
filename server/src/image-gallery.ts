@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, fstatSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { agentHomePath } from "./agent-home.js";
+import { listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
 import { getDb, getSession } from "./db.js";
 import type { ExtraValue } from "./image-generation.js";
@@ -22,7 +22,7 @@ import { FileError, baseDir, openPicture, readPicture, removeEntry, resolveInsid
  * made: the tools record each one (see recordChatPicture), with what it was
  * asked for. Those that were never recorded — made before this index existed, or
  * while the tool could not say whose they were — are found by looking in exactly those folders (see
- * scanFolders): the folders of the chats, Home and the projects, and in them
+ * scanFolders): the folders of the chats, the agents' homes and the projects, and in them
  * only `generated-images`. A file is only ever opened and served through the
  * same checks the Files panel's pictures have — a path inside the folder, no
  * link followed out of it, and what the bytes say it is.
@@ -62,7 +62,7 @@ export interface GalleryPicture {
   origin: PictureOrigin;
   /** The chat that made it, for the agent's pictures. */
   chat: { id: string; title: string } | null;
-  /** The folder it was found in, for a picture of the folder: Home, or the name of the project or folder. */
+  /** The folder it was found in, for a picture of the folder: Home, an agent's name, or the name of the project or folder. */
   folder: { name: string; home: boolean } | null;
   kind: PictureKind;
   prompt: string;
@@ -119,9 +119,13 @@ function downloadName(row: Row): string {
   return `image-${stamp}-${row.id.slice(0, 4)}${path.extname(row.path)}`;
 }
 
-/** What a folder is called to the person: Home, else its place under the workspace root (a project's name, or the way to a folder in one). */
+/** What a folder is called to the person: Home, an agent's name, else its place under the workspace root (a project's name, or the way to a folder in one). */
 function folderLabel(folder: string): { name: string; home: boolean } {
-  if (realPath(agentHomePath()) === folder) return { name: "", home: true };
+  const agents = listAgents();
+  // The first agent's home is Home, as it was before there were others.
+  if (agents[0] && realPath(agents[0].home) === folder) return { name: "", home: true };
+  const agent = agents.find((a) => realPath(a.home) === folder);
+  if (agent) return { name: agent.name, home: false };
   const inRoot = pathBelow(realPath(workspaceRoot()) ?? workspaceRoot(), folder);
   return { name: inRoot || path.basename(folder), home: false };
 }
@@ -186,14 +190,14 @@ function folderOf(sessionId: string): string | undefined {
 }
 
 /**
- * Whether a folder, real, is one a picture may be found in or served from: Home
- * or inside the workspace root, as a chat's folder has to be. Asked once for
- * all the folders a pass looks at.
+ * Whether a folder, real, is one a picture may be found in or served from: the
+ * home of an agent or inside the workspace root, as a chat's folder has to be.
+ * Asked once for all the folders a pass looks at.
  */
 function folderAllowed(): (real: string) => boolean {
-  const home = realPath(agentHomePath());
+  const homes = new Set(listAgents().map((a) => realPath(a.home)));
   const root = realPath(workspaceRoot());
-  return (real) => real === home || (root !== null && isWithinText(root, real));
+  return (real) => homes.has(real) || (root !== null && isWithinText(root, real));
 }
 
 /** The real folder a picture that was found is in, the same for all of a pass; the reason it cannot be used otherwise. */
@@ -390,10 +394,10 @@ const refused = new Map<string, string>();
 const MAX_REFUSED = 10_000;
 
 /**
- * The real folders the tools may have written into, each once: Home, the
- * projects, the folders chats work in, and those that pictures were found in
- * before. A folder that cannot be reached, or is not Home or inside the
- * workspace root, is not one of them.
+ * The real folders the tools may have written into, each once: the agents'
+ * homes, the projects, the folders chats work in, and those that pictures were
+ * found in before. A folder that cannot be reached, or is not an agent's home or
+ * inside the workspace root, is not one of them.
  */
 function knownFolders(): string[] {
   const allowed = folderAllowed();
@@ -407,7 +411,7 @@ function knownFolders(): string[] {
       // Not there, or out of reach: nothing to look at.
     }
   };
-  add(agentHomePath());
+  for (const agent of listAgents()) add(agent.home);
   try {
     for (const project of listProjects(workspaceRoot())) add(project.path);
   } catch {

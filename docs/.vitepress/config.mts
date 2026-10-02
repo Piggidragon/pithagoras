@@ -26,8 +26,10 @@ export default defineConfig({
         items: [
           { text: "What is Pithagoras", link: "/guide/what-is-pithagoras" },
           { text: "Deploying", link: "/guide/deploying" },
+          { text: "Upgrading", link: "/guide/upgrading" },
           { text: "Sessions", link: "/guide/sessions" },
           { text: "Projects", link: "/guide/projects" },
+          { text: "Agents", link: "/guide/agents" },
           { text: "Slash commands", link: "/guide/commands" },
           { text: "Routines", link: "/guide/routines" },
           { text: "The interface", link: "/guide/interface" },
