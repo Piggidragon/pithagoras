@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const temp = mkdtempSync(path.join(tmpdir(), "pitha-gallery-"));
+// What it made is not left in the temporary folder, run after run.
+after(() => rmSync(temp, { recursive: true, force: true }));
 process.env.DATA_DIR = temp;
 process.env.SESSION_DIR = path.join(temp, "sessions");
 process.env.PI_CODING_AGENT_DIR = path.join(temp, "agent");
@@ -716,11 +718,68 @@ test("a file name that comes back in a chat is a new picture, with its own words
   assert.ok(mine[0].createdAt >= old.createdAt, "it is as new as it is, not as old as the first");
 });
 
+test("chats in one folder share its files: a name that comes back replaces the other chat's old row too, and a picture of one is the other's original", async () => {
+  getDb().prepare("DELETE FROM images").run();
+  const folder = chat("chat-10", "Chat A");
+  createSession({ id: "chat-11", title: "Chat B", workspace: folder, executor: "host" });
+  const elsewhere = chat("chat-12", "Chat C in another folder");
+  mkdirSync(path.join(folder, GENERATED_DIR), { recursive: true });
+  const file = `${GENERATED_DIR}/photo-edited.png`;
+  const write = (tag: string) => writeFileSync(path.join(folder, file), png(tag));
+  const record = (sessionId: string, prompt: string, over: Partial<Parameters<typeof gallery.recordChatPicture>[0]> = {}) =>
+    gallery.recordChatPicture({ sessionId, path: file, kind: "edited", prompt, params: {}, bytes: 70, ...over });
+  const mine = async () => (await listed("?origin=chat")).pictures.filter((p: any) => p.fileName === "photo-edited.png");
+
+  // Chat A's picture, whose file the person then takes away; chat B makes the name again.
+  write("a");
+  record("chat-10", "A: make it red");
+  rmSync(path.join(folder, file));
+  write("b");
+  record("chat-11", "B: make it blue");
+  const both = await mine();
+  assert.equal(both.length, 1, "one file, one picture");
+  assert.equal(both[0].prompt, "B: make it blue");
+  assert.equal(both[0].chat.title, "Chat B");
+  // Deleting it is deleting chat B's file, and that is what the entry says it is.
+  assert.equal((await call("DELETE", `/images/${both[0].id}`)).status, 200);
+  assert.equal(existsSync(path.join(folder, file)), false);
+  assert.equal((await mine()).length, 0);
+
+  // A chat in another folder with the same name is another file, and keeps its row.
+  mkdirSync(path.join(elsewhere, GENERATED_DIR), { recursive: true });
+  writeFileSync(path.join(elsewhere, file), png("c"));
+  record("chat-12", "C: elsewhere");
+  write("d");
+  record("chat-10", "A again");
+  const rows = await mine();
+  assert.deepEqual(rows.map((p: any) => p.prompt).sort(), ["A again", "C: elsewhere"]);
+
+  // What chat B edits that chat A made in the shared folder is linked to it.
+  writeFileSync(path.join(folder, GENERATED_DIR, "base.png"), png("e"));
+  record("chat-10", "the base", { path: `${GENERATED_DIR}/base.png`, kind: "generated" });
+  writeFileSync(path.join(folder, GENERATED_DIR, "base-edited.png"), png("f"));
+  record("chat-11", "B edits A's", { path: `${GENERATED_DIR}/base-edited.png`, from: [`${GENERATED_DIR}/base.png`] });
+  const all = (await listed("?origin=chat")).pictures;
+  const base = all.find((p: any) => p.prompt === "the base");
+  const edit = all.find((p: any) => p.prompt === "B edits A's");
+  assert.equal(edit.from, base.id);
+  assert.deepEqual(edit.params.sources, [base.id]);
+});
+
 test("the sidebar is told whether the page is there: on while an address is set and the add-on is on", async () => {
   gone();
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1" });
   assert.deepEqual((await call("GET", "/features/flags")).body.images, { enabled: false });
   gen.saveImageGeneration({ enabled: true });
   assert.deepEqual((await call("GET", "/features/flags")).body.images, { enabled: true });
+  gone();
+  // Changing pictures is set up apart from making them, and the page is there for either: the agent's changes are kept in it, and the server edits.
+  gen.saveImageGeneration({ baseUrl: "", editEnabled: true, editBaseUrl: "https://edits.example.com/v1" });
+  assert.deepEqual((await call("GET", "/features/flags")).body.images, { enabled: true }, "only changing is set up");
+  const state = (await call("GET", "/features/images")).body.images;
+  assert.equal(state.enabled, false);
+  assert.equal(state.editReady, true);
+  gen.saveImageGeneration({ editEnabled: false });
+  assert.deepEqual((await call("GET", "/features/flags")).body.images, { enabled: false }, "an address for changes that is switched off is not a page");
   gone();
 });

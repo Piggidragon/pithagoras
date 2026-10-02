@@ -1618,6 +1618,7 @@ const de: Locale = {
     "being made": "in Arbeit",
     "kept from this page": "von dieser Seite gespeichert",
     "Image generation is switched off, or has no address.": "Die Bildgenerierung ist ausgeschaltet oder hat keine Adresse.",
+    "Pictures can still be changed: choose one in the gallery, or put one in from this computer.": "Bilder lassen sich weiterhin ändern: Wähle eines in der Galerie aus oder lege eines von diesem Computer ein.",
     "Set it up in Settings → Add-ons": "In den Einstellungen → Add-ons einrichten",
     "Gallery": "Galerie",
     "Where from": "Woher",

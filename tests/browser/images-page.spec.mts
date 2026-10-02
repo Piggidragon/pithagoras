@@ -206,12 +206,48 @@ test('a gallery that cannot be read says why', async ({ page }) => {
 });
 
 test('with image generation switched off the page says so and still shows what there is', async ({ page }) => {
-  await portal(page, { pictures: [pic({ prompt: 'Left over' })], images: feature({ enabled: false }), flagOn: false });
+  await portal(page, { pictures: [pic({ prompt: 'Left over' })], images: feature({ enabled: false, editEnabled: false, editReady: false }), flagOn: false });
   await page.goto('/images');
   await expect(page.getByText('Image generation is switched off, or has no address.')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Set it up in Settings → Add-ons' })).toHaveAttribute('href', '/settings/add-ons');
   await expect(maker(page)).toHaveCount(0);
   await expect(tile(page, 'Left over')).toBeVisible();
+});
+
+test('with only changing set up the page is there: no form to make a picture, but a picture can be put in and changed', async ({ page }) => {
+  const made = pic({ prompt: 'A fox' });
+  const edited = pic({ prompt: 'Make it night', kind: 'edited', from: made.id, params: { sources: [made.id] }, age: 1 });
+  const p = await portal(page, { pictures: [made, edited], images: feature({ enabled: false, baseUrl: '', editBaseUrl: 'https://edits.example.com/v1' }) });
+  await page.goto('/images');
+  // Where making a picture is not set up, that is said, and the rest of the form is there.
+  await expect(page.getByText('Image generation is switched off, or has no address.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Set it up in Settings → Add-ons' })).toBeVisible();
+  await expect(page.getByPlaceholder('Describe the picture')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Make the picture' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Options' })).toHaveCount(0);
+  await expect(page.getByLabel('Upload a picture')).toBeAttached();
+  await expect(tile(page, 'A fox')).toBeVisible();
+  // A picture is changed from the gallery, as ever, and that form has its words.
+  await tile(page, 'A fox').click();
+  await expect(viewer(page).getByRole('button', { name: 'Run again' })).toHaveCount(0);
+  await viewer(page).getByRole('button', { name: 'Edit it' }).click();
+  await expect(maker(page)).toHaveAccessibleName('Change a picture');
+  await page.getByPlaceholder('Describe the change: what to add, remove or make different').fill('Add a hat');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  // A change can be made again, which is not making one from nothing.
+  await tile(page, 'Make it night').click();
+  await expect(viewer(page).getByRole('button', { name: 'Run again' })).toBeVisible();
+});
+
+test('with only making set up there is no Edit it and no upload, and a picture can be made again', async ({ page }) => {
+  await portal(page, { pictures: [pic({ prompt: 'A fox' })], images: feature({ editEnabled: false, editReady: false }) });
+  await page.goto('/images');
+  await expect(page.getByPlaceholder('Describe the picture')).toBeVisible();
+  await expect(page.getByLabel('Upload a picture')).toHaveCount(0);
+  await tile(page, 'A fox').click();
+  await expect(viewer(page).getByRole('button', { name: 'Run again' })).toBeVisible();
+  await expect(viewer(page).getByRole('button', { name: 'Edit it' })).toHaveCount(0);
 });
 
 test('the filters ask the portal for what they say, and are in the address', async ({ page }) => {
@@ -288,6 +324,24 @@ test('making a picture starts a job that holds its place in the grid, and the pi
   // The same place: first, and the one that was made, once.
   await expect(grid(page).getByRole('listitem').first().getByRole('button')).toHaveAttribute('data-picture-id', made.id);
   await expect(page.getByText('1 of 4 being made')).toHaveCount(0);
+});
+
+test('a picture made here does not stay above one that came after it: the grid is newest first, and the viewer steps in its order', async ({ page }) => {
+  const p = await portal(page, { pictures: [pic({ prompt: 'Older', age: 60 })] });
+  await page.goto('/images');
+  await page.getByPlaceholder('Describe the picture').fill('A fox in the snow');
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  const made = p.finish(p.state.jobs[0].id);
+  await expect(tile(page, 'A fox in the snow')).toBeVisible();
+  await page.getByLabel('Upload a picture').setInputFiles({ name: 'cat.png', mimeType: 'image/png', buffer: Buffer.from('not really a png, the portal looks') });
+  await expect(tile(page, 'cat.png')).toBeVisible();
+  // The upload is the newest, so it is the first; the one that was made keeps the tile it had, below it.
+  const titles = () => grid(page).getByRole('button').evaluateAll((els) => els.map((e) => e.getAttribute('title')));
+  await expect.poll(titles).toEqual(['cat.png', 'A fox in the snow', 'Older']);
+  await grid(page).getByRole('listitem').first().getByRole('button').click();
+  await expect(viewer(page).getByText('1 / 3', { exact: true })).toBeVisible();
+  await viewer(page).getByRole('button', { name: 'Next picture' }).click();
+  await expect(viewer(page).locator('img[data-picture]')).toHaveAttribute('src', `/api/images/${made.id}/file`);
 });
 
 test('the settings of a request are sent as set, and are kept for the next visit, not the words', async ({ page }) => {

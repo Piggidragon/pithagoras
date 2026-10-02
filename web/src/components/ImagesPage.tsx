@@ -363,7 +363,9 @@ export function ImagesPage() {
     [loadMore],
   );
 
-  const ready = !!features && features.enabled && features.baseUrl !== "";
+  // Making and changing are set up apart: one can be on without the other.
+  const makes = !!features && features.enabled && features.baseUrl !== "";
+  const changes = !!features && features.editReady;
   const makingNow = jobs.filter((j) => j.state === "running").length;
   const filtered = !!(filter.origin || filter.kind);
   const pictureTiles = shownTiles.filter((x) => x.picture || x.job?.pictureId);
@@ -400,7 +402,7 @@ export function ImagesPage() {
         )}
 
         {features &&
-          (ready ? (
+          (makes || changes ? (
             <ImageMaker
               features={features}
               running={makingNow}
@@ -608,10 +610,10 @@ function ViewerActions({
 }) {
   const [details, setDetails] = useState(false);
   useEffect(() => onShown(picture), [picture.id, onShown]);
-  const ready = !!features && features.enabled && features.baseUrl !== "";
-  const canEdit = ready && features!.editReady;
+  const makes = !!features && features.enabled && features.baseUrl !== "";
+  const canEdit = !!features && features.editReady;
   // A picture put in by the person has no description to make again.
-  const again = ready && picture.kind !== "uploaded" && picture.prompt !== "" && (picture.kind === "generated" || canEdit);
+  const again = picture.kind !== "uploaded" && picture.prompt !== "" && (picture.kind === "generated" ? makes : canEdit);
   return (
     <>
       {/* Under the button on a wide screen; on a phone, above the zoom buttons, over the picture, so that the buttons that close it are not under it. */}

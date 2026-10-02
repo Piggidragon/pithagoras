@@ -241,7 +241,7 @@ the folder is not a repository, except `init`. See [Git](/guide/git).
 | `DELETE /api/providers/:id` | Remove one |
 | `GET /api/models` | Every model pi can use now — the ones with a key |
 | `GET /api/packages/catalog?q=&topic=` | Packages published for pi; `topic=provider` narrows to provider packages |
-| `GET /api/features/flags` | Only which opt-in features are on — for the sidebar and menus: `{ subagent: { enabled }, understory: { enabled }, images: { enabled } }`, where `images.enabled` is that image generation is on and has an address, which is when the Images page is offered |
+| `GET /api/features/flags` | Only which opt-in features are on — for the sidebar and menus: `{ subagent: { enabled }, understory: { enabled }, images: { enabled } }`, where `images.enabled` is that image generation, or editing, is on and has an address, which is when the Images page is offered |
 
 See [Models and providers](/guide/models).
 

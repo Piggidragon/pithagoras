@@ -87,19 +87,34 @@ test("the viewer is given a picture's file, its description and where it was mad
   assert.equal("from" in bare, false);
 });
 
-test("the grid has the jobs first, newest first, and then the gallery; a job whose picture is loaded holds its place and the picture is not drawn twice", () => {
+test("the grid has the jobs that have no picture first, newest first, and then the gallery; a job whose picture is loaded holds that picture's place and the picture is not drawn twice", () => {
   const a = picture();
   const b = picture();
   const running = job({ startedAt: 100 });
   const failed = job({ state: "failed", startedAt: 300, error: "no" });
   const done = job({ state: "done", startedAt: 200, pictureId: a.id });
   const all = tiles([b, a], [running, failed, done], {});
-  assert.deepEqual(all.map((t) => t.key), [`job:${failed.id}`, `job:${done.id}`, `job:${running.id}`, b.id]);
-  assert.equal(all[1].picture?.id, a.id);
-  // A job that is done and whose picture the list has not got yet still has its place, and the picture to show from the job.
+  assert.deepEqual(all.map((t) => t.key), [`job:${failed.id}`, `job:${running.id}`, b.id, `job:${done.id}`]);
+  assert.equal(all[3].picture?.id, a.id);
+  // A job that is done and whose picture the list has not got yet still has its place in front, and the picture to show from the job.
   const early = tiles([b], [job({ state: "done", pictureId: "0000000000ff" })], {});
   assert.equal(early[0].picture, undefined);
   assert.equal(early[0].job?.pictureId, "0000000000ff");
+});
+
+test("a picture made on the page does not stay above pictures that came after it: the grid is in the order the viewer steps through", () => {
+  const made = picture();
+  const uploaded = picture({ kind: "uploaded" });
+  const fromChat = picture({ origin: "chat", chat: { id: "c", title: "t" } });
+  const done = job({ state: "done", pictureId: made.id });
+  // The server's order: newest first, and the one made on the page is the oldest.
+  const list = newestFirst(made, uploaded, fromChat);
+  const all = tiles(list, [done], {});
+  assert.deepEqual(ids(all.map((t) => t.picture!)), ids(viewerList(list, new Map())));
+  assert.equal(all[all.length - 1].key, `job:${done.id}`, "it keeps its tile, and the place the list has for it");
+  // The same tile from when it was being made to when it is in the list, so that it is not drawn again.
+  const waiting = tiles([uploaded, fromChat], [done], {});
+  assert.equal(waiting[0].key, `job:${done.id}`);
 });
 
 test("a picture that was deleted is not shown by its job, and a done job without one is nothing to show", () => {

@@ -1,13 +1,17 @@
 # Images
 
 **Images** appears in the sidebar while [image generation](/guide/features#image-generation)
-is switched on and has an address. It is the page for making pictures with that
-endpoint **without a chat**, and for looking through every picture made with it —
-here, and by the agent in its chats. Nothing on it needs a model or a conversation:
+is switched on and has an address, or while [editing](/guide/features#editing-a-picture)
+is. It is the page for making pictures with that endpoint **without a chat**, and for
+looking through every picture made with it — here, and by the agent in its chats. Nothing on it needs a model or a conversation:
 the page asks the portal, the portal asks the image endpoint you set up.
 
 Where there is no endpoint the page says so, with a link to
-**Settings → Add-ons → Images**, and still shows what is in the gallery.
+**Settings → Add-ons → Images**, and still shows what is in the gallery. Making and
+changing a picture are set up apart: with only editing on there is no form to describe
+a new picture, which the page says, but a picture can be put in from your computer or
+chosen in the gallery to be changed; with only generation on there is no **Edit it** and
+no upload.
 
 ## Making a picture
 
@@ -43,7 +47,9 @@ Choose **Edit it** on a picture in the viewer, or **Change a picture from this
 computer** to put one in from your own files; the form then says **Change a picture**
 and shows the picture or pictures it works from. Describe what should change and
 choose **Change the picture**. It needs [editing](/guide/features#editing-a-picture)
-switched on; where it is not, there is no **Edit it** and no upload. An edit goes to
+switched on; where it is not, there is no **Edit it** and no upload, and with it on and
+generation off, **Run again** is there for a change only, since making a picture from a
+description needs generation. An edit goes to
 the editing endpoint with the model set for it, and the options above do not apply.
 
 - **The result is a new picture.** The original is never changed, and the new one
@@ -85,7 +91,9 @@ and how long ago.
   **Original** and **Edited version** at the top to go from one to the other, also when
   the original is further down than the gallery has been loaded.
 - **A picture that is being made** is a tile of its own, in the place it will have, with
-  the same wait a chat shows; a change shows the original under it.
+  the same wait a chat shows; a change shows the original under it. When it is made, it
+  stays in the place the gallery has for it, in order of time, and the arrows of the
+  viewer step through the grid in the order it shows.
 
 ### What the viewer adds
 
@@ -132,6 +140,8 @@ folder, no link followed out of it, and what its bytes say it is.
   before the gallery existed are not in it**; they stay in their chats' folders. A name
   the agent used before, whose file was taken away, is a new picture when it makes
   one under it again: the gallery shows the new one with its own description and time.
+  Chats that work in one folder, such as the chats of a project, share its files, so this
+  holds across them, and a picture one of them made is the original of an edit another makes.
 - **The page's own pictures are kept until you delete them.** Nothing is removed by age
   or by how many there are, and the pictures you put in from your computer, up to 25 MB
   each, are kept the same way. **kept from this page**, in the header, shows what they take

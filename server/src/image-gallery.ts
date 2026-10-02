@@ -154,6 +154,16 @@ function chatFolder(sessionId: string, folders: Map<string, string | FileError>)
   return found;
 }
 
+/** The real folder a chat's files are in, or nothing when it cannot be told: the chat is gone, or its folder cannot be reached. */
+function folderOf(sessionId: string): string | undefined {
+  try {
+    const session = getSession(sessionId);
+    return session ? baseDir(session.workspace) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Where a picture's file is, as a folder the portal knows and a path inside it; the reason it is not anywhere that can be served otherwise. */
 function locate(row: Row, folders: Map<string, string | FileError> = new Map()): { base: string; rel: string } {
   if (row.origin === "page") return { base: baseDir(imagesDir()), rel: row.path };
@@ -222,13 +232,19 @@ export function addPagePicture(picture: { bytes: Buffer; ext: string; kind: Pict
 export function recordChatPicture(picture: { sessionId: string; path: string; kind: "generated" | "edited"; prompt: string; params: PictureParams; from?: string[]; bytes: number }): void {
   // A picture that was made is made: that it could not be listed is not the tool's failure, and the agent has nothing to do about it.
   try {
-    const known = (file: string) => (getDb().prepare("SELECT id FROM images WHERE session_id = ? AND path = ?").get(picture.sessionId, file) as { id: string } | undefined)?.id;
-    // A file name that comes back — an edit is named after its original — is a new picture: its file was taken away by something that did not tell the list, and the old row is not this file's.
-    const before = known(picture.path);
-    const sources = (picture.from ?? []).map(known).filter((id): id is string => !!id && id !== before);
+    // Chats share a folder — every chat of a project, every one in Home — so a path names a file for all of them: the rows of the chats whose folder is this one, this chat's first.
+    const mine = folderOf(picture.sessionId);
+    const rowsOf = (file: string) =>
+      (getDb().prepare("SELECT id, session_id FROM images WHERE origin = 'chat' AND path = ? ORDER BY (session_id = ?) DESC, created_at DESC").all(file, picture.sessionId) as { id: string; session_id: string }[])
+        .filter((row) => row.session_id === picture.sessionId || (mine !== undefined && folderOf(row.session_id) === mine))
+        .map((row) => row.id);
+    const known = (file: string) => rowsOf(file)[0];
+    // A file name that comes back — an edit is named after its original — is a new picture: its file was taken away by something that did not tell the list, and the old rows are not this file's.
+    const before = rowsOf(picture.path);
+    const sources = (picture.from ?? []).map(known).filter((id): id is string => !!id && !before.includes(id));
     const first = picture.from?.[0] !== undefined ? known(picture.from[0]) : undefined;
     getDb().transaction(() => {
-      if (before) forget([before]);
+      if (before.length) forget(before);
       insert({
         id: newId(),
         origin: "chat",
@@ -238,7 +254,7 @@ export function recordChatPicture(picture: { sessionId: string; path: string; ki
         prompt: picture.prompt,
         params: JSON.stringify({ ...picture.params, ...(sources.length ? { sources } : {}) }),
         // The first of them, as the picture the edit is named after: only when that very one is in the list.
-        source_id: first && first !== before ? first : null,
+        source_id: first && !before.includes(first) ? first : null,
         bytes: picture.bytes,
         created_at: Date.now(),
       });

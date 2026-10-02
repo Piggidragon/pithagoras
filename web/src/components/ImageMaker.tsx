@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { Link } from "react-router-dom";
 import { LuImagePlus, LuLoader, LuSlidersHorizontal, LuSparkles, LuUpload, LuWandSparkles, LuX } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob } from "../api";
 import { FORM_KEY, parseFields, readForm, type FormMemory } from "../images-gallery";
@@ -62,6 +63,8 @@ export function ImageMaker({
   const file = useRef<HTMLInputElement>(null);
 
   const editing = sources.length > 0;
+  // Changing a picture has its own switch and address: a picture can be changed where none is made, and the form is for that then.
+  const generating = features.enabled && features.baseUrl !== "";
   const full = running >= limit;
   const count = Math.min(form.count, Math.max(1, limit - running));
 
@@ -190,24 +193,35 @@ export function ImageMaker({
         </div>
       )}
 
-      <label className="block">
-        <span className="sr-only">{editing ? t("What should change") : t("What the picture should show")}</span>
-        <textarea
-          ref={promptRef}
-          value={prompt}
-          onChange={(e) => onPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            // Ctrl or Cmd with Enter, so that Enter itself is a new line in a long description.
-            if (isEnter(e) && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault();
-              void submit();
-            }
-          }}
-          rows={3}
-          placeholder={editing ? t("Describe the change: what to add, remove or make different") : t("Describe the picture")}
-          className={`${inputCls} resize-y`}
-        />
-      </label>
+      {!editing && !generating && (
+        <p className="mb-3 text-sm text-fg-muted">
+          {t("Image generation is switched off, or has no address.")}{" "}
+          <Link to="/settings/add-ons" className="text-accent hover:underline">
+            {t("Set it up in Settings → Add-ons")}
+          </Link>
+          <span className="mt-1 block text-xs text-fg-subtle">{t("Pictures can still be changed: choose one in the gallery, or put one in from this computer.")}</span>
+        </p>
+      )}
+      {(editing || generating) && (
+        <label className="block">
+          <span className="sr-only">{editing ? t("What should change") : t("What the picture should show")}</span>
+          <textarea
+            ref={promptRef}
+            value={prompt}
+            onChange={(e) => onPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              // Ctrl or Cmd with Enter, so that Enter itself is a new line in a long description.
+              if (isEnter(e) && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+            rows={3}
+            placeholder={editing ? t("Describe the change: what to add, remove or make different") : t("Describe the picture")}
+            className={`${inputCls} resize-y`}
+          />
+        </label>
+      )}
 
       {editing && (
         <div className="mt-2">
@@ -225,17 +239,19 @@ export function ImageMaker({
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void submit()}
-          disabled={!prompt.trim() || busy || full}
-          title={full ? t("{n} pictures are being made: wait for one to finish, or stop one", { n: running }) : undefined}
-          className={primaryCls}
-        >
-          {busy ? <LuLoader aria-hidden className="h-4 w-4 animate-spin" /> : editing ? <LuWandSparkles aria-hidden className="h-4 w-4" /> : <LuSparkles aria-hidden className="h-4 w-4" />}
-          {editing ? t("Change the picture") : count > 1 ? t("Make {n} pictures", { n: count }) : t("Make the picture")}
-        </button>
-        {!editing && (
+        {(editing || generating) && (
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={!prompt.trim() || busy || full}
+            title={full ? t("{n} pictures are being made: wait for one to finish, or stop one", { n: running }) : undefined}
+            className={primaryCls}
+          >
+            {busy ? <LuLoader aria-hidden className="h-4 w-4 animate-spin" /> : editing ? <LuWandSparkles aria-hidden className="h-4 w-4" /> : <LuSparkles aria-hidden className="h-4 w-4" />}
+            {editing ? t("Change the picture") : count > 1 ? t("Make {n} pictures", { n: count }) : t("Make the picture")}
+          </button>
+        )}
+        {!editing && generating && (
           <button type="button" onClick={() => change({ open: !form.open })} aria-expanded={form.open} className={ghostCls}>
             <LuSlidersHorizontal aria-hidden className="h-3.5 w-3.5" />
             {t("Options")}
@@ -259,7 +275,7 @@ export function ImageMaker({
         <span className="ml-auto text-xs tabular-nums text-fg-subtle">{running > 0 ? t("{n} of {max} being made", { n: running, max: limit }) : ""}</span>
       </div>
 
-      {!editing && form.open && <div className="mt-3 rounded-xl border border-line bg-canvas/40 p-3">{options}</div>}
+      {!editing && generating && form.open && <div className="mt-3 rounded-xl border border-line bg-canvas/40 p-3">{options}</div>}
       {editing && <p className="mt-2 text-[11px] text-fg-faint">{t("A change goes to the editing endpoint with the model set for it in Settings → Add-ons → Images.")}</p>}
       {error && (
         <p role="alert" className="mt-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">

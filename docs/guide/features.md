@@ -87,7 +87,8 @@ switch of its own, [`edit_image`](#editing-a-picture).
 
 The same endpoint also makes pictures **without the agent**: while it is on and has
 an address the sidebar has an [Images](/guide/images) page, with a form to make and
-change pictures and a gallery of everything made, here and in chats.
+change pictures and a gallery of everything made, here and in chats. The page is there
+as well where only [editing](#editing-a-picture) is set up.
 
 ### The endpoint
 

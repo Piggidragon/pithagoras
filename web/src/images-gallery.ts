@@ -107,28 +107,32 @@ const jobMatches = (job: PictureJob, filter: Filter): boolean => {
 };
 
 /**
- * Every tile of the grid, newest first: the jobs on the page — being made, not
- * made, or made and not yet taken in by the list — and then the gallery. A job
- * whose picture is in the list holds that picture's place, and the picture is
- * not drawn a second time. A picture that was deleted is not shown by its job
- * either (`gone`), and what a filter leaves out, jobs included, is not shown.
+ * Every tile of the grid, newest first, in the order the viewer steps through:
+ * the jobs that have no picture to show yet — being made, not made, or made and
+ * not yet taken in by the list — in front, and then the gallery as the list has
+ * it. A job whose picture is in the list holds that picture's place, wherever
+ * newer pictures have put it, and the picture is not drawn a second time. A
+ * picture that was deleted is not shown by its job either (`gone`), and what a
+ * filter leaves out, jobs included, is not shown.
  */
 export function tiles(pictures: GalleryPicture[], jobs: PictureJob[], filter: Filter, gone: ReadonlySet<string> = new Set()): Tile[] {
-  const byId = new Map(pictures.map((p) => [p.id, p]));
-  const held = new Set<string>();
+  const listed = new Set(pictures.map((p) => p.id));
+  const holding = new Map<string, PictureJob>();
   const first: Tile[] = [];
   for (const job of [...jobs].sort((a, b) => b.startedAt - a.startedAt)) {
     if (!jobMatches(job, filter)) continue;
-    if (job.state === "done") {
-      if (!job.pictureId || gone.has(job.pictureId)) continue;
-      const picture = byId.get(job.pictureId);
-      if (picture) held.add(picture.id);
-      first.push({ key: `job:${job.id}`, job, ...(picture ? { picture } : {}) });
-    } else {
-      first.push({ key: `job:${job.id}`, job });
-    }
+    if (job.state !== "done") first.push({ key: `job:${job.id}`, job });
+    else if (!job.pictureId || gone.has(job.pictureId)) continue;
+    else if (listed.has(job.pictureId)) holding.set(job.pictureId, job);
+    else first.push({ key: `job:${job.id}`, job });
   }
-  return [...first, ...pictures.filter((p) => !held.has(p.id)).map((p): Tile => ({ key: p.id, picture: p }))];
+  return [
+    ...first,
+    ...pictures.map((p): Tile => {
+      const job = holding.get(p.id);
+      return job ? { key: `job:${job.id}`, job, picture: p } : { key: p.id, picture: p };
+    }),
+  ];
 }
 
 /**

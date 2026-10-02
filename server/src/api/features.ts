@@ -158,7 +158,7 @@ export function featuresRouter(): Router {
    */
   router.get("/features/flags", (_req, res) => {
     try {
-      res.json({ subagent: { enabled: subagentState().enabled }, understory: { enabled: understoryOn() }, images: { enabled: imageGenerationReady() } });
+      res.json({ subagent: { enabled: subagentState().enabled }, understory: { enabled: understoryOn() }, images: { enabled: imageGenerationReady() || imageEditingReady() } });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
