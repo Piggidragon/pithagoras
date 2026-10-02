@@ -141,7 +141,7 @@ link followed out of it, and what its bytes say it is.
 
 - The agent's pictures are listed from the moment its tools save them, with what they
   were asked for. **Pictures that nobody listed are found as well:** the ones made before
-  the gallery existed, or by a chat that has since been deleted. The portal looks in
+  the gallery existed. The portal looks in
   `generated-images` of Home, of every project and of every folder a chat works in, and
   lists each file there whose first bytes say it is a PNG, JPEG, GIF or WebP, of at most
   25 MB, whatever it is called. A link is never followed, a file that is no picture is
@@ -164,13 +164,18 @@ link followed out of it, and what its bytes say it is.
   each, are kept the same way. **kept from this page**, in the header, shows what they take
   of the disk; the agent's pictures are in their chats' folders and are not counted.
 - A picture whose file is gone — taken in the Files panel, or by hand — is dropped from
-  the list the next time it is loaded, and the pictures of a chat go from the list with
-  the chat, while their files stay in its folder, where they are found again as pictures
-  of the folder (without what they were asked for). A chat's folder that cannot be reached
-  for the moment, such as a drive that is not mounted, is not a file that is gone: its
-  pictures stay in the list, are shown again when it is back, and a delete of one says it
-  could not reach the file. A picture that was found has no chat to keep it, so it is
-  dropped with its folder and found again when the folder is back.
+  the list the next time it is loaded, and so is one that cannot be served any more, such
+  as one whose `generated-images` has been replaced by a link out of the folder (what is
+  moved to another disk and linked back). When a chat is **deleted**, its pictures stay in
+  the gallery, as pictures of its folder with what they were asked for: the files are in
+  a folder that is not the chat's to take away, and the portal goes on looking in it. A
+  chat that is deleted while its folder cannot be reached has no folder to leave them in,
+  and they go from the list. A chat's folder that cannot be reached for the moment, such
+  as a drive that is not mounted, is not a file that is gone: its pictures stay in the
+  list, are shown again when it is back, and a delete of one says it could not reach the
+  file. A picture that was found has no chat to keep it, so it is dropped with its
+  folder and found again when the folder is back, and a delete of one says the same while
+  the folder cannot be reached.
 - Looking through the folders for the first time reads the first bytes of every file
   there; after that the portal only reads the folders' names, and opens a file again only
   when it is new or has changed, so a gallery of hundreds stays quick.

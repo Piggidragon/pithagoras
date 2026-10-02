@@ -788,7 +788,7 @@ test("deleting a project takes the pictures of every chat that worked in it from
   assert.deepEqual(left.map((p: any) => p.prompt), ["chat-s"], "the neighbour whose name starts the same is another folder");
 });
 
-test("a deleted chat's pictures leave the gallery and what was made of them no longer names them", async () => {
+test("the pictures of a deleted chat whose folder cannot be reached leave the gallery, and what was made of them no longer names them", async () => {
   getDb().prepare("DELETE FROM images").run();
   const folder = chat("chat-13", "Going");
   mkdirSync(path.join(folder, GENERATED_DIR), { recursive: true });
@@ -797,6 +797,8 @@ test("a deleted chat's pictures leave the gallery and what was made of them no l
   const original = (await listed("?origin=chat")).pictures[0];
   const edited = gallery.addPagePicture({ bytes: png("b"), ext: "png", kind: "edited", prompt: "edit", params: { sources: [original.id] }, sourceId: original.id });
   assert.equal((await listed(`?ids=${edited.id}`)).pictures[0].from, original.id);
+  // There is no folder to find them in, so there is nothing to keep them for.
+  renameSync(folder, `${folder}-away`);
   deleteSession("chat-13");
   assert.equal((await listed(`?ids=${edited.id}`)).pictures[0].from, null, "no link to what is not in the list");
 });

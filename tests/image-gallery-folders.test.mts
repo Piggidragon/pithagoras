@@ -256,15 +256,124 @@ test("a picture that was found and a picture that was recorded are one picture, 
   const edit = (await listed("?kind=edited")).pictures.find((p: any) => p.fileName === "shot-edited.png");
   assert.equal(edit.from, photo.id);
   assert.deepEqual(edit.params.sources, [photo.id]);
-  // A chat that goes takes its recorded pictures; the files are still in the folder the page looks in, and are found again as the folder's.
+  // A chat that goes leaves its pictures where they are, in a folder the page looks in: they stay, as the folder's, with what they were asked for, and the edit still names its original.
   deleteSession("chat-beta");
   const back = (await listed()).pictures.filter((p: any) => [first, second, "shot-edited.png"].includes(p.fileName));
-  assert.deepEqual(back.map((p: any) => [p.fileName, p.origin, p.kind]).sort(), [
-    [first, "folder", "generated"],
-    [second, "folder", "generated"],
-    ["shot-edited.png", "folder", "edited"],
+  assert.deepEqual(back.map((p: any) => [p.fileName, p.origin, p.kind, p.prompt]).sort(), [
+    [first, "folder", "generated", "a fox"],
+    [second, "folder", "generated", "a bear"],
+    ["shot-edited.png", "folder", "edited", "night"],
   ].sort());
-  assert.ok(back.every((p: any) => p.prompt === "" && p.chat === null));
+  assert.ok(back.every((p: any) => p.chat === null && p.folder.name === "beta"));
+  assert.equal(back.find((p: any) => p.fileName === "shot-edited.png").from, photo.id);
+  assert.equal((await listed("?origin=folder")).pictures.filter((p: any) => [first, second, "shot-edited.png", original].includes(p.fileName)).length, 4, "and the same file is still one picture");
+});
+
+test("a chat in a folder inside a project leaves its pictures in the gallery when it goes, though nothing else names that folder", async () => {
+  const zeta = project("zeta");
+  const sub = path.join(zeta, "sub");
+  mkdirSync(sub);
+  chatIn("chat-sub", sub, "In sub");
+  const file = "image-20260102-160000-444444.png";
+  put(sub, file, png("sub"), T);
+  gallery.recordChatPicture({ sessionId: "chat-sub", path: `${GENERATED_DIR}/${file}`, kind: "generated", prompt: "a hill", params: { model: "m" }, bytes: 70 });
+  assert.equal((await listed("?origin=chat")).pictures.filter((p: any) => p.fileName === file).length, 1);
+  // A picture the chat made before the page recorded anything of it is found with the folder, which only the chat names.
+  const older = "image-20260102-150000-555555.png";
+  put(sub, older, png("older"), T - 1000);
+  deleteSession("chat-sub");
+  const left = (await listed()).pictures.filter((p: any) => [file, older].includes(p.fileName));
+  assert.deepEqual(left.map((p: any) => [p.fileName, p.origin, p.prompt, p.params, p.chat, p.folder]).sort(), [
+    [file, "folder", "a hill", { model: "m" }, null, { name: "zeta/sub", home: false }],
+    [older, "folder", "", {}, null, { name: "zeta/sub", home: false }],
+  ].sort());
+  assert.equal((await call("GET", `/images/${left.find((p: any) => p.fileName === file).id}/file`)).status, 200);
+  // The folder stays looked in: what comes into it later is found.
+  put(sub, "image-20260102-170000-666666.png", png("later"), T + 1000);
+  assert.ok((await listed("?origin=folder")).pictures.some((p: any) => p.fileName === "image-20260102-170000-666666.png"));
+  // A chat that goes while its folder cannot be reached has nowhere to leave them.
+  const away = path.join(temp, "away-sub");
+  chatIn("chat-gone", path.join(zeta, "gone"), "Gone");
+  mkdirSync(path.join(zeta, "gone"));
+  put(path.join(zeta, "gone"), "image-20260102-180000-777777.png", png("gone"), T);
+  gallery.recordChatPicture({ sessionId: "chat-gone", path: `${GENERATED_DIR}/image-20260102-180000-777777.png`, kind: "generated", prompt: "unreachable", params: {}, bytes: 70 });
+  renameSync(path.join(zeta, "gone"), away);
+  deleteSession("chat-gone");
+  renameSync(away, path.join(zeta, "gone"));
+  assert.ok(!(getDb().prepare("SELECT 1 FROM images WHERE prompt = 'unreachable'").get()), "no row of it is left");
+});
+
+test("a found picture whose folder cannot be reached is not said to be deleted, and is still there when the folder is back", async () => {
+  const eta = project("eta");
+  const file = put(eta, "z.png", png("z"), T);
+  const id = (await listed("?origin=folder")).pictures.find((p: any) => p.fileName === "z.png").id;
+  const away = path.join(temp, "away-eta");
+  renameSync(eta, away);
+  const refused = await call("POST", "/images/delete", { ids: [id] });
+  assert.deepEqual(refused.body.deleted, []);
+  assert.deepEqual(refused.body.failed.map((f: any) => f.id), [id]);
+  assert.match(refused.body.failed[0].error, /folder/i);
+  assert.equal((await call("DELETE", `/images/${id}`)).status, 404);
+  renameSync(away, eta);
+  assert.equal(existsSync(file), true, "the file was never touched");
+  const back = (await listed("?origin=folder")).pictures.filter((p: any) => p.fileName === "z.png");
+  assert.deepEqual(back.map((p: any) => p.id), [id], "the same picture, not a new one");
+});
+
+test("a found picture and a recorded one are one picture also after a link is put above the folder", async () => {
+  const theta = project("theta");
+  put(theta, "old.png", png("old"), T);
+  put(theta, "kept.png", png("kept"), T + 1000);
+  const where = (name: string) => getDb().prepare("SELECT origin, folder FROM images WHERE path = ?").all(`${GENERATED_DIR}/${name}`) as { origin: string; folder: string | null }[];
+  await listed("?origin=folder");
+  assert.equal(where("old.png").length, 1);
+  chatIn("chat-theta", theta, "Theta");
+  // The workspace root goes to another disk and a link is left in its place.
+  const moved = path.join(temp, "bigdisk");
+  renameSync(root, moved);
+  symlinkSync(moved, root);
+  try {
+    // The scan alone, before anything has dropped or renamed a row: it knows the files it has by where they really are.
+    assert.equal(gallery.scanFolders(), 0);
+    // A picture is recorded before anything has looked: the row that was found names the folder by its old path.
+    gallery.recordChatPicture({ sessionId: "chat-theta", path: `${GENERATED_DIR}/old.png`, kind: "generated", prompt: "made again", params: {}, bytes: 70 });
+    assert.deepEqual(where("old.png").map((r) => r.origin), ["chat"], "one entry, not the chat's beside the one that was found");
+    // And a picture that was found is not found again under the new path.
+    assert.equal((await listed("?origin=folder")).pictures.filter((p: any) => p.fileName === "kept.png").length, 1);
+    assert.deepEqual(where("kept.png").map((r) => r.folder), [path.join(moved, "theta")], "kept under the folder as it really is");
+    assert.equal(gallery.scanFolders(), 0);
+  } finally {
+    rmSync(root);
+    renameSync(moved, root);
+  }
+});
+
+test("a picture whose folder has become a link out of the place it is in is dropped, and found again when the link goes", async () => {
+  const iota = project("iota");
+  chatIn("chat-iota", project("iota-chat"), "Iota");
+  put(iota, "x.png", png("x"), T);
+  const recorded = path.join(root, "iota-chat");
+  put(recorded, "image-20260102-190000-888888.png", png("r"), T);
+  gallery.recordChatPicture({ sessionId: "chat-iota", path: `${GENERATED_DIR}/image-20260102-190000-888888.png`, kind: "generated", prompt: "recorded", params: {}, bytes: 70 });
+  const id = (await listed("?origin=folder")).pictures.find((p: any) => p.fileName === "x.png").id;
+  // The pictures are moved to a bigger disk, and a link is left where their folder was.
+  const nas = path.join(temp, "nas");
+  mkdirSync(nas);
+  renameSync(path.join(iota, GENERATED_DIR), path.join(nas, "iota"));
+  symlinkSync(path.join(nas, "iota"), path.join(iota, GENERATED_DIR));
+  renameSync(path.join(recorded, GENERATED_DIR), path.join(nas, "iota-chat"));
+  symlinkSync(path.join(nas, "iota-chat"), path.join(recorded, GENERATED_DIR));
+  assert.notEqual((await call("GET", `/images/${id}/file`)).status, 200, "it is not served");
+  const failed = await call("POST", "/images/delete", { ids: [id] });
+  assert.deepEqual(failed.body.deleted, [], "and not deleted, from where it leads");
+  const now = (await listed()).pictures.map((p: any) => p.fileName);
+  assert.ok(!now.includes("x.png") && !now.includes("image-20260102-190000-888888.png"), "so it is not a tile that never loads and cannot be deleted either");
+  assert.equal(existsSync(path.join(nas, "iota", "x.png")), true, "the file is not touched");
+  assert.equal((await call("GET", `/images/${id}/file`)).status, 404);
+  // The link goes, and the folder is as it was: what is in it is found.
+  rmSync(path.join(iota, GENERATED_DIR));
+  renameSync(path.join(nas, "iota"), path.join(iota, GENERATED_DIR));
+  assert.ok((await listed("?origin=folder")).pictures.some((p: any) => p.fileName === "x.png"));
 });
 
 test("what goes from a folder goes from the gallery, and what comes into it comes into the gallery", async () => {

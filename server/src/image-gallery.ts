@@ -8,7 +8,7 @@ import type { ExtraValue } from "./image-generation.js";
 import { listProjects } from "./projects.js";
 import { isUnderText, isWithinText, pathBelow, realPath } from "./within.js";
 import { workspaceRoot } from "./workspaces.js";
-import { FileError, baseDir, openPicture, readPicture, removeEntry, saveNewFile } from "./workspace-files.js";
+import { FileError, baseDir, openPicture, readPicture, removeEntry, resolveInside, saveNewFile } from "./workspace-files.js";
 
 /**
  * The pictures of the Images page, in one list: the ones the page made itself
@@ -21,7 +21,7 @@ import { FileError, baseDir, openPicture, readPicture, removeEntry, saveNewFile 
  * folder of the folder a chat works in, and are listed from the moment they are
  * made: the tools record each one (see recordChatPicture), with what it was
  * asked for. Those that were never recorded — made before this index existed, or
- * by a chat that has gone — are found by looking in exactly those folders (see
+ * while the tool could not say whose they were — are found by looking in exactly those folders (see
  * scanFolders): the folders of the chats, Home and the projects, and in them
  * only `generated-images`. A file is only ever opened and served through the
  * same checks the Files panel's pictures have — a path inside the folder, no
@@ -29,10 +29,11 @@ import { FileError, baseDir, openPicture, readPicture, removeEntry, saveNewFile 
  *
  * What goes from the list when a file does: a picture whose file is gone — the
  * Files panel took it, or somebody did by hand — is dropped the next time the
- * page looks, and the pictures of a chat go from the list with the chat, while
- * the files stay in its folder, which is not the chat's to take away. Those
- * that are still in a folder the portal looks in are found again, as pictures
- * of the folder.
+ * page looks, and so is one that could not be served, such as one whose folder
+ * has become a link out of the place it is in. The pictures of a chat stay when
+ * the chat goes, as pictures of its folder (see deleteSession): the files are in
+ * a folder that is not the chat's to take away, and the folder is kept with them
+ * for the portal to look in.
  */
 
 /** Where the agent's tools put what they make, inside the chat's folder, so that it does not mix with the work. */
@@ -201,7 +202,11 @@ function foundFolder(folder: string, folders: Map<string, string | FileError>): 
   let found = folders.get(key);
   if (found === undefined) {
     try {
-      found = baseDir(folder);
+      try {
+        found = baseDir(folder);
+      } catch {
+        throw new FileError("missing", "The folder this picture is in does not exist");
+      }
       if (!folderAllowed()(found)) throw new FileError("invalid", "That is not a folder the portal looks for pictures in");
     } catch (e) {
       if (!(e instanceof FileError)) throw e;
@@ -211,6 +216,15 @@ function foundFolder(folder: string, folders: Map<string, string | FileError>): 
   }
   if (found instanceof FileError) throw found;
   return found;
+}
+
+/** The real folder a found picture's folder is now, or nothing when it cannot be told. */
+function realFolderOf(folder: string): string | undefined {
+  try {
+    return baseDir(folder);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Where a picture's file is, as a folder the portal knows and a path inside it; the reason it is not anywhere that can be served otherwise. */
@@ -244,7 +258,20 @@ function isThere(row: Row, folders: Map<string, string | FileError>): boolean {
     return unreachable(row, e);
   }
   try {
-    return lstatSync(path.join(at.base, at.rel)).isFile();
+    // The folder part goes the way serving goes: a link in it that leads out of the folder is a picture that cannot be served, and is not there. The file itself is looked at as it is, so that a link is none.
+    const dirKey = `\0in\0${at.base}\0${path.dirname(at.rel)}`;
+    let dir = folders.get(dirKey);
+    if (dir === undefined) {
+      try {
+        dir = resolveInside(at.base, path.dirname(at.rel));
+      } catch (e) {
+        if (!(e instanceof FileError)) throw e;
+        dir = e;
+      }
+      folders.set(dirKey, dir);
+    }
+    if (dir instanceof FileError) return false;
+    return lstatSync(path.join(dir, path.basename(at.rel))).isFile();
   } catch {
     return false;
   }
@@ -295,7 +322,12 @@ export function recordChatPicture(picture: { sessionId: string; path: string; ki
       ...(getDb().prepare("SELECT id, session_id FROM images WHERE origin = 'chat' AND path = ? ORDER BY (session_id = ?) DESC, created_at DESC").all(file, picture.sessionId) as { id: string; session_id: string }[])
         .filter((row) => row.session_id === picture.sessionId || (mine !== undefined && folderOf(row.session_id) === mine))
         .map((row) => row.id),
-      ...(mine === undefined ? [] : (getDb().prepare("SELECT id FROM images WHERE origin = 'folder' AND folder = ? AND path = ?").all(mine, file) as { id: string }[]).map((row) => row.id)),
+      ...(mine === undefined
+        ? []
+        : (getDb().prepare("SELECT id, folder FROM images WHERE origin = 'folder' AND path = ?").all(file) as { id: string; folder: string }[])
+            // By where the folder really is: a row from before a link was put above it names it by the old path.
+            .filter((row) => realFolderOf(row.folder) === mine)
+            .map((row) => row.id)),
     ];
     const known = (file: string) => rowsOf(file)[0];
     // A file name that comes back — an edit is named after its original — is a new picture: its file was taken away by something that did not tell the list, and the old rows are not this file's.
@@ -327,12 +359,25 @@ export function recordChatPicture(picture: { sessionId: string; path: string; ki
 /**
  * Drops what the list names that is not there to show: a file that is gone, a
  * chat that is, a path that leads out. Looked at when the list is looked at from
- * the top, which is a stat for each picture and no more.
+ * the top, which is a stat for each picture and little more. A picture that was
+ * found is kept under the folder as it really is: when a link is put above its
+ * folder, such as a workspace root moved to another disk, the old name and the
+ * new one are the same folder, and its pictures are not listed twice.
  */
 export function pruneMissing(): number {
   const folders = new Map<string, string | FileError>();
-  const rows = getDb().prepare("SELECT * FROM images").all() as Row[];
-  const gone = rows.filter((row) => !isThere(row, folders)).map((row) => row.id);
+  const d = getDb();
+  const rows = d.prepare("SELECT * FROM images").all() as Row[];
+  const gone: string[] = [];
+  for (const row of rows) {
+    if (!isThere(row, folders)) {
+      gone.push(row.id);
+    } else if (row.origin === "folder" && row.folder) {
+      const real = foundFolder(row.folder, folders);
+      // Taken from the list when the same file is already a picture of that folder.
+      if (real !== row.folder && !d.prepare("UPDATE OR IGNORE images SET folder = ? WHERE id = ?").run(real, row.id).changes) gone.push(row.id);
+    }
+  }
   if (gone.length) forget(gone);
   return gone.length;
 }
@@ -413,8 +458,8 @@ function pictureAt(real: string, name: string): { size: number; mtimeMs: number 
 
 /**
  * Lists the pictures that lie in the folders the tools write into and were never
- * recorded: those made before the gallery kept an index, by a chat that has
- * gone, or while the tool could not say whose they were. Only the folder
+ * recorded: those made before the gallery kept an index, or while the tool could
+ * not say whose they were. Only the folder
  * `generated-images` of the folders the portal knows (see knownFolders) is
  * looked in, and in it only plain files: no link is followed, and what is
  * listed is what its bytes show to be a PNG, JPEG, GIF or WebP not over the size
@@ -437,7 +482,7 @@ export function scanFolders(): number {
     listed = new Set();
     for (const row of d.prepare("SELECT origin, session_id, folder, path FROM images WHERE origin != 'page'").all() as Pick<Row, "origin" | "session_id" | "folder" | "path">[]) {
       try {
-        const folder = row.origin === "folder" ? row.folder : row.session_id ? chatFolder(row.session_id, folders) : null;
+        const folder = row.origin === "folder" ? (row.folder ? foundFolder(row.folder, folders) : null) : row.session_id ? chatFolder(row.session_id, folders) : null;
         if (folder) listed.add(key(folder, row.path));
       } catch (e) {
         if (!(e instanceof FileError)) throw e;
@@ -628,8 +673,8 @@ export async function deletePicture(id: string): Promise<void> {
   try {
     at = locate(row);
   } catch (e) {
-    // Its chat is gone: nothing is left of it to delete. Out of reach is something else.
-    if (!missing(e) || unreachable(row, e)) throw e;
+    // Its chat is gone: nothing is left of it to delete. Out of reach is something else, for a picture that was found as for a chat's: its folder cannot be reached, and the file may be in it.
+    if (!missing(e) || (row.origin !== "page" && !(e instanceof ChatGone))) throw e;
   }
   try {
     if (at) await removeEntry(at.base, at.rel);

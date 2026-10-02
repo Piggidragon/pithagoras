@@ -5,7 +5,7 @@ import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL, imageEditingReady, imageGeneratio
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames } from "./api/mcp.js";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { agentHome } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
@@ -348,7 +348,8 @@ export function getDb(): Database.Database {
     -- are listed here as they are made, and those found lying in a folder the
     -- tools write into that nobody listed (see image-gallery.ts). A row names
     -- the file, never holds it; one whose file is gone is dropped when the
-    -- page next looks, and a chat's go with the chat. "path" is a file name in
+    -- page next looks, and a chat's stay with its folder when the chat goes,
+    -- as pictures found there. "path" is a file name in
     -- the images folder for the page's, and a path from the folder for the
     -- agent's: from the chat's, or, for one that was found, from "folder", the
     -- real path of the folder it was found in. "params" is what the request
@@ -671,13 +672,23 @@ export function updateSession(
 
 export function deleteSession(id: string): void {
   const d = getDb();
+  const folder = (d.prepare("SELECT workspace FROM sessions WHERE id = ?").get(id) as { workspace: string } | undefined)?.workspace;
   d.prepare("DELETE FROM canvases WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   d.prepare("DELETE FROM settings WHERE key = ?").run(`subagent_model:${id}`);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
-  // The pictures stay in the chat's folder, which is not the chat's to take away: only their place in the gallery goes, and what was made of them no longer names them.
+  // The pictures stay in the chat's folder, which is not the chat's to take away, and so they stay in the gallery, as pictures of that folder with what they were asked for.
+  // Nothing else may name the folder once the chat is gone, so it is kept with them (see image-gallery.ts).
+  let real: string | undefined;
+  try {
+    real = folder ? realpathSync(folder) : undefined;
+  } catch {
+    // A folder that cannot be reached is not one to keep pictures of: there is nothing to find them in.
+  }
+  if (real) d.prepare("UPDATE OR IGNORE images SET origin = 'folder', folder = ?, session_id = NULL WHERE session_id = ?").run(real, id);
+  // What is left is what could not be kept, and what was made of it no longer names it.
   d.prepare("UPDATE images SET source_id = NULL WHERE source_id IN (SELECT id FROM images WHERE session_id = ?)").run(id);
   d.prepare("DELETE FROM images WHERE session_id = ?").run(id);
 }
