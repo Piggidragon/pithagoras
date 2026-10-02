@@ -187,6 +187,7 @@ On the same page, under the generation settings:
 | **Editing address** | Where edits go, with the same rules as the API address. The portal adds `/images/edits` unless the address already ends with it, and an address that ends with `/images/generations` is taken as the base, so the address saved for generation also does for editing. **Empty uses the API address above:** one server that does both needs no second address. |
 | **Editing key** | Sent as `Authorization: Bearer …` to the editing address, and nowhere else. **Empty:** the key above goes along when edits go to the same server as generation (an empty address, or the same scheme, name and port), and no key goes to another server: a key belongs to the server it was given for. A saved key is never shown again, and a new address of another server without a key drops it, as for the key above. |
 | **Editing model** | Sent as `model`. Empty sends none. It is never the model above, which may be one that only makes pictures. |
+| **Maximum picture size** | The most pixels a picture sent to be edited may have, as `WIDTHxHEIGHT` such as `2048x2048`: the box it must fit, whichever way up it is (a `1024x2048` picture fits a `2048x1024` limit). Empty is no limit, as an empty size sends none. It applies to the picture, to each of [several pictures](#several-pictures) and to a mask, and is what an endpoint with a limit on its input needs; an edit comes out about as large as the picture it is made from. A picture beyond it is not sent: see below. Read at each call, so a change needs no restart. A setup saved before there was one has none. |
 | **Image editing tool** | The switch. It needs an address, its own or generation's; like generation's it is decided when a chat loads, so a change reloads the idle open chats. |
 | **Several pictures per edit** | Off by default. Switch it on only if the editing endpoint takes more than one picture in a request. Then `edit_image` is given a list of pictures instead of one (see [several pictures](#several-pictures)). It is said of this endpoint: when edits move to another server (a new editing address, or a new generation address while editing has none of its own), it goes off again until you say the new one takes them. The tool's shape is decided when a chat loads, so a change reloads the idle open chats. |
 
@@ -239,6 +240,15 @@ What was decided for it:
   cut:** the endpoint gets the picture that is in the folder or nothing, and
   where its own limit is lower it says so in its answer, which is passed on
   without the key.
+- **A picture beyond the maximum size is refused, naming the limit.** With a
+  **Maximum picture size** set, a picture (or mask) with more pixels than it is
+  not sent: the portal reads its size from its header, makes no request, and
+  `edit_image` fails with a plain message such as "The image is 4000x500 pixels,
+  which is over the maximum of 2048x2048 for an edit. Nothing was sent." The agent
+  can then use a smaller picture or tell you; with several pictures the message says
+  which one it is. A picture whose size cannot be read is refused too, since it
+  cannot be shown to be within the limit. The check is in the shared editing
+  function, so every caller of it, not only the agent's tool, has the same limit and the same message.
 - **No mask in the agent's tool.** A mask is a second picture of the same size
   with the area to change cleared, which an agent has no good way to make
   and which endpoints treat differently. The endpoint support in the portal

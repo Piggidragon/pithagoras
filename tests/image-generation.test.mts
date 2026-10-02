@@ -73,11 +73,11 @@ function parts(seen: Seen): Record<string, { filename?: string; type?: string; b
 const json = (res: ServerResponse, body: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
 const b64 = (bytes: Buffer) => bytes.toString("base64");
 const config = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageGenerationConfig>> = {}) => ({
-  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, timeoutSeconds: 300, ...more,
+  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300, ...more,
 });
 /** What the page is told of a fresh install, with `more` changed. */
 const fresh = (more: Record<string, unknown> = {}) => ({
-  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, timeoutSeconds: 300, editKeySet: false, editReady: false, ...more,
+  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300, editKeySet: false, editReady: false, ...more,
 });
 
 test("a request is checked: the address is a base with no secret in it, the size a real one", () => {
@@ -618,7 +618,7 @@ test("an extension's tool of the same name is the one pi keeps, so the portal's 
 
 /** As a fresh install has the settings, whatever the tests before left. */
 const reset = () => gen.saveImageGeneration({
-  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, timeoutSeconds: 300,
+  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300,
 });
 
 test("a request for editing is checked as one for generation is", () => {
@@ -668,7 +668,7 @@ test("a key goes only to the server it was given for: generation's never to anot
   reset();
   const target = gen.imageEditingTarget;
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", apiKey: KEY, editEnabled: true, editModel: "edit-model" });
-  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY, multiple: false, timeoutSeconds: 300 }, "edits to the generation server have its key");
+  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY, multiple: false, maxSize: "", timeoutSeconds: 300 }, "edits to the generation server have its key");
   assert.equal(target().model, "edit-model", "and never the model of generation, which may only make pictures");
 
   gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
@@ -712,7 +712,7 @@ test("the route for edits is added to the address unless it is there, and genera
   assert.equal(editing.editEndpointUrl("http://localhost:8080").href, "http://localhost:8080/images/edits");
 });
 
-const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, multiple: false, timeoutSeconds: 300, ...more });
+const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, multiple: false, maxSize: "", timeoutSeconds: 300, ...more });
 
 test("an edit is a form with the picture, the prompt and the model, sent with the key to this address", async () => {
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
@@ -1658,6 +1658,134 @@ test("the API saves the time limit and refuses one out of bounds, without reload
       assert.match(refused.body.error, /from 30 to 3600/);
     }
     assert.equal((await call("GET", "/features/images")).body.images.timeoutSeconds, 600, "a refused one changes nothing");
+  } finally {
+    portal.close();
+    reset();
+  }
+});
+
+// --- the maximum size of an edit ---
+
+/** A picture of this many pixels, as far as its header says: the rest is padding. */
+const pngOf = (w: number, h: number) => {
+  const dim = (n: number) => Buffer.from([n >>> 24, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff]);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]), Buffer.from("IHDR"), dim(w), dim(h), Buffer.alloc(16)]);
+};
+
+test("the maximum size of an edit is saved as the size of generation is written, and is none until chosen", () => {
+  const parse = gen.parseImageGenerationPatch;
+  assert.deepEqual(parse({ editMaxSize: " 2048x1024 " }), { editMaxSize: "2048x1024" });
+  assert.deepEqual(parse({ editMaxSize: "" }), { editMaxSize: "" }, "emptied is no limit");
+  for (const bad of ["auto", "2048", "2048*1024", "big", "1x1", "123456x10", "00x00", "0x2048", "2048x00", "02048x2048", 2048, null]) {
+    assert.match(String(parse({ editMaxSize: bad })), /maximum size looks like/, String(bad));
+  }
+
+  reset();
+  assert.equal(gen.imageGenerationConfig().editMaxSize, "", "a fresh install has none");
+  assert.equal(gen.imageGenerationState().editMaxSize, "");
+  assert.equal(gen.imageEditingTarget().maxSize, "");
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true, editMaxSize: "2048x1024" });
+  assert.equal(gen.imageGenerationConfig().editMaxSize, "2048x1024");
+  assert.equal(gen.imageGenerationState().editMaxSize, "2048x1024");
+  assert.equal(gen.imageEditingTarget().maxSize, "2048x1024");
+  assert.equal(gen.imageGenerationConfig().size, "", "generation's own size is another setting");
+  gen.saveImageGeneration({ model: "other" });
+  assert.equal(gen.imageGenerationConfig().editMaxSize, "2048x1024", "another change leaves it");
+  gen.saveImageGeneration({ editMaxSize: "" });
+  assert.equal(gen.imageEditingTarget().maxSize, "", "taken away");
+
+  // A setup saved before there was a maximum has none; one that cannot be read is as good as none.
+  putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https://images.example.com/v1", editEnabled: true }));
+  assert.equal(gen.imageGenerationConfig().editMaxSize, "");
+  assert.equal(gen.imageGenerationConfig().baseUrl, "https://images.example.com/v1", "the rest of an old setup is read as it was");
+  for (const bad of [2048, "auto", "wide", null, ["2048x2048"]]) {
+    putSetting("image_generation", JSON.stringify({ editMaxSize: bad }));
+    assert.equal(gen.imageGenerationConfig().editMaxSize, "", `stored ${JSON.stringify(bad)}`);
+  }
+  reset();
+});
+
+test("an edit beyond the maximum size is refused before anything is sent, and says what the limit is", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    const limited = target(origin, { maxSize: "2048x1024", multiple: true });
+    const refused = (request: Parameters<typeof editing.editImage>[1], message: RegExp) =>
+      assert.rejects(editing.editImage(limited, request), (e: Error) => {
+        assert.ok(e instanceof gen.ImageGenerationError);
+        assert.match(e.message, message);
+        assert.match(e.message, /Nothing was sent/);
+        return true;
+      });
+    await refused({ prompt: "p", image: pngOf(2049, 1024) }, /^The image is 2049x1024 pixels, which is over the maximum of 2048x1024 for an edit\./);
+    await refused({ prompt: "p", image: pngOf(1000, 2049) }, /^The image is 1000x2049 pixels, which is over the maximum of 2048x1024/);
+    await refused({ prompt: "p", image: pngOf(3000, 3000) }, /3000x3000 pixels.*maximum of 2048x1024/);
+    await refused({ prompt: "p", image: pngOf(100, 100), mask: pngOf(4096, 100) }, /^The mask is 4096x100 pixels/);
+    await refused({ prompt: "p", image: [pngOf(100, 100), pngOf(5000, 100)] }, /^Picture 2 is 5000x100 pixels/);
+    // The pixels are not read from a picture that is not one, or from one with no header to read.
+    await refused({ prompt: "p", image: PNG }, /^The image has a size that cannot be read.*maximum of 2048x1024/);
+    await refused({ prompt: "p", image: Buffer.from([0xff, 0xd8, 0xff, 0xff, 0xff, 0xe0]) }, /^The image has a size that cannot be read.*maximum of 2048x1024/);
+    assert.equal(seen.length, 0, "no request reached the endpoint");
+
+    // Within it, either way up, and exactly at it: sent as it always was.
+    for (const image of [pngOf(2048, 1024), pngOf(1024, 2048), pngOf(10, 10), pngOf(1500, 700)]) {
+      await editing.editImage(limited, { prompt: "p", image, mask: pngOf(64, 64) });
+    }
+    assert.equal(seen.length, 4);
+    // None set: any size goes, as it did.
+    await editing.editImage(target(origin), { prompt: "p", image: pngOf(9000, 9000) });
+    await editing.editImage(target(origin), { prompt: "p", image: PNG });
+    assert.equal(seen.length, 6);
+  } finally {
+    server.close();
+  }
+});
+
+test("edit_image tells the agent that the maximum size is exceeded, and sends and keeps nothing", async () => {
+  const folder = chatWith({ "small.png": pngOf(512, 512), "wide.png": pngOf(4000, 500), "tall.png": pngOf(300, 3000) });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "2048x2048" });
+    const { call } = loadEdit(folder);
+    await assert.rejects(call({ path: "wide.png", prompt: "p" }), /^Error: The image is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit\. Nothing was sent\..*Settings → Images/);
+    await assert.rejects(call({ paths: ["small.png", "tall.png"], prompt: "p" }), /^Error: Picture 2 is 300x3000 pixels, which is over the maximum of 2048x2048/);
+    assert.equal(seen.length, 0, "no request reached the endpoint");
+    assert.deepEqual(readdirSync(folder).sort(), ["small.png", "tall.png", "wide.png"], "no file or folder was made");
+
+    // The limit is read at each call: raised, the same picture goes.
+    gen.saveImageGeneration({ editMaxSize: "4096x4096" });
+    assert.match((await call({ path: "wide.png", prompt: "p" })).content[0].text, /^Edited wide\.png/);
+    assert.equal(seen.length, 1);
+    gen.saveImageGeneration({ editMaxSize: "" });
+    assert.match((await call({ paths: ["small.png", "tall.png"], prompt: "p" })).content[0].text, /^Made from small\.png, tall\.png/);
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("the API saves the maximum size of an edit and refuses one that is no size, without reloading chats", async () => {
+  const express = (await import("express")).default;
+  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const app = express().use(express.json()).use("/api", featuresRouter());
+  const portal = app.listen(0, "127.0.0.1");
+  await new Promise((r) => portal.once("listening", r));
+  const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/api`;
+  const call = async (method: string, p: string, body?: unknown) => {
+    const r = await fetch(`${at}${p}`, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, body: await r.json() as any };
+  };
+  try {
+    reset();
+    assert.equal((await call("GET", "/features/images")).body.images.editMaxSize, "", "none by default");
+    const saved = await call("PUT", "/features/images", { editMaxSize: "2048x2048" });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.body, { images: fresh({ editMaxSize: "2048x2048" }), changed: false, reloaded: 0, waiting: 0 });
+    assert.equal((await call("GET", "/features")).body.images.editMaxSize, "2048x2048");
+    const refused = await call("PUT", "/features/images", { editMaxSize: "huge" });
+    assert.equal(refused.status, 400);
+    assert.equal((await call("GET", "/features/images")).body.images.editMaxSize, "2048x2048", "a refused one changes nothing");
+    assert.equal((await call("PUT", "/features/images", { editMaxSize: "" })).body.images.editMaxSize, "");
   } finally {
     portal.close();
     reset();

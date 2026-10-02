@@ -85,7 +85,7 @@ that, a session asking for a local model silently started on pi's fallback.
 switches the agent's procedures. **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
 
-**Images** holds the image endpoint behind generation and editing, see
+**Images** holds the image endpoint behind generation and editing, including the maximum picture size of an edit, see
 [Opt-in features](/guide/features#image-generation). The tools themselves, `show_image`,
 `generate_image` and `edit_image`, are in the Tools list, together in one **Images** group.
 

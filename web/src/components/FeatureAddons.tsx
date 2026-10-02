@@ -702,9 +702,14 @@ const timeoutOk = (typed: string) => typed.trim() === "" || (/^\d+$/.test(typed.
 interface ImagesEditDraft {
   baseUrl: string;
   model: string;
+  /** As typed: "2048x2048", or empty for no limit. */
+  maxSize: string;
   /** Typed anew; empty keeps the one saved. */
   apiKey: string;
 }
+
+/** What the server takes as a maximum size (MAX_SIZE there): empty is none. */
+const maxSizeOk = (typed: string) => typed.trim() === "" || /^[1-9]\d{1,4}x[1-9]\d{1,4}$/.test(typed.trim());
 
 const originOf = (address: string): string => {
   try {
@@ -729,7 +734,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   if (!images) return <Loading />;
   const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, timeout: String(images.timeoutSeconds), apiKey: "" };
   const edit = (patch: Partial<ImagesDraft>) => setDraft({ ...form, ...patch });
-  const editForm = editDraft ?? { baseUrl: images.editBaseUrl, model: images.editModel, apiKey: "" };
+  const editForm = editDraft ?? { baseUrl: images.editBaseUrl, model: images.editModel, maxSize: images.editMaxSize, apiKey: "" };
   const editEdit = (patch: Partial<ImagesEditDraft>) => setEditDraft({ ...editForm, ...patch });
   // The key of generation goes along when edits go to the same server and have none of their own: the server says the same.
   const usesKeyAbove = images.keySet && !images.editKeySet && originOf(editForm.baseUrl || images.baseUrl) === originOf(images.baseUrl);
@@ -917,16 +922,32 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
               className={`${inputCls} mt-1 font-mono text-xs`}
             />
           </label>
+          <label className="text-xs text-fg-muted">
+            {t("Maximum picture size")}
+            <input
+              value={editForm.maxSize}
+              onChange={(e) => editEdit({ maxSize: e.target.value })}
+              placeholder="2048x2048"
+              spellCheck={false}
+              autoComplete="off"
+              aria-invalid={!maxSizeOk(editForm.maxSize)}
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
         </div>
         <p className="text-[11px] text-fg-faint">
           {t("Leave the address empty to edit with the server above, with its key. The model above is not used for editing, as a model that makes pictures may not change them; leave this one empty for the server's own. A key goes only to the address it was given for.")}
+        </p>
+        <p className="text-[11px] text-fg-faint">
+          {t("The maximum picture size is the most pixels a picture sent to be edited may have, such as 2048x2048, whichever way up it is. A picture beyond it is not sent: the agent is told the limit is exceeded and what it is. Leave it empty for no limit.")}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {editDraft && (
             <button
               type="button"
               className={primaryCls}
-              onClick={() => void change({ editBaseUrl: editForm.baseUrl, editModel: editForm.model, ...(editForm.apiKey ? { editApiKey: editForm.apiKey } : {}) })}
+              disabled={!maxSizeOk(editForm.maxSize)}
+              onClick={() => void change({ editBaseUrl: editForm.baseUrl, editModel: editForm.model, ...(editForm.maxSize.trim() !== images.editMaxSize ? { editMaxSize: editForm.maxSize.trim() } : {}), ...(editForm.apiKey ? { editApiKey: editForm.apiKey } : {}) })}
             >
               {t("Save")}
             </button>
