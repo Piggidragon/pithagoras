@@ -6,6 +6,7 @@ import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMA
 import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
+import { crossModelThinkingExtension } from "./cross-model-thinking.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
 import { browserTools } from "../browser/tools.js";
 import { EventEmitter } from "node:events";
@@ -428,6 +429,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // after it reads something untrusted, and any session can read something.
       const factories: { name: string; factory: (pi: any) => void }[] = [
         { name: "voice-first", factory: voiceFirst.extension },
+        // After a model switch, the earlier model's thinking is not handed on as answer text: see #60.
+        { name: "cross-model-thinking", factory: crossModelThinkingExtension },
         { name: "guard", factory: guardExtension(
             opts.sessionDir,
             opts.whoNow ?? (() => ({ role: "primary" })),

@@ -7,7 +7,7 @@ interface Portal {
   slowSettings?: number;
   stored?: Record<string, string>;
   /** What a server at an address lists, or undefined when nothing answers there. */
-  probe?: (baseUrl: string) => string[] | undefined;
+  probe?: (baseUrl: string) => (string | { id: string; name?: string })[] | undefined;
   /** How long a server at an address takes to answer. */
   probeDelay?: (baseUrl: string) => number;
   homepage?: string;
@@ -66,6 +66,7 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
     else if (p === '/api/providers') body = {
       presets: [
         { kind: 'llama-cpp', label: 'llama.cpp', description: 'One llama-server', id: 'llama-server', endpoint: true, baseUrl: 'http://127.0.0.1:8080/v1', key: 'optional' },
+        { kind: 'llama-swap', label: 'llama-swap', description: 'Several models, swapped in', id: 'llama-swap', endpoint: true, baseUrl: 'http://127.0.0.1:8080/v1', key: 'optional' },
         { kind: 'custom', label: 'Custom', description: 'Any OpenAI-compatible server', id: 'custom', endpoint: true, key: 'optional' },
         { kind: 'openrouter', label: 'OpenRouter', description: 'Hundreds of hosted models', id: 'openrouter', endpoint: false, key: 'required' },
       ],
@@ -90,7 +91,7 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
       if (!listed) return route.fulfill({ status: 502, json: { error: 'Nothing answered there.' } });
       // As the server says it: with its scheme and its /v1.
       const at = /\/v\d/.test(asked) ? asked : `${/^https?:/.test(asked) ? '' : 'http://'}${asked.replace(/\/+$/, '')}/v1`;
-      body = { baseUrl: at, models: listed.map((id) => ({ id })) };
+      body = { baseUrl: at, models: listed.map((m) => (typeof m === 'string' ? { id: m } : m)) };
     }
     else if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push({ id: decodeURIComponent(p.split('/').pop()!), body: route.request().postDataJSON() }); body = { ok: true, ...(providerNote ? { note: providerNote } : {}) }; }
     else if (p === '/api/providers/probe') return route.fulfill({ status: 502, json: { error: 'Nothing answered at 127.0.0.1:8080 — is the server running, and reachable from here?' } });
@@ -277,6 +278,8 @@ test('a stored model no one offers any more is not kept: the assistant offers on
 test('a new provider keeps only the models its current address lists', async ({ page }) => {
   const api = await portal(page, { probe: (url) => (url.includes('9090') ? ['B'] : url.includes('8080') ? ['A'] : undefined) });
   await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  // A model list cached by the chat's model menu, from before this provider.
+  await page.addInitScript(() => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('modelCatalogue.v2', JSON.stringify({ at: Date.now(), models: [{ id: 'A', name: 'A', provider: 'x' }] })); sessionStorage.setItem('seeded', '1'); } });
   await page.goto('/settings/models');
   const dialog = page.getByRole('dialog', { name: 'Settings' });
   await dialog.getByRole('button', { name: 'Add a provider' }).click();
@@ -293,6 +296,8 @@ test('a new provider keeps only the models its current address lists', async ({ 
   await dialog.getByRole('button', { name: 'Add', exact: true }).click();
   await expect.poll(() => api.providerSaves.length).toBe(1);
   expect((api.providerSaves[0].body as { models: { id: string }[] }).models.map((m) => m.id)).toEqual(['B', 'Mine']);
+  // Saved: the cached list goes, so the next model menu opened fetches the new one.
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('modelCatalogue.v2'))).toBeNull();
 });
 
 test("a package's link that is not a web page is not made a link", async ({ page }) => {
@@ -457,4 +462,19 @@ test('what a save did besides is said: a copy kept of a models.json whose commen
   await expect(dialog.getByLabel('Use A')).toBeChecked();
   await dialog.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(dialog.getByRole('status')).toContainText('models.json.before-x.bak');
+});
+
+test("asking a saved provider's server again takes the names it gives now: a llama-swap alias once saved under its router's name", async ({ page }) => {
+  // Saved as Ornith 1.5; the server now lists it under no name of its own, as llama-swap's aliases are read.
+  const api = await portal(page, { probe: () => [{ id: 'Ornith' }, { id: 'Strata', name: 'Strata — Flash' }] });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Edit llama-swap' }).click();
+  await dialog.getByRole('button', { name: 'Ask again' }).click();
+  await expect(dialog.getByText('Ornith 1.5')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.poll(() => api.providerSaves.length).toBe(1);
+  const saved = (api.providerSaves[0].body as { models: { id: string; name?: string }[] }).models;
+  expect(saved.find((m) => m.id === 'Ornith')?.name).toBeUndefined();
 });
