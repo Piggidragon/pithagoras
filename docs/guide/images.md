@@ -139,7 +139,7 @@ folder is deleted the same way.
 
 The page lists and serves pictures only from the places the portal knows: its own
 folder, `images`, under the portal's data folder, and the `generated-images` folder of
-the folders the agent works in — Home, the projects, and the folder of every chat. It
+the folders the agent works in — the home of every agent, the projects, and the folder of every chat. It
 never opens a path the page names — a picture is asked for by its id — and every file is
 opened with the checks the Files panel's pictures have: a path inside the folder, no
 link followed out of it, and what its bytes say it is.
@@ -147,7 +147,7 @@ link followed out of it, and what its bytes say it is.
 - The agent's pictures are listed from the moment its tools save them, with what they
   were asked for. **Pictures that nobody listed are found as well:** the ones made before
   the gallery existed. The portal looks in
-  `generated-images` of Home, of every project and of every folder a chat works in, and
+  `generated-images` of every agent's home, of every project and of every folder a chat works in, and
   lists each file there whose first bytes say it is a PNG, JPEG, GIF or WebP, of at most
   25 MB, whatever it is called. A link is never followed, a file that is no picture is
   left out, and nothing else in those folders — a project's other files, folders inside
@@ -181,6 +181,11 @@ link followed out of it, and what its bytes say it is.
   file. A picture that was found has no chat to keep it, so it is dropped with its
   folder and found again when the folder is back, and a delete of one says the same while
   the folder cannot be reached.
+- **Deleting an agent** does the same with its chats' pictures. With **Keep its folder**
+  they stay in the gallery, with what they were asked for, as pictures of that folder
+  (named by its folder, as no agent has it), and an agent made under the same name takes
+  them up again. With **Delete its folder too** the files are gone, and so are they, those
+  of its routines' runs included.
 - Looking through the folders for the first time reads the first bytes of every file
   there; after that the portal only reads the folders' names, and opens a file again only
   when it is new or has changed, so a gallery of hundreds stays quick.

@@ -7,10 +7,9 @@ import { DEFAULT_VOICE_INSTRUCTIONS, voiceInstructions, voiceRulesOn } from '../
 import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import express, { type Router } from "express";
-import { getDb, getStoredSettings } from "../db.js";
+import { getDb, getSession, getStoredSettings } from "../db.js";
+import { agentOf, defaultAgent } from "../agents.js";
 
 const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
 export interface VoiceConfig {
@@ -64,7 +63,7 @@ export function validateConfig(value: any): VoiceConfig {
     throw new Error("Provide a voice description of 1–1000 characters");
   const voice = value.voice ?? "design";
   if (typeof voice !== "string") throw new Error("Choose a speaking voice");
-  const preset = ["design", "aria"].includes(voice) ? undefined : readVoice(voice);
+  const preset = voice === "design" ? undefined : readVoice(voice);
   const language = value.language ?? "auto";
   if (!INPUT_LANGUAGES.some(([code]) => code === language))
     throw new Error("Choose a supported input language");
@@ -86,7 +85,7 @@ export function validateConfig(value: any): VoiceConfig {
     if (!CHATTERBOX_LANGUAGES.includes(language)) throw new Error(`Chatterbox speaks: ${CHATTERBOX_LANGUAGES.join(", ")}`);
     // Refuse a voice it cannot speak with here, rather than on every phrase.
     if (voice === "design" || (preset && !preset.audio))
-      throw new Error("Chatterbox speaks with a reference clone: choose Aria or a voice with a recording");
+      throw new Error("Chatterbox speaks with a reference clone: choose a voice with a recording");
   }
   const vad = { ...DEFAULT_VAD, ...value.vad };
   for (const [key, min, max] of [['positiveSpeechThreshold', 0.01, 1], ['negativeSpeechThreshold', 0, 0.99], ['minSpeechMs', 64, 2000], ['preSpeechPadMs', 0, 1000], ['redemptionMs', 200, 3000]] as const) {
@@ -373,7 +372,10 @@ export function voiceRouter(): Router {
     const text = req.body?.text;
     if (typeof text !== "string" || !text.trim() || text.length > 600)
       return res.status(400).json({ error: "Speech text must contain 1–600 characters" });
-    const settings = config();
+    // The voice of the agent the chat is with, where it has one of its own: the
+    // first agent's for a chat in a project, as its avatar is.
+    const own = (agentOf(getSession(req.params.id)?.workspace) ?? defaultAgent()).voice;
+    const settings = { ...config(), ...(own ? { voice: own } : {}) };
     const controller = new AbortController();
     res.on("close", () => controller.abort());
     try {
@@ -381,25 +383,16 @@ export function voiceRouter(): Router {
       // the runtime that is about to be called should pay to carry it.
       let instruction = settings.instruction;
       let reference: { audio: Buffer; transcript: string; filename: string } | undefined;
-      if (!['design','aria'].includes(settings.voice)) {
+      if (settings.voice !== "design") {
         const preset = readVoice(settings.voice);
         instruction = preset.instruction;
         if (preset.audio) reference = { audio: preset.audio, transcript: preset.transcript, filename: "reference.wav" };
-      }
-      if (settings.voice === "aria") {
-        const directory = path.join(process.env.DATA_DIR || "./data", "voices");
-        const [audio, transcript] = await Promise.all([
-          readFile(path.join(directory, "aria.wav")),
-          readFile(path.join(directory, "aria.txt"), "utf8"),
-        ]).catch(() => { throw new Error("Install the Aria reference audio and transcript in the portal voices directory"); });
-        if (!audio.length || !transcript.trim()) throw new Error("Aria reference audio and transcript must not be empty");
-        reference = { audio, transcript: transcript.trim(), filename: "aria.wav" };
       }
       // Chatterbox clones a speaker; it has no designed or built-in voice.
       // validateConfig refuses this combination on save; a config written before
       // that check, or by the managed connect, still reaches here.
       if (settings.runtime === "chatterbox" && !reference)
-        throw new Error("Chatterbox speaks with a reference clone: choose Aria or a voice with a recording");
+        throw new Error("Chatterbox speaks with a reference clone: choose a voice with a recording");
       let form: FormData | undefined;
       let json: Record<string, unknown> | undefined;
       if (settings.runtime === "chatterbox") {

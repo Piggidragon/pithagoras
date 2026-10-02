@@ -26,6 +26,8 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     else if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: String(Date.now()) }); reply = routine; }
     else if (p === '/api/routines/r1/sessions') reply = { sessions: [] };
     else if (p === '/api/routines/report-targets') reply = { targets: [], default: null };
+    // The routines page offers the agents' homes beside the projects; the first one is Home.
+    else if (p === '/api/agents') reply = { agents: [{ id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: {}, voice: '' }] };
     else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [{ name: 'site', path: '/w/site', isGit: true }, { name: 'notes', path: '/w/notes', isGit: false }] };
     else if (p === '/api/models') reply = { models: [{ provider: 'x', id: 'm', name: 'M', reasoning: false }], providers: {} };
     await route.fulfill({ json: reply });
