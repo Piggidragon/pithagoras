@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,10 +30,11 @@ test("a chat's levels do not wait for pi's catalogue to be built", async () => {
   // extension's code, loaded — held the answer up to 1.5s after each start
   // or install, where the page has what it last saw to draw meanwhile.
   //
-  // The build is held on a promise of the test's own, so that how long it takes
-  // is not what is measured: an answer that comes while it is still pending did
-  // not wait for it, however slow the machine is, and one that waits never
-  // comes, which the guard turns into a failure.
+  // The build is held on a promise of the test's own, and the clock is the
+  // test's too, so that how long anything takes is not what is measured. Once
+  // the wait the chat has is over, the answer is there although the build is
+  // still pending: it did not wait for it. One that waits for the build, or
+  // for longer than it is given, is not there, however slow the machine is.
   const pi = await import("@earendil-works/pi-coding-agent");
   const { modelRuntime } = await import("../dist/api/providers.js");
   const create = pi.ModelRuntime.create;
@@ -45,14 +46,18 @@ test("a chat's levels do not wait for pi's catalogue to be built", async () => {
     await held;
     return create.apply(pi.ModelRuntime, args);
   };
-  let guard;
+  // Only setTimeout, and only around the call: setImmediate stays real, to let what is ready run.
+  mock.timers.enable({ apis: ["setTimeout"] });
   try {
-    const never = new Promise((_, reject) => { guard = setTimeout(() => reject(new Error("the levels waited for the catalogue to be built")), 10_000); });
-    assert.deepEqual(await Promise.race([modelLevels("test-server", "switch"), never]), []);
+    let answer;
+    modelLevels("test-server", "switch").then((levels) => { answer = levels; });
+    mock.timers.tick(150);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(answer, [], "the levels waited for the catalogue to be built, or for more than the wait they have");
     // The build was started, and is still going: that is what was not waited for.
     assert.equal(started, true, "the build was not started");
   } finally {
-    clearTimeout(guard);
+    mock.timers.reset();
     release();
     pi.ModelRuntime.create = create;
   }
