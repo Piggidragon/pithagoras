@@ -104,17 +104,31 @@ export class AudioRule {
   }
 }
 
+/**
+ * The providers whose first call of a spoken turn goes without thinking, unless
+ * the voice settings name others: the ways a llama.cpp server shows up. Thinking
+ * is switched off through the chat template (`enable_thinking`), which only a
+ * llama.cpp server reads.
+ */
+export const DEFAULT_SKIP_THINKING_PROVIDERS: readonly string[] = ["llama.cpp", "llama-server", "llama-swap"];
+
+/** Whether `list` names `provider`: as it is, or as `name=<url>`, which is how pi-llama-cpp names one per server. */
+export function listsProvider(list: readonly string[], provider: string | undefined): boolean {
+  return !!provider && list.some((name) => provider === name || provider.startsWith(`${name}=`));
+}
+
 /** First-call thinking is transient; formatting is governed by AudioRule. */
 export class VoiceFirstTurn {
   private active = false;
   private first = false;
+  /** `providers`: the list saved in the voice settings, read at each call; none saved means the default one. */
+  constructor(private readonly providers: () => readonly string[] | undefined = () => undefined) {}
   arm(first = true) { this.active = true; this.first = first; }
   reset() { this.active = false; this.first = false; }
   extension = (pi: any) => {
     pi.on('before_provider_request', (event: any, ctx: any) => {
       if (process.env.VOICE_SKIP_FIRST_THINKING === 'false') return;
-      const provider = ctx.model?.provider as string | undefined;
-      if (!this.active || !this.first || !(provider === 'llama.cpp' || provider?.startsWith('llama-server'))) return;
+      if (!this.active || !this.first || !listsProvider(this.providers() ?? DEFAULT_SKIP_THINKING_PROVIDERS, ctx.model?.provider)) return;
       const payload = { ...event.payload, chat_template_kwargs: { ...event.payload.chat_template_kwargs, enable_thinking: false } };
       delete payload.thinking_budget_tokens;
       return payload;

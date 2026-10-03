@@ -23,7 +23,7 @@ import { heartbeatTool } from "./heartbeat-tool.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
-import { contextWindowFor, getVoiceInstructions, portalBrowserOn } from "../db.js";
+import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, portalBrowserOn } from "../db.js";
 import { configStamp } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { UNDERSTORY_RULE, understoryOn } from "../features.js";
@@ -406,7 +406,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Without an explicit loader the SDK starts with no extensions, skills or
     // prompt templates — so installed packages contribute no commands at all.
     // The CLI wires this up for you; here it has to be asked for.
-    const voiceFirst = new VoiceFirstTurn();
+    const voiceFirst = new VoiceFirstTurn(getSkipThinkingProviders);
     let resourceLoader: any;
     // What the conversation has switched off: the client's, once there is one.
     let switchedOff: () => ReadonlySet<string> = () => new Set(opts.toolsOff ?? []);
