@@ -60,9 +60,12 @@ write them by reflex, and refusing over one is a rule nobody can act on.
 
 ## Scope
 
-A rule naming a person applies to them alone. Approving Priya's request must not
-quietly permit that command for every colleague, so the chip on the rule says
-whose it is — a name, or `all colleagues`.
+A rule naming a person applies to them alone, **whatever their role is**.
+Approving Priya's request must not quietly permit that command for every
+colleague, and promoting her must not make her rule stop working. It can also be
+given to a primary or a blocked person, which a role could not express: the page
+writes a person's rules for *all roles*, narrowed to them. A rule for a role
+applies to everybody who holds it, and the list behind the roster says so.
 
 ## Writing one by hand
 

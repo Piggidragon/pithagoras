@@ -108,6 +108,7 @@ channel id before storage, so two channels using the same key stay separate.
 const reply = await ctx.ask("Deploy the staging branch", {
   session: `chat:${chatId}`,
   title: "Engineering",
+  from: { id: userId, name: userName }, // who sent it, by the platform's own id
   chatId,
 });
 await sendBack(reply);

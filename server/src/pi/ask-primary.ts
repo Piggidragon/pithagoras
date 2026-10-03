@@ -95,7 +95,8 @@ export function askPrimaryTool(sessionId: string) {
           await channelSupervisor.send(
             to.channel,
             to.target,
-            `${row.person_name} is asking (via ${session.channel_slug}):\n\n${question}\n\n` +
+            // The key beside the name: a name is whatever somebody called themselves, the key is who the platform says they are.
+            `${row.person_name} (${row.person_key}) is asking (via ${session.channel_slug}):\n\n${question}\n\n` +
               (row.action
                 ? `It wants to run, exactly once:\n\n    ${row.action.replace(/\n/g, "\n    ")}\n\n` +
                   `Approving runs that and nothing else.\n\n`

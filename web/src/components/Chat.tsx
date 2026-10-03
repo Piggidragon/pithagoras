@@ -1,5 +1,6 @@
 import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { PictureCall } from "./PictureCall";
+import { splitContext } from "../context-blocks";
 import { isPictureCall } from "../picture-call";
 import { workingText } from "./StatusDot";
 import { VoiceTerminal } from "./VoiceTerminal";
@@ -158,42 +159,6 @@ function storedComposerHeight(): number {
 
 function persistComposerHeight(height: number) {
   local.set(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
-}
-
-/**
- * Context the portal attaches to a message, and what to call it.
- *
- * The agent needs to be told who is speaking and what it said while nobody was
- * talking to it. A person reading the transcript does not — they wrote the
- * message, so seeing their own words buried under three framing blocks is
- * noise. Folded away rather than dropped: it is still what the model saw, and
- * when a reply looks strange this is usually why.
- */
-/** Keep in step with what the server attaches — see channels/supervisor.ts. */
-const CONTEXT_BLOCKS: { tag: string; label: string }[] = [
-  { tag: "speaker", label: msg("Speaker") },
-  { tag: "sent-since-you-last-spoke", label: msg("Sent while idle") },
-  { tag: "answer-from-primary", label: msg("Answer") },
-  { tag: "channel-instructions", label: msg("Channel instructions") },
-  { tag: "routine", label: msg("Routine") },
-];
-
-function splitContext(raw: string): { text: string; blocks: { label: string; body: string }[] } {
-  let text = raw;
-  const blocks: { label: string; body: string }[] = [];
-  for (const { tag, label } of CONTEXT_BLOCKS) {
-    // The opening tag may carry attributes, as <routine name="..."> does.
-    const re = new RegExp(`<${tag}(\\s[^>]*)?>[\\s\\S]*?</${tag}>`, "g");
-    text = text.replace(re, (match) => {
-      const body = match
-        .replace(new RegExp(`^<${tag}(\\s[^>]*)?>`), "")
-        .replace(new RegExp(`</${tag}>$`), "")
-        .trim();
-      if (body) blocks.push({ label, body });
-      return "";
-    });
-  }
-  return { text: text.trim(), blocks };
 }
 
 function ContextChip({ label, body }: { label: string; body: string }) {

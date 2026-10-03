@@ -11,10 +11,12 @@ import {
   consumeNotes,
 } from "../db.js";
 import { resolveChannelSession, scopeKey } from "../agent.js";
-import { sessions, EXECUTOR_KIND, stripThinkingMarkers } from "../session-manager.js";
+import { sessions, CommandFailed, EXECUTOR_KIND, stripThinkingMarkers } from "../session-manager.js";
+import { ruleApplies, taintSession } from "../pi/guard.js";
 import { readAnswer, recordAnswer, type QuestionRow } from "../questions.js";
 import { recordApproval } from "../approvals.js";
 import {
+  getPerson,
   hasPrimary,
   lower,
   markAnnounced,
@@ -25,6 +27,8 @@ import {
   type PersonRow,
 } from "../people.js";
 import { loadChannels, type LoadedChannel } from "./loader.js";
+import { neutralise, notesBlock } from "./framing.js";
+import { parseConfig, type ChannelRow } from "./row.js";
 
 /**
  * Runs the enabled channels.
@@ -35,19 +39,6 @@ import { loadChannels, type LoadedChannel } from "./loader.js";
  */
 
 export type ChannelState = "running" | "stopped" | "starting" | "error";
-
-interface ChannelRow {
-  id: string;
-  slug: string;
-  kind: string;
-  name: string;
-  enabled: number;
-  config: string;
-  instructions: string;
-  relay_progress: number;
-  relay_tools: number;
-  updated_at: string;
-}
 
 interface Running {
   /** Restarted when this changes, so an edited token takes effect. */
@@ -67,7 +58,18 @@ interface Running {
   /** Optional: platform-native question rendering, with a text fallback. */
   prompt?: (
     target: string,
-    request: { id: string; method: string; question: string; options?: string[] }
+    request: {
+      id: string;
+      method: string;
+      question: string;
+      options?: string[];
+      /**
+       * Whether the sender with this platform id may answer: the person it was
+       * asked of, or the primary user. For a transport whose answers are taps
+       * that any member of a group can make.
+       */
+      canAnswer: (senderId: string) => boolean;
+    }
   ) => Promise<{ value?: unknown; cancelled?: boolean } | null>;
   log: { at: string; text: string }[];
 }
@@ -110,7 +112,13 @@ interface PendingUi {
   id: string;
   method: string;
   options?: string[];
+  /** Whose message raised it: only they, or the primary user, answer it. */
+  asker?: string;
 }
+
+/** May this sender answer the dialog? Anybody may where nobody was told apart. */
+const mayAnswer = (open: PendingUi, who: { key: string; role: string } | null | undefined): boolean =>
+  !open.asker || who?.key === open.asker || who?.role === "primary";
 
 class ChannelSupervisor {
   private running = new Map<string, Running>();
@@ -337,9 +345,8 @@ class ChannelSupervisor {
     try {
       const reply = stripThinkingMarkers((await sessions.ask(sessionId, () => {
         const pending = pendingNotes(sessionId);
-        const full = pending.length
-          ? `${prompt}\n\n<sent-since-you-last-spoke>\n${pending.map(n => n.text).join("\n\n---\n\n")}\n</sent-since-you-last-spoke>`
-          : prompt;
+        if (pending.length) taintSession(sessionId);
+        const full = pending.length ? `${prompt}\n\n${notesBlock(pending.map((n) => n.text))}` : prompt;
         return { message: full, onAccepted: () => consumeNotes(sessionId, pending.map(n => n.id)) };
       })) ?? "");
       if (reply) await this.send(question.channel_slug, question.channel_key, reply);
@@ -409,6 +416,21 @@ class ChannelSupervisor {
     const person = senderId
       ? seen(personKey(row.slug, senderId), typeof from?.name === "string" ? from.name : "")
       : null;
+
+    if (!person && hasPrimary()) {
+      // Once somebody is named, nobody is let in unknown, and a message that says
+      // nothing of who sent it cannot be told from a stranger's. Said so, so that
+      // whoever set the channel up knows what to give it.
+      recordAudit({
+        kind: "stranger",
+        reason: `Turned away on ${row.slug}: the message named no sender`,
+        subject: text.slice(0, 200),
+      });
+      return (
+        "I only talk to people I have been introduced to, and this message did not say who " +
+        "sent it. If this channel is yours, have it name its sender."
+      );
+    }
 
     if (person && person.role === "unknown" && hasPrimary()) {
       recordAudit({
@@ -525,7 +547,13 @@ class ChannelSupervisor {
     }
 
     // Answering an extension's question, not starting a new turn. The reply
-    // travels back through the ask that is still running.
+    // travels back through the ask that is still running. Only by the one it
+    // was asked of, or the primary user: in a group the next message is
+    // anybody's, and a dialog that asks the owner to confirm something is not
+    // for a guest to say yes to.
+    if (open && !mayAnswer(open, person)) {
+      return `That question is waiting for ${getPerson(open.asker!)?.name ?? "somebody else"}. Your message was not taken as the answer.`;
+    }
     if (open) {
       // Anything that is not a valid answer cancels. Re-asking would trap the
       // conversation in a question nobody meant to be in — the run stays
@@ -557,6 +585,7 @@ class ChannelSupervisor {
 
     const reply = await sessions.ask(session.id, () => {
       const pending = pendingNotes(session.id);
+      if (pending.length) taintSession(session.id);
       return {
         message: withInstructions(text, row.instructions, person, pending.map(n => n.text)),
         onAccepted: () => consumeNotes(session.id, pending.map(n => n.id)),
@@ -616,38 +645,31 @@ class ChannelSupervisor {
             method: request.method,
             question,
             options: request.options,
+            canAnswer: (senderId) => mayAnswer({ id: request.id, method: request.method, asker: person?.key }, getPerson(personKey(row.slug, senderId))),
           })
             .then((answer) => {
               if (!answer) {
                 // Declined it: fall back to asking in words.
-                this.pendingUi.set(session.id, {
-                  id: request.id,
-                  method: request.method,
-                  options: request.options,
-                });
+                this.pendingUi.set(session.id, { id: request.id, method: request.method, options: request.options, asker: person?.key });
                 void packageReply?.(question);
                 return;
               }
               sessions.respondUi(session.id, request.id, answer);
             })
             .catch(() => {
-              this.pendingUi.set(session.id, {
-                id: request.id,
-                method: request.method,
-                options: request.options,
-              });
+              this.pendingUi.set(session.id, { id: request.id, method: request.method, options: request.options, asker: person?.key });
               void packageReply?.(question);
             });
           return;
         }
 
-        this.pendingUi.set(session.id, {
-          id: request.id,
-          method: request.method,
-          options: request.options,
-        });
+        this.pendingUi.set(session.id, { id: request.id, method: request.method, options: request.options, asker: person?.key });
         void packageReply?.(question);
       },
+    }).catch((e) => {
+      // A command that was refused, said as the answer: it is what the sender asked for.
+      if (e instanceof CommandFailed) return e.message;
+      throw e;
     });
 
     // A channel with no way to relay mid-run had nowhere to put these, so they
@@ -735,18 +757,20 @@ function interpretAnswer(
 }
 
 /**
- * The channel's standing instructions, attached to each incoming message.
- *
- * Appended per message rather than set once as a system prompt: pi exposes
- * systemPrompt as a getter with no setter, and editing the instructions should
- * take effect on the next message rather than the next restart.
- */
-/**
  * The message, plus what the agent needs to know to answer it properly.
  *
  * Who is speaking is attached to every message rather than stated once at
  * session start, because in a group the sender changes between turns and an
  * agent working from the first one answers the wrong person.
+ *
+ * The channel's standing instructions go with each message rather than being
+ * set once as a system prompt: pi exposes systemPrompt as a getter with no
+ * setter, and editing the instructions should take effect on the next message
+ * rather than the next restart.
+ *
+ * Somebody who is not the primary user speaks after the portal has said who
+ * they are, never first: a message that began with their words could begin
+ * with a command. And their words cannot make one of the portal's blocks.
  */
 function withInstructions(
   text: string,
@@ -754,40 +778,24 @@ function withInstructions(
   person?: PersonRow | null,
   notes: string[] = []
 ): string {
-  const parts = [text];
-  if (notes.length) {
-    parts.push(
-      "<sent-since-you-last-spoke>\n" +
-        "You sent these into this conversation while it was idle — a routine's report, or an " +
-        "answer passed back. They are yours and the other person has already read them.\n\n" +
-        notes.join("\n\n---\n\n") +
-        "\n</sent-since-you-last-spoke>"
-    );
-  }
   const who = person
     ? senderFraming(
         person,
         primaryName(),
         Boolean(getDefaultReportTo()),
         listToolRules()
-          .filter((r) => r.role === person.role || r.role === "all")
+          .filter((r) => ruleApplies(r, person.role, person.key))
           .map((r) => `${r.tool}: ${r.pattern}`)
       )
     : "";
-  if (who) parts.push(`<speaker>\n${who}\n</speaker>`);
   const extra = (instructions ?? "").trim();
-  if (extra) parts.push(`<channel-instructions>\n${extra}\n</channel-instructions>`);
-  return parts.join("\n\n");
+  return [
+    ...(who ? [`<speaker>\n${who}\n</speaker>`] : []),
+    neutralise(text),
+    ...(notes.length ? [notesBlock(notes)] : []),
+    ...(extra ? [`<channel-instructions>\n${extra}\n</channel-instructions>`] : []),
+  ].join("\n\n");
 }
-
-const parseConfig = (raw: string): Record<string, unknown> => {
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-};
 
 /** Config or identity changing means the running channel is stale. */
 const signature = (row: ChannelRow) =>

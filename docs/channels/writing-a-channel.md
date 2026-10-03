@@ -108,6 +108,7 @@ portal turns each key into an isolated session and keeps them apart.
 const reply = await ctx.ask(text, {
   session: `chat:${chatId}`,   // one conversation
   title: "Engineering",        // human label, used the first time only
+  from: { id: userId, name },  // who sent it: see Identity below
   chatId,                      // anything else you need to route the reply
 });
 ```
@@ -135,10 +136,12 @@ Pass `meta.onReply` and each stretch is handed to you as it completes, so the
 chat shows the agent working instead of going silent:
 
 ```js
-await ctx.ask(text, {
+const reply = await ctx.ask(text, {
   session: `chat:${chatId}`,
+  from: { id: userId, name },
   onReply: (body) => send(chatId, body),
 });
+if (reply) await send(chatId, reply);
 ```
 
 You also get a line for every tool as it starts, so the chat shows what the
@@ -157,7 +160,16 @@ When progress is on, `ask` resolves with `""` — the prose has already been giv
 to you, and returning it too would post everything twice. When it is off, only
 tool lines are relayed and `ask` resolves with the whole answer at the end. Both
 off and nothing is relayed at all. So the safe shape is: send everything
-`onReply` gives you, then send the return value if it is non-empty.
+`onReply` gives you, then send the return value if it is non-empty. The portal's
+own answers — `Stopped.`, `Nothing running.`, the refusal a stranger gets, the
+confirmation of an approval — are always the return value and never go through
+`onReply`, so a package that drops it posts nothing for them, and with
+**Progress** off nothing at all.
+
+A question an extension asks mid-run is relayed to you with the rest. If your
+transport answers it with buttons that any member of a group can press (as
+Telegram's do), the request you are given carries `canAnswer(senderId)`: check it
+with the id of whoever pressed, and ignore the press when it is false.
 
 ### Interrupting
 
@@ -231,7 +243,10 @@ authenticate every request:
 const server = createServer(async (req, res) => {
   if (!validSecret(req)) return unauthorized(res);
   const { message } = JSON.parse(await readBody(req));
-  const reply = await ctx.ask(message, { from: "webhook" });
+  const reply = await ctx.ask(message, {
+    session: "default",
+    from: { id: "ci", name: "CI" },   // who is speaking, never left out
+  });
   res.end(JSON.stringify({ reply }));
 });
 ```
@@ -332,8 +347,10 @@ POSTs `{session, message}` there, and the conversation becomes two-way.
 
 Pass `from: { id, name }` on `ctx.ask` — the platform's own id, never a display
 name. Without it every message is anonymous, which means it cannot be attributed
-to anybody in the [roster](/people/) and will be refused once a primary user is
-named.
+to anybody in the [roster](/people/) and is refused once a primary user is
+named, with a reply saying the message did not name its sender. A package written
+without `from` stops answering the day somebody is named primary, which is the
+safe way round: it would otherwise run with a primary user's rights.
 
 A webhook can pin its identity in config instead, so the secret is one person's
 credential rather than a licence to claim any name.

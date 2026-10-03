@@ -175,7 +175,7 @@ const RULES: Rule[] = [
  */
 const MARKER = /<<<\/?untrusted:[0-9a-f]{0,32}>>>/gi;
 
-const deface = (text: string) => text.replace(MARKER, "[marker removed]");
+export const deface = (text: string) => text.replace(MARKER, "[marker removed]");
 
 /**
  * The same envelope for the portal's own browser tools, without the paragraph:
@@ -428,16 +428,19 @@ export function ruleAllows(
   }
   // Each subject by some rule of its own, as the same calls one by one would be.
   return subjects.every((subject) =>
-    rules.some(
-      (r) =>
-        (r.role === role || r.role === "all") &&
-        // A rule naming somebody applies to them alone: approving Priya's request
-        // must not quietly permit the same command for every colleague.
-        (!r.person_key || r.person_key === personKey) &&
-        r.tool === toolName &&
-        globToRegExp(r.pattern).test(subject)
-    )
+    rules.some((r) => ruleApplies(r, role, personKey) && r.tool === toolName && globToRegExp(r.pattern).test(subject))
   );
+}
+
+/**
+ * Does a rule reach this speaker? One naming somebody applies to them alone,
+ * whatever their role is now: approving Priya's request must not permit the
+ * same command for every colleague, and her rule must not stop working when
+ * she is promoted. One for a role applies to everybody holding it.
+ */
+export function ruleApplies(rule: Pick<ToolRule, "role" | "person_key">, role: string, personKey?: string): boolean {
+  if (rule.person_key) return rule.person_key === personKey;
+  return rule.role === role || rule.role === "all";
 }
 
 /** A rule permitting this call, recorded so the log shows why it went through. */
@@ -507,16 +510,58 @@ function unreadable(toolName: string, input: Record<string, unknown>, workspace:
   return undefined;
 }
 
-/** What a session's entries say it has read: a result that came wrapped as somebody else's words. */
+/** The opening of an envelope, as every one of them begins: a fresh id of eight bytes. */
+const ENVELOPE_OPEN = /<<<untrusted:[0-9a-f]{16}>>>/;
+
+/** The text parts of a message's content, whichever way pi holds them. */
+const textsOf = (content: unknown): string[] =>
+  typeof content === "string"
+    ? [content]
+    : Array.isArray(content)
+      ? content.flatMap((part: any) => (part?.type === "text" && typeof part.text === "string" ? [part.text] : []))
+      : [];
+
+/**
+ * What a session's entries say it has read: a result that came wrapped as
+ * somebody else's words, or a message of the portal's own that carried some
+ * (see wrapUntrusted), which is where a routine's report comes in.
+ */
 function sawUntrusted(entries: unknown): boolean {
   if (!Array.isArray(entries)) return false;
-  return entries.some(
-    (entry: any) =>
-      entry?.type === "message" &&
-      entry.message?.role === "toolResult" &&
-      Array.isArray(entry.message.content) &&
-      entry.message.content.some((part: any) => part?.type === "text" && typeof part.text === "string" && /^<<<untrusted:[0-9a-f]{16}>>>/.test(part.text)),
-  );
+  return entries.some((entry: any) => {
+    if (entry?.type !== "message") return false;
+    if (entry.message?.role === "toolResult") return textsOf(entry.message.content).some((text) => /^<<<untrusted:[0-9a-f]{16}>>>/.test(text));
+    // Mid-message too: a note rides in a message with other words around it.
+    return entry.message?.role === "user" && textsOf(entry.message.content).some((text) => ENVELOPE_OPEN.test(text));
+  });
+}
+
+/**
+ * Words that came from outside, wrapped as a tool result's are, for a message
+ * the portal writes into a conversation itself. Short, as a page's is: whoever
+ * hands it over has said what it is. The marker is a fresh one, and what is
+ * inside cannot end the block itself.
+ */
+export function wrapUntrusted(text: string): string {
+  const { open, close } = pageEnvelope(randomBytes(8).toString("hex"));
+  return `${open}\n${deface(text)}\n${close}`;
+}
+
+/**
+ * The taint of each running conversation, by the portal's session id, so that
+ * the portal can mark one that read something outside a tool call: see taintSession.
+ */
+const taints = new Map<string, () => void>();
+
+/**
+ * Marks a conversation as having read untrusted content, as a tool result that
+ * carried some would. For what reaches it another way, such as the report of a
+ * routine. False when no guard is running for it.
+ */
+export function taintSession(portalSessionId: string): boolean {
+  const taint = taints.get(portalSessionId);
+  taint?.();
+  return Boolean(taint);
 }
 
 /** An ExtensionFactory — see pi's InlineExtension. One instance per session. */
@@ -554,6 +599,12 @@ export function guardExtension(
     // Per session, not global: a taint belongs to the conversation that read the
     // content, and this factory runs once per session.
     let tainted = false;
+    if (portalSessionId) {
+      const taint = () => { tainted = true; };
+      taints.set(portalSessionId, taint);
+      // Only its own: a reload starts the next one before this one is gone.
+      pi.on("session_shutdown", () => { if (taints.get(portalSessionId) === taint) taints.delete(portalSessionId); });
+    }
 
     // The factory runs again whenever pi reloads, and with it a restart or a
     // relaunch: what was read stays in the conversation's history, so the taint

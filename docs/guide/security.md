@@ -40,6 +40,13 @@ a package's web search or fetch and what a subagent reports back are as well. A
 new tool starts outside the list. The taint is read from the conversation again
 whenever pi reloads, so reopening a chat does not clear it.
 
+Not everything untrusted arrives as a tool result. What a routine reported into a
+chat while it sat idle, or an answer passed back from the primary user, comes in
+with the next message in a block that says what it is, and the words themselves
+are wrapped in the same marker: another run wrote them after reading whatever it
+read. A message that carries one taints the conversation as a result would, and
+`routine_run`, which hands a run's output back, is untrusted for the same reason.
+
 ## Limiting what happens next
 
 Reading untrusted content marks the session **tainted**. From then on, the

@@ -155,7 +155,9 @@ before its package was there starts when the package arrives.
 2. The key is prefixed with the channel's slug and resolved to a session,
    created on first sight.
 3. The channel's [instructions](#per-channel-instructions) are appended to the
-   message in a `<channel-instructions>` block.
+   message in a `<channel-instructions>` block. For anybody but the primary user
+   the portal's note about who is speaking goes in front of their words; what they
+   wrote cannot make a block of its own.
 4. The session is prompted, and `ask` **waits** — unlike the portal's own
    prompting, which returns immediately, because somebody is sitting in a chat
    expecting an answer.
@@ -195,6 +197,16 @@ something else gets the same prompt back.
 
 The answer jumps the queue — the run is stopped waiting for it, so it cannot be
 made to wait its turn behind itself.
+
+Only the person whose message raised the question, or the primary user, can
+answer it. In a group the next message is anybody's, and a question that asks the
+owner to confirm something is not for a guest to say yes to: theirs is answered
+with a note saying whom it waits for, and is not taken as the answer. Telegram's
+buttons check the person who pressed them in the same way.
+
+Slash commands are the primary user's alone. What anybody else writes reaches
+the agent after the portal's note about who they are, so `/bg ...` in a colleague's
+message is words, not a command.
 
 Questions are relayed whatever the progress toggles say. They are not chatter:
 the command hangs until somebody answers, and staying quiet would just leave it

@@ -1,9 +1,11 @@
 /**
  * The simplest possible channel: an HTTP endpoint.
  *
- * POST { "message": "..." } with the shared secret in X-Portal-Secret, and the
- * agent's reply comes back in the response body. Useful for wiring the agent
- * into anything that can make a request — cron, a CI job, another service.
+ * POST { "message": "...", "from": { "id": "..." } } with the shared secret in
+ * X-Portal-Secret, and the agent's reply comes back in the response body. The
+ * sender can be pinned in the channel's settings instead of sent each time.
+ * Useful for wiring the agent into anything that can make a request — cron, a
+ * CI job, another service.
  */
 
 import { createServer } from "node:http";
@@ -17,9 +19,10 @@ export const manifest = {
       key: "senderId",
       label: "Sender id",
       hint:
-        "Optional but recommended. Pins every message to one person, so the secret is that " +
-        "person's credential. Without it the caller names itself in the body and can claim to " +
-        "be anyone holding the secret.",
+        "Pins every message to one person, so the secret is that person's credential. Without " +
+        "it the caller names itself in the body (\"from\": {\"id\": \"…\"}) and can claim to be " +
+        "anyone holding the secret. A message that names nobody is turned away once a primary " +
+        "user is named.",
       placeholder: "priya",
     },
     {

@@ -11,6 +11,7 @@ import {
 } from "react-icons/lu";
 import { api, type Person, type Role, type ToolRule } from "../api";
 import { labelOf, msg, t, tp, tx } from "../i18n";
+import { confirmDialog } from "./ConfirmDialog";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
@@ -94,6 +95,8 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
     return (
       <PersonDetail
         person={open}
+        // The last primary user: without one the agent lets everybody in (see the people route).
+        onlyPrimary={open.role === "primary" && !people.some((p) => p.role === "primary" && p.key !== open.key)}
         rules={rules.filter((r) => r.person_key === open.key)}
         onBack={() => setOpenKey(null)}
         onChanged={load}
@@ -203,12 +206,14 @@ function RuleRow({
 
 function PersonDetail({
   person,
+  onlyPrimary,
   rules,
   onBack,
   onChanged,
   onError,
 }: {
   person: Person;
+  onlyPrimary: boolean;
   rules: ToolRule[];
   onBack: () => void;
   onChanged: () => Promise<void>;
@@ -229,6 +234,11 @@ function PersonDetail({
   }, [person.key]);
 
   const dirty = name !== person.name || role !== person.role || notes !== person.notes;
+  /** Said when this would leave nobody primary, which opens every channel to anybody. */
+  const noPrimaryLeft = {
+    message: t("This is the only primary user. With none, every channel lets anybody in with a primary user's rights, until you name another."),
+    danger: true,
+  };
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -255,12 +265,22 @@ function PersonDetail({
         <button
           disabled={busy}
           title={t("Forget — the next message from them arrives as a stranger again")}
-          onClick={() =>
+          onClick={async () => {
+            const ok = onlyPrimary
+              ? await confirmDialog({ title: t("Forget the only primary user?"), confirmLabel: t("Forget"), ...noPrimaryLeft })
+              : await confirmDialog({
+                  title: t("Forget {name}?", { name: person.name }),
+                  message: t("The next message from them arrives as a stranger again."),
+                  confirmLabel: t("Forget"),
+                  danger: true,
+                  deletes: true,
+                });
+            if (!ok) return;
             act(async () => {
-              await api.forgetPerson(person.key);
+              await api.forgetPerson(person.key, onlyPrimary);
               onBack();
-            })
-          }
+            });
+          }}
           className="rounded-lg p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger"
         >
           <LuTrash2 className="h-3.5 w-3.5" />
@@ -312,13 +332,15 @@ function PersonDetail({
           <button
             className={primaryCls}
             disabled={busy}
-            onClick={() =>
+            onClick={async () => {
+              const leaving = onlyPrimary && role !== "primary";
+              if (leaving && !(await confirmDialog({ title: t("Take away the only primary user's role?"), confirmLabel: t("Save"), ...noPrimaryLeft }))) return;
               act(async () => {
-                await api.updatePerson(person.key, { name, role, notes });
+                await api.updatePerson(person.key, { name, role, notes, force: leaving || undefined });
                 setSaved(true);
                 setTimeout(() => setSaved(false), 2000);
-              })
-            }
+              });
+            }}
           >
             {busy ? (
               <LuRefreshCw className="h-4 w-4 animate-spin" />
@@ -364,7 +386,8 @@ function PersonDetail({
             disabled={busy || !pattern.trim()}
             onClick={() =>
               act(async () => {
-                await api.addToolRule({ role: person.role, tool, pattern, personKey: person.key });
+                // "all", since a rule naming somebody applies to them whatever their role is.
+                await api.addToolRule({ role: "all", tool, pattern, personKey: person.key });
                 setPattern("");
               })
             }

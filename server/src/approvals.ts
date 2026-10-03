@@ -1,6 +1,5 @@
 import { nanoid } from "nanoid";
 import { addGrant, addToolRule } from "./db.js";
-import { getPerson } from "./people.js";
 import { literalPattern, rulePatterns } from "./pi/guard.js";
 import type { QuestionRow } from "./questions.js";
 
@@ -26,7 +25,8 @@ export function recordApproval(question: QuestionRow, asking: { id: string } | u
     for (const pattern of rulePatterns(tool, question.action)) {
       addToolRule({
         id: nanoid(10),
-        role: getPerson(question.person_key)?.role || "colleague",
+        // Whatever their role becomes: a rule naming a person applies to them (see ruleApplies).
+        role: "all",
         tool,
         pattern: literalPattern(pattern),
         person_key: question.person_key,

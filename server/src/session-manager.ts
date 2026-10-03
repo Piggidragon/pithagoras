@@ -4,7 +4,7 @@ import type { Timings } from "./llama-progress.js";
 import { forgetChat, noteToolCall, subagentGone } from "./memory-llm.js";
 import { ModelErrors } from "./model-errors.js";
 import { EventEmitter } from "node:events";
-import type { PersonRow, Role } from "./people.js";
+import { hasPrimary, type PersonRow, type Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { agentHome } from "./agent-home.js";
 import { agentAt } from "./agents.js";
@@ -57,6 +57,7 @@ import {
   remembered,
   rememberTools,
   knownTools,
+  recordAudit,
   shownTools,
   browserAllowlist,
   routineGuards,
@@ -1243,6 +1244,20 @@ class SessionManager extends EventEmitter {
     // Portal builtins never reach the model — they act on the session itself.
     const builtin = /^\/([\w-]+)\s*(.*)$/.exec(message.trim());
     const serverBuiltin = builtin ? await findServerBuiltin(builtin[1]) : undefined;
+    // A command runs in the portal's own process, with its full rights, and no
+    // tool call is made that the guard could refuse: it is for the primary user
+    // alone. Refused as a command that failed, which the chat is not.
+    if ((isCommand || serverBuiltin) && this.speakerRole(sessionId) !== "primary") {
+      recordAudit({
+        kind: "refused",
+        reason: "A command is for the primary user alone",
+        subject: message.trim().slice(0, 200),
+        personKey: this.speakerKey(sessionId),
+        sessionId,
+      });
+      logged.failedOnLine = true;
+      throw new Error("Commands can only be run by the primary user.");
+    }
     // A command is not a chat message, but it is in the chat: a line that
     // says it was sent, and then whether it is running, done, started a run,
     // or failed. Without one a command that answers nothing looked unsent.
@@ -2068,6 +2083,11 @@ class SessionManager extends EventEmitter {
     const live = this.speaker.get(sessionId);
     if (live) return live.role;
     const row = getSession(sessionId);
+    // A conversation on a channel that nobody is known to have spoken in since a
+    // primary user was named — begun before that, by a sender who named nobody —
+    // is a stranger's: its row says primary only because that is where every
+    // row starts.
+    if (row?.channel_slug && !row.last_person_key && hasPrimary()) return "guest";
     return (row?.role as Role) ?? "guest";
   }
 

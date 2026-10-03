@@ -43,10 +43,13 @@ With nobody marked primary, the portal has no basis for deciding who is a
 stranger, so it lets everyone through and simply records them. Name yourself
 primary and the gate closes. This is also why turning this on in an existing
 deployment does not lock you out of your own agent.
+
+It also means the other way round: take the role from your only primary user, or
+forget them, and the gate is open again. The portal asks before you do.
 :::
 
 ## Forgetting somebody
 
-**Forget** removes the row. It is not a block — the next message from them
+**Forget** asks first, then removes the row. It is not a block — the next message from them
 arrives as a stranger, is refused, and they reappear here. Blocking is what the
 **Blocked** role already does.

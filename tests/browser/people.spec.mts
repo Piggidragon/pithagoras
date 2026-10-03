@@ -1,0 +1,106 @@
+import { test, expect, type Page } from '@playwright/test';
+
+/** Settings → People over canned answers: what the page sends when somebody is forgotten, demoted or allowed something. */
+async function portal(page: Page, people: any[]) {
+  const sent: { method: string; url: string; body: any }[] = [];
+  const rules: any[] = [];
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url());
+    const p = url.pathname;
+    const method = route.request().method();
+    let body: any = {};
+    if (p === '/api/auth/status') body = { authed: true, authRequired: false };
+    else if (p === '/api/sessions' && method === 'GET') body = { sessions: [], executor: 'host' };
+    else if (p === '/api/people' && method === 'GET') body = { people };
+    else if (p === '/api/tool-rules' && method === 'GET') body = { rules };
+    else if (p === '/api/tool-rules' && method === 'POST') {
+      const rule = route.request().postDataJSON();
+      sent.push({ method, url: p, body: rule });
+      rules.push({ id: 'r1', role: rule.role, tool: rule.tool, pattern: rule.pattern, person_key: rule.personKey, note: '', created_at: '' });
+      body = { rules };
+    } else if (p.startsWith('/api/people/')) {
+      sent.push({ method, url: p + url.search, body: method === 'PATCH' ? route.request().postDataJSON() : undefined });
+      body = method === 'PATCH' ? { person: people[0] } : { ok: true };
+    } else if (p === '/api/settings') body = { settings: {}, stored: {}, defaults: {}, piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w' };
+    else if (p === '/api/models') body = { models: [], providers: {} };
+    else if (p === '/api/extensions') body = { settingsPath: '/a/settings.json', extensions: [] };
+    await route.fulfill({ json: body });
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem('pithagoras.setup', 'done');
+    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
+  });
+  return sent;
+}
+
+const person = (key: string, name: string, role: string) => ({ key, name, role, notes: '', first_seen: '', last_seen: null, announced_at: null, renamed: 0 });
+
+test('forgetting somebody asks first, and the only primary user is asked about as what it is', async ({ page }) => {
+  const sent = await portal(page, [person('tg:owner', 'Sam', 'primary'), person('tg:kim', 'Kim', 'colleague')]);
+  await page.goto('/settings/people');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+
+  await dialog.getByRole('button', { name: /Kim/ }).click();
+  await dialog.getByTitle(/^Forget/).click();
+  const ask = page.getByRole('alertdialog');
+  await expect(ask).toContainText('Forget Kim?');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  expect(sent).toEqual([]);
+
+  await dialog.getByTitle(/^Forget/).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Forget' }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0].method).toBe('DELETE');
+  expect(sent[0].url).toBe('/api/people/tg%3Akim');
+});
+
+test('the last primary user cannot be forgotten or demoted by one click, only after being told what follows', async ({ page }) => {
+  const sent = await portal(page, [person('tg:owner', 'Sam', 'primary'), person('tg:kim', 'Kim', 'colleague')]);
+  await page.goto('/settings/people');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+
+  await dialog.getByRole('button', { name: /Sam/ }).click();
+  await dialog.getByTitle(/^Forget/).click();
+  const ask = page.getByRole('alertdialog');
+  await expect(ask).toContainText('Forget the only primary user?');
+  await expect(ask).toContainText('every channel lets anybody in');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+
+  await dialog.getByRole('button', { name: 'Colleague', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('alertdialog')).toContainText("Take away the only primary user's role?");
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
+  expect(sent).toEqual([]);
+
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0].body).toMatchObject({ role: 'colleague', force: true });
+
+  await dialog.getByTitle(/^Forget/).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Forget' }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  expect(sent[1].url).toBe('/api/people/tg%3Aowner?force=1');
+});
+
+test('with another primary user, demoting somebody asks nothing and sends no force', async ({ page }) => {
+  const sent = await portal(page, [person('tg:owner', 'Sam', 'primary'), person('tg:deputy', 'Dee', 'primary')]);
+  await page.goto('/settings/people');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: /Dee/ }).click();
+  await dialog.getByRole('button', { name: 'Guest', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0].body.force).toBeUndefined();
+});
+
+test('an exception for one person is written for every role, so it follows them and can be given to anybody', async ({ page }) => {
+  const sent = await portal(page, [person('tg:owner', 'Sam', 'primary'), person('tg:kim', 'Kim', 'guest')]);
+  await page.goto('/settings/people');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: /Kim/ }).click();
+  await dialog.getByPlaceholder('himalaya envelope list*').fill('git log*');
+  await dialog.getByRole('button', { name: 'Allow', exact: true }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0].body).toEqual({ role: 'all', tool: 'bash', pattern: 'git log*', personKey: 'tg:kim' });
+});

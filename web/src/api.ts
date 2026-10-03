@@ -755,13 +755,14 @@ export const api = {
     }),
   deleteToolRule: (id: string) =>
     json<{ rules: ToolRule[] }>(`/api/tool-rules/${id}`, { method: "DELETE" }),
-  updatePerson: (key: string, patch: { name?: string; role?: Role; notes?: string }) =>
+  /** `force` confirms taking the last primary user's role away: see the people route. */
+  updatePerson: (key: string, patch: { name?: string; role?: Role; notes?: string; force?: boolean }) =>
     json<{ person: Person }>(`/api/people/${encodeURIComponent(key)}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
-  forgetPerson: (key: string) =>
-    json<{ ok: true }>(`/api/people/${encodeURIComponent(key)}`, { method: "DELETE" }),
+  forgetPerson: (key: string, force = false) =>
+    json<{ ok: true }>(`/api/people/${encodeURIComponent(key)}${force ? "?force=1" : ""}`, { method: "DELETE" }),
 
   routines: () => json<{ routines: Routine[] }>("/api/routines"),
   reportTargets: () =>
@@ -1252,7 +1253,6 @@ export interface ToolRule {
   pattern: string;
   /** Set when the rule is for one person rather than a whole role. */
   person_key: string | null;
-  person_name: string | null;
   note: string;
   created_at: string;
 }

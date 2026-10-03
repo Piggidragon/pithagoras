@@ -1,5 +1,5 @@
 import express, { type Router } from "express";
-import { forgetPerson, getPerson, listPeople, setRole, type Role } from "../people.js";
+import { forgetPerson, getPerson, isOnlyPrimary, listPeople, rename, setRole, type Role } from "../people.js";
 import { AUDIT_KEEP, addToolRule, clearAudit, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
 import { nanoid } from "nanoid";
 
@@ -12,6 +12,10 @@ import { nanoid } from "nanoid";
  */
 
 const ROLES: Role[] = ["primary", "colleague", "guest", "unknown"];
+
+const LAST_PRIMARY =
+  "This is the only primary user. Without one, every channel lets anybody in with a primary user's rights " +
+  "until another is named.";
 
 export function peopleRouter(): Router {
   const router = express.Router();
@@ -28,6 +32,12 @@ export function peopleRouter(): Router {
     if (role !== undefined && !ROLES.includes(role)) {
       return res.status(400).json({ error: `Role must be one of ${ROLES.join(", ")}` });
     }
+    // The agent treats everybody as a stranger only once somebody is named its
+    // primary user: with none, every channel lets anybody in, with the rights of
+    // one. Taking the last away is allowed, but only when it was asked for as that.
+    if (role !== undefined && role !== "primary" && isOnlyPrimary(key) && req.body?.force !== true) {
+      return res.status(409).json({ error: `${LAST_PRIMARY} Send force: true to do it anyway.`, code: "last-primary" });
+    }
     // One primary. Promoting somebody demotes whoever held it, rather than
     // leaving two people the agent treats as its owner.
     if (role === "primary") {
@@ -37,9 +47,7 @@ export function peopleRouter(): Router {
       getDb().prepare("UPDATE people SET notes = ? WHERE key = ?").run(notes.trim(), key);
     }
     if (role) setRole(key, role, typeof name === "string" ? name : undefined);
-    else if (typeof name === "string" && name.trim()) {
-      getDb().prepare("UPDATE people SET name = ? WHERE key = ?").run(name.trim(), key);
-    }
+    else if (typeof name === "string") rename(key, name);
     res.json({ person: getPerson(key) });
   });
 
@@ -78,15 +86,7 @@ export function peopleRouter(): Router {
 
   /** Exceptions: what a non-primary role is allowed to run despite the default. */
   router.get("/tool-rules", (_req, res) => {
-    // Names come from the roster: a rule showing a raw key is a rule nobody can
-    // decide about.
-    const people = new Map(listPeople().map((p) => [p.key, p.name]));
-    res.json({
-      rules: listToolRules().map((r) => ({
-        ...r,
-        person_name: r.person_key ? (people.get(r.person_key) ?? r.person_key) : null,
-      })),
-    });
+    res.json({ rules: listToolRules() });
   });
 
   router.post("/tool-rules", (req, res) => {
@@ -129,6 +129,9 @@ export function peopleRouter(): Router {
    * "unknown" already does.
    */
   router.delete("/people/:key", (req, res) => {
+    if (isOnlyPrimary(req.params.key) && req.query.force !== "1") {
+      return res.status(409).json({ error: `${LAST_PRIMARY} Add ?force=1 to do it anyway.`, code: "last-primary" });
+    }
     forgetPerson(req.params.key);
     res.json({ ok: true });
   });

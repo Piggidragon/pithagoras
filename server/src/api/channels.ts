@@ -6,6 +6,7 @@ import { agentHome } from "../agent.js";
 import { DEFAULT_AGENT, getAgent } from "../agents.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { channelSupervisor } from "../channels/supervisor.js";
+import { parseConfig, type ChannelRow } from "../channels/row.js";
 import {
   channelsDir,
   isPackageName,
@@ -40,30 +41,6 @@ const kindToApi = (k: LoadedChannel) => ({
   builtin: k.builtin,
   runnable: Boolean(k.start),
 });
-
-interface ChannelRow {
-  id: string;
-  slug: string;
-  kind: string;
-  name: string;
-  enabled: number;
-  config: string;
-  instructions: string;
-  relay_progress: number;
-  relay_tools: number;
-  agent_id: string;
-  created_at: string;
-  updated_at: string;
-}
-
-const parseConfig = (raw: string): Record<string, unknown> => {
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-};
 
 /**
  * Strip secrets before anything leaves the process. The browser is told which
