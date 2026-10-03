@@ -75,7 +75,9 @@ Open a skill to see and edit its `SKILL.md`; **Save** writes it back.
 - A skill pi cannot parse, usually because of broken frontmatter, is listed too,
   marked as not loading, with the warning pi gave. It is invisible to the
   agent until the frontmatter is fixed, and it can be edited or deleted here.
-- **Delete** removes the skill's directory after a confirmation.
+- **Delete** removes the skill's directory after a confirmation. A skill that is
+  a single `.md` file in the skills folder itself (see the tip below) is deleted
+  as that file alone, and cannot be switched off from here.
 
 Two skills with the same name, or a file pi cannot read, are reported as
 warnings at the top of the page.

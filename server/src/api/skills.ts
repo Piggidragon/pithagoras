@@ -67,6 +67,11 @@ async function loadFromPi(): Promise<{ skills: LoadedSkill[]; diagnostics: any[]
   const loader = new pi.DefaultResourceLoader({
     cwd: agentHome(),
     agentDir: pi.getAgentDir(),
+    // Only the skills are wanted. Without this, every extension is imported
+    // and its factory run in the portal's own process on each look at this
+    // page, which also drops what pi keeps of them for the sessions that
+    // are open.
+    noExtensions: true,
     // Same list a session gets, builtins included — this page disagreeing with
     // what the model is offered is the failure it exists to prevent.
     ...(builtin ? { additionalSkillPaths: [builtin] } : {}),
@@ -90,8 +95,20 @@ const underRoot = () => {
   };
 };
 
-/** The directory that owns a skill, which is what delete removes. */
+/** The directory a skill is in. */
 const skillDir = (filePath: string) => path.dirname(path.resolve(filePath));
+
+/**
+ * The directory that owns a skill, which is what delete removes. None for a
+ * single `.md` file in the skills folder itself: pi loads those as skills too,
+ * but the folder they are in is every other skill, so they own nothing beside
+ * themselves.
+ */
+const ownedDir = (filePath: string): string | null => {
+  const dir = skillDir(filePath);
+  const real = realPath(dir);
+  return real === null || real === realPath(skillsRoot()) ? null : dir;
+};
 
 function readBody(filePath: string): string {
   try {
@@ -292,6 +309,16 @@ export function skillsRouter(): Router {
     const off = path.join(dir, DISABLED);
 
     if (!existsSync(live) && !existsSync(off)) {
+      try {
+        const single = await locate(req.params.name);
+        if (single?.editable && ownedDir(single.file) === null) {
+          return res.status(400).json({
+            error: "A skill that is a single file in the skills folder cannot be switched off here — delete it, or move it into a folder of its own as SKILL.md",
+          });
+        }
+      } catch {
+        // Not the single file this is about; the answer below stands.
+      }
       return res.status(404).json({
         error: "Not found here — a skill from a package is switched off by removing the package",
       });
@@ -385,7 +412,9 @@ export function skillsRouter(): Router {
       if (!found.editable) {
         return res.status(400).json({ error: "That skill belongs to a package; remove the package" });
       }
-      rmSync(skillDir(found.file), { recursive: true, force: true });
+      const dir = ownedDir(found.file);
+      if (dir) rmSync(dir, { recursive: true, force: true });
+      else rmSync(found.file, { force: true });
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
