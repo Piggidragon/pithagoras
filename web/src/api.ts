@@ -58,6 +58,12 @@ export interface FoundSkill {
   from: string;
 }
 
+/** A skill of a repository that was not taken, and why. */
+export interface SkippedSkill {
+  name: string;
+  reason: string;
+}
+
 export interface SkillDiagnostic {
   type: string;
   message: string;
@@ -562,14 +568,15 @@ export const api = {
   skills: () =>
     json<{ root: string; skills: Skill[]; diagnostics: SkillDiagnostic[] }>("/api/skills"),
   previewSkillImport: (spec: string) =>
-    json<{ spec: string; found: FoundSkill[] }>("/api/skills/preview-import", {
+    json<{ spec: string; sha: string; found: FoundSkill[]; skipped: SkippedSkill[] }>("/api/skills/preview-import", {
       method: "POST",
       body: JSON.stringify({ spec }),
     }),
-  importSkills: (spec: string, only: string[], overwrite: boolean) =>
-    json<{ ok: true; imported: string[]; skipped: { name: string; reason: string }[] }>(
+  // `sha` is the commit the look saw, so that what is installed is what was shown.
+  importSkills: (spec: string, only: string[], overwrite: boolean, sha?: string) =>
+    json<{ ok: true; imported: string[]; skipped: SkippedSkill[] }>(
       "/api/skills/import",
-      { method: "POST", body: JSON.stringify({ spec, only, overwrite }) }
+      { method: "POST", body: JSON.stringify({ spec, only, overwrite, sha }) }
     ),
   updateSkill: (name: string) =>
     json<{ ok: true; imported: string[] }>(`/api/skills/${encodeURIComponent(name)}/update`, {

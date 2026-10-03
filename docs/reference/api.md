@@ -450,8 +450,8 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `PUT /api/skills/:name` | Save a skill's content. |
 | `DELETE /api/skills/:name` | Delete an editable skill. |
 | `POST /api/skills/:name/enabled` | Enable or disable a skill. |
-| `POST /api/skills/preview-import` | Preview a repository import. |
-| `POST /api/skills/import` | Import selected skills. |
+| `POST /api/skills/preview-import` | Preview a repository import: the skills found, those that cannot be imported and why, and the commit looked at (`sha`). |
+| `POST /api/skills/import` | Import selected skills. `sha` (optional) is the commit the preview saw, which is then what is installed; the answer lists `imported` and `skipped`. |
 | `POST /api/skills/:name/update` | Refresh an imported skill. |
 
 ## Routines

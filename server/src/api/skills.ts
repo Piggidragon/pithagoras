@@ -170,6 +170,8 @@ function brokenSkills(loaded: LoadedSkill[]) {
   }
 
   for (const name of entries) {
+    // pi does not look in these, and an import's copy in the making is one.
+    if (name.startsWith(".")) continue;
     const file = path.join(skillsRoot(), name, "SKILL.md");
     // A disabled skill has no SKILL.md by design; it is listed separately.
     if (existsSync(path.join(skillsRoot(), name, DISABLED))) continue;
@@ -201,6 +203,7 @@ function disabledSkills() {
   }
 
   for (const name of entries) {
+    if (name.startsWith(".")) continue;
     const file = path.join(skillsRoot(), name, DISABLED);
     if (!existsSync(file)) continue;
     const content = readBody(file);
@@ -339,7 +342,7 @@ export function skillsRouter(): Router {
       return res.status(400).json({ error: "spec required" });
     }
     try {
-      res.json({ spec: spec.trim(), found: await previewFromGit(spec.trim(), skillsRoot()) });
+      res.json({ spec: spec.trim(), ...(await previewFromGit(spec.trim(), skillsRoot())) });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
@@ -356,10 +359,16 @@ export function skillsRouter(): Router {
     if (typeof spec !== "string" || !spec.trim()) {
       return res.status(400).json({ error: "spec required" });
     }
+    // The commit that was looked at, so that what is installed is what was shown.
+    const sha = req.body?.sha;
+    if (sha !== undefined && !(typeof sha === "string" && /^[0-9a-f]{40,64}$/.test(sha))) {
+      return res.status(400).json({ error: "sha must be a commit id" });
+    }
     try {
       const result = await importFromGit(spec.trim(), skillsRoot(), {
         overwrite: Boolean(req.body?.overwrite),
         only: Array.isArray(req.body?.only) ? req.body.only.map(String) : undefined,
+        sha,
       });
       res.json({ ok: true, ...result });
     } catch (e) {
@@ -381,6 +390,11 @@ export function skillsRouter(): Router {
         overwrite: true,
         only: [req.params.name],
       });
+      // Said, not answered with ok: the copy here is then not the latest, and nothing changed.
+      if (!result.imported.length) {
+        const why = result.skipped.find((s) => s.name === req.params.name)?.reason ?? "Nothing was updated";
+        return res.status(why === "not in the repository any more" ? 404 : 400).json({ error: `Not updated: ${why}`, ...result });
+      }
       res.json({ ok: true, ...result });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });

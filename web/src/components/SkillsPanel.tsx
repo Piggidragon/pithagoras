@@ -13,7 +13,7 @@ import {
   LuTriangleAlert,
   LuWrench,
 } from "react-icons/lu";
-import { api, type FoundSkill, type Skill, type SkillDiagnostic } from "../api";
+import { api, type FoundSkill, type Skill, type SkillDiagnostic, type SkippedSkill } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { isEnter } from "../shortcuts";
 import { t, tp, tx } from "../i18n";
@@ -124,6 +124,7 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
           <ImportSkills
             onCancel={() => setImporting(false)}
             onError={onError}
+            onReload={load}
             onDone={async () => {
               setImporting(false);
               await load();
@@ -500,23 +501,33 @@ function SkillDetail({
 function ImportSkills({
   onCancel,
   onDone,
+  onReload,
   onError,
 }: {
   onCancel: () => void;
   onDone: () => Promise<void>;
+  onReload: () => Promise<void>;
   onError: (e: string) => void;
 }) {
   const [spec, setSpec] = useState("");
   const [found, setFound] = useState<FoundSkill[] | null>(null);
+  // What the look was of: the import takes exactly that, whatever the field says by then.
+  const [previewed, setPreviewed] = useState<{ spec: string; sha: string } | null>(null);
+  // What is in the repository and was not taken, and why.
+  const [skipped, setSkipped] = useState<SkippedSkill[]>([]);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<null | "look" | "import">(null);
 
   const look = async () => {
     setBusy("look");
     setFound(null);
+    setPreviewed(null);
+    setSkipped([]);
     try {
       const r = await api.previewSkillImport(spec.trim());
       setFound(r.found);
+      setPreviewed({ spec: r.spec, sha: r.sha });
+      setSkipped(r.skipped);
       // Everything you do not already have, which is the common intent.
       setChosen(new Set(r.found.filter((f) => !f.installed).map((f) => f.name)));
     } catch (e) {
@@ -527,12 +538,22 @@ function ImportSkills({
   };
 
   const doImport = async () => {
+    if (!previewed) return;
     setBusy("import");
     try {
       // Overwrite is implied: anything already installed is only in the list
       // because it was ticked deliberately.
-      await api.importSkills(spec.trim(), [...chosen], true);
-      await onDone();
+      const r = await api.importSkills(previewed.spec, [...chosen], true, previewed.sha);
+      if (r.skipped.length) {
+        // Said here, not closed over: the list is what was imported, and this is what was not.
+        setSkipped(r.skipped);
+        setFound(null);
+        setPreviewed(null);
+        setChosen(new Set());
+        await onReload();
+      } else {
+        await onDone();
+      }
     } catch (e) {
       onError((e as Error).message);
     } finally {
@@ -553,7 +574,13 @@ function ImportSkills({
         <input
           autoFocus
           value={spec}
-          onChange={(e) => setSpec(e.target.value)}
+          onChange={(e) => {
+            setSpec(e.target.value);
+            // The list is of another address now.
+            setFound(null);
+            setPreviewed(null);
+            setSkipped([]);
+          }}
           onKeyDown={(e) => isEnter(e) && spec.trim() && look()}
           placeholder="anthropics/skills"
           className={`${inputCls} font-mono text-xs`}
@@ -565,6 +592,26 @@ function ImportSkills({
       <p className="text-[11px] text-fg-faint">
         {tx("{repo}, {branch}, a subdirectory like {folder}, or a GitHub URL pasted from the address bar.", { repo: <code>user/repo</code>, branch: <code>user/repo#branch</code>, folder: <code>user/repo/skills/pdf</code> })}
       </p>
+
+      <p className="text-[11px] text-fg-faint">
+        {t("A private repository is reached through the git login of this server. Do not put a token in the address.")}
+      </p>
+
+      {skipped.length > 0 && (
+        <div className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[11px] text-warn/90">
+          <p className="flex items-start gap-1.5">
+            <LuTriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
+            {t("Not imported:")}
+          </p>
+          <ul className="mt-1 space-y-0.5 pl-4">
+            {skipped.map((s, i) => (
+              <li key={`${s.name}-${i}`}>
+                <span className="font-mono">{s.name}</span> — {s.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {found && (
         <>

@@ -75,7 +75,8 @@ const GIT_CONFIG = [
   "-c", "log.showSignature=false",
 ];
 
-function environment(writes: boolean, config: [string, string][] = []): NodeJS.ProcessEnv {
+/** What git runs in, here and for the skill importer's clone: no prompt, no editor, no pager. */
+export function environment(writes: boolean, config: [string, string][] = []): NodeJS.ProcessEnv {
   const pairs = Object.fromEntries(config.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]]));
   return {
     ...process.env,

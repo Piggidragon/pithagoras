@@ -56,13 +56,33 @@ anything. You tick the ones you want and press **Import**.
 
 - A skill you already have is marked _installed_ and skipped, unless you tick it
   again. A ticked skill you already have is replaced, including any edits you
-  made to it.
+  made to it. A replacement is made whole or not at all: if it cannot be put in
+  place, the skill you had is left as it was.
+- What you import is the version **Look** showed, even if the branch has moved
+  on since. Changing the address drops the list, so what you tick always belongs
+  to the address above it.
+- What is not taken is listed under **Not imported**, with the reason: a name
+  that is not a plain folder name (`..`, or one with a slash), two skills with
+  the same name, or one that is no longer in the repository.
+- Links inside a repository are never followed or copied, so a repository cannot
+  point a skill at your files.
 - Nothing is executed by an import. A skill is markdown, but it is markdown the
   agent will follow, so import only from somewhere you would take instructions
   from.
 - The origin is remembered beside the skill, so an imported skill gets an
   **Update** button that fetches only that skill again from where it came from,
-  replacing local edits.
+  replacing local edits. When the skill is no longer in the repository under
+  that name, **Update** says so rather than doing nothing.
+
+### Private repositories
+
+A private repository is reached through the git login of the server, not through
+the page: configure a credential helper for the server's git (`gh auth
+setup-git`, or `git config --global credential.helper store`; in the image
+`HOME` is `/data/home`, so it persists). An address with a login or token in it
+(`https://token@github.com/…`) is refused, and nothing here stores or shows one.
+With no login configured, a private repository answers _Not found, or private_
+at once instead of waiting for a password nobody can type.
 
 ## Switch off, edit, delete
 

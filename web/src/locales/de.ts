@@ -1395,6 +1395,8 @@ const de: Locale = {
     "{n} already installed": "{n} schon installiert",
     "all": "alle",
     "A ticked skill you already have will be replaced, including any edits you made to it.": "Ein angehakter Skill, den du schon hast, wird ersetzt, einschließlich deiner Änderungen daran.",
+    "A private repository is reached through the git login of this server. Do not put a token in the address.": "Ein privates Repository wird über den Git-Login dieses Servers erreicht. Gib kein Token in der Adresse an.",
+    "Not imported:": "Nicht importiert:",
     "Nothing is executed by an import — a skill is markdown. But it is markdown the agent will follow, so take them from somewhere you would take instructions from.": "Beim Importieren wird nichts ausgeführt — ein Skill ist Markdown. Aber Markdown, dem der Agent folgt, also hol sie dir von dort, wo du auch Anweisungen annehmen würdest.",
     // components/StatusDot.tsx
     "idle": "bereit",
