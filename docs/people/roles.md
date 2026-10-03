@@ -20,6 +20,12 @@ you have [allowed explicitly](/people/rules). Everything else is refused:
 An allowlist rather than a blocklist because the right default for a list whose
 job is to be conservative is that new things start outside it.
 
+What a colleague or a guest reads is held to the conversation's own folder and
+the agent's skills. A secret (`auth.json`, `.env`, `.ssh/`, tokens) is never
+read, nor is the private context in `PrimaryUser.md` and `MEMORY.md`, and a
+search over a folder that holds them is refused. The same goes for a rule you
+allowed: it opens the tool, not the files the guard keeps from them.
+
 Refusals are **enforced, not requested**. The agent usually declines before
 reaching for a tool, because it is told who it is speaking to. If it tries
 anyway — talked round, or fed a convincing story — the call is blocked and it is

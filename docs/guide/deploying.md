@@ -25,7 +25,9 @@ path to keep the portal's data in, instead of the `portal-data` Docker volume.
 Keep it apart from `WORKSPACES_DIR`.
 
 `PORTAL_SECRET` signs the login cookie. Leave it out and logins are invalidated
-on every restart, which is exactly the annoyance you would expect.
+on every restart, which is exactly the annoyance you would expect. The cookie is
+marked `Secure` when the portal serves HTTPS, so the browser does not send it to
+the plain-HTTP services on the same host.
 
 Then:
 
@@ -177,7 +179,7 @@ Everything here is optional except the password.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PORTAL_PASSWORD` | — | Required. The single login password; the portal will not start without it. |
+| `PORTAL_PASSWORD` | — | Required. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one. Changing it ends every login made under the old one. |
 | `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. |
 | `PORTAL_SECRET` | random | Signs the session cookie. Set it to survive restarts. |
 | `PORT` | `4100` | Port to listen on. |

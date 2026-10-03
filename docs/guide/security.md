@@ -34,6 +34,12 @@ The browser's tools read a page after nearly every click, so their results carry
 a shorter envelope: the same random closing id, with the warning above said once
 in the agent's instructions instead of on every result.
 
+The default is untrusted. pi's own file tools, the portal's inline tools and the
+portal's memory are trusted by name; the result of any other tool is wrapped, so
+a package's web search or fetch and what a subagent reports back are as well. A
+new tool starts outside the list. The taint is read from the conversation again
+whenever pi reloads, so reopening a chat does not clear it.
+
 ## Limiting what happens next
 
 Reading untrusted content marks the session **tainted**. From then on, the
@@ -48,6 +54,7 @@ refused:
 | `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens |
 | `publish` | `git push` is not undoable from here |
 | `persist` | Scheduling outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file |
+| `delegate` | A `subagent` runs its own pi, which has no guard, so a tainted session may not start one |
 
 Enforcement is **tainted-only** on purpose. A session writing code in a
 repository never meets any of this; the rules apply exactly where the risk

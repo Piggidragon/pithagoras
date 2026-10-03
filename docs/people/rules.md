@@ -33,6 +33,11 @@ each picture's path, and is allowed only if every one is.
 A bare `*` is rejected. That is not a rule, it is switching the thing off by
 accident.
 
+What **Always allow** writes is the command or path exactly as it was asked, so a
+`*` in it is a star and not a wildcard. To allow a family of commands, write the
+pattern yourself. A path is tidied before it is matched, so a `..` in it cannot
+reach out of the folder a rule names.
+
 ## One command, never a pipeline
 
 A shell rule matches a **single command**. Anything carrying a pipe, a
