@@ -702,7 +702,8 @@ export function activity(events: PortalEvent[]): Activity {
 
       case "message_snapshot": {
         const blocks = Array.isArray(p.message?.content) ? p.message.content : [];
-        const last = [...blocks].reverse().find((c: any) => c?.type === 'text' && c.text || c?.type === 'thinking' && c.thinking);
+        // A tool call being written counts: its arguments are the reply, for as long as they take.
+        const last = [...blocks].reverse().find((c: any) => c?.type === 'toolCall' || c?.type === 'text' && c.text || c?.type === 'thinking' && c.thinking);
         if (last) return { label: last.type === 'thinking' ? 'thinking' : 'writing the reply', since: ev.at };
         break;
       }

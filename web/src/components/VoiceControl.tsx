@@ -1,6 +1,6 @@
 import { DEFAULT_VAD } from '../api';
 import { local, session } from '../safe-storage';
-import { VoiceProfiler } from '../voice-profile';
+import { VoiceProfiler, replyMarks } from '../voice-profile';
 import { VoiceProfile } from './VoiceProfile';
 import { activity } from '../transcript';
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -57,10 +57,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     for(const event of toolEvents){
       if(event.seq < 0) { if(profileLiveSeen.current.has(event))continue; profileLiveSeen.current.add(event); }
       else { if(event.seq<=profileSeq.current)continue; profileSeq.current=event.seq; }
-      const inner=event.payload?.assistantMessageEvent;
-      if(event.type==='message_update'&&inner?.delta&&['text_delta','thinking_delta','toolcall_delta'].includes(inner.type))profileMark('first_model_token');
-      if(event.type==='message_update'&&inner?.delta&&inner?.type==='text_delta')profileMark('first_text');
-      if(event.type==='message_update'&&inner?.type==='thinking_delta')profileMark('first_thinking_token');
+      for(const name of replyMarks(event))profileMark(name);
       if(event.type==='portal_prefill')profiler.current!.mark('prefill_progress',{total:event.payload?.total??0,processed:event.payload?.processed??0,cache:event.payload?.cache??0,timeMs:event.payload?.timeMs??0});
       if(['portal_prompt','compaction_start','compaction_end','tool_execution_start','tool_execution_end','agent_end'].includes(event.type))profileMark(event.type);
     }
