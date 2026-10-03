@@ -23,6 +23,12 @@ server cannot be reached, as a tab does. Nothing the agent does is cached: the
 API and the agent's browser view always go to the server. A deploy shows up on
 the next load rather than the one after.
 
+When the portal does not answer as the page loads — it is restarting during an
+upgrade, say — the page says **Cannot reach the portal** and asks again by
+itself, with a **Try again** button for impatience. It does not fall back to the
+password form: your login is still good, and only a portal that says you are not
+signed in shows that.
+
 ## Theme
 
 **Settings → This browser → Theme** is light, dark or **System**, the default,

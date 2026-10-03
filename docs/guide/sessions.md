@@ -445,7 +445,10 @@ when you come back to it. A tab left in the background asks for nothing.
 
 If the connection to a chat breaks, the page reconnects — after two seconds,
 then four, eight and at most fifteen — and says so once a second attempt has
-failed. It is not shown for a blip.
+failed. It is not shown for a blip. A chat the portal no longer has — deleted
+on another device while this one still had it open — is not an outage: the page
+says **This chat no longer exists** and offers the way back to Sessions, instead
+of trying to reconnect.
 
 ## Status dots
 
