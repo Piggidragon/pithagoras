@@ -8,7 +8,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
-import { ConfigModal, prefetchSettings } from "./components/ConfigModal";
+import { ConfigModal, isTab, prefetchSettings, type Tab } from "./components/ConfigModal";
 import { SetupAssistant, setupDismissed } from "./components/SetupAssistant";
 import { load as loadCached } from "./settings-cache";
 import { ExtensionDialog, type UiRequest } from "./components/ExtensionDialog";
@@ -36,7 +36,6 @@ import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
-type Tab = "general" | "extensions" | "advanced";
 const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general" };
 
 export default function App() {
@@ -820,7 +819,7 @@ function Shell({
 
       {settings && (
         <ConfigModal
-          initialTab={LEGACY_TABS[tab ?? ""] ?? (tab as Tab) ?? "general"}
+          initialTab={LEGACY_TABS[tab ?? ""] ?? (tab && isTab(tab) ? tab : "general")}
           onClose={closeSettings}
           onSetup={setUpModel}
         />

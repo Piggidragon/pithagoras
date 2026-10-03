@@ -620,9 +620,25 @@ export function lastSeq(events: PortalEvent[]): number {
   return events.length ? events[events.length - 1].seq : 0;
 }
 
+/**
+ * Which phase the agent is in. These are ids that the status line, the voice
+ * stage and the progress card compare against, not wording: each of them says
+ * what the phase is called to the user in its own words, so rewording one here
+ * is a compile error where it is read rather than a card that quietly goes.
+ */
+export type ActivityLabel =
+  | "compacting the conversation"
+  | "loading the model"
+  | "processing the prompt"
+  | "retrying after an error"
+  | "thinking"
+  | "writing the reply"
+  | "working"
+  // A tool, by its name.
+  | `running ${string}`;
+
 export interface Activity {
-  /** What the agent is doing, in the second person's words rather than pi's. */
-  label: string;
+  label: ActivityLabel;
   /** When this phase started, for the elapsed counter. */
   since?: number;
   /** Prefill, when llama.cpp is reporting it. */

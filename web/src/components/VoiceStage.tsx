@@ -442,7 +442,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     <div className="voice-presence">
       <div className="voice-avatar"><VoiceOrb mode={mode} levels={levels} look={orbStyle} /></div>
       <div className="voice-dock-center">
-        {workPhase && ['processing the prompt','compacting the conversation'].includes(workPhase.label) ? <ActivityProgress phase={workPhase} compact /> : <>
+        {workPhase && (workPhase.label === 'processing the prompt' || workPhase.label === 'compacting the conversation') ? <ActivityProgress phase={workPhase} compact /> : <>
         <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? t('Compacting context') : thought && anyPanel ? t("Thinking") : status}</div>
         {anyPanel && thought && phase !== 'Compacting context' && <div ref={thoughtViewport} className="voice-thought-stream" aria-label={t("Live model thinking")}>{thought.slice(-1200)}</div>}
         </>}

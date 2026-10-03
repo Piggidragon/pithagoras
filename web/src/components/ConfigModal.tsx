@@ -125,6 +125,8 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
   },
 ];
 const TABS = GROUPS.flatMap((g) => g.tabs);
+/** Whether a path segment of the settings route names one of the tabs. */
+export const isTab = (id: string): id is Tab => TABS.some((x) => x.id === id);
 
 /**
  * What Settings needs first, fetched before it is opened — a moment after the
