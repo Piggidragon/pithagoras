@@ -7,7 +7,7 @@ The [Docker add-ons guide](/guide/add-ons) covers GPU prerequisites, automatic Q
 :::
 
 ::: info Already installed?
-Start with the controls below. Manual Compose and historical Cortex services are alternative deployments; do not run them alongside the managed installer.
+Start with the controls below. Manual Compose and native systemd services are alternative deployments; do not run them alongside the managed installer.
 :::
 
 Enable **Voice** under **Settings → Add-ons** to talk to any open session.
@@ -25,7 +25,7 @@ suppression are requested from the browser; headphones work best when speaker
 audio is still picked up by your microphone.
 
 VAD runs locally in your browser. Its pinned model and WebAssembly runtime are
-served by Pithagoras, with no CDN dependency or extra Cortex GPU allocation.
+served by Pithagoras, with no CDN dependency or extra GPU allocation.
 Whisper receives rolling snapshots while you speak (roughly every two seconds),
 and a fresh snapshot after about 200 ms of silence. The voice screen shows the
 latest partial transcript. At turn end, Pithagoras reuses a result only when it
@@ -42,13 +42,18 @@ speak. Quiet synthesized sound cues mark connection, submission, mute and tool
 focus; they can be turned off in the voice settings. Reduced-motion
 preferences disable panel transitions.
 
-The orb's look is set on the **Agent** page under **Avatar**: **Customize** opens
-a dialog with a live preview. Choose a personality (how it moves), a colour
-palette and a colour for each state, the motion speed, reactivity and glow, eyes,
-a hat and a prop. **Save avatar** stores it for the whole portal, and every
-device shows it the next time voice mode starts. **Reset to default** puts the
-plain orb back in the dialog; it only becomes the saved avatar once you press
-**Save avatar**.
+The orb is the agent's avatar, and each [agent](/guide/agents) has its own. Its
+look is set on the **Agents** page: open an agent and use the palette on its
+avatar, which opens a dialog with a live preview you can try in each state
+(idle, listening, speaking, muted). Choose a personality (how it moves), a colour
+palette and a colour for each state, the surface (glossy or plush, and a pattern),
+the motion speed, reactivity and glow, eyes, a hat and a prop. With voice
+installed, the dialog also has the **Voice** the agent speaks with. **Save
+avatar** stores both for that agent, and every device shows it the next time
+voice mode starts. **Reset to default** puts the plain orb back in the dialog; it
+only becomes the saved avatar once you press **Save avatar**. Voice mode shows
+the avatar of the agent the chat is with, the first agent's for a chat in a
+project.
 
 Browser tool calls bring the live browser into a floating window and dock the
 orb. Terminal calls show the agent’s actual command and streamed output on the
@@ -122,6 +127,9 @@ settings**:
 
 Each setting is remembered in this browser.
 
+**Profiling.** The gauge button beside the microphone opens a latency profiler for
+the voice turns you take, see [Voice latency profiling](/guide/voice-profiling).
+
 **Resizing windows.** Drag a window's left, right or bottom edge, or a bottom
 corner, to make it the size you want; the canvas panel has the same grips. A
 window keeps that size until the windows are arranged differently — one opens
@@ -189,7 +197,7 @@ on the same Linux host. Install Docker Compose with GPU support and NVIDIA
 Container Toolkit first. Breeze recommends at least 12 GB GPU memory for eager
 inference; allow additional memory for Whisper and any session model sharing the
 GPU. The overlay uses eager inference. Its default Flash Attention architecture
-is RTX 3060/Ampere (`86`), matching Cortex; use `FLASH_ATTN_CUDA_ARCHS=80`
+is `86` (consumer Ampere, such as an RTX 3060); use `FLASH_ATTN_CUDA_ARCHS=80`
 for A100 or `90` for Hopper. Match the build to your GPU
 and ensure the NVIDIA driver supports the upstream containers' CUDA versions.
 
@@ -255,7 +263,7 @@ licensed, unlike Breeze's research-only weights.
 
 The managed **Install voice** button in Settings builds this combination for
 you: pick **Chatterbox** and **Qwen3-ASR** under **Speech engines** (see
-[Docker add-ons](/guide/add-ons#engines-and-gpu-memory)), and the installer
+[Docker add-ons](/guide/add-ons#engines-devices-and-memory)), and the installer
 downloads both models, sets up the one audio.cpp process and points the settings
 at it. The rest of this section is the alternative: running audio.cpp yourself,
 as a separate deployment. It does not replace Breeze or the managed installer,
@@ -402,7 +410,7 @@ routing:
     use: matrix
     settings:
       matrix:
-        vars: { o: Ornith1.5-35b, q: Qwen3.8-27b, a: audio-cpp }
+        vars: { o: chat-model, q: large-model, a: audio-cpp }
         sets:
           pinned: "o & a"
           split: "q"
@@ -425,7 +433,7 @@ models swaps through all of them.
       "baseUrl": "http://127.0.0.1:8080/v1",
       "api": "openai-completions",
       "apiKey": "none",
-      "models": [{ "id": "Ornith1.5-35b", "reasoning": true, "contextWindow": 262144 }]
+      "models": [{ "id": "chat-model", "reasoning": true, "contextWindow": 262144 }]
     }
   }
 }
@@ -489,12 +497,37 @@ of what you edit.
 `VOICE_RESPONSE_INSTRUCTIONS=false` on the portal switches the speaking
 instructions off as a whole, whatever is saved: no `[Audio mode]` prefix is added
 and the system-prompt rule is never sent, which is what the
-[comparison baseline](/guide/voice-comparison) does. The page says so, and keeps
+[sequential baseline](/guide/voice-comparison) does. The page says so, and keeps
 your text for when the variable is removed. Any other value leaves them on.
 `VOICE_SKIP_FIRST_THINKING=false` keeps thinking on for the first call. The
 remaining `VOICE_*` variables (`VOICE_PIPELINE_MODE`, `VOICE_SENTENCE_CHUNKS`,
 `VOICE_TTS_PREFETCH`, `VOICE_STATUS_SPEECH`, `VOICE_COMPARISON`) are described in
 the comparison guide.
+
+## Status lines while it works
+
+Voice mode says a few short lines of its own while the agent is busy, so a silence
+is not mistaken for a hang. They come from the portal, in English, and not from the
+model; they are not part of the conversation and are not added to the transcript.
+
+- **Thinking.** When the agent has been thinking for about two seconds and has not
+  started to answer, a phrase such as "Let me think about that for a moment." is
+  spoken. It is chosen from a few, never the same one twice in a row, at most once
+  for each thing you say and no more often than every twenty seconds. It is
+  skipped once the answer has begun, and while you are talking.
+- **Compaction.** When the conversation is compacted to free context, a line
+  says so ("Let me do a quick context compaction so I can keep going."), and another
+  when it is over ("Context compaction is done. I'm ready to continue.") or when it
+  stopped before it finished.
+- **Talking during compaction.** What you say while it compacts is dropped, not
+  sent: the agent cannot take it in until the compaction is over. The portal says
+  "I'm still compacting our conversation. Please wait a moment; I'll let you know
+  when I'm ready.", at most every eight seconds, so say it again afterwards.
+
+All the spoken lines are off in the [sequential baseline](/guide/voice-comparison),
+and `VOICE_STATUS_SPEECH=false` on the portal turns them off everywhere. Only the
+lines go: what you say during compaction is still dropped, with nothing said about
+it.
 
 ## Speech runtimes
 
@@ -516,7 +549,7 @@ rest by **Save voice settings**.
 
 **Speech generation → Fast** uses CFG 1, avoiding the extra guidance branch.
 **Expressive** uses CFG 4 for stronger voice direction. Fast can change delivery
-and voice similarity, so compare using the same reference. The Cortex runtime
+and voice similarity, so compare using the same reference. The Breeze runtime
 also caches up to eight encoded reference clips in CPU memory, keyed by audio
 content rather than temporary upload filename.
 
@@ -526,7 +559,7 @@ Select **Settings → Add-ons → Voice → Input language** and save. Choosing 
 spoken language sends an explicit language hint to Whisper on every turn, avoiding
 automatic language guessing on short clips. Auto-detect remains available when
 switching languages. Use a multilingual Whisper model for languages other than
-English; Cortex currently runs multilingual `base` on CPU. A larger model can
+English; the managed installer runs multilingual `base` on the CPU by default. A larger model can
 improve recognition but adds processing time, so benchmark before switching.
 Language selection does not translate speech or change Breeze’s supported output
 languages.
@@ -564,7 +597,9 @@ is slower than playback. Barge-in cancels both queued audio and the upstream req
 The first sentence still needs model synthesis time before audio is available.
 
 Code blocks are
-replaced with a short spoken notice. Thinking and tool output are not spoken.
+replaced with a short spoken notice. The agent's thinking and tool output are not
+read out; the portal's own [status lines](#status-lines-while-it-works) are the
+only thing spoken besides the reply.
 
 If transcription or sending fails, the error appears beside the controls; a
 failed send leaves the recognized text visible for copying. If Breeze reports
@@ -591,34 +626,36 @@ model inference or microphone hardware.
 Runtime references: [Breeze](https://github.com/breezeblue-ai/breeze-tts),
 [Whisper.cpp server](https://github.com/ggml-org/whisper.cpp/tree/master/examples/server).
 
-## Historical Cortex native services
+## Alternative: native services
 
 ::: details Show alternative deployment details
-Cortex already has Breeze's source, Python environment and weights under
-`/root/breeze`. The units in `deploy/cortex-voice` reuse that installation.
-Whisper is built without CUDA under `/opt/pithagoras/voice-runtime/whisper.cpp`
-and uses the CPU, leaving the RTX 3060 available for Breeze. Both endpoints bind
-to loopback and use the same default URLs as the add-on.
+`deploy/cortex-voice` holds example systemd units for running the speech services
+natively on a host, without Docker: `pithagoras-whisper` (Whisper.cpp on the CPU),
+`pithagoras-breeze` (the Python Breeze runtime) and `pithagoras-audio-cpp`
+(Breeze on audio.cpp). They were written for one machine, so change the paths in
+them to where Breeze's source, Python environment and weights, the audio.cpp
+build and Whisper.cpp sit on yours before installing them. Whisper is built
+without CUDA and uses the CPU, leaving the GPU to Breeze. Both endpoints bind to
+loopback and use the same default URLs as the add-on.
 
 Install the unit files into `/etc/systemd/system`, reload systemd, and start
 `pithagoras-whisper`. Start `pithagoras-breeze` when sufficient GPU memory is
-available. On Cortex, the experimental `emotion-console` container is stopped
-and both voice units are enabled at boot. Breeze reserves roughly 8 GB of the
-GPU; use `systemctl stop pithagoras-breeze` to release its memory, or
+available. Breeze reserves roughly 8 GB of the GPU; use
+`systemctl stop pithagoras-breeze` to release its memory, or
 `systemctl disable --now pithagoras-breeze` before returning the GPU to another
-service permanently. Do not run these units alongside the Compose voice services;
-they use the same ports.
+service permanently. Do not run these units alongside the managed add-on or the
+Compose voice services; they use the same ports.
 
 Browser tests use the public JFK speech sample bundled with Whisper.cpp as a
 synthetic microphone stream; they do not record from your physical microphone.
 :::
 
-## Historical Cortex accelerated streaming runtime
+## Alternative: native audio.cpp streaming runtime
 
 ::: details Show alternative deployment details
-Cortex uses audio.cpp at commit `efb04233dab73aeee4b2912042a90e7b36329061`,
-built for CUDA architecture 86 with the `breeze_tts` model. The Q8 package is
-`breeze_tts_2_q8_0`, installed under `/root/breeze/audio-cpp-models`.
+The example uses audio.cpp at commit `efb04233dab73aeee4b2912042a90e7b36329061`,
+built for the CUDA architecture of the GPU (`86` there) with the `breeze_tts`
+model, from the `breeze_tts_2_q8_0` Q8 package.
 `pithagoras-audio-cpp.service` serves loopback port 7861; the Voice add-on uses
 runtime `audio-cpp` and URL `http://127.0.0.1:7861/v1/audio/speech`.
 The reference recording and transcript are sent inline and cached by the runtime.
@@ -628,22 +665,25 @@ chunks contiguously. Synthesis stays single-file while playback runs independent
 Barge-in cancels the HTTP stream and scheduled audio. The Python runtime retains
 whole-phrase buffering because its measured synthesis is slower than playback.
 
-On the RTX 3060 with Qwen resident, a warmed reference-clone sample generated 4.88 seconds
-of audio in 3.05 seconds, with first audio at 0.94 seconds. The prior Python
-runtime took 8.40 seconds for the same text (its output duration was 4.32 seconds).
-The audio.cpp process used 4414 MiB VRAM. These are sample measurements, not
-latency guarantees for every input. A separate portal request produced 8 seconds
-of audio in 4.94 seconds, with first bytes at 0.99 seconds.
+On an RTX 3060 with a language model resident, a warmed reference-clone sample
+generated 4.88 seconds of audio in 3.05 seconds, with first audio at 0.94 seconds.
+The prior Python runtime took 8.40 seconds for the same text (its output duration
+was 4.32 seconds). The audio.cpp process used 4414 MiB VRAM. These are sample
+measurements, not latency guarantees for every input. A separate portal request
+produced 8 seconds of audio in 4.94 seconds, with first bytes at 0.99 seconds.
 
 Rollback: stop `pithagoras-audio-cpp`, start `pithagoras-breeze`, select runtime
 `breeze`, and restore the speech URL to port 7860. Only one TTS unit should be
-enabled at boot. Qwen and Whisper do not need to restart.
+enabled at boot. The language model and Whisper do not need to restart.
 :::
 
-## Session prefill snapshots on Cortex
+## Session prefill snapshots
 
-`LLAMA_DISK_CACHE_MODELS=qwen36-35b-a3b-mtp` enables per-session slot snapshots.
-The matching llama preset has `slot-save-path = /root/models/session-cache/`.
+`LLAMA_DISK_CACHE_MODELS` names the llama.cpp models, comma-separated, whose
+prompt cache is kept per session. Set it to `my-model` and that model's chats
+get per-session slot snapshots.
+The llama.cpp server needs a `slot-save-path` to write them to, such as
+`/path/to/session-cache/`.
 The portal serializes inference and save/restore operations for its single model
 slot, saves after successful responses, and restores when changing sessions.
 Filenames hash the model and session ID. Cache files persist on the llama host;
@@ -664,7 +704,7 @@ On a Linux NVIDIA host with Docker and NVIDIA Container Toolkit, open
 you choose the speech synthesis engine (Breeze or Chatterbox) and the speech
 recognition model (Whisper base or small, Qwen3-ASR 0.6B or 1.7B), or leave the
 choice to the installer, which reads the GPU and its free memory and picks the
-best combination that fits; [Docker add-ons](/guide/add-ons#engines-and-gpu-memory)
+best combination that fits; [Docker add-ons](/guide/add-ons#engines-devices-and-memory)
 lists what each needs and what happens when a choice does not fit. The default is
 the original combination: Breeze with Whisper base.
 
@@ -750,6 +790,6 @@ from the recording alone, so editing the description of a voice used with
 Chatterbox changes nothing you can hear.
 
 Delete voice removes the preset and falls back
-to the default designed voice if it was active. Presets and recordings persist in
+to the default designed voice if it was active; an [agent](/guide/agents#its-voice) that had it speaks as the voice settings say again. Presets and recordings persist in
 the portal's SQLite database; they are shared across sessions and require portal
 authentication to access. Adding a voice does not retrain or download another model.

@@ -337,7 +337,8 @@ The same as the agent's tools, because it is the same code: the address, model, 
 key are read when a picture is made; the key goes to that address and nowhere else and
 **never reaches the page**; a picture sent as an address is fetched only from the
 endpoint's own host or over https from the public internet; what comes back must be a
-PNG, JPEG, GIF or WebP by its first bytes and at most 20 MB, in three minutes. See
+PNG, JPEG, GIF or WebP by its first bytes and at most 20 MB, within the time limit (five minutes
+unless you set another). See
 [Opt-in features](/guide/features#what-is-accepted).
 
 | | |

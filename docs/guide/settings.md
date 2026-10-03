@@ -20,8 +20,9 @@ the composer, and a second copy here would be two places to keep in sync.
 
 *(The **Defaults** page; older links call it `general`.)*
 
-Defaults for newly created sessions, and read-only deployment facts — the
-executor, the workspace root, and where pi's `settings.json` lives.
+What new chats start with: provider, model, effort, the context window, how much
+is kept when a chat is compacted, and where routines report. The fields are
+described in [Models and providers](/guide/models#defaults).
 
 The fields show **only your explicit overrides**. Leave one empty and it
 inherits, with the inherited value shown as the placeholder. Clearing a field
@@ -31,39 +32,12 @@ This matters more than it sounds. An earlier version prefilled each field with
 the *resolved* value, so one click of Save pinned an inherited setting forever —
 which is how a portal could end up permanently stuck on a model nobody chose.
 
-**Notifications** are a switch on **This browser**, kept in this browser like
-the confirmations. Turned on, the browser asks for permission once, and after
-that a chat that finishes or an extension that needs an answer says so while you
-are on another tab or window. Nobody is told about the chat in front of them.
-It needs a secure connection — HTTPS, or `localhost` — because browsers do not
-offer notifications over plain HTTP; the switch says so where it is unavailable.
-A chat that is not open is noticed too: while one is running and notifications
-are on, a hidden page keeps checking every fifteen seconds.
-
-**Sign out**, also on **This browser**, appears when the portal has a password. It
-signs out this browser only, and the login it held stops working anywhere a
-copy of its cookie was taken. A login that runs out — after thirty days, or when
-the portal restarts without `PORTAL_SECRET` — brings the password screen back
-rather than failing every request with *Unauthorized*.
-
-### Language
-
-The portal speaks English and German. **This browser → Language** picks one,
-and is kept in this browser like the theme; until one is picked it follows the
-browser's own language, and English where there is none of its own. Dates and
-numbers are written the language's way. It changes the portal's words only:
-what the agent writes is up to the agent, and messages that come from the
-server — an error it reports, a channel's own description — stay as they are.
-
-A language is one file in `web/src/locales/`, mapping each English text to its
-own; adding one means adding that file, and the tests list what it lacks.
-
 ### Where a model comes from
 
 Resolved in order, first match wins:
 
 1. The session's own choice, from the pill under the composer
-2. A portal override, saved here in General
+2. A portal override, saved on **Defaults**
 3. `PI_PROVIDER` / `PI_MODEL` / `PI_THINKING_LEVEL` in the environment
 4. `defaultProvider` / `defaultModel` / `defaultThinkingLevel` in pi's `settings.json`
 5. A last-resort constant
@@ -82,7 +56,7 @@ that, a session asking for a local model silently started on pi's fallback.
 
 **Tools** sets which tools every conversation starts with, see
 [The interface](/guide/interface#tools). **Skills** lists, creates, imports and
-switches the agent's procedures. **MCP** manages MCP servers, see
+switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
 
 **Images** holds the image endpoint behind generation and editing, including the maximum picture size of an edit, and the
@@ -114,16 +88,59 @@ which is a heuristic: a key built dynamically at runtime will not appear. Use
 Advanced to edit `settings.json` directly when that happens.
 :::
 
-## This browser, Add-ons and About
+## This browser
 
-**This browser** holds what is kept per browser: theme, animations, language,
-notifications, the command character, confirmations and sign-out — see
+What is kept in this browser rather than on the server, so a phone can differ
+from the laptop: the theme (light, dark, or following the system), animations,
+language, notifications, the command character, confirmations and sign-out. See
 [The interface](/guide/interface) and
 [Slash commands](/guide/commands#the-command-character).
-**Add-ons** installs the optional parts of the portal itself: Browser, Voice,
-Subagents and Memory, see [Docker add-ons](/guide/add-ons) and
-[Opt-in features](/guide/features). **About** shows where this portal runs the
-agent, its workspace root and where pi keeps its files.
+
+**Confirmations** is the one question the portal asks before it deletes
+something, and whether it asks it.
+
+### Notifications
+
+A switch. Turned on, the browser asks for permission once, and after that a chat
+that finishes or an extension that needs an answer says so while you are on
+another tab or window. Nobody is told about the chat in front of them. It needs a
+secure connection — HTTPS, or `localhost` — because browsers do not offer
+notifications over plain HTTP; the switch says so where it is unavailable. A chat
+that is not open is noticed too: while one is running and notifications are on,
+a hidden page keeps checking every fifteen seconds.
+
+### Sign out
+
+Appears when the portal has a password. It signs out this browser only, and the
+login it held stops working anywhere a copy of its cookie was taken. A login that
+runs out — after thirty days, or when the portal restarts without
+`PORTAL_SECRET` — brings the password screen back rather than failing every
+request with *Unauthorized*.
+
+### Language
+
+The portal speaks English and German. **Language** picks one, and is kept in this
+browser like the theme; until one is picked it follows the browser's own
+language, and English where there is none of its own. Dates and numbers are
+written the language's way. It changes the portal's words only: what the agent
+writes is up to the agent, and messages that come from the server — an error it
+reports, a channel's own description — stay as they are.
+
+A language is one file in `web/src/locales/`, mapping each English text to its
+own; adding one means adding that file, and the tests list what it lacks.
+
+## Add-ons
+
+Installs the optional parts of the portal itself: Browser, Voice, Subagents and
+Memory, see [Docker add-ons](/guide/add-ons) and
+[Opt-in features](/guide/features).
+
+## About
+
+Where this portal keeps what it keeps, set when it was deployed through its
+environment: whether the agent runs on this host or in a container per chat, the
+workspace root where each chat's folder is made, and where pi keeps its files
+(`settings.json`, `models.json`, `auth.json` and installed packages).
 
 ## Shortcuts
 

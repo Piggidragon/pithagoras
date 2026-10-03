@@ -25,6 +25,14 @@ reaching for a tool, because it is told who it is speaking to. If it tries
 anyway — talked round, or fed a convincing story — the call is blocked and it is
 told to say so rather than look for another route.
 
+## An agent's own look
+
+When an agent [looks around on its own](/guide/agents#its-heartbeat) nobody is
+speaking, and it runs as a role that is not for people: `heartbeat`. It
+may read files and leave notes, and nothing else: no commands, no edits, no
+messages. What you [allow anyway](/people/rules) for it is a rule for the role,
+listed in People as for every agent's heartbeat.
+
 ## What each can see
 
 Context files split at the same boundary:

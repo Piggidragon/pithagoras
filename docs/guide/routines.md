@@ -4,9 +4,9 @@ A routine is a standing instruction and a schedule. When it fires the agent is
 given the instruction, does the work, and goes quiet again — nobody is waiting
 on the other end, so a run may take as long as it takes.
 
-Routines live in the sidebar next to Sessions and Agent. By default they run in the
-agent's home directory and share the agent's memory; **Runs in** gives one a project
-instead, and its runs work in that folder. Each place keeps its own session, so
+Routines live in the sidebar next to Sessions and Agents. By default they run in the
+first agent's home directory and share its memory; **Runs in** gives one another
+[agent's](/guide/agents) home or a project instead, and its runs work in that folder. Each place keeps its own session, so
 moving a routine back picks up where it left off. If the folder is later removed,
 the routine says so and its runs fail until another place is chosen.
 
@@ -41,7 +41,7 @@ cannot start messaging somewhere it was never pointed at.
 
 Two places to set it:
 
-- **Settings → General → Routine reports** is the portal-wide default. Every
+- **Settings → Defaults → Routine reports** is the portal-wide default. Every
   routine inherits it, including one the agent creates for itself from a chat.
 - **A routine's own page** overrides that: a different conversation, or *Never
   report* for one that should stay quiet whatever the default is.
@@ -91,6 +91,13 @@ The rules exist for when the log line was written by somebody who wanted the
 agent to read it. Exempt the routine that needs it, leave the rest alone, and
 read the audit occasionally.
 :::
+
+## The browser
+
+**Browser** on a routine's page lets its runs drive the agent's
+[browser](/guide/browser), which is signed into the agent's own accounts. It is
+off by default, and every page a run opens is recorded in
+[Audit](/guide/sessions#audit).
 
 ## Letting the agent manage them
 

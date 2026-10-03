@@ -19,8 +19,15 @@ session never deletes its folder.
 Type and send. The request returns as soon as pi accepts the message — it does
 not wait for the work to finish. Close the tab if you like.
 
-While a run is in progress you can keep typing; further messages are queued.
-**Stop** aborts the current run.
+While a run is in progress you can keep typing. Words sent mid-run steer it: the
+agent takes them in after the step it is on, instead of when the whole run is
+over. Until then the message sits in the transcript marked *Waiting — goes in
+after the current step*. A message that did not get that far — the run was
+stopped, or the portal restarted, before the agent took it in — says so and has
+a button to send it again. **Stop** aborts the current run. In
+[voice mode](/guide/voice#pictures-tool-cards-and-controls) what you say stops
+the task by default, and its settings have a switch to add it to the running task
+instead.
 
 ## The message box
 
@@ -243,10 +250,10 @@ A status that names one of the chat's slash commands runs it when clicked.
 
 ## Sidebar and the sessions page
 
-The sidebar opens with New, then the places — Sessions, Projects, Agent,
-Routines and [Audit](#audit), with Browser and Memory added while the
-[browser](/guide/browser) is installed and [Understory](/guide/features#memory-understory)
-holds the agent's memory — then **Pinned**, then **Recents**. The button at its
+The sidebar opens with New, then the places — Sessions, Projects, Agents,
+Routines and [Audit](#audit), with Browser, Memory and Images added while the
+[browser](/guide/browser) is installed, [Understory](/guide/features#memory-understory)
+holds the agent's memory and an [image endpoint](/guide/images) is set up — then **Pinned**, then **Recents**. The button at its
 top edge folds it to a rail of icons; under each chat's title it shows the folder it works in. Recents is capped at twelve; anything past that is reachable from
 the Sessions page, which lists everything with search over names and workspace
 paths.
@@ -290,7 +297,7 @@ Hovering a session gives you pin, rename and delete. Renaming turns the name int
 a field where it stands — Enter or clicking away keeps the new one, Escape puts
 the old one back — and double-clicking the name does the same. Delete asks in the
 portal's own dialog, with the button saying what it will do — and **Settings →
-General → Confirmations** turns that question off, for chats, messages, files,
+This browser → Confirmations** turns that question off, for chats, messages, files,
 skills, routines, projects, voices and channels alike. It is kept per browser.
 Discarding unsaved changes is still asked about. The Agents page's conversations
 can be renamed and deleted the same way, from the row.
@@ -332,14 +339,14 @@ The pill can say `off` and the model go on thinking. What `off` puts in the
 request is decided by pi from the model's entry in `models.json`, and for an
 OpenAI-compatible server it does not know how to switch reasoning off unless it
 is told. Left alone it sends `reasoning_effort: "off"`, which llama.cpp does not
-read: measured on a Qwen-family model, that answer reasons exactly as much as
+read: measured on a local model, that answer reasons exactly as much as
 `medium` does.
 
 Those models switch thinking through their chat template, so say so:
 
 ```json
 {
-  "id": "Ornith1.5-35b",
+  "id": "my-local-model",
   "reasoning": true,
   "thinkingLevelMap": { "off": "off", "minimal": null, "low": null, "medium": "medium", "high": null, "xhigh": null, "max": null },
   "compat": { "thinkingFormat": "qwen-chat-template" }
@@ -384,7 +391,7 @@ information. Until then the window is the one in the model's entry, or the
 default below.
 
 For all models at once there is a **Context window** default under
-Settings → General. It is a ceiling: a model that declares more is held to it, a
+Settings → Defaults. It is a ceiling: a model that declares more is held to it, a
 model that declares less keeps its own number, and a window set for one model in
 its pill wins over it. Leave it empty to use what each model says.
 
@@ -414,9 +421,9 @@ while it runs, `❓ Fix login · asks you` while an extension is waiting for an
 answer, and the plain name when it is done. Whether it is worth switching back
 to is then readable from the tab strip.
 
-The pages that refresh themselves — the sessions in the sidebar, Agent, Routines,
-Channels, Browser, Audit — do that only while the page is visible, and once at
-once when you come back to it. A tab left in the background asks for nothing.
+The pages that refresh themselves — the sessions in the sidebar, Agents, Routines,
+Channels, Browser, Audit — do that only while the page is visible, and once
+when you come back to it. A tab left in the background asks for nothing.
 
 If the connection to a chat breaks, the page reconnects — after two seconds,
 then four, eight and at most fifteen — and says so once a second attempt has
@@ -445,9 +452,16 @@ and, for a tool, which tool and what it was asked to do:
 | Turned away | A stranger on a channel was refused |
 | You answered | A question from the agent was answered |
 | Page opened | The agent's [browser](/guide/browser) was pointed at a page |
+| `allowed-by-exemption` | A routine whose [injection guard](/guide/routines#the-injection-guard) is off did something the guard would have stopped |
+| Log cleared | Somebody emptied the log, and how many entries went |
 
 The buttons above the list filter it: **Everything**, **Refused**, **Allowed**
-(both kinds) or **Strangers**, with counts of each and how many are shown. The
+(every kind of allowed) or **Strangers**, with counts of each and how many are shown. The
 page shows the latest 300 and refreshes every ten seconds while it is visible.
 Who is named is who they are called now: renaming a person renames them through
-the history. There is no button to clear it.
+the history.
+
+**Clear the log** empties it, after a confirmation. It deletes every recorded
+decision, not only the ones the filter shows, but not one made while the question
+was open. A clear leaves a *Log cleared* row behind that says how many entries it
+removed, so an emptied log cannot pass for a quiet one.

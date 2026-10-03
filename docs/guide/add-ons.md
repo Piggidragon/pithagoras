@@ -175,7 +175,7 @@ Browser uses Docker's `unless-stopped` restart policy. If `BROWSER_EXTERNAL=true
 ### Choose engines, install and wait for Ready
 
 1. Open **Settings → Add-ons → Voice**.
-2. Expand **Voice service**. Under **Speech engines** the page shows the GPU it can read and what fits it. Leave **Choose for me, based on my GPU** on, or turn it off and pick the engines yourself (see [the engines](#engines-and-gpu-memory) below).
+2. Expand **Voice service**. Under **Speech engines** the page shows the GPU it can read and what fits it. Leave **Choose for me, based on my GPU** on, or turn it off and pick the engines yourself (see [the engines](#engines-devices-and-memory) below).
 3. Click **Install voice** and follow **Setup log** until the service shows **Ready**.
 
 ::: info First setup takes time
