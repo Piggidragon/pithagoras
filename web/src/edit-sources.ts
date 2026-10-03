@@ -49,6 +49,16 @@ export function moved<T>(list: readonly T[], index: number, by: -1 | 1): T[] {
   return next;
 }
 
+/** `list` with the picture `id` taken out and put at place `to`, the others keeping their order: what dragging one to another's place does. The list itself, copied, where there is no such picture or place. */
+export function moveTo<T extends { id: string }>(list: readonly T[], id: string, to: number): T[] {
+  const from = list.findIndex((p) => p.id === id);
+  if (from < 0 || to < 0 || to >= list.length || from === to) return [...list];
+  const next = [...list];
+  const [one] = next.splice(from, 1);
+  next.splice(to, 0, one);
+  return next;
+}
+
 /** What the pictures weigh together. */
 export const weightOf = (list: readonly GalleryPicture[]): number => list.reduce((sum, p) => sum + p.bytes, 0);
 

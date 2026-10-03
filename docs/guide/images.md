@@ -6,12 +6,19 @@ is. It is the page for making pictures with that endpoint **without a chat**, an
 looking through every picture made with it — here, and by the agent in its chats. Nothing on it needs a model or a conversation:
 the page asks the portal, the portal asks the image endpoint you set up.
 
-Where there is no endpoint the page says so, with a link to
-**Settings → Agent → Images**, and still shows what is in the gallery. Making and
-changing a picture are set up apart: with only editing on there is no form to describe
-a new picture, which the page says, but a picture can be put in from your computer or
-chosen in the gallery to be changed; with only generation on there is no **Edit it** and
-no upload.
+The form at the top has two modes, chosen with the switch above it: **Generate** and
+**Edit**. Both are always there. Making and changing a picture are set up apart, each
+with its own switch in **Settings → Agent → Images** (**Image generation** and **Image
+editing**, with an address), and a mode that is not set up is not hidden: it says
+*not set up*, and when you choose it the form says it is switched off or has no address,
+with a link to the setting. The page opens in **Generate**, or in **Edit** where only
+editing is set up, and it still shows what is in the gallery whatever is set up.
+
+Those two switches decide whether the feature exists: whether the page can make or change
+pictures, and whether the agent can have the `generate_image` and `edit_image` tools at all.
+Whether a chat's agent actually gets a tool is set where every tool is, in the tool lists
+(Settings → Agent → Tools, a project's Tools, the tools control of a chat). The page does not
+depend on those lists: a tool switched off there leaves the page as it is.
 
 ## Making a picture
 
@@ -22,15 +29,63 @@ gallery while it is made — the same frame a chat shows, with how long it has t
 page of the portal, does not lose it: the portal makes it, and the page shows it
 again when you come back.
 
-**Options** has what the request is made with, and the page keeps it for the next
-visit (the description is not kept):
+Under the description are the settings of the picture. They are fields of their own, and a
+field you leave empty is **not sent**: the add-on's own model and size, or the endpoint's own
+default, apply, and the field shows what that is as its placeholder. The page keeps them for the
+next visit (the description is not kept), **Generate** and **Edit** each with their own.
 
-| Field | Meaning |
-| --- | --- |
-| **Model** | Sent as `model` instead of the model saved for the add-on. Empty uses that one. |
-| **Picture size** | Sent as `size`, such as `1024x1024`. Empty uses the size saved for the add-on, or none. |
-| **How many** | One to four. Each is a request of its own for one picture, so an endpoint that makes one at a time is not asked for a number it may refuse. |
-| **Other fields of the request** | One `name=value` to a line, sent with the request as they are, for what an endpoint takes beyond these (`quality=high`, a `seed`). `true`, `false` and plain numbers are sent as such; a value in double quotes is text whatever it looks like (`seed="42"`). The four fields the form sets itself, `model`, `prompt`, `n` and `size`, cannot be set here, and at most twelve can be. |
+| Field | Sent as | Meaning |
+| --- | --- | --- |
+| **Model** | `model` | Instead of the model saved for the add-on (for **Edit**, the model saved for editing). Empty uses that one. |
+| **Width** and **Height** | `size`, as `1024x768` | Both, or neither: a size needs both sides, each a whole number from 64 to 8192. Empty uses the size saved for the add-on; an edit has none of its own, and an empty size sends none, since what an edit comes out as is the endpoint's to say. |
+| **How many** | `n` (1 for each) | One to four. Each is a request of its own for one picture, so an endpoint that makes one at a time is not asked for a number it may refuse. |
+
+**Advanced** adds two more, which the OpenAI image format also has:
+
+| Field | Sent as | Meaning |
+| --- | --- | --- |
+| **File format** | `output_format` | PNG, JPEG or WebP, as the endpoint takes them; some take only PNG and JPEG for edits. Empty is the endpoint's own. |
+| **Compression** | `output_compression` | A whole number from 0 to 100, **only with JPEG or WebP**: the field is off for the others and says so, and nothing is sent for it. |
+
+A setting that is wrong is said when you choose **Make the picture**, with the field marked and
+the keyboard moved to it, and nothing is sent.
+
+These fields are exactly what the OpenAI image format has for a request: `model`, `prompt`, `n`,
+`size`, `output_format` and `output_compression`. **Nothing else is ever sent as a field of the
+request.** The old free input for "other fields of the request" is gone, for that reason: a field
+that is not in the format reaches an endpoint that does not know it as a field it ignores or
+refuses. Pictures that an older version made with such fields still list them under
+**Details**, as they were, and **Run again** does not send them.
+
+### Stable Diffusion settings
+
+Some settings are not in the OpenAI image format at all, and a server cannot be told them as
+fields. **stable-diffusion.cpp's server** takes them in its own way: as a JSON block inside the
+prompt, `<sd_cpp_extra_args>{…}</sd_cpp_extra_args>`, which it cuts out before it generates. The
+page can send them that way, and only if you say the endpoint is such a server: switch on
+**Stable Diffusion extra settings** in **Settings → Agent → Images** (off by default; one switch for
+generating and editing). Only stable-diffusion.cpp servers understand it, and any other endpoint would
+take the block as part of the description, so leave it off for those.
+
+**Off,** the form shows only the OpenAI fields above and **nothing of this kind is ever sent**: no
+block, not even for a value that was typed or kept earlier. Those values stay in the form's memory,
+and are not shown or sent. The agent's tools never send these settings, on or off.
+
+**On,** a block of its own appears in the form, **Stable Diffusion (stable-diffusion.cpp)**,
+apart from the OpenAI fields, with a link to the setting:
+
+| Field | In the block as | Meaning |
+| --- | --- | --- |
+| **Negative prompt** | `negative_prompt` | What the picture should not show. Up to 4000 characters. |
+| **Seed** | `seed` | A whole number, 0 or more, or -1 for a random one. With several pictures each takes the next seed, so that they are not the same picture. A seed is not kept for the next visit. |
+| **Steps** | `sample_params.sample_steps` | The sampler's steps, 1 to 100. |
+| **Strength** | `strength` | Edit only: 0 to 1. See below. |
+| **Start from** | `init_image: null` | Edit only: **Noise only**. See below. |
+
+A field left empty is left out of the block, and with none set there is no block: the description
+goes as you typed it. The block is made as JSON, so quotes, line breaks and `<` in a negative prompt
+are text and cannot end it early. A description that has an `<sd_cpp_extra_args>` block of its own
+cannot also have settings: it is refused, since only one of the two would be read.
 
 At most **four** pictures are being made at once — a guard against a click that costs
 more than meant, not a measure of what an endpoint can do. **Stop** on a picture that
@@ -48,50 +103,81 @@ Each picture can cost money at a hosted endpoint, as it does for the agent.
 
 ## Changing a picture
 
-Choose **Edit it** on a picture in the viewer, put pictures in from your own files
-(**Change a picture from this computer**, a drop on the form, or a paste), or tick
-pictures in the gallery and choose **Edit the selected**; the form then says **Change a
-picture** and shows the picture or pictures it works from. Describe what should change
-and choose **Change the picture**. It needs [editing](/guide/features#editing-a-picture)
-switched on; where it is not, there is no **Edit it** and no upload, and with it on and
-generation off, **Run again** is there for a change only, since making a picture from a
-description needs generation. An edit goes to
-the editing endpoint with the model set for it, and the options above do not apply.
+Choose **Edit** at the top of the form. The pictures it works from are chosen right there, in
+the gallery under it: **click a picture to use it**, and click it again to take it out. A picture
+you click takes a place after the ones there (a number on the tile shows it) and appears as a
+small picture in the form, in the order the request sends them. New pictures can be put in from
+your own files — **Add pictures from this computer**, a drop on the form, or a paste. Describe
+what should change and choose **Change the picture**. **Edit it** on a picture in the viewer
+does the same for that one picture alone, and **Run again** on a change puts it back in the form
+with its pictures and words.
+
+It needs [editing](/guide/features#editing-a-picture) switched on. Where it is not, **Edit** and
+**Edit it** are still there: they lead to the form, which says that image editing is switched
+off or has no address, and links to the setting. With editing on and generation off, **Run
+again** is there for a change only, since making a picture from a description needs generation.
+An edit goes to the editing endpoint with the model set for it, and has the settings of
+[the form](#making-a-picture) too: the model, a size, how many (one change each), and the file format
+and compression. It needs the **Stable Diffusion** settings for the strength and for starting from
+noise (below).
 
 - **The result is a new picture.** The original is never changed, and the new one
   is a gallery picture of its own that the viewer links back to the original.
+- **Choosing in the gallery.** While the form is in **Edit**, a click on a tile chooses the
+  picture instead of opening it, and the tile gets a box that is ticked while the picture is in
+  the edit. **Select** (for download and delete) gives way to a line saying so, and is there
+  again in **Generate**. To look at a picture larger, use the small button in the tile's corner,
+  or the picture in the form's row: both open the [viewer](/guide/sessions#looking-at-a-picture).
+  Pictures a job is still making cannot be chosen until they are in the gallery.
 - **Several pictures.** Where the editing endpoint is [said to take several](/guide/features#several-pictures)
-  (**Several pictures per edit**, off until you switch it on), the form shows the pictures
-  as a row of small pictures, up to eight, in the order the request sends them. This also makes a new
+  (**Several pictures per edit**, off until you switch it on), the form takes up to eight
+  pictures, in the order the request sends them. This also makes a new
   picture from references; the endpoint cannot tell the two apart, the description does.
-  - **Adding.** The **Add** button after the last picture takes several files at once
-    (`Ctrl`/`Shift` in the file dialog). Files can also be **dropped anywhere on the form** — a
-    drop on the form with no pictures yet starts an edit — and a picture on the clipboard (a
-    screenshot, or "Copy image") is **pasted** with `Ctrl`/`Cmd` + `V` into the description or
-    anywhere in the form. Each file is checked by its bytes as a PNG, JPEG, GIF or WebP; one
-    that is not a picture is named in the message and the others are still added. In the
-    gallery, **Select** and tick pictures, then **Edit the selected**: they go in the order you
-    ticked them. In the viewer, **Use as a reference** adds the picture shown and takes it out
-    again (a toggle).
-  - **Their order.** Each picture has its place on it (1, 2, …), which is how the
-    description names them: "the first picture", "the second picture". The arrows under a picture
-    move it one place earlier or later, and **×** takes it out; every one of these is a button, so a
-    keyboard reaches them with `Tab` and `Enter`. The picture itself opens in the
-    [viewer](/guide/sessions#looking-at-a-picture), which steps through them in this order.
+  - **Adding.** Click pictures in the gallery, in the order you want them. The **Add** button
+    after the last picture takes several files at once (`Ctrl`/`Shift` in the file dialog). Files
+    can also be **dropped anywhere on the form** — a drop in **Generate** switches to **Edit** — and a
+    picture on the clipboard (a screenshot, or "Copy image") is **pasted** with `Ctrl`/`Cmd` + `V` into
+    the description or anywhere in the form. Each file is checked by its bytes as a PNG, JPEG, GIF or
+    WebP; one that is not a picture is named in the message and the others are still added.
+  - **Their order.** Each picture has its place on it (1, 2, …), in the form and on its tile in the
+    gallery, which is how the description names them: "the first picture", "the second picture". **The
+    order is the one the request sends them in** (`image[]`, first to last). **Drag a picture to another
+    place** in the row to move it there (a mouse or a pen; a drag does not work on every touch screen). The
+    arrows under a picture move it one place earlier or later, and **×** takes it out; these are buttons,
+    so a keyboard and a phone reach them with `Tab` and `Enter`, and a move is said to a screen reader.
+    The picture itself opens in the [viewer](/guide/sessions#looking-at-a-picture), which steps through
+    them in this order.
+  - **The first one counts most.** The form says so under a row of several: the first picture is the one
+    that is changed or carried over, and the others are extra references. Put the picture you mean to
+    change first.
   - **The limit.** The header of the row shows how many there are of the eight. At eight the
-    **Add** button goes until one is taken out, **Use as a reference** is greyed out for a
-    ninth, with the reason as its tooltip, and pictures that did not fit — in a pick, a drop or a paste — are **not uploaded** and are
-    said to be left out, never dropped without a word (if the row filled up while a pick was still being
-    uploaded, say from the viewer, the one that no longer fits stays in the gallery and is said to be left out). Together they may weigh 50 MB; a row that weighs more
-    says so, and **Change the picture** waits.
+    **Add** button goes, and the tiles of the gallery that are not in the edit are dimmed and cannot be
+    chosen until one is taken out (their box says why). Pictures that did not fit — in a pick, a drop or a
+    paste — are **not uploaded** and are said to be left out, never dropped without a word (if the row
+    filled up while a pick was still being uploaded, the one that no longer fits stays in the gallery and
+    is said to be left out). Together they may weigh 50 MB; a row that weighs more says so, and **Change
+    the picture** waits.
   - **An endpoint that takes one.** With the switch off, the form works with one picture:
-    a picture you add or drop takes the place of the one there is, any others in the same pick are
+    a picture you click, add or drop takes the place of the one there is, any others in the same pick are
     said to be left out, and the form says what to switch on and links to it. Several that came in anyway
     (a change made from several, run again) are said to be too many, and **Change the picture** waits until one is left.
   - **The size limit applies to each.** The [maximum picture size](/guide/features#editing-a-picture) of
     the editing settings is checked for every picture; one that is over it fails the whole change in its frame
     with a message such as "Picture 2 is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit",
     and nothing is sent.
+- **Strength.** With the Stable Diffusion settings on, **Strength** (0 to 1; a comma is a decimal point)
+  says how far the result may go from the first picture. A high one, such as 0.75 or more, **tends** to keep
+  the result close to the first picture, so that the other pictures then have little or no effect; a lower
+  one gives them more influence. That is how it has been seen to behave, not a promise of what an endpoint
+  does. Empty is the server's own.
+- **Starting from noise.** With the Stable Diffusion settings on, **Start from** has two ways. **The first
+  picture** (the default) is the base that is built on, and works with the strength and the mask. **Noise
+  only** sends `"init_image": null` in the block, so that the run starts from noise: the description and
+  all the pictures, which are still sent as `image[]`, are used as references. The strength and the mask
+  do not apply then, so they are not sent, and the form turns them off and says so (a request that has
+  them is refused). The first picture likely counts less there than it does as the base, so the order
+  matters less; the form words it that way, as it is not something the page can check. This is not kept
+  for the next visit.
 - **A mask.** **Only change a part: paint a mask** shows the first picture with a
   brush: paint over what should change. The mask is made at the picture's own size,
   transparent where you painted and opaque elsewhere — the area OpenAI-style endpoints
@@ -138,21 +224,20 @@ Beside its own buttons, the viewer has these for a gallery picture:
 
 | Button | Does |
 | --- | --- |
-| **Details** | The full description, when and how it was made, the model, the size, the other fields it was asked with, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
-| **Edit it** | Puts the picture in the form to be changed, in place of any that were there. |
-| **Use as a reference** | Adds it to the pictures an edit works from, or takes it out again; not offered once there are eight. Only where the editing endpoint takes several. |
-| **Run again** | A picture made from a description is made once more, with the model, size and other fields it was made with: one click, one more picture. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
+| **Details** | The full description, when and how it was made, the model, the size, the file format and compression, the Stable Diffusion settings it was made with (they are listed whether or not the switch is on now), the free fields an older version sent, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
+| **Edit it** | Puts the picture in the form, in **Edit**, to be changed, in place of any that were there. Always offered: where editing is not set up it leads to the form, which says so. To work from several pictures, click them in the gallery instead. |
+| **Run again** | A picture made from a description is made once more, with the model, size, file format and compression it was made with, and its Stable Diffusion settings while that switch is on: one click, one more picture. With a seed that is the same picture again, as the endpoint makes it. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
 | **Delete** | See below. |
 | **Open in a new tab**, **Download** | The file itself. |
 
 ### Selecting several
 
-**Select** puts a box on every picture: a click selects instead of opening, and
+In **Generate**, **Select** puts a box on every picture: a click selects instead of opening, and
 **Select all shown** takes what is on screen. **Download** saves each selected picture
 as a file of its own — the browser may ask once whether this page may download several —
-**Edit the selected** makes them the pictures of an [edit](#changing-a-picture), in the order
-they were ticked (the first eight, or only the first where the endpoint takes one; the rest are said to be left out), where editing is set up,
-and **Delete** takes them away after asking. What is selected belongs to what is shown: a
+and **Delete** takes them away after asking. (In **Edit** a click on a picture chooses it for
+the [edit](#changing-a-picture) instead, and there is no **Select**; a picture is deleted from
+the viewer there.) What is selected belongs to what is shown: a
 change of filter, or **Back** to another one, clears it, so that nothing that is not on
 screen is deleted with what is. `Esc` or **Done** ends selecting.
 

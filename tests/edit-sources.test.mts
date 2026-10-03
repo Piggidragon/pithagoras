@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { MAX_SOURCES, MAX_SOURCES_BYTES, addSources, moved, refusal, roomFor, sourceName, weightOf } from "../web/src/edit-sources.ts";
+import { MAX_SOURCES, MAX_SOURCES_BYTES, addSources, moveTo, moved, refusal, roomFor, sourceName, weightOf } from "../web/src/edit-sources.ts";
 import type { GalleryPicture } from "../web/src/api.ts";
 
 const temp = mkdtempSync(path.join(tmpdir(), "pitha-sources-"));
@@ -95,4 +95,19 @@ test("a picture is called by what it was made from, or its file, on one line and
 test("the form's limits are the ones the portal checks", () => {
   assert.equal(MAX_SOURCES, editing.MAX_EDIT_PICTURES);
   assert.equal(MAX_SOURCES_BYTES, editing.MAX_EDIT_TOTAL_BYTES);
+});
+
+test("a picture dragged to another place takes that place, and the others keep their order", () => {
+  const list = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+  const ids = (l: { id: string }[]) => l.map((p) => p.id);
+  assert.deepEqual(ids(moveTo(list, "a", 2)), ["b", "c", "a", "d"], "later");
+  assert.deepEqual(ids(moveTo(list, "d", 0)), ["d", "a", "b", "c"], "to the first place, which is the one that counts most");
+  assert.deepEqual(ids(moveTo(list, "c", 1)), ["a", "c", "b", "d"], "earlier");
+  assert.deepEqual(ids(moveTo(list, "b", 3)), ["a", "c", "d", "b"], "to the last");
+  // Nowhere to go, or nothing to move: the list as it is, and not the same array.
+  for (const same of [moveTo(list, "b", 1), moveTo(list, "x", 0), moveTo(list, "a", 9), moveTo(list, "a", -1)]) {
+    assert.deepEqual(ids(same), ["a", "b", "c", "d"]);
+    assert.notEqual(same, list);
+  }
+  assert.deepEqual(ids(list), ["a", "b", "c", "d"], "the list given is not changed");
 });

@@ -764,7 +764,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
     <div className="mt-4 space-y-3">
       <div className="rounded-xl border border-line bg-raised/40 p-3">
         <Header Icon={LuImage} title={t("Image generation")}>
-          {tx("A {tool} tool: the agent describes a picture and an image model you set up makes it. It appears in the chat, and in voice mode's picture window, as one shown with {show} does.", { tool: <code>generate_image</code>, show: <code>show_image</code> })}
+          {tx("Pictures from a description, made by an image model you set up: on the Images page, and by the agent with a {tool} tool, whose pictures appear in the chat, and in voice mode's picture window, as one shown with {show} does.", { tool: <code>generate_image</code>, show: <code>show_image</code> })}
         </Header>
       </div>
 
@@ -867,20 +867,20 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       </fieldset>
 
       <SwitchRow
-        title={t("Image generation tool")}
-        detail={images.enabled ? t("On: the agent has a generate_image tool.") : t("Off: the agent has no image tool.")}
+        title={t("Image generation")}
+        detail={images.enabled ? t("On: pictures are made on the Images page, and the agent can have a generate_image tool.") : t("Off: no pictures are made, on the Images page or by the agent.")}
         on={images.enabled}
         onChange={(enabled) => void change({ enabled })}
         disabled={busy || !!draft || (!images.baseUrl && !images.enabled)}
         note={draft ? t("Save or discard the changes first.") : !images.baseUrl && !images.enabled ? t("Save the address of an image endpoint first.") : undefined}
       />
       <p className="text-[11px] text-fg-faint">
-        {t("Pictures are made in a generated-images folder inside the chat's folder. Making one can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it.")}
+        {t("Pictures are made in a generated-images folder inside the chat's folder. Making one can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it. This switch is for the feature as a whole: whether a chat's agent gets the generate_image tool is set in the tool lists (Settings → Agent → Tools, a project's Tools, and the tools control of a chat).")}
       </p>
 
       <div className="rounded-xl border border-line bg-raised/40 p-3">
         <Header Icon={LuWandSparkles} title={t("Image editing")}>
-          {tx("An {tool} tool: the agent changes a picture in the chat's folder as you tell it, with an endpoint that has an OpenAI-style {route}. The original stays; the result is a new picture, shown as one made with {generate} is.", {
+          {tx("Changing pictures that exist, with an endpoint that has an OpenAI-style {route}: on the Images page, and by the agent with an {tool} tool, for a picture in the chat's folder. The original stays; the result is a new picture, shown as one made with {generate} is.", {
             tool: <code>edit_image</code>,
             route: <code>images/edits</code>,
             generate: <code>generate_image</code>,
@@ -968,8 +968,8 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       </fieldset>
 
       <SwitchRow
-        title={t("Image editing tool")}
-        detail={images.editEnabled ? t("On: the agent has an edit_image tool.") : t("Off: the agent cannot change a picture.")}
+        title={t("Image editing")}
+        detail={images.editEnabled ? t("On: pictures are changed on the Images page, and the agent can have an edit_image tool.") : t("Off: no pictures are changed, on the Images page or by the agent.")}
         on={images.editEnabled}
         onChange={(editEnabled) => void change({ editEnabled })}
         disabled={busy || !!editDraft || (!(images.editBaseUrl || images.baseUrl) && !images.editEnabled)}
@@ -977,7 +977,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       />
       <SwitchRow
         title={t("Several pictures per edit")}
-        detail={images.editMultiple ? t("On: edit_image takes a list of pictures.") : t("Off: edit_image takes one picture.")}
+        detail={images.editMultiple ? t("On: an edit takes up to eight pictures, on the Images page and for edit_image.") : t("Off: an edit takes one picture.")}
         on={images.editMultiple}
         onChange={(editMultiple) => void change({ editMultiple })}
         disabled={busy || !!editDraft}
@@ -986,7 +986,21 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
         {t("Switch on several pictures only if the editing endpoint takes more than one in a request, to combine subjects or keep a style. The agent then names its pictures in the order the prompt refers to them, and the Images page takes up to eight pictures for an edit. What an endpoint takes is said of that endpoint, so editing moved to another server switches it off again.")}
       </p>
       <p className="text-[11px] text-fg-faint">
-        {t("The result is a new picture in the generated-images folder, named after the original, which is not changed. Editing can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it.")}
+        {t("The result is a new picture in the generated-images folder, named after the original, which is not changed. Editing can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it. This switch is for the feature as a whole: whether a chat's agent gets the edit_image tool is set in the tool lists, as for generation.")}
+      </p>
+      <SwitchRow
+        title={t("Stable Diffusion extra settings")}
+        detail={
+          images.sdExtras
+            ? t("On: the Images page shows a block of settings that only stable-diffusion.cpp servers understand, and sends them in the description.")
+            : t("Off: the Images page shows and sends only the settings of the OpenAI image format.")
+        }
+        on={images.sdExtras}
+        onChange={(sdExtras) => void change({ sdExtras })}
+        disabled={busy}
+      />
+      <p className="text-[11px] text-fg-faint">
+        {t("Switch this on only if the image endpoint, for generating and for editing, is a stable-diffusion.cpp server. It adds a seed, the steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description, which that server reads out of it; any other endpoint would take the block as part of the description. For making and changing pictures on the Images page: the agent's tools do not use these settings. While this is off none of them is sent, whatever was typed or kept before.")}
       </p>
       {busy && (
         <p className="flex items-center gap-2 text-xs text-fg-subtle">

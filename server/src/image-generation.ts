@@ -3,6 +3,7 @@ import http from "node:http";
 import https from "node:https";
 import { BlockList, isIP } from "node:net";
 import { getSetting, putSetting } from "./db.js";
+import { promptWith, type NativeSettings, type OutputFormat } from "./image-settings.js";
 import { pictureExt } from "./prompt-images.js";
 
 /**
@@ -68,6 +69,12 @@ export interface ImageGenerationConfig {
   editMaxSize: string;
   /** How long a request for a picture, generated or edited, may take in all; see TIMEOUT_SECONDS. */
   timeoutSeconds: number;
+  /**
+   * The endpoint is stable-diffusion.cpp's server, which reads settings the OpenAI format does not have out of the
+   * prompt (see image-settings.ts). Off until the person says it is: nothing of the sort is shown on the Images page
+   * or sent, to this endpoint or to any other, whatever was typed or kept.
+   */
+  sdExtras: boolean;
 }
 
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -108,6 +115,8 @@ export function imageGenerationConfig(): ImageGenerationConfig {
     editMaxSize: typeof raw.editMaxSize === "string" && MAX_SIZE.test(raw.editMaxSize) ? raw.editMaxSize : "",
     // A setup saved before there was a limit has none, and an unreadable one is as good as none.
     timeoutSeconds: validTimeout(raw.timeoutSeconds) ? raw.timeoutSeconds : TIMEOUT_SECONDS.default,
+    // A setup saved before there was the switch has it off.
+    sdExtras: raw.sdExtras === true,
   };
 }
 
@@ -135,6 +144,8 @@ export interface ImageEditingTarget {
   maxSize: string;
   /** How long the request may take; see TIMEOUT_SECONDS. */
   timeoutSeconds: number;
+  /** Whether what only stable-diffusion.cpp reads may be sent with an edit; see ImageGenerationConfig.sdExtras. */
+  sdExtras: boolean;
 }
 
 /**
@@ -145,7 +156,7 @@ export interface ImageEditingTarget {
 export function imageEditingTarget(config: ImageGenerationConfig = imageGenerationConfig()): ImageEditingTarget {
   const baseUrl = config.editBaseUrl || config.baseUrl;
   const sameServer = baseUrl !== "" && originOf(baseUrl) === originOf(config.baseUrl);
-  return { baseUrl, model: config.editModel, apiKey: config.editApiKey || (sameServer ? config.apiKey : ""), multiple: config.editMultiple, maxSize: config.editMaxSize, timeoutSeconds: config.timeoutSeconds };
+  return { baseUrl, model: config.editModel, apiKey: config.editApiKey || (sameServer ? config.apiKey : ""), multiple: config.editMultiple, maxSize: config.editMaxSize, timeoutSeconds: config.timeoutSeconds, sdExtras: config.sdExtras };
 }
 
 /** What the page is told of the settings: never a key itself. */
@@ -173,6 +184,7 @@ export interface ImageGenerationPatch {
   editMaxSize?: string;
   /** Whole seconds, from TIMEOUT_SECONDS.min to its max; null takes the saved one away, which is the default again. */
   timeoutSeconds?: number | null;
+  sdExtras?: boolean;
 }
 
 /** `1024x1024`, or `auto`, as the OpenAI-style APIs take it. */
@@ -200,7 +212,7 @@ function parseBase(value: unknown): { base: string } | { error: string } {
 export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch | string {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const patch: ImageGenerationPatch = {};
-  for (const field of ["enabled", "editEnabled", "editMultiple"] as const) {
+  for (const field of ["enabled", "editEnabled", "editMultiple", "sdExtras"] as const) {
     if (b[field] === undefined) continue;
     if (typeof b[field] !== "boolean") return `${field} must be true or false`;
     patch[field] = b[field];
@@ -304,42 +316,12 @@ const seconds = (ms: number) => Math.round(ms / 1000);
 /** What the endpoints take of a prompt: DALL-E 3's four thousand characters is the least. */
 export const MAX_PROMPT = 4000;
 
-/** A field of the request that an endpoint takes beyond the four it is made of: `quality`, `seed`, `style`, whatever it knows. */
-export type ExtraValue = string | number | boolean;
-
-/** What the request is made of, and so what an extra field cannot take the place of. */
-const CORE_FIELDS = new Set(["model", "prompt", "n", "size"]);
-const EXTRA_NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
-export const MAX_EXTRA_FIELDS = 12;
-const MAX_EXTRA_TEXT = 200;
-
 /**
- * The extra fields of a request, checked, or the reason they are not fine. A
- * value typed in a form is text: `true` and `false` are sent as such, a plain
- * number as a number, and anything else as text — in double quotes it is
- * text whatever it looks like. What is already a number or a boolean is kept.
+ * A field of the request that an older version of the Images page sent as it was typed. Not sent any more: what
+ * is not in the OpenAI format goes in the prompt (see image-settings.ts). Pictures made then still have theirs,
+ * which the page shows as they were.
  */
-export function parseExtra(value: unknown): Record<string, ExtraValue> | string {
-  if (value === undefined || value === null) return {};
-  if (typeof value !== "object" || Array.isArray(value)) return "The extra fields are a list of names with values";
-  const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.length > MAX_EXTRA_FIELDS) return `At most ${MAX_EXTRA_FIELDS} extra fields can be sent`;
-  const extra: Record<string, ExtraValue> = {};
-  for (const [name, given] of entries) {
-    if (!EXTRA_NAME.test(name)) return `"${name.slice(0, 40)}" is not a name an extra field can have: letters, digits, _ . - and at most 40 characters, starting with a letter`;
-    if (CORE_FIELDS.has(name)) return `"${name}" is set by the form itself, not as an extra field`;
-    if (typeof given === "boolean" || (typeof given === "number" && Number.isFinite(given))) {
-      extra[name] = given;
-      continue;
-    }
-    if (typeof given !== "string" || given.length > MAX_EXTRA_TEXT) return `The value of "${name}" must be short text, a number, or true or false`;
-    const text = given.trim();
-    if (text === "true" || text === "false") extra[name] = text === "true";
-    else if (/^-?\d+(\.\d+)?$/.test(text)) extra[name] = Number(text);
-    else extra[name] = /^"[^"]*"$/.test(text) ? text.slice(1, -1) : text;
-  }
-  return extra;
-}
+export type ExtraValue = string | number | boolean;
 
 /** What a request for a picture says, on top of the settings it is made with. */
 export interface GenerateRequest {
@@ -348,14 +330,18 @@ export interface GenerateRequest {
   size?: string;
   /** Instead of the saved model, for the Images page: the agent's tool has the saved one only. */
   model?: string;
-  /** Beyond the four fields of the request, as `parseExtra` has them. */
-  extra?: Record<string, ExtraValue>;
+  /** Sent as `output_format`, and `output_compression` with it. */
+  outputFormat?: OutputFormat;
+  outputCompression?: number;
+  /** Not in the OpenAI format: put in the prompt as stable-diffusion.cpp's server reads them, and only where one is set. */
+  native?: NativeSettings;
 }
 
 /**
  * Asks for a picture and returns it, checked: what comes back is a PNG, JPEG,
  * GIF or WebP by its first bytes, whatever the server calls it, and not larger
- * than the limit.
+ * than the limit. The request has the fields of the OpenAI image format and no
+ * other; what the format does not have is in the prompt (see image-settings.ts).
  */
 export async function generateImage(
   config: ImageGenerationConfig,
@@ -364,8 +350,15 @@ export async function generateImage(
 ): Promise<{ bytes: Buffer; ext: string }> {
   const size = request.size || config.size;
   const model = request.model || config.model;
-  // The four fields last: an extra one cannot take their place, whatever got past the check.
-  const body = JSON.stringify({ ...request.extra, ...(model ? { model } : {}), prompt: request.prompt, n: 1, ...(size ? { size } : {}) });
+  const body = JSON.stringify({
+    ...(model ? { model } : {}),
+    // Where the switch is off nothing of the kind goes, whatever the request holds: the one place that holds for every caller.
+    prompt: promptWith(request.prompt, config.sdExtras ? (request.native ?? {}) : {}),
+    n: 1,
+    ...(size ? { size } : {}),
+    ...(request.outputFormat ? { output_format: request.outputFormat } : {}),
+    ...(request.outputCompression !== undefined ? { output_compression: request.outputCompression } : {}),
+  });
   return requestPicture(endpointUrl(config.baseUrl), config.apiKey, body, { timeoutMs: config.timeoutSeconds * 1000, ...options });
 }
 

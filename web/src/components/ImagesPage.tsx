@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { LuCheck, LuDownload, LuFolder, LuImage, LuImagePlus, LuInfo, LuListChecks, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles, LuX } from "react-icons/lu";
+import { LuDownload, LuFolder, LuImage, LuInfo, LuListChecks, LuMaximize2, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles, LuX } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob, type PictureKind, type PictureOrigin } from "../api";
-import { MAX_SOURCES, addSources } from "../edit-sources";
-import { appendPage, fieldsOf, fieldsText, madeButNotListed, mergeTop, readFilter, sameList, tiles, viewerList, viewerPicture, type Filter, type Tile } from "../images-gallery";
+import { MAX_SOURCES, addSources, sourceName } from "../edit-sources";
+import { appendPage, fieldsText, madeButNotListed, mergeTop, readFilter, sameList, tiles, viewerList, viewerPicture, type Filter, type Tile } from "../images-gallery";
 import { pollWhileVisible } from "../poll";
 import { bytesLabel } from "../projects";
 import { isEscape } from "../shortcuts";
@@ -11,7 +11,7 @@ import { sinceThen } from "../time";
 import { formatDateTime, msg, t, tp } from "../i18n";
 import { useNow } from "./ChatActivity";
 import { confirmDialog } from "./ConfirmDialog";
-import { ImageMaker, leftOutText } from "./ImageMaker";
+import { ImageMaker, type Mode } from "./ImageMaker";
 import { ImagePreview, type PreviewState } from "./ImagePreview";
 import { ImageViewer } from "./ImageViewer";
 import { PageHeader, Stat } from "./PageHeader";
@@ -234,6 +234,15 @@ export function ImagesPage() {
   // What the form is working on: the pictures to change, and the words.
   const [prompt, setPrompt] = useState("");
   const [sources, setSources] = useState<GalleryPicture[]>([]);
+  // Making and changing are set up apart: one can be on without the other, and the form has both, whichever is not set up saying so.
+  const makes = !!features && features.enabled && features.baseUrl !== "";
+  const changes = !!features && features.editReady;
+  // Where the person has not chosen yet, the one that is set up; making where both are.
+  const [chosen, setChosen] = useState<Mode | null>(null);
+  const mode: Mode = chosen ?? (changes && !makes ? "edit" : "make");
+  // Pictures are for the edit while it is the form's mode and it can be done: the gallery's tiles are what an edit is made of then.
+  const picking = mode === "edit" && changes;
+  const multiple = !!features?.editMultiple;
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const [focusForm, setFocusForm] = useState(0);
@@ -263,6 +272,11 @@ export function ImagesPage() {
   const stopSelecting = () => {
     setSelecting(false);
     setPicked(new Set());
+  };
+  // Picking for an edit and selecting for a download or a delete are both a click on a tile: one at a time.
+  const setMode = (next: Mode) => {
+    if (next === "edit") stopSelecting();
+    setChosen(next);
   };
   useEffect(() => {
     if (!selecting) return;
@@ -358,34 +372,34 @@ export function ImagesPage() {
     setFocusForm((n) => n + 1);
   };
   const editIt = (picture: GalleryPicture) => {
-    setSources([picture]);
-    toForm();
-  };
-  /** Takes a picture into the edit, or out of it again; one that would be a ninth is not taken, and the viewer's button says so. */
-  const reference = (picture: GalleryPicture) => setSources((cur) => (cur.some((p) => p.id === picture.id) ? cur.filter((p) => p.id !== picture.id) : addSources(cur, [picture], true).list));
-  /** The pictures ticked in the gallery, in the order they were ticked, are what an edit works from. */
-  const editSelected = () => {
-    const chosen = [...picked].map((id) => byId.get(id)).filter((p): p is GalleryPicture => !!p);
-    if (!chosen.length) return;
-    // As the form takes pictures in: where the endpoint takes one, the first of them is what is changed, and the rest is said to be left out.
-    const multiple = !!features?.editMultiple;
-    const { list, left } = addSources([], chosen, multiple);
-    setSources(list);
-    setError(left > 0 ? leftOutText(left, multiple) : null);
+    setChosen("edit");
     stopSelecting();
+    // Where editing is not set up there is nothing to put it in: the form says so, and where to switch it on.
+    if (changes) setSources([picture]);
     toForm();
   };
+  /** A click on a picture of the gallery while editing: it is taken into the edit, after the ones there, or out of it again; where the endpoint takes one, it takes the place of the one there is. */
+  const pick = useCallback(
+    (id: string) => {
+      const picture = byId.get(id);
+      if (!picture) return;
+      setSources((cur) => (cur.some((p) => p.id === id) ? cur.filter((p) => p.id !== id) : addSources(cur, [picture], multiple).list));
+    },
+    [byId, multiple],
+  );
 
   /** The same again: a picture made from a description is made once more, as it was asked for; a change is shown in the form first, since the mask it had is not kept. */
   const runAgain = async (picture: GalleryPicture) => {
     setError(null);
     try {
       if (picture.kind === "generated") {
+        // The settings it was made with, as they are recorded; the free fields an older version sent are not sent again.
+        // What only stable-diffusion.cpp reads is sent only while the add-on says the endpoint is one: the picture keeps it, and it is not sent otherwise.
+        const { extra: _older, sources: _sources, masked: _masked, negativePrompt, seed, sampleSteps, strength: _strength, fromNoise: _noise, ...settings } = picture.params;
         const { jobs: made } = await api.makePictures({
           prompt: picture.prompt,
-          ...(picture.params.size ? { size: picture.params.size } : {}),
-          ...(picture.params.model ? { model: picture.params.model } : {}),
-          ...(picture.params.extra ? { extra: fieldsOf(picture.params.extra) } : {}),
+          ...settings,
+          ...(features?.sdExtras ? { ...(negativePrompt ? { negativePrompt } : {}), ...(seed !== undefined ? { seed } : {}), ...(sampleSteps !== undefined ? { sampleSteps } : {}) } : {}),
         });
         started(made);
         setOpened(null);
@@ -397,6 +411,7 @@ export function ImagesPage() {
       if (!found.length) throw new Error(t("The pictures this was changed from are not in the gallery any more."));
       setPrompt(picture.prompt);
       setSources(wanted.map((id) => found.find((p) => p.id === id)).filter((p): p is GalleryPicture => !!p));
+      setChosen("edit");
       toForm();
     } catch (e) {
       setError((e as Error).message);
@@ -420,9 +435,6 @@ export function ImagesPage() {
     [loadMore],
   );
 
-  // Making and changing are set up apart: one can be on without the other.
-  const makes = !!features && features.enabled && features.baseUrl !== "";
-  const changes = !!features && features.editReady;
   const makingNow = jobs.filter((j) => j.state === "running").length;
   const filtered = !!(filter.origin || filter.kind);
   const pictureTiles = shownTiles.filter((x) => x.picture || x.job?.pictureId);
@@ -458,28 +470,22 @@ export function ImagesPage() {
           </div>
         )}
 
-        {features &&
-          (makes || changes ? (
-            <ImageMaker
-              features={features}
-              running={makingNow}
-              limit={limit}
-              prompt={prompt}
-              onPrompt={setPrompt}
-              promptRef={promptRef}
-              sources={sources}
-              onSources={setSources}
-              onStarted={started}
-              onUploaded={() => refreshTop()}
-            />
-          ) : (
-            <Empty>
-              {t("Image generation is switched off, or has no address.")}{" "}
-              <Link to="/settings/images" className="text-accent hover:underline">
-                {t("Set it up in Settings → Agent → Images")}
-              </Link>
-            </Empty>
-          ))}
+        {features && (
+          <ImageMaker
+            features={features}
+            running={makingNow}
+            limit={limit}
+            prompt={prompt}
+            onPrompt={setPrompt}
+            promptRef={promptRef}
+            mode={mode}
+            onMode={setMode}
+            sources={sources}
+            onSources={setSources}
+            onStarted={started}
+            onUploaded={() => refreshTop()}
+          />
+        )}
 
         <section aria-label={t("Gallery")}>
           <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -494,12 +500,6 @@ export function ImagesPage() {
                   <button type="button" onClick={() => setPicked(new Set(everyId))} disabled={!everyId.length} className={ghostCls}>
                     {t("Select all shown")}
                   </button>
-                  {changes && (
-                    <button type="button" onClick={editSelected} disabled={!picked.size} className={btnCls}>
-                      <LuWandSparkles aria-hidden className="h-4 w-4" />
-                      {t("Edit the selected")}
-                    </button>
-                  )}
                   <button type="button" onClick={() => download([...picked])} disabled={!picked.size} className={btnCls}>
                     <LuDownload aria-hidden className="h-4 w-4" />
                     {t("Download")}
@@ -517,6 +517,9 @@ export function ImagesPage() {
                     {t("Done")}
                   </button>
                 </>
+              ) : picking ? (
+                // The tiles are what the edit is made of: a click takes one in, and the form above says which and in what order.
+                <span className="text-xs text-fg-muted">{multiple ? t("Click pictures to use them in the edit, in the order you click them.") : t("Click a picture to use it in the edit.")}</span>
               ) : (
                 <button type="button" onClick={() => setSelecting(true)} disabled={!everyId.length} className={btnCls}>
                   <LuListChecks aria-hidden className="h-4 w-4" />
@@ -534,14 +537,28 @@ export function ImagesPage() {
               ))}
             </div>
           ) : shownTiles.length === 0 ? (
-            <Empty>{filtered ? t("No pictures match these filters.") : t("No pictures yet. Describe one above to make the first.")}</Empty>
+            <Empty>{filtered ? t("No pictures match these filters.") : picking ? t("No pictures yet. Put one in from this computer above to change it.") : t("No pictures yet. Describe one above to make the first.")}</Empty>
           ) : (
             <ul className="gallery-grid" aria-label={t("Pictures")}>
-              {shownTiles.map((tile) => (
-                <li key={tile.key}>
-                  <GalleryTile tile={tile} selecting={selecting} selected={picked.has(tile.picture?.id ?? tile.job?.pictureId ?? "")} onOpen={open} onToggle={toggle} onDismiss={dismiss} />
-                </li>
-              ))}
+              {shownTiles.map((tile) => {
+                const id = tile.picture?.id ?? tile.job?.pictureId ?? "";
+                const place = sources.findIndex((p) => p.id === id) + 1;
+                return (
+                  <li key={tile.key}>
+                    <GalleryTile
+                      tile={tile}
+                      mode={picking ? "pick" : selecting ? "select" : "view"}
+                      selected={picking ? place > 0 : picked.has(id)}
+                      place={multiple ? place : 0}
+                      // At eight there is no ninth: the tiles that are not in the edit say so, and wait until one is taken out.
+                      full={multiple && sources.length >= MAX_SOURCES && place === 0}
+                      onOpen={open}
+                      onToggle={picking ? pick : toggle}
+                      onDismiss={dismiss}
+                    />
+                  </li>
+                );
+              })}
             </ul>
           )}
 
@@ -560,7 +577,8 @@ export function ImagesPage() {
           pictures={viewerPictures}
           startId={opened}
           onClose={() => setOpened(null)}
-          anchor={(id) => document.querySelector<HTMLElement>(`[data-picture-id="${CSS.escape(id)}"]`)}
+          // Where it was opened from: the tile's button to look at it while the tiles choose, else its picture.
+          anchor={(id) => document.querySelector<HTMLElement>(`[data-look-id="${CSS.escape(id)}"]`) ?? document.querySelector<HTMLElement>(`[data-picture-id="${CSS.escape(id)}"]`)}
           actions={(vp) => {
             const picture = byId.get(vp.id);
             if (!picture) return null;
@@ -569,12 +587,9 @@ export function ImagesPage() {
                 key={picture.id}
                 picture={picture}
                 features={features}
-                referenced={sources.some((p) => p.id === picture.id)}
-                roomLeft={sources.length < MAX_SOURCES}
                 onShown={shown}
                 onEdit={editIt}
                 onAgain={runAgain}
-                onReference={reference}
                 onDelete={(p) => void remove([p.id])}
               />
             );
@@ -619,6 +634,12 @@ function PictureDetails({ picture }: { picture: GalleryPicture }) {
     ],
     ...(params.model ? [[t("Model"), params.model] as [string, string]] : []),
     ...(params.size ? [[t("Picture size"), params.size] as [string, string]] : []),
+    ...(params.outputFormat ? [[t("File format"), params.outputFormat.toUpperCase()] as [string, string]] : []),
+    ...(params.outputCompression !== undefined ? [[t("Compression"), String(params.outputCompression)] as [string, string]] : []),
+    ...(params.negativePrompt ? [[t("Negative prompt"), params.negativePrompt] as [string, string]] : []),
+    ...(params.seed !== undefined ? [[t("Seed"), String(params.seed)] as [string, string]] : []),
+    ...(params.sampleSteps !== undefined ? [[t("Steps"), String(params.sampleSteps)] as [string, string]] : []),
+    ...(params.strength !== undefined ? [[t("Strength"), String(params.strength)] as [string, string]] : []),
     ...(extra ? [[t("Other fields of the request"), extra] as [string, string]] : []),
     ...(params.sources?.length ? [[t("Changed from"), tp(params.sources.length, "{n} picture", "{n} pictures")] as [string, string]] : []),
     ...(params.masked ? [[t("Mask"), t("Only a painted part was changed")] as [string, string]] : []),
@@ -660,23 +681,16 @@ function PictureDetails({ picture }: { picture: GalleryPicture }) {
 function ViewerActions({
   picture,
   features,
-  referenced,
-  roomLeft,
   onShown,
   onEdit,
   onAgain,
-  onReference,
   onDelete,
 }: {
   picture: GalleryPicture;
   features: ImagesFeature | null;
-  referenced: boolean;
-  /** Whether the edit can take one more picture. */
-  roomLeft: boolean;
   onShown: (picture: GalleryPicture) => void;
   onEdit: (picture: GalleryPicture) => void;
   onAgain: (picture: GalleryPicture) => void;
-  onReference: (picture: GalleryPicture) => void;
   onDelete: (picture: GalleryPicture) => void;
 }) {
   const [details, setDetails] = useState(false);
@@ -702,24 +716,10 @@ function ViewerActions({
           </div>
         )}
       </div>
-      {canEdit && (
-        <button type="button" onClick={() => onEdit(picture)} aria-label={t("Edit it")} title={t("Edit it")} className={viewerButton}>
-          <LuWandSparkles aria-hidden className="h-[18px] w-[18px]" />
-        </button>
-      )}
-      {canEdit && features!.editMultiple && (
-        <button
-          type="button"
-          onClick={() => onReference(picture)}
-          disabled={!referenced && !roomLeft}
-          aria-pressed={referenced}
-          aria-label={referenced ? t("Do not use as a reference") : t("Use as a reference")}
-          title={referenced ? t("Do not use as a reference") : roomLeft ? t("Use as a reference") : t("An edit takes at most {n} pictures", { n: MAX_SOURCES })}
-          className={viewerButton}
-        >
-          {referenced ? <LuCheck aria-hidden className="h-[18px] w-[18px]" /> : <LuImagePlus aria-hidden className="h-[18px] w-[18px]" />}
-        </button>
-      )}
+      {/* Always there: where editing is not set up it leads to the form, which says so and where to switch it on. */}
+      <button type="button" onClick={() => onEdit(picture)} aria-label={t("Edit it")} title={canEdit ? t("Edit it") : t("Edit it (editing is not set up)")} className={viewerButton}>
+        <LuWandSparkles aria-hidden className="h-[18px] w-[18px]" />
+      </button>
       {again && (
         <button type="button" onClick={() => onAgain(picture)} aria-label={t("Run again")} title={t("Run again")} className={viewerButton}>
           <LuRepeat aria-hidden className="h-[18px] w-[18px]" />
@@ -735,17 +735,29 @@ function ViewerActions({
 /** What a job's state is to the preview. */
 const previewState = (job: PictureJob | undefined): PreviewState => (!job ? "done" : job.state === "running" ? "making" : job.state === "failed" ? "failed" : "done");
 
+/**
+ * What a click on a tile does: look at the picture, or — in a mode that takes pictures — choose it, for a download
+ * or a delete (select) or for the edit (pick), where the tile also has a button to look at it.
+ */
+type TileMode = "view" | "select" | "pick";
+
 const GalleryTile = memo(function GalleryTile({
   tile,
-  selecting,
+  mode,
   selected,
+  place,
+  full,
   onOpen,
   onToggle,
   onDismiss,
 }: {
   tile: Tile;
-  selecting: boolean;
+  mode: TileMode;
   selected: boolean;
+  /** Its place among the pictures of the edit, for one that is in it and where several can be; none is 0. */
+  place: number;
+  /** Picking, and the edit has all it takes: this one is not in it, and cannot be added. */
+  full: boolean;
   onOpen: (id: string) => void;
   onToggle: (id: string) => void;
   onDismiss: (id: string) => void;
@@ -756,8 +768,9 @@ const GalleryTile = memo(function GalleryTile({
   const making = state === "making";
   const now = useNow(making);
   const here = state === "done" && id;
+  const choosing = mode !== "view";
   return (
-    <div className={`gallery-tile${selected ? " is-selected" : ""}`}>
+    <div className={`gallery-tile${selected ? " is-selected" : ""}${full ? " is-locked" : ""}`}>
       <ImagePreview
         state={state}
         edit={job?.kind === "edit" || picture?.kind === "edited"}
@@ -768,7 +781,7 @@ const GalleryTile = memo(function GalleryTile({
         reason={job?.error}
         elapsed={making && job ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : undefined}
         pictureId={here ? id : undefined}
-        onOpen={selecting ? onToggle : onOpen}
+        onOpen={choosing ? (full ? undefined : onToggle) : onOpen}
         actions={
           job && state !== "done" ? (
             <button type="button" className="gallery-tile-action" onClick={() => onDismiss(job.id)}>
@@ -777,8 +790,26 @@ const GalleryTile = memo(function GalleryTile({
           ) : undefined
         }
       />
-      {selecting && here && (
-        <input type="checkbox" className="gallery-check" checked={selected} onChange={() => onToggle(id)} aria-label={t("Select this picture")} />
+      {choosing && here && (
+        <input
+          type="checkbox"
+          className="gallery-check"
+          checked={selected}
+          disabled={full}
+          title={full ? t("An edit takes at most {n} pictures", { n: MAX_SOURCES }) : undefined}
+          onChange={() => onToggle(id)}
+          aria-label={mode === "pick" ? t("Use in the edit") : t("Select this picture")}
+        />
+      )}
+      {mode === "pick" && selected && place > 0 && (
+        <span className="gallery-order" aria-hidden>
+          {place}
+        </span>
+      )}
+      {mode === "pick" && here && picture && (
+        <button type="button" className="gallery-look" data-look-id={id} onClick={() => onOpen(id)} aria-label={t("Look at {name}", { name: sourceName(picture) })} title={t("Look at {name}", { name: sourceName(picture) })}>
+          <LuMaximize2 aria-hidden />
+        </button>
       )}
       {picture && (
         <p className="gallery-meta">

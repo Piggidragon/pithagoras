@@ -29,10 +29,18 @@
 .gallery-check { position: absolute; top: 8px; left: 8px; z-index: 5; width: 20px; height: 20px; margin: 0; cursor: pointer; accent-color: rgb(var(--accent)); }
 .gallery-tile.is-selected .image-preview-frame::after { content: ""; position: absolute; inset: 0; z-index: 4; border: 3px solid rgb(var(--accent)); border-radius: inherit; background: rgb(var(--accent) / .12); pointer-events: none; }
 
+/* Picking pictures for an edit: the same box, the place each has in the edit beside it, a way to look at one larger, and what cannot be taken any more drawn back. */
+.gallery-order { position: absolute; top: 8px; left: 34px; z-index: 5; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: rgb(var(--accent)); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 20px; text-align: center; pointer-events: none; }
+.gallery-look { position: absolute; top: 6px; right: 6px; z-index: 5; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid rgb(var(--line)); border-radius: 9999px; background: rgb(var(--surface) / .88); color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
+.gallery-look:hover { background: rgb(var(--surface)); color: rgb(var(--fg)); }
+.gallery-look svg { width: 14px; height: 14px; }
+.gallery-tile.is-locked .image-preview-frame { opacity: .45; }
+.gallery-tile.is-locked .gallery-check { cursor: not-allowed; }
+
 /* Stop and Dismiss, in the place the title has company. */
 .gallery-tile-action { flex-shrink: 0; padding: 1px 6px; border-radius: 6px; font-size: 12px; color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
 .gallery-tile-action:hover { background: rgb(var(--fg) / .05); color: rgb(var(--fg)); }
 
 /* In the viewer, over a stage that takes every touch: this scrolls by itself. */
 .gallery-details { touch-action: pan-y; overscroll-behavior: contain; }
-@media (prefers-reduced-motion: reduce) { .gallery-tile-action { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .gallery-tile-action, .gallery-look { transition: none; } }

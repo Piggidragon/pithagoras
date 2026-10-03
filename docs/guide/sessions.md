@@ -184,7 +184,9 @@ the moment it is asked for:
   being changed (the first, when it was given several), which is shown under the
   wait; a square when nothing says. It
   says "Making a picture" or "Editing a picture" and, after a few seconds, how
-  long it has taken. Image endpoints do not report how far they are, so the
+  long it has taken; over the picture of an edit, both words and seconds sit on
+  a plate of the theme's own colour, so that they read on a bright picture as
+  on a dark one. Image endpoints do not report how far they are, so the
   animation does not pretend to: a soft light drifts over the frame and a sheen
   passes, and that is all.
 - **When the call is over**, the wait is over too: the frame says "Loading the
