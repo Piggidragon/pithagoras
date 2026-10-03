@@ -5,6 +5,7 @@ import { agentsRoot, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
 import { getDb, getSession } from "./db.js";
 import type { ExtraValue } from "./image-generation.js";
+import { OUTPUT_FORMATS, type OutputFormat } from "./image-settings.js";
 import { listProjects } from "./projects.js";
 import { isUnderText, isWithinText, pathBelow, realPath } from "./within.js";
 import { workspaceRoot } from "./workspaces.js";
@@ -48,7 +49,16 @@ export type PictureKind = "generated" | "edited" | "uploaded" | "unknown";
 export interface PictureParams {
   model?: string;
   size?: string;
-  /** Fields of the request beyond the four it is made of. */
+  outputFormat?: OutputFormat;
+  outputCompression?: number;
+  /** The settings that only stable-diffusion.cpp's server reads (see image-settings.ts). */
+  negativePrompt?: string;
+  seed?: number;
+  sampleSteps?: number;
+  strength?: number;
+  /** The edit started from noise, with its pictures as references only. */
+  fromNoise?: boolean;
+  /** Fields an older version of the page sent as they were typed, which is not done any more: kept to show what the picture was made with. */
   extra?: Record<string, ExtraValue>;
   /** An edit's pictures in the order they were given, by their ids here: the first is the one it is `from`. Those that are not in the list are not here either. */
   sources?: string[];
@@ -106,6 +116,13 @@ function readParams(text: string): PictureParams {
   const params: PictureParams = {};
   if (typeof raw.model === "string" && raw.model) params.model = raw.model;
   if (typeof raw.size === "string" && raw.size) params.size = raw.size;
+  if (typeof raw.outputFormat === "string" && (OUTPUT_FORMATS as readonly string[]).includes(raw.outputFormat)) params.outputFormat = raw.outputFormat as OutputFormat;
+  if (typeof raw.outputCompression === "number" && Number.isFinite(raw.outputCompression)) params.outputCompression = raw.outputCompression;
+  if (typeof raw.negativePrompt === "string" && raw.negativePrompt) params.negativePrompt = raw.negativePrompt;
+  if (typeof raw.seed === "number" && Number.isSafeInteger(raw.seed)) params.seed = raw.seed;
+  if (typeof raw.sampleSteps === "number" && Number.isSafeInteger(raw.sampleSteps)) params.sampleSteps = raw.sampleSteps;
+  if (typeof raw.strength === "number" && Number.isFinite(raw.strength)) params.strength = raw.strength;
+  if (raw.fromNoise === true) params.fromNoise = true;
   if (raw.extra && typeof raw.extra === "object" && !Array.isArray(raw.extra)) params.extra = raw.extra as Record<string, ExtraValue>;
   if (Array.isArray(raw.sources)) params.sources = raw.sources.filter((s): s is string => typeof s === "string");
   if (raw.masked === true) params.masked = true;

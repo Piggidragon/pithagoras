@@ -59,9 +59,13 @@ that, a session asking for a local model silently started on pi's fallback.
 switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
 
-**Images** holds the image endpoint behind generation and editing, including the maximum picture size of an edit, see
-[Opt-in features](/guide/features#image-generation). The tools themselves, `show_image`,
-`generate_image` and `edit_image`, are in the Tools list, together in one **Images** group.
+**Images** holds the image endpoint behind generation and editing, including the maximum picture size of an edit, and the
+switches for **Image generation**, **Image editing**, **Several pictures per edit** and **Stable Diffusion extra settings**, see
+[Opt-in features](/guide/features#image-generation). The first two switch the feature on or off as a whole: the
+[Images page](/guide/images) and the existence of the tools. Whether a chat's agent gets the tools,
+`show_image`, `generate_image` and `edit_image`, is set only in the Tools list, where they are together in one **Images** group. **Stable Diffusion extra settings** (off by default) is
+for an endpoint that is a stable-diffusion.cpp server: it lets the Images page offer and send the settings only that server
+reads, see [Images](/guide/images#stable-diffusion-settings). The tools do not use it.
 
 ## Channels
 
