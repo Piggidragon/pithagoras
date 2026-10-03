@@ -1858,6 +1858,27 @@ test('Run again of a change shows it in the form, with its pictures and words, s
   expect(p.state.edited).toEqual([]);
 });
 
+test('Run again of a change puts the form in Edit, where the boxes are the pictures of the edit: what was selected before is let go, and the bar with its Delete is gone', async ({ page }) => {
+  const [a, b, c] = [pic({ prompt: 'Alpha', age: 5 }), pic({ prompt: 'Bravo', age: 4 }), pic({ prompt: 'Charlie', age: 3 })];
+  const edit = pic({ prompt: 'Make it night', kind: 'edited', from: c.id, params: { sources: [c.id] }, age: 1 });
+  const p = await portal(page, { pictures: [a, b, c, edit] });
+  await page.goto('/images');
+  await tick(page, 'Alpha');
+  await tick(page, 'Bravo');
+  await expect(bar(page).getByText('2 selected')).toBeVisible();
+  await tile(page, 'Make it night').click();
+  await viewer(page).getByRole('button', { name: 'Run again' }).click();
+  await expect(maker(page)).toHaveAccessibleName('Change a picture');
+  await expect.poll(() => names(page)).toEqual(['Charlie']);
+  // The only box that is ticked is the edit's, and nothing else is selected behind it that a button of the bar could delete.
+  await expect(box(page, 'Charlie')).toBeChecked();
+  await expect(box(page, 'Alpha')).not.toBeChecked();
+  await expect(box(page, 'Bravo')).not.toBeChecked();
+  await expect(bar(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
+  expect(p.state.deleted).toEqual([]);
+});
+
 test('a picture put in from this computer is in the gallery and is the one to change', async ({ page }) => {
   const p = await portal(page);
   await page.goto('/images');

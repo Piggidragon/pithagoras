@@ -72,7 +72,8 @@ export interface ImageGenerationConfig {
   /**
    * The endpoint is stable-diffusion.cpp's server, which reads settings the OpenAI format does not have out of the
    * prompt (see image-settings.ts). Off until the person says it is: nothing of the sort is shown on the Images page
-   * or sent, to this endpoint or to any other, whatever was typed or kept.
+   * or sent, to this endpoint or to any other, whatever was typed or kept. It is said of the endpoint, for generating
+   * and editing: either address moving to another server takes it off again.
    */
   sdExtras: boolean;
 }
@@ -265,18 +266,23 @@ const originOf = (address: string): string => {
  * was given for no server yet, and stays for the first. Both keys follow this
  * rule, the edit key by the address edits go to (see imageEditingTarget). So
  * does "takes several pictures", which was said of one endpoint and is not
- * assumed of another.
+ * assumed of another. And so does "stable-diffusion.cpp", which is said of the
+ * endpoint as a whole: either address moving takes it off, since any other
+ * server would read what it makes the Images page send as part of the description.
  */
 export function saveImageGeneration(patch: ImageGenerationPatch): ImageGenerationConfig {
   const had = imageGenerationConfig();
   const { timeoutSeconds: asked, ...others } = patch;
   const next = { ...had, ...others, ...(typeof asked === "number" ? { timeoutSeconds: asked } : asked === null ? { timeoutSeconds: TIMEOUT_SECONDS.default } : {}) };
   // Only from one server to another: a key saved before there was an address was given for none, and goes with the first.
-  if (patch.apiKey === undefined && had.baseUrl !== "" && originOf(next.baseUrl) !== originOf(had.baseUrl)) next.apiKey = "";
+  const movedGeneration = had.baseUrl !== "" && originOf(next.baseUrl) !== originOf(had.baseUrl);
+  if (patch.apiKey === undefined && movedGeneration) next.apiKey = "";
   const wasEditedAt = had.editBaseUrl || had.baseUrl;
   const movedEdits = wasEditedAt !== "" && originOf(next.editBaseUrl || next.baseUrl) !== originOf(wasEditedAt);
   if (patch.editApiKey === undefined && movedEdits) next.editApiKey = "";
   if (patch.editMultiple === undefined && movedEdits) next.editMultiple = false;
+  // One switch for both addresses: it is not known of a server that either one moved to.
+  if (patch.sdExtras === undefined && (movedGeneration || movedEdits)) next.sdExtras = false;
   if (next.enabled && !next.baseUrl) throw new ImageGenerationError("Set the address of the image endpoint before switching it on");
   if (next.editEnabled && !(next.editBaseUrl || next.baseUrl)) throw new ImageGenerationError("Set the address of the image endpoint before switching editing on");
   // The default stays unsaved until a limit is chosen, so that it is the default of the day for every setup that never chose one.

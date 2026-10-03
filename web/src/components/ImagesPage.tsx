@@ -270,11 +270,14 @@ export function ImagesPage() {
     });
   }, []);
   const stopSelecting = () => setPicked(new Set());
-  // While the form is in Edit the boxes are the pictures of the edit, so what was selected for something else is let go.
+  // While the form is in Edit the boxes are the pictures of the edit, so what was selected for something else is let go: however the form came to be in Edit, by its switch, the viewer, a Run again, or the add-on being found set up.
   const setMode = (next: Mode) => {
     if (next === "edit") stopSelecting();
     setChosen(next);
   };
+  useEffect(() => {
+    if (picking) setPicked((cur) => (cur.size ? new Set() : cur));
+  }, [picking]);
   const selecting = picked.size > 0;
   useEffect(() => {
     if (!selecting) return;

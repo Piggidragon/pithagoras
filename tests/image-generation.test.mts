@@ -953,6 +953,36 @@ test("a request may say the editing endpoint takes several pictures, and it is o
   reset();
 });
 
+test("what only stable-diffusion.cpp reads is said of the endpoint: either address moving to another server takes the switch off, or the page would send it a block it takes as words", () => {
+  reset();
+  gen.saveImageGeneration({ baseUrl: "http://sd-box.example:1234/v1", enabled: true, editEnabled: true, sdExtras: true });
+  gen.saveImageGeneration({ baseUrl: "http://sd-box.example:1234/v2", model: "m" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true, "the same server by another route");
+  gen.saveImageGeneration({ editBaseUrl: "http://sd-box.example:1234/edit" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true, "and by an address of its own");
+  gen.saveImageGeneration({ baseUrl: "https://api.other.example/v1" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, false, "generation moved");
+  assert.equal(gen.imageGenerationState().sdExtras, false);
+  assert.equal(gen.imageEditingTarget().sdExtras, false);
+  // Said again, it is what was said for the new server; and in the same save as the move, too.
+  gen.saveImageGeneration({ sdExtras: true });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true);
+  gen.saveImageGeneration({ baseUrl: "https://third.example.org/v1", sdExtras: true });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true);
+  // Edits that go elsewhere than generation, moved to another server: one switch covers both, so it goes off.
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, false, "edits moved");
+  // A first address is no move: it may be given with the switch, or before it.
+  reset();
+  gen.saveImageGeneration({ sdExtras: true });
+  gen.saveImageGeneration({ baseUrl: "http://sd-box.example:1234/v1", enabled: true });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true);
+  // Edits that follow generation's address follow its server.
+  gen.saveImageGeneration({ baseUrl: "https://elsewhere.example.org/v1" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, false);
+  reset();
+});
+
 test("what an endpoint takes is said of that endpoint: another server is not assumed to take several pictures", () => {
   reset();
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true, editMultiple: true });
