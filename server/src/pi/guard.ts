@@ -1,11 +1,19 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { inlineBrowserScreenshot } from "./browser-screenshot.js";
 import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-format.js";
+import { bareRef } from "../browser/ref.js";
 import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
-import { EDIT_IMAGE_TOOL } from "../image-generation.js";
+import { UNDERSTORY } from "../features.js";
+import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL } from "../image-generation.js";
 import { PORTAL_BROWSER_TOOLS } from "../tool-policy.js";
-// Only the name: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
-import { NOTE_TOOL } from "./heartbeat-names.js";
+import { isWithinText, realPath } from "../within.js";
+import { PRIVATE_FILES } from "./context-files.js";
+// Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
+import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
 
 /**
  * A blast-radius limiter for prompt injection.
@@ -35,6 +43,40 @@ import { NOTE_TOOL } from "./heartbeat-names.js";
 /** Commands whose output is somebody else's words. */
 const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|curl|wget|lynx|w3m|ssh|scp)\b|\bgit\s+(?:clone|fetch|pull)\b|\b(?:npm|pnpm|yarn|pip3?|uv)\s+(?:install|add|sync)\b/;
 
+/**
+ * The tools whose results are not somebody else's words: pi's own, which read
+ * and change what is in the folder the person works in, and the portal's own,
+ * which answer from the portal. Every other result is untrusted.
+ *
+ * That way round on purpose. A list of the sources that carry other people's
+ * words — mail, the web, an MCP server, a subagent that read any of them — is
+ * never complete: the tools of a package installed tomorrow are not on it, and
+ * a missing name leaves the envelope off and the session untainted, silently.
+ * A tool missing from this list costs a session its push, and says so.
+ *
+ * routine_run is not on it: what a routine's run answers with is what it read.
+ */
+const TRUSTED_TOOLS = new Set([
+  "read", "write", "edit", "grep", "find", "ls",
+  "ask_primary", NOTE_TOOL, "report", "show_image", GENERATE_IMAGE_TOOL, EDIT_IMAGE_TOOL,
+  "routines_list", "routine_create", "routine_update",
+  "canvas_list", "canvas_create", "canvas_read", "canvas_write", "canvas_delete",
+]);
+
+/**
+ * The agent's own memory, which the portal runs and writes to as the agent
+ * itself: not another's words, and a session that used it would otherwise never
+ * be free of the taint.
+ */
+const MEMORY_TOOL = new RegExp(`^${UNDERSTORY}_memory_`);
+
+/** Does what this call returned carry somebody else's words? */
+function untrustedResult(toolName: string, input: Record<string, unknown>): boolean {
+  if (toolName === "bash") return UNTRUSTED_COMMAND.test(cmd(input));
+  if (browserCall(toolName, input).isBrowser) return true;
+  return !TRUSTED_TOOLS.has(toolName) && !MEMORY_TOOL.test(toolName);
+}
+
 interface Rule {
   name: string;
   why: string;
@@ -58,6 +100,12 @@ const PATH_DIRS = /(^|[^\w/])(\/data\/bin|\/usr\/local\/bin|\/usr\/bin|\/usr\/lo
 
 const PERSIST_PATHS = /(?:\/etc\/(?:cron\.[a-z]+|systemd\/system)|(?:~|\/[^\s]+)\/\.config\/(?:autostart|systemd\/user)|(?:~|\/[^\s]+)\/\.(?:bashrc|bash_profile|zshrc|zprofile|profile))(?=\/|[\s'"]|$)/;
 const writesFiles = (command: string) => /(>|\b(?:cp|mv|install|tee)\b)/.test(command);
+
+/** Whether a call reads a place where secrets are kept: the command, or the path. */
+function readsCredentials(tool: string, input: Record<string, unknown>): boolean {
+  const where = tool === "bash" ? cmd(input) : target(input);
+  return /(auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.ssh\/|credentials|\.netrc|token)/i.test(where);
+}
 
 const RULES: Rule[] = [
   {
@@ -89,12 +137,7 @@ const RULES: Rule[] = [
   {
     name: "read-credentials",
     why: "reading secrets it was not asked about",
-    hit: (tool, input) => {
-      const where = tool === "bash" ? cmd(input) : target(input);
-      return /(auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.ssh\/|credentials|\.netrc|token)/i.test(
-        where,
-      );
-    },
+    hit: readsCredentials,
   },
   {
     name: "publish",
@@ -110,6 +153,11 @@ const RULES: Rule[] = [
       ((tool === "write" || tool === "edit") && PERSIST_PATHS.test(target(input))) ||
       (tool === "bash" && (/\b(crontab|systemd-run|at\s+now)\b/.test(cmd(input)) ||
         (PERSIST_PATHS.test(cmd(input)) && writesFiles(cmd(input))))),
+  },
+  {
+    name: "delegate",
+    why: "a subagent works without these rules, so what it is asked to do is not held to them",
+    hit: (tool) => tool === "subagent",
   },
 ];
 
@@ -168,60 +216,12 @@ const envelope = (id: string) => ({
 const READ_ONLY = new Set(["read", "grep", "find", "ls", "ask_primary", NOTE_TOOL]);
 
 /**
- * Driving the agent's browser, in either of the two shapes the MCP adapter
- * offers: a directly registered tool named for its server, or the proxy tool
- * carrying the same thing as an argument.
- *
- * The browser is signed into the agent's own accounts, so a session holding it
- * can act as the agent anywhere it has a login. That is a capability, not a
- * read — it is off unless somebody turned it on.
- */
-/**
- * A snapshot prints refs as `[ref=f1e17]`, and pasting that in whole is the
- * obvious thing to do. Playwright reads a bracketed value as a CSS attribute
- * selector, matches nothing, and reports it as "does not match any elements" —
- * which reads like the ref expired, so the next move is to take another
- * snapshot and get the same result. Agents have burned whole sessions on it.
- *
- * Telling the model the convention did not hold. This normalises the argument
- * on the way past instead, which is deterministic.
- */
-/**
- * Playwright's own ref shape: frame then element, `f1e17`, or bare `e17`.
- * Distinctive enough to tell a ref from an attribute selector — nobody writes
- * `[e17]` meaning an element with an `e17` attribute.
- */
-const REF_TOKEN = /^(?:f\d+)?e\d+$/;
-
-/**
- * Peel off the decoration and keep it only if a ref is what is underneath.
- *
- * Shape-based rather than a list of known mistakes: the first version matched
- * `[ref=x]` exactly, the model moved to `[x]` the next day, and the same error
- * came back. Anything that does not reduce to a ref is returned exactly as it
- * arrived, so real selectors — `[disabled]`, `a[href="..."]`, `#id` — are
- * never touched.
- */
-function bareRef(value: string): string {
-  const stripped = value
-    .trim()
-    .replace(/^\[|\]$/g, "")
-    .trim()
-    .replace(/^["']|["']$/g, "")
-    .trim()
-    .replace(/^(?:aria-)?ref\s*=\s*/i, "")
-    .trim()
-    .replace(/^["']|["']$/g, "")
-    .trim();
-  return REF_TOKEN.test(stripped) ? stripped : value;
-}
-
-/**
  * Playwright's element argument, whatever shape it arrives in.
  *
  * `target` is current; `ref` was its name until @playwright/mcp changed the
  * signature, and a model that learned the old one keeps sending it. Both are
- * accepted here rather than failing on a difference of spelling.
+ * accepted here rather than failing on a difference of spelling. Refs are
+ * read as the portal's own browser tools read them (see bareRef).
  */
 function normaliseTarget(input: unknown): void {
   if (!input || typeof input !== "object") return;
@@ -235,12 +235,47 @@ function normaliseTarget(input: unknown): void {
   else if (typeof o.ref === "string") o.target = bareRef(o.ref);
   // fill_form carries one of these per field.
   if (Array.isArray(o.fields)) for (const field of o.fields) normaliseTarget(field);
+  // The MCP proxy takes its arguments as a JSON string as well, and the string
+  // is written back as one. One that does not parse is left as it is: the
+  // browser gate has already refused the call (see browserCall).
+  if (typeof o.args === "string") {
+    const parsed = parseArgs(o.args);
+    if (parsed) {
+      const before = JSON.stringify(parsed);
+      normaliseTarget(parsed);
+      if (JSON.stringify(parsed) !== before) o.args = JSON.stringify(parsed);
+    }
+  }
 }
 
+/** The arguments of a proxied call that came as a string: an object, or undefined when they are not one. */
+function parseArgs(text: string): Record<string, unknown> | undefined {
+  if (!text.trim()) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Driving the agent's browser, in either of the two shapes the MCP adapter
+ * offers: a directly registered tool named for its server, or the proxy tool
+ * carrying the same thing as an argument.
+ *
+ * The browser is signed into the agent's own accounts, so a session holding it
+ * can act as the agent anywhere it has a login. That is a capability, not a
+ * read — it is off unless somebody turned it on.
+ *
+ * `unreadable` is a browser call whose arguments came as a string that is not
+ * JSON: the adapter would parse them itself, and the gate cannot say where the
+ * call goes, so it does not let it through.
+ */
 function browserCall(
   toolName: string,
   input: Record<string, unknown>
-): { isBrowser: boolean; url?: string } {
+): { isBrowser: boolean; url?: string; unreadable?: boolean } {
   // Matched anywhere, not anchored. Playwright's own tools are browser_navigate,
   // browser_click and so on, so the server prefix puts the telling part in the
   // middle: browser_browser_navigate, playwright_browser_navigate. Anchoring
@@ -254,8 +289,9 @@ function browserCall(
   if (!direct && !viaProxy) return { isBrowser: false };
 
   // The URL, wherever this shape happens to put it.
-  const args = (input.args ?? input) as Record<string, unknown>;
-  const url = typeof args?.url === "string" ? args.url : undefined;
+  const args = typeof input.args === "string" ? parseArgs(input.args) : ((input.args ?? input) as Record<string, unknown>);
+  if (!args) return { isBrowser: true, unreadable: true };
+  const url = typeof args.url === "string" ? args.url : undefined;
   return { isBrowser: true, url };
 }
 
@@ -289,11 +325,29 @@ function hostAllowed(url: string, allow: string[]): boolean {
  */
 const CHAINING = /[;&|`\n<>]|\$\(/;
 
-/** Only `*` is special, so a pattern reads like a command rather than a regex. */
+const escapeRegExp = (c: string) => c.replace(/[.*+^${}()[\]\\?|]/g, "\\$&");
+
+/**
+ * Only `*` is special, so a pattern reads like a command rather than a regex.
+ * A backslash makes the next `*` or backslash itself, and any other backslash
+ * stays one.
+ */
 function globToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.+^${}()[\]\\?]/g, "\\$&").replace(/\*/g, "[\\s\\S]*");
-  return new RegExp(`^${escaped}$`);
+  let source = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === "\\" && (pattern[i + 1] === "*" || pattern[i + 1] === "\\")) source += escapeRegExp(pattern[++i]);
+    else source += c === "*" ? "[\\s\\S]*" : escapeRegExp(c);
+  }
+  return new RegExp(`^${source}$`);
 }
+
+/**
+ * Text as a pattern that matches only itself. What somebody approves is that
+ * command, not every one it would fit as a glob: "always" for
+ * `rm -rf /tmp/build-*` is not "always" for `rm -rf /tmp/build- /home/me`.
+ */
+export const literalPattern = (text: string): string => text.replace(/[\\*]/g, "\\$&");
 
 /** What a rule is matched against: the command, or the path for file tools. */
 const subjectOf = (toolName: string, input: Record<string, unknown>) =>
@@ -360,11 +414,17 @@ export function ruleAllows(
   input: Record<string, unknown>,
   personKey?: string
 ): boolean {
-  const subjects = subjectsOf(toolName, input).map((s) => s.trim());
+  let subjects = subjectsOf(toolName, input).map((s) => s.trim());
   if (!subjects.length || subjects.some((s) => !s)) return false;
   if (toolName === "bash") {
     subjects[0] = subjects[0].replace(STDERR_IDIOM, "").trim();
     if (CHAINING.test(subjects[0])) return false;
+  } else if (toolName === EDIT_IMAGE_TOOL || target(input)) {
+    // A path is what it leads to, not how it was written: `*` in a rule for
+    // /srv/site/* must not reach /srv/site/../../root. A `..` that is left
+    // after tidying leads out of wherever the rule's place is.
+    subjects = subjects.map((s) => path.posix.normalize(s));
+    if (subjects.some((s) => s.split("/").includes(".."))) return false;
   }
   // Each subject by some rule of its own, as the same calls one by one would be.
   return subjects.every((subject) =>
@@ -394,6 +454,71 @@ function allowedByRule(
   return true;
 }
 
+/** The tools that look at a path they are given, or at the folder the conversation is in when they are given none. */
+const PATH_READERS = new Set(["read", "grep", "find", "ls"]);
+
+/**
+ * Where pi's file tools would look for `asked`, worked out as pi works it out —
+ * `~`, a leading `@`, a file: URL and odd spaces included — so that what is
+ * checked here is what is opened there. Links are followed. Undefined for a
+ * path that is no path.
+ */
+function whereToolsLook(asked: string, workspace: string): string | undefined {
+  let text = asked.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
+  if (text.startsWith("@")) text = text.slice(1);
+  if (text === "~") text = os.homedir();
+  else if (text.startsWith("~/")) text = path.join(os.homedir(), text.slice(2));
+  if (/^file:\/\//.test(text)) {
+    try {
+      text = fileURLToPath(text);
+    } catch {
+      return undefined;
+    }
+  }
+  const resolved = path.resolve(workspace, text);
+  return realPath(resolved) ?? resolved;
+}
+
+/**
+ * Why somebody who is not the primary user may not have this read, or undefined
+ * when they may. Reading is all they can do, so it is held to what is theirs to
+ * see: nothing that is a secret, nothing outside the folder of this
+ * conversation, and not the primary user's private notes in it (see
+ * PRIVATE_FILES). A search over a folder that holds them is refused as well, as
+ * it would show their lines; listing names is not.
+ *
+ * Without a folder to hold it to, only the names are checked.
+ */
+function unreadable(toolName: string, input: Record<string, unknown>, workspace: string | undefined, alsoReadable: string[]): string | undefined {
+  if (readsCredentials(toolName, input)) return "it reads a place where secrets are kept";
+  const asked = target(input);
+  const priv = "it reads what is private to the primary user";
+  if (workspace === undefined) return PRIVATE_FILES.some((name) => path.basename(asked).toLowerCase() === name.toLowerCase()) ? priv : undefined;
+
+  const root = realPath(workspace) ?? path.resolve(workspace);
+  const where = whereToolsLook(asked || ".", workspace);
+  const open = [root, ...alsoReadable.map((dir) => realPath(dir) ?? path.resolve(dir))];
+  if (where === undefined || !open.some((dir) => isWithinText(dir, where))) return "it is outside the folder of this conversation";
+  for (const name of PRIVATE_FILES) {
+    const file = path.join(root, name);
+    if (toolName === "read" && where.toLowerCase() === file.toLowerCase()) return priv;
+    if (toolName === "grep" && isWithinText(where, file) && existsSync(file)) return priv;
+  }
+  return undefined;
+}
+
+/** What a session's entries say it has read: a result that came wrapped as somebody else's words. */
+function sawUntrusted(entries: unknown): boolean {
+  if (!Array.isArray(entries)) return false;
+  return entries.some(
+    (entry: any) =>
+      entry?.type === "message" &&
+      entry.message?.role === "toolResult" &&
+      Array.isArray(entry.message.content) &&
+      entry.message.content.some((part: any) => part?.type === "text" && typeof part.text === "string" && /^<<<untrusted:[0-9a-f]{16}>>>/.test(part.text)),
+  );
+}
+
 /** An ExtensionFactory — see pi's InlineExtension. One instance per session. */
 export function guardExtension(
   sessionId: string,
@@ -415,25 +540,45 @@ export function guardExtension(
   browserNow: () => { allowed: boolean; allowlist: string[] } = () => ({
     allowed: false,
     allowlist: [],
-  })
+  }),
+  /**
+   * The folder this conversation works in, which what somebody who is not the
+   * primary user may read is held to. Without it only the names of the files
+   * and places are checked, not where a path leads.
+   */
+  workspace?: string,
+  /** Other places they may read as well: the skills the agent offers, which are instructions for anybody it serves. */
+  alsoReadable: string[] = []
 ) {
   return (pi: any): void => {
     // Per session, not global: a taint belongs to the conversation that read the
     // content, and this factory runs once per session.
     let tainted = false;
 
+    // The factory runs again whenever pi reloads, and with it a restart or a
+    // relaunch: what was read stays in the conversation's history, so the taint
+    // is taken from there rather than forgotten.
+    pi.on("session_start", (event: any, ctx: any) => {
+      let found = false;
+      try {
+        found = sawUntrusted(ctx?.sessionManager?.getEntries?.());
+      } catch {
+        // A history that cannot be read is not evidence of anything.
+      }
+      // A new conversation has read nothing yet.
+      tainted = event?.reason === "new" ? found : tainted || found;
+    });
+
     pi.on("tool_result", (event: any) => {
       const compact = !event.isError && isBrowserSnapshot(event.toolName, event.input ?? {});
       const formatted = compact ? (event.content ?? []).map((part: any) =>
         part?.type === 'text' && typeof part.text === 'string' ? { ...part, text: cleanBrowserSnapshot(part.text) } : part,
       ) : event.content;
-      const source =
-        event.toolName === "bash" ? cmd(event.input ?? {}) : String(event.toolName ?? "");
-      // MCP tools reach servers the portal does not control, and the browser
-      // reads pages anyone can write, so their output is treated the same way
-      // as mail: someone else's words.
-      const untrusted =
-        UNTRUSTED_COMMAND.test(source) || /^mcp(_|$)/.test(source) || browserCall(event.toolName, event.input ?? {}).isBrowser;
+      // Whatever is not known to be the portal's own or the folder's: an MCP
+      // server, a web search, a subagent that read either, and the browser,
+      // which reads pages anyone can write, are all treated as mail is:
+      // someone else's words.
+      const untrusted = untrustedResult(String(event.toolName ?? ""), event.input ?? {});
       if (!untrusted) return compact ? { content: formatted } : undefined;
 
       tainted = true;
@@ -468,8 +613,9 @@ export function guardExtension(
       const asBrowser = browserCall(event.toolName, event.input ?? {});
       if (asBrowser.isBrowser) {
         inlineBrowserScreenshot(event.toolName, event.input);
-        // Mutated in place — that is how pi takes an argument change.
-        normaliseTarget(event.input);
+        // Mutated in place — that is how pi takes an argument change. Not for
+        // the portal's own browser tools, which read a ref their own way.
+        if (!(PORTAL_BROWSER_TOOLS as readonly string[]).includes(event.toolName)) normaliseTarget(event.input);
         const browser = browserNow();
         if (!browser.allowed) {
           note("refused", "The browser is not enabled for this session");
@@ -479,6 +625,15 @@ export function guardExtension(
               "Refused: this session cannot drive the browser. It is enabled per session and " +
               "per routine, and nobody has enabled it here. Say so rather than looking for " +
               "another way to reach the page.",
+          };
+        }
+        if (asBrowser.unreadable) {
+          note("refused", "The arguments of a browser call could not be read");
+          return {
+            block: true,
+            reason:
+              "Refused: the arguments of this browser call are not valid JSON, so it cannot be " +
+              "checked against the browser allowlist. Send them as an object, or as JSON text.",
           };
         }
         if (asBrowser.url && !hostAllowed(asBrowser.url, browser.allowlist)) {
@@ -503,6 +658,26 @@ export function guardExtension(
         if (ok) note("allowed-by-approval", "One-off approval, now spent");
         return ok;
       };
+
+      // What may be read is not everything a role that can only read could ask
+      // for: see unreadable. A heartbeat is the agent looking around for the
+      // person it works for, with nobody else speaking, and reads what its
+      // WATCH.md names wherever that is.
+      if (role !== "primary" && role !== HEARTBEAT_ROLE && PATH_READERS.has(event.toolName)) {
+        const why = unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable);
+        if (why) {
+          console.warn(`[guard ${sessionId}] blocked ${event.toolName}: role ${role}, ${why}`);
+          note("refused", `Not permitted for a ${role}: ${why}`);
+          return {
+            block: true,
+            reason:
+              `Refused: ${why}. You are speaking with someone who is not your primary user, and ` +
+              `they may have you read what is in this conversation's folder — not the primary user's ` +
+              `private notes, anything outside it, or anything that holds a secret. Say so rather than ` +
+              `looking for another way to it.`,
+          };
+        }
+      }
 
       if (
         role !== "primary" &&

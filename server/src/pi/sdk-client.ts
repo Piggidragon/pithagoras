@@ -19,6 +19,7 @@ import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
+import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
@@ -48,20 +49,9 @@ function asArray(v: any): any[] {
  *
  * Only picked up where they exist, so a task workspace is unaffected and the
  * agent's home directory gets its character, its user and its memory without
- * anything being generated.
+ * anything being generated. Who may see which of them is settled in
+ * context-files.ts, which the guard reads as well.
  */
-/**
- * The agent's own files, and who is allowed to see them.
- *
- * SOUL.md is who the agent is and travels everywhere. PrimaryUser.md and
- * MEMORY.md are one person's notes about themselves and their work, so a
- * conversation with anyone else must not load them — otherwise a teammate
- * messaging the bot gets an agent carrying your private context.
- *
- * TEAM.md is the shared half: what everyone may be told.
- */
-const CONTEXT_FILES = ["SOUL.md", "PrimaryUser.md", "MEMORY.md"];
-const SHARED_FILES = ["SOUL.md", "TEAM.md"];
 
 /**
  * While Understory holds the agent's memory, MEMORY.md is not read: two
@@ -437,6 +427,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             opts.sessionId,
             opts.enforceTaint !== false,
             opts.browserNow ?? (() => ({ allowed: false, allowlist: [] })),
+            opts.cwd,
+            [path.join(pi.getAgentDir(), "skills"), ...(builtinSkills ? [builtinSkills] : [])],
           ) },
       ];
       if (canvases) factories.push({ name: "canvases", factory: canvases.extension });

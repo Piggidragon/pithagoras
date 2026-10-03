@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { addGrant, addToolRule } from "./db.js";
 import { getPerson } from "./people.js";
-import { rulePatterns } from "./pi/guard.js";
+import { literalPattern, rulePatterns } from "./pi/guard.js";
 import type { QuestionRow } from "./questions.js";
 
 /**
@@ -20,14 +20,15 @@ export function recordApproval(question: QuestionRow, asking: { id: string } | u
   if (approves && question.action && asking) addGrant(nanoid(10), asking.id, tool, question.action);
   // Standing permission, narrowed to the person who asked. Recorded as an
   // ordinary rule so it shows up in Settings → People beside the ones
-  // written by hand, and is revoked the same way.
+  // written by hand, and is revoked the same way. What was shown is what is
+  // permitted, to the letter: a `*` in a command is a star, not a wildcard.
   if (always && question.action) {
     for (const pattern of rulePatterns(tool, question.action)) {
       addToolRule({
         id: nanoid(10),
         role: getPerson(question.person_key)?.role || "colleague",
         tool,
-        pattern,
+        pattern: literalPattern(pattern),
         person_key: question.person_key,
         note: `Approved for ${question.person_name}`,
       });

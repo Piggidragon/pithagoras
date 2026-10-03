@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { BROWSER_CDP } from "../api/mcp.js";
+import { bareRef, REF_TOKEN } from "./ref.js";
 import { diffViews, findNodes, findRef, pinned, renderView, sectionText, textPage, type AxChild, type View, type Viewport } from "./view.js";
 
 /**
@@ -92,8 +93,8 @@ async function settle(page: Page) {
 
 /** A ref as the model may write it — `e12`, `[e12]`, `ref=e12` — reduced to the ref. */
 export function cleanRef(raw: unknown): string {
-  const ref = String(raw ?? "").trim().replace(/^\[|\]$/g, "").replace(/^(?:aria-)?ref\s*=\s*/i, "").trim();
-  if (!/^(?:f\d+)?e\d+$/.test(ref)) throw new Error(`"${raw}" is not a ref. Use one from the last snapshot, like e12.`);
+  const ref = bareRef(String(raw ?? ""));
+  if (!REF_TOKEN.test(ref)) throw new Error(`"${raw}" is not a ref. Use one from the last snapshot, like e12.`);
   return ref;
 }
 
