@@ -888,6 +888,7 @@ const de: Locale = {
     "Reset all": "Alle zurücksetzen",
     "Voice mode shortcuts": "Tastenkürzel im Sprachmodus",
     "Press the new keys…": "Drück die neuen Tasten…",
+    "Tab moves between buttons, so it cannot be a shortcut.": "Tab wechselt zwischen den Schaltflächen, darum kann es kein Tastenkürzel sein.",
     "None": "Keins",
     "Change": "Ändern",
     "Clear": "Entfernen",
@@ -2203,7 +2204,7 @@ const de: Locale = {
     "Jump to the message box": "Zum Eingabefeld springen",
     "Send the message": "Die Nachricht senden",
     "New line in the message": "Neue Zeile in der Nachricht",
-    "Stop the run (with the message box empty)": "Den Lauf stoppen (bei leerem Eingabefeld)",
+    "Stop the run": "Den Lauf stoppen",
     // session-folders.ts
     "Elsewhere": "Anderswo",
     // settings-search.ts

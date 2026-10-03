@@ -79,7 +79,7 @@ Two keys work from anywhere on the page:
 | Key | Does |
 | --- | --- |
 | `/` | Jump to the message box with the command list open. Not while you are typing somewhere else, where it is a character. It is the [command character](/guide/commands#the-command-character), so it is another key if you chose one |
-| `Esc` | In the message box, **stop the run**. Only when the box is empty — the moment the send button is a stop button — so it can never cost you words |
+| `Esc` | In the message box, **stop the run**, whatever is typed: the words stay in the box, so it costs you nothing. Not while an input method is composing a word, and not while the command list is open, where it closes the list |
 
 ## Looking at a picture
 

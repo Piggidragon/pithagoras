@@ -148,7 +148,9 @@ Every keyboard shortcut, in one list. The voice-mode ones can be changed: choose
 **Change** and press the new keys, with any modifiers. **Clear** leaves an action
 without one, **Reset** puts its default back, and **Reset all** puts back every
 default. A key that another action already has moves to the one being changed,
-and the list says which action lost it. Shortcuts are kept in this browser.
+and the list says which action lost it. `Tab` cannot be a shortcut — it is how
+the keyboard moves on to the next button — so pressing it while listening ends
+the listening and moves on. Shortcuts are kept in this browser.
 
 A shortcut is the physical key, so it stays the same key whatever the keyboard
 layout, and it is shown with the label on this keyboard where the browser can
