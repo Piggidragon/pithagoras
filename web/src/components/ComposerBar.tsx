@@ -103,6 +103,17 @@ function cacheLevels(provider: string, model: string, levels: string[], named?: 
 const RECENTS_KEY = "pithagoras.recentModels";
 const MAX_RECENTS = 4;
 
+/**
+ * What a recent is kept by. Two providers can offer a model of the same id, and
+ * keyed by the id alone the one picked last was shown for both. Recents kept
+ * before this are bare ids; see `quick`.
+ */
+const modelKey = (m: { provider: string; id: string }) => `${m.provider}/${m.id}`;
+
+/** The same model, where one side may not know its provider yet: a chat's seed, or pi's own default. */
+const sameModel = (a: { provider: string; id: string }, b: { provider: string; id: string }) =>
+  a.id === b.id && (!a.provider || !b.provider || a.provider === b.provider);
+
 function readRecents(): string[] {
   try {
     const raw = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]");
@@ -210,6 +221,8 @@ export function ComposerBar({
   const [filter, setFilter] = useState("");
   const [recents, setRecents] = useState<string[]>(readRecents);
   const [busy, setBusy] = useState(false);
+  /** Why the last model picked was not taken, shown in the menu where it was picked. */
+  const [pickError, setPickError] = useState<string | null>(null);
   /** Where the handle sits mid-drag, before the change is sent. */
   const [dragEffort, setDragEffort] = useState<number | null>(null);
   // Each menu opens over its own button; see menu-anchor.ts.
@@ -223,11 +236,18 @@ export function ComposerBar({
     return () => window.removeEventListener("resize", place);
   }, [open]);
 
-  const load = () =>
-    api
-      .config(sessionId)
+  // This component outlives a switch between chats: an answer for one that has
+  // been left is not this one's, and must not draw its model or levels here.
+  const currentSession = useRef(sessionId);
+  currentSession.current = sessionId;
+
+  const load = () => {
+    const asked = sessionId;
+    return api
+      .config(asked)
       .then((next) => {
         cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.named);
+        if (currentSession.current !== asked) return;
         // /config is the cheap route and reports neither when pi's catalogue
         // has not answered. The levels are then what was last reported for the
         // model it names — not for the one the seed guessed, which for a chat
@@ -257,6 +277,7 @@ export function ComposerBar({
         }));
       })
       .catch(() => {});
+  };
 
   /** Whether the chat had started when last looked at — see the effect on `started`. */
   const wasStarted = useRef(started);
@@ -264,6 +285,7 @@ export function ComposerBar({
     levelsFor.current = levelsModel(session.provider, session.model);
     setCfg(seed(session));
     setOpen(null);
+    setPickError(null);
     setDragEffort(null);
     // Another chat, loaded here: its having started already is no change.
     wasStarted.current = started;
@@ -271,14 +293,16 @@ export function ComposerBar({
   }, [sessionId]);
 
   const refreshCatalogue = () => {
+    const asked = sessionId;
     setLoadingCatalogue(true);
     api
-      .models(sessionId)
+      .models(asked)
       .then((next) => {
-        setCfg(next);
-        levelsFor.current = levelsKey(next.state.model.provider, next.state.model.id);
         cacheModels(next.models?.models ?? []);
         cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels, next.named);
+        if (currentSession.current !== asked) return;
+        setCfg(next);
+        levelsFor.current = levelsKey(next.state.model.provider, next.state.model.id);
       })
       .catch(() => {})
       .finally(() => setLoadingCatalogue(false));
@@ -318,8 +342,6 @@ export function ComposerBar({
   // Only the figures are asked for, not the whole config: that one carries the
   // model catalogue, which pi rebuilds from each provider's credentials every
   // time it is asked, and a long run has a great many turns.
-  const currentSession = useRef(sessionId);
-  currentSession.current = sessionId;
   useEffect(() => {
     if (!running || !turns) return;
     const asked = sessionId;
@@ -349,6 +371,7 @@ export function ComposerBar({
       setOpen(null);
       setShowAll(false);
       setFilter("");
+      setPickError(null);
     },
     trigger,
   );
@@ -356,29 +379,40 @@ export function ComposerBar({
   // With the chat, not with the menu: ready by the time the menu opens.
   const subagents = useSubagentChoice(sessionId);
   const models = cfg.models.models ?? [];
-  const byId = useMemo(() => new Map(models.map((m) => [m.id, m])), [models]);
+  const byKey = useMemo(() => new Map(models.map((m) => [modelKey(m), m])), [models]);
 
-  // Short list: models picked here before, plus the current one.
+  // Short list: models picked here before, plus the current one. A recent kept
+  // before they were keyed by provider is a bare id: the first model of that id.
   const quick = useMemo(() => {
-    const ids = [...recents];
-    if (cfg.state.model.id && !ids.includes(cfg.state.model.id)) ids.push(cfg.state.model.id);
-    return ids.map((id) => byId.get(id) ?? (id === cfg.state.model.id ? cfg.state.model : null)).filter(Boolean) as PiModel[];
-  }, [recents, cfg, byId]);
+    const current = cfg.state.model;
+    const keys = [...recents];
+    if (current.id && !keys.some((k) => k === modelKey(current) || k === current.id)) keys.push(modelKey(current));
+    const picked = keys
+      .map((k) => byKey.get(k) ?? models.find((m) => m.id === k) ?? (k === modelKey(current) || k === current.id ? current : null))
+      .filter(Boolean) as PiModel[];
+    // Two recents can come to one model: an old bare id and the key it was kept under since.
+    return picked.filter((m, i) => picked.findIndex((o) => modelKey(o) === modelKey(m)) === i);
+  }, [recents, cfg, byKey, models]);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return (q ? models.filter((m) => (m.id + m.name).toLowerCase().includes(q)) : models).slice(0, 200);
   }, [models, filter]);
 
-  const applyModel = async (id: string) => {
+  // The provider goes with the id: without it the server looks for the model
+  // among the chat's own provider, and one that another provider lists is not found.
+  const applyModel = async (m: PiModel) => {
     setBusy(true);
+    setPickError(null);
     try {
-      await api.setConfig(sessionId, { modelId: id });
-      setRecents(pushRecent(id));
+      await api.setConfig(sessionId, { provider: m.provider, modelId: m.id });
+      setRecents(pushRecent(modelKey(m)));
       await load();
       setOpen(null);
       setShowAll(false);
       setFilter("");
+    } catch (e) {
+      setPickError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -546,14 +580,14 @@ export function ComposerBar({
             <>
               {quick.map((m) => (
                 <button
-                  key={m.id}
+                  key={modelKey(m)}
                   type="button"
-                  onClick={() => applyModel(m.id)}
+                  onClick={() => applyModel(m)}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-fg hover:bg-raised"
                   title={m.id}
                 >
                   <span className="truncate">{shortName(m)}</span>
-                  {m.id === cfg.state.model.id && <span className="text-fg-muted">✓</span>}
+                  {sameModel(m, cfg.state.model) && <span className="text-fg-muted">✓</span>}
                   <OriginTag provider={m.provider} />
                 </button>
               ))}
@@ -580,14 +614,14 @@ export function ComposerBar({
               <div className="max-h-72 overflow-y-auto">
                 {filtered.map((m) => (
                   <button
-                    key={m.id}
+                    key={modelKey(m)}
                     type="button"
-                    onClick={() => applyModel(m.id)}
+                    onClick={() => applyModel(m)}
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-fg-muted hover:bg-raised"
                     title={m.id}
                   >
                     <span className="truncate">{shortName(m)}</span>
-                    {m.id === cfg.state.model.id && <span className="text-fg-muted">✓</span>}
+                    {sameModel(m, cfg.state.model) && <span className="text-fg-muted">✓</span>}
                     <OriginTag provider={m.provider} />
                   </button>
                 ))}
@@ -597,6 +631,7 @@ export function ComposerBar({
               </div>
             </>
           )}
+          {pickError && <p role="alert" className="px-3 py-1 text-xs text-danger">{pickError}</p>}
           <SubagentModelPicker subagents={subagents} models={models} />
           <div className="my-1 border-t border-line" />
           <button
