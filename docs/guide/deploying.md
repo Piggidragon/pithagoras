@@ -142,6 +142,11 @@ into place by hand without them is sent as it is.
 | `/workspaces` | The directories pi works in, mounted from `WORKSPACES_DIR` |
 | `/var/run/docker.sock` | Managed Browser/Voice add-ons and `EXECUTOR=container` |
 
+The portal closes `/data` to every account but the one it runs as (mode `0700`)
+each time it starts, a folder made by hand or by an older version too:
+`portal.db` holds the channels' bot tokens, the add-ons' passwords and every
+conversation. A data folder on the host, mounted as `/data`, is closed the same way.
+
 Inside `/data`:
 
 | Path | Holds |

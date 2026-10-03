@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { writeFileAtomic } from "./atomic-write.js";
 import { piAgentDir } from "./pi-settings.js";
 import { piEntry } from "./pi/package.js";
 
@@ -155,9 +156,7 @@ function readJson(file: string): Json {
 /** Through a temp file and a rename, so pi never reads half a file; readable by its owner only, as pi makes them. */
 function writeJson(file: string, data: Json) {
   mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, JSON.stringify(data, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
-  renameSync(temp, file);
+  writeFileAtomic(file, JSON.stringify(data, null, 2) + "\n", 0o600);
 }
 
 /**

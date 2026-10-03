@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { writeFileAtomic } from "./atomic-write.js";
 
 /**
  * pi's own settings file — the one the CLI writes and extensions read.
@@ -115,10 +116,8 @@ function replaceFile(text: string): void {
   }
   // A save that changes nothing leaves the copy of the file before it alone.
   if (before === text) return;
-  if (before !== undefined) writeFileSync(`${file}.bak`, before, { encoding: "utf8", mode: 0o600 });
-  const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, text, "utf8");
-  renameSync(temp, file);
+  if (before !== undefined) writeFileAtomic(`${file}.bak`, before, 0o600);
+  writeFileAtomic(file, text);
 }
 
 /**

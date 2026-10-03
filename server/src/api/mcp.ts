@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
+import { writeFileAtomic } from "../atomic-write.js";
 import { piAgentDir } from "../pi-settings.js";
 import { BROWSER_MCP } from "../tool-policy.js";
 
@@ -151,10 +152,19 @@ export function browserServers(): string[] {
   return [...names];
 }
 
-export function writeMcpFile(config: McpFile): void {
+/**
+ * The file holds the keys of the MCP servers and the portal's own token for
+ * Understory, so it is for its owner alone, and put in place whole: one cut
+ * off by a full disk would take every MCP server with it.
+ */
+export function writeMcpText(text: string): void {
   const file = mcpConfigPath();
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(config, null, 2) + "\n", "utf8");
+  writeFileAtomic(file, text.endsWith("\n") ? text : text + "\n", 0o600);
+}
+
+export function writeMcpFile(config: McpFile): void {
+  writeMcpText(JSON.stringify(config, null, 2));
 }
 
 /** Is the adapter installed? Without it, none of this configuration does anything. */
@@ -328,9 +338,7 @@ export function mcpRouter(): Router {
       return res.status(400).json({ error: `Not valid JSON: ${(e as Error).message}` });
     }
     try {
-      const file = mcpConfigPath();
-      mkdirSync(path.dirname(file), { recursive: true });
-      writeFileSync(file, content.endsWith("\n") ? content : content + "\n", "utf8");
+      writeMcpText(content);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

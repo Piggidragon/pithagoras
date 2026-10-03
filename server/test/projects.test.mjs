@@ -22,7 +22,7 @@ test('a project is named like a folder and starts with its instructions', () => 
   assert.equal(p.name, 'cool-project');
   assert.equal(p.hasInstructions, true);
   assert.equal(readFileSync(path.join(r, 'cool-project', 'AGENTS.md'), 'utf8'), '  Answer in German.\n');
-  assert.equal(P.readInstructions(r, 'cool-project'), '  Answer in German.\n');
+  assert.equal(P.readInstructions(r, 'cool-project').text, '  Answer in German.\n');
   rmSync(r, { recursive: true });
 });
 
@@ -30,7 +30,7 @@ test('a project without instructions has no file, and blank instructions remove 
   const r = root();
   const p = P.createProject(r, 'plain');
   assert.equal(p.hasInstructions, false);
-  assert.equal(P.readInstructions(r, 'plain'), '');
+  assert.deepEqual(P.readInstructions(r, 'plain'), { text: '', mtime: 0 });
   P.writeInstructions(r, 'plain', 'be brief');
   assert.equal(P.getProject(r, 'plain').hasInstructions, true);
   P.writeInstructions(r, 'plain', '   \n');
@@ -166,7 +166,7 @@ test('an AGENTS.md far larger than the editor takes is refused rather than read 
   writeFileSync(path.join(r, 'huge', 'AGENTS.md'), 'x'.repeat(400_001));
   assert.equal(code(() => P.readInstructions(r, 'huge')), 'invalid');
   writeFileSync(path.join(r, 'huge', 'AGENTS.md'), 'y'.repeat(100_000));
-  assert.equal(P.readInstructions(r, 'huge').length, 100_000);
+  assert.equal(P.readInstructions(r, 'huge').text.length, 100_000);
   rmSync(r, { recursive: true });
 });
 

@@ -6,10 +6,10 @@ import {
   readdirSync,
   renameSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { writeFileAtomic } from "../atomic-write.js";
 import { piAgentDir } from "../pi-settings.js";
 import { agentHome } from "../agent.js";
 import { builtinSkillsDir } from "../pi/sdk-client.js";
@@ -286,11 +286,7 @@ export function skillsRouter(): Router {
 
     try {
       mkdirSync(dir, { recursive: true });
-      writeFileSync(
-        path.join(dir, "SKILL.md"),
-        template(slug, description.trim(), typeof body === "string" ? body : ""),
-        "utf8"
-      );
+      writeFileAtomic(path.join(dir, "SKILL.md"), template(slug, description.trim(), typeof body === "string" ? body : ""));
       res.json({ ok: true, name: slug, path: path.join(dir, "SKILL.md") });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -412,7 +408,7 @@ export function skillsRouter(): Router {
           error: "That skill came from a package — editing it here would be lost on its next update",
         });
       }
-      writeFileSync(found.file, content.endsWith("\n") ? content : `${content}\n`, "utf8");
+      writeFileAtomic(found.file, content.endsWith("\n") ? content : `${content}\n`);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

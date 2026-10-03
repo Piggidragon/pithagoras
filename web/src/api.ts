@@ -112,7 +112,8 @@ export interface Routine {
 export interface AgentSetup {
   home: string;
   initialised: boolean;
-  files: { name: string; exists: boolean; content: string }[];
+  /** `mtime`: when the file last changed, 0 where there is none. A save sends it back, so the agent's own writes are not lost. */
+  files: { name: string; exists: boolean; content: string; mtime: number }[];
   /** Where the agent's memory is kept: while it is Understory, MEMORY.md is not read. */
   memory?: "file" | "understory";
 }
@@ -462,11 +463,12 @@ export const api = {
     }),
   projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),
   projectInstructions: (name: string) =>
-    json<{ text: string }>(`/api/projects/${encodeURIComponent(name)}/instructions`),
-  setProjectInstructions: (name: string, text: string) =>
+    json<{ text: string; mtime: number }>(`/api/projects/${encodeURIComponent(name)}/instructions`),
+  /** `mtime` is the file's as it was read; a file the agent has written since is refused (409). Without it the save replaces what is there. */
+  setProjectInstructions: (name: string, text: string, mtime?: number) =>
     json<{ ok: true }>(`/api/projects/${encodeURIComponent(name)}/instructions`, {
       method: "PUT",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, mtime }),
     }),
   /** What chats in the project start with: the same list as a chat's, `live` always false. */
   projectTools: (name: string) =>
@@ -842,10 +844,11 @@ export const api = {
     json<OrbStyle>(`/api/agents/${encodeURIComponent(agent)}/orb`, { method: "PUT", body: JSON.stringify(style) }),
   runAgentWizard: (agent: string, input: AgentWizard) =>
     json<AgentSetup>(`/api/agents/${encodeURIComponent(agent)}/setup`, { method: "POST", body: JSON.stringify(input) }),
-  saveAgentFile: (agent: string, name: string, content: string) =>
+  /** `mtime` is the file's as it was read; a file the agent has written since is refused (409). Without it the save replaces what is there. */
+  saveAgentFile: (agent: string, name: string, content: string, mtime?: number) =>
     json<AgentSetup>(`/api/agents/${encodeURIComponent(agent)}/files/${encodeURIComponent(name)}`, {
       method: "PUT",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, mtime }),
     }),
 
   /** Any session by id, including agent and routine ones the task list omits. */

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { LuBlocks, LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
-import { api, type Project, type ProjectContents, type Session } from "../api";
+import { api, ApiError, type Project, type ProjectContents, type Session } from "../api";
 import { deleteAsking, unsavedNotes } from "../unsaved";
 import { bytesLabel, slugify } from "../projects";
 import { within } from "../paths";
@@ -408,28 +408,39 @@ function Instructions({
 }) {
   const [text, setText] = useState<string | null>(null);
   const [saved, setSaved] = useState("");
+  // When the file was read: the agent writes AGENTS.md too, and a save from an older copy must not replace what it wrote since.
+  const [readAt, setReadAt] = useState(0);
+  const [changed, setChanged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    api
+  const load = useCallback(() => {
+    return api
       .projectInstructions(project.name)
       .then((r) => {
         setText(r.text);
         setSaved(r.text);
+        setReadAt(r.mtime);
+        setChanged(false);
+        setError(null);
       })
       .catch((e) => setError((e as Error).message));
   }, [project.name]);
 
-  const save = async () => {
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async (overwrite = false) => {
     if (text === null || busy) return;
     setBusy(true);
     setError(null);
     try {
-      await api.setProjectInstructions(project.name, text);
+      await api.setProjectInstructions(project.name, text, overwrite ? undefined : readAt);
       onSaved();
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof ApiError && e.status === 409) setChanged(true);
+      else setError((e as Error).message);
       setBusy(false);
     }
   };
@@ -447,7 +458,7 @@ function Instructions({
             {t("Cancel")}
           </button>
           <button
-            onClick={save}
+            onClick={() => void save()}
             disabled={text === null || text === saved || busy}
             className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
           >
@@ -460,6 +471,17 @@ function Instructions({
         <p className="py-8 text-center text-sm text-fg-subtle">{error ? "" : t("Loading…")}</p>
       ) : (
         <>
+          {changed && (
+            <div role="alert" className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-1.5 text-xs text-warn">
+              <span className="min-w-0 flex-1">{t("This file changed after you opened it.")}</span>
+              <button onClick={() => void load()} className="rounded px-1.5 py-0.5 underline hover:text-fg">
+                {t("Load the new version")}
+              </button>
+              <button onClick={() => void save(true)} className="rounded px-1.5 py-0.5 underline hover:text-fg">
+                {t("Save mine anyway")}
+              </button>
+            </div>
+          )}
           <textarea
             autoFocus
             aria-label={t("Project instructions")}

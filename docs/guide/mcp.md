@@ -15,6 +15,10 @@ adapter reads several files in precedence order; this is the pi-global one, so
 it applies to every session in the portal. A project-local `.mcp.json` would
 only reach one workspace, which is the wrong shape here.
 
+The file holds the servers' keys, and the token the portal made for its own
+memory, so it is readable by the account the portal runs as and no other. It is
+written whole or not at all: a full disk leaves the file as it was.
+
 Changes are read when a session starts. A session already running keeps the
 servers it connected with, so restart it to pick up a new one.
 

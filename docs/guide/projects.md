@@ -72,6 +72,10 @@ when a chat starts in it. The editor and the file are the same thing: edit it in
 the portal or in the folder, whichever is nearer. Saving an empty text removes the
 file. Home has none of its own.
 
+The agent works in the folder and may write `AGENTS.md` too. A save made from a
+copy that has changed since is not applied: the dialog says "This file changed
+after you opened it" and offers **Load the new version** or **Save mine anyway**.
+
 Chats started after a change pick it up. A chat that is already open does after
 `/reload`.
 

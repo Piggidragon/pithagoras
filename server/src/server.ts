@@ -26,7 +26,8 @@ import { checkWorkspace, workspaceRoot } from "./workspaces.js";
 import { insideReal, isWithinText } from "./within.js";
 import { agentHomePath } from "./agent-home.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
-import { AgentError, agentOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
+import { AgentError, agentOf, agentsRoot, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
+import { sweepRemoved } from "./folder-removal.js";
 import { agentsRouter } from "./api/agents.js";
 import { heartbeat } from "./heartbeat.js";
 import { deleteNotesOf } from "./activity.js";
@@ -277,7 +278,7 @@ app.get("/api/workspaces", (_req, res) => {
 
 // --- projects ---
 
-const projectStatus = { invalid: 400, missing: 404, exists: 409 } as const;
+const projectStatus = { invalid: 400, missing: 404, exists: 409, conflict: 409 } as const;
 
 const projectFailure = (res: express.Response, e: unknown) => {
   if (e instanceof ProjectError) return res.status(projectStatus[e.code]).json({ error: e.message });
@@ -407,17 +408,18 @@ app.get("/api/projects/:name", async (req, res) => {
 
 app.get("/api/projects/:name/instructions", (req, res) => {
   try {
-    res.json({ text: readInstructions(WORKSPACE_ROOT, req.params.name) });
+    res.json(readInstructions(WORKSPACE_ROOT, req.params.name));
   } catch (e) {
     projectFailure(res, e);
   }
 });
 
 app.put("/api/projects/:name/instructions", (req, res) => {
-  const text = req.body?.text;
+  const { text, mtime } = req.body ?? {};
   if (typeof text !== "string") return res.status(400).json({ error: "text required" });
+  if (mtime !== undefined && typeof mtime !== "number") return res.status(400).json({ error: "mtime must be a number" });
   try {
-    writeInstructions(WORKSPACE_ROOT, req.params.name, text);
+    writeInstructions(WORKSPACE_ROOT, req.params.name, text, mtime);
     res.json({ ok: true });
   } catch (e) {
     projectFailure(res, e);
@@ -1479,6 +1481,9 @@ startLlamaProxy(
   (sessionId, timings) => sessions.reportTimings(sessionId, timings),
 );
 sessions.startReaper();
+// Folders put aside for removal that a stop cut short: see folder-removal.ts.
+sweepRemoved(WORKSPACE_ROOT);
+sweepRemoved(agentsRoot());
 getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
 pinConnection();
 adoptPortalBrowser();

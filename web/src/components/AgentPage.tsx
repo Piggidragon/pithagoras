@@ -19,7 +19,7 @@ import {
 } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
-import { api, type Agent, type AgentSession, type AgentSetup as Setup } from "../api";
+import { api, ApiError, type Agent, type AgentSession, type AgentSetup as Setup } from "../api";
 import { AgentSetup } from "./AgentSetup";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
@@ -659,20 +659,51 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  // When the file was read: the agent writes these files too (MEMORY.md above all), and a save from an older copy must not replace what it wrote since.
+  const [readAt, setReadAt] = useState(0);
+  const [changed, setChanged] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const file = setup.files.find((f) => f.name === open);
   // Understory holds the memory: the file stays, and is not read.
   const unread = (name: string) => name === "MEMORY.md" && setup.memory === "understory";
 
-  const save = async () => {
+  const show = (f: Setup["files"][number]) => {
+    setOpen(f.name);
+    setDraft(f.content);
+    setReadAt(f.mtime);
+    setChanged(false);
+    setError(null);
+  };
+
+  const save = async (overwrite = false) => {
     if (!file) return;
     setBusy(true);
+    setError(null);
     try {
-      onSaved(await api.saveAgentFile(agent, file.name, draft));
+      const next = await api.saveAgentFile(agent, file.name, draft, overwrite ? undefined : readAt);
+      onSaved(next);
+      setReadAt(next.files.find((f) => f.name === file.name)?.mtime ?? 0);
+      setChanged(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) setChanged(true);
+      else setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const loadNew = async () => {
+    if (!file) return;
+    try {
+      const next = await api.agentSetup(agent);
+      onSaved(next);
+      const fresh = next.files.find((f) => f.name === file.name);
+      if (fresh) show(fresh);
+    } catch (e) {
+      setError((e as Error).message);
     }
   };
 
@@ -683,8 +714,8 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
           <button
             key={f.name}
             onClick={() => {
-              setOpen(open === f.name ? null : f.name);
-              setDraft(f.content);
+              if (open === f.name) setOpen(null);
+              else show(f);
             }}
             className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition ${
               open === f.name
@@ -721,8 +752,24 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
             placeholder={file.name === "WATCH.md" ? WATCH_EXAMPLE : undefined}
             className="w-full resize-y rounded-lg border border-line bg-raised/60 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-accent/60"
           />
+          {changed && (
+            <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-1.5 text-xs text-warn">
+              <span className="min-w-0 flex-1">{t("This file changed after you opened it.")}</span>
+              <button onClick={() => void loadNew()} className="rounded px-1.5 py-0.5 underline hover:text-fg">
+                {t("Load the new version")}
+              </button>
+              <button onClick={() => void save(true)} className="rounded px-1.5 py-0.5 underline hover:text-fg">
+                {t("Save mine anyway")}
+              </button>
+            </div>
+          )}
+          {error && (
+            <p role="alert" className="mt-2 text-xs text-danger">
+              {error}
+            </p>
+          )}
           <button
-            onClick={save}
+            onClick={() => void save()}
             disabled={busy || draft === file.content}
             className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-3 py-2 text-sm text-fg transition hover:bg-fg/10 disabled:opacity-40"
           >

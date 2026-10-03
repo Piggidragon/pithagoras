@@ -38,8 +38,8 @@ them. See [Projects](/guide/projects).
 | `GET /api/projects` | `{ root, projects: [{ name, path, isGit, hasInstructions, hasTools, sessions, lastActive }] }`; `hasTools` is whether the project switches tools differently from the portal-wide default |
 | `POST /api/projects` | `{ name, instructions?, toolsOff? }` → creates the folder (slugified) and writes `AGENTS.md` if there are instructions; 409 if it exists, 400 for `home`. `toolsOff` is the tools its chats start with off, as for `PUT /api/projects/:name/tools`, checked before the folder is made. If the folder is made and the tools cannot be stored, the answer is the project with a `toolsError` |
 | `GET /api/projects/:name` | The project plus `{ files, bytes, complete }` — what deleting it would remove |
-| `GET /api/projects/:name/instructions` | `{ text }` |
-| `PUT /api/projects/:name/instructions` | `{ text }` → writes `AGENTS.md`; blank removes it. |
+| `GET /api/projects/:name/instructions` | `{ text, mtime }` — `mtime` is when `AGENTS.md` last changed, 0 where there is none |
+| `PUT /api/projects/:name/instructions` | `{ text, mtime? }` → writes `AGENTS.md` whole; blank removes it. With `mtime`, a file that has changed since is not overwritten: 409. |
 | `GET /api/projects/:name/tools` | `{ tools, live, off, names }`, shaped like a conversation's list: every tool the portal has seen and whether it is on for chats in this project, with `defaultOn` the portal-wide default. `live` is always false |
 | `PUT /api/projects/:name/tools` | `{ off: string[] }` — the tools chats in this project start with; what is not named is on. Stored as the difference from the portal-wide default, and told to the running chats in the project. Answers `{ off, applied }` |
 | `DELETE /api/projects/:name` | Deletes its chats (with their conversation files) and its folder; 409 while one is running |
@@ -398,12 +398,12 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | Route | Purpose |
 | --- | --- |
 | `GET /api/agents` | `{ agents }`, each `{ id, name, home, first, initialised, chats, channels, orb, voice, heartbeat, unread }` |
-| `POST /api/agents` | `{ name, setup? }` — a new agent and its folder; `setup` takes the wizard's answers. A folder kept from a deleted agent of the same name is taken up again. |
+| `POST /api/agents` | `{ name, setup? }` — a new agent and its folder; `setup` takes the wizard's answers. A folder kept from a deleted agent of the same name is taken up again, and the files in it are not rewritten: `kept` in the answer names the ones that were left as they were. |
 | `PATCH /api/agents/:id` | `{ name }` — its folder stays where it is |
 | `DELETE /api/agents/:id` | Deletes it and its chats, and its folder with `?folder=delete`. Refused for the first agent, for one a channel talks as, and while one of its chats or routines is working. Its routines are switched off. |
-| `GET /api/agents/:id/setup` | Setup status and its editable files |
-| `POST /api/agents/:id/setup` | Writes its identity files from the wizard's answers |
-| `PUT /api/agents/:id/files/:name` | Saves one of its files |
+| `GET /api/agents/:id/setup` | Setup status and its editable files, each `{ name, exists, content, mtime }` |
+| `POST /api/agents/:id/setup` | Writes the identity files that are not there from the wizard's answers; the others are left, and `kept` names them |
+| `PUT /api/agents/:id/files/:name` | `{ content, mtime? }` — saves one of its files whole. With `mtime` (0 for a file that was not there), a file that has changed since is not overwritten: 409. A link is refused. |
 | `PUT /api/agents/:id/orb` | Saves its avatar; answers the style as stored |
 | `PUT /api/agents/:id/heartbeat` | `{ minutes, quietStart, quietEnd }` — how often it looks around on its own (0 never, else 15 minutes to a week) and the hours it keeps quiet (`"HH:MM"`, both or neither) |
 | `POST /api/agents/:id/heartbeat/run` | A look now. Answers at once; `heartbeat.running` and `heartbeat.status` follow it |

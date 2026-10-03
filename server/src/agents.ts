@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { getDb } from "./db.js";
+import { removeFolderLater } from "./folder-removal.js";
 import { agentHomePath } from "./agent-home.js";
 import { isWithinText } from "./within.js";
 import { normalizeOrb, type OrbStyle } from "./orb-style.js";
@@ -178,7 +179,7 @@ export function deleteAgent(id: string, { deleteFolder }: { deleteFolder: boolea
   getDb().prepare("DELETE FROM agents WHERE id = ?").run(id);
   // Only a folder this module made, under agentsRoot(): nothing else is ever removed.
   if (deleteFolder && isWithinText(agentsRoot(), agent.home) && agent.home !== agentsRoot() && existsSync(agent.home)) {
-    rmSync(agent.home, { recursive: true, force: true });
+    removeFolderLater(agent.home);
   }
   return agent;
 }

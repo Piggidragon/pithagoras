@@ -15,7 +15,9 @@ The **Agents** page shows a card for each agent, with its avatar and name and
 how many chats it has. **New agent** asks the same two questions as the first
 setup: who it is, and who it works for. Its home is made in `agents/` beside the
 first agent's home, named after it (`agents/research-bot` for *Research Bot*),
-and its files are written there.
+and its files are written there. A folder that is already there, kept when an
+agent of the same name was deleted, is taken up as it is: the files in it stay
+as they were, and only the ones that are missing are written.
 
 A card opens that agent (`/agents?agent=research-bot`), with **New
 conversation** to start one with it and four tabs: **Conversations**,
@@ -26,6 +28,12 @@ agent's avatar is its own, and voice mode shows the avatar of the agent the
 chat is with (the first agent's for a chat in a project). Its
 name, with the pencil beside it, renames it; the folder keeps its name.
 **Agents** at the top goes back to the cards.
+
+The **Files** tab edits `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` and `WATCH.md`.
+The agent writes these files too, `MEMORY.md` above all, so a save made from a
+copy the agent has changed since is not applied. The tab says "This file changed
+after you opened it" and offers **Load the new version** or **Save mine anyway**.
+A file that is a link is left alone: it is neither shown nor written through.
 
 ## Its voice
 

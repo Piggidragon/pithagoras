@@ -5,6 +5,8 @@ import { listAgentSessions, listSessions } from "../db.js";
 import { deleteNote, listNotes, markNoteRead, markNotesRead, unreadNotes } from "../activity.js";
 import { heartbeat, setHeartbeat, watchList } from "../heartbeat.js";
 import { EXECUTOR_KIND } from "../session-manager.js";
+import { FileError } from "../workspace-files.js";
+import { fail } from "./files.js";
 
 /**
  * The agents: listing them, making one, naming it, and its own files and setup.
@@ -60,8 +62,9 @@ export function agentsRouter(): Router {
     try {
       const agent = createAgent({ name: req.body?.name });
       const wizard = req.body?.setup as WizardInput | undefined;
-      if (wizard && typeof wizard === "object") runWizard({ ...wizard, agentName: wizard.agentName || agent.name }, agent.home);
-      res.json(agentToApi(agent));
+      // `kept`: the files a folder kept from an agent of the same name already had, which the answers did not replace.
+      const kept = wizard && typeof wizard === "object" ? runWizard({ ...wizard, agentName: wizard.agentName || agent.name }, agent.home).kept : [];
+      res.json({ ...agentToApi(agent), kept });
     } catch (e) {
       failed(res, e);
     }
@@ -150,7 +153,7 @@ export function agentsRouter(): Router {
     if (agent) res.json(agentFileStatus(agent.home));
   });
 
-  /** The setup wizard, for this agent's home. Refuses to overwrite an existing MEMORY.md. */
+  /** The setup wizard, for this agent's home. Writes the files that are not there and leaves the others, `kept` in the answer. */
   router.post("/agents/:id/setup", (req, res) => {
     const agent = agentOr404(req.params.id, res);
     if (!agent) return;
@@ -158,22 +161,25 @@ export function agentsRouter(): Router {
     if (typeof body.agentName !== "string" || !body.agentName.trim()) return res.status(400).json({ error: "The agent needs a name" });
     if (typeof body.userName !== "string" || !body.userName.trim()) return res.status(400).json({ error: "Who is it working for?" });
     try {
-      runWizard(body, agent.home);
-      res.json(agentFileStatus(agent.home));
+      const { kept } = runWizard(body, agent.home);
+      res.json({ ...agentFileStatus(agent.home), kept });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
   });
 
+  /** `{ content, mtime }`: `mtime` is the file's as the page read it; a file the agent has written since is not overwritten (409). */
   router.put("/agents/:id/files/:name", (req, res) => {
     const agent = agentOr404(req.params.id, res);
     if (!agent) return;
-    const content = req.body?.content;
+    const { content, mtime } = req.body ?? {};
     if (typeof content !== "string") return res.status(400).json({ error: "content required" });
+    if (mtime !== undefined && typeof mtime !== "number") return res.status(400).json({ error: "mtime must be a number" });
     try {
-      writeAgentFile(req.params.name, content, agent.home);
+      writeAgentFile(req.params.name, content, agent.home, mtime);
       res.json(agentFileStatus(agent.home));
     } catch (e) {
+      if (e instanceof FileError) return fail(res, e);
       res.status(400).json({ error: (e as Error).message });
     }
   });
