@@ -42,7 +42,7 @@ import { sessions, CommandFailed, EXECUTOR_KIND, IMAGE_ROOT } from "./session-ma
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpServerNames } from "./api/mcp.js";
-import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth, signOut } from "./auth.js";
+import { authEnabled, checkPassword, isAuthed, issueCookie, keptShortPassword, requireAuth, signOut } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -158,7 +158,9 @@ app.use(cookieParser());
 // --- auth ---
 
 app.get("/api/auth/status", (req, res) => {
-  res.json({ authRequired: authEnabled, authed: isAuthed(req) });
+  const authed = isAuthed(req);
+  // Said to a login only: to anyone else it would say which password to guess.
+  res.json({ authRequired: authEnabled, authed, ...(authed && keptShortPassword ? { shortPassword: true } : {}) });
 });
 
 app.post("/api/auth/login", loginThrottle(), (req, res) => {

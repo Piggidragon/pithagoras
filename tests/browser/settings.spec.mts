@@ -19,10 +19,12 @@ interface Portal {
   settingsSaveDelay?: (n: number) => number;
   /** What the server says came of saving a provider, besides. */
   providerNote?: string;
+  /** A portal with a password, and what its status says of it. */
+  login?: { shortPassword?: boolean };
 }
 
 /** The portal with no server: Settings, its search, and the setup assistant, over canned answers. */
-async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, stored = {}, probe, probeDelay, homepage, openRouterFromEnv = false, installBringsModels = false, plainModel = false, settingsSaveDelay, providerNote }: Portal = {}) {
+async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, stored = {}, probe, probeDelay, homepage, openRouterFromEnv = false, installBringsModels = false, plainModel = false, settingsSaveDelay, providerNote, login }: Portal = {}) {
   const calls: string[] = [];
   const providerSaves: { id: string; body: any }[] = [];
   const settingsSaves: unknown[] = [];
@@ -42,7 +44,7 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
     calls.push(`${method} ${p}`);
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     let body: unknown = {};
-    if (p === '/api/auth/status') body = { authed: true, authRequired: false };
+    if (p === '/api/auth/status') body = { authed: true, authRequired: Boolean(login), ...(login?.shortPassword ? { shortPassword: true } : {}) };
     else if (p === '/api/sessions' && method === 'GET') body = { sessions: [], executor: 'host' };
     else if (p === '/api/sessions') body = { id: 'new', title: 'New', workspace: '/w', status: 'idle', kind: 'task', pinned: false };
     else if (p === '/api/settings' && method === 'PUT') {
@@ -391,6 +393,24 @@ test('the assistant waits for what is stored before it saves a model', async ({ 
   await setup.getByRole('button', { name: 'Next' }).click();
   await expect.poll(() => api.saved()).toEqual({ provider: 'llama-swap', model: 'Plain', thinkingLevel: 'high' });
   expect(api.settingsSaves).toHaveLength(1);
+});
+
+test('a password the portal only keeps because it was in use is said in Settings, where the login is', async ({ page }) => {
+  await portal(page, { login: { shortPassword: true } });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/browser');
+  const signedIn = page.getByRole('dialog').locator('section', { hasText: 'Signed in' });
+  await expect(signedIn.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await expect(signedIn.getByRole('note')).toContainText('shorter than 8 characters');
+});
+
+test('a password of the right length says nothing about it', async ({ page }) => {
+  await portal(page, { login: {} });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/browser');
+  const signedIn = page.getByRole('dialog').locator('section', { hasText: 'Signed in' });
+  await expect(signedIn.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await expect(signedIn.getByRole('note')).toHaveCount(0);
 });
 
 test('About draws from what Settings already has', async ({ page }) => {

@@ -609,8 +609,9 @@ function CommandCharacter() {
 /** Only where there is a password: without one there is nothing to sign out of. */
 function SignOut({ onError }: { onError: (e: string) => void }) {
   const [required, setRequired] = useState(false);
+  const [short, setShort] = useState(false);
   useEffect(() => {
-    api.authStatus().then((s) => setRequired(s.authRequired)).catch(() => {});
+    api.authStatus().then((s) => { setRequired(s.authRequired); setShort(Boolean(s.shortPassword)); }).catch(() => {});
   }, []);
   if (!required) return null;
   const signOut = () =>
@@ -623,6 +624,11 @@ function SignOut({ onError }: { onError: (e: string) => void }) {
       <button onClick={signOut} className={btnCls}>
         {t("Sign out")}
       </button>
+      {short && (
+        <p role="note" className="mt-3 text-xs text-warn">
+          {t("The portal's password is shorter than 8 characters. It keeps working because it was already in use, but anybody who can reach the portal can try to guess it. Set a longer PORTAL_PASSWORD and restart.")}
+        </p>
+      )}
     </Section>
   );
 }

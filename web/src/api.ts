@@ -415,7 +415,7 @@ export const api = {
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
-  authStatus: () => json<{ authRequired: boolean; authed: boolean }>("/api/auth/status"),
+  authStatus: () => json<{ authRequired: boolean; authed: boolean; shortPassword?: boolean }>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),

@@ -191,6 +191,44 @@ test("the portal does not start without a password, with the example's, or with 
   }
 });
 
+test("a password shorter than the minimum only stops a portal it is new to: one that ran with it keeps working, with a warning", async () => {
+  const home = testHome("pithagoras-auth-kept-");
+  const run = (password, port) => startServer(serverEnv(home, port, { PORTAL_PASSWORD: password, PORTAL_ALLOW_NO_PASSWORD: password ? "" : "1" }));
+  const refused = (password) => runToEnd([ENTRY], serverEnv(home, 0, { PORTAL_PASSWORD: password, PORTAL_ALLOW_NO_PASSWORD: "" }), { ms: 20_000 });
+  const stop = async ({ child }) => { child.kill(); await new Promise((r) => child.once("exit", r)); };
+  const loggedIn = async (at, password) => {
+    const res = await login(password, at);
+    return (await fetch(`${at}/api/auth/status`, { headers: { Cookie: cookieOf(res) } })).json();
+  };
+
+  // An install from before the minimum: it has been used, under a password that is short.
+  const before = await run("", await freePort());
+  assert.equal((await fetch(`${before.base}/api/sessions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 200);
+  await stop(before);
+
+  const oldPassword = "oldpass";
+  const kept = await run(oldPassword, await freePort());
+  // Said to a login, not to whoever asks: it would name the password to guess.
+  assert.deepEqual(await (await fetch(`${kept.base}/api/auth/status`)).json(), { authRequired: true, authed: false });
+  assert.deepEqual(await loggedIn(kept.base, oldPassword), { authRequired: true, authed: true, shortPassword: true });
+  await stop(kept);
+
+  // Remembered, so that it is a change which stops it: another short one, even one of the same length.
+  for (const password of ["newpass", "oldpas"]) assert.equal((await refused(password)).code, 1, password);
+  const again = await run(oldPassword, await freePort());
+  await stop(again);
+
+  // A long one is accepted, and a return to a short one is then a change like any other.
+  const long = await run("a long enough password", await freePort());
+  assert.deepEqual(await loggedIn(long.base, "a long enough password"), { authRequired: true, authed: true });
+  await stop(long);
+  assert.equal((await refused(oldPassword)).code, 1);
+
+  // A portal that was never used has nothing to keep.
+  const fresh = await runToEnd([ENTRY], serverEnv(testHome("pithagoras-auth-new-"), 0, { PORTAL_PASSWORD: oldPassword, PORTAL_ALLOW_NO_PASSWORD: "" }), { ms: 20_000 });
+  assert.equal(fresh.code, 1);
+});
+
 test("the example environment file ships no password for anyone to find", () => {
   // `cp .env.example .env` and `docker compose up` is the quick start: with a
   // password in the example, that is a portal everyone with the file can enter.
@@ -317,6 +355,39 @@ test("a stream of another site's page is refused, and the one of the portal's ow
   assert.equal(seen.headers.cookie, undefined);
   mine.socket.destroy();
   await browser.socketClosed;
+});
+
+test("behind a reverse proxy that rewrites Host, the page of the host it was asked for is accepted, and another site's still is not", async () => {
+  const cookie = await signedIn();
+  browser.mode = "accept";
+  browser.upgrades.length = 0;
+  // Host is the portal's own address behind the proxy; the page's origin is what the visitor typed.
+  const asked = { Cookie: cookie, "X-Forwarded-Host": "portal.example" };
+  const mine = upgrade({ ...asked, Origin: "https://portal.example" });
+  await until(() => mine.text().includes("RFB 003.008"), "the stream of the page behind the proxy");
+  assert.match(mine.text(), /^HTTP\/1\.1 101 /);
+  mine.socket.destroy();
+  await browser.socketClosed;
+
+  // The default port of the scheme is the same host, and a list of proxies names the visitor's first.
+  const withPort = upgrade({ Cookie: cookie, "X-Forwarded-Host": "portal.example:443, inner.proxy:8080", Origin: "https://portal.example" });
+  await until(() => withPort.text().includes("RFB 003.008"), "the stream with the port spelled out");
+  withPort.socket.destroy();
+  await browser.socketClosed;
+
+  browser.upgrades.length = 0;
+  for (const origin of ["https://elsewhere.example", "https://portal.example.elsewhere.example", "null"]) {
+    const foreign = upgrade({ ...asked, Origin: origin });
+    await until(() => foreign.text().includes("\r\n\r\n"), `an answer to ${origin}`);
+    assert.match(foreign.text(), /^HTTP\/1\.1 403 /, origin);
+    foreign.socket.destroy();
+  }
+  // A forwarded host that is no address does not stand for anything.
+  const tricked = upgrade({ Cookie: cookie, "X-Forwarded-Host": "elsewhere.example@portal.example", Origin: "https://elsewhere.example" });
+  await until(() => tricked.text().includes("\r\n\r\n"), "an answer to a made-up host");
+  assert.match(tricked.text(), /^HTTP\/1\.1 403 /);
+  tricked.socket.destroy();
+  assert.equal(browser.upgrades.length, 0, "the browser was never asked");
 });
 
 test("a stream the browser refuses is answered, not left waiting", async () => {

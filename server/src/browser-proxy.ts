@@ -106,7 +106,7 @@ export function attachBrowserUpgrade(server: http.Server): void {
     // login, asked here. And a page of another site may not open the stream with
     // the visitor's cookie — a browser names where the page came from.
     if (!isAuthedUpgrade(req)) return refuse(socket, 401, "Unauthorized");
-    if (req.headers.origin && !sameHost(req.headers.origin, req.headers.host)) return refuse(socket, 403, "Forbidden");
+    if (req.headers.origin && !fromHere(req.headers.origin, req.headers)) return refuse(socket, 403, "Forbidden");
     const proxied = https.request({
       host: UPSTREAM_HOST,
       port: upstreamPort(),
@@ -157,10 +157,26 @@ export function attachBrowserUpgrade(server: http.Server): void {
   });
 }
 
-/** Is `origin` the page of the host the request was made to? */
-function sameHost(origin: string, host: string | undefined): boolean {
+/**
+ * Is `origin` a page of the host the request was made to? Behind a reverse proxy
+ * that rewrites Host, that is the one the proxy was asked for, which it passes
+ * on as X-Forwarded-Host. A browser cannot set that header on a stream it opens
+ * from a page, so a page of another site cannot make itself the host this way.
+ */
+function fromHere(origin: string, headers: http.IncomingHttpHeaders): boolean {
+  const forwarded = headers["x-forwarded-host"];
+  // Several proxies in a row list the hosts they were asked for; the first is the visitor's.
+  const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim();
+  return [headers.host, first].some((host) => host && sameHost(origin, host));
+}
+
+/** Is `origin` the page of `host`, an address with or without the port its scheme implies? */
+function sameHost(origin: string, host: string): boolean {
+  // Only an address: anything URL would read as a user name or a path is not one.
+  if (!/^[^\s/@?#\\]+$/.test(host)) return false;
   try {
-    return new URL(origin).host === host;
+    const { protocol, host: page } = new URL(origin);
+    return new URL(`${protocol}//${host}`).host === page;
   } catch {
     return false;
   }

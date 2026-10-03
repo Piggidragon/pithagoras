@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
-import { isSignedOut, recordSignOut } from "./db.js";
+import { getDb, getSetting, isSignedOut, putSetting, recordSignOut } from "./db.js";
 import { tlsFiles } from "./http-security.js";
 
 /**
@@ -36,7 +36,39 @@ if (!authEnabled && !allowNoPassword) {
   process.exit(1);
 }
 
-if (authEnabled && (PASSWORD === EXAMPLE_PASSWORD || PASSWORD.length < MIN_PASSWORD_LENGTH)) {
+/**
+ * A short password only stops a portal it is new to. The minimum came after
+ * installs that already had a shorter one, which must still start: the portal
+ * remembers the password it ran with (salted and hashed, in its own settings),
+ * and one it has run with before keeps working, with a warning. An install
+ * from before it remembered anything is told by having been used.
+ */
+const LOGIN_STAMP = "login_password";
+
+const stampOf = (password: string): string => {
+  const salt = crypto.randomBytes(16);
+  return `${salt.toString("hex")}:${crypto.scryptSync(password, salt, 32).toString("hex")}`;
+};
+
+function isStamp(stamp: string, password: string): boolean {
+  const [salt, hash] = stamp.split(":");
+  if (!salt || !hash) return false;
+  const expected = Buffer.from(hash, "hex");
+  return crypto.timingSafeEqual(crypto.scryptSync(password, Buffer.from(salt, "hex"), expected.length), expected);
+}
+
+/** Whether this portal has been used before: it holds a chat. A new one holds settings of its own already. */
+const hasBeenUsed = (): boolean => getDb().prepare("SELECT 1 FROM sessions LIMIT 1").get() !== undefined;
+
+const tooShort = authEnabled && PASSWORD !== EXAMPLE_PASSWORD && PASSWORD.length < MIN_PASSWORD_LENGTH;
+
+/** The password is shorter than the minimum, but this portal has run with it before. */
+export const keptShortPassword = tooShort && (() => {
+  const stamp = getSetting(LOGIN_STAMP);
+  return stamp ? isStamp(stamp, PASSWORD) : hasBeenUsed();
+})();
+
+if (authEnabled && (PASSWORD === EXAMPLE_PASSWORD || (tooShort && !keptShortPassword))) {
   console.error(
     "\n  PORTAL_PASSWORD is the example from .env.example or shorter than " + MIN_PASSWORD_LENGTH + " characters.\n" +
       "  This portal runs arbitrary commands on the host and listens on every\n" +
@@ -44,6 +76,21 @@ if (authEnabled && (PASSWORD === EXAMPLE_PASSWORD || PASSWORD.length < MIN_PASSW
       "  anybody could guess. Choose a longer one.\n"
   );
   process.exit(1);
+}
+
+if (keptShortPassword) {
+  console.warn(
+    "\n  WARNING: PORTAL_PASSWORD is shorter than " + MIN_PASSWORD_LENGTH + " characters. This portal ran with it\n" +
+      "  before the minimum, so it keeps working, but a new or changed password\n" +
+      "  has to be longer. Anybody who can reach the port can try to guess it,\n" +
+      "  and the portal runs arbitrary commands on this machine.\n"
+  );
+}
+
+// What this start ran with, so that a change to the password is known next time.
+if (authEnabled) {
+  const stamp = getSetting(LOGIN_STAMP);
+  if (!stamp || !isStamp(stamp, PASSWORD)) putSetting(LOGIN_STAMP, stampOf(PASSWORD));
 }
 
 if (!authEnabled) {

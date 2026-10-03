@@ -522,6 +522,7 @@ const de: Locale = {
     "Signed in": "Angemeldet",
     "Signing out asks for the password here again. Other browsers stay signed in.": "Nach dem Abmelden wird hier wieder nach dem Passwort gefragt. Andere Browser bleiben angemeldet.",
     "Sign out": "Abmelden",
+    "The portal's password is shorter than 8 characters. It keeps working because it was already in use, but anybody who can reach the portal can try to guess it. Set a longer PORTAL_PASSWORD and restart.": "Das Passwort des Portals ist kürzer als 8 Zeichen. Es funktioniert weiter, weil es schon in Gebrauch war, aber jeder, der das Portal erreicht, kann versuchen, es zu erraten. Setz ein längeres PORTAL_PASSWORD und starte neu.",
     "This browser does not offer them here — they need a secure connection (HTTPS, or localhost).": "Dieser Browser bietet sie hier nicht an — sie brauchen eine sichere Verbindung (HTTPS oder localhost).",
     "The browser has blocked them for this site. Allow them in its site settings, then come back.": "Der Browser hat sie für diese Seite blockiert. Erlaube sie in seinen Website-Einstellungen und komm dann zurück.",
     "Tell me when a chat is done or needs me": "Sag mir, wenn ein Chat fertig ist oder mich braucht",

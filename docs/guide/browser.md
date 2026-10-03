@@ -45,7 +45,9 @@ The portal proxies the browser's UI at `/browser-ui`, so **Open browser** shows
 it inline with a fullscreen button, using the portal's own certificate and
 credential. No second password, no second certificate. The page and its
 websocket sit behind the portal's login like everything else: without the login
-they answer 401, and a websocket opened from another site is refused. The frame switches on like
+they answer 401, and a websocket opened from another site is refused. Behind a reverse
+proxy that rewrites the `Host` header, have it send the host the visitor asked for
+as `X-Forwarded-Host`: the page's origin is compared with that as well. The frame switches on like
 a screen when it opens, unless [the animations](/guide/interface#animations) are
 off.
 
