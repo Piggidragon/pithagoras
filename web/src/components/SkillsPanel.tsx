@@ -15,6 +15,7 @@ import {
 } from "react-icons/lu";
 import { api, type FoundSkill, type Skill, type SkillDiagnostic, type SkippedSkill } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
+import { useUnsavedDraft } from "./Modal";
 import { isEnter } from "../shortcuts";
 import { t, tp, tx } from "../i18n";
 
@@ -341,6 +342,7 @@ function SkillDetail({
   const [draft, setDraft] = useState(s.content);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  useUnsavedDraft(draft !== s.content);
 
   useEffect(() => setDraft(s.content), [s.name, s.content]);
 

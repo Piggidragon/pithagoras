@@ -498,3 +498,31 @@ test("asking a saved provider's server again takes the names it gives now: a lla
   const saved = (api.providerSaves[0].body as { models: { id: string; name?: string }[] }).models;
   expect(saved.find((m) => m.id === 'Ornith')?.name).toBeUndefined();
 });
+
+test('Escape with a provider being added asks before Settings closes, and an untouched editor closes at once', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await portal(page, { probe: () => ['A'] });
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  await expect(dialog.getByLabel('Server address')).toBeVisible();
+  // Nothing typed: the preset's own address is not a draft.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+
+  await page.goto('/settings/models');
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  await dialog.getByLabel('Server address').fill('http://gpu:9090/v1');
+  await page.keyboard.press('Escape');
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await expect(ask).toBeVisible();
+  // Keep editing: the address is still there.
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(ask).toBeHidden();
+  await expect(dialog.getByLabel('Server address')).toHaveValue('http://gpu:9090/v1');
+  // A click beside the dialog asks the same.
+  await page.mouse.click(2, 2);
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Discard' }).click();
+  await expect(dialog).toBeHidden();
+});

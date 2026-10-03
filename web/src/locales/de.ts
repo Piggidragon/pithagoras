@@ -1054,6 +1054,7 @@ const de: Locale = {
     "— drag to move · scroll to zoom · click to open": "— ziehen zum Verschieben · scrollen zum Zoomen · klicken zum Öffnen",
     // components/Modal.tsx
     "Close": "Schließen",
+    "What you changed here has not been saved.": "Was du hier geändert hast, ist nicht gespeichert.",
     // components/PackageCatalog.tsx
     "Install {name}?": "{name} installieren?",
     "It is installed from npm and runs inside pi with the same rights as the agent — reading files, running commands. Install packages you trust.": "Es wird von npm installiert und läuft in pi mit denselben Rechten wie der Agent — liest Dateien, führt Befehle aus. Installiere nur Pakete, denen du vertraust.",

@@ -11,6 +11,7 @@ import { PackageCatalog } from "./PackageCatalog";
 import { parseWindow } from "../context-window";
 import { looksComplete } from "../provider-address";
 import { confirmDialog } from "./ConfirmDialog";
+import { useUnsavedDraft } from "./Modal";
 import { formatTokens } from "../transcript";
 import { Select } from "./Select";
 import { Empty, Field, Section, btnCls, ghostCls, inputCls, primaryCls } from "./SettingsUi";
@@ -328,6 +329,9 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   const [probe, setProbe] = useState<{ state: "idle" | "asking" | "ok" | "failed"; message?: () => string }>({ state: "idle" });
   const [manual, setManual] = useState("");
   const [saving, setSaving] = useState(false);
+  // What was there when the editor opened: a key, a manual model, or another name or address is a draft.
+  const first = useRef({ choice, id, baseUrl, apiType });
+  useUnsavedDraft(!saving && (!!key || !!manual.trim() || choice !== first.current.choice || id !== first.current.id || baseUrl !== first.current.baseUrl || apiType !== first.current.apiType));
   const probeSeq = useRef(0);
   /** The address the server last answered at, as it said it: put in the field, it is not asked again. */
   const answered = useRef<string | null>(null);

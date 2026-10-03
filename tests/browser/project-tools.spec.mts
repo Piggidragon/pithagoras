@@ -55,7 +55,8 @@ async function portal(page: Page, opts: { off?: string[]; refuse?: string; tools
           { name: 'todo', source: 'pi-todo', enabled: !off.includes('todo'), defaultOn: true },
         ],
       };
-    } else if (p === '/api/models') reply = { models: [], providers: {} };
+    } else if (p === '/api/projects/demo/instructions') reply = { text: 'Use tabs.' };
+    else if (p === '/api/models') reply = { models: [], providers: {} };
     await route.fulfill({ json: reply });
   });
   await page.addInitScript(() => {
@@ -179,4 +180,48 @@ test('the hint above the tools has room above it', async ({ page }) => {
   const hint = dialog(page).getByText('These are the tools earlier chats had.');
   await expect(hint).toBeVisible();
   expect(await hint.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('8px');
+});
+
+test('the New project dialog asks before it is closed with something typed in, and not before', async ({ page }) => {
+  const { made } = await portal(page);
+  await page.getByRole('button', { name: 'New project' }).click();
+  // Nothing typed: Escape just closes it.
+  await page.keyboard.press('Escape');
+  await expect(dialog(page)).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'New project' }).click();
+  await dialog(page).getByRole('textbox', { name: 'Name' }).fill('fresh');
+  await page.keyboard.press('Escape');
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog(page).getByRole('textbox', { name: 'Name' })).toHaveValue('fresh');
+  // The close button and a click beside the dialog ask as well; Discard closes it.
+  await dialog(page).getByRole('button', { name: 'Close' }).click();
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(ask).toBeHidden();
+  // Inside the page's own area, beside the dialog.
+  await page.mouse.click(300, 360);
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Discard' }).click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect(made).toEqual([]);
+});
+
+test("a project's instructions asks before they are closed with changes, and not before", async ({ page }) => {
+  await portal(page);
+  await page.getByRole('button', { name: 'Instructions for demo' }).click();
+  const text = dialog(page).getByRole('textbox', { name: 'Project instructions' });
+  await expect(text).toHaveValue('Use tabs.');
+  await page.keyboard.press('Escape');
+  await expect(dialog(page)).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Instructions for demo' }).click();
+  await text.fill('Use spaces.');
+  await page.keyboard.press('Escape');
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Discard' }).click();
+  await expect(dialog(page)).toHaveCount(0);
 });

@@ -338,6 +338,7 @@ function NewProject({
       title={t("New project")}
       subtitle={t("A folder of its own, with instructions the agent follows in it")}
       onClose={onClose}
+      unsaved={!busy && (!!name.trim() || !!instructions.trim() || toolsOff !== undefined)}
       footer={
         <div className="flex items-center justify-end gap-2">
           {error && <p className="mr-auto text-xs text-danger">{error}</p>}
@@ -438,6 +439,7 @@ function Instructions({
       title={t("Instructions · {name}", { name: project.name })}
       subtitle={t("Saved as AGENTS.md in the folder — edit it there too if you like")}
       onClose={onClose}
+      unsaved={text !== null && text !== saved && !busy}
       footer={
         <div className="flex items-center justify-end gap-2">
           {error && <p className="mr-auto text-xs text-danger">{error}</p>}
