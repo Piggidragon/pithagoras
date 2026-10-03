@@ -907,7 +907,8 @@ app.post("/api/sessions/:id/messages/:seq/version", async (req, res) => {
 
 /** A picture sent with a message, for the transcript to show. */
 app.get("/api/sessions/:id/images/:name", (req, res) => {
-  const file = imagePath(IMAGE_ROOT, req.params.id, req.params.name);
+  // A chat that is gone serves no pictures, whatever a removal that failed left behind.
+  const file = getSession(req.params.id) ? imagePath(IMAGE_ROOT, req.params.id, req.params.name) : undefined;
   if (!file) return res.status(404).json({ error: "Not found" });
   // Named by a random id and never rewritten, so it can be kept as long as a
   // browser likes. The type is the one its bytes were checked against.
@@ -1597,6 +1598,9 @@ const tls =
     : null;
 
 const host = bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN);
+// Before anything can start a run: a catch-up routine marked running in the same
+// moment would be taken for one the last server left.
+const cutOff = sessions.recoverOrphans();
 const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).listen(
   PORT,
   host,
@@ -1625,6 +1629,8 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   channelSupervisor
     .sync()
     .then(() => console.log(`  channels: ${channelSupervisor.summary()}`))
+    // Once they are up: the person whose request the restart cut off is told.
+    .then(() => channelSupervisor.tellRestart(cutOff))
     .catch((e) => console.error(`[portal] channel startup failed: ${e.message}`));
   }
 );
@@ -1648,7 +1654,7 @@ startLlamaProxy(
   (sessionId, load) => sessions.reportModelLoad(sessionId, load),
   (sessionId, timings) => sessions.reportTimings(sessionId, timings),
 );
-sessions.recoverOrphans();
+sessions.startReaper();
 getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
 pinConnection();
 adoptPortalBrowser();

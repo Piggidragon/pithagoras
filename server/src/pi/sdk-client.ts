@@ -19,6 +19,7 @@ import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
+import { findSessionFile } from "./session-file.js";
 import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
 import { askPrimaryTool } from "./ask-primary.js";
@@ -330,6 +331,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return this.unbridge?.running() ?? 0;
   }
 
+  dialogsOpen(): number {
+    return this.pendingUi.size;
+  }
+
   endSubagents(why: string): void {
     this.unbridge?.endAll(why);
   }
@@ -520,10 +525,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Note the argument order — (cwd, sessionDir). Only one was being passed,
     // so the session directory was taken as the working directory and pi filed
     // everything under an encoded path derived from it.
-    const sessionManager =
-      opts.sessionFile && existsSync(opts.sessionFile)
-        ? pi.SessionManager.open(opts.sessionFile, opts.sessionDir, opts.cwd)
-        : pi.SessionManager.create(opts.cwd, opts.sessionDir);
+    const sessionFile = findSessionFile(opts.sessionFile, opts.sessionDir);
+    const sessionManager = sessionFile
+      ? pi.SessionManager.open(sessionFile, opts.sessionDir, opts.cwd)
+      : pi.SessionManager.create(opts.cwd, opts.sessionDir);
     // Before the prompt is first built: a reopened conversation may have had
     // voice. What the model is given, not the whole path: a spoken message
     // compacted away left nothing the rule is about.

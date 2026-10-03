@@ -47,10 +47,22 @@ interface Seen {
 }
 const seen = new Map<string, Seen>();
 
+/**
+ * A chat that is gone, or a clean routine run that is over: what it was shown,
+ * and the tab it held, are not needed again. Says whether there was any. Not when a chat's pi is merely
+ * stopped for being idle — it goes on in its own tab when it is started again,
+ * and without the record it would be handed whichever tab is newest.
+ */
+export function forgetBrowserSession(sessionId: string): boolean {
+  return seen.delete(sessionId);
+}
+
 /** The tab a chat works in: the one it last used, else the most recent. */
 async function pageFor(sessionId: string): Promise<Page> {
   const known = seen.get(sessionId);
   if (known && !known.page.isClosed()) return known.page;
+  // A tab that was closed is not kept, whether or not the browser can be reached for another.
+  seen.delete(sessionId);
   const b = await connect();
   const context = b.contexts()[0] ?? (await b.newContext());
   const pages = context.pages();

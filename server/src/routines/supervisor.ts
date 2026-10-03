@@ -3,6 +3,7 @@ import { createSession, findRoutineSession, getDb, type SessionRow } from "../db
 import { agentHome } from "../agent.js";
 import { checkWorkspace } from "../workspaces.js";
 import { sessions, EXECUTOR_KIND } from "../session-manager.js";
+import { forgetBrowserSession } from "../browser/tools.js";
 import { isDue, nextRun, parseCron } from "./cron.js";
 import { reportFraming, reportToFor } from "../pi/report-tool.js";
 
@@ -159,8 +160,10 @@ class RoutineSupervisor {
       .prepare("UPDATE routines SET last_run = ?, last_status = 'running' WHERE id = ?")
       .run(lastRun, row.id);
 
+    let fresh: SessionRow | undefined;
     try {
       const session = this.sessionFor(row);
+      if (row.fresh_session) fresh = session;
       const output = await sessions.ask(session.id, prompt(row, trigger), {
         timeoutMs: RUN_TIMEOUT_MS,
       });
@@ -169,6 +172,13 @@ class RoutineSupervisor {
       this.finish(row.id, "error", (e as Error).message, Date.now() - started);
     } finally {
       this.running.delete(row.slug);
+      // A clean session is never used again: its pi would otherwise be held until
+      // the portal stops, one more with every run. Its transcript stays. Not while
+      // a subagent it started is still working: the idle reaper takes it then.
+      if (fresh && !sessions.backgroundWork(fresh.id)) {
+        await sessions.stop(fresh.id).catch(() => {});
+        forgetBrowserSession(fresh.id);
+      }
       // A one-off has nothing left to do. Disabled rather than deleted, so the
       // result stays readable and it can be re-armed by giving it a new time.
       // Not one run by hand ahead of its moment: that was a try, and the

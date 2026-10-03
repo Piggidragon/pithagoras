@@ -24,7 +24,9 @@ agent takes them in after the step it is on, instead of when the whole run is
 over. Until then the message sits in the transcript marked *Waiting — goes in
 after the current step*. A message that did not get that far — the run was
 stopped, or the portal restarted, before the agent took it in — says so and has
-a button to send it again. **Stop** aborts the current run. In
+a button to send it again. **Stop** aborts the current run, and pressed while pi
+is still starting for a message, it keeps that message from being sent at all:
+the message comes back as not sent, rather than being answered seconds later. In
 [voice mode](/guide/voice#pictures-tool-cards-and-controls) what you say stops
 the task by default, and its settings have a switch to add it to the running task
 instead.
@@ -412,7 +414,23 @@ before it was a feature:
   log, which is what replay reads.
 
 If the server restarts mid-run, that session is marked `interrupted` rather than
-left spinning. Send a message to carry on.
+left spinning. The run is stopped first, as Stop would, so what the agent had
+written so far is kept in the transcript and in its own record of the
+conversation, not lost with the process. Send a message to carry on.
+
+A chat's pi is let go after twenty minutes without use: nothing running, no
+command or question waiting, no subagent working in the background. Every pi is a
+whole agent in memory (or a container), and a portal with many conversations
+would otherwise hold them all until it stopped. Nothing is lost — the next
+message starts pi again from the conversation's file, which takes a few seconds
+on a cold start. Picking a model or opening the command list also starts it. A
+routine that runs in a clean session each time lets its pi go as soon as the run
+ends.
+
+pi's file for the chat (`/data/sessions/<id>`, see
+[Deploying](/guide/deploying#volumes)) is what the agent remembers. When it is
+gone, the chat still shows its transcript, but the agent starts over, and a
+notice in the chat says so.
 
 ## The tab
 

@@ -20,6 +20,8 @@ import { AUDIO_MESSAGE_PREFIX } from "./pi/voice-first.js";
 import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
+import { forgetBrowserSession } from "./browser/tools.js";
+import { forTranscript } from "./stored-event.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
 import { describeToolCall } from "./tool-summary.js";
 import {
@@ -43,6 +45,7 @@ import {
   notePromptQueued,
   sentMessage,
   sentMessages,
+  hasAnswer,
   unsettledMessages,
   unansweredCommands,
   chatModel,
@@ -261,6 +264,9 @@ const EPHEMERAL_EVENTS = new Set([
   "portal_versions",
 ]);
 
+/** How long a chat's pi may go unused before it is let go: see startReaper. */
+const IDLE_STOP_MS = 20 * 60_000;
+
 export type PreparedPrompt = { message: string; onAccepted?: () => void };
 type AskMessage = string | (() => PreparedPrompt);
 
@@ -314,8 +320,12 @@ class SessionManager extends EventEmitter {
    * the very chat running it as interrupted — which took away its Stop button
    * while it was still waiting on the command. Only a run that died with the
    * previous server is marked, so an interrupted chat has nothing running.
+   *
+   * Returns the conversations on a channel it cut off — a run that was going,
+   * or a message that never reached the agent — whose people have not heard
+   * that: the channel acknowledged their messages, and will not send them again.
    */
-  recoverOrphans(): void {
+  recoverOrphans(): string[] {
     const orphaned = markOrphanedSessionsInterrupted();
     if (orphaned.length > 0) {
       console.log(`[portal] marked ${orphaned.length} session(s) interrupted (server restarted mid-run)`);
@@ -323,7 +333,7 @@ class SessionManager extends EventEmitter {
     // Said in the conversation too, so what the run left open is settled
     // there for good, and not taken up again as running by the next run.
     for (const id of orphaned) this.record(id, "portal_status", { status: "interrupted", restarted: true });
-    this.settleOrphanedMessages();
+    const unsent = this.settleOrphanedMessages();
     // A subagent in the background ran in the last server's process, in a chat
     // that may well have been idle: nothing above ends it, and it would show
     // as running for good.
@@ -338,6 +348,10 @@ class SessionManager extends EventEmitter {
     for (const c of unansweredCommands()) {
       this.record(c.sessionId, "portal_command_end", { of: c.seq, error: c.error ?? "The portal restarted before it answered" });
     }
+    return [...new Set([...orphaned, ...unsent])].filter((id) => {
+      const row = getSession(id);
+      return Boolean(row?.channel_slug && row.channel_key);
+    });
   }
 
   /**
@@ -349,7 +363,8 @@ class SessionManager extends EventEmitter {
    * read, and the rest never reached it. Put where the run ended, which is as
    * near as can be told to where the agent read them.
    */
-  private settleOrphanedMessages(): void {
+  private settleOrphanedMessages(): string[] {
+    const lost: string[] = [];
     const bySession = new Map<string, ReturnType<typeof unsettledMessages>>();
     for (const m of unsettledMessages()) bySession.set(m.sessionId, [...(bySession.get(m.sessionId) ?? []), m]);
     for (const [sessionId, list] of bySession) {
@@ -364,6 +379,7 @@ class SessionManager extends EventEmitter {
           restarted: true,
           unsure: true,
         });
+        lost.push(sessionId);
         continue;
       }
       // Each by the words pi was given, where it said what it made of them: a
@@ -389,8 +405,10 @@ class SessionManager extends EventEmitter {
           prompts: Object.fromEntries(unsent.map((m) => [m.seq, m.prompt])),
           restarted: true,
         });
+        lost.push(sessionId);
       }
     }
+    return lost;
   }
 
   /**
@@ -425,6 +443,7 @@ class SessionManager extends EventEmitter {
 
   /** Stream updates in memory; persist completed messages and lifecycle metadata. */
   private record(sessionId: string, type: string, payload: unknown): EventRow | undefined {
+    this.touch(sessionId);
     if (EPHEMERAL_EVENTS.has(type)) {
       // Still deliver it to anyone attached right now, with a negative seq so
       // it can never be confused with a stored event during replay.
@@ -877,6 +896,7 @@ class SessionManager extends EventEmitter {
    * nobody has opened yet will do it.
    */
   private async ensureClient(sessionId: string, insideEdit = false): Promise<PiClient> {
+    this.touch(sessionId);
     // A client started now would read the file the edit is about to rewrite, and
     // go on holding the conversation as it was.
     if (!insideEdit) await this.whenEditable(sessionId);
@@ -947,13 +967,24 @@ class SessionManager extends EventEmitter {
     });
 
     // pi writes the file lazily, so it usually does not exist yet at launch.
-    // Recorded the first time it appears; from then on this exact conversation
-    // is what gets reopened.
+    // Recorded the first time it appears, and again whenever pi works from
+    // another: from then on this exact conversation is what gets reopened. One
+    // that went missing was left recorded, and every launch after it began a
+    // new conversation all the same.
     let recordedFile = session.pi_session_file;
     const rememberSessionFile = () => {
-      if (recordedFile) return;
       const file = client.sessionFile;
-      if (!file) return;
+      if (!file || file === recordedFile) return;
+      // A file pi has not written yet, in place of one that was recorded: it
+      // did not find the conversation, and this chat starts over for the agent.
+      // Said once it has something to forget — an answer; a chat whose first
+      // message failed never had a file to lose.
+      if (recordedFile && !existsSync(file) && hasAnswer(sessionId)) {
+        this.record(sessionId, "portal_notice", {
+          text: "The saved conversation of this chat could not be found, so the agent starts without it. The messages stay here, but it does not remember them.",
+          warning: true,
+        });
+      }
       recordedFile = file;
       updateSession(sessionId, { pi_session_file: file });
     };
@@ -1001,7 +1032,7 @@ class SessionManager extends EventEmitter {
       const modelFailure = this.modelErrors.take(sessionId, msg);
       if (modelFailure) this.record(sessionId, "portal_notice", { text: modelFailure, error: true });
       if (msg.type === "extension_ui_request") this.noteExtensionUi(sessionId, msg);
-      this.record(sessionId, msg.type, msg);
+      this.record(sessionId, msg.type, forTranscript(msg));
       // Anything a command in hand shows for itself: see endCommand. Only what
       // a person sees in the chat — a line, a dialog, a run, a message — and
       // not a status or widget, which any extension updates on its own clock.
@@ -1124,6 +1155,7 @@ class SessionManager extends EventEmitter {
     // put it there, and a send from the box finds it.
     client.useDrafts?.({ get: () => this.drafts.get(sessionId), set: (text, caret) => this.setDraft(sessionId, text, caret) });
     this.live.set(sessionId, { client, executor });
+    this.touch(sessionId);
 
     return client;
   }
@@ -1140,8 +1172,69 @@ class SessionManager extends EventEmitter {
   /** A Stop that arrived before there was anything to stop. */
   private cancelPending = new Set<string>();
 
+  /**
+   * Stops pressed with no pi to abort, counted per session. A message that was
+   * waiting for pi to start when one came is not sent: see submit().
+   */
+  private stops = new Map<string, number>();
+
   /** Client startup in flight, so two callers cannot launch two of them. */
   private starting = new Map<string, Promise<PiClient>>();
+
+  /** When each running pi last did anything — said an event, was started, was used — for letting an idle one go. */
+  private activity = new Map<string, number>();
+
+  private touch(sessionId: string): void {
+    if (this.live.has(sessionId)) this.activity.set(sessionId, Date.now());
+  }
+
+  private reaper?: NodeJS.Timeout;
+
+  /**
+   * Lets the pi of a chat nobody has used for a while go, every minute.
+   *
+   * Each is a whole pi, every extension loaded and the conversation in memory,
+   * or a container of up to a few gigabytes. Nothing else ever released one:
+   * thirty people on a channel held thirty, and a routine run in a clean
+   * session each hour left twenty-four a day. The chat is not lost — the next
+   * message starts pi again from its file. Started by the server, so that
+   * anything that imports this builds no timer.
+   */
+  startReaper(everyMs = 60_000): void {
+    if (this.reaper) return;
+    this.reaper = setInterval(() => void this.reapIdle().catch((e) => console.error(`[portal] could not stop idle sessions: ${(e as Error).message}`)), everyMs);
+    this.reaper.unref();
+  }
+
+  /** The sessions whose pi it stopped. `now` and `idleMs` are for a test to set. */
+  async reapIdle(idleMs = IDLE_STOP_MS, now = Date.now()): Promise<string[]> {
+    const stopped: string[] = [];
+    for (const [id, { client }] of [...this.live]) {
+      if (now - (this.activity.get(id) ?? now) < idleMs || this.inUse(id, client)) continue;
+      await this.stop(id);
+      stopped.push(id);
+    }
+    return stopped;
+  }
+
+  /** Whether stopping this chat's pi would take something with it: a run, a command, a dialog, a subagent, an edit. */
+  private inUse(sessionId: string, client: PiClient): boolean {
+    return (
+      !client.running ||
+      this.isBusy(sessionId) ||
+      this.compacting.has(sessionId) ||
+      this.editing.has(sessionId) ||
+      this.starting.has(sessionId) ||
+      (this.prompting.get(sessionId) ?? 0) > 0 ||
+      this.sending.has(sessionId) ||
+      this.waiting.has(sessionId) ||
+      this.commandsInHand.has(sessionId) ||
+      this.calls.has(sessionId) ||
+      this.backgroundWork(sessionId) ||
+      client.isIdle?.() === false ||
+      (client.dialogsOpen?.() ?? 0) > 0
+    );
+  }
 
   /** Move a session's status and tell whoever is watching, in that order. */
   private mark(sessionId: string, status: "running" | "idle"): void {
@@ -1156,8 +1249,10 @@ class SessionManager extends EventEmitter {
    * The session is marked running before anything else, because starting pi
    * for the first message in a session takes seconds and the composer has
    * nothing to show for them otherwise.
+   *
+   * False when a Stop got there first and the message was never sent.
    */
-  async prompt(sessionId: string, message: string, options?: PromptOptions, insideEdit = false): Promise<void> {
+  async prompt(sessionId: string, message: string, options?: PromptOptions, insideEdit = false): Promise<boolean> {
     // Callers ask first, where there is someone to tell; this is so that one
     // which did not is refused too, before the session is marked as anything.
     const refused = options?.images?.length ? await picturesRefused(message) : undefined;
@@ -1166,7 +1261,7 @@ class SessionManager extends EventEmitter {
     if (!insideEdit) await this.whenEditable(sessionId);
     this.prompting.set(sessionId, (this.prompting.get(sessionId) ?? 0) + 1);
     try {
-      await this.promptNow(sessionId, message, options, insideEdit);
+      return await this.promptNow(sessionId, message, options, insideEdit);
     } finally {
       const left = (this.prompting.get(sessionId) ?? 1) - 1;
       if (left) this.prompting.set(sessionId, left);
@@ -1180,7 +1275,7 @@ class SessionManager extends EventEmitter {
    */
   private prompting = new Map<string, number>();
 
-  private async promptNow(sessionId: string, message: string, options: PromptOptions | undefined, insideEdit: boolean): Promise<void> {
+  private async promptNow(sessionId: string, message: string, options: PromptOptions | undefined, insideEdit: boolean): Promise<boolean> {
     this.mark(sessionId, "running");
     // Same reason as in abort(): a session mid-compaction is detached from
     // agent events, and a prompt started there is invisible.
@@ -1191,7 +1286,7 @@ class SessionManager extends EventEmitter {
     this.mark(sessionId, "running");
     const logged = { images: false, queued: false, command: false, failedOnLine: false };
     try {
-      await this.submit(sessionId, message, options, insideEdit, logged);
+      return await this.submit(sessionId, message, options, insideEdit, logged);
     } catch (e) {
       const busy = this.live.get(sessionId)?.client.isIdle?.() === false;
       // A command refused: its line in the chat says so, and why. The chat
@@ -1226,9 +1321,29 @@ class SessionManager extends EventEmitter {
     options?: PromptOptions,
     insideEdit = false,
     logged = { images: false, queued: false, command: false, failedOnLine: false },
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const stopsBefore = this.stops.get(sessionId) ?? 0;
     const client = await this.ensureClient(sessionId, insideEdit);
     const images = options?.images ?? [];
+    // Stop pressed while pi was still starting for it. There was no run to
+    // abort then, so it is honoured here: the message goes back to the person
+    // as not sent, where it would otherwise be answered seconds later.
+    if ((this.stops.get(sessionId) ?? 0) !== stopsBefore) {
+      const prompt = {
+        message,
+        ...(options?.voice ? { voice: true } : {}),
+        ...(images.length ? { images: forLog(images) } : {}),
+        queued: true,
+      };
+      const row = this.record(sessionId, "portal_prompt", prompt);
+      if (row) {
+        logged.images = images.length > 0;
+        this.record(sessionId, "portal_unsent", { seqs: [row.seq], prompts: { [row.seq]: prompt } });
+      }
+      updateSession(sessionId, { status: "idle" });
+      this.record(sessionId, "portal_status", { status: "idle", aborted: true });
+      return false;
+    }
     // Sent from the box, which the page empties as it sends: said here too,
     // or a command reading the box would find itself there.
     if (this.drafts.get(sessionId)?.text.trim() === message.trim()) this.setDraft(sessionId, "");
@@ -1287,7 +1402,7 @@ class SessionManager extends EventEmitter {
           if (!during && !overtaken && !this.compacting.has(sessionId)) this.mark(sessionId, "idle");
         }
       })();
-      return;
+      return true;
     }
 
     // Into a run that is going, it waits for pi to take it in. So does one
@@ -1349,7 +1464,7 @@ class SessionManager extends EventEmitter {
       if (ahead) await ahead;
       // Stopped while it was on its way: already marked as not sent, and pi
       // would otherwise start a run with it that nobody asked for.
-      if (waiting && !this.waiting.get(sessionId)?.includes(waiting)) return;
+      if (waiting && !this.waiting.get(sessionId)?.includes(waiting)) return false;
       // Whether it starts a run is read now, with nothing awaited between here
       // and the prompt: a run that began while this one waited its turn would
       // queue it, and its start taken for this one's put a waiting message in
@@ -1427,6 +1542,7 @@ class SessionManager extends EventEmitter {
       unfresh();
       this.mark(sessionId, "idle");
     }
+    return true;
   }
 
   /**
@@ -1529,10 +1645,14 @@ class SessionManager extends EventEmitter {
 
     // Released before the file changes: a live pi holds the conversation in
     // memory and would write its own version back over the edit. The next
-    // prompt reopens it from the file.
+    // prompt reopens it from the file. One still starting — the model picker
+    // and the command list launch it without a run — is waited for first, or it
+    // would go live on the old conversation once the file was rewritten.
+    await this.settleStart(sessionId);
     await this.stop(sessionId);
 
-    const file = session.pi_session_file;
+    // Read again: that launch may have been the one to record the file.
+    const file = getSession(sessionId)?.pi_session_file ?? session.pi_session_file;
     const write = (text: string) => rewrite(file!, text);
     let original: string | undefined;
     let cutText: string | undefined;
@@ -1578,6 +1698,7 @@ class SessionManager extends EventEmitter {
         throw new SessionEditError("busy", "A subagent is still working in the background here. Wait for its answer, or stop it, first.");
       }
       // A client started since would hold the edited conversation in memory.
+      await this.settleStart(sessionId);
       await this.stop(sessionId);
       // The transcript first, in one go, and the file last: a disk that
       // failed the step being undone can fail this write too, and done first
@@ -2050,7 +2171,9 @@ class SessionManager extends EventEmitter {
       // nothing is waiting on it yet. The throw below is what reaches the
       // caller; left unhandled, this one took the whole portal down with it.
       finished.catch(() => {});
-      await this.prompt(sessionId, prepared.message);
+      // Stopped before it was sent: nothing for the channel to wait on, and what
+      // it had to tell the agent is still to be told.
+      if ((await this.prompt(sessionId, prepared.message)) === false) return "";
       prepared.onAccepted?.();
       await finished;
       // Already relayed piece by piece; handing it back would post it twice.
@@ -2306,6 +2429,7 @@ class SessionManager extends EventEmitter {
       // still going to run, and the session already shows as working with a
       // Stop button. Remembered so it is cancelled the moment it could begin.
       if (this.compacting.has(sessionId)) this.cancelPending.add(sessionId);
+      this.stops.set(sessionId, (this.stops.get(sessionId) ?? 0) + 1);
       // Then waited for, like the path below. Returning here reported the Stop
       // as done while the session went on showing itself as compacting until pi
       // had finished starting — the same bounded wait, so the answer arrives
@@ -2394,6 +2518,7 @@ class SessionManager extends EventEmitter {
 
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
+    this.activity.delete(sessionId);
     this.dropCommands(sessionId);
     // No memory tool of its is running any more, whatever it last said.
     forgetChat(sessionId);
@@ -2436,6 +2561,7 @@ class SessionManager extends EventEmitter {
     // A prompt can have started a launch while the abort was being waited for.
     await this.settleStart(sessionId);
     await this.stop(sessionId);
+    forgetBrowserSession(sessionId);
   }
 
   /**
@@ -2445,11 +2571,18 @@ class SessionManager extends EventEmitter {
    */
   removeFiles(sessionId: string): void {
     this.drafts.delete(sessionId);
-    try {
-      removeSessionFiles(SESSION_ROOT, sessionId);
-      removeImages(IMAGE_ROOT, sessionId);
-    } catch (e) {
-      console.error(`[portal] could not remove the files of session ${sessionId}:`, (e as Error).message);
+    this.stops.delete(sessionId);
+    // Each on its own: pi's folder is the one that can refuse, and the pictures
+    // are what would then stay downloadable.
+    for (const [what, remove] of [
+      ["pi's files", () => removeSessionFiles(SESSION_ROOT, sessionId)],
+      ["pictures", () => removeImages(IMAGE_ROOT, sessionId)],
+    ] as const) {
+      try {
+        remove();
+      } catch (e) {
+        console.error(`[portal] could not remove the ${what} of session ${sessionId}:`, (e as Error).message);
+      }
     }
   }
 
@@ -2459,7 +2592,38 @@ class SessionManager extends EventEmitter {
     await this.stop(sessionId);
   }
 
+  /** How long a restart waits for a run to wind down: a pi that will not is not worth holding it for. */
+  abortGraceMs = 3_000;
+
   async shutdown(): Promise<void> {
+    if (this.reaper) clearInterval(this.reaper);
+    this.reaper = undefined;
+    // A run that is going is aborted first, as a Stop does. Disposing alone
+    // dropped the answer being written: its text reaches the transcript and pi's
+    // file only as its message ends, and the abort is what ends it.
+    await Promise.all(
+      [...this.live].map(async ([id, { client }]) => {
+        const running = getSession(id)?.status === "running";
+        if (!running && client.isIdle?.() !== false) return;
+        // Not sent into the run that is stopping, or a message waiting in pi's
+        // queue starts one of its own: settled at the next start, as after a crash.
+        try {
+          client.clearQueue?.();
+        } catch {
+          // The queue is gone with pi anyway.
+        }
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+          client.abort().catch(() => {}),
+          new Promise<void>((resolve) => (timer = setTimeout(resolve, this.abortGraceMs))),
+        ]);
+        clearTimeout(timer);
+        // The abort settled the run, and the session with it. The next start
+        // finds it running, which is how it knows the run was cut off by a
+        // restart — and says so to the chat, and to the person on a channel.
+        if (running) updateSession(id, { status: "running" });
+      }),
+    );
     await Promise.all([...this.live.keys()].map((id) => this.stop(id)));
   }
 }

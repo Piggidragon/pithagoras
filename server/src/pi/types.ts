@@ -86,6 +86,8 @@ export interface PiClient extends EventEmitter {
   subagentStop?(id: string): boolean;
   /** How many subagents it announced are still running: a background one outlives the turn that started it. */
   subagentsRunning?(): number;
+  /** How many dialogs an extension has open, waiting on a person: its pi is not one to stop. */
+  dialogsOpen?(): number;
   /** Says each subagent still running has stopped: its pi is about to go. */
   endSubagents?(why: string): void;
   /**

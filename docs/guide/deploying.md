@@ -136,7 +136,7 @@ Inside `/data`:
 | `/data/portal.db` | Sessions, event log, channels, agents, routines, settings |
 | `/data/portal.sock` | Held while the portal runs, so a second one cannot start on this data |
 | `/data/backups` | The copies of the database made before an [upgrade](/guide/upgrading) |
-| `/data/sessions/<id>` | Per-session working area |
+| `/data/sessions/<id>` | Per-session working area, and pi's file of the chat's conversation: it is what the agent remembers. Do not clear it |
 | `/data/home` | `HOME` for pi — `~/.pi/agent`, its settings, skills and packages |
 | `/data/channels` | Installed third-party channel packages |
 | `/data/agent-home` | The first agent's home: its `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` |
@@ -146,6 +146,11 @@ Inside `/data`:
 
 `HOME` deliberately points at the volume. Otherwise every image rebuild would
 silently wipe the pi packages you installed.
+
+Move `/data` as a whole, or keep `/data/sessions` with `portal.db`. A chat whose
+file is gone still shows its transcript, but the agent starts over without
+remembering it, and a notice in the chat says so. A moved folder is found again
+by the file's name, so a data folder copied to another path keeps its chats.
 
 ## Installing command-line tools
 

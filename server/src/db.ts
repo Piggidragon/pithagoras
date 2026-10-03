@@ -878,6 +878,15 @@ function placeOf(
   return settled.taken.get(row.seq) ?? settled.unsent.get(row.seq) ?? Number.POSITIVE_INFINITY;
 }
 
+/** Whether the agent has answered in a chat: there is a conversation of its own to lose. */
+export function hasAnswer(sessionId: string): boolean {
+  return Boolean(
+    getDb()
+      .prepare("SELECT 1 FROM events WHERE session_id = ? AND type = 'message_end' AND json_extract(payload, '$.message.role') = 'assistant' LIMIT 1")
+      .get(sessionId),
+  );
+}
+
 /**
  * Every message the portal sent to the agent in this session, in the order the
  * agent read them — which is the order of pi's file. `at` is where each sits in

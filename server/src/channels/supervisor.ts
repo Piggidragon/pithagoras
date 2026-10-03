@@ -10,7 +10,7 @@ import {
   pendingNotes,
   consumeNotes,
 } from "../db.js";
-import { resolveChannelSession, scopeKey } from "../agent.js";
+import { resolveChannelSession, scopeKey, unscopeKey } from "../agent.js";
 import { sessions, CommandFailed, EXECUTOR_KIND, stripThinkingMarkers } from "../session-manager.js";
 import { ruleApplies, taintSession } from "../pi/guard.js";
 import { readAnswer, recordAnswer, type QuestionRow } from "../questions.js";
@@ -267,6 +267,32 @@ class ChannelSupervisor {
     if (!retry) return;
     clearTimeout(retry.timer);
     this.retries.delete(id);
+  }
+
+  /**
+   * Tell the people whose conversation a restart cut off.
+   *
+   * The channel acknowledged what they said before the portal went down, and
+   * will not hand it over again: a run that was going is gone, and so is what
+   * they sent meanwhile. Without a word they would wait for an answer that
+   * never comes. Only a channel that can speak first is written to — what is
+   * left for one that cannot would go out with the answer to their next
+   * message, long after they had given up.
+   */
+  async tellRestart(sessionIds: string[]): Promise<void> {
+    for (const id of sessionIds) {
+      const session = getSession(id);
+      if (!session?.channel_slug || !session.channel_key || !this.canSend(session.channel_slug)) continue;
+      try {
+        await this.send(
+          session.channel_slug,
+          unscopeKey(session.channel_slug, session.channel_key),
+          "The portal restarted while I was working on this, so my answer was cut off. Please send your message again.",
+        );
+      } catch (e) {
+        console.error(`[portal] could not tell ${session.channel_key} about the restart: ${(e as Error).message}`);
+      }
+    }
   }
 
   /** Can this channel speak first? Only running channels that implement send. */

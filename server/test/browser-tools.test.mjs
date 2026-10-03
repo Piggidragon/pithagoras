@@ -141,4 +141,13 @@ test("the browser tools, on a real browser", { skip: browser ? false : "no Chrom
     assert.equal(shot.content[0].type, "image");
     assert.equal(shot.content[0].mimeType, "image/jpeg");
   });
+
+  await t.test("a chat that is gone does not keep its tab and what it was shown", async () => {
+    const { forgetBrowserSession } = await import("../dist/browser/tools.js");
+    assert.equal(forgetBrowserSession("chat-1"), true, "it was holding them");
+    assert.equal(forgetBrowserSession("chat-1"), false, "and does not any more");
+    assert.equal(forgetBrowserSession("never-used-the-browser"), false);
+    // Used again, it is simply given a tab.
+    assert.match(await call("browser_snapshot"), /^Page: /);
+  });
 });

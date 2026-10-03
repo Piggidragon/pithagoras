@@ -344,6 +344,12 @@ and goes out with the reply to whatever is said next, so an answer is late
 rather than lost. The portal reports which happened, and tells whoever is
 waiting.
 
+The portal also speaks first, through `send`, after it has restarted in the middle
+of a conversation: the platform has acknowledged the messages it cut off and will
+not deliver them again, so the person is asked to send theirs once more. A
+channel without `send` is not written to for that, since the note would arrive
+with the answer to a message they have already repeated.
+
 A webhook can opt into being spoken to by taking a **callback URL**: the portal
 POSTs `{session, message}` there, and the conversation becomes two-way.
 

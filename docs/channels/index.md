@@ -149,6 +149,14 @@ Each channel shows its real state on its page: `running`, `starting`,
 A channel enabled with a package that has no `start()` reports that rather than
 looking healthy.
 
+A restart can cut a conversation off: the run that was answering is gone, and a
+message sent into it never reached the agent. The platform has acknowledged those
+messages and will not send them again, so once the channels are up again the
+portal writes to each such conversation — *The portal restarted while I was
+working on this, so my answer was cut off. Please send your message again.* —
+through the channel's `send()`. A channel that cannot speak first is not written
+to.
+
 A channel whose `start()` fails — the network was not up yet when the portal
 booted, the platform had a bad minute — is tried again on its own: after 30
 seconds, then twice as long each time, up to every fifteen minutes. Saving it
