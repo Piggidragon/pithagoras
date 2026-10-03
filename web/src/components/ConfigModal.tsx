@@ -53,7 +53,8 @@ import { ProvidersPanel } from "./ProvidersPanel";
 import { EffortPicker, Empty, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { PackageCatalog } from "./PackageCatalog";
 import { packageName } from "../package-names";
-import { load, useCached } from "../settings-cache";
+import { prefetchSettings, useCached } from "../settings-cache";
+import type { Tab } from "../settings-tabs";
 import { serialSaver } from "../serial-saver";
 import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
 import { useTheme, type Theme } from "../theme";
@@ -61,22 +62,6 @@ import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
 import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
-
-export type Tab =
-  | "models"
-  | "general"
-  | "channels"
-  | "people"
-  | "add-ons"
-  | "tools"
-  | "images"
-  | "skills"
-  | "mcp"
-  | "extensions"
-  | "browser"
-  | "shortcuts"
-  | "about"
-  | "advanced";
 
 /** Either a fixed tab or one extension's own configuration page. */
 type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; spec: string };
@@ -125,21 +110,6 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
   },
 ];
 const TABS = GROUPS.flatMap((g) => g.tabs);
-/** Whether a path segment of the settings route names one of the tabs. */
-export const isTab = (id: string): id is Tab => TABS.some((x) => x.id === id);
-
-/**
- * What Settings needs first, fetched before it is opened — a moment after the
- * portal loads — so that opening it draws the page rather than a placeholder.
- */
-export function prefetchSettings() {
-  const quietly = (p: Promise<unknown>) => void p.catch(() => {});
-  quietly(load("extensions", api.extensions, 30_000));
-  quietly(load("settings", api.settings, 30_000));
-  quietly(load("models", api.allModels, 30_000));
-  quietly(load("report-targets", api.reportTargets, 30_000));
-  quietly(load("providers", api.providers, 30_000));
-}
 
 /** The rail's extension pages as last seen, so a reload does not start without them. */
 const RAIL_KEY = "pithagoras.settings.extension-rail";

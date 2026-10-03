@@ -8,8 +8,11 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Streamdown carries a syntax highlighter and a diagram renderer. They
-        // belong in their own chunk: the shell should paint without waiting on
-        // either, and they change far less often than the app does.
+        // belong in their own chunk because they change far less often than the
+        // app does: a deploy that changes only the app leaves this file cached.
+        // The chat draws markdown, so the chunk is fetched with the entry, not
+        // after it; what loads later are the pages (see App.tsx) and the diagram
+        // parts, which come when a diagram does.
         manualChunks: {
           markdown: ["streamdown"],
         },

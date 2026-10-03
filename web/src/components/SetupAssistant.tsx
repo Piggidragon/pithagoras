@@ -12,24 +12,7 @@ import { EffortPicker, ghostCls, primaryCls } from "./SettingsUi";
 import { msg, t, tp } from "../i18n";
 
 import { modelTraits } from "../model-traits";
-const DONE_KEY = "pithagoras.setup";
-
-/** Whether this browser has been through the assistant, or waved it away. */
-export function setupDismissed(): boolean {
-  try {
-    return localStorage.getItem(DONE_KEY) !== null;
-  } catch {
-    return false;
-  }
-}
-
-function dismiss(how: "done" | "skipped") {
-  try {
-    localStorage.setItem(DONE_KEY, how);
-  } catch {
-    // Asked again next time, which is no harm.
-  }
-}
+import { dismissSetup as dismiss } from "../setup-state";
 
 const STEPS = [
   { title: msg("Provider"), lead: msg("Where the models come from") },

@@ -1,25 +1,18 @@
 import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvents, resetLiveEvents } from "./live-events";
 import { fillFrom } from "./editor-fills";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
-import { ConfigModal, isTab, prefetchSettings, type Tab } from "./components/ConfigModal";
-import { SetupAssistant, setupDismissed } from "./components/SetupAssistant";
-import { load as loadCached } from "./settings-cache";
+import { isTab, type Tab } from "./settings-tabs";
+import { setupDismissed } from "./setup-state";
+import { load as loadCached, prefetchSettings } from "./settings-cache";
 import { ExtensionDialog, type UiRequest } from "./components/ExtensionDialog";
-import { SessionsPage } from "./components/SessionsPage";
-import { ProjectsPage } from "./components/ProjectsPage";
-import { AgentPage } from "./components/AgentPage";
-import { RoutinesPage } from "./components/RoutinesPage";
-import { AuditPage } from "./components/AuditPanel";
-import { BrowserPage } from "./components/BrowserPage";
-import { MemoryPage } from "./components/MemoryPage";
-import { ImagesPage } from "./components/ImagesPage";
+import { lazyComponent } from "./lazy";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { ghostCls } from "./components/SettingsUi";
@@ -34,6 +27,19 @@ import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
+
+// What the first draw needs is the shell, the chat and the sign-in page. The other pages, and the dialogs that
+// open over them, are fetched when they are first opened, so that they are not in the file everyone waits for.
+const SessionsPage = lazyComponent(() => import("./components/SessionsPage"), "SessionsPage");
+const ProjectsPage = lazyComponent(() => import("./components/ProjectsPage"), "ProjectsPage");
+const AgentPage = lazyComponent(() => import("./components/AgentPage"), "AgentPage");
+const RoutinesPage = lazyComponent(() => import("./components/RoutinesPage"), "RoutinesPage");
+const AuditPage = lazyComponent(() => import("./components/AuditPanel"), "AuditPage");
+const BrowserPage = lazyComponent(() => import("./components/BrowserPage"), "BrowserPage");
+const MemoryPage = lazyComponent(() => import("./components/MemoryPage"), "MemoryPage");
+const ImagesPage = lazyComponent(() => import("./components/ImagesPage"), "ImagesPage");
+const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "ConfigModal");
+const SetupAssistant = lazyComponent(() => import("./components/SetupAssistant"), "SetupAssistant");
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
 const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general" };
@@ -165,6 +171,8 @@ function Shell({
       if (setupAsked) return;
       setupAsked = true;
       prefetchSettings();
+      // The dialog itself too, so that opening it is not a wait for its file.
+      void import("./components/ConfigModal");
       if (setupDismissed()) return;
       loadCached("models", api.allModels, 30_000).then((r) => r.models.length === 0 && setSetup(true), () => {});
     }, 1200);
@@ -703,6 +711,7 @@ function Shell({
         )}
         {/* One page failing to draw takes down that page, not the portal. */}
         <ErrorBoundary resetKey={`${view}:${sessionId ?? ""}`}>
+        <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-fg-subtle">{t("Loading…")}</div>}>
         {view === "sessions" ? (
           <SessionsPage
             sessions={sessions}
@@ -804,6 +813,7 @@ function Shell({
         ) : (
           <EmptyState hasSessions={sessions.length > 0} />
         )}
+        </Suspense>
         </ErrorBoundary>
       </main>
 
@@ -817,24 +827,26 @@ function Shell({
         />
       )}
 
-      {settings && (
-        <ConfigModal
-          initialTab={LEGACY_TABS[tab ?? ""] ?? (tab && isTab(tab) ? tab : "general")}
-          onClose={closeSettings}
-          onSetup={setUpModel}
-        />
-      )}
+      <Suspense fallback={null}>
+        {settings && (
+          <ConfigModal
+            initialTab={LEGACY_TABS[tab ?? ""] ?? (tab && isTab(tab) ? tab : "general")}
+            onClose={closeSettings}
+            onSetup={setUpModel}
+          />
+        )}
 
-      {setup && (
-        <SetupAssistant
-          onClose={() => setSetup(false)}
-          onStartChat={async () => {
-            const s = await api.createSession();
-            await refreshSessions();
-            navigate(`/s/${s.id}`);
-          }}
-        />
-      )}
+        {setup && (
+          <SetupAssistant
+            onClose={() => setSetup(false)}
+            onStartChat={async () => {
+              const s = await api.createSession();
+              await refreshSessions();
+              navigate(`/s/${s.id}`);
+            }}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

@@ -21,7 +21,7 @@ import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
-import { Fragment, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, Suspense, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useNow } from "../use-now";
 import type { DiagramPlugin } from "streamdown";
 import { Markdown } from "./Markdown";
@@ -38,7 +38,7 @@ import { sentPictureId, shownPictureId } from "../chat-pictures";
 import { confirmDialog } from "./ConfirmDialog";
 import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
-import { TerminalPanel } from "./TerminalPanel";
+import { lazyComponent } from "../lazy";
 import { FilesPanel } from "./FilesPanel";
 import { GIT_TABS, GitPanel, type GitTab } from "./git/GitPanel";
 import { TitleInput } from "./TitleInput";
@@ -53,6 +53,9 @@ import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shor
 import { DOCKED_MIN, EDGE, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
 import { msg, t, tp } from "../i18n";
 import { ReplyStatsLine } from "./ReplyStats";
+
+// The terminal emulator is large and only a chat that opens a shell needs it.
+const TerminalPanel = lazyComponent(() => import("./TerminalPanel"), "TerminalPanel");
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -1418,7 +1421,9 @@ export function Chat({
           </div>
           {shellStarted && (
             <div className={terminalTab === "shell" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
-              <TerminalPanel sessionId={session.id} />
+              <Suspense fallback={null}>
+                <TerminalPanel sessionId={session.id} />
+              </Suspense>
             </div>
           )}
         </div>
