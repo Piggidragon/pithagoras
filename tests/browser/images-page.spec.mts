@@ -1368,6 +1368,32 @@ test('a picture pasted in the description is added, and text that came with it i
   expect(p.state.uploads.map((u) => u.name)).toEqual(['image.png', 'shot.png', 'shot2.png']);
 });
 
+test('the eight pictures kept for an edit lock no box of Generate: there the boxes are for a download, a delete and a change', async ({ page }) => {
+  const many = Array.from({ length: 10 }, (_, i) => pic({ prompt: `Pic ${i + 1}`, age: i }));
+  await portal(page, { pictures: many, images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await pick(page, ...Array.from({ length: 8 }, (_, i) => `Pic ${i + 1}`));
+  await expect(box(page, 'Pic 9')).toBeDisabled();
+  // Back to making a new picture: the eight stay for the way back, and nothing is locked.
+  await toMake(page);
+  await expect(box(page, 'Pic 9')).toBeEnabled();
+  await expect(cell(page, 'Pic 9').locator('.gallery-tile')).not.toHaveClass(/is-locked/);
+  await expect(cell(page, 'Pic 9').locator('.gallery-check-hit')).not.toHaveAttribute('title', /.+/);
+  await box(page, 'Pic 9').check();
+  await box(page, 'Pic 10').check();
+  await expect(bar(page).getByText('2 selected')).toBeVisible();
+  // Select all shown takes every one, and each can be taken out of it again on its own.
+  await bar(page).getByRole('button', { name: 'Select all shown' }).click();
+  await expect(bar(page).getByText('10 selected')).toBeVisible();
+  await box(page, 'Pic 9').uncheck();
+  await expect(bar(page).getByText('9 selected')).toBeVisible();
+  // The way back to the edit has its eight, and its locks.
+  await bar(page).getByRole('button', { name: 'Clear selection' }).click();
+  await toEdit(page);
+  await expect.poll(() => names(page)).toHaveLength(8);
+  await expect(box(page, 'Pic 9')).toBeDisabled();
+});
+
 test('a picture of the gallery dragged into the form is that picture, added once: nothing is uploaded and the gallery stays as it is', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'A fox', age: 2 }), pic({ prompt: 'A hat', age: 1 })];
   const p = await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
@@ -1838,7 +1864,11 @@ for (const sdExtras of [false, true]) {
     await page.goto('/images');
     await tile(page, 'A fox').click();
     await viewer(page).getByRole('button', { name: 'Details' }).click();
-    await expect(viewer(page).getByRole('region', { name: 'Details' })).toContainText('blurry');
+    const details = viewer(page).getByRole('region', { name: 'Details' });
+    await expect(details).toContainText('blurry');
+    // What it was made with includes where it started from: noise, not the first picture, whatever the switch says now.
+    await expect(details.locator('dt', { hasText: 'Start from' }).locator('xpath=following-sibling::dd[1]')).toHaveText('Noise only');
+    await expect(details.locator('dt', { hasText: 'Strength' }).locator('xpath=following-sibling::dd[1]')).toHaveText('0.5');
     await viewer(page).getByRole('button', { name: 'Run again' }).click();
     await expect.poll(() => p.state.generated.length).toBe(1);
     expect(p.state.generated).toEqual([sdExtras ? { prompt: 'A fox', model: 'draw-2', negativePrompt: 'blurry', seed: 42, sampleSteps: 20 } : { prompt: 'A fox', model: 'draw-2' }]);
@@ -2094,7 +2124,12 @@ test('a selection that cannot all be an edit says why, where the endpoint takes 
   await tick(page, 'Beta');
   await expect(edit).toBeDisabled();
   await expect(edit).toHaveAttribute('title', 'The editing endpoint takes one picture per edit: select one');
+  // And in words on the bar, which a phone and a keyboard have, and the button points to.
+  const why = bar(page).getByText('The editing endpoint takes one picture per edit: select one');
+  await expect(why).toBeVisible();
+  await expect(edit).toHaveAccessibleDescription('The editing endpoint takes one picture per edit: select one');
   await box(page, 'Beta').uncheck();
+  await expect(why).toHaveCount(0);
   await edit.click();
   await expect.poll(() => names(page)).toEqual(['Alpha']);
   await describe(page).fill('Make it night');

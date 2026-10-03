@@ -573,6 +573,16 @@ test('Stable Diffusion extra settings is a switch of its own, off by default, th
   await sd.click();
   await expect(sd).toHaveAttribute('aria-checked', 'false');
   expect(sent.at(-1)!.body).toEqual({ sdExtras: false });
+
+  // An address typed and not saved: the switch waits for the save, as the others of the endpoint do, since saving the address of another server takes it off again.
+  await panel.getByLabel('API address').fill('http://sd-box.example:1234/v1');
+  await expect(sd).toBeDisabled();
+  await panel.getByRole('button', { name: 'Discard' }).click();
+  await expect(sd).toBeEnabled();
+  await panel.getByLabel('Editing model').fill('edit-model');
+  await expect(sd).toBeDisabled();
+  await panel.getByRole('button', { name: 'Discard' }).click();
+  await expect(sd).toBeEnabled();
 });
 
 test('the Images page holds the image settings and no switch for the tools themselves', async ({ page }) => {

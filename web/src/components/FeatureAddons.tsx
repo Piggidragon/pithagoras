@@ -997,7 +997,8 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
         }
         on={images.sdExtras}
         onChange={(sdExtras) => void change({ sdExtras })}
-        disabled={busy}
+        // Saving a new address of another server takes it off again, so it waits for the save as the other switches of the endpoint do.
+        disabled={busy || !!draft || !!editDraft}
       />
       <p className="text-[11px] text-fg-faint">
         {t("Switch this on only if the image endpoint, for generating and for editing, is a stable-diffusion.cpp server. It adds a seed, the steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description, which that server reads out of it; any other endpoint would take the block as part of the description. For making and changing pictures on the Images page: the agent's tools do not use these settings. While this is off none of them is sent, whatever was typed or kept before.")}

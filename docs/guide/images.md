@@ -233,7 +233,7 @@ Beside its own buttons, the viewer has these for a gallery picture:
 
 | Button | Does |
 | --- | --- |
-| **Details** | The full description, when and how it was made, the model, the size, the file format and compression, the Stable Diffusion settings it was made with (they are listed whether or not the switch is on now), the free fields an older version sent, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
+| **Details** | The full description, when and how it was made, the model, the size, the file format and compression, the Stable Diffusion settings it was made with, including **Start from: Noise only** for a change that started from noise (they are listed whether or not the switch is on now), the free fields an older version sent, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
 | **Edit it** | Puts the picture in the form, in **Edit**, to be changed, in place of any that were there. Always offered: where editing is not set up it leads to the form, which says so. While the form is already in **Edit** this button is **Use in the edit** instead, which adds the picture to the ones there, or takes it out again, and leaves the viewer open. To work from several pictures, tick them in the gallery instead. |
 | **Run again** | A picture made from a description is made once more, with the model, size, file format and compression it was made with, and its Stable Diffusion settings while that switch is on: one click, one more picture. With a seed that is the same picture again, as the endpoint makes it. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
 | **Delete** | See below. |
@@ -249,7 +249,7 @@ long as something is ticked, and stays in view as you scroll:
 | Button | Does |
 | --- | --- |
 | **Select all shown** | Takes every picture on screen. |
-| **Edit** | Puts the selected pictures in the form, in **Edit**, in the order you ticked them, and lets go of the selection. Off, with the reason on it, where the endpoint [takes one picture](#changing-a-picture) and more are selected, or more than eight. |
+| **Edit** | Puts the selected pictures in the form, in **Edit**, in the order you ticked them, and lets go of the selection. Off where the endpoint [takes one picture](#changing-a-picture) and more are selected, or more than eight; the reason is written on the bar, so that a phone and a keyboard have it too, not only in a tooltip. |
 | **Download** | Saves each selected picture as a file of its own; the browser may ask once whether this page may download several. |
 | **Delete** | Takes them away after asking. |
 | **Clear selection** | Lets go of the selection; so does `Esc`. |

@@ -531,7 +531,7 @@ export function ImagesPage() {
               <button type="button" onClick={() => setPicked(new Set(everyId))} className={ghostCls}>
                 {t("Select all shown")}
               </button>
-              <button type="button" onClick={editPicked} disabled={!!editRefusal} title={editRefusal} className={btnCls}>
+              <button type="button" onClick={editPicked} disabled={!!editRefusal} title={editRefusal} aria-describedby={editRefusal ? "selection-edit-why" : undefined} className={btnCls}>
                 <LuWandSparkles aria-hidden className="h-4 w-4" />
                 {t("Edit")}
               </button>
@@ -546,6 +546,12 @@ export function ImagesPage() {
               <button type="button" onClick={stopSelecting} className={ghostCls}>
                 {t("Clear selection")}
               </button>
+              {/* In words on the bar and not only in the button's tooltip, which a phone and a keyboard never show. */}
+              {editRefusal && (
+                <p id="selection-edit-why" className="basis-full text-xs text-fg-muted">
+                  {editRefusal}
+                </p>
+              )}
             </div>
           )}
 
@@ -570,8 +576,8 @@ export function ImagesPage() {
                       mode={picking ? "pick" : "select"}
                       selected={picking ? place > 0 : picked.has(id)}
                       place={multiple ? place : 0}
-                      // At eight there is no ninth: the tiles that are not in the edit say so, and wait until one is taken out.
-                      full={multiple && sources.length >= MAX_SOURCES && place === 0}
+                      // At eight there is no ninth: the tiles that are not in the edit say so, and wait until one is taken out. Only while the boxes are the edit's: the pictures are kept for the way back, and Generate's boxes are for a download, a delete and a change.
+                      full={picking && multiple && sources.length >= MAX_SOURCES && place === 0}
                       onOpen={open}
                       onToggle={picking ? pick : toggle}
                       onDismiss={dismiss}
@@ -662,6 +668,7 @@ function PictureDetails({ picture }: { picture: GalleryPicture }) {
     ...(params.seed !== undefined ? [[t("Seed"), String(params.seed)] as [string, string]] : []),
     ...(params.sampleSteps !== undefined ? [[t("Steps"), String(params.sampleSteps)] as [string, string]] : []),
     ...(params.strength !== undefined ? [[t("Strength"), String(params.strength)] as [string, string]] : []),
+    ...(params.fromNoise ? [[t("Start from"), t("Noise only")] as [string, string]] : []),
     ...(extra ? [[t("Other fields of the request"), extra] as [string, string]] : []),
     ...(params.sources?.length ? [[t("Changed from"), tp(params.sources.length, "{n} picture", "{n} pictures")] as [string, string]] : []),
     ...(params.masked ? [[t("Mask"), t("Only a painted part was changed")] as [string, string]] : []),
