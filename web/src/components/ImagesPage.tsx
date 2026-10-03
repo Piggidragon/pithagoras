@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { LuDownload, LuFolder, LuImage, LuInfo, LuListChecks, LuMaximize2, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles, LuX } from "react-icons/lu";
+import { LuCheck, LuDownload, LuFolder, LuImage, LuInfo, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles, LuX } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob, type PictureKind, type PictureOrigin } from "../api";
 import { MAX_SOURCES, addSources, sourceName } from "../edit-sources";
 import { appendPage, fieldsText, madeButNotListed, mergeTop, readFilter, sameList, tiles, viewerList, viewerPicture, type Filter, type Tile } from "../images-gallery";
@@ -261,7 +261,7 @@ export function ImagesPage() {
   const byId = useMemo(() => new Map(forViewer.map((p) => [p.id, p])), [forViewer]);
   const viewerPictures: ViewerPicture[] = useMemo(() => forViewer.map((p) => viewerPicture(p, api.galleryFileUrl)), [forViewer]);
 
-  const [selecting, setSelecting] = useState(false);
+  // A tick in a tile's box takes the picture into what is selected, in the order they are ticked: for a download, a delete or a change. A click on the picture itself never does, it opens it.
   const toggle = useCallback((id: string) => {
     setPicked((cur) => {
       const next = new Set(cur);
@@ -269,15 +269,13 @@ export function ImagesPage() {
       return next;
     });
   }, []);
-  const stopSelecting = () => {
-    setSelecting(false);
-    setPicked(new Set());
-  };
-  // Picking for an edit and selecting for a download or a delete are both a click on a tile: one at a time.
+  const stopSelecting = () => setPicked(new Set());
+  // While the form is in Edit the boxes are the pictures of the edit, so what was selected for something else is let go.
   const setMode = (next: Mode) => {
     if (next === "edit") stopSelecting();
     setChosen(next);
   };
+  const selecting = picked.size > 0;
   useEffect(() => {
     if (!selecting) return;
     const onKey = (e: KeyboardEvent) => {
@@ -378,7 +376,19 @@ export function ImagesPage() {
     if (changes) setSources([picture]);
     toForm();
   };
-  /** A click on a picture of the gallery while editing: it is taken into the edit, after the ones there, or out of it again; where the endpoint takes one, it takes the place of the one there is. */
+  /** What is selected, taken into an edit in the order it was ticked: the form opens in Edit with those pictures. */
+  const editPicked = () => {
+    const wanted = [...picked].map((id) => byId.get(id)).filter((p): p is GalleryPicture => !!p);
+    if (!wanted.length) return;
+    setChosen("edit");
+    stopSelecting();
+    // Where editing is not set up there is nothing to put them in: the form says so, and where to switch it on.
+    if (changes) setSources(addSources([], wanted, multiple).list);
+    toForm();
+  };
+  /** Why what is selected cannot all go into an edit, or nothing when it can. */
+  const editRefusal = !changes ? undefined : !multiple && picked.size > 1 ? t("The editing endpoint takes one picture per edit: select one") : picked.size > MAX_SOURCES ? t("An edit takes at most {n} pictures", { n: MAX_SOURCES }) : undefined;
+  /** A tick in a box while editing: the picture is taken into the edit, after the ones there, or out of it again; where the endpoint takes one, it takes the place of the one there is. */
   const pick = useCallback(
     (id: string) => {
       const picture = byId.get(id);
@@ -491,43 +501,39 @@ export function ImagesPage() {
           <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
             <Segments label={t("Where from")} value={filter.origin ?? ""} options={ORIGINS} onChange={(origin) => setFilter({ ...filter, origin: origin || undefined })} />
             <Segments label={t("How it was made")} value={filter.kind ?? ""} options={KINDS} onChange={(kind) => setFilter({ ...filter, kind: kind || undefined })} />
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              {selecting ? (
-                <>
-                  <span className="text-xs tabular-nums text-fg-muted" role="status">
-                    {t("{n} selected", { n: picked.size })}
-                  </span>
-                  <button type="button" onClick={() => setPicked(new Set(everyId))} disabled={!everyId.length} className={ghostCls}>
-                    {t("Select all shown")}
-                  </button>
-                  <button type="button" onClick={() => download([...picked])} disabled={!picked.size} className={btnCls}>
-                    <LuDownload aria-hidden className="h-4 w-4" />
-                    {t("Download")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void remove([...picked])}
-                    disabled={!picked.size}
-                    className={`${btnCls} hover:bg-danger/10 hover:text-danger`}
-                  >
-                    <LuTrash2 aria-hidden className="h-4 w-4" />
-                    {t("Delete")}
-                  </button>
-                  <button type="button" onClick={stopSelecting} className={ghostCls}>
-                    {t("Done")}
-                  </button>
-                </>
-              ) : picking ? (
-                // The tiles are what the edit is made of: a click takes one in, and the form above says which and in what order.
-                <span className="text-xs text-fg-muted">{multiple ? t("Click pictures to use them in the edit, in the order you click them.") : t("Click a picture to use it in the edit.")}</span>
-              ) : (
-                <button type="button" onClick={() => setSelecting(true)} disabled={!everyId.length} className={btnCls}>
-                  <LuListChecks aria-hidden className="h-4 w-4" />
-                  {t("Select")}
-                </button>
-              )}
-            </div>
+            {/* Said where the boxes are what an edit is made of, and where they are not: that is all the gallery needs to say of them until one is ticked. */}
+            {!selecting && everyId.length > 0 && (
+              <span className="ml-auto text-xs text-fg-muted">
+                {picking ? (multiple ? t("Tick pictures to use them in the edit, in the order you tick them. A click on a picture opens it.") : t("Tick a picture to use it in the edit. A click on a picture opens it.")) : t("Tick pictures to download, delete or edit them. A click on a picture opens it.")}
+              </span>
+            )}
           </div>
+
+          {selecting && (
+            <div role="group" aria-label={t("Selected pictures")} className="sticky top-2 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent/30 bg-surface/95 px-3 py-2 shadow-pop backdrop-blur">
+              <span className="mr-auto text-sm tabular-nums text-fg" role="status">
+                {t("{n} selected", { n: picked.size })}
+              </span>
+              <button type="button" onClick={() => setPicked(new Set(everyId))} className={ghostCls}>
+                {t("Select all shown")}
+              </button>
+              <button type="button" onClick={editPicked} disabled={!!editRefusal} title={editRefusal} className={btnCls}>
+                <LuWandSparkles aria-hidden className="h-4 w-4" />
+                {t("Edit")}
+              </button>
+              <button type="button" onClick={() => download([...picked])} className={btnCls}>
+                <LuDownload aria-hidden className="h-4 w-4" />
+                {t("Download")}
+              </button>
+              <button type="button" onClick={() => void remove([...picked])} className={`${btnCls} hover:bg-danger/10 hover:text-danger`}>
+                <LuTrash2 aria-hidden className="h-4 w-4" />
+                {t("Delete")}
+              </button>
+              <button type="button" onClick={stopSelecting} className={ghostCls}>
+                {t("Clear selection")}
+              </button>
+            </div>
+          )}
 
           {loading ? (
             <div role="status" className="gallery-grid">
@@ -539,7 +545,7 @@ export function ImagesPage() {
           ) : shownTiles.length === 0 ? (
             <Empty>{filtered ? t("No pictures match these filters.") : picking ? t("No pictures yet. Put one in from this computer above to change it.") : t("No pictures yet. Describe one above to make the first.")}</Empty>
           ) : (
-            <ul className="gallery-grid" aria-label={t("Pictures")}>
+            <ul className={`gallery-grid${picking || selecting ? " is-choosing" : ""}`} aria-label={t("Pictures")}>
               {shownTiles.map((tile) => {
                 const id = tile.picture?.id ?? tile.job?.pictureId ?? "";
                 const place = sources.findIndex((p) => p.id === id) + 1;
@@ -547,7 +553,7 @@ export function ImagesPage() {
                   <li key={tile.key}>
                     <GalleryTile
                       tile={tile}
-                      mode={picking ? "pick" : selecting ? "select" : "view"}
+                      mode={picking ? "pick" : "select"}
                       selected={picking ? place > 0 : picked.has(id)}
                       place={multiple ? place : 0}
                       // At eight there is no ninth: the tiles that are not in the edit say so, and wait until one is taken out.
@@ -577,8 +583,8 @@ export function ImagesPage() {
           pictures={viewerPictures}
           startId={opened}
           onClose={() => setOpened(null)}
-          // Where it was opened from: the tile's button to look at it while the tiles choose, else its picture.
-          anchor={(id) => document.querySelector<HTMLElement>(`[data-look-id="${CSS.escape(id)}"]`) ?? document.querySelector<HTMLElement>(`[data-picture-id="${CSS.escape(id)}"]`)}
+          // Where it was opened from: its picture in the gallery.
+          anchor={(id) => document.querySelector<HTMLElement>(`[data-picture-id="${CSS.escape(id)}"]`)}
           actions={(vp) => {
             const picture = byId.get(vp.id);
             if (!picture) return null;
@@ -589,6 +595,8 @@ export function ImagesPage() {
                 features={features}
                 onShown={shown}
                 onEdit={editIt}
+                // While the form is in Edit, the pictures are taken into it from here as well, one after another, with the viewer open.
+                use={picking ? { on: sources.some((p) => p.id === picture.id), full: multiple && sources.length >= MAX_SOURCES, toggle: () => pick(picture.id) } : undefined}
                 onAgain={runAgain}
                 onDelete={(p) => void remove([p.id])}
               />
@@ -683,6 +691,7 @@ function ViewerActions({
   features,
   onShown,
   onEdit,
+  use,
   onAgain,
   onDelete,
 }: {
@@ -690,6 +699,8 @@ function ViewerActions({
   features: ImagesFeature | null;
   onShown: (picture: GalleryPicture) => void;
   onEdit: (picture: GalleryPicture) => void;
+  /** Where the form is in Edit: whether this picture is one of the edit's, whether the edit has all it takes, and a way to take it in or out. */
+  use?: { on: boolean; full: boolean; toggle: () => void };
   onAgain: (picture: GalleryPicture) => void;
   onDelete: (picture: GalleryPicture) => void;
 }) {
@@ -716,10 +727,25 @@ function ViewerActions({
           </div>
         )}
       </div>
-      {/* Always there: where editing is not set up it leads to the form, which says so and where to switch it on. */}
-      <button type="button" onClick={() => onEdit(picture)} aria-label={t("Edit it")} title={canEdit ? t("Edit it") : t("Edit it (editing is not set up)")} className={viewerButton}>
-        <LuWandSparkles aria-hidden className="h-[18px] w-[18px]" />
-      </button>
+      {use ? (
+        // The same choice as the box on the tile, so that a picture can be looked at before it is taken in; it does not replace what is there.
+        <button
+          type="button"
+          onClick={use.toggle}
+          disabled={use.full && !use.on}
+          aria-pressed={use.on}
+          aria-label={t("Use in the edit")}
+          title={use.on ? t("Take out of the edit") : use.full ? t("An edit takes at most {n} pictures", { n: MAX_SOURCES }) : t("Use in the edit")}
+          className={viewerButton}
+        >
+          {use.on ? <LuCheck aria-hidden className="h-[18px] w-[18px]" /> : <LuWandSparkles aria-hidden className="h-[18px] w-[18px]" />}
+        </button>
+      ) : (
+        // Always there: where editing is not set up it leads to the form, which says so and where to switch it on.
+        <button type="button" onClick={() => onEdit(picture)} aria-label={t("Edit it")} title={canEdit ? t("Edit it") : t("Edit it (editing is not set up)")} className={viewerButton}>
+          <LuWandSparkles aria-hidden className="h-[18px] w-[18px]" />
+        </button>
+      )}
       {again && (
         <button type="button" onClick={() => onAgain(picture)} aria-label={t("Run again")} title={t("Run again")} className={viewerButton}>
           <LuRepeat aria-hidden className="h-[18px] w-[18px]" />
@@ -736,10 +762,11 @@ function ViewerActions({
 const previewState = (job: PictureJob | undefined): PreviewState => (!job ? "done" : job.state === "running" ? "making" : job.state === "failed" ? "failed" : "done");
 
 /**
- * What a click on a tile does: look at the picture, or — in a mode that takes pictures — choose it, for a download
- * or a delete (select) or for the edit (pick), where the tile also has a button to look at it.
+ * A click on a tile's picture, or Enter on it, opens it in the viewer, always. What the box in its corner does is the
+ * mode: it selects the picture, for a download, a delete or a change (select), or takes it into the edit that the
+ * form is in (pick).
  */
-type TileMode = "view" | "select" | "pick";
+type TileMode = "select" | "pick";
 
 const GalleryTile = memo(function GalleryTile({
   tile,
@@ -768,7 +795,7 @@ const GalleryTile = memo(function GalleryTile({
   const making = state === "making";
   const now = useNow(making);
   const here = state === "done" && id;
-  const choosing = mode !== "view";
+  const name = picture ? sourceName(picture) : job?.prompt || "";
   return (
     <div className={`gallery-tile${selected ? " is-selected" : ""}${full ? " is-locked" : ""}`}>
       <ImagePreview
@@ -781,7 +808,7 @@ const GalleryTile = memo(function GalleryTile({
         reason={job?.error}
         elapsed={making && job ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : undefined}
         pictureId={here ? id : undefined}
-        onOpen={choosing ? (full ? undefined : onToggle) : onOpen}
+        onOpen={onOpen}
         actions={
           job && state !== "done" ? (
             <button type="button" className="gallery-tile-action" onClick={() => onDismiss(job.id)}>
@@ -790,26 +817,23 @@ const GalleryTile = memo(function GalleryTile({
           ) : undefined
         }
       />
-      {choosing && here && (
-        <input
-          type="checkbox"
-          className="gallery-check"
-          checked={selected}
-          disabled={full}
-          title={full ? t("An edit takes at most {n} pictures", { n: MAX_SOURCES }) : undefined}
-          onChange={() => onToggle(id)}
-          aria-label={mode === "pick" ? t("Use in the edit") : t("Select this picture")}
-        />
+      {here && (
+        // The box has a place of its own that a thumb can find, and a name that says which picture it is for.
+        <label className="gallery-check-hit" title={full ? t("An edit takes at most {n} pictures", { n: MAX_SOURCES }) : undefined}>
+          <input
+            type="checkbox"
+            className="gallery-check"
+            checked={selected}
+            disabled={full}
+            onChange={() => onToggle(id)}
+            aria-label={mode === "pick" ? t("Use {name} in the edit", { name }) : t("Select {name}", { name })}
+          />
+        </label>
       )}
       {mode === "pick" && selected && place > 0 && (
         <span className="gallery-order" aria-hidden>
           {place}
         </span>
-      )}
-      {mode === "pick" && here && picture && (
-        <button type="button" className="gallery-look" data-look-id={id} onClick={() => onOpen(id)} aria-label={t("Look at {name}", { name: sourceName(picture) })} title={t("Look at {name}", { name: sourceName(picture) })}>
-          <LuMaximize2 aria-hidden />
-        </button>
       )}
       {picture && (
         <p className="gallery-meta">

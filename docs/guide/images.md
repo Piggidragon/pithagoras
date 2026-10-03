@@ -104,8 +104,9 @@ Each picture can cost money at a hosted endpoint, as it does for the agent.
 ## Changing a picture
 
 Choose **Edit** at the top of the form. The pictures it works from are chosen right there, in
-the gallery under it: **click a picture to use it**, and click it again to take it out. A picture
-you click takes a place after the ones there (a number on the tile shows it) and appears as a
+the gallery under it: **tick the box on a picture to use it**, and tick it again to take it out. A
+click on the picture itself never does that, it opens the picture. A picture you tick takes a place
+after the ones there (a number on the tile shows it) and appears as a
 small picture in the form, in the order the request sends them. New pictures can be put in from
 your own files — **Add pictures from this computer**, a drop on the form, or a paste. Describe
 what should change and choose **Change the picture**. **Edit it** on a picture in the viewer
@@ -123,17 +124,20 @@ noise (below).
 
 - **The result is a new picture.** The original is never changed, and the new one
   is a gallery picture of its own that the viewer links back to the original.
-- **Choosing in the gallery.** While the form is in **Edit**, a click on a tile chooses the
-  picture instead of opening it, and the tile gets a box that is ticked while the picture is in
-  the edit. **Select** (for download and delete) gives way to a line saying so, and is there
-  again in **Generate**. To look at a picture larger, use the small button in the tile's corner,
-  or the picture in the form's row: both open the [viewer](/guide/sessions#looking-at-a-picture).
-  Pictures a job is still making cannot be chosen until they are in the gallery.
+- **Choosing in the gallery.** Every picture has a box in its corner, and while the form is in
+  **Edit** it is ticked while the picture is in the edit. A click on the picture, or `Enter` on it,
+  opens it in the [viewer](/guide/sessions#looking-at-a-picture), as it does in **Generate**; only the
+  box chooses. The box is a round place a thumb can find (44 pixels on a touch screen), named for its
+  picture ("Use Alpha in the edit"), reached with `Tab` after the picture and ticked with `Space`. In
+  **Edit** the boxes are all there. The viewer has the same choice: **Use in the edit** on the picture it
+  shows, which stays open, so that you can look at one picture after the other and take in the ones you
+  want. The picture in the form's row opens the viewer too. Pictures a job is still making cannot be
+  chosen until they are in the gallery.
 - **Several pictures.** Where the editing endpoint is [said to take several](/guide/features#several-pictures)
   (**Several pictures per edit**, off until you switch it on), the form takes up to eight
   pictures, in the order the request sends them. This also makes a new
   picture from references; the endpoint cannot tell the two apart, the description does.
-  - **Adding.** Click pictures in the gallery, in the order you want them. The **Add** button
+  - **Adding.** Tick pictures in the gallery, in the order you want them. The **Add** button
     after the last picture takes several files at once (`Ctrl`/`Shift` in the file dialog). Files
     can also be **dropped anywhere on the form** — a drop in **Generate** switches to **Edit** — and a
     picture on the clipboard (a screenshot, or "Copy image") is **pasted** with `Ctrl`/`Cmd` + `V` into
@@ -152,13 +156,13 @@ noise (below).
     change first.
   - **The limit.** The header of the row shows how many there are of the eight. At eight the
     **Add** button goes, and the tiles of the gallery that are not in the edit are dimmed and cannot be
-    chosen until one is taken out (their box says why). Pictures that did not fit — in a pick, a drop or a
+    chosen until one is taken out (their box says why; the picture itself can still be looked at). Pictures that did not fit — in a pick, a drop or a
     paste — are **not uploaded** and are said to be left out, never dropped without a word (if the row
     filled up while a pick was still being uploaded, the one that no longer fits stays in the gallery and
     is said to be left out). Together they may weigh 50 MB; a row that weighs more says so, and **Change
     the picture** waits.
   - **An endpoint that takes one.** With the switch off, the form works with one picture:
-    a picture you click, add or drop takes the place of the one there is, any others in the same pick are
+    a picture you tick, add or drop takes the place of the one there is, any others in the same pick are
     said to be left out, and the form says what to switch on and links to it. Several that came in anyway
     (a change made from several, run again) are said to be too many, and **Change the picture** waits until one is left.
   - **The size limit applies to each.** The [maximum picture size](/guide/features#editing-a-picture) of
@@ -208,7 +212,7 @@ one that was found, how it was made for the others) and how long ago.
 - **Filters.** *Where from*: all, made here, from chats, from folders. *How it was made*:
   all, made, changed, from this computer, not known. They are in the address
   (`/images?origin=chat&kind=edited`), so a link keeps them and **Back** goes through them.
-- **Looking at one.** A click opens it in the [viewer](/guide/sessions#looking-at-a-picture),
+- **Looking at one.** A click on the picture, or `Enter` on it, opens it in the [viewer](/guide/sessions#looking-at-a-picture), in both modes, never anything else;
   which steps through the gallery with the arrows, `←` and `→`, or a swipe, and loads
   the next page when it gets near the end. A picture that was changed has
   **Original** and **Edited version** at the top to go from one to the other, also when
@@ -225,21 +229,31 @@ Beside its own buttons, the viewer has these for a gallery picture:
 | Button | Does |
 | --- | --- |
 | **Details** | The full description, when and how it was made, the model, the size, the file format and compression, the Stable Diffusion settings it was made with (they are listed whether or not the switch is on now), the free fields an older version sent, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
-| **Edit it** | Puts the picture in the form, in **Edit**, to be changed, in place of any that were there. Always offered: where editing is not set up it leads to the form, which says so. To work from several pictures, click them in the gallery instead. |
+| **Edit it** | Puts the picture in the form, in **Edit**, to be changed, in place of any that were there. Always offered: where editing is not set up it leads to the form, which says so. While the form is already in **Edit** this button is **Use in the edit** instead, which adds the picture to the ones there, or takes it out again, and leaves the viewer open. To work from several pictures, tick them in the gallery instead. |
 | **Run again** | A picture made from a description is made once more, with the model, size, file format and compression it was made with, and its Stable Diffusion settings while that switch is on: one click, one more picture. With a seed that is the same picture again, as the endpoint makes it. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
 | **Delete** | See below. |
 | **Open in a new tab**, **Download** | The file itself. |
 
 ### Selecting several
 
-In **Generate**, **Select** puts a box on every picture: a click selects instead of opening, and
-**Select all shown** takes what is on screen. **Download** saves each selected picture
-as a file of its own — the browser may ask once whether this page may download several —
-and **Delete** takes them away after asking. (In **Edit** a click on a picture chooses it for
-the [edit](#changing-a-picture) instead, and there is no **Select**; a picture is deleted from
-the viewer there.) What is selected belongs to what is shown: a
-change of filter, or **Back** to another one, clears it, so that nothing that is not on
-screen is deleted with what is. `Esc` or **Done** ends selecting.
+The box in a picture's corner selects it, in **Generate**: nothing to switch on first. Where a mouse can
+hover the box shows when the picture is pointed at or has focus, and on a touch screen it is always
+there; once one is ticked, all of them are. A **bar** with **n selected** appears over the gallery for as
+long as something is ticked, and stays in view as you scroll:
+
+| Button | Does |
+| --- | --- |
+| **Select all shown** | Takes every picture on screen. |
+| **Edit** | Puts the selected pictures in the form, in **Edit**, in the order you ticked them, and lets go of the selection. Off, with the reason on it, where the endpoint [takes one picture](#changing-a-picture) and more are selected, or more than eight. |
+| **Download** | Saves each selected picture as a file of its own; the browser may ask once whether this page may download several. |
+| **Delete** | Takes them away after asking. |
+| **Clear selection** | Lets go of the selection; so does `Esc`. |
+
+A click on a picture opens it and does not change what is selected. In **Edit** the boxes are the
+pictures of the [edit](#changing-a-picture) and there is no bar; a picture is deleted from the viewer
+there, or after going back to **Generate**. What is selected belongs to what is shown: a change of
+filter, or **Back** to another one, clears it, so that nothing that is not on screen is deleted with what
+is, and so does going to **Edit**.
 
 ### Deleting
 

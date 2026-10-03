@@ -177,10 +177,13 @@ const describe = (page: Page) => page.getByPlaceholder('Describe the change: wha
 /** The form's two modes: Generate, and Edit, where the pictures of a change are chosen. */
 const toEdit = (page: Page) => maker(page).getByRole('radio', { name: /^Edit/ }).click();
 const toMake = (page: Page) => maker(page).getByRole('radio', { name: /^Generate/ }).click();
-/** A change begun in the gallery: the form in Edit, and the pictures clicked in this order. */
+/** The box of a picture in the gallery: it ticks it, which a click on the picture itself does not. */
+const box = (page: Page, name: string) => cell(page, name).getByRole('checkbox');
+const tick = (page: Page, name: string) => box(page, name).check();
+/** A change begun in the gallery: the form in Edit, and the pictures ticked in this order. */
 async function pick(page: Page, ...prompts: string[]) {
   await toEdit(page);
-  for (const name of prompts) await tile(page, name).click();
+  for (const name of prompts) await tick(page, name);
 }
 /** The tile of a picture in the gallery, whole: its box and its place in the edit. */
 // By its picture, not its button: a tile that cannot be chosen any more has none.
@@ -286,17 +289,17 @@ test('with only changing set up the page opens in Edit: no form to make a pictur
   await expect(tile(page, 'A fox')).toBeVisible();
   // A picture is chosen from the gallery, and that form has its words.
   await toEdit(page);
-  await tile(page, 'A fox').click();
+  await tick(page, 'A fox');
   await expect.poll(() => names(page)).toEqual(['A fox']);
   await describe(page).fill('Add a hat');
   await page.getByRole('button', { name: 'Change the picture' }).click();
   await expect.poll(() => p.state.edited.length).toBe(1);
   expect(p.state.edited[0].sources).toEqual([made.id]);
   // A change can be made again, which is not making one from nothing.
-  await page.getByRole('button', { name: 'Look at Make it night' }).first().click();
+  await tile(page, 'Make it night').click();
   await expect(viewer(page).getByRole('button', { name: 'Run again' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await cell(page, 'A fox').getByRole('button', { name: 'Look at A fox' }).click();
+  await tile(page, 'A fox').click();
   await expect(viewer(page).getByRole('button', { name: 'Run again' })).toHaveCount(0);
 });
 
@@ -421,7 +424,7 @@ test('a picture that was found is deleted only on purpose, with the folder named
   expect(p.state.deleted).toEqual([]);
   // With others, one question for all of them, which says what is in a folder.
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await tick(page, 'fox.png');
   await page.getByRole('button', { name: 'Select all shown' }).click();
   await page.getByRole('button', { name: 'Delete' }).click();
   const several = page.getByRole('alertdialog', { name: 'Delete these 3 pictures?' });
@@ -584,7 +587,7 @@ test('without the Stable Diffusion switch only the OpenAI settings are there, an
   await toEdit(page);
   await expect(stableBlock(page)).toHaveCount(0);
   await expect(page.getByRole('radio', { name: 'Noise only' })).toHaveCount(0);
-  await tile(page, 'A fox').click();
+  await tick(page, 'A fox');
   await describe(page).fill('Add a hat');
   await page.getByRole('button', { name: 'Change the picture' }).click();
   await expect.poll(() => p.state.edited.length).toBe(1);
@@ -954,7 +957,7 @@ test('Edit it puts the picture in the form, and the change is sent with it', asy
   await expect(maker(page).getByRole('img', { name: 'A fox' })).toBeVisible();
 });
 
-test('in Edit a click on a picture of the gallery takes it into the edit, after the ones there, and again takes it out: no viewer or select mode needed', async ({ page }) => {
+test('in Edit a tick in the box of a picture takes it into the edit, after the ones there, and again takes it out; a click on the picture itself never does, it opens it', async ({ page }) => {
   const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
   const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
   await page.goto('/images');
@@ -964,65 +967,168 @@ test('in Edit a click on a picture of the gallery takes it into the edit, after 
   await expect(page.getByRole('button', { name: 'Change the picture' })).toBeDisabled();
   await describe(page).fill('Beta, painted like Alpha, on Gamma');
   await expect(page.getByRole('button', { name: 'Change the picture' })).toHaveAttribute('title', 'Choose the picture to change first');
-  // The gallery says what it is for now, and Select (for download and delete) gives way to it.
-  await expect(page.getByText('Click pictures to use them in the edit, in the order you click them.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Select', exact: true })).toHaveCount(0);
+  // The gallery says what the boxes are for now, and that the picture is for looking at.
+  await expect(page.getByText('Tick pictures to use them in the edit, in the order you tick them. A click on a picture opens it.')).toBeVisible();
+  // A click on the picture opens it and takes nothing in; closing it leaves the edit as it was.
   await tile(page, 'Beta').click();
-  await tile(page, 'Alpha').click();
+  await expect(viewer(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(viewer(page)).toHaveCount(0);
+  await expect(maker(page).getByText('No picture yet.')).toBeVisible();
+  await expect(box(page, 'Beta')).not.toBeChecked();
+  await tick(page, 'Beta');
+  await tick(page, 'Alpha');
   await expect.poll(() => names(page)).toEqual(['Beta', 'Alpha']);
   // Each tile in the edit is ticked and has its place; one that is not is not.
-  await expect(cell(page, 'Beta').getByRole('checkbox', { name: 'Use in the edit' })).toBeChecked();
+  await expect(box(page, 'Beta')).toBeChecked();
   await expect(cell(page, 'Beta').locator('.gallery-order')).toHaveText('1');
   await expect(cell(page, 'Alpha').locator('.gallery-order')).toHaveText('2');
-  await expect(cell(page, 'Gamma').getByRole('checkbox', { name: 'Use in the edit' })).not.toBeChecked();
+  await expect(box(page, 'Gamma')).not.toBeChecked();
   await expect(cell(page, 'Gamma').locator('.gallery-order')).toHaveCount(0);
-  // The box does the same as the picture, and a second click takes it out again.
-  await cell(page, 'Gamma').getByRole('checkbox', { name: 'Use in the edit' }).check();
+  await tick(page, 'Gamma');
   await expect.poll(() => names(page)).toEqual(['Beta', 'Alpha', 'Gamma']);
-  await tile(page, 'Beta').click();
+  // Ticked again it is out, and the others close up; ticked once more it comes last.
+  await box(page, 'Beta').uncheck();
   await expect.poll(() => names(page)).toEqual(['Alpha', 'Gamma']);
   await expect(cell(page, 'Gamma').locator('.gallery-order')).toHaveText('2');
-  await tile(page, 'Beta').click();
+  await tick(page, 'Beta');
+  await expect.poll(() => names(page)).toEqual(['Alpha', 'Gamma', 'Beta']);
+  // A click on a picture that is in the edit does not take it out either.
+  await tile(page, 'Gamma').click();
+  await expect(viewer(page)).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect.poll(() => names(page)).toEqual(['Alpha', 'Gamma', 'Beta']);
   await page.getByRole('button', { name: 'Change the picture' }).click();
   await expect.poll(() => p.state.edited.length).toBe(1);
   expect(p.state.edited[0]).toEqual({ prompt: 'Beta, painted like Alpha, on Gamma', sources: [a.id, c.id, b.id], count: 1 });
 });
 
-test('in Edit a picture of the gallery can still be looked at larger, with its own button, and Select is there again in Generate', async ({ page }) => {
+test('in Edit the viewer takes the picture it shows into the edit or out of it, and stays open to go on to the next', async ({ page }) => {
+  const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
+  const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await toEdit(page);
+  // The newest is the first of the gallery, and the viewer steps on to the older.
+  await tile(page, 'Gamma').click();
+  const use = viewer(page).getByRole('button', { name: 'Use in the edit' });
+  // Not "Edit it": that would put this one in the place of what is there. This one is added to it.
+  await expect(viewer(page).getByRole('button', { name: 'Edit it' })).toHaveCount(0);
+  await expect(use).toHaveAttribute('aria-pressed', 'false');
+  await use.click();
+  await expect(use).toHaveAttribute('aria-pressed', 'true');
+  await viewer(page).getByRole('button', { name: 'Next picture' }).click();
+  await expect(viewer(page).locator('img[data-picture]')).toHaveAttribute('src', `/api/images/${b.id}/file`);
+  await expect(use).toHaveAttribute('aria-pressed', 'false');
+  await use.click();
+  await viewer(page).getByRole('button', { name: 'Next picture' }).click();
+  await use.click();
+  await use.click();
+  await expect(use).toHaveAttribute('aria-pressed', 'false');
+  await page.keyboard.press('Escape');
+  await expect.poll(() => names(page)).toEqual(['Gamma', 'Beta']);
+  await expect(box(page, 'Beta')).toBeChecked();
+  await describe(page).fill('Both');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toEqual([c.id, b.id]);
+});
+
+test('a click or Enter on a picture opens the viewer in either mode, and the box has its own name, is a tab stop of its own, and is ticked with Space', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
   await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
   await page.goto('/images');
-  await toEdit(page);
-  const look = cell(page, 'Alpha').getByRole('button', { name: 'Look at Alpha' });
-  await look.click();
-  await expect(viewer(page)).toBeVisible();
-  await expect(viewer(page).locator('img[data-picture]')).toHaveAttribute('src', `/api/images/${a.id}/file`);
-  // Looking is not choosing.
-  await page.keyboard.press('Escape');
-  await expect(viewer(page)).toHaveCount(0);
-  await expect(maker(page).getByText('No picture yet.')).toBeVisible();
-  await expect(look).toBeFocused();
+  for (const mode of ['Generate', 'Edit']) {
+    if (mode === 'Edit') await toEdit(page);
+    // Enter on the picture, from the keyboard: the viewer, and nothing ticked.
+    await tile(page, 'Alpha').focus();
+    await page.keyboard.press('Enter');
+    await expect(viewer(page)).toBeVisible();
+    await expect(viewer(page).locator('img[data-picture]')).toHaveAttribute('src', `/api/images/${a.id}/file`);
+    await page.keyboard.press('Escape');
+    await expect(viewer(page)).toHaveCount(0);
+    await expect(tile(page, 'Alpha')).toBeFocused();
+    await expect(box(page, 'Alpha')).not.toBeChecked();
+    await tile(page, 'Beta').click();
+    await expect(viewer(page)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(box(page, 'Beta')).not.toBeChecked();
+  }
   await toMake(page);
-  await expect(page.getByRole('button', { name: 'Select', exact: true })).toBeVisible();
-  await expect(cell(page, 'Alpha').getByRole('button', { name: 'Look at Alpha' })).toHaveCount(0);
-  // A click opens the viewer again, as it did.
-  await tile(page, 'Alpha').click();
-  await expect(viewer(page)).toBeVisible();
+  // The box: named for its picture, after the picture in the tab order, and ticked with Space; Enter on the picture does not.
+  await expect(cell(page, 'Alpha').getByRole('checkbox', { name: 'Select Alpha' })).toBeAttached();
+  await tile(page, 'Alpha').focus();
+  await page.keyboard.press('Tab');
+  await expect(cell(page, 'Alpha').getByRole('checkbox', { name: 'Select Alpha' })).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(box(page, 'Alpha')).toBeChecked();
+  await expect(page.getByRole('group', { name: 'Selected pictures' }).getByText('1 selected')).toBeVisible();
+  await toEdit(page);
+  await expect(cell(page, 'Alpha').getByRole('checkbox', { name: 'Use Alpha in the edit' })).toBeAttached();
 });
 
-test('where the endpoint takes one picture, a click on a picture takes the place of the one there is, with no place numbers, and the viewer has no reference button', async ({ page }) => {
+test('where a pointer can hover the box is there while the picture is pointed at or has focus, and always once one is ticked or the form is in Edit', async ({ page }) => {
+  const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
+  await portal(page, { pictures: [a, b] });
+  await page.goto('/images');
+  const shown = (name: string) => cell(page, name).locator('.gallery-check-hit').evaluate((el) => ({ opacity: Number(getComputedStyle(el).opacity), ...el.getBoundingClientRect().toJSON() }));
+  // A mouse: hidden until the tile is pointed at or the box has focus, so that it does not cover every picture.
+  await page.mouse.move(0, 0);
+  await expect.poll(async () => (await shown('Alpha')).opacity).toBe(0);
+  await cell(page, 'Alpha').hover();
+  await expect.poll(async () => (await shown('Alpha')).opacity).toBe(1);
+  await expect.poll(async () => (await shown('Beta')).opacity).toBe(0);
+  await page.mouse.move(0, 0);
+  await box(page, 'Beta').focus();
+  await expect.poll(async () => (await shown('Beta')).opacity).toBe(1);
+  // Once one is ticked every box shows, to tick the next with.
+  await box(page, 'Alpha').check();
+  await page.mouse.move(0, 0);
+  await expect.poll(async () => (await shown('Beta')).opacity).toBe(1);
+  await box(page, 'Alpha').uncheck();
+  await page.mouse.move(0, 0);
+  await expect.poll(async () => (await shown('Beta')).opacity).toBe(0);
+  // In Edit the boxes are what the form is made of: all there.
+  await toEdit(page);
+  await expect.poll(async () => (await shown('Beta')).opacity).toBe(1);
+});
+
+test.describe('on a touch screen', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 800 } });
+  test('the boxes are always there, with a place a thumb can find, and a tap on one ticks it where a tap on the picture opens it', async ({ page }) => {
+    const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
+    await portal(page, { pictures: [a, b] });
+    await page.goto('/images');
+    const hit = cell(page, 'Beta').locator('.gallery-check-hit');
+    // No hover to wait for, and at least the 44 pixels a finger needs.
+    await expect.poll(() => hit.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
+    const size = (await hit.boundingBox())!;
+    expect(size.width).toBeGreaterThanOrEqual(44);
+    expect(size.height).toBeGreaterThanOrEqual(44);
+    await hit.tap();
+    await expect(box(page, 'Beta')).toBeChecked();
+    await expect(page.getByRole('group', { name: 'Selected pictures' }).getByText('1 selected')).toBeVisible();
+    await expect(viewer(page)).toHaveCount(0);
+    await tile(page, 'Alpha').tap();
+    await expect(viewer(page)).toBeVisible();
+    await expect(box(page, 'Alpha')).not.toBeChecked();
+    // Nothing runs off the screen with the bar there.
+    await page.keyboard.press('Escape');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+});
+
+test('where the endpoint takes one picture, a tick takes the place of the one there is, with no place numbers, and the viewer has one button for it', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
   const p = await portal(page, { pictures: [a, b] });
   await page.goto('/images');
   await toEdit(page);
   await expect(maker(page).getByText('No picture yet. Pick one from the gallery below, drop or paste it here, or add it from this computer.')).toBeVisible();
-  await expect(page.getByText('Click a picture to use it in the edit.')).toBeVisible();
-  await tile(page, 'Alpha').click();
+  await expect(page.getByText('Tick a picture to use it in the edit. A click on a picture opens it.')).toBeVisible();
+  await tick(page, 'Alpha');
   await expect.poll(() => names(page)).toEqual(['Alpha']);
-  await tile(page, 'Beta').click();
+  await tick(page, 'Beta');
   await expect.poll(() => names(page)).toEqual(['Beta']);
-  await expect(cell(page, 'Alpha').getByRole('checkbox', { name: 'Use in the edit' })).not.toBeChecked();
+  await expect(box(page, 'Alpha')).not.toBeChecked();
   await expect(grid(page).locator('.gallery-order')).toHaveCount(0);
   // The way to several is said, with the way to the setting.
   await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
@@ -1030,11 +1136,15 @@ test('where the endpoint takes one picture, a click on a picture takes the place
   await page.getByRole('button', { name: 'Change the picture' }).click();
   await expect.poll(() => p.state.edited.length).toBe(1);
   expect(p.state.edited[0].sources).toEqual([b.id]);
-  // Out again, and the viewer: Edit it, and no toggle to hide several pictures behind.
-  await tile(page, 'Beta').click();
+  // Out again, and the viewer: the same choice in it, which puts the picture there in the place of the one there is.
+  await box(page, 'Beta').uncheck();
   await expect(maker(page).getByText('No picture yet.')).toBeVisible();
-  await cell(page, 'Alpha').getByRole('button', { name: 'Look at Alpha' }).click();
-  await expect(viewer(page).getByRole('button', { name: 'Edit it' })).toBeVisible();
+  await tile(page, 'Beta').click();
+  await viewer(page).getByRole('button', { name: 'Use in the edit' }).click();
+  await expect.poll(() => names(page)).toEqual(['Beta']);
+  await viewer(page).getByRole('button', { name: 'Next picture' }).click();
+  await viewer(page).getByRole('button', { name: 'Use in the edit' }).click();
+  await expect.poll(() => names(page)).toEqual(['Alpha']);
   await expect(viewer(page).getByRole('button', { name: /reference/ })).toHaveCount(0);
 });
 
@@ -1244,7 +1354,7 @@ test('a single picture is not dragged, and a row of several says that the first 
   await pick(page, 'Alpha');
   await expect(slot(page, 'Alpha')).not.toHaveAttribute('draggable', 'true');
   await expect(maker(page)).not.toContainText(FIRST_COUNTS);
-  await tile(page, 'Beta').click();
+  await tick(page, 'Beta');
   await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta']);
   await expect(slot(page, 'Beta')).toHaveAttribute('draggable', 'true');
   await expect(maker(page)).toContainText(FIRST_COUNTS);
@@ -1312,8 +1422,8 @@ test('pictures that were uploaded while the row filled up from the gallery are s
   });
   await drop(maker(page), ['q1.png', 'q2.png']);
   await expect(maker(page).getByRole('status').filter({ hasText: 'Adding…' })).toBeAttached();
-  // Meanwhile a click in the gallery takes a seventh, so that only one of the two fits.
-  await tile(page, 'Zeta').click();
+  // Meanwhile a tick in the gallery takes a seventh, so that only one of the two fits.
+  await tick(page, 'Zeta');
   await expect.poll(() => names(page)).toHaveLength(7);
   release();
   await expect.poll(() => names(page)).toEqual(['p1.png', 'p2.png', 'p3.png', 'p4.png', 'p5.png', 'p6.png', 'Zeta', 'q1.png']);
@@ -1411,20 +1521,25 @@ test('at most eight pictures can be chosen in the gallery: the others are dimmed
   await pick(page, ...Array.from({ length: 8 }, (_, i) => `Pic ${i + 1}`));
   await expect.poll(() => names(page)).toHaveLength(8);
   await expect(maker(page).getByText('8 of 8 pictures')).toBeVisible();
-  // The ninth and tenth are not to be had: their box is off, with the reason, and a click on the picture does nothing.
-  const ninth = cell(page, 'Pic 9').getByRole('checkbox', { name: 'Use in the edit' });
+  // The ninth and tenth are not to be had: their box is off, with the reason. The picture itself can still be looked at.
+  const ninth = box(page, 'Pic 9');
   await expect(ninth).toBeDisabled();
-  await expect(ninth).toHaveAttribute('title', 'An edit takes at most 8 pictures');
+  await expect(cell(page, 'Pic 9').locator('.gallery-check-hit')).toHaveAttribute('title', 'An edit takes at most 8 pictures');
   await expect(cell(page, 'Pic 9').locator('.gallery-tile')).toHaveClass(/is-locked/);
   await expect(cell(page, 'Pic 1').locator('.gallery-tile')).not.toHaveClass(/is-locked/);
-  await expect(cell(page, 'Pic 10').getByRole('checkbox', { name: 'Use in the edit' })).toBeDisabled();
-  await expect(cell(page, 'Pic 9').getByRole('button', { name: 'Pic 9', exact: true })).toHaveCount(0);
+  await expect(box(page, 'Pic 10')).toBeDisabled();
+  await expect.poll(() => names(page)).toHaveLength(8);
+  await tile(page, 'Pic 9').click();
+  await expect(viewer(page)).toBeVisible();
+  // The viewer's choice is the box's: not for one that would be the ninth, and the one that is in can be taken out from there.
+  await expect(viewer(page).getByRole('button', { name: 'Use in the edit' })).toBeDisabled();
+  await page.keyboard.press('Escape');
   await expect.poll(() => names(page)).toHaveLength(8);
   // One that is in can still be taken out, and then the others can be chosen again.
-  await tile(page, 'Pic 8').click();
+  await box(page, 'Pic 8').uncheck();
   await expect(maker(page).getByText('7 of 8 pictures')).toBeVisible();
   await expect(ninth).toBeEnabled();
-  await tile(page, 'Pic 9').click();
+  await ninth.check();
   await expect.poll(() => names(page)).toHaveLength(8);
   await describe(page).fill('All of them');
   await page.getByRole('button', { name: 'Change the picture' }).click();
@@ -1658,20 +1773,32 @@ test('a picture in a chat’s folder is deleted only on purpose, with a warning,
   expect(p.state.deleted).toEqual([[mine.id]]);
 });
 
-test('several pictures can be selected, to download or delete together', async ({ page }) => {
+const bar = (page: Page) => page.getByRole('group', { name: 'Selected pictures' });
+
+test('several pictures can be selected with their boxes, to download or delete together, and a click on a picture opens it', async ({ page }) => {
   const a = pic({ prompt: 'One', age: 3 });
   const b = pic({ prompt: 'Two', age: 2 });
   const c = pic({ prompt: 'Three', age: 1, origin: 'chat', chat: { id: 'c1', title: 'A chat' } });
   const p = await portal(page, { pictures: [a, b, c] });
   await page.goto('/images');
-  await page.getByRole('button', { name: 'Select', exact: true }).click();
-  // A click selects, and does not open the viewer.
-  await tile(page, 'One').click();
-  await tile(page, 'Three').click();
+  // No select mode to go into, and no bar while nothing is ticked: the gallery says the boxes are there.
+  await expect(page.getByRole('button', { name: 'Select', exact: true })).toHaveCount(0);
+  await expect(bar(page)).toHaveCount(0);
+  await expect(page.getByText('Tick pictures to download, delete or edit them. A click on a picture opens it.')).toBeVisible();
+  // A tick selects, and does not open the viewer.
+  await tick(page, 'One');
+  await tick(page, 'Three');
   await expect(viewer(page)).toHaveCount(0);
-  await expect(page.getByText('2 selected')).toBeVisible();
-  await expect(page.getByLabel('Select this picture').nth(0)).toBeChecked();
-  await expect(page.getByLabel('Select this picture').nth(1)).not.toBeChecked();
+  await expect(bar(page).getByText('2 selected')).toBeVisible();
+  await expect(box(page, 'One')).toBeChecked();
+  await expect(box(page, 'Two')).not.toBeChecked();
+  await expect(box(page, 'Three')).toBeChecked();
+  // A click on a ticked picture opens it, and ticks nothing more and nothing less.
+  await tile(page, 'Two').click();
+  await expect(viewer(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(viewer(page)).toHaveCount(0);
+  await expect(bar(page).getByText('2 selected')).toBeVisible();
   const downloads: string[] = [];
   page.on('download', (d) => downloads.push(d.suggestedFilename()));
   await page.getByRole('button', { name: 'Download' }).click();
@@ -1685,9 +1812,69 @@ test('several pictures can be selected, to download or delete together', async (
   await expect.poll(() => p.state.deleted.length).toBe(1);
   expect([...p.state.deleted[0]].sort()).toEqual([a.id, c.id].sort());
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
-  await expect(page.getByText('0 selected')).toBeVisible();
-  await page.getByRole('button', { name: 'Done' }).click();
-  await expect(page.getByRole('button', { name: 'Select', exact: true })).toBeVisible();
+  // Nothing is ticked any more, so the bar is gone with it.
+  await expect(bar(page)).toHaveCount(0);
+});
+
+test('the bar of the selection has the actions, clears with its button or Escape, and is let go of when the form goes to Edit', async ({ page }) => {
+  const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
+  const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await tick(page, 'Gamma');
+  const actions = bar(page).getByRole('button');
+  await expect(actions).toHaveText(['Select all shown', 'Edit', 'Download', 'Delete', 'Clear selection']);
+  await bar(page).getByRole('button', { name: 'Clear selection' }).click();
+  await expect(bar(page)).toHaveCount(0);
+  await expect(box(page, 'Gamma')).not.toBeChecked();
+  await tick(page, 'Beta');
+  await page.keyboard.press('Escape');
+  await expect(bar(page)).toHaveCount(0);
+  await expect(box(page, 'Beta')).not.toBeChecked();
+  // Escape in a viewer closes the viewer and not the selection under it.
+  await tick(page, 'Beta');
+  await tile(page, 'Alpha').click();
+  await page.keyboard.press('Escape');
+  await expect(viewer(page)).toHaveCount(0);
+  await expect(bar(page).getByText('1 selected')).toBeVisible();
+  // Edit takes them into the form, in the order they were ticked, and the selection is let go of.
+  await tick(page, 'Alpha');
+  await bar(page).getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(maker(page)).toHaveAccessibleName('Change a picture');
+  await expect.poll(() => names(page)).toEqual(['Beta', 'Alpha']);
+  await expect(bar(page)).toHaveCount(0);
+  await expect(box(page, 'Alpha')).toBeChecked();
+  await expect(cell(page, 'Beta').locator('.gallery-order')).toHaveText('1');
+  await expect(describe(page)).toBeFocused();
+  await describe(page).fill('Both');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toEqual([b.id, a.id]);
+  // Ticks made in Generate are not the edit's: going to Edit by the switch starts from what the form has.
+  await toMake(page);
+  await box(page, 'Alpha').uncheck();
+  await tick(page, 'Gamma');
+  await expect(bar(page).getByText('1 selected')).toBeVisible();
+  await toEdit(page);
+  await expect(bar(page)).toHaveCount(0);
+});
+
+test('a selection that cannot all be an edit says why, where the endpoint takes one picture, and the Edit button is off', async ({ page }) => {
+  const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
+  const p = await portal(page, { pictures: [a, b] });
+  await page.goto('/images');
+  await tick(page, 'Alpha');
+  const edit = bar(page).getByRole('button', { name: 'Edit', exact: true });
+  await expect(edit).toBeEnabled();
+  await tick(page, 'Beta');
+  await expect(edit).toBeDisabled();
+  await expect(edit).toHaveAttribute('title', 'The editing endpoint takes one picture per edit: select one');
+  await box(page, 'Beta').uncheck();
+  await edit.click();
+  await expect.poll(() => names(page)).toEqual(['Alpha']);
+  await describe(page).fill('Make it night');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toEqual([a.id]);
 });
 
 test('a selection does not follow a change of filter: a chat’s picture that is not shown is never deleted with another, whatever Settings says', async ({ page }) => {
@@ -1696,21 +1883,21 @@ test('a selection does not follow a change of filter: a chat’s picture that is
   const mine = pic({ prompt: 'Mine' });
   const p = await portal(page, { pictures: [theirs, mine] });
   await page.goto('/images?origin=chat');
-  await page.getByRole('button', { name: 'Select', exact: true }).click();
-  await tile(page, 'From a chat').click();
+  await tick(page, 'From a chat');
   await expect(page.getByText('1 selected')).toBeVisible();
   await page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'Made here' }).click();
   await expect(tile(page, 'Mine')).toBeVisible();
-  // What is not shown is not selected.
-  await expect(page.getByText('0 selected')).toBeVisible();
-  await tile(page, 'Mine').click();
+  // What is not shown is not selected: nothing is, and the bar is gone.
+  await expect(bar(page)).toHaveCount(0);
+  await tick(page, 'Mine');
   await expect(page.getByText('1 selected')).toBeVisible();
   await page.getByRole('button', { name: 'Delete' }).click();
   await expect.poll(() => p.state.deleted).toEqual([[mine.id]]);
   // Back to the chats: still there, and not selected.
   await page.goBack();
   await expect(tile(page, 'From a chat')).toBeVisible();
-  await expect(page.getByLabel('Select this picture')).not.toBeChecked();
+  await expect(box(page, 'From a chat')).not.toBeChecked();
+  await expect(bar(page)).toHaveCount(0);
   expect(p.state.deleted).toEqual([[mine.id]]);
 });
 
@@ -1723,7 +1910,7 @@ test('a gallery of hundreds can be selected whole and deleted: the portal takes 
     await page.getByRole('button', { name: 'Show more' }).click();
     await expect(grid(page).getByRole('listitem')).toHaveCount(shown);
   }
-  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await tick(page, 'Many 1');
   await page.getByRole('button', { name: 'Select all shown' }).click();
   await expect(page.getByText('240 selected')).toBeVisible();
   await page.getByRole('button', { name: 'Delete' }).click();
@@ -1731,7 +1918,7 @@ test('a gallery of hundreds can be selected whole and deleted: the portal takes 
   await expect.poll(() => p.state.deleted.map((ids) => ids.length)).toEqual([200, 40]);
   await expect(grid(page).getByRole('listitem')).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
-  await expect(page.getByText('0 selected')).toBeVisible();
+  await expect(bar(page)).toHaveCount(0);
 });
 
 test('on a phone the grid has two columns, the viewer reaches every action, and nothing runs off the screen', async ({ page }) => {
