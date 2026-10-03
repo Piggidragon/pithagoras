@@ -192,7 +192,7 @@ export function ImageMaker({
 
   const submit = async () => {
     const said = prompt.trim();
-    if (!said || busy || full || refused || (editing && !sources.length)) return;
+    if (!said || busy || full || refused || (editing && (!sources.length || adding > 0))) return;
     setError(null);
     setNotice(null);
     setProblem(null);
@@ -433,6 +433,8 @@ export function ImageMaker({
     { id: "edit", label: t("Edit"), icon: <LuWandSparkles aria-hidden className="h-4 w-4" />, ready: changing },
   ];
   const noPicture = editing && !sources.length;
+  // Pictures still being put in are not in the row yet: an edit sent now would leave them out, while the row goes on to show them as if they were used.
+  const waiting = editing && adding > 0;
   const showRow = sources.length > 0 || adding > 0;
 
   return (
@@ -726,8 +728,8 @@ export function ImageMaker({
           <button
             type="button"
             onClick={() => void submit()}
-            disabled={!prompt.trim() || busy || full || !!refused || noPicture}
-            title={full ? t("{n} pictures are being made: wait for one to finish, or stop one", { n: running }) : noPicture ? t("Choose the picture to change first") : why}
+            disabled={!prompt.trim() || busy || full || !!refused || noPicture || waiting}
+            title={full ? t("{n} pictures are being made: wait for one to finish, or stop one", { n: running }) : waiting ? t("Wait until the pictures are added") : noPicture ? t("Choose the picture to change first") : why}
             className={primaryCls}
           >
             {busy ? <LuLoader aria-hidden className="h-4 w-4 animate-spin" /> : editing ? <LuWandSparkles aria-hidden className="h-4 w-4" /> : <LuSparkles aria-hidden className="h-4 w-4" />}

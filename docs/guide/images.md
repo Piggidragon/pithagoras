@@ -144,7 +144,9 @@ noise (below).
     can also be **dropped anywhere on the form** — a drop in **Generate** switches to **Edit** — and a
     picture on the clipboard (a screenshot, or "Copy image") is **pasted** with `Ctrl`/`Cmd` + `V` into
     the description or anywhere in the form. Each file is checked by its bytes as a PNG, JPEG, GIF or
-    WebP; one that is not a picture is named in the message and the others are still added.
+    WebP; one that is not a picture is named in the message and the others are still added. While files are
+    still being added (the row shows a spinner), **Change the picture** and `Ctrl`/`Cmd` + `Enter` wait, so
+    that an edit is never sent without the pictures you just put in.
     A picture of the gallery can be **dragged** from it into the form too, or copied with "Copy image" and
     pasted. That is the picture itself, taken in as a tick takes it, once however often it is dropped:
     nothing is uploaded and no copy of it appears in the gallery.

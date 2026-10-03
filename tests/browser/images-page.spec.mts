@@ -1663,6 +1663,62 @@ test('pictures that were uploaded while the row filled up from the gallery are s
   expect(p.state.uploads.map((u) => u.name)).toContain('q2.png');
 });
 
+test('an edit waits for the pictures that are still being added: neither the button nor Ctrl+Enter sends it without them', async ({ page }) => {
+  const alpha = pic({ prompt: 'Alpha' });
+  const p = await portal(page, { pictures: [alpha], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await pick(page, 'Alpha');
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/images/upload*', async (route) => {
+    await gate;
+    await route.fallback();
+  });
+  await drop(maker(page), ['b.png', 'c.png']);
+  await expect(maker(page).getByRole('status').filter({ hasText: 'Adding…' })).toBeAttached();
+  await describe(page).fill('Put the person of the first picture into the second, in the style of the third');
+  // They are not in the row yet: an edit sent now would be made of Alpha alone, and the row would show three as if they were used.
+  const change = page.getByRole('button', { name: 'Change the picture' });
+  await expect(change).toBeDisabled();
+  await expect(change).toHaveAttribute('title', 'Wait until the pictures are added');
+  await describe(page).press('Control+Enter');
+  await page.waitForTimeout(200);
+  expect(p.state.edited).toEqual([]);
+  release();
+  await expect.poll(() => names(page)).toEqual(['Alpha', 'b.png', 'c.png']);
+  await expect(change).toBeEnabled();
+  await expect(change).not.toHaveAttribute('title', /Wait/);
+  await describe(page).press('Control+Enter');
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  const uploaded = p.pics.filter((x) => x.kind === 'uploaded').map((x) => x.id);
+  expect(p.state.edited[0].sources).toEqual([alpha.id, ...uploaded]);
+});
+
+test('where the endpoint takes one picture, an edit does not go out from the picture that a drop is replacing', async ({ page }) => {
+  const alpha = pic({ prompt: 'Alpha' });
+  const p = await portal(page, { pictures: [alpha] });
+  await page.goto('/images');
+  await pick(page, 'Alpha');
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/images/upload*', async (route) => {
+    await gate;
+    await route.fallback();
+  });
+  await paste(describe(page), ['b.png']);
+  await describe(page).fill('Make it night');
+  await describe(page).press('Control+Enter');
+  await expect(page.getByRole('button', { name: 'Change the picture' })).toBeDisabled();
+  await page.waitForTimeout(200);
+  expect(p.state.edited).toEqual([]);
+  release();
+  await expect.poll(() => names(page)).toEqual(['b.png']);
+  await expect(page.getByRole('button', { name: 'Change the picture' })).toBeEnabled();
+  await describe(page).press('Control+Enter');
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toEqual([p.pics.find((x) => x.kind === 'uploaded')!.id]);
+});
+
 test('where the endpoint takes one picture, a picture put in replaces it, the extra ones are said to be left out, and the setting is named', async ({ page }) => {
   const p = await portal(page);
   await page.goto('/images');
