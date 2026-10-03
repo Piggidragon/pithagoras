@@ -228,6 +228,9 @@ const de: Locale = {
     "Install (downloads 4.6GB)": "Installieren (lädt 4,6 GB herunter)",
     "Remove": "Entfernen",
     // components/CanvasPanel.tsx
+    "This document was deleted while you were editing it.": "Dieses Dokument wurde gelöscht, während du es bearbeitet hast.",
+    "Your draft": "Dein Entwurf",
+    "Copy draft": "Entwurf kopieren",
     "Untitled document": "Unbenanntes Dokument",
     "Session canvases": "Canvases der Sitzung",
     "Session canvas workspace": "Canvas-Arbeitsbereich der Sitzung",

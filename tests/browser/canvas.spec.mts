@@ -62,3 +62,28 @@ test('saved canvas list loads even when its live stream is disconnected',async({
  await expect(page.locator('.canvas-document')).toContainText('Persisted words');
  await expect(page.getByText('Reconnecting to live canvas…')).toBeVisible();
 });
+
+test('a canvas deleted while it is being edited ends the edit, and its draft stays to be copied',async({page})=>{
+ await page.route('**/api/browser',r=>r.fulfill({json:{running:false,install:{container:'stopped'},sessions:[]}}));
+ await page.route('**/api/voice',r=>r.fulfill({json:{enabled:false}}));
+ await page.route('**/api/sessions/test/commands',r=>r.fulfill({json:{commands:[]}}));
+ await page.route('**/api/sessions/test/config',r=>r.fulfill({status:503,json:{}}));
+ await page.route('**/api/sessions/test/canvases',r=>r.fulfill({json:[]}));
+ await page.goto('/tests/voice.html');
+ const row={id:'canvas-1',title:'A document',content:'Written by the agent.',revision:1,status:'saved',active_call:null,updated_at:'',persisted:false};
+ await page.evaluate(row=>{(window as any).canvasFeed.connected(true);(window as any).canvasFeed.message({type:'snapshot',canvases:[row]});},row);
+ await page.getByLabel('Session canvases',{exact:true}).click();
+ await page.getByRole('button',{name:'Edit inline'}).click();
+ await page.getByLabel('Edit canvas content').fill('Half of my own text.');
+ // Gone: the agent removed it, or another tab did.
+ await page.evaluate(()=>(window as any).canvasFeed.message({type:'delete',id:'canvas-1'}));
+ await expect(page.getByRole('alert')).toContainText('This document was deleted while you were editing it.');
+ await expect(page.getByLabel('Your draft')).toHaveValue('Half of my own text.');
+ // Not stuck: the panel can be closed and another document made.
+ await expect(page.getByLabel('New canvas')).toBeEnabled();
+ await expect(page.getByLabel('Close canvas',{exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Dismiss'}).click();
+ await expect(page.getByLabel('Your draft')).toHaveCount(0);
+ await page.getByLabel('Close canvas',{exact:true}).click();
+ await expect(page.getByLabel('Session canvas workspace')).toHaveCount(0);
+});

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Select } from "./Select";
-import { LuFileText, LuPlus, LuX, LuTrash2, LuCheck, LuPencil, LuEye, LuSave, LuDownload } from 'react-icons/lu';
+import { LuFileText, LuPlus, LuX, LuTrash2, LuCheck, LuPencil, LuEye, LuSave, LuDownload, LuCopy } from 'react-icons/lu';
 import { Markdown } from './Markdown';
 import { asksBeforeDeleting } from '../confirm-prefs';
+import { copyText } from '../clipboard';
 import { canvasPictures } from '../canvas-pictures';
 import { api, json } from '../api';
 import { watchCanvases, type FeedState } from '../canvas-feed';
@@ -19,6 +20,8 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[feed,setFeed]=useState<FeedState>('down');
   const feedRef=useRef<FeedState>('down');
   const [confirmDelete,setConfirmDelete]=useState(false);
+  /** The draft of a document that was deleted while it was being edited, kept to be copied. */
+  const [lost,setLost]=useState<string|null>(null),[copied,setCopied]=useState(false);
   const editingRef=useRef(editing);editingRef.current=editing;
   const lastActiveCall=useRef<string|null>(null);
   const updates=useRef(0);
@@ -27,7 +30,7 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
   const root=`/api/sessions/${encodeURIComponent(sessionId)}/canvases`;
   const canvas=rows.find(row=>row.id===selected);
   useEffect(()=>{
-    setRows([]);setSelected('');setOpen(false);setEditing(false);setError('');setConfirmDelete(false);
+    setRows([]);setSelected('');setOpen(false);setEditing(false);setError('');setConfirmDelete(false);setLost(null);
     // Heard on the chat's own stream, which the app keeps open: see canvas-feed.ts.
     return watchCanvases(sessionId,{state:s=>{feedRef.current=s;setFeed(s);},message:(data:any)=>{
       updates.current++;
@@ -67,6 +70,14 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
     const first=setTimeout(()=>{if(stalled||feedRef.current==='down')void load();},0);const timer=setInterval(()=>void load(),5000);
     return()=>{disposed=true;stop.abort();clearTimeout(first);clearInterval(timer);};
   },[root,open,askSelf]);
+  // The document being edited was deleted, by the agent or from another tab: the editor has nothing left to
+  // save to, and the panel's close, picker and New canvas wait for editing to end. What was typed is kept.
+  useEffect(()=>{
+    if(!editing||canvas)return;
+    setEditing(false);setCopied(false);
+    setLost(draft.trim()?draft:null);
+    setError(t("This document was deleted while you were editing it."));
+  },[editing,canvas]);
   useEffect(()=>{if(!editing&&!rows.some(row=>row.id===selected))setSelected(rows[0]?.id??'');},[rows,selected,editing]);
   useEffect(()=>{if(canvas?.active_call&&follow.current&&viewport.current)viewport.current.scrollTop=viewport.current.scrollHeight;},[canvas?.content,canvas?.active_call]);
   const beginEdit=()=>{if(!canvas)return;setDraft(canvas.content);setTitle(canvas.title);setBase(canvas.revision);setEditing(true);setError('');};
@@ -82,6 +93,7 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
       <div className="canvas-picker"><Select aria-label={t("Select canvas")} className="flex-1 min-w-0" size="sm" value={selected} disabled={editing} placeholder={t("Choose a document")} onChange={v=>{setSelected(v);setConfirmDelete(false);setError('');follow.current=true}} options={rows.map(row=>({value:row.id,label:row.title,text:row.title,hint:row.persisted?undefined:t("Temporary — not stored")}))}/><button disabled={editing||busy} aria-label={t("New canvas")} onClick={()=>void create()}><LuPlus/></button></div>
       {askSelf&&<p className="canvas-notice">{t("Reconnecting to live canvas…")}</p>}
       {error&&<p role="alert" className="canvas-error">{error}</p>}
+      {lost!==null&&<><textarea className="canvas-editor" readOnly aria-label={t("Your draft")} value={lost}/><footer><button onClick={()=>void copyText(lost).then(ok=>ok&&setCopied(true))}>{copied?<LuCheck/>:<LuCopy/>}{copied?t("Copied"):t("Copy draft")}</button><button onClick={()=>setLost(null)}>{t("Dismiss")}</button></footer></>}
       {canvas?<>
         <div className="canvas-document-heading">{editing?<input aria-label={t("Canvas title")} maxLength={200} value={title} onChange={e=>setTitle(e.target.value)}/>:<h3>{canvas.title}</h3>}<span>{canvas.active_call?t("Writing live"):canvas.status==='edited'?t("Edited by you"):canvas.status==='interrupted'?t("Partial draft retained"):canvas.persisted?t("Auto-saved"):t("Temporary")} · {canvas.persisted?t("Stored"):t("Not stored — lost on server restart")} · r{canvas.revision}</span></div>
         {editing&&canvas.revision!==base&&<p className="canvas-error">{t("This document changed. Your draft is preserved here; copy it before cancelling to read the latest version.")}</p>}

@@ -21,10 +21,14 @@ silently overwriting newer text. While an AI write is streaming, finish or
 interrupt it before editing manually. A conflicting manual draft stays in the
 editor so you can copy it before reloading the document.
 
+If the document you are editing is deleted meanwhile, by the agent or from another tab, the edit ends with a
+notice and your draft stays below it, read-only, with **Copy draft**; the panel stays usable.
+
 A canvas can show pictures from the chat's folder: `![Sales by month](plots/sales.png)`
 draws `plots/sales.png`, by a path relative to the folder or an absolute one
 inside it. The agent is told it can do this, so a report can carry the chart it
-made. Web addresses work as usual; a path outside the folder is not shown.
+made. A picture from another website is not loaded, here as everywhere in the portal: it shows where it
+would have come from instead (see [Security](/guide/security)). A path outside the folder is not shown.
 
 The agent has five tools: `canvas_create`, `canvas_list`, `canvas_read`,
 `canvas_write` (replace or append), and `canvas_delete`. Write arguments specify
