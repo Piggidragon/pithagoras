@@ -992,7 +992,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
         title={t("Stable Diffusion extra settings")}
         detail={
           images.sdExtras
-            ? t("On: the Images page shows a block of settings that only stable-diffusion.cpp servers understand, and sends them in the description.")
+            ? t("On: the Images page shows settings that only stable-diffusion.cpp servers understand, under Advanced, and sends them in the description.")
             : t("Off: the Images page shows and sends only the settings of the OpenAI image format.")
         }
         on={images.sdExtras}

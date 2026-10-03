@@ -8,7 +8,7 @@ import { COMPRESSIBLE, FORM_KEY, LIMITS, OUTPUT_FORMATS, readForm, settingsBody,
 import { bytesLabel } from "../projects";
 import { local } from "../safe-storage";
 import { isEnter } from "../shortcuts";
-import { t, tp } from "../i18n";
+import { t, tp, tx } from "../i18n";
 import { ImageViewer } from "./ImageViewer";
 import { MaskPainter, type MaskHandle } from "./MaskPainter";
 import { Select } from "./Select";
@@ -196,7 +196,7 @@ export function ImageMaker({
     const settings = settingsBody(fields, editing, sd);
     if ("problem" in settings) {
       // The setting may be under "Advanced", which is opened to show it.
-      if (settings.field === "outputFormat" || settings.field === "outputCompression") change({ open: true });
+      if (["outputFormat", "outputCompression", "negativePrompt", "seed", "sampleSteps", "strength"].includes(settings.field)) change({ open: true });
       setProblem({ field: settings.field, at: Date.now() });
       setError(problemText(settings.problem));
       return;
@@ -338,78 +338,81 @@ export function ImageMaker({
           <p id="image-compression-hint" className="text-[11px] text-fg-faint sm:col-span-2">
             {compressible ? t("How strongly the file is compressed, from 0 to 100, as the endpoint reads it. Empty is its own.") : t("Choose JPEG or WebP as the file format to set a compression.")}
           </p>
+          {/* What is not in the OpenAI image format: plain fields like the ones above, there only where the add-on says the endpoint reads them, and with a way to that setting where it does not. */}
+          {sd ? (
+            <>
+              <p className="mt-1 text-[11px] text-fg-faint sm:col-span-2">
+                {t("For stable-diffusion.cpp servers only: these are added to the description as a block that its server reads.")}
+              </p>
+              <div className="grid gap-2 sm:col-span-2 sm:grid-cols-3">
+                {numberField("seed", t("Seed"), t("Random"))}
+                {numberField("sampleSteps", t("Steps"), empty)}
+                {editing && numberField("strength", t("Strength"), empty, { disabled: fromNoise, describedBy: "image-strength-hint" })}
+              </div>
+              {count > 1 && <p className="text-[11px] text-fg-faint sm:col-span-2">{t("With a seed, each of the pictures takes the next one, so that they are not all the same.")}</p>}
+              <label className="block text-xs text-fg-muted sm:col-span-2">
+                {t("Negative prompt")}
+                <textarea
+                  id="image-negativePrompt"
+                  value={fields.negativePrompt}
+                  onChange={(e) => setField({ negativePrompt: e.target.value })}
+                  aria-invalid={invalid("negativePrompt") || undefined}
+                  rows={2}
+                  placeholder={t("What the picture should not show")}
+                  className={`${inputCls} mt-1 resize-y ${invalid("negativePrompt") ? "border-danger" : ""}`}
+                />
+              </label>
+              {editing && (
+                <>
+                  <p id="image-strength-hint" className="text-[11px] text-fg-faint sm:col-span-2">
+                    {fromNoise
+                      ? t("There is no strength when the result starts from noise.")
+                      : t("The strength tends to decide how far the result may go from the first picture. A high one, such as 0.75 or more, keeps it close to that picture, and the other pictures then have little or no effect. A lower one gives them more influence.")}
+                  </p>
+                  <div className="sm:col-span-2">
+                    <span id="edit-start-label" className="text-xs text-fg-muted">
+                      {t("Start from")}
+                    </span>
+                    <div role="radiogroup" aria-labelledby="edit-start-label" aria-describedby="edit-start-hint" className="mt-1 inline-grid grid-cols-2 gap-1 rounded-xl bg-fg/5 p-1">
+                      {[
+                        { noise: false, label: t("The first picture") },
+                        { noise: true, label: t("Noise only") },
+                      ].map((o) => (
+                        <button
+                          key={String(o.noise)}
+                          type="button"
+                          role="radio"
+                          aria-checked={fields.fromNoise === o.noise}
+                          onClick={() => setField({ fromNoise: o.noise })}
+                          className={`inline-flex min-h-8 items-center justify-center rounded-lg px-3 text-xs transition focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${fields.fromNoise === o.noise ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25" : "text-fg-muted hover:bg-fg/10 hover:text-fg"}`}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p id="edit-start-hint" className="mt-1 text-[11px] text-fg-faint">
+                      {fromNoise
+                        ? t("The result starts from noise only. The description and all the pictures are used as references; strength and a mask do not apply.")
+                        : t("The first picture is the base that is built on. Strength and a mask work on it.")}
+                    </p>
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <p className="mt-1 text-[11px] text-fg-faint sm:col-span-2">
+              {tx("Using stable-diffusion.cpp? Switch on “Stable Diffusion extra settings” in {settings} for more options.", {
+                settings: (
+                  <Link to="/settings/images" className="text-accent hover:underline">
+                    {t("Settings → Agent → Images")}
+                  </Link>
+                ),
+              })}
+            </p>
+          )}
         </div>
       )}
     </div>
-  );
-
-  /** Everything that is not in the OpenAI image format, in one place of its own, and only where the add-on says the endpoint reads it. */
-  const stable = sd && (
-    <fieldset className="mt-3 rounded-xl border border-dashed border-accent/40 bg-accent/[0.04] px-3 pb-3 pt-1">
-      <legend className="px-1 text-xs font-medium text-accent">{t("Stable Diffusion (stable-diffusion.cpp)")}</legend>
-      <p className="mb-2 text-[11px] text-fg-muted">
-        {t("Only stable-diffusion.cpp servers understand these. They are added to the description as a block that its server reads, and another endpoint would take the block as part of the description. They are switched on in Settings → Agent → Images.")}{" "}
-        <Link to="/settings/images" className="text-accent hover:underline">
-          {t("Open the setting")}
-        </Link>
-      </p>
-      <div>
-        <label className="block text-xs text-fg-muted">
-          {t("Negative prompt")}
-          <textarea
-            id="image-negativePrompt"
-            value={fields.negativePrompt}
-            onChange={(e) => setField({ negativePrompt: e.target.value })}
-            aria-invalid={invalid("negativePrompt") || undefined}
-            rows={2}
-            placeholder={t("What the picture should not show")}
-            className={`${inputCls} mt-1 resize-y ${invalid("negativePrompt") ? "border-danger" : ""}`}
-          />
-        </label>
-      </div>
-      <div className="mt-2 grid gap-2 sm:grid-cols-3">
-        {numberField("seed", t("Seed"), t("Random"))}
-        {numberField("sampleSteps", t("Steps"), empty)}
-        {editing && numberField("strength", t("Strength"), empty, { disabled: fromNoise, describedBy: "image-strength-hint" })}
-      </div>
-      {count > 1 && <p className="mt-2 text-[11px] text-fg-faint">{t("With a seed, each of the pictures takes the next one, so that they are not all the same.")}</p>}
-      {editing && (
-        <>
-          <p id="image-strength-hint" className="mt-2 text-[11px] text-fg-faint">
-            {fromNoise
-              ? t("There is no strength when the result starts from noise.")
-              : t("The strength tends to decide how far the result may go from the first picture. A high one, such as 0.75 or more, keeps it close to that picture, and the other pictures then have little or no effect. A lower one gives them more influence.")}
-          </p>
-          <div className="mt-3">
-            <span id="edit-start-label" className="text-xs text-fg-muted">
-              {t("Start from")}
-            </span>
-            <div role="radiogroup" aria-labelledby="edit-start-label" aria-describedby="edit-start-hint" className="mt-1 inline-grid grid-cols-2 gap-1 rounded-xl bg-fg/5 p-1">
-              {[
-                { noise: false, label: t("The first picture") },
-                { noise: true, label: t("Noise only") },
-              ].map((o) => (
-                <button
-                  key={String(o.noise)}
-                  type="button"
-                  role="radio"
-                  aria-checked={fields.fromNoise === o.noise}
-                  onClick={() => setField({ fromNoise: o.noise })}
-                  className={`inline-flex min-h-8 items-center justify-center rounded-lg px-3 text-xs transition focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${fields.fromNoise === o.noise ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25" : "text-fg-muted hover:bg-fg/10 hover:text-fg"}`}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-            <p id="edit-start-hint" className="mt-1 text-[11px] text-fg-faint">
-              {fromNoise
-                ? t("The result starts from noise only. The description and all the pictures are used as references; strength and a mask do not apply.")
-                : t("The first picture is the base that is built on. Strength and a mask work on it.")}
-            </p>
-          </div>
-        </>
-      )}
-    </fieldset>
   );
 
   const modes: { id: Mode; label: string; icon: ReactNode; ready: boolean }[] = [
@@ -700,7 +703,6 @@ export function ImageMaker({
       )}
 
       {(editing ? changing : generating) && settings}
-      {(editing ? changing : generating) && stable}
 
       {(editing ? changing : generating) && (
         <div className="mt-3 flex flex-wrap items-center gap-2">

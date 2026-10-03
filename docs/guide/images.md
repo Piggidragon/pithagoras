@@ -69,10 +69,12 @@ take the block as part of the description, so leave it off for those.
 
 **Off,** the form shows only the OpenAI fields above and **nothing of this kind is ever sent**: no
 block, not even for a value that was typed or kept earlier. Those values stay in the form's memory,
-and are not shown or sent. The agent's tools never send these settings, on or off.
+and are not shown or sent. Under **Advanced** a quiet line tells where to switch the settings on, with
+a link to **Settings → Agent → Images**. The agent's tools never send these settings, on or off.
 
-**On,** a block of its own appears in the form, **Stable Diffusion (stable-diffusion.cpp)**,
-apart from the OpenAI fields, with a link to the setting:
+**On,** the fields are plain fields of the form, right under the others in **Advanced**, in the same
+style and with no box or heading of their own, and the line about switching them on is gone. A short
+note says that they are for stable-diffusion.cpp servers only:
 
 | Field | In the block as | Meaning |
 | --- | --- | --- |
@@ -119,7 +121,7 @@ off or has no address, and links to the setting. With editing on and generation 
 again** is there for a change only, since making a picture from a description needs generation.
 An edit goes to the editing endpoint with the model set for it, and has the settings of
 [the form](#making-a-picture) too: the model, a size, how many (one change each), and the file format
-and compression. It needs the **Stable Diffusion** settings for the strength and for starting from
+and compression. It needs the **Stable Diffusion** settings, under **Advanced**, for the strength and for starting from
 noise (below).
 
 - **The result is a new picture.** The original is never changed, and the new one
@@ -169,12 +171,12 @@ noise (below).
     the editing settings is checked for every picture; one that is over it fails the whole change in its frame
     with a message such as "Picture 2 is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit",
     and nothing is sent.
-- **Strength.** With the Stable Diffusion settings on, **Strength** (0 to 1; a comma is a decimal point)
+- **Strength.** With the Stable Diffusion settings on, **Strength** under **Advanced** (0 to 1; a comma is a decimal point)
   says how far the result may go from the first picture. A high one, such as 0.75 or more, **tends** to keep
   the result close to the first picture, so that the other pictures then have little or no effect; a lower
   one gives them more influence. That is how it has been seen to behave, not a promise of what an endpoint
   does. Empty is the server's own.
-- **Starting from noise.** With the Stable Diffusion settings on, **Start from** has two ways. **The first
+- **Starting from noise.** With the Stable Diffusion settings on, **Start from**, also under **Advanced**, has two ways. **The first
   picture** (the default) is the base that is built on, and works with the strength and the mask. **Noise
   only** sends `"init_image": null` in the block, so that the run starts from noise: the description and
   all the pictures, which are still sent as `image[]`, are used as references. The strength and the mask

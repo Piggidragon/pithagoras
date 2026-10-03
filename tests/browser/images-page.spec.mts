@@ -528,7 +528,13 @@ const fillOpenAi = async (page: Page) => {
   await page.getByRole('option', { name: 'JPEG' }).click();
   await page.getByLabel('Compression').fill('80');
 };
-const stableBlock = (page: Page) => page.getByRole('group', { name: 'Stable Diffusion (stable-diffusion.cpp)' });
+/** The less usual settings are in the form's Advanced fold: opened here if it is closed. Nothing else of the form is a box of its own. */
+async function advanced(page: Page) {
+  const toggle = page.getByRole('button', { name: 'Advanced' });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  return maker(page);
+}
+const TIP = 'Using stable-diffusion.cpp? Switch on “Stable Diffusion extra settings” in Settings → Agent → Images for more options.';
 
 test('the settings of a request are sent as set, and are kept for the next visit, not the words', async ({ page }) => {
   const p = await portal(page);
@@ -578,15 +584,24 @@ test('without the Stable Diffusion switch only the OpenAI settings are there, an
   const first = pic({ prompt: 'A fox' });
   const p = await portal(page, { pictures: [first] });
   await page.goto('/images');
+  const form = await advanced(page);
   for (const name of ['Negative prompt', 'Seed', 'Steps', 'Strength']) await expect(page.getByLabel(name)).toHaveCount(0);
-  await expect(stableBlock(page)).toHaveCount(0);
+  // Under Advanced a quiet line says where more is switched on, with the way there, and the form has no box for what is not shown.
+  const tip = form.getByText(TIP);
+  await expect(tip).toBeVisible();
+  await expect(tip.getByRole('link', { name: 'Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
+  expect(await tip.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeLessThanOrEqual(12);
+  await expect(form.locator('fieldset')).toHaveCount(0);
+  await expect(page.getByRole('group', { name: /stable-diffusion/i })).toHaveCount(0);
   await expect(page.getByLabel('Width')).toHaveValue('512');
   await page.getByPlaceholder('Describe the picture').fill('A boat');
   await page.getByRole('button', { name: 'Make the picture' }).click();
   expect(p.state.generated).toEqual([{ prompt: 'A boat', size: '512x512', count: 1 }]);
   await toEdit(page);
-  await expect(stableBlock(page)).toHaveCount(0);
   await expect(page.getByRole('radio', { name: 'Noise only' })).toHaveCount(0);
+  await expect(page.getByLabel('Strength')).toHaveCount(0);
+  // The tip is there for a change as well, under the same fold.
+  await expect(maker(page).getByText(TIP)).toBeVisible();
   await tick(page, 'A fox');
   await describe(page).fill('Add a hat');
   await page.getByRole('button', { name: 'Change the picture' }).click();
@@ -594,41 +609,83 @@ test('without the Stable Diffusion switch only the OpenAI settings are there, an
   expect(p.state.edited[0]).toEqual({ prompt: 'Add a hat', sources: [first.id], count: 1 });
 });
 
-test('with the Stable Diffusion switch on the settings of stable-diffusion.cpp are one block of their own, and are sent', async ({ page }) => {
+test('with the Stable Diffusion switch on its fields are plain fields under the Advanced ones, in the same style and with no box or tip of their own, and are sent', async ({ page }) => {
   const p = await portal(page, { images: feature({ sdExtras: true }) });
   await page.goto('/images');
-  const block = stableBlock(page);
-  await expect(block).toBeVisible();
-  await expect(block).toContainText('Only stable-diffusion.cpp servers understand these');
-  await expect(block.getByRole('link', { name: 'Open the setting' })).toHaveAttribute('href', '/settings/images');
-  // Apart from the OpenAI fields: they are not inside it, and it has no model, size or format.
-  await expect(block.getByLabel('Model')).toHaveCount(0);
-  await expect(block.getByLabel('Width')).toHaveCount(0);
-  await expect(page.getByLabel('Model')).toBeVisible();
+  // Under Advanced, which is closed until it is opened: nothing of it before.
+  for (const name of ['Negative prompt', 'Seed', 'Steps']) await expect(page.getByLabel(name)).toHaveCount(0);
+  const form = await advanced(page);
+  // Not a box, not a heading of its own, and no tip of where to switch it on, since it is on.
+  await expect(form.locator('fieldset')).toHaveCount(0);
+  await expect(form.getByRole('group', { name: /stable-diffusion/i })).toHaveCount(0);
+  await expect(form.getByText('Stable Diffusion (stable-diffusion.cpp)')).toHaveCount(0);
+  await expect(form.getByText(TIP)).toHaveCount(0);
+  await expect(form.getByText(/Using stable-diffusion\.cpp\?/)).toHaveCount(0);
+  await expect(form.getByText('For stable-diffusion.cpp servers only: these are added to the description as a block that its server reads.')).toBeVisible();
   // For a new picture: no strength, and no way to start from noise.
-  await expect(block.getByLabel('Strength')).toHaveCount(0);
-  await expect(block.getByRole('radio', { name: 'Noise only' })).toHaveCount(0);
+  await expect(page.getByLabel('Strength')).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Noise only' })).toHaveCount(0);
+  // Right under the fields of the OpenAI format, in their frame and their style: the nearest box around each is the same one.
+  const frameOf = (label: string) => form.getByLabel(label).evaluate((el) => {
+    let box = el.parentElement;
+    while (box && parseFloat(getComputedStyle(box).borderTopWidth) === 0) box = box.parentElement;
+    box!.dataset.frame ??= String(Math.random());
+    return box!.dataset.frame;
+  });
+  const frame = await frameOf('Compression');
+  for (const label of ['Seed', 'Steps', 'Negative prompt']) expect(await frameOf(label), label).toBe(frame);
+  const at = async (label: string) => (await form.getByLabel(label).boundingBox())!;
+  expect((await at('Seed')).y).toBeGreaterThan((await at('Compression')).y);
+  expect((await at('Negative prompt')).y).toBeGreaterThan((await at('Seed')).y);
+  const style = (label: string) => form.getByLabel(label).evaluate((el) => { const css = getComputedStyle(el); return [css.fontSize, css.fontFamily, css.borderTopWidth, css.borderTopLeftRadius, css.height].join('|'); });
+  expect(await style('Seed')).toBe(await style('Compression'));
 
-  await block.getByLabel('Negative prompt').fill('blurry, "text"');
-  await block.getByLabel('Seed').fill('42');
-  await block.getByLabel('Steps').fill('20');
+  await form.getByLabel('Negative prompt').fill('blurry, "text"');
+  await form.getByLabel('Seed').fill('42');
+  await form.getByLabel('Steps').fill('20');
   await page.getByPlaceholder('Describe the picture').fill('A boat');
   await page.getByRole('button', { name: 'Make the picture' }).click();
   expect(p.state.generated).toEqual([{ prompt: 'A boat', negativePrompt: 'blurry, "text"', seed: 42, sampleSteps: 20, count: 1 }]);
   // Kept for the next visit, but the seed is not: it would make the same picture every time.
   await page.reload();
-  await expect(stableBlock(page).getByLabel('Negative prompt')).toHaveValue('blurry, "text"');
-  await expect(stableBlock(page).getByLabel('Steps')).toHaveValue('20');
-  await expect(stableBlock(page).getByLabel('Seed')).toHaveValue('');
+  const again = await advanced(page);
+  await expect(again.getByLabel('Negative prompt')).toHaveValue('blurry, "text"');
+  await expect(again.getByLabel('Steps')).toHaveValue('20');
+  await expect(again.getByLabel('Seed')).toHaveValue('');
 });
 
-test('in Edit the block has a strength and a start from noise: the strength is for the picture that is built on, and neither it nor a mask goes without one', async ({ page }) => {
+test('the fields of stable-diffusion.cpp are there only while the switch is on: it comes on with the page, and takes them away again, and the tip with it', async ({ page }) => {
+  const feat = feature({ sdExtras: false });
+  const p = await portal(page, { images: feat });
+  await page.goto('/images');
+  const form = await advanced(page);
+  await expect(form.getByText(TIP)).toBeVisible();
+  await expect(page.getByLabel('Seed')).toHaveCount(0);
+  // Another visit, with the switch on in Settings meanwhile.
+  Object.assign(feat, { sdExtras: true });
+  await page.reload();
+  const on = await advanced(page);
+  await expect(on.getByLabel('Seed')).toBeVisible();
+  await expect(on.getByText(TIP)).toHaveCount(0);
+  Object.assign(feat, { sdExtras: false });
+  await page.reload();
+  const off = await advanced(page);
+  await expect(off.getByLabel('Seed')).toHaveCount(0);
+  await expect(off.getByText(TIP)).toBeVisible();
+  expect(p.state.generated).toEqual([]);
+});
+
+test('in Edit its fields have a strength and a start from noise: the strength is for the picture that is built on, and neither it nor a mask goes without one', async ({ page }) => {
   const first = pic({ prompt: 'A fox' });
   const second = pic({ prompt: 'A hat' });
   const p = await portal(page, { pictures: [first, second], images: feature({ sdExtras: true, editMultiple: true }) });
   await page.goto('/images');
   await pick(page, 'A fox', 'A hat');
-  const block = stableBlock(page);
+  // Under Advanced like the rest: nothing of it while the fold is shut, and no box of its own once it is open.
+  await expect(page.getByLabel('Strength')).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Noise only' })).toHaveCount(0);
+  const block = await advanced(page);
+  await expect(block.locator('fieldset')).toHaveCount(0);
   await block.getByLabel('Strength').fill('0,75');
   await expect(block.getByRole('radio', { name: 'The first picture' })).toHaveAttribute('aria-checked', 'true');
   await expect(block).toContainText('The first picture is the base that is built on. Strength and a mask work on it.');
@@ -658,7 +715,7 @@ test('in Edit the block has a strength and a start from noise: the strength is f
   await block.getByRole('radio', { name: 'Noise only' }).click();
   await page.reload();
   await toEdit(page);
-  await expect(stableBlock(page).getByRole('radio', { name: 'The first picture' })).toHaveAttribute('aria-checked', 'true');
+  await expect((await advanced(page)).getByRole('radio', { name: 'The first picture' })).toHaveAttribute('aria-checked', 'true');
 });
 
 test('a setting that is wrong is said, with the field it is in marked and focused, and nothing is sent', async ({ page }) => {
@@ -692,7 +749,16 @@ test('a setting that is wrong is said, with the field it is in marked and focuse
   await expect(page.getByLabel('Compression')).toBeFocused();
   await page.getByLabel('Compression').fill('');
 
-  const block = stableBlock(page);
+  // The same fold, with the fields of stable-diffusion.cpp in it: opened again where a problem is in one of them.
+  const block = maker(page);
+  await block.getByLabel('Seed').fill('1.5');
+  await page.getByRole('button', { name: 'Advanced' }).click();
+  await expect(page.getByLabel('Seed')).toHaveCount(0);
+  await make.click();
+  await expect(alert).toHaveText('The seed is a whole number, 0 or more, or -1 for a random one.');
+  await expect(page.getByRole('button', { name: 'Advanced' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByLabel('Seed')).toBeFocused();
+  await page.getByLabel('Seed').fill('');
   for (const [label, value, message] of [
     ['Seed', '1.5', 'The seed is a whole number, 0 or more, or -1 for a random one.'],
     ['Seed', '-2', 'The seed is a whole number, 0 or more, or -1 for a random one.'],

@@ -567,7 +567,7 @@ test('Stable Diffusion extra settings is a switch of its own, off by default, th
   // It is a setting of the endpoint, not of a tool: no address is needed to say it, and nothing reloads.
   await sd.click();
   await expect(sd).toHaveAttribute('aria-checked', 'true');
-  await expect(panel.getByText('On: the Images page shows a block of settings that only stable-diffusion.cpp servers understand, and sends them in the description.')).toBeVisible();
+  await expect(panel.getByText('On: the Images page shows settings that only stable-diffusion.cpp servers understand, under Advanced, and sends them in the description.')).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ sdExtras: true });
   await expect(panel.getByText(/one busy chat picks it up/)).toHaveCount(0);
   await sd.click();
