@@ -3,6 +3,8 @@ import { LuCheck, LuTerminal, LuX } from "react-icons/lu";
 import { api } from "../api";
 import { isEnter, isEscape } from "../shortcuts";
 import { t } from "../i18n";
+import { useLeaveRef } from "../motion";
+import { useDialogFocus } from "../dialog-focus";
 
 export interface UiRequest {
   id: string;
@@ -31,6 +33,9 @@ export function ExtensionDialog({
   const [value, setValue] = useState(request.defaultValue ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The same entrance, exit and keyboard as the portal's other dialogs.
+  const leaving = useLeaveRef<HTMLDivElement>("dialog");
+  const dialog = useDialogFocus<HTMLDivElement>();
 
   const respond = async (payload: { value?: unknown; cancelled?: boolean }) => {
     if (busy) return;
@@ -58,14 +63,17 @@ export function ExtensionDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
+      ref={leaving}
+      className="ui-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && respond({ cancelled: true })}
     >
       <div
+        ref={dialog}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={request.title || t("Extension")}
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-line bg-surface shadow-pop"
+        className="ui-dialog w-full max-w-md overflow-hidden outline-none rounded-2xl border border-line bg-surface shadow-pop"
       >
         <header className="flex items-start gap-3 border-b border-line px-4 py-3">
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/12 text-accent">
@@ -80,6 +88,7 @@ export function ExtensionDialog({
           <button
             onClick={() => respond({ cancelled: true })}
             className="rounded-lg p-1 text-fg-subtle transition hover:bg-fg/10 hover:text-fg"
+            aria-label={t("Close")}
           >
             <LuX className="h-4 w-4" />
           </button>

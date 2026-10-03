@@ -88,6 +88,8 @@ English and German. See [Settings → Language](/guide/settings#language).
 
 On a phone the sidebar's rail gives way to a compact layout with larger
 touch targets. The same pages and settings are there; nothing is left out.
+The navigation opens as a drawer over the page; Esc closes it, and a window
+widened past the phone layout closes it too.
 
 On a wide screen the chat's panels — the browser, the terminal, Files, Git,
 canvases — dock beside the conversation, each on its own side. See
@@ -142,3 +144,7 @@ another `PORT`.
 
 **Settings → Shortcuts** lists them, and the voice-mode ones can be changed —
 see [Settings](/guide/settings#shortcuts).
+
+Dialogs, an extension's question and the phone's navigation drawer take the
+keyboard when they open: focus moves into them, Tab goes round them instead of
+into the page behind, and Esc (or closing them) puts focus back where it was.

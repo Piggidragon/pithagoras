@@ -17,6 +17,7 @@ const de: Locale = {
     "Dismiss navigation": "Navigation schließen",
     "Close navigation": "Navigation schließen",
     "Open navigation": "Navigation öffnen",
+    "Navigation": "Navigation",
     "Lost the connection to the portal — trying again. What is shown may be out of date.": "Verbindung zum Portal verloren — neuer Versuch läuft. Was hier steht, ist vielleicht nicht mehr aktuell.",
     "Pick a session from the list.": "Wähle eine Sitzung aus der Liste.",
     "Start a session to get going.": "Starte eine Sitzung, um loszulegen.",

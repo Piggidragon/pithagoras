@@ -32,6 +32,7 @@ import { usePlaces } from "./use-session-folders";
 import { fancy, keep, swapPages, type Leave } from "./motion";
 import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
+import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
@@ -147,6 +148,15 @@ function Shell({
   const navigate = useNavigate();
   const [mobileNav, setMobileNav] = useState(false);
   useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
+  // The drawer covers the page and keeps the keyboard; widened to a window with the sidebar in place, it is only the sidebar.
+  const drawer = useDialogFocus<HTMLDivElement>(mobileNav);
+  useEffect(() => {
+    if (!mobileNav) return;
+    const wide = window.matchMedia("(min-width: 768px)");
+    const onChange = () => wide.matches && setMobileNav(false);
+    wide.addEventListener("change", onChange);
+    return () => wide.removeEventListener("change", onChange);
+  }, [mobileNav]);
 
   // A moment after the portal has drawn: fetch what Settings opens on, and
   // offer the setup assistant while there is no model to talk to.
@@ -647,7 +657,14 @@ function Shell({
   return (
     <div data-fits-keyboard className="flex h-[calc(100dvh-var(--keyboard,0px))] min-h-0 overflow-hidden bg-canvas">
       {mobileNav && <button aria-label={t("Dismiss navigation")} onClick={() => setMobileNav(false)} className="ui-backdrop fixed inset-0 z-40 bg-black/50 md:hidden" />}
-      <div id="mobile-navigation" className={`${mobileNav ? "mobile-drawer fixed inset-y-0 left-0 z-50 flex" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
+      <div
+        id="mobile-navigation"
+        ref={drawer}
+        tabIndex={mobileNav ? -1 : undefined}
+        role={mobileNav ? "dialog" : undefined}
+        aria-modal={mobileNav ? true : undefined}
+        aria-label={mobileNav ? t("Navigation") : undefined}
+        className={`${mobileNav ? "mobile-drawer fixed inset-y-0 left-0 z-50 flex outline-none" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
       {mobileNav && <button type="button" aria-label={t("Close navigation")} onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-20 rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
       <Sidebar
         forceExpanded={mobileNav}

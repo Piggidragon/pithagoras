@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { LuChevronLeft, LuX } from "react-icons/lu";
 import { isEscape } from "../shortcuts";
 import { useLeaveRef } from "../motion";
+import { useDialogFocus } from "../dialog-focus";
 import { t } from "../i18n";
 
 /**
@@ -39,6 +40,7 @@ export function Modal({
   const [inRail, setInRail] = useState(startInRail);
   // Closed, it sinks away as a picture of itself (see motion.ts).
   const leaving = useLeaveRef<HTMLDivElement>("dialog");
+  const dialog = useDialogFocus<HTMLDivElement>();
   // Only for its first moment, so that what comes in with it (the rail's lines) does not come in again when it is drawn again.
   const [fresh, setFresh] = useState(true);
   useEffect(() => {
@@ -65,10 +67,12 @@ export function Modal({
           and re-centred from one to the next, and the rail moved under the
           pointer that had just picked from it. */}
       <div
+        ref={dialog}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === "string" ? title : undefined}
-        className={`ui-dialog${fresh ? " is-fresh" : ""} flex max-h-[94dvh] w-full sm:max-h-[88vh] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
+        className={`ui-dialog${fresh ? " is-fresh" : ""} outline-none flex max-h-[94dvh] w-full sm:max-h-[88vh] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
           // Grows with the viewport rather than to it: the rail plus a settings
           // form has a comfortable width, and a 34-inch screen should not
           // stretch a two-column form across all of it.
