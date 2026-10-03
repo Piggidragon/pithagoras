@@ -160,4 +160,11 @@ the message box — are listed there too, and are fixed.
 
 pi's raw `settings.json`, edited in place. It is validated as JSON before
 writing — a broken file stops every future session from starting, so an invalid
-save is refused rather than accepted.
+save is refused rather than accepted. It has to be an object, and what a save
+replaces is kept beside the file as `settings.json.bak`.
+
+If you edit the file by hand and leave it unreadable, the other places that
+write to it (the compaction slider, the extension switches and forms) refuse to
+change it and say so, rather than starting over from an empty file and losing
+your packages and defaults. Put it right here, or in your editor, and save
+again.

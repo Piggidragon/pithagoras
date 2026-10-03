@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { piSetting, readPiSettings, readProjectPiSettings, updatePiSettings } from "./pi-settings.js";
+import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
@@ -2139,16 +2139,15 @@ export function forgetPackageTools(spec: string): void {
  */
 export async function packageRemoved(source: string): Promise<void> {
   forgetPackageTools(source);
-  await updatePiSettings(
-    () => {},
-    () => {
-      const stash = extensionStash();
-      if (source in stash) {
-        delete stash[source];
-        setExtensionStash(stash);
-      }
-    },
-  );
+  // The file itself is not touched: pi has just taken the package out of it,
+  // and one the portal cannot read must not fail the removal that is done.
+  await inTurnWithSettings(() => {
+    const stash = extensionStash();
+    if (source in stash) {
+      delete stash[source];
+      setExtensionStash(stash);
+    }
+  });
 }
 
 /**

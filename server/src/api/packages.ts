@@ -1,8 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { piSettingsPath } from "../pi-settings.js";
+import { existsSync, readFileSync } from "node:fs";
+import { piSettingsPath, writePiSettingsText } from "../pi-settings.js";
 import { packageRemoved } from "../db.js";
 import express, { type Router } from "express";
 import { searchCatalog } from "../catalog.js";
@@ -108,21 +107,24 @@ export function packagesRouter(): Router {
     }
   });
 
-  router.put("/pi-settings", (req, res) => {
+  router.put("/pi-settings", async (req, res) => {
     const content = req.body?.content;
     if (typeof content !== "string") return res.status(400).json({ error: "content required" });
     // Refuse to write anything pi could not parse — a broken settings.json
     // stops every future session from starting.
+    let parsed: unknown;
     try {
-      JSON.parse(content);
+      parsed = JSON.parse(content);
     } catch (e) {
       return res.status(400).json({ error: `Not valid JSON: ${(e as Error).message}` });
     }
-    const file = piSettingsPath();
+    // An object, as every other change of the file takes it to be.
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return res.status(400).json({ error: "settings.json must be a JSON object" });
+    }
     try {
-      mkdirSync(path.dirname(file), { recursive: true });
-      writeFileSync(file, content, "utf8");
-      res.json({ ok: true, path: file, note: "Applies to newly started sessions" });
+      await writePiSettingsText(content);
+      res.json({ ok: true, path: piSettingsPath(), note: "Applies to newly started sessions" });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
