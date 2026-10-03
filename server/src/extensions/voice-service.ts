@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { containerState, dockerAvailable, imagePresent, pullImage, request } from './docker.js';
-import { asrDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, speechUrl, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, whisperUrl as managedWhisperUrl, type Gpu, type Host, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
+import { asrDevice, ttsDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, speechUrl, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, whisperUrl as managedWhisperUrl, type Gpu, type Host, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
 import { NoGpu, askedCard, cardOf, decide, detectGpus, deviceId, explain, holds, hostProbe, isNoGpu, readHost, SMI_ARGS, type Card, type Detected, type Probe } from '../voice-gpu.js';
 
 export const CONTAINER = 'pithagoras-voice';
@@ -87,8 +87,8 @@ export function containerSpec(script: string, networkMode: string, choice: Voice
   const gpu = plan.card ? { DeviceIDs: [deviceId(plan.card)] } : { Count: 1 };
   const server = serverConfig(choice), cpuServer = cpuServerConfig(choice, plan.threads);
   return { Image: imageFor(choice), Tty: true, Cmd: ['bash', '-c', script],
-    Env: [`VOICE_TTS=${choice.tts}`, `VOICE_ASR=${choice.asr}`, `VOICE_ASR_MODEL=${choice.asrModel}`, `VOICE_ASR_DEVICE=${asrDevice(choice)}`,
-      ...(server ? [`VOICE_SERVER_CONFIG=${JSON.stringify(server)}`] : []), ...(cpuServer ? [`VOICE_ASR_CPU_CONFIG=${JSON.stringify(cpuServer)}`] : []),
+    Env: [`VOICE_TTS=${choice.tts}`, ...(ttsDevice(choice) ? [`VOICE_TTS_DEVICE=${ttsDevice(choice)}`] : []), `VOICE_ASR=${choice.asr}`, `VOICE_ASR_MODEL=${choice.asrModel}`, `VOICE_ASR_DEVICE=${asrDevice(choice)}`,
+      ...(server ? [`VOICE_SERVER_CONFIG=${JSON.stringify(server)}`] : []), ...(cpuServer ? [`VOICE_CPU_CONFIG=${JSON.stringify(cpuServer)}`] : []),
       ...(plan.threads ? [`VOICE_THREADS=${plan.threads}`] : []), ...(plan.note ? [`VOICE_PLAN=${plan.note}`] : [])],
     Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1', 'pithagoras.voice-recipe': choiceKey(choice) },
     HostConfig: { Binds: [`${VOLUME}:/voice`], NetworkMode: networkMode,
@@ -229,7 +229,7 @@ export const hostReader = { read: (): Host => readHost() };
 
 /**
  * What the GPU check finds, and what it would suggest, for the page to show before anything is installed.
- * `cpuOnly` is that the check found there is no GPU: what is suggested is then recognition alone on the CPU.
+ * `cpuOnly` is that the check found there is no GPU: what is suggested is then Kokoro on the CPU, or recognition alone on the CPU where the host is too small for it.
  * `selected` is the card it would use: the one asked for, by the choice on the page (`chosen`, a UUID) or by `VOICE_GPU`; else, with a container,
  * the one it is on and not the one with the most room, as the memory the service holds is what makes its own card look full.
  */
@@ -302,8 +302,8 @@ export async function install(requested?: VoiceChoice) {
         await ensureImage(imageFor(existing.choice), line => { progress = line; });
       }
       const final = choice ?? DEFAULT_CHOICE;
-      // Recognition on the CPU gets the threads the host has, up to the ones its speeds were measured on; what is on the GPU keeps its four.
-      if (!usesGpu(final) || (final.asr === 'qwen3-asr' && asrDevice(final) === 'cpu')) plan.threads = cpuThreads(hostReader.read().threads);
+      // What runs on the CPU gets the threads the host has, up to the ones its speeds were measured on; what is on the GPU keeps its four.
+      if (!usesGpu(final) || (final.asr === 'qwen3-asr' && asrDevice(final) === 'cpu') || ttsDevice(final) === 'cpu') plan.threads = cpuThreads(hostReader.read().threads);
       await ensureContainer(script, final, plan);
     } catch (e) { error = explain((e as Error).message); }
     finally { pending = false; }
@@ -347,8 +347,9 @@ export async function uninstall(removeData = false) {
   } finally { pending = false; }
 }
 
-export async function modelAction(action:'load'|'unload', engine: TtsEngine = 'breeze') {
+/** `port` is the audio.cpp process the engine is in: the GPU one, unless speech is put on the CPU. */
+export async function modelAction(action:'load'|'unload', engine: TtsEngine = 'breeze', port = SPEECH_PORT) {
   const model = ttsModel(engine);
-  const response=await fetch(`http://127.0.0.1:${SPEECH_PORT}/v1/models/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(action==='load'?model:{id:model.id}),signal:AbortSignal.timeout(120000)});
+  const response=await fetch(`http://127.0.0.1:${port}/v1/models/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(action==='load'?model:{id:model.id}),signal:AbortSignal.timeout(120000)});
   if(!response.ok)throw new Error(`Voice model ${action} failed (${response.status}): ${(await response.text()).slice(0,300)}`);
 }

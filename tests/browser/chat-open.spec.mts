@@ -38,7 +38,8 @@ async function portal(page: Page, opts: { streamsOpen?: boolean; listHangs?: boo
     else if (p === '/api/sessions/a/config' && method === 'POST') {
       picked = true;
       reply = { ok: true, applied: ['model'], state: { model: qwen, thinkingLevel: 'medium' } };
-    } else if (p === '/api/sessions/a/config') {
+    } else if (p === '/api/sessions/a/config' || p === '/api/sessions/a/models') {
+      // The model menu fetches the catalogue where the browser has none cached, and is answered as the config is.
       reply = picked ? { ...config(qwen, ALL, { provider: 'llama-swap', model: qwen.id }), live: true } : config(ornith, ['off', 'medium']);
     } else if (p === '/api/sessions/c/config') reply = config(ornith, ['off', 'medium'], { provider: 'llama-swap', model: null });
     // The default is Qwen now, and pi's catalogue has not said its levels yet.
