@@ -48,6 +48,27 @@ test('the portal can be switched to German and back, and keeps the choice', asyn
   await expect(page.getByRole('dialog').getByText('Appearance', { exact: true })).toBeVisible();
 });
 
+/** Which files of the portal's languages the page asked for. */
+const askedForLanguages = (page: Page) => {
+  const asked: string[] = [];
+  page.on('request', (r) => {
+    const path = new URL(r.url()).pathname;
+    if (/\/locales\/(?!index)[\w-]+(\.ts|-[\w-]+\.js)$/.test(path)) asked.push(path);
+  });
+  return asked;
+};
+
+test('an English page does not fetch the German text, and picking German fetches it then', async ({ page }) => {
+  await portal(page);
+  const asked = askedForLanguages(page);
+  await page.goto('/settings/browser');
+  await expect(page.getByRole('dialog').getByText('Appearance', { exact: true })).toBeVisible();
+  expect(asked).toEqual([]);
+  await pickLanguage(page, /^Deutsch/);
+  await expect(page.getByRole('dialog').getByText('Darstellung', { exact: true })).toBeVisible();
+  expect(asked).toHaveLength(1);
+});
+
 test.describe('in a browser set to German', () => {
   test.use({ locale: 'de-DE' });
 
@@ -67,6 +88,23 @@ test.describe('in a browser set to German', () => {
     // Back to the browser's.
     await pickLanguage(page, /^Match the browser/);
     await expect(page.getByRole('dialog').getByText('Darstellung', { exact: true })).toBeVisible();
+  });
+
+  test('the German text is there before the first draw, not English for a moment first', async ({ page }) => {
+    await portal(page);
+    const asked = askedForLanguages(page);
+    // The first words of the page, in whatever language they are drawn: seen as they are drawn.
+    await page.addInitScript(() => {
+      (window as any).words = [];
+      new MutationObserver(() => {
+        const text = document.body?.innerText ?? '';
+        if (/Sitzungen|Sessions/.test(text) && !(window as any).words.length) (window as any).words.push(/Sitzungen/.test(text) ? 'de' : 'en');
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await page.goto('/sessions');
+    await expect(page.getByRole('button', { name: 'Sitzungen' }).first()).toBeVisible();
+    expect(asked).toHaveLength(1);
+    expect(await page.evaluate(() => (window as any).words)).toEqual(['de']);
   });
 
   test('a setting is found by its German name and by its English one', async ({ page }) => {

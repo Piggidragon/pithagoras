@@ -126,8 +126,10 @@ written the language's way. It changes the portal's words only: what the agent
 writes is up to the agent, and messages that come from the server — an error it
 reports, a channel's own description — stay as they are.
 
-A language is one file in `web/src/locales/`, mapping each English text to its
-own; adding one means adding that file, and the tests list what it lacks.
+A language is one file in `web/src/locales/`, named by its language code
+(`de.ts`), mapping each English text to its own; adding one means adding that
+file, and the tests list what it lacks. A page fetches only the file of the
+language it is in, so an English page does not carry the German text.
 
 ## Add-ons
 
