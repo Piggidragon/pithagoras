@@ -134,13 +134,16 @@ export class ContainerExecutor implements Executor {
 
 
 
+    // By name only: docker copies the value from its own environment, which is
+    // this one, and a value on the command line is readable by anybody on the
+    // host who lists processes while the task runs.
     const passthrough = [
       "OPENROUTER_API_KEY",
       "ANTHROPIC_API_KEY",
       "OPENAI_API_KEY",
       "PI_PROVIDER",
       "PI_MODEL",
-    ].flatMap((key) => (process.env[key] ? ["-e", `${key}=${process.env[key]}`] : []));
+    ].flatMap((key) => (process.env[key] ? ["-e", key] : []));
 
     const args = [
       "run",

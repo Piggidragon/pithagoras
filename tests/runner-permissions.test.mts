@@ -21,3 +21,21 @@ test('runner uses the portal uid/gid and a pre-created private session directory
   assert.ok(args.includes('--rm'));assert.ok(args.includes('no-new-privileges'));assert.ok(args.includes('ALL'));
  }finally{process.env.PATH=saved;if(prior===undefined)delete process.env.ARG_FILE;else process.env.ARG_FILE=prior;rmSync(temp,{recursive:true,force:true});}
 });
+
+test('provider keys reach the container by name, never as a value on the docker command line',async()=>{
+ const temp=mkdtempSync(join(tmpdir(),'pitha-runner-keys-'));const saved={PATH:process.env.PATH,ARG_FILE:process.env.ARG_FILE,KEY_FILE:process.env.KEY_FILE,OPENROUTER_API_KEY:process.env.OPENROUTER_API_KEY,PI_MODEL:process.env.PI_MODEL};
+ process.env.PATH=temp+':'+saved.PATH;process.env.ARG_FILE=join(temp,'args');process.env.KEY_FILE=join(temp,'key');
+ process.env.OPENROUTER_API_KEY='sk-or-example-secret-value';process.env.PI_MODEL='some/model';
+ // Records its arguments, and the one key as docker would copy it from its environment.
+ writeFileSync(join(temp,'docker'),'#!/bin/sh\nprintf "%s\\n" "$@" > "$ARG_FILE"\nprintf "%s" "$OPENROUTER_API_KEY" > "$KEY_FILE"\nif [ "$1" = "container" ] && [ "$2" = "inspect" ]; then echo "Error: No such container: $3" >&2; exit 1; fi\n',{mode:0o755});
+ try {
+  const executor=new ContainerExecutor('test-runner',join(temp,'sessions'),{memoryMb:2048,cpus:2,pidsLimit:512});
+  const client=await executor.launch({sessionId:'abc',workspacePath:temp});
+  await new Promise<void>(resolve=>client.on('exit',()=>resolve()));
+  const args=readFileSync(process.env.ARG_FILE!,'utf8').split('\n');
+  assert.ok(args.some((a,i)=>a==='OPENROUTER_API_KEY'&&args[i-1]==='-e'),'named, so that docker takes the value from its environment');
+  assert.ok(args.some((a,i)=>a==='PI_MODEL'&&args[i-1]==='-e'));
+  assert.equal(args.join('\n').includes('sk-or-example-secret-value'),false,'the value is not in the arguments');
+  assert.equal(readFileSync(process.env.KEY_FILE!,'utf8'),'sk-or-example-secret-value','and docker still has it in its environment to copy');
+ }finally{for(const [k,v] of Object.entries(saved)){if(v===undefined)delete process.env[k];else process.env[k]=v;}rmSync(temp,{recursive:true,force:true});}
+});
