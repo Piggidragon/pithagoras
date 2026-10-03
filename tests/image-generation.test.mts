@@ -73,11 +73,11 @@ function parts(seen: Seen): Record<string, { filename?: string; type?: string; b
 const json = (res: ServerResponse, body: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
 const b64 = (bytes: Buffer) => bytes.toString("base64");
 const config = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageGenerationConfig>> = {}) => ({
-  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300, ...more,
+  enabled: true, baseUrl, model: "image-model", size: "", apiKey: KEY, editEnabled: false, editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300, sdExtras: false, ...more,
 });
 /** What the page is told of a fresh install, with `more` changed. */
 const fresh = (more: Record<string, unknown> = {}) => ({
-  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300, editKeySet: false, editReady: false, ...more,
+  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300, sdExtras: false, editKeySet: false, editReady: false, ...more,
 });
 
 test("a request is checked: the address is a base with no secret in it, the size a real one", () => {
@@ -618,7 +618,7 @@ test("an extension's tool of the same name is the one pi keeps, so the portal's 
 
 /** As a fresh install has the settings, whatever the tests before left. */
 const reset = () => gen.saveImageGeneration({
-  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300,
+  enabled: false, editEnabled: false, baseUrl: "", model: "", size: "", apiKey: "", editBaseUrl: "", editModel: "", editApiKey: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300, sdExtras: false,
 });
 
 test("a request for editing is checked as one for generation is", () => {
@@ -668,7 +668,7 @@ test("a key goes only to the server it was given for: generation's never to anot
   reset();
   const target = gen.imageEditingTarget;
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", apiKey: KEY, editEnabled: true, editModel: "edit-model" });
-  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY, multiple: false, maxSize: "", timeoutSeconds: 300 }, "edits to the generation server have its key");
+  assert.deepEqual(target(), { baseUrl: "https://images.example.com/v1", model: "edit-model", apiKey: KEY, multiple: false, maxSize: "", timeoutSeconds: 300, sdExtras: false }, "edits to the generation server have its key");
   assert.equal(target().model, "edit-model", "and never the model of generation, which may only make pictures");
 
   gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
@@ -712,7 +712,7 @@ test("the route for edits is added to the address unless it is there, and genera
   assert.equal(editing.editEndpointUrl("http://localhost:8080").href, "http://localhost:8080/images/edits");
 });
 
-const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, multiple: false, maxSize: "", timeoutSeconds: 300, ...more });
+const target = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageEditingTarget>> = {}) => ({ baseUrl, model: "edit-model", apiKey: KEY, multiple: false, maxSize: "", timeoutSeconds: 300, sdExtras: false, ...more });
 
 test("an edit is a form with the picture, the prompt and the model, sent with the key to this address", async () => {
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
@@ -744,6 +744,34 @@ test("an edit is a form with the picture, the prompt and the model, sent with th
     assert.equal(withMask.image.type, "image/webp");
     assert.equal(seen[1].auth, undefined);
     assert.equal(seen[1].url, "/images/edits");
+  } finally {
+    server.close();
+  }
+});
+
+test("an edit has the OpenAI fields as fields, and what only stable-diffusion.cpp reads in the prompt, which is left out while the switch for it is off", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  const ask = { prompt: "make it night", image: [PNG, WEBP], model: "page-model", size: "512x768", outputFormat: "webp" as const, outputCompression: 70, native: { fromNoise: true, seed: 9, negativePrompt: "blurry" } };
+  try {
+    await editing.editImage(target(origin, { multiple: true, sdExtras: true }), ask);
+    const on = parts(seen[0]);
+    assert.deepEqual(Object.keys(on).sort(), ["image[]", "model", "n", "output_compression", "output_format", "prompt", "size"].sort(), "a field of the format, or nothing: no seed, no strength, no init_image");
+    assert.equal(on.model.bytes.toString(), "page-model", "the form's model, not the saved one");
+    assert.equal(on.size.bytes.toString(), "512x768");
+    assert.equal(on.output_format.bytes.toString(), "webp");
+    assert.equal(on.output_compression.bytes.toString(), "70");
+    const prompt = on.prompt.bytes.toString();
+    assert.ok(prompt.startsWith("make it night <sd_cpp_extra_args>"));
+    assert.deepEqual(JSON.parse(/<sd_cpp_extra_args>(.*)<\/sd_cpp_extra_args>$/.exec(prompt)![1]), { init_image: null, negative_prompt: "blurry", seed: 9 });
+
+    // The switch off: the same ask sends the description as it is, whatever the request carries.
+    await editing.editImage(target(origin, { multiple: true, sdExtras: false }), ask);
+    const off = parts(seen[1]);
+    assert.equal(off.prompt.bytes.toString(), "make it night");
+    assert.deepEqual(Object.keys(off).sort(), Object.keys(on).sort(), "the rest is as it was");
+    // Nothing set, nothing added, with the switch on as well.
+    await editing.editImage(target(origin, { sdExtras: true }), { prompt: "plain", image: PNG, native: {} });
+    assert.equal(parts(seen[2]).prompt.bytes.toString(), "plain");
   } finally {
     server.close();
   }
@@ -886,12 +914,12 @@ test("a picture that takes longer than the old limit is waited for, one past the
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 1 }), { prompt: "p" }), (e: Error) => {
       assert.ok(e instanceof gen.ImageGenerationError);
       assert.match(e.message, /did not answer within 1 seconds/, "it names the limit");
-      assert.match(e.message, /time limit in Settings → Images/, "and where to change it");
+      assert.match(e.message, /time limit in Settings → Agent → Images/, "and where to change it");
       return true;
     });
     // Editing has the same limit, from its target.
     assert.equal((await editing.editImage(target(origin, { timeoutSeconds: 3 }), { prompt: "p", image: PNG })).ext, "png");
-    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Images/);
+    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Agent → Images/);
     // An explicit limit of the call still wins, as the tests above use it.
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 3 }), { prompt: "p" }, { timeoutMs: 150 }), /did not answer within 0 seconds/);
   } finally {
@@ -922,6 +950,36 @@ test("a request may say the editing endpoint takes several pictures, and it is o
   // It is the edit tool's shape, so it counts only while there is one.
   gen.saveImageGeneration({ editEnabled: false });
   assert.equal(gen.imageEditingMultiple(), false);
+  reset();
+});
+
+test("what only stable-diffusion.cpp reads is said of the endpoint: either address moving to another server takes the switch off, or the page would send it a block it takes as words", () => {
+  reset();
+  gen.saveImageGeneration({ baseUrl: "http://sd-box.example:1234/v1", enabled: true, editEnabled: true, sdExtras: true });
+  gen.saveImageGeneration({ baseUrl: "http://sd-box.example:1234/v2", model: "m" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true, "the same server by another route");
+  gen.saveImageGeneration({ editBaseUrl: "http://sd-box.example:1234/edit" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true, "and by an address of its own");
+  gen.saveImageGeneration({ baseUrl: "https://api.other.example/v1" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, false, "generation moved");
+  assert.equal(gen.imageGenerationState().sdExtras, false);
+  assert.equal(gen.imageEditingTarget().sdExtras, false);
+  // Said again, it is what was said for the new server; and in the same save as the move, too.
+  gen.saveImageGeneration({ sdExtras: true });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true);
+  gen.saveImageGeneration({ baseUrl: "https://third.example.org/v1", sdExtras: true });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true);
+  // Edits that go elsewhere than generation, moved to another server: one switch covers both, so it goes off.
+  gen.saveImageGeneration({ editBaseUrl: "https://edit.example.net/v1" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, false, "edits moved");
+  // A first address is no move: it may be given with the switch, or before it.
+  reset();
+  gen.saveImageGeneration({ sdExtras: true });
+  gen.saveImageGeneration({ baseUrl: "http://sd-box.example:1234/v1", enabled: true });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true);
+  // Edits that follow generation's address follow its server.
+  gen.saveImageGeneration({ baseUrl: "https://elsewhere.example.org/v1" });
+  assert.equal(gen.imageGenerationConfig().sdExtras, false);
   reset();
 });
 
@@ -1279,6 +1337,52 @@ test("an endpoint that takes one picture gets a tool with one path, and one that
   gen.saveImageGeneration({ editEnabled: false });
   assert.deepEqual(loadEdit(folder).registered, []);
   reset();
+});
+
+test("an agent whose endpoint takes one picture is told so, and what to do about several, rather than left to use one and say nothing", () => {
+  reset();
+  const folder = chatWith();
+  gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true });
+  const one = loadEdit(folder).registered[0];
+  assert.match(one.description, /set up to take ONE picture per edit/, "the limit is said, not left out");
+  assert.match(one.description, /do not make the edit with one of them as if it were all/, "no picture is dropped without a word");
+  assert.match(one.description, /Settings → Agent → Images \(Several pictures per edit\)/, "and where several are switched on");
+  assert.match(one.description, /reference for a new picture/, "one reference picture is still what it can be given");
+  const attached = /attached to a message is not a file in the chat's folder, so it cannot be given here[^]*Files panel[^]*Images page/;
+  assert.match(one.description, attached, "a picture only attached to a message has no path: the agent says so rather than guess one");
+
+  // With several taken, the same sentence is not there, and the limits are: the count and the weight.
+  gen.saveImageGeneration({ editMultiple: true });
+  const many = loadEdit(folder).registered[0];
+  assert.doesNotMatch(many.description, /ONE picture|as if it were all/);
+  assert.match(many.description, new RegExp(`one to ${editing.MAX_EDIT_PICTURES} pictures`));
+  assert.match(many.description, new RegExp(`at most ${editing.MAX_EDIT_TOTAL_BYTES / 1024 / 1024} MB`));
+  assert.match(many.description, /size limit set for edits is refused, and the error names it/);
+  assert.match(many.description, attached, "and the same for a list: attached pictures cannot be named in it");
+  reset();
+});
+
+test("a list of pictures for an endpoint that takes one is refused before anything is sent, with the count and the switch that changes it", async () => {
+  const folder = chatWith({ "a.png": PNG, "b.jpg": JPEG, "c.gif": GIF });
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, editEnabled: true });
+    // A call that was loaded when several were on, or by a model that sends a list anyway: asked of the setting as it is now.
+    await assert.rejects(
+      loadEdit(folder).call({ paths: ["a.png", "b.jpg", "c.gif"], prompt: "p" }),
+      /not set up to take several pictures, so none was sent \(3 were given\)\. .*"Several pictures per edit" can be switched on in Settings → Agent → Images/,
+    );
+    assert.equal(seen.length, 0, "nothing reached the endpoint");
+    assert.deepEqual(readdirSync(folder).sort(), ["a.png", "b.jpg", "c.gif"], "and nothing was written");
+    // Switched on, the same three go, in one request, as image[] each.
+    gen.saveImageGeneration({ editMultiple: true });
+    await loadEdit(folder).call({ paths: ["a.png", "b.jpg", "c.gif"], prompt: "p" });
+    assert.equal(partList(seen[0]).filter((part) => part.name === "image[]").length, 3);
+  } finally {
+    server.close();
+    reset();
+  }
 });
 
 test("the tool makes one picture of several, in the order given, named after the first, and the originals stay", async () => {
@@ -1747,7 +1851,7 @@ test("edit_image tells the agent that the maximum size is exceeded, and sends an
     reset();
     gen.saveImageGeneration({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "2048x2048" });
     const { call } = loadEdit(folder);
-    await assert.rejects(call({ path: "wide.png", prompt: "p" }), /^Error: The image is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit\. Nothing was sent\..*Settings → Images/);
+    await assert.rejects(call({ path: "wide.png", prompt: "p" }), /^Error: The image is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit\. Nothing was sent\..*Settings → Agent → Images/);
     await assert.rejects(call({ paths: ["small.png", "tall.png"], prompt: "p" }), /^Error: Picture 2 is 300x3000 pixels, which is over the maximum of 2048x2048/);
     assert.equal(seen.length, 0, "no request reached the endpoint");
     assert.deepEqual(readdirSync(folder).sort(), ["small.png", "tall.png", "wide.png"], "no file or folder was made");
@@ -1790,4 +1894,47 @@ test("the API saves the maximum size of an edit and refuses one that is no size,
     portal.close();
     reset();
   }
+});
+
+test("the agent's tools send nothing that only stable-diffusion.cpp reads, with the Stable Diffusion switch on or off", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    for (const sdExtras of [false, true]) {
+      reset();
+      gen.saveImageGeneration({ baseUrl: origin, enabled: true, editEnabled: true, sdExtras });
+      const folder = chatWith();
+      const make = load(folder);
+      const change = loadEdit(folder);
+      // They have no such settings to give, and the switch does not give them any.
+      assert.deepEqual(Object.keys(make.registered[0].parameters.properties).sort(), ["prompt", "size", "title"]);
+      assert.ok(!Object.keys(change.registered[0].parameters.properties).some((name) => /seed|steps|negative|strength|noise|init/i.test(name)));
+      const before = seen.length;
+      await make.call({ prompt: "a lighthouse at dusk" });
+      await change.call({ prompt: "make it night", path: "photo.png" });
+      assert.equal(seen.length, before + 2);
+      assert.equal(seen[before].body.prompt, "a lighthouse at dusk", `generation, switch ${sdExtras}`);
+      assert.equal(parts(seen[before + 1]).prompt.bytes.toString(), "make it night", `editing, switch ${sdExtras}`);
+    }
+    assert.ok(seen.every((one) => !one.raw!.includes("sd_cpp_extra_args")));
+  } finally {
+    server.close();
+    reset();
+  }
+});
+
+test("the Stable Diffusion switch is off in a setup saved without it, is a plain true or false, and is the person's to change", () => {
+  reset();
+  putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https://images.example.com/v1", editEnabled: true }));
+  assert.equal(gen.imageGenerationConfig().sdExtras, false);
+  assert.equal(gen.imageEditingTarget().sdExtras, false);
+  assert.equal(gen.imageGenerationState().sdExtras, false);
+  for (const bad of ["yes", 1, null, "true"]) assert.match(String(gen.parseImageGenerationPatch({ sdExtras: bad })), /sdExtras must be true or false/, String(bad));
+  assert.deepEqual(gen.parseImageGenerationPatch({ sdExtras: true }), { sdExtras: true });
+  gen.saveImageGeneration({ sdExtras: true });
+  assert.equal(gen.imageGenerationConfig().sdExtras, true);
+  assert.equal(gen.imageEditingTarget().sdExtras, true);
+  assert.equal(gen.imageGenerationConfig().baseUrl, "https://images.example.com/v1", "the rest is as it was");
+  putSetting("image_generation", JSON.stringify({ sdExtras: "true" }));
+  assert.equal(gen.imageGenerationConfig().sdExtras, false, "only a true is on");
+  reset();
 });

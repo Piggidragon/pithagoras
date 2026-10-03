@@ -41,6 +41,11 @@ out. They go to the model with the message, up to eight of them, and a message
 can be a picture alone. The sent message shows them; click one to
 [look at it in the viewer](#looking-at-a-picture).
 
+The model sees them, but they are not files of the chat's folder, so the agent's
+[`edit_image`](/guide/features#editing-a-picture) cannot change them: put a picture
+in the folder with the Files panel for that, or change it on the
+[Images page](/guide/images#changing-a-picture).
+
 A photo straight off a phone is made smaller in the browser before it goes:
 2048 pixels on its longer side, as a JPEG. Models scale anything bigger down on
 their side anyway, so those pixels would only cost upload time and context. A
@@ -179,7 +184,9 @@ the moment it is asked for:
   being changed (the first, when it was given several), which is shown under the
   wait; a square when nothing says. It
   says "Making a picture" or "Editing a picture" and, after a few seconds, how
-  long it has taken. Image endpoints do not report how far they are, so the
+  long it has taken; over the picture of an edit, both words and seconds sit on
+  a plate of the theme's own colour, so that they read on a bright picture as
+  on a dark one. Image endpoints do not report how far they are, so the
   animation does not pretend to: a soft light drifts over the frame and a sheen
   passes, and that is all.
 - **When the call is over**, the wait is over too: the frame says "Loading the
