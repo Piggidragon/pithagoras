@@ -683,8 +683,8 @@ export const api = {
   stopPictureJob: (id: string) => json<{ ok: true }>(`/api/images/jobs/${id}`, { method: "DELETE" }),
   /** One job for each picture; answers at once. */
   makePictures: (request: PictureRequest) => json<{ jobs: PictureJob[] }>("/api/images/generate", { method: "POST", body: JSON.stringify(request) }),
-  /** `mask` is a PNG as base64: the transparent part is what changes. */
-  changePicture: (request: { prompt: string; sources: string[]; mask?: string }) =>
+  /** One job for each change; answers at once. */
+  changePicture: (request: ChangeRequest) =>
     json<{ jobs: PictureJob[] }>("/api/images/edit", { method: "POST", body: JSON.stringify(request) }),
   /** A picture from this computer, into the gallery to be changed. */
   uploadPicture: async (file: File): Promise<GalleryPicture> => {
@@ -1307,6 +1307,8 @@ export interface ImagesFeature {
   timeoutSeconds: number;
   /** Whether the agent has an edit tool: switched on, and with an address to ask. */
   editReady: boolean;
+  /** The endpoint is stable-diffusion.cpp's server: the page shows, and sends, the settings that only it reads. Off by default. */
+  sdExtras: boolean;
 }
 
 /** Made on the page, made by the agent in a chat, or found in a folder the agent's tools write into, with no chat to name. */
@@ -1325,7 +1327,22 @@ export interface GalleryPicture {
   kind: PictureKind;
   prompt: string;
   /** What it was asked for with, as far as that is known. */
-  params: { model?: string; size?: string; extra?: Record<string, string | number | boolean>; sources?: string[]; masked?: boolean };
+  params: {
+    model?: string;
+    size?: string;
+    outputFormat?: OutputFormat;
+    outputCompression?: number;
+    /** The ones that only stable-diffusion.cpp's server reads. */
+    negativePrompt?: string;
+    seed?: number;
+    sampleSteps?: number;
+    strength?: number;
+    fromNoise?: boolean;
+    /** Fields an older version of the page sent as typed; shown, not sent again. */
+    extra?: Record<string, string | number | boolean>;
+    sources?: string[];
+    masked?: boolean;
+  };
   /** The picture an edit was made from, when that one is in the gallery. */
   from: string | null;
   createdAt: number;
@@ -1357,12 +1374,42 @@ export interface PictureJob {
   error?: string;
 }
 
-/** What the page asks the portal to make: the extra fields are text as typed, which the portal reads. */
-export interface PictureRequest {
-  prompt: string;
-  size?: string;
+/** The file formats of the OpenAI image format. */
+export type OutputFormat = "png" | "jpeg" | "webp";
+
+/**
+ * What the page asks of the portal for one picture beyond its description, and
+ * only what is set. Model, size, format and compression are fields of the
+ * OpenAI image format; the rest are not, and reach only an endpoint that is
+ * stable-diffusion.cpp's server, in the prompt (see image-settings.ts on the portal).
+ */
+export interface PictureSettingsBody {
   model?: string;
-  extra?: Record<string, string>;
+  /** `1024x1024`. */
+  size?: string;
+  outputFormat?: OutputFormat;
+  /** With jpeg or webp. */
+  outputCompression?: number;
+  negativePrompt?: string;
+  seed?: number;
+  sampleSteps?: number;
+  /** For a change only. */
+  strength?: number;
+  /** For a change only: from noise, with the pictures as references; no strength and no mask then. */
+  fromNoise?: boolean;
+}
+
+/** What the page asks the portal to make. */
+export interface PictureRequest extends PictureSettingsBody {
+  prompt: string;
+  count?: number;
+}
+
+/** What the page asks the portal to change: `mask` is a PNG as base64, and the transparent part is what changes. */
+export interface ChangeRequest extends PictureSettingsBody {
+  prompt: string;
+  sources: string[];
+  mask?: string;
   count?: number;
 }
 
@@ -1381,6 +1428,7 @@ export interface ImagesFeaturePatch {
   editMaxSize?: string;
   /** null takes a saved limit away: the default again. */
   timeoutSeconds?: number | null;
+  sdExtras?: boolean;
 }
 
 /** The model that keeps Understory's memory, as the page is told it: never the key. */

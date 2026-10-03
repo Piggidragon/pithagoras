@@ -71,7 +71,8 @@ are that project's to decide and have no switch here.
 
 ::: warning Some packages carry others with them
 `pi-mcp-adapter` is what makes MCP servers into tools. Switching it off takes
-every MCP server with it, [the browser](/guide/browser) included.
+every MCP server with it. The agent's [browser](/guide/browser) is not one of them:
+its tools are the portal's own.
 :::
 
 ## Configuring
@@ -91,7 +92,7 @@ provider**, so a local llama-server appears in the model picker alongside hosted
 models:
 
 ```
-llama-server=http://192.168.1.101:8080 / qwen36-35b-a3b-mtp   64000 ctx
+llama-server=http://<host>:8080 / <model>   64000 ctx
 ```
 
 Those models only exist once extensions are bound, which is later than session
@@ -101,9 +102,9 @@ seems not to stick.
 ## Built-in skills
 
 The portal ships skills of its own, loaded from the image rather than installed,
-so they are there without anyone adding them. They appear in Settings → Skills
-under "Built in and from packages", read-only — editing one in place would be
-lost on the next deploy without saying so.
+so they are there without anyone adding them. They appear in Settings → Agent →
+[Skills](/guide/skills) under "Built in and from packages", read-only — editing
+one in place would be lost on the next deploy without saying so.
 
 There is one so far. **`skill-creator`** teaches the agent to write skills: the
 format, the frontmatter and the ways it silently fails, how to split detail into
@@ -135,12 +136,15 @@ Tools are grouped by what installed them, so a package can be switched off in
 one go. An MCP server is its own group rather than a share of the adapter that
 attached it — three servers used to arrive as one pile of forty tools called
 `pi-mcp-adapter`, and nobody thinks of them that way.
+The portal's own picture tools, `show_image`, `generate_image` and `edit_image`,
+are together in one **Images** group, whichever of them is on offer.
 
 ::: tip The browser is one of them
 It used to have a switch of its own beside the composer, which was a second
 answer to a question the tools list already asked — and the two could
-disagree. It is now an MCP server like any other: its tools are in the list,
-switched one at a time or as a group, with a default like anything else.
+disagree. Its tools are now in the list, as a group named `browser` — they are the
+portal's own, not an MCP server's — switched one at a time or as a group, with a
+default like anything else.
 Having its tools is having the browser, so a conversation with them all off is
 not offered them and does not reach the container. Where it may go once it is
 there is still the [allowlist](/guide/browser#where-it-may-go)'s question, not this one.

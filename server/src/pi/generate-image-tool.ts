@@ -8,7 +8,7 @@ import { pictureIn } from "./show-image-tool.js";
 
 /**
  * Making a picture from a description, with the image model the person set up
- * in Settings → Images, and putting it in front of them.
+ * in Settings → Agent → Images, and putting it in front of them.
  *
  * What it returns is what show_image returns — the picture's path in the chat's
  * folder, and a title, with a mark that it is this tool's (see generated-picture.ts)

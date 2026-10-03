@@ -1,15 +1,20 @@
 # Agent and channels
 
-Sessions are per-task: one workspace, one job, its own conversation. The **agent**
-is the opposite — a single long-lived pi session rooted at a fixed directory,
-`agentHome`, that you talk to continuously.
+Sessions are per-task: one workspace, one job, its own conversation. An
+**agent** is the opposite — a character with a home directory and a memory that
+you talk to continuously. The portal starts with one, and [more](/guide/agents)
+can be added, each with a home of its own.
 
-Chats you start with **New** in the portal work in `agentHome` too, so the agent's
-SOUL.md, PrimaryUser.md and MEMORY.md are there in those as well. Chats in a
+Chats you start with **New** in the portal work in the first agent's home, so its
+SOUL.md, PrimaryUser.md and MEMORY.md are there in those as well; a chat started
+on another agent's page works in that agent's home. Chats in a
 [project](/guide/projects) are ordinary per-task sessions and have none of them.
 
-A **channel** is a two-way link into that agent. Messages arrive through it and
-the agent's replies go back out the same way.
+A **channel** is a two-way link into an agent. Messages arrive through it and
+the agent's replies go back out the same way. A channel talks as the first agent
+unless you pick another under **Talks as** on its page: the agent that answers
+there, with its own character and memory. Moved to another agent, a channel
+starts new conversations there; moved back, it picks up the ones it had.
 
 ## One session per conversation
 
@@ -19,7 +24,7 @@ they should not share a memory.
 
 So the channel package supplies a **session key** for every message — whatever
 identifies a conversation on that platform — and the portal turns each key into
-its own isolated session, all rooted at `agentHome`.
+its own isolated session, all rooted at the home of the agent the channel talks as.
 
 ```
 Telegram ─┬─ chat:-100987  ──▶  session  "Engineering"
@@ -38,8 +43,9 @@ same one picks its conversations back up, and choosing a different one is a
 deliberate fresh start. It also reads better: `my-bot:chat:999`.
 
 Removing a channel keeps its conversations rather than deleting them. They show
-on the Agent tab marked "no channel" until something claims that slug again. They are ordinary sessions — same transcript,
-same replay, same model handling — and they are listed on the **Agent** tab,
+on the [Agents page](/guide/agents) marked "no channel" until something claims
+that slug again. They are ordinary sessions — same transcript, same replay, same
+model handling — and each agent's **Conversations** tab lists them by channel,
 where clicking one opens it in the normal chat view.
 
 From that list a conversation can be renamed or deleted. Deleting one does not
@@ -168,14 +174,14 @@ Telegram probably wants less than a war-room Slack channel does.
 
 ### Questions from extensions
 
-An extension command can stop and ask something — `/models` from `pi-llama-cpp`
-opens a menu. In the portal that draws a modal. In a chat there is nowhere to
+An extension command can stop and ask something — a model picker from a
+provider package, say — and opens a menu. In the portal that draws a modal. In a chat there is nowhere to
 draw one, so the question is sent as a message and the next reply answers it:
 
 ```
-Llama.cpp models:
-1. qwen36-35b-a3b-mtp
-2. ornith-1.0-35b
+Models:
+1. model-a
+2. model-b
 
 Reply with a number, or "cancel".
 ```

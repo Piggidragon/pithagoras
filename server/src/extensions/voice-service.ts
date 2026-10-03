@@ -229,7 +229,7 @@ export const hostReader = { read: (): Host => readHost() };
 
 /**
  * What the GPU check finds, and what it would suggest, for the page to show before anything is installed.
- * `cpuOnly` is that the check found there is no GPU: what is suggested is then recognition alone on the CPU.
+ * `cpuOnly` is that the check found there is no GPU: what is suggested is then Kokoro on the CPU, or recognition alone on the CPU where the host is too small for it.
  * `selected` is the card it would use: the one asked for, by the choice on the page (`chosen`, a UUID) or by `VOICE_GPU`; else, with a container,
  * the one it is on and not the one with the most room, as the memory the service holds is what makes its own card look full.
  */

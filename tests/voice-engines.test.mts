@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import {
-  CPU_PORT, ASR_MODELS, speechCpuSeconds, speechSlow, ttsDevices, ramNeeded, vramNeeded, usesGpu, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, asrDevice, asrDevices, choiceFromKey, choiceKey, choiceLabel, cpuRealtime, cpuServerConfig, cpuSlow, cpuThreads, endpoints, isManagedUrl, fitOn, fitRam, healthUrls, parseChoice, pickGpu,
+  CPU_PORT, ASR_MODELS, speechCpuSeconds, speechSlow, ttsDevices, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, asrDevice, asrDevices, choiceFromKey, choiceKey, choiceLabel, cpuRealtime, cpuServerConfig, cpuSlow, cpuThreads, endpoints, fitOn, fitRam, healthUrls, isManagedUrl, parseChoice, pickGpu,
   ramNeeded, sameChoice, serverConfig, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, vramNeeded,
   type Gpu, type Host, type VoiceChoice,
 } from '../server/src/voice-engines.js';
@@ -407,11 +407,9 @@ test('the host is read as it is: the memory and the CPUs of the machine, not the
 
 test('an address is the managed service\'s when it leads to a port the managed container listens on, however it is written', () => {
   // Every address the managed choices save.
-  for (const c of combos) for (const url of [endpoints(c).whisperUrl, endpoints(c).breezeUrl].filter(Boolean)) assert.equal(isManagedUrl(url), true, url);
-  // Kokoro on the CPU speaks from the CPU process.
-  const kokoroCpu = endpoints({ tts: 'kokoro', ttsDevice: 'cpu', asr: 'qwen3-asr', asrModel: '0.6b' });
-  for (const url of [kokoroCpu.breezeUrl, kokoroCpu.whisperUrl]) assert.equal(isManagedUrl(url), true, url);
-  for (const url of ['http://localhost:8188/inference', 'http://127.0.0.1:8188/inference/', ' http://127.0.0.1:7862/v1/audio/speech ', 'http://localhost:7863/v1/audio/transcriptions']) assert.equal(isManagedUrl(url), true, url);
+  const onCpu: VoiceChoice[] = ASR_MODELS.map(o => ({ tts: 'kokoro', ttsDevice: 'cpu', asr: o.asr, asrModel: o.model }));
+  for (const c of [...combos, ...onCpu]) for (const url of [endpoints(c).whisperUrl, endpoints(c).breezeUrl].filter(Boolean)) assert.equal(isManagedUrl(url), true, url);
+  for (const url of ['http://localhost:8188/inference', 'http://127.0.0.1:8188/inference/', ' http://127.0.0.1:7862/v1/audio/speech ', 'http://localhost:7863/v1/audio/transcriptions', 'http://127.0.0.1:7863/v1/audio/speech']) assert.equal(isManagedUrl(url), true, url);
   // The Compose overlay's services, another host on the same port, another path and nothing at all are not.
   for (const url of ['http://127.0.0.1:8178/inference', 'http://127.0.0.1:7860/v1/audio/speech', 'http://stt.example.test:8188/inference', 'http://127.0.0.1:8188/other', 'https://127.0.0.1:8188/inference', 'http://127.0.0.1/inference', 'not a url', '']) assert.equal(isManagedUrl(url), false, url);
   assert.equal(isManagedUrl(undefined), false);
