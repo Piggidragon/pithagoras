@@ -126,6 +126,21 @@ test('install overwrites the settings, and uninstall puts back exactly what they
   assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'none', whisperUrl: MANAGED.whisper, breezeUrl: '', sttModel: '' });
 });
 
+test('Kokoro on the CPU is the managed service too: its speech address is not taken for the user\'s own, and uninstall puts theirs back', async () => {
+  reset();
+  assert.equal((await put(OWN)).status, 200);
+  const kokoro = { tts: 'kokoro', ttsDevice: 'cpu', asr: 'whisper', asrModel: 'base' };
+  const up = await install(kokoro);
+  assert.deepEqual([up.state, up.connected], ['running', true]);
+  // Speech is in the audio.cpp process on the CPU, not the GPU one.
+  const CPU_SPEECH = 'http://127.0.0.1:7863/v1/audio/speech';
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'kokoro', whisperUrl: MANAGED.whisper, breezeUrl: CPU_SPEECH, sttModel: '' });
+  // Connected over again, as a rebuild does: what is remembered is still what the user had, not the service's address.
+  assert.equal((await post('/voice/connect')).status, 200);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'breeze', whisperUrl: OWN.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: 'my-model' });
+});
+
 test('what was remembered is what there was before the first connect: a second connect, a rebuild and "Use installed voice" do not replace it', async () => {
   reset();
   assert.equal((await put(OWN)).status, 200);
