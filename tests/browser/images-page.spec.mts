@@ -1327,7 +1327,7 @@ test('where the endpoint takes one picture, a picture put in replaces it, the ex
   await page.goto('/images');
   await drop(maker(page), ['one.png', 'two.png', 'three.png']);
   await expect.poll(() => names(page)).toEqual(['one.png']);
-  expect(p.state.uploads.map((u) => u.name)).toEqual(['one.png'], 'only the one that is used was put in the gallery');
+  expect(p.state.uploads.map((u) => u.name), 'only the one that is used was put in the gallery').toEqual(['one.png']);
   await expect(maker(page).getByRole('status').filter({ hasText: '2 more pictures were left out: this editing endpoint takes one picture per edit.' })).toBeVisible();
   // No row of several: no count, no add button, no way to move one; the picker takes one file.
   await expect(maker(page).getByText(/of 8 pictures/)).toHaveCount(0);
