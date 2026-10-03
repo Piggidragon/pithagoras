@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { confirmDialog } from "./ConfirmDialog";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
@@ -30,14 +30,14 @@ import { isEscape } from "../shortcuts";
 import { keep, pick, useFlip } from "../motion";
 import { HOME, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
-import { t } from "../i18n";
+import { t, useLanguage } from "../i18n";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
 const RECENTS_LIMIT = 12;
 /** How many of a folder's chats the sidebar shows before deferring to Sessions, opened at that folder. */
 const FOLDER_LIMIT = 8;
 
-export function Sidebar({
+export const Sidebar = memo(function Sidebar({
   forceExpanded = false,
   sessions,
   executor,
@@ -81,6 +81,8 @@ export function Sidebar({
   /** The Sessions page, showing only the chats in the folder `key` (see session-folders). */
   onOpenFolder: (key: string) => void;
 }) {
+  // Not drawn again with every token of a chat, so the language is asked for here.
+  useLanguage();
   const [storedCollapsed, setCollapsed] = useState(() => local.get("sidebarCollapsed") === "true");
   const collapsed = forceExpanded ? false : storedCollapsed;
   const toggleSidebar = () => {
@@ -344,7 +346,7 @@ export function Sidebar({
       </div>
     </aside>
   );
-}
+});
 
 const Divider = () => <div className="my-2 h-px bg-line" />;
 

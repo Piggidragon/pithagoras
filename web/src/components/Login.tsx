@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { t } from "../i18n";
 
 export function Login({ onSuccess }: { onSuccess: () => void }) {
@@ -15,7 +15,9 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
       await api.login(password);
       onSuccess();
     } catch (err) {
-      setError((err as Error).message);
+      // The server's own word where it refused (a wrong password, too many tries). Anything else is
+      // not the server saying no: a proxy's "HTTP 502" while the portal restarts reads like a broken login.
+      setError(err instanceof ApiError && (err.status === 401 || err.status === 429) ? err.message : t("Cannot reach the portal"));
     } finally {
       setBusy(false);
     }

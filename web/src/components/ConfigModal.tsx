@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Select } from "./Select";
 import {
   LuBlocks,
@@ -150,7 +150,7 @@ function railSnapshot(): { spec: string; name: string }[] {
   }
 }
 
-export function ConfigModal({
+export const ConfigModal = memo(function ConfigModal({
   onClose,
   initialTab = "general",
   onSetup,
@@ -335,7 +335,7 @@ export function ConfigModal({
       </div>
     </Modal>
   );
-}
+});
 
 // --- rail ---
 

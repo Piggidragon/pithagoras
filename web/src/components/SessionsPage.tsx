@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { LuCircleAlert, LuFilter, LuMessagesSquare, LuPencil, LuPin, LuPinOff, LuSearch, LuTrash2, LuX } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
@@ -13,7 +13,7 @@ import { RowsSkeleton } from "./Skeleton";
 import { HOME, folderFrom, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { keep, useFlip } from "../motion";
-import { t } from "../i18n";
+import { t, useLanguage } from "../i18n";
 
 /**
  * How long a click on a name waits for a second one. The chat opens on a click
@@ -27,7 +27,7 @@ const DOUBLE_CLICK_MS = 300;
  * unreachable once they fall off the end. Gathered by folder as the sidebar
  * has them, or as one list; `?folder=` shows only one folder's.
  */
-export function SessionsPage({
+export const SessionsPage = memo(function SessionsPage({
   sessions,
   places,
   onSelect,
@@ -46,6 +46,7 @@ export function SessionsPage({
   onPin: (id: string, pinned: boolean) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
 }) {
+  useLanguage();
   const [query, setQuery] = useState("");
   /** The session whose name is being edited in place. */
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -336,4 +337,4 @@ export function SessionsPage({
       </div>
     </div>
   );
-}
+});

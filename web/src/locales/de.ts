@@ -21,6 +21,10 @@ const de: Locale = {
     "Pick a session from the list.": "Wähle eine Sitzung aus der Liste.",
     "Start a session to get going.": "Starte eine Sitzung, um loszulegen.",
     "Give it a task and close the tab — it keeps working, and picks up where it left off when you come back.": "Gib ihm eine Aufgabe und schließ den Tab — er arbeitet weiter und macht dort weiter, wo er aufgehört hat, wenn du zurückkommst.",
+    "This chat no longer exists.": "Diesen Chat gibt es nicht mehr.",
+    "Back to Sessions": "Zurück zu den Sitzungen",
+    "Cannot reach the portal": "Das Portal ist nicht erreichbar",
+    "It may be restarting. This page tries again by itself.": "Vielleicht startet es gerade neu. Diese Seite versucht es von selbst wieder.",
     // api.ts
     "Could not upload {name} ({status})": "{name} konnte nicht hochgeladen werden ({status})",
     // attachments.ts

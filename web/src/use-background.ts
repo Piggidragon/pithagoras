@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type BackgroundState, type PortalEvent } from "./api";
 import { stripAnsi } from "./transcript";
 import { piRunning } from "./drafts";
+import { reconcile } from "./reconcile";
 
 const EMPTY: BackgroundState = { supported: false, jobs: [], statuses: [], widgets: [] };
 
@@ -85,7 +86,13 @@ export function useBackground(sessionId: string, busy: boolean, events: PortalEv
           if (!live || current.current !== sessionId) return;
           const state = normalize(s);
           piRunning(sessionId, state.piRunning === true);
-          setHeld({ sessionId, state, since });
+          // The same object when nothing changed: asked every few seconds, an answer that says
+          // what the last did is no reason to draw the chat again.
+          setHeld((prev) => {
+            const mine = prev.sessionId === sessionId;
+            const kept = mine ? reconcile(prev.state, state) : state;
+            return mine && kept === prev.state && prev.since.live === since.live && prev.since.stored === since.stored ? prev : { sessionId, state: kept, since };
+          });
         },
         () => undefined,
       );

@@ -1,12 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
 
-/** A portal with a password: signed in once the right one is posted, and signed out again when `expired` says so. */
-async function portal(page: Page, state: { authed: boolean; expired?: boolean }) {
+/** A portal with a password: signed in once the right one is posted, signed out again when `expired` says so, and not answering while `down`. */
+async function portal(page: Page, state: { authed: boolean; expired?: boolean; down?: boolean }) {
   const calls = { status: 0, login: [] as unknown[], rename: 0 };
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   await page.route('**/api/**', async (route) => {
     const p = new URL(route.request().url()).pathname;
     const method = route.request().method();
+    // What a proxy answers while the portal behind it restarts: a page of its own, not JSON.
+    if (state.down && p.startsWith('/api/auth/')) { if (p === '/api/auth/status') calls.status++; return route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>Bad Gateway</h1>' }); }
     if (p === '/api/auth/status') { calls.status++; return route.fulfill({ json: { authRequired: true, authed: state.authed } }); }
     if (p === '/api/auth/login') {
       const body = route.request().postDataJSON();
@@ -81,4 +83,37 @@ test('a login that runs out in the middle of the work returns to the form, and s
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('main').getByText('Old name')).toBeVisible();
   expect(calls.login).toEqual([{ password: 'secret' }]);
+});
+
+test('a portal that does not answer is not taken for a login that is gone, and is asked again', async ({ page }) => {
+  const state = { authed: true, down: true };
+  const calls = await portal(page, state);
+  await page.goto('/sessions');
+  await expect(page.getByText('Cannot reach the portal')).toBeVisible();
+  await expect(page.getByPlaceholder('Password')).toHaveCount(0);
+  const asked = calls.status;
+  // Asking again by hand, while it is still away.
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect.poll(() => calls.status).toBeGreaterThan(asked);
+  await expect(page.getByText('Cannot reach the portal')).toBeVisible();
+  // Back: the page does not wait to be told, and the login the browser holds is still good.
+  state.down = false;
+  await expect(page.getByRole('main').getByText('Old name')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByPlaceholder('Password')).toHaveCount(0);
+  expect(calls.login).toEqual([]);
+});
+
+test('a password sent while the portal is away says that, not the proxy\'s status', async ({ page }) => {
+  const state = { authed: false, down: false };
+  const calls = await portal(page, state);
+  await page.goto('/sessions');
+  await expect(page.getByPlaceholder('Password')).toBeVisible();
+  state.down = true;
+  await page.getByPlaceholder('Password').fill('secret');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByText('Cannot reach the portal')).toBeVisible();
+  await expect(page.getByText(/HTTP 502/)).toHaveCount(0);
+  // Still the form: nothing was refused.
+  await expect(page.getByPlaceholder('Password')).toBeVisible();
+  expect(calls.login).toEqual([]);
 });
