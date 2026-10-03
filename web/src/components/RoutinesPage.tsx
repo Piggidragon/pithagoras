@@ -34,12 +34,14 @@ const STATUS_STYLE: Record<string, string> = {
   ok: "text-ok",
   error: "text-danger",
   running: "text-accent",
+  interrupted: "text-warn",
 };
 
 const STATUS_LABEL: Record<string, string> = {
   ok: msg("ok"),
   error: msg("error"),
   running: msg("running"),
+  interrupted: msg("interrupted"),
 };
 const statusLabel = (status: string) => labelOf(STATUS_LABEL, status);
 
@@ -479,7 +481,7 @@ function SchedulePicker({
       {preview.error && <p className="mt-1.5 text-[11px] text-danger">{preview.error}</p>}
       {preview.runs && preview.runs.length > 0 && (
         <p className="mt-1.5 text-[11px] text-fg-subtle">
-          {t("Next: {when}", { when: preview.runs.slice(0, 3).map((r) => formatDateTime(r)).join(" · ") })}
+          {t("Next: {when}", { when: preview.runs.map((r) => formatDateTime(r)).join(" · ") })}
         </p>
       )}
     </div>

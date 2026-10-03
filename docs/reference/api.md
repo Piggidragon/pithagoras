@@ -462,7 +462,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `PATCH /api/routines/:id` | Update a routine. |
 | `DELETE /api/routines/:id` | Delete a routine. |
 | `POST /api/routines/:id/run` | Start a run now. |
-| `POST /api/routines/preview` | Preview schedule timing. |
+| `POST /api/routines/preview` | The next three runs of a schedule, without saving it: `{ expression, runs }`. |
 | `GET /api/routines/:id/sessions` | List the routine's runs. |
 | `GET /api/routines/report-targets` | List available report destinations. |
 | `PUT /api/routines/report-default` | Set the default report destination. |

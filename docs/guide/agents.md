@@ -66,7 +66,8 @@ A look never gets in the way: it waits while any chat or routine is working,
 and **Look now** is refused until they are done,
 since a home lab has one model to share, and one agent looks at a time. Each
 agent looks in one conversation of its own, so it remembers what it already
-told you. Looks need the host executor; under the container executor nothing
+told you. A look that a restart cuts off shows as "Interrupted by a restart"
+until the next one. Looks need the host executor; under the container executor nothing
 would hold them to reading, so they do not run.
 
 ## In the sidebar

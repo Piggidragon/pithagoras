@@ -155,3 +155,21 @@ test('a rename that was saved is shown as saved, even when the list then fails t
   await expect(page.getByRole('main').getByText('Saved anyway', { exact: true })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
+
+test.describe('in a browser set to German', () => {
+  test.use({ locale: 'de-DE' });
+
+  test('a one-off a restart cut off is shown as interrupted, not as done', async ({ page }) => {
+    await portal(page, {
+      routine: {
+        name: 'Quarterly numbers', enabled: false, schedule: '', runAt: '2026-10-01T09:00:00.000Z', mode: 'once', done: false,
+        lastStatus: 'interrupted', lastOutput: 'The portal restarted during this run', lastRun: '2026-10-01T09:00:01.000Z',
+      },
+    });
+    await page.goto('/routines');
+    const row = page.getByRole('button', { name: /Quarterly numbers/ });
+    await expect(row).toContainText('unterbrochen');
+    await expect(row).toContainText('deaktiviert');
+    await expect(row).not.toContainText('fertig');
+  });
+});

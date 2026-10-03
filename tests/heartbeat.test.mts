@@ -77,6 +77,17 @@ test('a look with nothing to watch says so, and waits its interval', async () =>
   assert.equal(heartbeatDue(after, new Date()), false);
 });
 
+test('a look cut off by a restart is no longer shown as looking once the portal is back', () => {
+  const cut = createAgent({ name: 'Cut off' });
+  const done = createAgent({ name: 'Finished' });
+  getDb().prepare("UPDATE agents SET heartbeat_status = 'Looking' WHERE id = ?").run(cut.id);
+  getDb().prepare("UPDATE agents SET heartbeat_status = 'Nothing new' WHERE id = ?").run(done.id);
+  heartbeat.start();
+  heartbeat.stop();
+  assert.equal(getAgent(cut.id)!.heartbeat_status, 'Interrupted by a restart');
+  assert.equal(getAgent(done.id)!.heartbeat_status, 'Nothing new', 'only a look that was under way');
+});
+
 test('the routes set the heartbeat and read, mark and delete its notes', async () => {
   const agent = createAgent({ name: 'Scout' });
   writeFileSync(join(agent.home, WATCH_FILE), 'The open PRs on the repo.\n');

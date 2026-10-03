@@ -4,7 +4,7 @@ import { countChannelSessions, deleteSession, getDb } from "../db.js";
 import { sessions } from "../session-manager.js";
 import { agentHome } from "../agent.js";
 import { DEFAULT_AGENT, getAgent } from "../agents.js";
-import { isValidSlug, slugify } from "../slug.js";
+import { freeSlug, isValidSlug, slugify } from "../slug.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { parseConfig, type ChannelRow } from "../channels/row.js";
 import {
@@ -82,24 +82,6 @@ function toApi(row: ChannelRow, kind?: LoadedChannel) {
   };
 }
 
-/**
- * A slug that is free. Agent sessions are keyed on it, so it must be unique —
- * two channels sharing one would merge their conversations.
- */
-function freeSlug(desired: string, exceptId?: string): string {
-  const base = slugify(desired) || "channel";
-  const taken = new Set(
-    (getDb().prepare("SELECT id, slug FROM channels").all() as { id: string; slug: string }[])
-      .filter((c) => c.id !== exceptId)
-      .map((c) => c.slug)
-  );
-  if (!taken.has(base)) return base;
-  for (let n = 2; n < 500; n++) {
-    if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
-  }
-  throw new Error(`Could not find a free slug for "${desired}"`);
-}
-
 /** How an agent is kept on a channel: empty for the first, as every channel was before there were others. Undefined for one there is not. */
 const storedAgent = (id: unknown): string | undefined =>
   typeof id === "string" && getAgent(id) ? (id === DEFAULT_AGENT ? "" : id) : undefined;
@@ -146,7 +128,9 @@ export function channelsRouter(): Router {
     // An explicit slug reconnects a channel to the conversations it had before
     // it was deleted; without one it is derived from the name.
     const wanted = typeof req.body?.slug === "string" && req.body.slug.trim() ? req.body.slug : label;
-    const slug = freeSlug(wanted);
+    // Agent sessions are keyed on the slug, so two channels sharing one would merge their conversations.
+    const taken = (getDb().prepare("SELECT slug FROM channels").all() as { slug: string }[]).map((c) => c.slug);
+    const slug = freeSlug(wanted, taken, "channel");
 
     const agentId = req.body?.agentId === undefined ? "" : storedAgent(req.body.agentId);
     if (agentId === undefined) return res.status(400).json({ error: "No such agent" });

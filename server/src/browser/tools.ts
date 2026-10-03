@@ -131,14 +131,22 @@ async function act(sessionId: string, what: string, fn: (page: Page) => Promise<
     const { view, viewport } = await look(page);
     before = { page, view, url: page.url(), scrollY: viewport.scrollY };
   }
-  const opened = page.context().waitForEvent("page", { timeout: 1500 }).catch(() => null);
-  await fn(page);
-  const tab = await opened;
+  // Listening while the action and the settling run, and looking afterwards:
+  // waiting a fixed time for a tab that almost never comes costs every action.
+  let tab = undefined as Page | undefined;
+  const context = page.context();
+  const onPage = (p: Page) => void (tab ??= p);
+  context.on("page", onPage);
+  try {
+    await fn(page);
+    await settle(page);
+  } finally {
+    context.off("page", onPage);
+  }
   if (tab) {
     await settle(tab);
     return show(sessionId, tab, {}, `${what}: it opened a new tab, which is where you are now.`);
   }
-  await settle(page);
   if (page.url() !== before.url) return show(sessionId, page, {}, `${what}: the page is now ${page.url()}.`);
   const { view, viewport } = await look(page);
   const changes = diffViews(before.view!, view);

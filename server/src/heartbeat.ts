@@ -133,6 +133,9 @@ class HeartbeatSupervisor {
 
   start(): void {
     if (this.timer) return;
+    // A look cut off by a restart never reached its `finally`; nothing else
+    // would ever take "Looking" off the agent's page.
+    getDb().prepare("UPDATE agents SET heartbeat_status = 'Interrupted by a restart' WHERE heartbeat_status = 'Looking'").run();
     this.timer = setInterval(() => void this.tick(), TICK_MS);
     if (typeof this.timer.unref === "function") this.timer.unref();
   }

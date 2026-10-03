@@ -56,6 +56,9 @@ const MAX_OUTPUT = 4000;
 
 const TICK_MS = 20_000;
 
+/** What a run that a restart cut off says of itself. */
+const INTERRUPTED = "The portal restarted during this run";
+
 class RoutineSupervisor {
   /** Routines with a run in flight — a slow one must not stack on itself. */
   private running = new Set<string>();
@@ -73,6 +76,7 @@ class RoutineSupervisor {
 
   start(): void {
     if (this.timer) return;
+    this.settleInterrupted();
     this.refreshSchedules();
     this.timer = setInterval(() => void this.tick(), TICK_MS);
     if (typeof this.timer.unref === "function") this.timer.unref();
@@ -83,11 +87,40 @@ class RoutineSupervisor {
     this.timer = null;
   }
 
-  /** Recompute when each routine fires next. Cheap, and keeps the UI honest. */
-  refreshSchedules(): void {
-    for (const row of this.rows()) {
-      getDb().prepare("UPDATE routines SET next_run = ? WHERE id = ?").run(whenNext(row), row.id);
-    }
+  /**
+   * Recompute when routines fire next: all of them, or only these. Cheap, and
+   * keeps the UI honest. One transaction, so a long list is one write.
+   */
+  refreshSchedules(only?: string[]): void {
+    const wanted = only && new Set(only);
+    const update = getDb().prepare("UPDATE routines SET next_run = ? WHERE id = ?");
+    getDb().transaction(() => {
+      for (const row of this.rows()) {
+        if (!wanted || wanted.has(row.id)) update.run(whenNext(row), row.id);
+      }
+    })();
+  }
+
+  /**
+   * Runs a restart cut off, which are still marked as running: nothing else
+   * ever finishes them, and they would show as running for good. A one-off whose
+   * moment it was is not run again: the cut-off run may have done part of what
+   * it was asked, and doing it twice is worse than telling the person it did not
+   * finish. It is switched off like any one-off that has run, and giving it a
+   * new time arms it again.
+   */
+  private settleInterrupted(): void {
+    const update = getDb().prepare(
+      "UPDATE routines SET last_status = 'interrupted', last_output = ? WHERE id = ?",
+    );
+    const off = getDb().prepare("UPDATE routines SET enabled = 0 WHERE id = ?");
+    getDb().transaction(() => {
+      for (const row of this.rows()) {
+        if (row.last_status !== "running") continue;
+        update.run(INTERRUPTED, row.id);
+        if (oneOffDone(row)) off.run(row.id);
+      }
+    })();
   }
 
   /**
@@ -182,11 +215,12 @@ class RoutineSupervisor {
       // A one-off has nothing left to do. Disabled rather than deleted, so the
       // result stays readable and it can be re-armed by giving it a new time.
       // Not one run by hand ahead of its moment: that was a try, and the
-      // moment it was set for is still to come.
+      // moment it was set for is still to come. Not one given a new moment
+      // while it ran either: that is the moment it was set for now.
       if (oneOffDone({ ...row, last_run: lastRun })) {
-        getDb().prepare("UPDATE routines SET enabled = 0 WHERE id = ?").run(row.id);
+        getDb().prepare("UPDATE routines SET enabled = 0 WHERE id = ? AND run_at = ?").run(row.id, row.run_at);
       }
-      this.refreshSchedules();
+      this.refreshSchedules([row.id]);
     }
 
     return getDb().prepare("SELECT * FROM routines WHERE id = ?").get(row.id) as RoutineRow;
