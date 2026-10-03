@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { MAX_SOURCES, MAX_SOURCES_BYTES, addSources, moveTo, moved, refusal, roomFor, sourceName, weightOf } from "../web/src/edit-sources.ts";
+import { MAX_SOURCES, MAX_SOURCES_BYTES, addSources, galleryIdsIn, moveTo, moved, refusal, roomFor, sourceName, weightOf } from "../web/src/edit-sources.ts";
 import type { GalleryPicture } from "../web/src/api.ts";
 
 const temp = mkdtempSync(path.join(tmpdir(), "pitha-sources-"));
@@ -110,4 +110,23 @@ test("a picture dragged to another place takes that place, and the others keep t
     assert.notEqual(same, list);
   }
   assert.deepEqual(ids(list), ["a", "b", "c", "d"], "the list given is not changed");
+});
+
+test("a drag or a paste that names a picture of the gallery by its address is that picture, and not a file to upload", () => {
+  const origin = "https://portal.example";
+  const a = "0123456789ab";
+  const b = "ba9876543210";
+  // As a browser drags an <img>: the link, and the picture it was.
+  assert.deepEqual(galleryIdsIn({ uris: `${origin}/api/images/${a}/file` }, origin), [a]);
+  assert.deepEqual(galleryIdsIn({ html: `<meta charset='utf-8'><img src="${origin}/api/images/${a}/file" alt="x">` }, origin), [a]);
+  assert.deepEqual(galleryIdsIn({ html: `<IMG class="x" SRC='/api/images/${b}/file'>` }, origin), [b], "an address without its origin is this portal's");
+  // Both of them name the same one: once, in the order named, with comments of a link list left out.
+  assert.deepEqual(galleryIdsIn({ uris: `# a picture\r\n${origin}/api/images/${b}/file\r\n${origin}/api/images/${a}/file`, html: `<img src="${origin}/api/images/${b}/file">` }, origin), [b, a]);
+  // What is no picture of this gallery is a file like any other.
+  assert.deepEqual(galleryIdsIn({}, origin), []);
+  assert.deepEqual(galleryIdsIn({ uris: `https://elsewhere.example/api/images/${a}/file` }, origin), [], "another site, with the same path");
+  assert.deepEqual(galleryIdsIn({ html: `<img src="http://portal.example/api/images/${a}/file">` }, origin), [], "another origin: the scheme counts");
+  assert.deepEqual(galleryIdsIn({ uris: `${origin}/api/images/${a}/file?download=1`, html: `<a href="${origin}/api/images/${a}/file">x</a>` }, origin), [a], "a query does not change what it is; a link that is no picture is nothing");
+  assert.deepEqual(galleryIdsIn({ uris: `${origin}/api/images/${a}`, html: `<img src="${origin}/api/images/xyz/file"><img src="${origin}/logo.png">` }, origin), []);
+  assert.deepEqual(galleryIdsIn({ uris: "not a url at all" }, origin), []);
 });

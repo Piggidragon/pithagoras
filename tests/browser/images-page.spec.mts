@@ -207,6 +207,20 @@ async function paste(target: Locator, files: string[], text = '') {
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   }, [files, text] as [string[], string]);
 }
+/**
+ * A picture of the page dragged up into `target`, as Chromium delivers it: a file made from the picture, with its address beside it
+ * as a link and as the `<img>` it was. It is the page's own picture, though it looks like a file from the computer.
+ */
+async function dropOwn(target: Locator, url: string, files: string[] = ['file.png']) {
+  await target.evaluate((el, [url, files]: [string, string[]]) => {
+    const data = new DataTransfer();
+    for (const name of files) data.items.add(new File([`bytes of ${name}`], name, { type: 'image/png' }));
+    data.setData('text/uri-list', new URL(url, location.origin).href);
+    data.setData('text/html', `<meta charset='utf-8'><img src="${new URL(url, location.origin).href}" alt="x">`);
+    el.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+  }, [url, files] as [string, string[]]);
+}
 const png = (name: string) => ({ name, mimeType: 'image/png', buffer: Buffer.from(`bytes of ${name}`) });
 
 async function loaded(image: Locator) {
@@ -1352,6 +1366,131 @@ test('a picture pasted in the description is added, and text that came with it i
   await paste(describe(page), ['cells.png'], 'a\tb');
   await page.waitForTimeout(150);
   expect(p.state.uploads.map((u) => u.name)).toEqual(['image.png', 'shot.png', 'shot2.png']);
+});
+
+test('a picture of the gallery dragged into the form is that picture, added once: nothing is uploaded and the gallery stays as it is', async ({ page }) => {
+  const [a, b] = [pic({ prompt: 'A fox', age: 2 }), pic({ prompt: 'A hat', age: 1 })];
+  const p = await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  const tiles = page.locator('.gallery-tile');
+  await expect(tiles).toHaveCount(2);
+  // The picture itself, not the thumbnail of the same one in the form's row.
+  const picture = (name: string) => tiles.filter({ has: page.getByRole('img', { name, exact: true }) }).locator('.image-preview-img');
+  // Dragged as a person does, with the mouse, from the gallery to the form: in Generate, which a drop switches to Edit.
+  await picture('A fox').dragTo(page.getByPlaceholder('Describe the picture'));
+  await expect(maker(page)).toHaveAccessibleName('Change a picture');
+  await expect.poll(() => names(page)).toEqual(['A fox']);
+  await expect(box(page, 'A fox')).toBeChecked();
+  // The same one again is not added twice, and another comes after it.
+  await picture('A fox').dragTo(describe(page));
+  await picture('A hat').dragTo(describe(page));
+  await expect.poll(() => names(page)).toEqual(['A fox', 'A hat']);
+  await picture('A fox').dragTo(describe(page));
+  await page.waitForTimeout(150);
+  expect(await names(page)).toEqual(['A fox', 'A hat']);
+  // No copy of it was made: nothing was sent to the portal, and the gallery has the two it had.
+  expect(p.state.uploads).toEqual([]);
+  expect(p.pics).toHaveLength(2);
+  await expect(tiles).toHaveCount(2);
+  await expect(page.getByRole('region', { name: 'Gallery' }).getByText('Uploaded')).toHaveCount(0);
+
+  // What the browser hands over for it: a file made from the picture, with its address. It is the picture, not a file of the person's.
+  await toMake(page);
+  await dropOwn(maker(page), `/api/images/${b.id}/file`);
+  await page.waitForTimeout(150);
+  expect(await names(page)).toEqual(['A fox', 'A hat']);
+  await dropOwn(describe(page), `/api/images/${a.id}/file`, ['file.png', 'file2.png']);
+  await page.waitForTimeout(150);
+  expect(await names(page)).toEqual(['A fox', 'A hat']);
+  expect(p.state.uploads).toEqual([]);
+  expect(p.pics).toHaveLength(2);
+  await expect(tiles).toHaveCount(2);
+  // The edit is made from the pictures themselves.
+  await describe(page).fill('The fox in the hat');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect.poll(() => p.state.edited.length).toBe(1);
+  expect(p.state.edited[0].sources).toEqual([a.id, b.id]);
+
+  // A file of the person's own is still put in the gallery, and so is a picture of another site that has the same path.
+  await drop(maker(page), ['mine.png']);
+  await expect.poll(() => p.state.uploads.map((u) => u.name)).toEqual(['mine.png']);
+  await dropOwn(maker(page), `https://elsewhere.example/api/images/${a.id}/file`, ['theirs.png']);
+  await expect.poll(() => p.state.uploads.map((u) => u.name)).toEqual(['mine.png', 'theirs.png']);
+});
+
+test('a picture of the gallery dragged in where the endpoint takes one takes the place of the one there is', async ({ page }) => {
+  const [a, b] = [pic({ prompt: 'A fox', age: 2 }), pic({ prompt: 'A hat', age: 1 })];
+  const p = await portal(page, { pictures: [a, b] });
+  await page.goto('/images');
+  await page.locator('.gallery-tile .image-preview-img[alt="A fox"]').dragTo(page.getByPlaceholder('Describe the picture'));
+  await expect.poll(() => names(page)).toEqual(['A fox']);
+  await page.locator('.gallery-tile .image-preview-img[alt="A hat"]').dragTo(describe(page));
+  await expect.poll(() => names(page)).toEqual(['A hat']);
+  expect(p.state.uploads).toEqual([]);
+  expect(p.pics).toHaveLength(2);
+});
+
+test('a picture of the gallery dragged into a row that has room for one takes it, one that is there already is no loss, and one that does not fit is said to be left out', async ({ page }) => {
+  const many = Array.from({ length: 9 }, (_, i) => pic({ prompt: `Picture ${i + 1}`, age: i + 1 }));
+  const p = await portal(page, { pictures: many, images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await toEdit(page);
+  for (const m of many.slice(0, 7)) await tick(page, m.prompt);
+  await expect(strip(page).getByRole('img')).toHaveCount(7);
+  const notice = maker(page).getByRole('status').filter({ hasText: 'left out' });
+  await dropOwn(maker(page), `/api/images/${many[8].id}/file`);
+  await expect.poll(() => names(page).then((n) => n.length)).toBe(8);
+  expect(await names(page)).toContain('Picture 9');
+  await expect(notice).toHaveCount(0);
+  // The row is full now: one that is in it is nothing that was lost, one that is not is said to be left out.
+  await dropOwn(maker(page), `/api/images/${many[0].id}/file`);
+  await page.waitForTimeout(150);
+  await expect(notice).toHaveCount(0);
+  await dropOwn(maker(page), `/api/images/${many[7].id}/file`);
+  await expect(maker(page).getByRole('status').filter({ hasText: 'One picture was left out: an edit takes at most 8.' })).toBeVisible();
+  expect(await names(page)).toHaveLength(8);
+  expect(p.state.uploads, 'nothing was put in the gallery').toEqual([]);
+  expect(p.pics).toHaveLength(9);
+});
+
+test('a picture of the gallery copied and pasted is that picture; the viewer\'s button for the edit adds it once, and neither makes a copy', async ({ page }) => {
+  const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
+  const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  const tiles = page.locator('.gallery-tile');
+  // "Copy image": the picture, and the page it was an `<img>` of, which names it.
+  await page.getByPlaceholder('Describe the picture').evaluate((el, id) => {
+    const data = new DataTransfer();
+    data.items.add(new File(['bytes'], 'image.png', { type: 'image/png' }));
+    data.setData('text/html', `<meta charset='utf-8'><img src="${location.origin}/api/images/${id}/file">`);
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, a.id);
+  await expect.poll(() => names(page)).toEqual(['Alpha']);
+  // The same again is not added twice; a screenshot, which has no address of the gallery, is a file like any other.
+  await page.getByPlaceholder('Describe the change: what to add, remove or make different').evaluate((el, id) => {
+    const data = new DataTransfer();
+    data.items.add(new File(['bytes'], 'image.png', { type: 'image/png' }));
+    data.setData('text/html', `<img src="${location.origin}/api/images/${id}/file">`);
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, a.id);
+  await page.waitForTimeout(150);
+  expect(await names(page)).toEqual(['Alpha']);
+  expect(p.state.uploads).toEqual([]);
+  await paste(describe(page), ['shot.png']);
+  await expect.poll(() => p.state.uploads.map((u) => u.name)).toEqual(['shot.png']);
+  await expect.poll(() => names(page)).toEqual(['Alpha', 'shot.png']);
+  const afterUpload = p.pics.length;
+
+  // The viewer: "Use in the edit" takes the picture it shows in, once, and out again; it never puts one in the gallery.
+  await tile(page, 'Beta').click();
+  const use = viewer(page).getByRole('button', { name: 'Use in the edit' });
+  await use.click();
+  await expect(use).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => names(page)).toEqual(['Alpha', 'shot.png', 'Beta']);
+  await page.keyboard.press('Escape');
+  expect(p.state.uploads.map((u) => u.name)).toEqual(['shot.png']);
+  expect(p.pics).toHaveLength(afterUpload);
+  await expect(tiles).toHaveCount(afterUpload);
 });
 
 test('a picture is taken out with its button, and moved earlier or later, and the places and the request follow', async ({ page }) => {

@@ -145,6 +145,9 @@ noise (below).
     picture on the clipboard (a screenshot, or "Copy image") is **pasted** with `Ctrl`/`Cmd` + `V` into
     the description or anywhere in the form. Each file is checked by its bytes as a PNG, JPEG, GIF or
     WebP; one that is not a picture is named in the message and the others are still added.
+    A picture of the gallery can be **dragged** from it into the form too, or copied with "Copy image" and
+    pasted. That is the picture itself, taken in as a tick takes it, once however often it is dropped:
+    nothing is uploaded and no copy of it appears in the gallery.
   - **Their order.** Each picture has its place on it (1, 2, …), in the form and on its tile in the
     gallery, which is how the description names them: "the first picture", "the second picture". **The
     order is the one the request sends them in** (`image[]`, first to last). **Drag a picture to another

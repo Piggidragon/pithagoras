@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { LuChevronLeft, LuChevronRight, LuLoader, LuPlus, LuSlidersHorizontal, LuSparkles, LuUpload, LuWandSparkles, LuX } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob } from "../api";
 import { IMAGE_TYPES, sortFiles } from "../attachments";
-import { MAX_SOURCES, MAX_SOURCES_BYTES, addSources, moveTo, moved, refusal, roomFor, sourceName } from "../edit-sources";
+import { MAX_SOURCES, MAX_SOURCES_BYTES, addSources, galleryIdsIn, moveTo, moved, refusal, roomFor, sourceName } from "../edit-sources";
 import { COMPRESSIBLE, FORM_KEY, LIMITS, OUTPUT_FORMATS, readForm, settingsBody, sizeParts, viewerPicture, type FieldName, type Fields, type FormMemory, type Problem } from "../images-gallery";
 import { bytesLabel } from "../projects";
 import { local } from "../safe-storage";
@@ -85,6 +85,7 @@ export function ImageMaker({
   onMode,
   sources,
   onSources,
+  onFind,
   onStarted,
   onUploaded,
 }: {
@@ -100,6 +101,8 @@ export function ImageMaker({
   /** The pictures to change, in the order the prompt refers to them. They stay while the form is making a new picture, for the way back. */
   sources: GalleryPicture[];
   onSources: (sources: GalleryPicture[]) => void;
+  /** The pictures of the gallery with these ids, those there are: what a picture of the page that is dragged or pasted into the form is taken as. */
+  onFind: (ids: string[]) => Promise<GalleryPicture[]>;
   onStarted: (jobs: PictureJob[]) => void;
   /** A picture of this computer is in the gallery now. */
   onUploaded: (picture: GalleryPicture) => void;
@@ -218,8 +221,18 @@ export function ImageMaker({
     }
   };
 
+  /** Pictures of the gallery that were dragged or pasted in as themselves: added to the pictures of the edit, with nothing uploaded. */
+  const putKnown = (found: GalleryPicture[]) => {
+    const added = addSources(sourcesNow.current, found, multiple);
+    sourcesNow.current = added.list;
+    onSources(added.list);
+    if (added.left > 0) setNotice(leftOutText(added.left, multiple));
+  };
   /** Puts files in the gallery, one after another so that they keep the order they were given in, and adds them to the pictures of the edit. */
-  const put = async (files: File[]) => {
+  const put = async (files: File[], own: string[]) => {
+    // What came from a picture of the gallery is that picture: it is in the gallery, and a copy of it would be there twice.
+    const known = own.length ? await onFind(own) : [];
+    if (known.length) return putKnown(known);
     const { images, others } = sortFiles(files);
     const problems = others.map((f) => t("{name} is not a PNG, JPEG, GIF or WebP picture", { name: f.name || t("Pasted picture") }));
     // Only as many as there is room for are put in the gallery: the rest would be pictures nobody asked to keep.
@@ -247,15 +260,15 @@ export function ImageMaker({
   };
   const queue = useRef<Promise<void>>(Promise.resolve());
   /** Picked, dropped or pasted: each set of files waits for the one before it, so that two quick pastes do not take the same places. */
-  const addFiles = (files: File[]) => {
-    if (!files.length || !changing) return;
+  const addFiles = (files: File[], own: string[] = []) => {
+    if ((!files.length && !own.length) || !changing) return;
     // Pictures put on the form are for a change, wherever it was left.
     onMode("edit");
     setError(null);
     setNotice(null);
     setAdding((n) => n + 1);
     queue.current = queue.current
-      .then(() => put(files))
+      .then(() => put(files, own))
       .catch((e: Error) => setError(e.message))
       .finally(() => setAdding((n) => n - 1));
   };
@@ -438,16 +451,20 @@ export function ImageMaker({
       onDrop={(e) => {
         // Down whatever was dropped: a drag that looked like files can carry none, and the overlay would stay up until the next one left.
         setDragging(false);
-        if (!changing || e.defaultPrevented || !e.dataTransfer.files.length) return;
+        if (!changing || e.defaultPrevented) return;
+        // A picture of the gallery that is dragged up here comes with a file made from it; the address beside it says it is the gallery's own.
+        const own = galleryIdsIn({ uris: e.dataTransfer.getData("text/uri-list"), html: e.dataTransfer.getData("text/html") }, location.origin);
+        if (!e.dataTransfer.files.length && !own.length) return;
         e.preventDefault();
-        addFiles([...e.dataTransfer.files]);
+        addFiles([...e.dataTransfer.files], own);
       }}
       onPaste={(e) => {
         // A screenshot, or "Copy image" in a browser. Where there is text as well — cells copied from a spreadsheet come with a picture of themselves — the text is what was meant.
         const files = [...e.clipboardData.files];
         if (!changing || !files.length || e.clipboardData.getData("text/plain")) return;
         e.preventDefault();
-        addFiles(files);
+        // "Copy image" on a picture of the gallery is that picture too.
+        addFiles(files, galleryIdsIn({ html: e.clipboardData.getData("text/html") }, location.origin));
       }}
     >
       {dragging && (

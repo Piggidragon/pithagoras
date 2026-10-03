@@ -37,6 +37,36 @@ export function addSources(current: readonly GalleryPicture[], added: readonly G
   return { list: [...current, ...fresh.slice(0, room)], left: Math.max(0, fresh.length - room) };
 }
 
+/** Where the portal serves a picture of the gallery as a file: what an `<img>` of the gallery has for its `src` (api.galleryFileUrl). */
+const FILE_PATH = /^\/api\/images\/([0-9a-f]{12})\/file$/;
+
+/**
+ * The pictures of the gallery that a drag or a paste names by their address. A browser that is made to drag or
+ * copy a picture of the page hands over a file made from it, with its address beside it (`uris` is the
+ * `text/uri-list` of the data, `html` its `text/html`). That file is the gallery's own picture, not one from
+ * the person's computer: taken as a file it would be uploaded, and be in the gallery twice. Only addresses of
+ * this portal (`origin`) count, so that a picture of another site with the same path is a file like any other.
+ * Each picture once, in the order named.
+ */
+export function galleryIdsIn({ uris = "", html = "" }: { uris?: string; html?: string }, origin: string): string[] {
+  const sources = [
+    ...uris.split(/\r?\n/).filter((line) => line && !line.startsWith("#")),
+    ...[...html.matchAll(/<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map((m) => m[1] ?? m[2]),
+  ];
+  const ids: string[] = [];
+  for (const source of sources) {
+    let url: URL;
+    try {
+      url = new URL(source.trim(), origin);
+    } catch {
+      continue;
+    }
+    const id = url.origin === new URL(origin).origin ? FILE_PATH.exec(url.pathname)?.[1] : undefined;
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
 /** How many more pictures a list can be given at once: all that are left of the limit, and one where it takes one. */
 export const roomFor = (have: number, multiple: boolean): number => (multiple ? Math.max(0, MAX_SOURCES - have) : 1);
 

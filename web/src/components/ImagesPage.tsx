@@ -398,6 +398,16 @@ export function ImagesPage() {
     [byId, multiple],
   );
 
+  /** Pictures of the gallery by their ids, for a picture of it dragged or pasted into the form: those the page has, and the others asked for. */
+  const find = useCallback(
+    async (ids: string[]) => {
+      const missing = ids.filter((id) => !byId.has(id));
+      const fetched = missing.length ? (await api.galleryPictures(missing)).pictures : [];
+      return ids.map((id) => byId.get(id) ?? fetched.find((p) => p.id === id)).filter((p): p is GalleryPicture => !!p);
+    },
+    [byId],
+  );
+
   /** The same again: a picture made from a description is made once more, as it was asked for; a change is shown in the form first, since the mask it had is not kept. */
   const runAgain = async (picture: GalleryPicture) => {
     setError(null);
@@ -492,6 +502,7 @@ export function ImagesPage() {
             onMode={setMode}
             sources={sources}
             onSources={setSources}
+            onFind={find}
             onStarted={started}
             onUploaded={() => refreshTop()}
           />
