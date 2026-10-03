@@ -71,6 +71,12 @@ Four ship in the repo, between them covering every shape a transport takes:
 | `pithagoras-channel-discord` | WebSocket | The Gateway, with the heartbeat it demands. |
 | `pithagoras-channel-webhook` | A listener | POST a message, the reply comes back in the response. |
 
+Slack sends a mention in a channel the app also reads twice, once as a message
+and once as a mention, and the agent answers it once. People joining, and
+messages being edited or deleted, are not said to the agent. The webhook, when
+it is disabled or edited while a request is open, answers that request with a 503
+rather than waiting for the agent to finish.
+
 None of them needs a dependency: `fetch` and `WebSocket` are both globals on
 Node 22, which the portal requires anyway.
 

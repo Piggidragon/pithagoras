@@ -72,8 +72,16 @@ export async function start(ctx) {
   const secret = ctx.config.secret;
   const port = Number(ctx.config.port) || 4180;
 
+  // Requests whose answer is still being written. One stays open for the whole of
+  // an agent turn, so stopping has to tell them rather than wait for them.
+  const open = new Set();
+
   const server = createServer(async (req, res) => {
+    open.add(res);
+    res.on("close", () => open.delete(res));
     const send = (status, payload) => {
+      // Said once: a turn that ends after the channel was stopped has nobody to tell.
+      if (res.headersSent || res.destroyed) return;
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(payload));
     };
@@ -129,7 +137,18 @@ export async function start(ctx) {
 
   return {
     async stop() {
-      await new Promise((resolve) => server.close(resolve));
+      const closed = new Promise((resolve) => server.close(resolve));
+      for (const res of open) {
+        if (res.headersSent) continue;
+        res.writeHead(503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "This channel is stopping" }));
+      }
+      // Whatever has not hung up by now is cut: server.close() waits for every
+      // connection, and a keep-alive one can sit there for as long as it likes.
+      const cut = setTimeout(() => server.closeAllConnections?.(), 500);
+      server.closeIdleConnections?.();
+      await closed;
+      clearTimeout(cut);
     },
 
     ...(ctx.config.callbackUrl

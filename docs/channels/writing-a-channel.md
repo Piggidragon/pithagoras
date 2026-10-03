@@ -285,7 +285,11 @@ see a change.
   quietly lumping everything into one conversation.
 - **Editing configuration restarts your channel.** `stop()` is called and
   `start()` runs again with the new values, so do not hold state that matters
-  outside them.
+  outside them. `stop()` has five seconds: a package that is still waiting by
+  then (say, for a request that is open for the length of an agent turn) is left
+  behind, with a line in the log, so that editing a channel and shutting the
+  portal down never wait on it. Answer what is open instead of waiting for it,
+  as the webhook does with a 503.
 - **`ask` waits for the agent.** It can take minutes on a real task; there is a
   15 minute ceiling after which it rejects.
 

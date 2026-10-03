@@ -125,6 +125,8 @@ class ChannelSupervisor {
   private syncing: Promise<void> | null = null;
   /** Open dialogs, by session. The next message in that chat answers one. */
   private pendingUi = new Map<string, PendingUi>();
+  /** How long a package gets to stop before the portal goes on without it. */
+  stopGraceMs = 5000;
   /** Channels waiting to try starting again, with how many times they have failed. */
   private retries = new Map<string, { attempt: number; timer: NodeJS.Timeout }>();
 
@@ -384,11 +386,25 @@ class ChannelSupervisor {
     const live = this.running.get(id);
     if (!live) return;
     this.running.delete(id);
+    let timer: NodeJS.Timeout | undefined;
     try {
       live.controller.abort();
-      await live.stop?.();
+      // A package that waits for something to end (a webhook with a request open
+      // for the length of an agent turn) must not hold every later sync and the
+      // shutdown with it.
+      await Promise.race([
+        live.stop?.(),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            console.error(`[channel ${live.slug}] did not stop within ${this.stopGraceMs / 1000}s; carrying on without it`);
+            resolve();
+          }, this.stopGraceMs);
+        }),
+      ]);
     } catch (e) {
       console.error(`[channel ${live.slug}] stop failed: ${(e as Error).message}`);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
