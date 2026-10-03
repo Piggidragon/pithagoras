@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { isSignedOut, recordSignOut } from "./db.js";
+import { tlsFiles } from "./http-security.js";
 
 /**
  * Shared-password gate.
@@ -9,6 +10,8 @@ import { isSignedOut, recordSignOut } from "./db.js";
  * network it should not be drivable by anything that happens to reach the port.
  * The cookie is an HMAC of an expiry stamp — no session store needed, except
  * for the ones signed out early, which are remembered until they would expire.
+ * The key holds the password as well as the secret, so changing the password
+ * ends every login that was made under the old one.
  */
 const PASSWORD = process.env.PORTAL_PASSWORD || "";
 const SECRET = process.env.PORTAL_SECRET || crypto.randomBytes(32).toString("hex");
@@ -16,6 +19,9 @@ const COOKIE = (process.env.VOICE_COMPARISON === "true" || process.env.VOICE_PIP
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export const authEnabled = PASSWORD.length > 0;
+/** The example in .env.example and the README, which is public: nobody's password. */
+const EXAMPLE_PASSWORD = "change-me";
+const MIN_PASSWORD_LENGTH = 8;
 /** Running without a login is a deliberate choice, never what an empty .env falls back to. */
 const allowNoPassword = /^(1|true|yes)$/i.test(process.env.PORTAL_ALLOW_NO_PASSWORD ?? "");
 
@@ -30,6 +36,16 @@ if (!authEnabled && !allowNoPassword) {
   process.exit(1);
 }
 
+if (authEnabled && (PASSWORD === EXAMPLE_PASSWORD || PASSWORD.length < MIN_PASSWORD_LENGTH)) {
+  console.error(
+    "\n  PORTAL_PASSWORD is the example from .env.example or shorter than " + MIN_PASSWORD_LENGTH + " characters.\n" +
+      "  This portal runs arbitrary commands on the host and listens on every\n" +
+      "  interface once it has a password, so it refuses to start with one that\n" +
+      "  anybody could guess. Choose a longer one.\n"
+  );
+  process.exit(1);
+}
+
 if (!authEnabled) {
   console.warn(
     "\n  WARNING: PORTAL_ALLOW_NO_PASSWORD is set and PORTAL_PASSWORD is not — the\n" +
@@ -39,9 +55,13 @@ if (!authEnabled) {
   );
 }
 
+/** What the cookies are signed with: the secret and the password, so a new password refuses every old cookie. */
+const KEY = crypto.createHash("sha256").update(`${SECRET}\0${PASSWORD}`).digest();
+
+const macOf = (expiry: string) => crypto.createHmac("sha256", KEY).update(expiry).digest("hex");
+
 function sign(expiry: number): string {
-  const mac = crypto.createHmac("sha256", SECRET).update(String(expiry)).digest("hex");
-  return `${expiry}.${mac}`;
+  return `${expiry}.${macOf(String(expiry))}`;
 }
 
 /** The token's expiry and signature, if it is one this portal signed and it has not run out. */
@@ -50,7 +70,7 @@ function genuine(token: string | undefined): { expiry: number; mac: string } | n
   const [expiryStr, mac] = token.split(".");
   const expiry = Number(expiryStr);
   if (!Number.isFinite(expiry) || expiry < Date.now()) return null;
-  const expected = crypto.createHmac("sha256", SECRET).update(expiryStr).digest("hex");
+  const expected = macOf(expiryStr);
   const a = Buffer.from(mac ?? "");
   const b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b) ? { expiry, mac } : null;
@@ -61,10 +81,18 @@ function verify(token: string | undefined): boolean {
   return login !== null && !isSignedOut(login.mac);
 }
 
+/**
+ * Only over TLS: the browser sends a cookie to every port of the host name, and a
+ * Secure one is kept from the plain-HTTP services beside the portal. Where the
+ * portal itself is plain HTTP, a Secure cookie would never be stored at all.
+ */
+const secure = (res: Response) => Boolean(tlsFiles()) || res.req.secure;
+
 export function issueCookie(res: Response): void {
   res.cookie(COOKIE, sign(Date.now() + MAX_AGE_MS), {
     httpOnly: true,
     sameSite: "lax",
+    secure: secure(res),
     maxAge: MAX_AGE_MS,
   });
 }
@@ -76,7 +104,7 @@ export function issueCookie(res: Response): void {
 export function signOut(req: Request, res: Response): void {
   const login = genuine(req.cookies?.[COOKIE]);
   if (login) recordSignOut(login.mac, login.expiry);
-  res.clearCookie(COOKIE, { httpOnly: true, sameSite: "lax" });
+  res.clearCookie(COOKIE, { httpOnly: true, sameSite: "lax", secure: secure(res) });
 }
 
 export function checkPassword(candidate: unknown): boolean {
@@ -94,4 +122,22 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 
 export function isAuthed(req: Request): boolean {
   return !authEnabled || verify(req.cookies?.[COOKIE]);
+}
+
+/**
+ * The same question for a request cookie-parser never saw: an upgrade is
+ * handed to the server before Express, so its cookies are still the raw header.
+ */
+export function isAuthedUpgrade(req: { headers: { cookie?: string } }): boolean {
+  if (!authEnabled) return true;
+  for (const part of (req.headers.cookie ?? "").split(";")) {
+    const at = part.indexOf("=");
+    if (at < 0 || part.slice(0, at).trim() !== COOKIE) continue;
+    try {
+      return verify(decodeURIComponent(part.slice(at + 1).trim()));
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }

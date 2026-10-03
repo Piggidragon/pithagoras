@@ -2,6 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import type { Duplex } from "node:stream";
 import type { Express } from "express";
+import { isAuthedUpgrade, requireAuth } from "./auth.js";
 import { config } from "./extensions/browser-service.js";
 import { viewerConnected, viewerDisconnected } from "./extensions/browser-frames.js";
 
@@ -15,9 +16,11 @@ import { viewerConnected, viewerDisconnected } from "./extensions/browser-frames
  * is only secure if the portal itself is. Same-origin means it inherits
  * whatever the portal has instead of needing its own.
  *
- * And it removes a second credential and a second certificate: the portal has
- * already decided who you are, so it holds the browser's password rather than
- * asking you for it again.
+ * And it removes a second credential and a second certificate: the portal
+ * decides who you are, so it holds the browser's password rather than asking
+ * you for it again. That only holds if it decides before it proxies: both
+ * halves refuse what carries no login, since the browser's own password is
+ * added on the way and its container would never ask.
  */
 
 const UPSTREAM_HOST = process.env.BROWSER_HOST || "127.0.0.1";
@@ -35,12 +38,39 @@ const agent = new https.Agent({ rejectUnauthorized: false });
 const upstreamPath = (url: string) => url.slice(PREFIX.length) || "/";
 
 /**
+ * What goes on to the browser: the request as it came, without the portal's own
+ * login cookie or anything the client sent as a credential. The container is
+ * not the portal, and whatever runs in it must not be handed a way in.
+ */
+function forwarded(headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
+  const { cookie: _cookie, authorization: _authorization, ...rest } = headers;
+  return { ...rest, host: `${UPSTREAM_HOST}:${upstreamPort()}`, authorization: auth() };
+}
+
+const FRAME_ANCESTORS = "frame-ancestors 'self'";
+
+/**
+ * What the browser UI answers, plus the one thing it does not say for itself:
+ * only the portal's own pages may frame it. Added to a policy of its own as a
+ * second one, so that both apply.
+ */
+function answered(headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
+  const own = headers["content-security-policy"];
+  return { ...headers, "content-security-policy": own ? `${own}, ${FRAME_ANCESTORS}` : FRAME_ANCESTORS };
+}
+
+/** An answer to a connection that is not going to become a stream, then closed. */
+function refuse(socket: Duplex, status: number, message: string): void {
+  socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+}
+
+/**
  * The route half. Registered with the other routes, before the SPA fallback —
  * that fallback answers everything outside /api, so a proxy mounted after it
  * quietly served the portal's own index.html instead.
  */
 export function mountBrowserProxy(app: Express): void {
-  app.use(PREFIX, (req, res) => {
+  app.use(PREFIX, requireAuth, (req, res) => {
     const proxied = https.request(
       {
         host: UPSTREAM_HOST,
@@ -48,11 +78,11 @@ export function mountBrowserProxy(app: Express): void {
         // Express strips the mount path from req.url, so it is already relative.
         path: req.url || "/",
         method: req.method,
-        headers: { ...req.headers, host: `${UPSTREAM_HOST}:${upstreamPort()}`, authorization: auth() },
+        headers: forwarded(req.headers),
         agent,
       },
       (upstream) => {
-        res.writeHead(upstream.statusCode ?? 502, upstream.headers);
+        res.writeHead(upstream.statusCode ?? 502, answered(upstream.headers));
         upstream.pipe(res);
       }
     );
@@ -72,21 +102,33 @@ export function mountBrowserProxy(app: Express): void {
 export function attachBrowserUpgrade(server: http.Server): void {
   server.on("upgrade", (req: http.IncomingMessage, socket: Duplex, head: Buffer) => {
     if (!req.url?.startsWith(PREFIX)) return;
+    // Express never sees an upgrade, so requireAuth did not either: the same
+    // login, asked here. And a page of another site may not open the stream with
+    // the visitor's cookie — a browser names where the page came from.
+    if (!isAuthedUpgrade(req)) return refuse(socket, 401, "Unauthorized");
+    if (req.headers.origin && !sameHost(req.headers.origin, req.headers.host)) return refuse(socket, 403, "Forbidden");
     const proxied = https.request({
       host: UPSTREAM_HOST,
       port: upstreamPort(),
       path: upstreamPath(req.url),
       method: "GET",
-      headers: { ...req.headers, host: `${UPSTREAM_HOST}:${upstreamPort()}`, authorization: auth() },
+      headers: forwarded(req.headers),
       agent,
     });
     proxied.end();
+    // A visitor who leaves during the handshake takes the request with them.
+    socket.once("close", () => proxied.destroy());
+    socket.on("error", () => socket.destroy());
 
     proxied.on("upgrade", (upstreamRes, upstreamSocket, upstreamHead) => {
+      if (socket.destroyed) return void upstreamSocket.destroy();
       const lines = Object.entries(upstreamRes.headers).map(([k, v]) => `${k}: ${v}`);
       socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join("\r\n")}\r\n\r\n`);
-      if (upstreamHead?.length) socket.unshift(upstreamHead);
-      if (head?.length) upstreamSocket.unshift(head);
+      // Each side's first bytes go back where they were read: the container's
+      // into its own stream, which is sent on to the visitor, and the visitor's
+      // into theirs, which is sent on to the container.
+      if (upstreamHead?.length) upstreamSocket.unshift(upstreamHead);
+      if (head?.length) socket.unshift(head);
       upstreamSocket.pipe(socket).pipe(upstreamSocket);
       // Somebody is watching now, so the portal's own stream gets out of the
       // way — only one client may hold the display, and the newer one wins.
@@ -105,6 +147,21 @@ export function attachBrowserUpgrade(server: http.Server): void {
       socket.on("error", close);
       upstreamSocket.on("error", close);
     });
+    // An answer that is not an upgrade — the container's password changed, it is
+    // not up yet — said to the visitor instead of leaving them waiting.
+    proxied.on("response", (answer) => {
+      refuse(socket, answer.statusCode ?? 502, answer.statusMessage ?? "Bad Gateway");
+      answer.resume();
+    });
     proxied.on("error", () => socket.destroy());
   });
+}
+
+/** Is `origin` the page of the host the request was made to? */
+function sameHost(origin: string, host: string | undefined): boolean {
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
 }

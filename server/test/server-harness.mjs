@@ -38,12 +38,16 @@ export const freePort = () => new Promise((resolve) => {
   const s = createServer().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
 });
 
-/** What the server is started with: everything in `home`, no password, pi on the host. */
-export const serverEnv = (home, port) => ({
+/**
+ * What the server is started with: everything in `home`, no password, pi on the
+ * host. `overrides` change any of it, a test of the login giving it a password.
+ */
+export const serverEnv = (home, port, overrides = {}) => ({
   ...process.env,
   PORT: String(port), DATA_DIR: home, BIN_DIR: path.join(home, "bin"), SESSION_DIR: path.join(home, "sessions"), CHANNELS_DIR: path.join(home, "channels"),
   AGENT_HOME: path.join(home, "agent-home"), WORKSPACE_ROOT: path.join(home, "ws"), PI_CODING_AGENT_DIR: path.join(home, "agent"),
   PORTAL_PASSWORD: "", PORTAL_ALLOW_NO_PASSWORD: "1", EXECUTOR: "host", LLAMA_BASE_URL: "http://127.0.0.1:1",
+  ...overrides,
 });
 
 /**

@@ -1,8 +1,28 @@
 import type { RequestHandler } from 'express';
 import { existsSync } from 'node:fs';
+import net from 'node:net';
 
 export function bindHost(password: string | undefined, allowOpen: string | undefined): string {
   return password || allowOpen === '1' ? '0.0.0.0' : '127.0.0.1';
+}
+
+/**
+ * Who an address counts as, for the throttle. A network hands out a /64 to one
+ * subscriber, so an IPv6 address is only its first four groups: one machine
+ * cannot have every address of its block fail once each. An IPv4 address mapped
+ * into IPv6 is the IPv4 address it carries.
+ */
+export function throttleKey(address: string | undefined): string {
+  if (!address) return 'unknown';
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
+  if (mapped) return mapped[1];
+  if (!net.isIPv6(address)) return address;
+  // `::` stands for however many zero groups make eight.
+  const [head, tail] = address.split('%')[0].split('::');
+  const groups = head ? head.split(':') : [];
+  const rest = tail ? tail.split(':') : [];
+  const all = tail === undefined ? groups : [...groups, ...Array(Math.max(0, 8 - groups.length - rest.length)).fill('0'), ...rest];
+  return all.slice(0, 4).map((g) => parseInt(g || '0', 16).toString(16)).join(':') + '::/64';
 }
 
 /** Bound memory and attempts without trusting client-supplied forwarding headers. */
@@ -11,17 +31,17 @@ export function loginThrottle(now = Date.now): RequestHandler {
   return (req, res, next) => {
     const time = now();
     for (const [key, value] of attempts) if (value.until <= time) attempts.delete(key);
-    const key = req.socket.remoteAddress ?? 'unknown';
+    const key = throttleKey(req.socket.remoteAddress);
     const entry = attempts.get(key) ?? { count: 0, until: time + 15 * 60_000 };
     if (entry.count >= 10) {
       res.setHeader('Retry-After', String(Math.ceil((entry.until - time) / 1000)));
       res.status(429).json({ error: 'Too many login attempts. Try again later.' });
       return;
     }
-    if (!attempts.has(key) && attempts.size >= 4096) {
-      res.status(429).json({ error: 'Too many login attempts. Try again later.' });
-      return;
-    }
+    // Full: the entry that runs out first makes room, rather than the newcomer
+    // being refused — with enough addresses, that would keep everyone else out.
+    // They are in the order they were made, and so in the order they run out.
+    if (!attempts.has(key) && attempts.size >= 4096) attempts.delete(attempts.keys().next().value!);
     entry.count++;
     attempts.set(key, entry);
     res.on('finish', () => { if (res.statusCode < 400) attempts.delete(key); });

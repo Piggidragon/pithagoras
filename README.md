@@ -29,7 +29,7 @@ adds 150–300 tokens per tool.
 
 ```bash
 git clone https://github.com/thecodacus/pithagoras.git && cd pithagoras
-cp .env.example .env      # set PORTAL_PASSWORD, and WORKSPACES_DIR to where your repos are
+cp .env.example .env      # set PORTAL_PASSWORD (8+ characters; it will not start without), and WORKSPACES_DIR to where your repos are
 docker compose up -d --build
 ```
 
