@@ -9,8 +9,7 @@ import { getDb } from "./db.js";
  * back to the person who asked, so the refusal turns into a round trip instead
  * of a dead end.
  *
- * The id is short and typed by a human in a chat, so it is four characters and
- * only has to be unique among questions still waiting.
+ * The id is short and typed by a human in a chat, so it is four characters.
  */
 
 export interface QuestionRow {
@@ -32,19 +31,16 @@ export interface QuestionRow {
 
 const ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789";
 
-/** Unique among unanswered questions; an answered id is free to be reused. */
+/**
+ * Unique in the whole table: answered rows are kept, and the id is the primary
+ * key, so one reused for a new question would make the insert fail.
+ */
 function freeId(): string {
-  const taken = new Set(
-    (
-      getDb().prepare("SELECT id FROM questions WHERE answered_at IS NULL").all() as {
-        id: string;
-      }[]
-    ).map((r) => r.id)
-  );
+  const used = getDb().prepare("SELECT 1 FROM questions WHERE id = ?");
   for (let attempt = 0; attempt < 500; attempt++) {
     let id = "";
     for (let i = 0; i < 4; i++) id += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
-    if (!taken.has(id)) return id;
+    if (!used.get(id)) return id;
   }
   throw new Error("No free question id");
 }

@@ -5,6 +5,7 @@ import { unscopeKey } from "../agent.js";
 import { placeProblem, routinePlace } from "../workspaces.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { isValidSlug, slugify } from "../slug.js";
+import { fail, say } from "./tool-result.js";
 import { isValidCron, nextRun, parseCron } from "../routines/cron.js";
 import {
   oneOffDone,
@@ -34,8 +35,8 @@ import {
  * stays a deliberate act in the UI.
  */
 
-const ok = (text: string) => ({ output: text, isError: false });
-const bad = (text: string) => ({ output: text, isError: true });
+const ok = say;
+const bad = fail;
 
 const rows = () =>
   getDb()
@@ -343,15 +344,11 @@ export function routineTools(sessionId?: string) {
       async execute(_id: string, p: any) {
         const row = byName(p.routine ?? "");
         if (!row) return bad(`No routine called "${p.routine}"`);
-        try {
-          const after = await routineSupervisor.run(row, "manual");
-          const output = (after.last_output ?? "").trim();
-          return after.last_status === "ok"
-            ? ok(output || "Ran, with no output.")
-            : bad(`It failed: ${output}`);
-        } catch (e) {
-          return bad((e as Error).message);
-        }
+        const after = await routineSupervisor.run(row, "manual");
+        const output = (after.last_output ?? "").trim();
+        return after.last_status === "ok"
+          ? ok(output || "Ran, with no output.")
+          : bad(`It failed: ${output}`);
       },
     });
   };

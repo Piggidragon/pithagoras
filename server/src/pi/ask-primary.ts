@@ -5,6 +5,7 @@ import { askQuestion } from "../questions.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { sessions } from "../session-manager.js";
 import { getPerson } from "../people.js";
+import { fail, say } from "./tool-result.js";
 
 /**
  * Reaching the primary user from a conversation that is not theirs.
@@ -50,23 +51,21 @@ export function askPrimaryTool(sessionId: string) {
       }),
       async execute(_id: string, p: any) {
         const question = String(p.question ?? "").trim();
-        if (!question) return { output: "Nothing to ask.", isError: true };
+        if (!question) return fail("Nothing to ask.");
 
         const to = getDefaultReportTo();
         if (!to) {
-          return {
-            output:
-              "There is no way to reach the primary user — no report destination is configured. " +
+          return fail(
+            "There is no way to reach the primary user — no report destination is configured. " +
               "Tell the person you cannot get hold of them.",
-            isError: true,
-          };
+          );
         }
 
         const session = getDb()
           .prepare("SELECT * FROM sessions WHERE id = ?")
           .get(sessionId) as SessionRow | undefined;
         if (!session?.channel_slug || !session.channel_key) {
-          return { output: "This conversation has nowhere to send an answer back to.", isError: true };
+          return fail("This conversation has nowhere to send an answer back to.");
         }
         // Whether an answer can be routed back, which is not whether the
         // question is worth asking. Refusing to ask at all because the return
@@ -117,15 +116,13 @@ export function askPrimaryTool(sessionId: string) {
               : undefined
           );
         } catch (e) {
-          return { output: `Could not reach them: ${(e as Error).message}`, isError: true };
+          return fail(`Could not reach them: ${(e as Error).message}`);
         }
 
-        return {
-          output:
-            `Asked. Tell ${row.person_name} you have passed it on and that you will come back ` +
+        return say(
+          `Asked. Tell ${row.person_name} you have passed it on and that you will come back ` +
             `to them — do not guess at the answer in the meantime.`,
-          isError: false,
-        };
+        );
       },
     });
   };

@@ -10,7 +10,7 @@ you with `ask_primary`, and it arrives wherever [routine reports](/guide/routine
 go:
 
 ```
-Priya is asking (via telegram):
+Priya (telegram:100200300) is asking (via telegram):
 
 Priya wants me to check the inbox and summarise anything urgent.
 
@@ -20,6 +20,10 @@ It wants to run, exactly once:
 
 Approving runs that and nothing else.
 ```
+
+The id after the name is who the platform says is asking. A name is whatever
+somebody called themselves, and one can be changed to look like somebody else's;
+the id cannot.
 
 For `edit_image` the action is the path of each picture, one to a line, in the
 order of the call (a single picture is just its path), and the agent is told
