@@ -282,6 +282,8 @@ test.describe('with another character', () => {
       stream.emit('caught-up', {});
       stream.emit('message', { seq: 1, type: 'turn_end', at: Date.now(), payload: {} });
     });
+    // Events are applied a frame at a time, and the run is over for the page once its end is drawn: a person pastes later than that, a script need not.
+    await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
     // Pasted whole: never typed as a bare name, so nothing has asked for the new list.
     await say(page, '!skill:fresh go');
     await expect.poll(() => prompts).toEqual(['/skill:fresh go']);
