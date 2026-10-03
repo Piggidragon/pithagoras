@@ -41,7 +41,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
       })
       // A deployment where this cannot work says so in place of the list — the
       // same as the switches beside the composer, and for the same reason.
-      .catch((e) => setRefusal(String(e).replace(/^Error:\s*/, "")))
+      .catch((e) => setRefusal((e as Error).message))
       .finally(() => setLoading(false));
   }, []);
 
@@ -55,7 +55,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
       setOff(r.off);
     } catch (e) {
       setOff(before);
-      onError(String(e));
+      onError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -79,7 +79,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
       setNames(r.names);
     } catch (e) {
       setNames(before);
-      onError(String(e));
+      onError((e as Error).message);
     }
   };
 

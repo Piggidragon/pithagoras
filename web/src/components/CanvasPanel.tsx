@@ -4,7 +4,7 @@ import { LuFileText, LuPlus, LuX, LuTrash2, LuCheck, LuPencil, LuEye, LuSave, Lu
 import { Markdown } from './Markdown';
 import { asksBeforeDeleting } from '../confirm-prefs';
 import { canvasPictures } from '../canvas-pictures';
-import { api } from '../api';
+import { api, json } from '../api';
 import { watchCanvases, type FeedState } from '../canvas-feed';
 import { ResizeHandles } from './ResizeHandles';
 import { t } from "../i18n";
@@ -12,10 +12,7 @@ import { t } from "../i18n";
 /** How long the chat's stream may take to come up before the panel asks for the list itself. */
 const STALLED_MS=2000;
 type Canvas = { id:string; title:string; content:string; revision:number; status:string; active_call:string|null; updated_at:string; persisted:boolean };
-async function request(url:string,method:string,body?:unknown,signal?:AbortSignal) {
-  const res=await fetch(url,{method,signal,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
-  const data=await res.json();if(!res.ok)throw new Error(data.error||t('Canvas request failed'));return data;
-}
+const request=(url:string,method:string,body?:unknown,signal?:AbortSignal)=>json<any>(url,{method,signal,...(body===undefined?{}:{body:JSON.stringify(body)})});
 export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{sessionId:string;folder:string;open:boolean;setOpen:(open:boolean)=>void;showToggle?:boolean}) {
   const [rows,setRows]=useState<Canvas[]>([]),[selected,setSelected]=useState('');
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(''),[title,setTitle]=useState(''),[base,setBase]=useState(0);

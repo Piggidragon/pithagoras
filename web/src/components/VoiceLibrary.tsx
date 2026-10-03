@@ -2,6 +2,8 @@ import {useEffect,useState} from 'react';
 import { Select } from "./Select";
 import {LuPlus,LuTrash2} from 'react-icons/lu';
 import {samplesWav} from '../voice';
+import {json} from '../api';
+import {micError} from '../mic-error';
 import {confirmDialog} from './ConfirmDialog';
 import { languageName, t } from "../i18n";
 import { KOKORO_VOICES } from "../../../server/src/kokoro-voices";
@@ -10,11 +12,12 @@ export type Preset={id:string;name:string;kind:'design'|'clone';instruction:stri
 export const kokoroVoiceOptions=()=>KOKORO_VOICES.map(v=>({value:v.id,label:v.name,text:v.name,hint:`${languageName(v.locale,v.language)} · ${v.female?t('female'):t('male')}`}));
 /** The voices in the library. */
 export const voicePresets=():Promise<Preset[]>=>request();
-async function request(path='',method='GET',body?:unknown){const r=await fetch('/api/voice/presets'+path,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw Error(data.error||t('Voice request failed'));return data;}
+const request=(path='',method='GET',body?:unknown)=>json<any>('/api/voice/presets'+path,{method,...(body===undefined?{}:{body:JSON.stringify(body)})});
 async function reference(file:File){
  if(file.size>20*1024*1024)throw Error(t('Choose an audio file smaller than 20 MB'));
  const decoder=new OfflineAudioContext(1,16000,16000);
- const decoded=await decoder.decodeAudioData(await file.arrayBuffer());
+ // A file that is not audio the browser reads: its own words for that are no help.
+ const decoded=await decoder.decodeAudioData(await file.arrayBuffer()).catch(e=>{throw Error(micError(e));});
  if(decoded.duration<1||decoded.duration>30)throw Error(t('Choose a recording between 1 and 30 seconds'));
  const renderer=new OfflineAudioContext(1,Math.round(decoded.duration*16000),16000);
  const source=renderer.createBufferSource();source.buffer=decoded;source.connect(renderer.destination);source.start();

@@ -35,7 +35,10 @@ after it. The current Whisper API remains clip-based, so this is speculative
 transcription rather than a token-streaming ASR model. Long turns are segmented
 at 60 seconds and listening resumes automatically.
 
-Microphone access needs HTTPS or localhost. Voice mode replaces the chat and
+Microphone access needs HTTPS or localhost. A microphone the browser refuses — blocked
+for the site, none connected, in use by another program — is said in the portal's
+language, with where to change it (the site settings behind the icon left of the
+address), for dictation and voice mode alike. Voice mode replaces the chat and
 composer with an audio-reactive orb: by default teal for your voice and violet
 for spoken replies. The screen keeps only status, the controls and live words while you
 speak. Quiet synthesized sound cues mark connection, submission, mute and tool
@@ -182,7 +185,8 @@ Choose where the words go with the switch on that line. The choice is remembered
 
 Stopping dictation still delivers a sentence you were in the middle of. Starting
 voice mode turns dictation off, since both use the microphone, and leaving the
-session drops anything not yet transcribed instead of sending it elsewhere.
+session drops anything not yet transcribed instead of sending it elsewhere: a
+sentence you are still saying when you open another chat is not sent to that one.
 Whisper's placeholders for silence, such as `[BLANK_AUDIO]`, are not typed.
 
 Messages sent by dictation are ordinary text messages. Unlike voice-mode turns

@@ -67,7 +67,7 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
         if (cancelled) return;
         // A deployment where this cannot work says so — a switch that silently
         // does nothing is worse than one that is not there.
-        setRefusal(String(e).replace(/^Error:\s*/, ""));
+        setRefusal((e as Error).message);
         setTools([]);
       });
     return () => {

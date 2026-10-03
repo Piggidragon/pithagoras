@@ -3,8 +3,8 @@ import type { MicVAD } from "@ricky0123/vad-web";
 import { api, DEFAULT_VAD } from "./api";
 import { cleanTranscript } from "./dictation";
 import { LiveTranscription } from "./live-transcription";
-import { samplesWav } from "./voice";
 import { t } from "./i18n";
+import { micError } from "./mic-error";
 
 /** Where dictated words go: into the message box to be edited, or straight to the agent. */
 export type DictationMode = "review" | "send";
@@ -25,6 +25,14 @@ const readMode = (): DictationMode => {
 /** Everything one listening run owns, so stopping it releases exactly that. */
 interface Run {
   closed: boolean;
+  /**
+   * The chat it listens for, and what ends its words' way there: both are taken
+   * when it starts. Leaving the chat stops the run, and stopping hands over the
+   * sentence in progress after the next chat has been set up, so the page's
+   * current chat and signal are by then the next one's.
+   */
+  sessionId: string;
+  signal: AbortSignal;
   mic?: MediaStream;
   audio?: AudioContext;
   vad?: MicVAD;
@@ -122,7 +130,7 @@ export function useDictation({
   };
 
   const transcribe = (r: Run, samples: Float32Array) => {
-    const signal = cancel.current.signal;
+    const signal = r.signal;
     setPendingNow(1);
     queue.current = queue.current.then(async () => {
       try {
@@ -177,7 +185,7 @@ export function useDictation({
 
   const start = async () => {
     if (run.current) return;
-    const r: Run = { closed: false };
+    const r: Run = { closed: false, sessionId: latest.current.sessionId, signal: cancel.current.signal };
     run.current = r;
     setStarting(true);
     setError("");
@@ -197,17 +205,7 @@ export function useDictation({
       if (r.closed) return teardown(r);
 
       const live = new LiveTranscription(
-        async (samples, signal) => {
-          const response = await fetch(`/api/sessions/${latest.current.sessionId}/voice/transcribe`, {
-            method: "POST",
-            headers: { "Content-Type": "audio/wav" },
-            body: samplesWav(samples),
-            signal,
-          });
-          const result = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(result.error || t("Transcription failed"));
-          return String(result.text ?? "");
-        },
+        async (samples, signal) => (await api.transcribe(r.sessionId, samples, signal)).text,
         (text) => {
           if (!r.closed) setPartial(text);
         },
@@ -284,7 +282,7 @@ export function useDictation({
         run.current = null;
         setStarting(false);
         setActive(false);
-        setError((e as Error).message);
+        setError(micError(e));
       }
       r.closed = true;
       teardown(r);

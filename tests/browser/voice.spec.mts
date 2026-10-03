@@ -370,3 +370,53 @@ test('without speech synthesis voice mode is not offered, because it speaks its 
   await expect(page.getByRole('button', { name: 'Dictate a message' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Turn on hands-free voice' })).toBeVisible();
 });
+
+test('dictation in send mode sends what was said to the chat it was started in', async ({ page }) => {
+  const asked: string[] = [];
+  await page.addInitScript(() => localStorage.setItem('dictationMode', 'send'));
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  await page.route('**/voice/transcribe', route => { asked.push(new URL(route.request().url()).pathname); return route.fulfill({ json: { text: 'A dictated sentence.' } }); });
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Dictate a message' }).click();
+  await expect(page.getByRole('button', { name: 'Stop dictating' })).toBeVisible({ timeout: 25000 });
+  await page.getByRole('button', { name: 'Inject speech' }).click();
+  await expect(page.getByTestId('sent')).toHaveText('1', { timeout: 15000 });
+  await expect(page.getByTestId('last-send')).toContainText('A dictated sentence.');
+  expect(asked.at(-1)).toBe('/api/sessions/test/voice/transcribe');
+});
+
+test('a sentence being dictated when another chat is opened is not sent to that chat', async ({ page }) => {
+  const asked: string[] = [];
+  await page.addInitScript(() => localStorage.setItem('dictationMode', 'send'));
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  await page.route('**/voice/transcribe', route => { asked.push(new URL(route.request().url()).pathname); return route.fulfill({ json: { text: 'A dictated sentence.' } }); });
+  // The chat switched to answers as the one the page starts in does.
+  await page.route('**/api/sessions/other/commands', route => route.fulfill({ json: { commands: [] } }));
+  await page.route('**/api/sessions/other/canvases', route => route.fulfill({ json: [] }));
+  await page.route('**/api/sessions/other/config', route => route.fulfill({ status: 503, json: {} }));
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Dictate a message' }).click();
+  await expect(page.getByRole('button', { name: 'Stop dictating' })).toBeVisible({ timeout: 25000 });
+  await page.getByRole('button', { name: 'Inject speech' }).click();
+  // Mid-sentence: heard, not yet ended by a pause.
+  await expect(page.getByText('Hearing you')).toBeVisible({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Switch chat' }).click();
+  await page.waitForTimeout(2500);
+  await expect(page.getByTestId('sent')).toHaveText('0');
+  expect(asked.filter(path => path.includes('/other/'))).toEqual([]);
+});
+
+test('a refused microphone says how to allow it, in dictation and in voice mode, not the browser\'s "Permission denied"', async ({ page }) => {
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  await page.goto('/tests/voice.html');
+  await page.evaluate(() => { (window as any).micFails = 'NotAllowedError'; });
+  await page.getByRole('button', { name: 'Dictate a message' }).click();
+  await expect(page.getByRole('alert')).toContainText('The microphone is blocked for this site');
+  await expect(page.getByRole('alert')).not.toContainText('Permission denied');
+  await page.reload();
+  await page.evaluate(() => { (window as any).micFails = 'NotFoundError'; });
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('alert')).toContainText('No microphone was found');
+});

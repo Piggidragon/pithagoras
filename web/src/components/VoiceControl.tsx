@@ -9,7 +9,8 @@ import { createPortal } from "react-dom";
 import { VoiceStage, type VoiceLevels } from "./VoiceStage";
 import { LuAudioLines, LuLoaderCircle, LuGauge } from "react-icons/lu";
 import type { MicVAD } from "@ricky0123/vad-web";
-import { api, type PortalEvent, type PromptOptions } from "../api";
+import { api, json, type PortalEvent, type PromptOptions } from "../api";
+import { micError } from "../mic-error";
 import type { Item } from "../transcript";
 import { LiveTranscription } from "../live-transcription";
 import { preparePcmSpeech, readPcmStream, playAudioBuffer, bufferOf } from "../pcm-stream";
@@ -19,7 +20,6 @@ import { asksToRepeat, couldAskToRepeat } from "../voice-commands";
 import { isImage, pending, type Attachment } from "../attachments";
 import { VOICE_RATES } from "./VoiceSettings";
 import { describe, matches, useKeyLabels, useKeybindings } from "../keybindings";
-import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
 import { t } from "../i18n";
 
@@ -165,8 +165,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const connection = useRef<string | null>(null);
   const heartbeat = useRef<ReturnType<typeof setInterval>>();
   const connectVoice = async(client:string,active:boolean)=>{
-    const response=await fetch(`/api/sessions/${sessionId}/voice/connection`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client,active}),keepalive:!active});
-    if(!response.ok)throw new Error((await response.json()).error||t('Could not connect voice service'));
+    await json(`/api/sessions/${sessionId}/voice/connection`,{method:'POST',body:JSON.stringify({client,active}),keepalive:!active});
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
 
@@ -499,12 +498,14 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       const live = new LiveTranscription(async (samples, signal) => {
         const trace=profiling.current?profiler.current!.current:undefined;
         const started=performance.now();if(trace)profiler.current!.mark('stt_request',{audioMs:samples.length/16},trace);
-        const response = await fetch(`/api/sessions/${sessionId}/voice/transcribe`, {
-          method: "POST", headers: { "Content-Type": "audio/wav" }, body: samplesWav(samples), signal,
-        });
-        const result = await response.json();
-        if(trace)profiler.current!.mark('stt_result',{requestMs:performance.now()-started,serverTiming:response.headers.get('server-timing')??'',ok:response.ok},trace);
-        if (!response.ok) throw new Error(result.error || t("Transcription failed"));
+        let result: { text: string; serverTiming: string };
+        try {
+          result = await api.transcribe(sessionId, samples, signal);
+        } catch (e) {
+          if(trace)profiler.current!.mark('stt_result',{requestMs:performance.now()-started,serverTiming:'',ok:false},trace);
+          throw e;
+        }
+        if(trace)profiler.current!.mark('stt_result',{requestMs:performance.now()-started,serverTiming:result.serverTiming,ok:true},trace);
         return result.text;
       }, text => { if (current()) { setTranscript(text); voice.current?.heard(text); } }, !sequential.current);
       transcription.current = live;
@@ -605,7 +606,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (pushToTalk.current) mic.getTracks().forEach(track => { track.enabled = false; });
       setEnabled(true); setStarting(false); cue("start");
     } catch (e) {
-      if (current()) { setError((e as Error).message); stop(); }
+      if (current()) { setError(micError(e)); stop(); }
     }
   };
 

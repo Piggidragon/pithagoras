@@ -228,7 +228,6 @@ const de: Locale = {
     "Install (downloads 4.6GB)": "Installieren (lädt 4,6 GB herunter)",
     "Remove": "Entfernen",
     // components/CanvasPanel.tsx
-    "Canvas request failed": "Canvas-Anfrage fehlgeschlagen",
     "Untitled document": "Unbenanntes Dokument",
     "Session canvases": "Canvases der Sitzung",
     "Session canvas workspace": "Canvas-Arbeitsbereich der Sitzung",
@@ -1660,11 +1659,15 @@ const de: Locale = {
     "Save voice settings": "Spracheinstellungen speichern",
     // components/VoiceControl.tsx
     "Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode. Put other files in Files.": "Im Sprachmodus lassen sich nur PNG-, JPEG-, GIF- und WebP-Bilder senden. Leg andere Dateien in Dateien ab.",
-    "Could not connect voice service": "Verbindung zum Sprachdienst fehlgeschlagen",
     "Speech generation failed": "Sprachgenerierung fehlgeschlagen",
     "Unsupported speech stream": "Nicht unterstützter Sprachstream",
     "Speech generation returned no audio": "Die Sprachgenerierung hat kein Audio geliefert",
     "Microphone access requires HTTPS or localhost.": "Mikrofonzugriff braucht HTTPS oder localhost.",
+    "The microphone is blocked for this site. Allow it in the browser's site settings (the icon at the left of the address), then try again.": "Das Mikrofon ist für diese Seite gesperrt. Erlaube es in den Website-Einstellungen des Browsers (das Symbol links neben der Adresse) und versuch es dann erneut.",
+    "No microphone was found. Connect one and try again.": "Es wurde kein Mikrofon gefunden. Schließ eines an und versuch es erneut.",
+    "The microphone cannot be used, perhaps because another program has it. Close that and try again.": "Das Mikrofon lässt sich nicht verwenden, vielleicht weil ein anderes Programm es belegt. Schließ das und versuch es erneut.",
+    "That file could not be read as audio. Choose a WAV or MP3 recording.": "Diese Datei ließ sich nicht als Audio lesen. Wähl eine WAV- oder MP3-Aufnahme.",
+    "The microphone could not be opened.": "Das Mikrofon konnte nicht geöffnet werden.",
     "Transcription failed": "Transkription fehlgeschlagen",
     "Microphone disconnected. Reconnect it and turn the mic on again.": "Mikrofon getrennt. Schließ es wieder an und schalte das Mikrofon erneut ein.",
     "Sentence pipeline · buffered audio": "Satz-Pipeline · gepuffertes Audio",
@@ -1678,7 +1681,6 @@ const de: Locale = {
     // components/VoiceConversation.tsx
     "Nothing has been said yet.": "Noch wurde nichts gesagt.",
     // components/VoiceLibrary.tsx
-    "Voice request failed": "Sprachanfrage fehlgeschlagen",
     "Choose an audio file smaller than 20 MB": "Wähle eine Audiodatei unter 20 MB",
     "Choose a recording between 1 and 30 seconds": "Wähle eine Aufnahme zwischen 1 und 30 Sekunden",
     "Could not read the recording": "Die Aufnahme konnte nicht gelesen werden",

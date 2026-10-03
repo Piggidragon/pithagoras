@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import { samplesWav } from "./voice";
 import type { Host, VoiceChoice } from "../../server/src/voice-engines";
 import type { OrbStyle } from "../../server/src/orb-style";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
@@ -304,12 +305,30 @@ export interface PortalEvent {
  */
 export const SIGNED_OUT = "pithagoras:signed-out";
 
+/**
+ * A request, as every one the page makes is: the portal being away is said in words
+ * (what the browser says of it is "Failed to fetch", "Load failed" or
+ * "NetworkError…", in English, whatever language is shown), and a login that is
+ * gone is told to the page.
+ */
+async function send(url: string, init?: RequestInit): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    // Aborting is the caller's own doing, and says so itself.
+    if ((e as Error)?.name === "AbortError") throw e;
+    throw new ApiError(t("Cannot reach the portal"), 0, {});
+  }
+  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
+  return res;
+}
+
 export async function json<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await send(url, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
-  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(body.error || `HTTP ${res.status}`, res.status, body);
@@ -326,6 +345,14 @@ export class ApiError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+/** A file's bytes as they are, always a plain stream: what the file calls itself is not how it is sent. */
+async function uploadBytes(url: string, file: File, name: string): Promise<any> {
+  const res = await send(url, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(body.error || t("Could not upload {name} ({status})", { name, status: res.status }), res.status, body);
+  return body;
 }
 
 export const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
@@ -382,18 +409,8 @@ export const api = {
    * A file from this computer into the chat's folder. A taken name gets a
    * number rather than replacing anything; the answer says what it is called.
    */
-  uploadFile: async (sessionId: string, dir: string, file: File, name = file.name): Promise<{ path: string; size: number }> => {
-    const res = await fetch(`/api/sessions/${sessionId}/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`, {
-      method: "POST",
-      // Always a plain stream of bytes: what the file calls itself is not how it is sent.
-      headers: { "Content-Type": "application/octet-stream" },
-      body: file,
-    });
-    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || t("Could not upload {name} ({status})", { name, status: res.status }));
-    return body;
-  },
+  uploadFile: (sessionId: string, dir: string, file: File, name = file.name): Promise<{ path: string; size: number }> =>
+    uploadBytes(`/api/sessions/${sessionId}/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`, file, name),
   /** What deleting `file` would lose that nothing else has (see Unsaved), null for nothing. */
   fileUnsaved: (sessionId: string, file: string) =>
     json<{ unsaved: Unsaved | null }>(`/api/sessions/${sessionId}/unsaved?path=${encodeURIComponent(file)}`),
@@ -412,6 +429,13 @@ export const api = {
   /** Removes the voice container and puts the settings back; `removeData` deletes the downloaded engines and models too. */
   uninstallVoice: (removeData: boolean) => json<{ok:boolean}>('/api/voice/uninstall', {method:'POST', body: JSON.stringify({removeData})}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
+  /** What was said in `samples` (16 kHz mono), in words, and how long the speech server says it took. */
+  transcribe: async (sessionId: string, samples: Float32Array, signal?: AbortSignal): Promise<{ text: string; serverTiming: string }> => {
+    const res = await send(`/api/sessions/${sessionId}/voice/transcribe`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: samplesWav(samples), signal });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(body.error || t("Transcription failed"), res.status, body);
+    return { text: String(body.text ?? ""), serverTiming: res.headers.get("server-timing") ?? "" };
+  },
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
@@ -692,18 +716,7 @@ export const api = {
   changePicture: (request: ChangeRequest) =>
     json<{ jobs: PictureJob[] }>("/api/images/edit", { method: "POST", body: JSON.stringify(request) }),
   /** A picture from this computer, into the gallery to be changed. */
-  uploadPicture: async (file: File): Promise<GalleryPicture> => {
-    const res = await fetch(`/api/images/upload?name=${encodeURIComponent(file.name)}`, {
-      method: "POST",
-      // Always the bytes themselves: the portal says what they are.
-      headers: { "Content-Type": "application/octet-stream" },
-      body: file,
-    });
-    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || t("Could not upload {name} ({status})", { name: file.name, status: res.status }));
-    return body.picture;
-  },
+  uploadPicture: async (file: File): Promise<GalleryPicture> => (await uploadBytes(`/api/images/upload?name=${encodeURIComponent(file.name)}`, file, file.name)).picture,
   /** The picture as the file it is. Its address never changes what it shows, unless it is in a chat's folder, which the browser then asks about. */
   galleryFileUrl: (id: string) => `/api/images/${id}/file`,
   /** Each as asked, files and all: what could not be deleted is said for each. */
