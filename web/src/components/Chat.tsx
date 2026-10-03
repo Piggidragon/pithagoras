@@ -1,11 +1,10 @@
-import { CompactionMarker, StatusIndicator, ThinkingBlock, ToolCall } from "./ChatActivity";
-import { PictureCall } from "./PictureCall";
+import { StatusIndicator } from "./ChatActivity";
+import { TranscriptRow, type RowActions } from "./TranscriptRow";
+import { useStableActions } from "../use-stable-actions";
 import { splitContext } from "../context-blocks";
-import { isPictureCall } from "../picture-call";
 import { workingText } from "./StatusDot";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
-import { CommandLine } from "./CommandLine";
 import { mentionsCommand } from "../status-commands";
 import { SubagentPanel } from "./SubagentPanel";
 import { BackgroundJobs } from "./BackgroundJobs";
@@ -14,27 +13,23 @@ import { useBackground } from "../use-background";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
-import { assistantText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
 import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
-import { Fragment, Suspense, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useNow } from "../use-now";
+import { Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
-import { Markdown } from "./Markdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuPaperclip, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
-import { activity, buildTranscript, type Item, type SentImage } from "../transcript";
+import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
-import { PictureButton, useChatPictures } from "./ChatPictures";
-import { sentPictureId, shownPictureId } from "../chat-pictures";
+import { useChatPictures } from "./ChatPictures";
 import { confirmDialog } from "./ConfirmDialog";
 import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
@@ -42,17 +37,15 @@ import { lazyComponent } from "../lazy";
 import { FilesPanel } from "./FilesPanel";
 import { GIT_TABS, GitPanel, type GitTab } from "./git/GitPanel";
 import { TitleInput } from "./TitleInput";
-import { latestFileActivity } from "../file-activity";
+import { keepFileActivity, latestFileActivity, type FileActivity } from "../file-activity";
 import { caretFrom, drafts, withUnsent } from "../drafts";
 import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
 import { fancy, glide, launch, leaveRef, mark, settle, useLeaveRef, type Mark } from "../motion";
-import { copyText } from "../clipboard";
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
-import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../shortcuts";
+import { isComposing, isEnter, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
-import { msg, t, tp } from "../i18n";
-import { ReplyStatsLine } from "./ReplyStats";
+import { msg, t } from "../i18n";
 
 // The terminal emulator is large and only a chat that opens a shell needs it.
 const TerminalPanel = lazyComponent(() => import("./TerminalPanel"), "TerminalPanel");
@@ -164,31 +157,6 @@ function storedComposerHeight(): number {
 
 function persistComposerHeight(height: number) {
   local.set(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
-}
-
-function ContextChip({ label, body }: { label: string; body: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className={`rounded-full px-2 py-0.5 text-[11px] transition ${
-          open
-            ? "bg-accent/20 text-accent"
-            : "bg-fg/5 text-fg-faint hover:bg-fg/10 hover:text-fg-muted"
-        }`}
-        title={t("Context the portal attached to this message")}
-      >
-        {label}
-      </button>
-      {open && (
-        <pre className="mt-1 w-full whitespace-pre-wrap rounded-lg bg-fg/5 p-2 text-left text-[11px] leading-relaxed text-fg-muted">
-          {body}
-        </pre>
-      )}
-    </>
-  );
 }
 
 export function Chat({
@@ -314,7 +282,9 @@ export function Chat({
   const [files, setFiles] = useState(false);
   // Whether Files has an edit that is not saved: closing it would lose it.
   const [filesDirty, setFilesDirty] = useState(false);
-  const fileActivity = useMemo(() => latestFileActivity(events, session.workspace), [events, session.workspace]);
+  // The same entry while it has not changed, so that Files and Git, which are given it, are not drawn for every event.
+  const lastFile = useRef<FileActivity | null>(null);
+  const fileActivity = useMemo(() => (lastFile.current = keepFileActivity(lastFile.current, latestFileActivity(events, session.workspace))), [events, session.workspace]);
   // A file Git asked Files to show, by its path in the chat's folder; `seq` makes the same file asked twice a new ask.
   const [fileAsked, setFileAsked] = useState<{ path: string; seq: number } | null>(null);
   const [git, setGit] = useState(false);
@@ -698,7 +668,9 @@ export function Chat({
   const lastSpoken = useRef<string | null>(null);
   // Interrupted or failed, the process is gone: nothing it started is still going.
   const ended = session.status === "interrupted" || session.status === "error";
-  const items = useMemo(() => buildTranscript(events, { ended }), [events, ended]);
+  // Entries that have not changed are the same entries as in the last draw, so that their rows are not drawn again (see TranscriptRow).
+  const lastItems = useRef<Item[]>([]);
+  const items = useMemo(() => (lastItems.current = keepItems(lastItems.current, buildTranscript(events, { ended }))), [events, ended]);
   // A click on a picture opens it over the chat, not in a tab of its own.
   const pictures = useChatPictures(items, session);
   // What arrived while the chat was open slides in; what was there when it
@@ -897,6 +869,9 @@ export function Chat({
   // What it is doing, and for how long. The clock ticks only while something is
   // running, so an idle session re-renders no more than it used to.
   const phase = useMemo(() => (running ? activity(events) : null), [running, events]);
+  // Scans of every event, for the voice view: with the box's text in this component, they would run for each key typed.
+  const browserActivity = useMemo(() => latestBrowserActivity(events), [events]);
+  const terminalActivity = useMemo(() => latestTerminalActivity(events), [events]);
   // Beside the conversation: subagents, jobs left running, extension statuses.
   // The same entry for a subagent whose own events have not changed: an open
   // panel draws its transcript again only when there is more of it, not on
@@ -925,8 +900,6 @@ export function Chat({
     () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant" || item.kind === "command"),
     [items, hasEarlier],
   );
-  const now = useNow(running);
-
   // Commands come from pi at runtime, so anything a newly installed package
   // registers shows up here without the portal knowing about it in advance.
   //
@@ -1179,6 +1152,53 @@ export function Chat({
       setActionError((e as Error).message);
     }
   };
+
+  // What the rows can do. Rows are drawn only when what they show changes, so they are handed one object
+  // that stays the same, whose functions do what these do now (see useStableActions).
+  const rowActions = useStableActions<RowActions>({
+    openPicture: pictures.open,
+    showInTerminal,
+    openAgent,
+    edit: setEditing,
+    cancelEdit: () => setEditing(null),
+    saveEdit: (seq, next) =>
+      attempt(async () => {
+        await onEditMessage(seq, next);
+        setEditing(null);
+      }),
+    // The same as editing without changing a word. After a Stop this is what clears the half-finished
+    // answer out of the agent's memory instead of stacking a second question on top of it.
+    retry: (seq, text) => {
+      takeOut();
+      void attempt(() => onEditMessage(seq, text));
+    },
+    again: (item, text) => attempt(() => sendAgain(item, text)),
+    remove: async (seq) => {
+      if (
+        await confirmDialog({
+          title: t("Delete this message?"),
+          message: t("The agent's reply to it goes too, and the agent forgets both."),
+          confirmLabel: t("Delete"),
+          danger: true,
+          deletes: true,
+        })
+      ) {
+        takeOut();
+        void attempt(() => onDeleteMessage(seq));
+      }
+    },
+    switchVersion: (seq, to) => {
+      setSwitching(seq);
+      void attempt(async () => {
+        try {
+          await api.switchVersion(session.id, seq, to);
+        } catch (e) {
+          setSwitching(null);
+          throw e;
+        }
+      });
+    },
+  });
 
   const send = async () => {
     const msg = input.trim();
@@ -1656,304 +1676,33 @@ export function Chat({
           const enter = (entering ? " chat-enter" : "") + live;
           // What you said comes in from the corner the send button is in; what went wrong shakes (motion.css).
           const mine = entering && item.kind === "user" ? " is-mine" : "";
-          if (item.kind === "user") {
-            const { text, blocks } = splitContext(item.text);
-            // Nothing but framing: the portal spoke, not a person. Drawing it as
-            // a message bubble with no message in it reads as something broken.
-            if (!text && !item.images) {
-              return (
-                <div key={item.id} className="flex flex-wrap justify-end gap-1">
-                  {blocks.map((b, i) => (
-                    <ContextChip key={i} label={t(b.label)} body={b.body} />
-                  ))}
-                </div>
-              );
-            }
-            if (editing === item.seq) {
-              return (
-                <div key={item.id} className="flex justify-end">
-                  <MessageEditor
-                    initial={text}
-                    hasImages={!!item.images}
-                    onCancel={() => setEditing(null)}
-                    onSave={(next) =>
-                      attempt(async () => {
-                        await onEditMessage(item.seq, next);
-                        setEditing(null);
-                      })
-                    }
-                  />
-                </div>
-              );
-            }
-            // Sent into the run and waiting for the agent to take it in: shown
-            // as sent, at the foot of the conversation, and moved to where it
-            // was read once it has been. Nothing to edit or retry until then —
-            // and one that never got there can only be sent again. Waiting
-            // until the server says otherwise, run or no run: pi can still
-            // hold one after its run is over, or be taking it in, and offered
-            // again it would be read twice.
-            if (item.queued || item.unsent) {
-              const waits = !item.unsent;
-              return (
-                <div key={item.id} className={`group flex flex-col items-end gap-1${enter}${mine}`}>
-                  <div className="max-w-[80%] rounded-2xl rounded-br-md border border-dashed border-accent/30 bg-accent/5 px-3.5 py-2 text-sm text-fg-muted">
-                    {text && <div className="whitespace-pre-wrap">{text}</div>}
-                    {item.images && <div className="mt-1 text-[11px] text-fg-subtle">{tp(item.images.length, "{n} picture", "{n} pictures")}</div>}
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
-                    {waits ? (
-                      <>
-                        <LuClock aria-hidden className="h-3 w-3" />
-                        <span>
-                          {running
-                            ? item.steer ? t("Waiting — goes in after the current step") : t("Waiting — goes in when the run ends")
-                            : t("Waiting — the agent has it, and reads it next")}
-                        </span>
-                      </>
-                    ) : (
-                      <span>
-                        {item.unsent === "unsure"
-                          ? t("May not have been sent — the portal restarted, and could not tell whether the agent took it in")
-                          : item.unsent === "restarted" ? t("Not sent — the portal restarted before the agent took it in") : t("Not sent — the run was stopped before the agent took it in")}
-                      </span>
-                    )}
-                    {text && <CopyAction text={text} />}
-                    {!waits && (
-                      <MessageAction label={t("Send again as a new message")} onClick={() => attempt(() => sendAgain(item, text))}>
-                        <LuRotateCw className="h-3 w-3" />
-                      </MessageAction>
-                    )}
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div key={item.id} className={`group flex flex-col items-end gap-1${enter}${mine}`}>
-                <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
-                  {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title={t("Sent in voice mode")}><LuAudioLines size={13} aria-hidden="true" /><span>{t("Audio")}</span></div>}
-                  {item.images && (
-                    <div className={`flex flex-wrap justify-end gap-1.5 ${text ? "mb-1.5" : ""}`}>
-                      {item.images.map((image) => (
-                        <PictureButton key={image.name} id={sentPictureId(item.id, image.name)} onOpen={pictures.open} title={t("Open the picture")}>
-                          <img
-                            src={api.imageUrl(session.id, image.name)}
-                            alt={t("A picture sent with this message")}
-                            loading="lazy"
-                            className="max-h-48 max-w-full rounded-lg object-contain ring-1 ring-line"
-                          />
-                        </PictureButton>
-                      ))}
-                    </div>
-                  )}
-                  {text && <div className="whitespace-pre-wrap">{text}</div>}
-                  {blocks.length > 0 && (
-                    <div className="mt-1.5 flex flex-wrap justify-end gap-1">
-                      {blocks.map((b, i) => (
-                        <ContextChip key={i} label={t(b.label)} body={b.body} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {/* Only where it can be done: taking a message out from under a
-                    run that is answering it leaves the agent replying to
-                    something that no longer exists. Sending it again is fine —
-                    it just queues, like any other message. */}
-                <div className="flex items-center gap-1">
-                {versions[item.seq] && (
-                  <VersionSwitch
-                    seqs={versions[item.seq]}
-                    seq={item.seq}
-                    running={running}
-                    busy={switching !== null}
-                    onSwitch={(to) => {
-                      setSwitching(item.seq);
-                      void attempt(async () => {
-                        try {
-                          await api.switchVersion(session.id, item.seq, to);
-                        } catch (e) {
-                          setSwitching(null);
-                          throw e;
-                        }
-                      });
-                    }}
-                  />
-                )}
-                <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                  {text && <CopyAction text={text} />}
-                  {item.id === lastSaid ? (
-                    // Retry: the same as editing without changing a word. After
-                    // a Stop this is what clears the half-finished answer out of
-                    // the agent's memory instead of stacking a second question
-                    // on top of it.
-                    <MessageAction
-                      label={
-                        running
-                          ? t("Stop the run to retry")
-                          : t("Retry — drops the reply and sends this message again")
-                      }
-                      disabled={running}
-                      onClick={() => {
-                        takeOut();
-                        void attempt(() => onEditMessage(item.seq, text));
-                      }}
-                    >
-                      <LuRotateCw className="h-3 w-3" />
-                    </MessageAction>
-                  ) : (
-                    <MessageAction
-                      label={t("Send again as a new message")}
-                      onClick={() => attempt(() => sendAgain(item, text))}
-                    >
-                      <LuRotateCw className="h-3 w-3" />
-                    </MessageAction>
-                  )}
-                  <MessageAction
-                    label={
-                      running
-                        ? t("Stop the run to edit")
-                        : item.id === lastSaid ? t("Edit — replaces this message and everything after it (↑ in an empty box)") : t("Edit — replaces this message and everything after it")
-                    }
-                    disabled={running}
-                    onClick={() => setEditing(item.seq)}
-                  >
-                    <LuPencil className="h-3 w-3" />
-                  </MessageAction>
-                  <MessageAction
-                    label={running ? t("Stop the run to delete") : t("Delete this message and the reply to it")}
-                    disabled={running}
-                    danger
-                    onClick={async () => {
-                      if (
-                        await confirmDialog({
-                          title: t("Delete this message?"),
-                          message: t("The agent's reply to it goes too, and the agent forgets both."),
-                          confirmLabel: t("Delete"),
-                          danger: true,
-                          deletes: true,
-                        })
-                      ) {
-                        takeOut();
-                        void attempt(() => onDeleteMessage(item.seq));
-                      }
-                    }}
-                  >
-                    <LuTrash2 className="h-3 w-3" />
-                  </MessageAction>
-                </div>
-                </div>
-              </div>
-            );
-          }
-          if (item.kind === "assistant") {
-            return (
-              <div key={item.id} className={`group max-w-[90%]${enter}`}>
-                {item.thinking && (
-                  <ThinkingBlock
-                    thinking={item.thinking}
-                    streaming={running && !item.done && !item.text}
-                    since={item.thinkingSince}
-                    until={item.thinkingUntil}
-                  />
-                )}
-                {item.text && (
-                  <div className="md text-sm leading-relaxed text-fg">
-                    {/* Streamdown rather than plain markdown: a reply arrives a
-                        token at a time, so half of it is briefly malformed —
-                        an unclosed fence, a half-written link — and a strict
-                        renderer flickers between interpretations as it lands.
-                        A reasoning model also sometimes closes a thought inside
-                        the answer; that stray tag is noise to whoever reads it. */}
-                    <Markdown
-                      parseIncompleteMarkdown
-                      animated
-                      isAnimating={running && !item.done}
-                      caret={running && !item.done ? "circle" : undefined}
-                      diagram={mermaid}
-                      mermaid={mermaidOptions}
-                    >
-                      {assistantText(item)}
-                    </Markdown>
-                  </div>
-                )}
-                {/* Under the answer, where it ends: only the last bubble of it,
-                    and only once nothing in the run follows it. One per tool
-                    call in between would be a Copy button after every
-                    paragraph, and one beside the words sat in the margin where
-                    the eye does not go. Each answer keeps its button when
-                    another message comes. */}
-                {item.final && (
-                  <div className="reply-actions -ml-1.5 mt-1 flex items-center gap-0.5">
-                    <CopyAction text={assistantText(item)} />
-                    {item.stats && <ReplyStatsLine stats={item.stats} />}
-                  </div>
-                )}
-              </div>
-            );
-          }
-          if (item.kind === "compaction") {
-            return (
-              <div key={item.id} className={`chat-row${enter}`}>
-                <CompactionMarker item={item} />
-              </div>
-            );
-          }
-          if (item.kind === "command") {
-            return (
-              <div key={item.id} className={`chat-row${enter}`}>
-                <CommandLine item={item} />
-              </div>
-            );
-          }
-          if (item.kind === "tool") {
-            // The portal's picture tools are a preview of the picture, not a tool card.
-            if (isPictureCall(item)) {
-              return (
-                <div key={item.id} className={`tool-row${enter}`}>
-                  <PictureCall item={item} sessionId={session.id} folder={session.workspace} onOpen={pictures.open} />
-                </div>
-              );
-            }
-            return (
-              <div key={item.id} className={`tool-row${enter}`}>
-              <ToolCall item={item} onOpenTerminal={showInTerminal} onOpenAgent={agentFor(item.callId) ? () => openAgent(agentFor(item.callId)!.id) : undefined} />
-              {item.picture && (
-                // In the middle of the column, with as much room above as below. Contained, never cropped: a wide or tall picture is smaller here, and whole in the viewer.
-                <div className="chat-picture my-3 flex justify-center">
-                  <PictureButton id={shownPictureId(item.id)} onOpen={pictures.open} title={item.picture.title ?? item.picture.path}>
-                    <img
-                      src={api.pictureUrl(session.id, item.picture.path, item.pictureSeq)}
-                      alt={item.picture.title ?? item.picture.path}
-                      loading="lazy"
-                      className="max-h-80 max-w-full rounded-lg border border-line object-contain"
-                    />
-                  </PictureButton>
-                </div>
-              )}
-              </div>
-            );
-          }
+          const seq = item.kind === "user" ? item.seq : undefined;
           return (
-            <div
+            <TranscriptRow
               key={item.id}
-              className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-xs${enter}${entering && item.tone === "error" ? " is-error" : ""} ${
-                item.tone === "error"
-                  ? "bg-danger/10 text-danger"
-                  : item.tone === "warn"
-                    ? "bg-warn/10 text-warn"
-                    : "bg-raised/60 text-fg-muted"
-              }`}
-            >
-              {item.portal ? t(item.text) : item.text}
-            </div>
+              item={item}
+              enter={enter}
+              mine={mine}
+              entering={entering}
+              running={running}
+              editing={seq !== undefined && editing === seq}
+              last={item.id === lastSaid}
+              seqs={seq === undefined ? undefined : versions[seq]}
+              switching={switching !== null}
+              sessionId={session.id}
+              folder={session.workspace}
+              mermaid={mermaid}
+              mermaidOptions={mermaidOptions}
+              agent={item.kind === "tool" ? agentFor(item.callId)?.id : undefined}
+              act={rowActions}
+            />
           );
-        // Each by its id, for motion.ts to tell them apart once they have been drawn.
-        }).map((row) => cloneElement(row, { "data-key": row.key }))}
+        })}
 
           {actionError && (
             <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
           )}
-          {!loading && running && phase && !statusShownElsewhere && <StatusIndicator phase={phase} now={now} />}
+          {!loading && running && phase && !statusShownElsewhere && <StatusIndicator phase={phase} />}
         </div>
       </div>
 
@@ -2207,7 +1956,7 @@ export function Chat({
                 <LuPaperclip aria-hidden className="h-4 w-4" />
               </button>
               <DictationButton dictation={dictation} />
-              <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
+              <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} work={phase} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={events} />
               {/* Mid-run, Stop stays while a message is written: it is the
                   moment the agent is seen going the wrong way, and whether to
                   steer it or stop it is still open. */}
@@ -2309,158 +2058,5 @@ function PanelToggle({
       {children}
       {live && <i className="header-live-dot" aria-hidden />}
     </button>
-  );
-}
-
-/**
- * Which version of a message is shown, and a way to the others: every time
- * it was edited or sent again, with what followed it that time. Not while a
- * run is going — it would be answering a conversation being swapped under it.
- */
-function VersionSwitch({
-  seqs,
-  seq,
-  running,
-  busy,
-  onSwitch,
-}: {
-  seqs: number[];
-  seq: number;
-  running: boolean;
-  /** A switch is on its way: one at a time. */
-  busy: boolean;
-  onSwitch: (to: number) => void;
-}) {
-  const at = seqs.indexOf(seq);
-  if (at < 0) return null;
-  return (
-    <div className="message-versions flex items-center text-[11px] text-fg-subtle" role="group" aria-label={t("Versions of this message")}>
-      <MessageAction label={running ? t("Stop the run to switch versions") : t("Previous version")} disabled={running || busy || at === 0} onClick={() => onSwitch(seqs[at - 1])}>
-        <LuChevronLeft className="h-3 w-3" />
-      </MessageAction>
-      <span className="min-w-[2.2rem] text-center tabular-nums" aria-live="polite">
-        {at + 1} / {seqs.length}
-      </span>
-      <MessageAction label={running ? t("Stop the run to switch versions") : t("Next version")} disabled={running || busy || at === seqs.length - 1} onClick={() => onSwitch(seqs[at + 1])}>
-        <LuChevronRight className="h-3 w-3" />
-      </MessageAction>
-    </div>
-  );
-}
-
-/** Copies a message, and for a moment says that it did. */
-function CopyAction({ text }: { text: string }) {
-  const [result, setResult] = useState<"done" | "failed" | null>(null);
-  const timer = useRef<number>();
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-  return (
-    <MessageAction
-      label={result === "done" ? t("Copied") : result === "failed" ? t("Could not copy") : t("Copy")}
-      onClick={async () => {
-        setResult((await copyText(text)) ? "done" : "failed");
-        window.clearTimeout(timer.current);
-        timer.current = window.setTimeout(() => setResult(null), 1500);
-      }}
-    >
-      {result === "done" ? <LuCheck className="h-3 w-3 text-ok" /> : <LuCopy className="h-3 w-3" />}
-    </MessageAction>
-  );
-}
-
-function MessageAction({
-  label,
-  onClick,
-  disabled,
-  danger,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={`rounded p-1.5 text-fg-faint transition disabled:cursor-not-allowed disabled:opacity-40 ${
-        danger ? "hover:text-danger" : "hover:text-accent"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** A sent message, opened for rewriting in place. */
-function MessageEditor({
-  initial,
-  hasImages,
-  onSave,
-  onCancel,
-}: {
-  initial: string;
-  /** The message went with pictures: they go again, so the words may be left out. */
-  hasImages?: boolean;
-  onSave: (text: string) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const changed = value.trim() !== initial.trim();
-  const empty = !value.trim() && !hasImages;
-
-  const save = async () => {
-    if (empty || !changed || saving) return;
-    setSaving(true);
-    try {
-      await onSave(value.trim());
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="w-full max-w-[80%] rounded-2xl bg-accent/10 p-2 ring-1 ring-inset ring-accent/30">
-      <textarea
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (isEscape(e)) onCancel();
-          if (isEnter(e) && !e.shiftKey) {
-            e.preventDefault();
-            save();
-          }
-        }}
-        rows={Math.min(10, Math.max(2, value.split("\n").length))}
-        aria-label={t("Edit message")}
-        className="w-full resize-none bg-transparent px-1.5 py-1 text-sm text-fg outline-none"
-      />
-      <div className="mt-1 flex items-center gap-2 px-1">
-        <span className="text-[11px] text-fg-faint">
-          {hasImages ? t("Replaces this message and everything after it. The pictures go with it again.") : t("Replaces this message and everything after it.")}
-        </span>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="ml-auto rounded-lg px-2.5 py-1 text-xs text-fg-muted transition hover:bg-fg/5"
-        >
-          {t("Cancel")}
-        </button>
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving || !changed || empty}
-          className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/25 disabled:opacity-40"
-        >
-          {saving ? t("Sending…") : t("Send")}
-        </button>
-      </div>
-    </div>
   );
 }

@@ -2,10 +2,10 @@ import { ActivityProgress } from './ActivityProgress';
 import type { Activity } from '../transcript';
 import { useWorkPanels } from "../use-work-panels";
 import { FilesPanel } from "./FilesPanel";
-import { latestFileActivity, type FileActivity } from "../file-activity";
+import { keepFileActivity, latestFileActivity, type FileActivity } from "../file-activity";
 import { VoiceToolActivity } from "./VoiceToolActivity";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MutableRefObject } from "react";
-import { buildTranscript, type Item } from "../transcript";
+import type { Item } from "../transcript";
 import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuTerminal, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
 import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
@@ -95,7 +95,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // the browser and terminal do, and follows it from there. A file opened from
   // a tool card is put after everything that has happened, so that the panel
   // takes it, and the agent's next file after that again.
-  const agentFile = useMemo(() => latestFileActivity(toolEvents, folder), [toolEvents, folder]);
+  const lastFile = useRef<FileActivity | null>(null);
+  const agentFile = useMemo(() => (lastFile.current = keepFileActivity(lastFile.current, latestFileActivity(toolEvents, folder))), [toolEvents, folder]);
   const [openedFile, setOpenedFile] = useState<FileActivity | null>(null);
   const fileActivity = openedFile && openedFile.seq > (agentFile?.seq ?? 0) ? openedFile : agentFile;
   const filesSeen = useRef(agentFile?.seq ?? 0);
@@ -112,9 +113,9 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const [browserError, setBrowserError] = useState('');
   const thoughtViewport = useRef<HTMLDivElement>(null);
   const thought = useMemo(() => {
-    const latest = buildTranscript(toolEvents).at(-1);
+    const latest = items.at(-1);
     return latest?.kind === 'assistant' && !latest.done && !latest.text ? latest.thinking : '';
-  }, [toolEvents]);
+  }, [items]);
   useEffect(() => {
     const el = thoughtViewport.current;
     if (!el) return;

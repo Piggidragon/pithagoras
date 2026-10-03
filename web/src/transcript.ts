@@ -233,6 +233,33 @@ function userItem(seq: number, p: any): UserItem {
   };
 }
 
+/** Whether two values hold the same, however deep: what an entry is made of is strings, numbers and plain objects. */
+function sameValue(a: any, b: any, depth = 0): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b || depth > 8 || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => key in b && sameValue(a[key], b[key], depth + 1));
+}
+
+/**
+ * The entries as they were before wherever one has not changed.
+ *
+ * `buildTranscript` makes every entry anew from the events, so every row of a
+ * conversation looks changed to the one drawing it, for each word of a reply.
+ * Handing back the earlier entry where it says the same lets a row that is
+ * drawn only when its entry changes be left alone.
+ */
+export function keepItems(was: Item[], next: Item[]): Item[] {
+  if (!was.length) return next;
+  const before = new Map<string, Item>();
+  for (const item of was) before.set(item.id, item);
+  return next.map((item) => {
+    const old = before.get(item.id);
+    return old && sameValue(old, item) ? old : item;
+  });
+}
+
 /**
  * Fold pi's event stream into renderable turns.
  *

@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNow } from "../use-now";
 import { LuSquare, LuTrash2 } from "react-icons/lu";
 import { api, type BackgroundState } from "../api";
 import { useFollowBottom } from "../use-follow-bottom";
 import { formatElapsed, stripAnsi } from "../transcript";
-import { t } from "../i18n";
+import { t, useLanguage } from "../i18n";
 
 /** Output kept on screen for one job; the file has the rest. */
 const KEEP = 400_000;
@@ -112,8 +112,9 @@ export function BackgroundJobs({
   );
 }
 
-/** One job's output file, followed from where it was last read. */
-function JobOutput({ sessionId, jobKey, live }: { sessionId: string; jobKey: string; live: boolean }) {
+/** One job's output file, followed from where it was last read. Not drawn again for the second's tick of the list above it. */
+const JobOutput = memo(function JobOutput({ sessionId, jobKey, live }: { sessionId: string; jobKey: string; live: boolean }) {
+  useLanguage();
   const [text, setText] = useState("");
   const [gone, setGone] = useState<string | null>(null);
   const offset = useRef<number | undefined>(undefined);
@@ -140,10 +141,12 @@ function JobOutput({ sessionId, jobKey, live }: { sessionId: string; jobKey: str
     };
   }, [sessionId, jobKey, live]);
   useLayoutEffect(() => follow(), [text]);
+  // Up to KEEP characters: not worked through again by a draw that has no new output.
+  const plain = useMemo(() => stripAnsi(text), [text]);
   if (gone) return <p className="bg-jobs-empty">{gone}</p>;
   return (
     <pre ref={attach} onScroll={onScroll} className="bg-job-output">
-      {stripAnsi(text) || (live ? t("Waiting for output…") : t("(no output)"))}
+      {plain || (live ? t("Waiting for output…") : t("(no output)"))}
     </pre>
   );
-}
+});

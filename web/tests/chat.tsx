@@ -12,6 +12,9 @@ import type { PortalEvent, Session } from '../src/api';
 import '../src/styles';
 import { installTooltips } from '../src/tooltips';
 import { installMotion } from '../src/motion';
+import { setLanguage } from '../src/i18n';
+// Offers the languages, as the app does: `setLang('de')` fetches German.
+import '../src/locales';
 installTooltips();
 // As the app does: the Animations switch and reduced motion are read from the page, for what moves with them.
 installMotion();
@@ -283,5 +286,7 @@ function Fixture() {
     <div style={{ flex: 1, minHeight: 0 }}><Chat session={shown} events={shownEvents} onSend={async (message) => { (window as any).sent = [...((window as any).sent ?? []), message]; }} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={new URLSearchParams(location.search).has('loading')} /></div>
   </div>;
 }
+// The language, as Settings changes it: `window.setLang('de')`.
+(window as any).setLang = setLanguage;
 // Inside a router, as in the app: the chat's links go through it.
 createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /><ConfirmHost /></BrowserRouter>);

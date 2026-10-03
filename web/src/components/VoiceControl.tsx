@@ -2,8 +2,8 @@ import { DEFAULT_VAD } from '../api';
 import { local, session } from '../safe-storage';
 import { VoiceProfiler, replyMarks } from '../voice-profile';
 import { VoiceProfile } from './VoiceProfile';
-import { activity } from '../transcript';
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { Activity } from '../transcript';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { voiceCue, type VoiceCue } from "../voice-cues";
 import { createPortal } from "react-dom";
 import { VoiceStage, type VoiceLevels } from "./VoiceStage";
@@ -29,7 +29,7 @@ const REPEAT_SECONDS = 120;
 type KeptPhrase = { samples: Float32Array[]; sampleRate: number; stretched?: { rate: number; samples: Promise<Float32Array>; signal: AbortSignal; ready?: boolean } };
 const seconds = (phrase: KeptPhrase) => phrase.samples.reduce((n, s) => n + s.length, 0) / phrase.sampleRate;
 
-export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, folder, items, running, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, terminalActivity, toolEvents }: {
+export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, folder, items, running, work, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, terminalActivity, toolEvents }: {
   sessionId: string;
   /** The folder the chat works in, for the Files window. */
   folder: string;
@@ -40,6 +40,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   browserAvailable: boolean; browserActivity: number; terminalActivity: number; toolEvents: PortalEvent[];
   items: Item[];
   running: boolean;
+  /** What the agent is doing now (the chat works it out once, from the same events), or null when it is not running. */
+  work: Activity | null;
   onSend: (text: string, options?: PromptOptions) => Promise<void>;
   onAbort: () => Promise<void>;
 }) {
@@ -48,7 +50,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const [,refreshProfile]=useState(0);
   const profiler=useRef<VoiceProfiler>();
   if(!profiler.current)profiler.current=new VoiceProfiler(()=>refreshProfile(n=>n+1));
-  const eventSeq=useRef(0);eventSeq.current=toolEvents.reduce((n,e)=>Math.max(n,e.seq),0);
+  // Read again only when there are new events: this component is drawn with every key typed in the chat's box.
+  const newestSeq=useMemo(()=>toolEvents.reduce((n,e)=>Math.max(n,e.seq),0),[toolEvents]);
+  const eventSeq=useRef(0);eventSeq.current=newestSeq;
   const profileSeq=useRef(Infinity);
   const profileLiveSeen=useRef(new WeakSet<object>());
   const profileMark=(name:string)=>{if(profiling.current)profiler.current!.mark(name);};
@@ -112,7 +116,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const muteBusy = useRef(false);
   const startButton = useRef<HTMLButtonElement>(null);
   const levels = useRef<VoiceLevels>({ input: 0, output: 0 });
-  const compactionEvent = [...toolEvents].reverse().find(event => event.type === 'compaction_start' || event.type === 'compaction_end');
+  const compactionEvent = useMemo(() => {
+    for (let i = toolEvents.length - 1; i >= 0; i--) if (toolEvents[i].type === 'compaction_start' || toolEvents[i].type === 'compaction_end') return toolEvents[i];
+  }, [toolEvents]);
   const compacting = running && compactionEvent?.type === 'compaction_start';
   const latest = useRef({ items, running, onSend, onAbort, compacting });
   latest.current = { items, running, onSend, onAbort, compacting };
@@ -634,7 +640,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     {profileOpen&&createPortal(<VoiceProfile profiler={profiler.current!} onClose={()=>{setProfileOpen(false);profiler.current!.close('disabled');}}/>,document.body)}
 
     {(starting || enabled) && stageTarget && createPortal(
-      <VoiceStage sessionId={sessionId} folder={folder} workPhase={running ? activity(toolEvents) : null} canvasOpen={canvasOpen} onCanvasMinimize={onCanvasMinimize} onCanvasToggle={onCanvasToggle} title={sequentialMode ? `${title} · ${sentenceMode ? (prefetchMode ? t("Sentence pipeline · buffered audio") : t("Sentence chunks · buffered audio")) : t("Sequential baseline")}` : comparison ? `${title} · ${t("Streaming pipeline")}` : title} phase={phase} starting={starting} muted={muted} speaking={speaking}
+      <VoiceStage sessionId={sessionId} folder={folder} workPhase={work} canvasOpen={canvasOpen} onCanvasMinimize={onCanvasMinimize} onCanvasToggle={onCanvasToggle} title={sequentialMode ? `${title} · ${sentenceMode ? (prefetchMode ? t("Sentence pipeline · buffered audio") : t("Sentence chunks · buffered audio")) : t("Sequential baseline")}` : comparison ? `${title} · ${t("Streaming pipeline")}` : title} phase={phase} starting={starting} muted={muted} speaking={speaking}
         browserAvailable={browserAvailable} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={toolEvents} sounds={sounds} onSounds={toggleSounds} onCue={cue}
         levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode} waitingForTap={waitingForTap}
         items={items} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}

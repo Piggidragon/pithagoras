@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   LuArrowLeft,
   LuChevronRight,
@@ -24,7 +24,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { within } from "../paths";
 import { isEnter, isEscape } from "../shortcuts";
 import { deleteAsking, unsavedNotes } from "../unsaved";
-import { t, tp } from "../i18n";
+import { t, tp, useLanguage } from "../i18n";
 
 /** What the server says when a save would put older text over newer. */
 const CHANGED = "The file changed after you opened it";
@@ -81,8 +81,10 @@ const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
  * Only what the agent does after the panel opens is followed, so opening it does
  * not jump to a file from earlier. `since` moves that line, for a panel that
  * opens because of what the agent just did and should show it.
+ *
+ * Not drawn again for a draw of the chat that changed none of what it is given.
  */
-export function FilesPanel({
+export const FilesPanel = memo(function FilesPanel({
   sessionId,
   folder,
   activity,
@@ -102,6 +104,8 @@ export function FilesPanel({
   /** Told whether there are changes not saved, so that whoever can close the panel can ask first. */
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  // Its text is in the language chosen: it is drawn for that, as it is not for the chat's draws.
+  useLanguage();
   const [dir, setDir] = useState("");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [truncated, setTruncated] = useState(false);
@@ -744,4 +748,4 @@ export function FilesPanel({
       )}
     </div>
   );
-}
+});

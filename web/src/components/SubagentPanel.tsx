@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from "react";
+import { memo, useLayoutEffect, useMemo, useState } from "react";
 import { useNow } from "../use-now";
 import { Markdown } from "./Markdown";
 import { LuArrowUp, LuBot, LuSquare } from "react-icons/lu";
@@ -8,7 +8,7 @@ import { reportedSteps, subagentName, type Subagent } from "../subagents";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CompactionMarker, Ring, Shimmer, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { isEnter } from "../shortcuts";
-import { t } from "../i18n";
+import { t, useLanguage } from "../i18n";
 
 /**
  * The subagents of a chat, one at a time: what it is doing, drawn like the
@@ -30,6 +30,8 @@ export function SubagentPanel({
   onSelect: (id: string) => void;
 }) {
   const agent = agents.find((a) => a.id === selected) ?? agents[agents.length - 1];
+  // Only its own entry goes down: the rest of the conversation changes with every word, and is not its business.
+  const tool = agent?.kind === "tool" ? items.find((i): i is Extract<Item, { kind: "tool" }> => i.kind === "tool" && `tool:${i.callId ?? i.id}` === agent.id) : undefined;
   if (!agents.length || !agent) {
     return (
       <div className="sub-panel">
@@ -51,17 +53,17 @@ export function SubagentPanel({
           ))}
         </div>
       )}
-      <AgentView key={agent.id} sessionId={sessionId} agent={agent} items={items} />
+      <AgentView key={agent.id} sessionId={sessionId} agent={agent} tool={tool} />
     </div>
   );
 }
 
-function AgentView({ sessionId, agent, items }: { sessionId: string; agent: Subagent; items: Item[] }) {
+const AgentView = memo(function AgentView({ sessionId, agent, tool }: { sessionId: string; agent: Subagent; tool?: Extract<Item, { kind: "tool" }> }) {
+  useLanguage();
   const running = agent.status === "running";
   const now = useNow(running);
   const { attach, onScroll, follow } = useFollowBottom<HTMLDivElement>();
   const childItems = useMemo(() => (agent.kind === "protocol" ? buildTranscript(agent.events) : []), [agent]);
-  const tool = agent.kind === "tool" ? items.find((i): i is Extract<Item, { kind: "tool" }> => i.kind === "tool" && `tool:${i.callId ?? i.id}` === agent.id) : undefined;
   useLayoutEffect(() => follow(), [childItems, tool?.output, tool?.details]);
   const seconds = agent.since ? Math.max(0, Math.floor(((running ? now : agent.until ?? now) - agent.since) / 1000)) : undefined;
 
@@ -92,9 +94,11 @@ function AgentView({ sessionId, agent, items }: { sessionId: string; agent: Suba
       <AgentInput sessionId={sessionId} agent={agent} />
     </>
   );
-}
+});
 
-function ChildItem({ item, running }: { item: Item; running: boolean }) {
+/** Not drawn again for the second's tick of the panel, nor for another entry being written. */
+const ChildItem = memo(function ChildItem({ item, running }: { item: Item; running: boolean }) {
+  useLanguage();
   switch (item.kind) {
     case "user":
       return <div className="sub-prompt">{item.text}</div>;
@@ -118,7 +122,7 @@ function ChildItem({ item, running }: { item: Item; running: boolean }) {
     default:
       return <div className="sub-notice">{item.kind === "notice" && item.portal ? t(item.text) : item.text}</div>;
   }
-}
+});
 
 /** A tool that is not on the protocol: its steps where its details list them, and its text. */
 function ToolReport({ tool, running }: { tool: Extract<Item, { kind: "tool" }>; running: boolean }) {

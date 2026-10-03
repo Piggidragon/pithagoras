@@ -38,6 +38,11 @@ export function insideFolder(folder: string, given: string): string | undefined 
   return parts.length ? parts.join("/") : undefined;
 }
 
+/** The entry it was before when nothing in it differs, so that what is handed it on is not seen as changed by a later event that was about something else. */
+export function keepFileActivity(was: FileActivity | null, next: FileActivity | null): FileActivity | null {
+  return was && next && was.seq === next.seq && was.path === next.path && was.tool === next.tool ? was : next;
+}
+
 /**
  * The file the agent most recently read or changed in the chat's folder, if any.
  *

@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { DiffFile } from "../../git-diff";
-import { t } from "../../i18n";
+import { t, useLanguage } from "../../i18n";
 
 const ROW: Record<string, string> = {
   add: "bg-ok/10",
@@ -14,9 +14,11 @@ const MARK: Record<string, string> = { add: "+", del: "−", ctx: " ", hunk: "",
 /**
  * One file's changes, line by line: where each line was, where it is, and
  * what it says. Long lines scroll sideways rather than wrap, so that the
- * indentation of code still reads as indentation.
+ * indentation of code still reads as indentation. A large diff is many rows,
+ * so it is drawn again only when its file is.
  */
-export function DiffView({ file, truncated }: { file: DiffFile; truncated?: boolean }) {
+export const DiffView = memo(function DiffView({ file, truncated }: { file: DiffFile; truncated?: boolean }) {
+  useLanguage();
   // Wide enough for the largest line number either side.
   const width = useMemo(() => {
     let most = 0;
@@ -62,4 +64,4 @@ export function DiffView({ file, truncated }: { file: DiffFile; truncated?: bool
       {truncated && <p className="px-3 py-2 text-xs text-warn">{t("This diff is too large to show whole — it stops here.")}</p>}
     </div>
   );
-}
+});

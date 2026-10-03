@@ -568,7 +568,9 @@ export function CompactionMarker({ item }: { item: CompactionItem }) {
  * been said — rather than a card that grows and shrinks. Writing and tool calls
  * are drawn where they happen, so this steps aside for them.
  */
-export function StatusIndicator({ phase, now }: { phase: Activity; now: number }) {
+export function StatusIndicator({ phase }: { phase: Activity }) {
+  // Its own clock: a second's tick redraws this pill, and not the conversation it sits under.
+  const now = useNow(true);
   const seconds = phase.since ? Math.max(0, Math.floor((now - phase.since) / 1000)) : 0;
   const elapsed = seconds >= 2 ? formatElapsed(seconds) : null;
   const p = phase.prefill;

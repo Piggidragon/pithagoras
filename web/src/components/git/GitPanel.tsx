@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LuArrowDown, LuArrowLeft, LuArrowUp, LuCloudDownload, LuGitBranch, LuRefreshCw } from "react-icons/lu";
 import { gitApi, type GhState, type GitState } from "../../git-api";
 import { Branches } from "./Branches";
@@ -8,7 +8,7 @@ import { ErrorNote, Quiet, TextButton } from "./bits";
 import { History } from "./History";
 import { Pulls } from "./Pulls";
 import { ViewHost } from "./views";
-import { msg, t, tp } from "../../i18n";
+import { msg, t, tp, useLanguage } from "../../i18n";
 import { below } from "../../paths";
 
 export type GitTab = "changes" | "history" | "branches" | "pulls";
@@ -36,8 +36,11 @@ const WHILE_RUNNING_MS = 8000;
  * What it drills into — a diff, a commit, a pull request — goes on top of the
  * tab, with a way back, rather than beside it: the panel is often a third of
  * the screen, and a list beside a diff leaves room for neither.
+ *
+ * Not drawn again for a draw of the chat that changed none of what it is
+ * given: with a large diff open, each word of a reply would draw every line of it.
  */
-export function GitPanel({
+export const GitPanel = memo(function GitPanel({
   sessionId,
   tab,
   onTab,
@@ -57,6 +60,8 @@ export function GitPanel({
   /** How many files have changed, for the tab. */
   onCount?: (n: number) => void;
 }) {
+  // Its text is in the language chosen: a panel that is not drawn for the chat's draws is drawn for that.
+  useLanguage();
   const [state, setState] = useState<GitState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy | null>(null);
@@ -236,7 +241,7 @@ export function GitPanel({
       </div>
     </Ctx.Provider>
   );
-}
+});
 
 /** Where the repository is: the branch, how far it is from its upstream, and the ways to bring the two together. */
 function BranchBar({ onBranches, onRefresh }: { onBranches: () => void; onRefresh: () => void }) {
