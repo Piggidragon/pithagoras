@@ -89,6 +89,17 @@ have tools shaped like reading email, not `bash` — see
 [Allowed anyway](/people/rules) for the same idea applied to teammates.
 :::
 
+## Pictures from other sites are not loaded
+
+A reply, a note, a pull request or a page the agent fetched can name a picture on
+any server, and the browser fetches it the moment it is drawn, with whatever the
+address carries: a way to send something out without anyone clicking. So the
+portal draws only its own pictures, and those that are part of the message
+itself (`data:`); any other is shown as a small label, "Picture from
+*host* not loaded", saying where it would have come from. The page's content
+security policy says the same to the browser, so a picture that gets past the
+label is refused there.
+
 ## People are a separate layer
 
 The guard also enforces what a teammate may do, checked per tool call so it

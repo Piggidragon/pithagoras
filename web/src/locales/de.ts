@@ -897,6 +897,8 @@ const de: Locale = {
     "Password": "Passwort",
     "Checking…": "Wird geprüft…",
     "Sign in": "Anmelden",
+    // components/Markdown.tsx
+    "Picture from {host} not loaded": "Bild von {host} nicht geladen",
     // components/McpPanel.tsx
     "Reading configuration…": "Konfiguration wird gelesen…",
     "The MCP adapter is not installed": "Der MCP-Adapter ist nicht installiert",

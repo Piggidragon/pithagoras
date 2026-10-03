@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { LuCircleCheck, LuCircleDot, LuCircleX, LuExternalLink, LuGitCompareArrows, LuGitMerge, LuGitPullRequest, LuLoader } from "react-icons/lu";
-import { Streamdown } from "streamdown";
+import { Markdown } from "../Markdown";
 import { gitApi, type Check, type Comparison, type PullDetail, type PullSummary } from "../../git-api";
 import { parseDiff, type DiffFile } from "../../git-diff";
 import { confirmDialog } from "../ConfirmDialog";
@@ -262,9 +262,9 @@ function CheckIcon({ check }: { check: Check }) {
   return <LuCircleDot aria-label={result.toLowerCase()} className="h-3.5 w-3.5 shrink-0 text-fg-faint" />;
 }
 
-const Markdown = ({ children }: { children: string }) => (
+const PullMarkdown = ({ children }: { children: string }) => (
   <div className="md text-xs leading-relaxed text-fg [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h1]:font-semibold [&_h2]:font-semibold">
-    <Streamdown shikiTheme={["github-light", "github-dark"]}>{children}</Streamdown>
+    <Markdown>{children}</Markdown>
   </div>
 );
 
@@ -396,7 +396,7 @@ export function PullView({ n }: { n: number }) {
 
       {pull.body?.trim() && (
         <div className="border-b border-line px-3 py-2">
-          <Markdown>{pull.body}</Markdown>
+          <PullMarkdown>{pull.body}</PullMarkdown>
         </div>
       )}
 
@@ -447,7 +447,7 @@ export function PullView({ n }: { n: number }) {
             {" · "}
             {when(c.at)}
           </p>
-          {c.body && <Markdown>{c.body}</Markdown>}
+          {c.body && <PullMarkdown>{c.body}</PullMarkdown>}
         </div>
       ))}
       <div className="px-3 py-2">

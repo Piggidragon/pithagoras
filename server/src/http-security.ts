@@ -49,11 +49,17 @@ export function loginThrottle(now = Date.now): RequestHandler {
   };
 }
 
-/** Apply only to the portal UI, not the separately proxied browser desktop. */
+/**
+ * Apply only to the portal UI, not the separately proxied browser desktop.
+ *
+ * Pictures come from the portal itself: the browser fetches whatever an `<img>`
+ * names the moment it is drawn, so any other host there would be a way for a
+ * reply or a page the agent read to send what it has seen out, unseen.
+ */
 export const portalSecurityHeaders: RequestHandler = (_req, res, next) => {
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https: http:",
+    "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:",
     "font-src 'self' data:", "media-src 'self' blob: data:",
     "connect-src 'self' https: http: ws: wss:", "worker-src 'self' blob:",
     "frame-src 'self' https: http:", "object-src 'none'", "base-uri 'self'",

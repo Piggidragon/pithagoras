@@ -22,7 +22,8 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
 import { Fragment, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Streamdown, type DiagramPlugin } from "streamdown";
+import type { DiagramPlugin } from "streamdown";
+import { Markdown } from "./Markdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuAudioLines, LuPaperclip, LuPencil, LuRotateCw, LuTrash2, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
@@ -1863,17 +1864,16 @@ export function Chat({
                         renderer flickers between interpretations as it lands.
                         A reasoning model also sometimes closes a thought inside
                         the answer; that stray tag is noise to whoever reads it. */}
-                    <Streamdown
+                    <Markdown
                       parseIncompleteMarkdown
-                      animated={{ animation: "blurIn", duration: 240, sep: "word" }}
+                      animated
                       isAnimating={running && !item.done}
                       caret={running && !item.done ? "circle" : undefined}
-                      shikiTheme={["github-light", "github-dark"]}
-                      plugins={mermaid ? { mermaid } : undefined}
+                      diagram={mermaid}
                       mermaid={mermaidOptions}
                     >
                       {assistantText(item)}
-                    </Streamdown>
+                    </Markdown>
                   </div>
                 )}
                 {/* Under the answer, where it ends: only the last bubble of it,

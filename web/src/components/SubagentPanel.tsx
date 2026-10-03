@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { Streamdown } from "streamdown";
+import { Markdown } from "./Markdown";
 import { LuArrowUp, LuBot, LuSquare } from "react-icons/lu";
 import { api } from "../api";
 import { buildTranscript, formatElapsed, type Item } from "../transcript";
@@ -108,9 +108,9 @@ function ChildItem({ item, running }: { item: Item; running: boolean }) {
           {item.thinking && <ThinkingBlock thinking={item.thinking} streaming={running && !item.done && !item.text} since={item.thinkingSince} until={item.thinkingUntil} />}
           {item.text && (
             <div className="md text-[13px] leading-relaxed text-fg">
-              <Streamdown parseIncompleteMarkdown animated={{ animation: "blurIn", duration: 240, sep: "word" }} isAnimating={running && !item.done}>
+              <Markdown parseIncompleteMarkdown animated isAnimating={running && !item.done}>
                 {item.text}
-              </Streamdown>
+              </Markdown>
             </div>
           )}
         </div>
@@ -135,12 +135,12 @@ function ToolReport({ tool, running }: { tool: Extract<Item, { kind: "tool" }>; 
             <ToolCall item={{ kind: "tool", id: `s${i}`, name: s.name!, status: running && i === steps.length - 1 ? "running" : "done", args: s.args }} />
           </div>
         ) : (
-          <div key={i} className="md text-[13px] text-fg-muted"><Streamdown>{s.text!}</Streamdown></div>
+          <div key={i} className="md text-[13px] text-fg-muted"><Markdown>{s.text!}</Markdown></div>
         ),
       )}
       {tool.output && (
         <div className="md text-[13px] leading-relaxed text-fg">
-          <Streamdown parseIncompleteMarkdown>{tool.output}</Streamdown>
+          <Markdown parseIncompleteMarkdown>{tool.output}</Markdown>
         </div>
       )}
       {!steps.length && !tool.output && running && <p className="bg-jobs-empty"><Shimmer>{t("Working…")}</Shimmer></p>}

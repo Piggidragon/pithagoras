@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Select } from "./Select";
 import { LuFileText, LuPlus, LuX, LuTrash2, LuCheck, LuPencil, LuEye, LuSave, LuDownload } from 'react-icons/lu';
-import { Streamdown } from 'streamdown';
+import { Markdown } from './Markdown';
 import { asksBeforeDeleting } from '../confirm-prefs';
 import { canvasPictures } from '../canvas-pictures';
 import { api } from '../api';
@@ -88,7 +88,7 @@ export function CanvasPanel({sessionId,folder,open,setOpen,showToggle=true}:{ses
       {canvas?<>
         <div className="canvas-document-heading">{editing?<input aria-label={t("Canvas title")} maxLength={200} value={title} onChange={e=>setTitle(e.target.value)}/>:<h3>{canvas.title}</h3>}<span>{canvas.active_call?t("Writing live"):canvas.status==='edited'?t("Edited by you"):canvas.status==='interrupted'?t("Partial draft retained"):canvas.persisted?t("Auto-saved"):t("Temporary")} · {canvas.persisted?t("Stored"):t("Not stored — lost on server restart")} · r{canvas.revision}</span></div>
         {editing&&canvas.revision!==base&&<p className="canvas-error">{t("This document changed. Your draft is preserved here; copy it before cancelling to read the latest version.")}</p>}
-        {editing?<textarea className="canvas-editor" aria-label={t("Edit canvas content")} value={draft} onChange={e=>setDraft(e.target.value)} spellCheck/>:<div ref={viewport} className="canvas-document prose prose-sm max-w-none" onScroll={e=>{const el=e.currentTarget;follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<60}}>{canvas.content?<Streamdown>{canvasPictures(canvas.content,folder,path=>api.pictureUrl(sessionId,path))}</Streamdown>:<p className="canvas-empty">{t("A blank page. Ask the agent to write here, or start editing.")}</p>}</div>}
+        {editing?<textarea className="canvas-editor" aria-label={t("Edit canvas content")} value={draft} onChange={e=>setDraft(e.target.value)} spellCheck/>:<div ref={viewport} className="canvas-document prose prose-sm max-w-none" onScroll={e=>{const el=e.currentTarget;follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<60}}>{canvas.content?<Markdown>{canvasPictures(canvas.content,folder,path=>api.pictureUrl(sessionId,path))}</Markdown>:<p className="canvas-empty">{t("A blank page. Ask the agent to write here, or start editing.")}</p>}</div>}
         <footer>{editing?<><button disabled={busy||!title.trim()||canvas.revision!==base||!!canvas.active_call} onClick={()=>void save()}><LuCheck/>{canvas.persisted?t("Save changes"):t("Apply changes")}</button><button disabled={busy} onClick={()=>{setEditing(false);setError('')}}><LuEye/>{t("Cancel edit")}</button></>:<><button disabled={!!canvas.active_call||busy} onClick={beginEdit}><LuPencil/>{t("Edit inline")}</button><button disabled={!!canvas.active_call||busy} aria-label={t("Delete canvas")} onClick={()=>asksBeforeDeleting()?setConfirmDelete(true):void remove()}><LuTrash2/></button></>}{confirmDelete&&!editing&&<span className="canvas-delete-confirm">{t("Delete this document?")} <button disabled={busy} onClick={()=>void remove()}>{t("Delete")}</button><button onClick={()=>setConfirmDelete(false)}>{t("Keep")}</button></span>}</footer>
       </>:<div className="canvas-empty"><LuFileText/><h3>{t("A place for your documents")}</h3><p>{t("Ask the agent to create a canvas, or start a document here.")}</p><button disabled={busy} onClick={()=>void create()}>{t("Create canvas")}</button></div>}
     <ResizeHandles target={panel} mode="anchored" edges={["w","s","sw"]}/></section>}

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Streamdown } from "streamdown";
+import { Markdown } from "./Markdown";
 import {
   LuBrain,
   LuChevronDown,
@@ -436,7 +436,7 @@ function MemoryMarkdown({ text, from, onOpen }: { text: string; from: string; on
     [],
   );
   const linked = useMemo(() => linkNotes(text, from), [text, from]);
-  return <Streamdown components={components}>{linked}</Streamdown>;
+  return <Markdown components={components}>{linked}</Markdown>;
 }
 
 /** Understory's own index and log: written by it, never by hand. */
@@ -803,7 +803,7 @@ function AfterChange({
           <details className="rounded-lg border border-line px-3 py-2 text-xs">
             <summary className="cursor-pointer text-fg-muted">{t("What the model said")}</summary>
             <div className="md mt-2 max-h-60 overflow-y-auto text-fg">
-              <Streamdown>{told}</Streamdown>
+              <Markdown>{told}</Markdown>
             </div>
           </details>
         )}
