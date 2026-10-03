@@ -91,8 +91,9 @@ A routine can run in any agent's home: choose the agent under **Runs in**.
 The bin next to an agent's name deletes it. Its chats are stopped and deleted
 with it, and its routines are switched off. It asks what to do with its folder:
 
-- **Keep its folder**: its files and memory stay. Make an agent with the same
-  name and it picks them up again.
+- **Keep its folder**: its files and memory stay, and so do the pictures its chats
+  made, in the [Images page](/guide/images). Make an agent with the same name and
+  it picks them up again.
 - **Delete its folder too**: the folder and everything in it are removed.
 
 The first agent cannot be deleted, only renamed. An agent a channel talks as

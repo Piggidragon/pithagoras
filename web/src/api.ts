@@ -243,6 +243,8 @@ export interface PortalTool {
   enabled: boolean;
   /** Whether it is on by default, so a chat can show where it disagrees. */
   defaultOn?: boolean;
+  /** One of the portal's own, not an extension's of the same name: the list groups its picture tools. */
+  inline?: true;
 }
 
 /** A picture going with a message: a data: URL, which the box also shows it from. */
@@ -337,7 +339,7 @@ export interface VoiceConfig {
   enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "kokoro" | "none"; sttModel?: string; exaggeration?: number; kokoroVoice?: string; speed?: number;
 }
 
-export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; }
+export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; /** The saved settings point at the managed service, whether or not its container is there. */ connected?: boolean; }
 /** The GPUs the voice container can use, as nvidia-smi reports them, and the combination that fits the one it would take. */
 export interface VoiceHardware { gpus: { index: number; uuid?: string; name: string; totalMiB: number | null; freeMiB: number | null }[]; source: string; error: string; /** False while nothing could be asked yet, so that no GPU is not yet the same as none. */ checked: boolean; /** The check found there is no GPU: what is suggested is speech recognition alone, on the CPU. */ cpuOnly: boolean; /** Cards the host lists that Docker cannot hand to a container: for voice there are none. */ unusable?: string[]; /** What recognition on the CPU has to run on. */ host: Host; selected: number | null; /** The UUID of the GPU chosen on the page, empty where none is, or the one chosen is no longer there. */ chosen: string; reserveMiB: number; suggestion: VoiceChoice; }
 export const api = {
@@ -401,6 +403,8 @@ export const api = {
   // `choice` is for install: the engines to build for. Without it an install keeps what is installed, or picks for the GPU.
   voiceAction: (action: 'install' | 'start' | 'stop', choice?: VoiceChoice) => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST', ...(choice ? {body: JSON.stringify(choice)} : {})}),
   voiceHardware: () => json<VoiceHardware>('/api/voice/hardware'),
+  /** Removes the voice container and puts the settings back; `removeData` deletes the downloaded engines and models too. */
+  uninstallVoice: (removeData: boolean) => json<{ok:boolean}>('/api/voice/uninstall', {method:'POST', body: JSON.stringify({removeData})}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),
@@ -491,7 +495,7 @@ export const api = {
   /** Every tool the portal has seen, for setting a default without opening a chat. */
   toolDefaults: () =>
     json<{
-      tools: { name: string; source: string; defaultOn: boolean }[];
+      tools: { name: string; source: string; defaultOn: boolean; inline?: true }[];
       off: string[];
       names: Record<string, string>;
     }>("/api/tools"),
@@ -625,8 +629,11 @@ export const api = {
   features: () => json<Features>("/api/features"),
   /** The subagent tool alone: nothing of Understory or Docker asked for. */
   subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
+  /** Image generation alone: nothing of Understory or Docker asked for. */
+  imagesFeature: () => json<{ images: ImagesFeature }>("/api/features/images"),
   /** Only whether each is on — cheap, for the sidebar and the chat's menus. */
-  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean } }>("/api/features/flags"),
+  /** `images`: image generation is on and has an address, which is when the Images page is in the sidebar. */
+  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
   subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
   setSubagentModel: (id: string, model: string | null) =>
@@ -656,6 +663,46 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
+  /** `changed`: the agent got or lost a tool, which chats have from their next load. */
+  setImagesFeature: (patch: ImagesFeaturePatch) =>
+    json<{ images: ImagesFeature; changed: boolean; reloaded: number; waiting: number }>("/api/features/images", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  /** A page of the gallery, newest first; `before` is the `next` of the page before. */
+  galleryPage: (query: { origin?: PictureOrigin; kind?: PictureKind; before?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    for (const [name, value] of Object.entries(query)) if (value !== undefined) params.set(name, String(value));
+    return json<GalleryPage>(`/api/images${params.size ? `?${params}` : ""}`);
+  },
+  /** Some pictures of the gallery by their ids, as far as they are there. */
+  galleryPictures: (ids: string[]) => json<{ pictures: GalleryPicture[] }>(`/api/images?ids=${ids.join(",")}`),
+  /** What is being made, and what was, with the most that run at once. */
+  pictureJobs: () => json<{ jobs: PictureJob[]; limit: number }>("/api/images/jobs"),
+  /** Stops a picture that is being made, or clears one that is done. */
+  stopPictureJob: (id: string) => json<{ ok: true }>(`/api/images/jobs/${id}`, { method: "DELETE" }),
+  /** One job for each picture; answers at once. */
+  makePictures: (request: PictureRequest) => json<{ jobs: PictureJob[] }>("/api/images/generate", { method: "POST", body: JSON.stringify(request) }),
+  /** One job for each change; answers at once. */
+  changePicture: (request: ChangeRequest) =>
+    json<{ jobs: PictureJob[] }>("/api/images/edit", { method: "POST", body: JSON.stringify(request) }),
+  /** A picture from this computer, into the gallery to be changed. */
+  uploadPicture: async (file: File): Promise<GalleryPicture> => {
+    const res = await fetch(`/api/images/upload?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      // Always the bytes themselves: the portal says what they are.
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || t("Could not upload {name} ({status})", { name: file.name, status: res.status }));
+    return body.picture;
+  },
+  /** The picture as the file it is. Its address never changes what it shows, unless it is in a chat's folder, which the browser then asks about. */
+  galleryFileUrl: (id: string) => `/api/images/${id}/file`,
+  /** Each as asked, files and all: what could not be deleted is said for each. */
+  deletePictures: (ids: string[]) => json<{ deleted: string[]; failed: { id: string; error: string }[] }>("/api/images/delete", { method: "POST", body: JSON.stringify({ ids }) }),
   setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string }) =>
     json<{ understory: UnderstoryFeature }>("/api/features/understory/config", { method: "PUT", body: JSON.stringify(config) }),
   dreamUnderstory: () => json<{ understory: UnderstoryFeature }>("/api/features/understory/dream", { method: "POST" }),
@@ -1236,6 +1283,154 @@ export interface SubagentFeature {
   model: string;
 }
 
+/** Image generation as the page is told it: never the key, only whether one is set. */
+export interface ImagesFeature {
+  enabled: boolean;
+  /** The API's base, such as https://host/v1. */
+  baseUrl: string;
+  model: string;
+  /** "1024x1024" or empty for the endpoint's own. */
+  size: string;
+  keySet: boolean;
+  /** Editing a picture has a switch of its own: not every endpoint that makes pictures changes them. */
+  editEnabled: boolean;
+  /** Where edits go; empty is the address above. */
+  editBaseUrl: string;
+  /** Empty sends no model: the model above is not taken for editing. */
+  editModel: string;
+  /** The edit endpoint takes several pictures, so edit_image has a list; off until said, and off again when edits move to another server. */
+  editMultiple: boolean;
+  /** "2048x2048", the most pixels a picture sent to be edited may have, or empty for no limit. */
+  editMaxSize: string;
+  editKeySet: boolean;
+  /** How long a request for a picture, made or edited, may take, in whole seconds. */
+  timeoutSeconds: number;
+  /** Whether the agent has an edit tool: switched on, and with an address to ask. */
+  editReady: boolean;
+  /** The endpoint is stable-diffusion.cpp's server: the page shows, and sends, the settings that only it reads. Off by default. */
+  sdExtras: boolean;
+}
+
+/** Made on the page, made by the agent in a chat, or found in a folder the agent's tools write into, with no chat to name. */
+export type PictureOrigin = "page" | "chat" | "folder";
+/** Made from a description, changed from another picture, put in by the person to be changed, or found with nothing to tell how it was made. */
+export type PictureKind = "generated" | "edited" | "uploaded" | "unknown";
+
+/** A picture of the gallery, as the portal tells of it. */
+export interface GalleryPicture {
+  id: string;
+  origin: PictureOrigin;
+  /** The chat whose agent made it, for the agent's pictures. */
+  chat: { id: string; title: string } | null;
+  /** The folder it was found in, for one that was found: Home, or the project's name or the way to the folder under the workspace root. */
+  folder: { name: string; home: boolean } | null;
+  kind: PictureKind;
+  prompt: string;
+  /** What it was asked for with, as far as that is known. */
+  params: {
+    model?: string;
+    size?: string;
+    outputFormat?: OutputFormat;
+    outputCompression?: number;
+    /** The ones that only stable-diffusion.cpp's server reads. */
+    negativePrompt?: string;
+    seed?: number;
+    sampleSteps?: number;
+    strength?: number;
+    fromNoise?: boolean;
+    /** Fields an older version of the page sent as typed; shown, not sent again. */
+    extra?: Record<string, string | number | boolean>;
+    sources?: string[];
+    masked?: boolean;
+  };
+  /** The picture an edit was made from, when that one is in the gallery. */
+  from: string | null;
+  createdAt: number;
+  bytes: number;
+  fileName: string;
+}
+
+export interface GalleryPage {
+  pictures: GalleryPicture[];
+  /** Where the next page starts, or null at the end. */
+  next: string | null;
+  /** How many there are with the filters, and how much of the disk the page's own take. */
+  total: number;
+  pageBytes: number;
+}
+
+/** A picture that is being made, was, or was not. */
+export interface PictureJob {
+  id: string;
+  kind: "generate" | "edit";
+  state: "running" | "done" | "failed";
+  prompt: string;
+  size?: string;
+  /** An edit's first picture. */
+  from?: string;
+  startedAt: number;
+  finishedAt?: number;
+  pictureId?: string;
+  error?: string;
+}
+
+/** The file formats of the OpenAI image format. */
+export type OutputFormat = "png" | "jpeg" | "webp";
+
+/**
+ * What the page asks of the portal for one picture beyond its description, and
+ * only what is set. Model, size, format and compression are fields of the
+ * OpenAI image format; the rest are not, and reach only an endpoint that is
+ * stable-diffusion.cpp's server, in the prompt (see image-settings.ts on the portal).
+ */
+export interface PictureSettingsBody {
+  model?: string;
+  /** `1024x1024`. */
+  size?: string;
+  outputFormat?: OutputFormat;
+  /** With jpeg or webp. */
+  outputCompression?: number;
+  negativePrompt?: string;
+  seed?: number;
+  sampleSteps?: number;
+  /** For a change only. */
+  strength?: number;
+  /** For a change only: from noise, with the pictures as references; no strength and no mask then. */
+  fromNoise?: boolean;
+}
+
+/** What the page asks the portal to make. */
+export interface PictureRequest extends PictureSettingsBody {
+  prompt: string;
+  count?: number;
+}
+
+/** What the page asks the portal to change: `mask` is a PNG as base64, and the transparent part is what changes. */
+export interface ChangeRequest extends PictureSettingsBody {
+  prompt: string;
+  sources: string[];
+  mask?: string;
+  count?: number;
+}
+
+/** What the page may change of it. A key left out keeps the saved one; "" takes it away. */
+export interface ImagesFeaturePatch {
+  enabled?: boolean;
+  baseUrl?: string;
+  model?: string;
+  size?: string;
+  apiKey?: string;
+  editEnabled?: boolean;
+  editBaseUrl?: string;
+  editModel?: string;
+  editApiKey?: string;
+  editMultiple?: boolean;
+  editMaxSize?: string;
+  /** null takes a saved limit away: the default again. */
+  timeoutSeconds?: number | null;
+  sdExtras?: boolean;
+}
+
 /** The model that keeps Understory's memory, as the page is told it: never the key. */
 export type UnderstoryLlm =
   | { source: "auto" }
@@ -1349,6 +1544,7 @@ export interface MemoryValidation {
 export interface Features {
   subagent: SubagentFeature;
   understory: UnderstoryFeature;
+  images: ImagesFeature;
 }
 
 export interface BrowserStatus {

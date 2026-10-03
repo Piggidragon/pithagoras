@@ -38,7 +38,8 @@ export function askPrimaryTool(sessionId: string) {
           Type.String({
             description:
               "When you are asking permission to do one specific thing, the exact thing — the " +
-              "shell command verbatim, or the path you would write. Approving authorises this " +
+              "shell command verbatim, or the path you would write; for edit_image the path of " +
+              "each picture, one to a line, in the order of the call. Approving authorises this " +
               "and nothing else, so it must be exactly what you intend to run, once. Leave it " +
               "out when you are asking for a decision rather than permission.",
           })
@@ -96,7 +97,7 @@ export function askPrimaryTool(sessionId: string) {
             to.target,
             `${row.person_name} is asking (via ${session.channel_slug}):\n\n${question}\n\n` +
               (row.action
-                ? `It wants to run, exactly once:\n\n    ${row.action}\n\n` +
+                ? `It wants to run, exactly once:\n\n    ${row.action.replace(/\n/g, "\n    ")}\n\n` +
                   `Approving runs that and nothing else.\n\n`
                 : "") +
               (row.action

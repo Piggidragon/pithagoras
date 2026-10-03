@@ -1,6 +1,6 @@
 # Voice latency profiling
 
-Use the gauge button beside the microphone to enable the profiler before starting a voice turn. The panel displays the latest turn and downloads up to 20 traces as JSON. Capturing is opt-in; closing the panel disables capture. Reports contain timestamps and numeric/status metadata, not audio or transcript content.
+Use the gauge button beside the microphone (**Profile voice latency**) to enable the profiler before starting a voice turn. The panel displays the latest turn and downloads up to 20 traces as JSON. Capturing is opt-in; closing the panel disables capture. Reports contain timestamps and numeric/status metadata, not audio or transcript content.
 
 The main metric runs from the last VAD frame classified as speech to estimated first generated-reply playback. A second exported metric includes speaking duration. Thinking and compaction announcements are tagged separately and do not complete the reply timer. Compaction announcements and tool events can still explain delays in the timeline.
 
@@ -10,4 +10,4 @@ Whisper upstream duration and TTS upstream-header/busy-retry durations come from
 
 Playback timestamps include the actual Web Audio scheduled start plus browser-reported output latency. This estimates device output; it does not measure speaker acoustics, Bluetooth delays reliably, or leading silence in generated audio. For exact acoustic end-to-end latency, record microphone speech and output loopback on the same clock and locate the first non-silent reply sample.
 
-Warm and cold tests should be recorded separately. Capture 5–10 representative turns, then compare medians and slow outliers with the same model/context/voice settings. No live Cortex performance figures have been collected for this change while the host is down due to the power cut.
+Warm and cold tests should be recorded separately. Capture 5–10 representative turns, then compare medians and slow outliers with the same model/context/voice settings.

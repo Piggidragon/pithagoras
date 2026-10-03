@@ -59,8 +59,9 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
   removing it.
 - **Voice mode** — local speech-to-text and text-to-speech in a managed container, pictures
   both ways, push-to-talk.
-- **Add-ons** — the agent's own browser, and opt-in features: a subagent tool and Understory
-  memory with a Memory page.
+- **Add-ons** — the agent's own browser, and opt-in features: a subagent tool, Understory
+  memory with a Memory page, and image generation and editing through an endpoint you choose,
+  with an Images page to make pictures without a chat and a gallery of them.
 - **Channels and people** — reach the agent from Telegram, Slack, Discord or a webhook, with
   roles, approvals and an audit log.
 - **Routines** — scheduled runs that report to a channel.
@@ -108,8 +109,8 @@ The rest is in [Configuration](https://thecodacus.github.io/pithagoras/reference
 ## Settings
 
 **Settings** (bottom of the sidebar) is the web equivalent of pi's slash commands:
-**Providers** and **Defaults** for models, **Tools**, **Skills**, **MCP** and **Extensions**
-for the agent, **Channels** and **People**, and **This browser**, **Add-ons**, **Shortcuts**,
+**Providers** and **Defaults** for models, **Tools**, **Images**, **Skills**, **MCP** and
+**Extensions** for the agent, **Channels** and **People**, and **This browser**, **Add-ons**, **Shortcuts**,
 **About** and **Advanced** for the portal. What a chat uses lives on the pills under its
 composer. Defaults you set apply to **newly started** sessions only.
 

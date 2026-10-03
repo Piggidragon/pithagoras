@@ -1,7 +1,7 @@
 import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { fillFrom } from "./editor-fills";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { api, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -19,6 +19,7 @@ import { RoutinesPage } from "./components/RoutinesPage";
 import { AuditPage } from "./components/AuditPanel";
 import { BrowserPage } from "./components/BrowserPage";
 import { MemoryPage } from "./components/MemoryPage";
+import { ImagesPage } from "./components/ImagesPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
 import { pollWhileVisible, reconnectDelay } from "./poll";
@@ -27,6 +28,7 @@ import { APP_NAME, finishedRuns, tabTitle } from "./attention";
 import { notifyIfAway, notifyState } from "./notify";
 import { guardStrayDrops } from "./drop-guard";
 import { usePlaces } from "./use-session-folders";
+import { fancy, keep, swapPages, type Leave } from "./motion";
 import { t, useLanguage } from "./i18n";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
@@ -82,6 +84,7 @@ export default function App() {
       <Route path="/routines" element={<Shell view="routines" />} />
       <Route path="/browser" element={<Shell view="browser" />} />
       <Route path="/memory" element={<Shell view="memory" />} />
+      <Route path="/images" element={<Shell view="images" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
@@ -102,7 +105,7 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "audit";
+  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
@@ -139,10 +142,19 @@ function Shell({
   const [hasBrowser, setHasBrowser] = useState(false);
   // Whether Understory is the agent's memory, which is when its page is in the sidebar.
   const [hasMemory, setHasMemory] = useState(false);
+  // Likewise whether image generation is on and has an address, which is when the Images page is.
+  const [hasImages, setHasImages] = useState(false);
   useEffect(() => {
-    const ask = () => api.featureFlags().then((f) => setHasMemory(f.understory?.enabled === true)).catch(() => {});
+    const ask = () =>
+      api
+        .featureFlags()
+        .then((f) => {
+          setHasMemory(f.understory?.enabled === true);
+          setHasImages(f.images?.enabled === true);
+        })
+        .catch(() => {});
     ask();
-    // Said by Settings → Add-ons when it switches Understory, so the sidebar follows at once.
+    // Said by Settings when it switches Understory (Add-ons) or the images (Agent → Images), so the sidebar follows at once.
     window.addEventListener("features-changed", ask);
     return () => window.removeEventListener("features-changed", ask);
   }, []);
@@ -427,6 +439,39 @@ function Shell({
 
   const active = listed ?? (other?.id === sessionId ? other : null);
 
+  // The page that is left plays out as a picture of itself over the one that
+  // comes (see motion.ts). Taken here, while what is on the page is still the
+  // page that was drawn, and put on it once the next one is. A chat to another
+  // chat is the same page: only its conversation goes. A chat that was
+  // deleted dissolves, and the empty page it is left on for a moment does not.
+  const main = useRef<HTMLElement>(null);
+  /** The chats the list had when it was last drawn. */
+  const knownIds = useRef(new Set<string>());
+  useEffect(() => {
+    knownIds.current = new Set(sessions.map((s) => s.id));
+  }, [sessions]);
+  const pageKey = view === "chat" ? `chat:${active?.id ?? ""}` : view;
+  const leaving = useRef<{ key: string; leave: ((how: Leave) => void) | null; how: Leave }>({ key: pageKey, leave: null, how: "page" });
+  if (leaving.current.key !== pageKey) {
+    const was = leaving.current.key;
+    const page = main.current?.lastElementChild as HTMLElement | null | undefined;
+    const chats = was.startsWith("chat:") && pageKey.startsWith("chat:");
+    // Gone from the list it was in: not one the list never has (an agent's or a routine's chat is opened by its address).
+    const deleted = was.startsWith("chat:") && knownIds.current.has(was.slice(5)) && !sessions.some((s) => s.id === was.slice(5));
+    leaving.current = {
+      key: pageKey,
+      leave: was === "chat:" ? null : keep((chats && page?.querySelector<HTMLElement>("[data-transcript]")) || page || null),
+      how: deleted ? "gone" : "page",
+    };
+    if (leaving.current.leave && fancy()) swapPages(true);
+  }
+  useLayoutEffect(() => {
+    const { leave, how } = leaving.current;
+    leaving.current.leave = null;
+    swapPages(false);
+    leave?.(how);
+  }, [pageKey]);
+
   // What the tab says while you are looking at something else, and — if you
   // asked for them — a notification when a chat you left running is done.
   const waiting = Boolean(active && uiQueue[0]);
@@ -480,6 +525,7 @@ function Shell({
         view={view}
         hasBrowser={hasBrowser}
         hasMemory={hasMemory}
+        hasImages={hasImages}
         places={places}
         onNavigate={(to) => { setMobileNav(false); navigate(`/${to}`); }}
         onOpenFolder={(key) => { setMobileNav(false); navigate(`/sessions?folder=${encodeURIComponent(key)}`); }}
@@ -504,7 +550,7 @@ function Shell({
       />
 
       </div>
-      <main className="app-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <main ref={main} className="app-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* In a chat the chat's own header has the menu button, and this bar
             would only repeat its title; in voice mode that header is gone. */}
         <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
@@ -565,6 +611,8 @@ function Shell({
           <BrowserPage onOpenSession={(id) => navigate(`/s/${id}`)} />
         ) : view === "memory" ? (
           <MemoryPage />
+        ) : view === "images" ? (
+          <ImagesPage />
         ) : view === "audit" ? (
           <AuditPage />
         ) : active ? (

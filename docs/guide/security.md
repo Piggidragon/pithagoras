@@ -12,7 +12,8 @@ visible instead of silent.
 ## Marking untrusted output
 
 Output from a source carrying other people's words — a mail client, `curl`,
-`wget`, any MCP tool — is wrapped before the model sees it:
+`wget`, `ssh`, `git clone`, a package install, any MCP tool, and every page the
+agent's own [browser](/guide/browser) reads — is wrapped before the model sees it:
 
 ```
 <<<untrusted:9f3ac1d20e4b7a61>>>
@@ -29,6 +30,10 @@ the block itself and everything after it would read as trusted again. Anything
 already shaped like a marker is defaced before wrapping, so a forged one never
 reaches the model to be reasoned about.
 
+The browser's tools read a page after nearly every click, so their results carry
+a shorter envelope: the same random closing id, with the warning above said once
+in the agent's instructions instead of on every result.
+
 ## Limiting what happens next
 
 Reading untrusted content marks the session **tainted**. From then on, the
@@ -42,14 +47,16 @@ refused:
 | `upload` | `curl`/`wget` carrying data out |
 | `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens |
 | `publish` | `git push` is not undoable from here |
-| `persist` | Scheduling outlives the conversation |
+| `persist` | Scheduling outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file |
 
 Enforcement is **tainted-only** on purpose. A session writing code in a
 repository never meets any of this; the rules apply exactly where the risk
 appeared.
 
-A refusal is logged and the agent is told to say it was refused rather than to
-find another route.
+A refusal is logged in [Audit](/guide/sessions#audit) and the agent is told to
+say it was refused rather than to find another route. A [routine](/guide/routines#the-injection-guard)
+can have the blocking turned off for itself; what the rules would have stopped is
+then recorded instead.
 
 ## What this does not do
 

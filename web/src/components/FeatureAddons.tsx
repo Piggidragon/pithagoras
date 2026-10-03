@@ -1,10 +1,10 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { LuBot, LuBrain, LuCheck, LuDownload, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert } from "react-icons/lu";
-import { api, type AvailableModel, type Features, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
+import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert, LuWandSparkles } from "react-icons/lu";
+import { api, type AvailableModel, type Features, type ImagesFeature, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
-import { SwitchRow, inputCls } from "./SettingsUi";
+import { SwitchRow, inputCls, primaryCls } from "./SettingsUi";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
 
 /**
@@ -675,6 +675,337 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
       {busy && (
         <p className="flex items-center gap-2 text-xs text-fg-subtle">
           <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t(busy)}
+        </p>
+      )}
+      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+    </div>
+  );
+}
+
+/** The form's copy of the image endpoint's settings, before they are saved. */
+interface ImagesDraft {
+  baseUrl: string;
+  model: string;
+  size: string;
+  /** As typed: whole seconds, or not yet. */
+  timeout: string;
+  /** Typed anew; empty keeps the one saved. */
+  apiKey: string;
+}
+
+/** What the server takes as a time limit, in seconds (TIMEOUT_SECONDS there). */
+const TIMEOUT = { default: 300, min: 30, max: 3600 };
+/** Empty is the default, as it is for the model and the size: it takes a saved limit away. */
+const timeoutOk = (typed: string) => typed.trim() === "" || (/^\d+$/.test(typed.trim()) && Number(typed) >= TIMEOUT.min && Number(typed) <= TIMEOUT.max);
+
+/** The same for editing, which has its own address, model and key. */
+interface ImagesEditDraft {
+  baseUrl: string;
+  model: string;
+  /** As typed: "2048x2048", or empty for no limit. */
+  maxSize: string;
+  /** Typed anew; empty keeps the one saved. */
+  apiKey: string;
+}
+
+/** What the server takes as a maximum size (MAX_SIZE there): empty is none. */
+const maxSizeOk = (typed: string) => typed.trim() === "" || /^[1-9]\d{1,4}x[1-9]\d{1,4}$/.test(typed.trim());
+
+const originOf = (address: string): string => {
+  try {
+    return new URL(address).origin;
+  } catch {
+    return "";
+  }
+};
+
+export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
+  // Its own, not with Understory's: a Docker that cannot be reached is not this tab's to wait on.
+  const [images, setImages] = useState<ImagesFeature | null>(null);
+  const [draft, setDraft] = useState<ImagesDraft | null>(null);
+  const [editDraft, setEditDraft] = useState<ImagesEditDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Said in the language shown, whenever it is drawn.
+  const [note, setNote] = useState<(() => string) | null>(null);
+  useEffect(() => {
+    api.imagesFeature().then((r) => setImages(r.images), (e: Error) => onError(e.message));
+  }, []);
+
+  if (!images) return <Loading />;
+  const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, timeout: String(images.timeoutSeconds), apiKey: "" };
+  const edit = (patch: Partial<ImagesDraft>) => setDraft({ ...form, ...patch });
+  const editForm = editDraft ?? { baseUrl: images.editBaseUrl, model: images.editModel, maxSize: images.editMaxSize, apiKey: "" };
+  const editEdit = (patch: Partial<ImagesEditDraft>) => setEditDraft({ ...editForm, ...patch });
+  // The key of generation goes along when edits go to the same server and have none of their own: the server says the same.
+  const usesKeyAbove = images.keySet && !images.editKeySet && originOf(editForm.baseUrl || images.baseUrl) === originOf(images.baseUrl);
+
+  const change = async (patch: ImagesFeaturePatch) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const { images: saved, changed, waiting } = await api.setImagesFeature(patch);
+      setImages(saved);
+      // The form's settings are saved now, so it shows them as the server has them; the key typed is not shown again.
+      if (patch.baseUrl !== undefined) setDraft(null);
+      if (patch.editBaseUrl !== undefined) setEditDraft(null);
+      if (changed) setNote(() => () => reloadNote(waiting));
+      // The Images page is in the sidebar while there is an endpoint to make pictures with.
+      window.dispatchEvent(new Event("features-changed"));
+      return true;
+    } catch (e) {
+      onError((e as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="rounded-xl border border-line bg-raised/40 p-3">
+        <Header Icon={LuImage} title={t("Image generation")}>
+          {tx("Pictures from a description, made by an image model you set up: on the Images page, and by the agent with a {tool} tool, whose pictures appear in the chat, and in voice mode's picture window, as one shown with {show} does.", { tool: <code>generate_image</code>, show: <code>show_image</code> })}
+        </Header>
+      </div>
+
+      <fieldset disabled={busy} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
+        <legend className="px-1 text-xs text-fg-muted">{t("The image endpoint")}</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="text-xs text-fg-muted sm:col-span-2">
+            {t("API address")}
+            <input
+              value={form.baseUrl}
+              onChange={(e) => edit({ baseUrl: e.target.value })}
+              placeholder="https://images.example.com/v1"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("API key")}
+            <input
+              type="password"
+              value={form.apiKey}
+              onChange={(e) => edit({ apiKey: e.target.value })}
+              placeholder={images.keySet ? t("saved — type to replace") : t("none needed for a local server")}
+              autoComplete="off"
+              className={`${inputCls} mt-1 text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Model")}
+            <input
+              value={form.model}
+              onChange={(e) => edit({ model: e.target.value })}
+              placeholder="image-model"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Picture size")}
+            <input
+              value={form.size}
+              onChange={(e) => edit({ size: e.target.value })}
+              placeholder="1024x1024"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Time limit (seconds)")}
+            <input
+              inputMode="numeric"
+              value={form.timeout}
+              onChange={(e) => edit({ timeout: e.target.value })}
+              placeholder={String(TIMEOUT.default)}
+              aria-invalid={!timeoutOk(form.timeout)}
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+        </div>
+        <p className="text-[11px] text-fg-faint">
+          {tx("Any server with an OpenAI-style {route}: the portal sends the model, the prompt and the size, and takes a picture back as base64 or as an address. The key goes only to this address. Leave the model and the size empty for the server's own.", { route: <code>images/generations</code> })}
+        </p>
+        <p className="text-[11px] text-fg-faint">
+          {t("The time limit is how long the portal waits for one picture, made or edited, before it gives up: {min} to {max} seconds, {default} by default. A slow or local model may need more.", TIMEOUT)}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {draft && (
+            <button
+              type="button"
+              className={primaryCls}
+              disabled={!timeoutOk(form.timeout)}
+              onClick={() =>
+                void change({
+                  baseUrl: form.baseUrl,
+                  model: form.model,
+                  size: form.size,
+                  // Only when changed, so that saving the rest does not state a limit the person never chose.
+                  ...(form.timeout.trim() === "" ? { timeoutSeconds: null } : Number(form.timeout) !== images.timeoutSeconds ? { timeoutSeconds: Number(form.timeout) } : {}),
+                  ...(form.apiKey ? { apiKey: form.apiKey } : {}),
+                })
+              }
+            >
+              {t("Save")}
+            </button>
+          )}
+          {draft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-fg" onClick={() => setDraft(null)}>
+              {t("Discard")}
+            </button>
+          )}
+          {images.keySet && !draft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-danger" onClick={() => void change({ apiKey: "" })}>
+              {t("Remove the saved key")}
+            </button>
+          )}
+        </div>
+      </fieldset>
+
+      <SwitchRow
+        title={t("Image generation")}
+        detail={images.enabled ? t("On: pictures are made on the Images page, and the agent can have a generate_image tool.") : t("Off: no pictures are made, on the Images page or by the agent.")}
+        on={images.enabled}
+        onChange={(enabled) => void change({ enabled })}
+        disabled={busy || !!draft || (!images.baseUrl && !images.enabled)}
+        note={draft ? t("Save or discard the changes first.") : !images.baseUrl && !images.enabled ? t("Save the address of an image endpoint first.") : undefined}
+      />
+      <p className="text-[11px] text-fg-faint">
+        {t("Pictures are made in a generated-images folder inside the chat's folder. Making one can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it. This switch is for the feature as a whole: whether a chat's agent gets the generate_image tool is set in the tool lists (Settings → Agent → Tools, a project's Tools, and the tools control of a chat).")}
+      </p>
+
+      <div className="rounded-xl border border-line bg-raised/40 p-3">
+        <Header Icon={LuWandSparkles} title={t("Image editing")}>
+          {tx("Changing pictures that exist, with an endpoint that has an OpenAI-style {route}: on the Images page, and by the agent with an {tool} tool, for a picture in the chat's folder. The original stays; the result is a new picture, shown as one made with {generate} is.", {
+            tool: <code>edit_image</code>,
+            route: <code>images/edits</code>,
+            generate: <code>generate_image</code>,
+          })}
+        </Header>
+      </div>
+
+      <fieldset disabled={busy} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
+        <legend className="px-1 text-xs text-fg-muted">{t("The editing endpoint")}</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="text-xs text-fg-muted sm:col-span-2">
+            {t("Editing address")}
+            <input
+              value={editForm.baseUrl}
+              onChange={(e) => editEdit({ baseUrl: e.target.value })}
+              placeholder={images.baseUrl || "https://images.example.com/v1"}
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Editing key")}
+            <input
+              type="password"
+              value={editForm.apiKey}
+              onChange={(e) => editEdit({ apiKey: e.target.value })}
+              placeholder={images.editKeySet ? t("saved — type to replace") : usesKeyAbove ? t("the key above is used") : t("none needed for a local server")}
+              autoComplete="off"
+              className={`${inputCls} mt-1 text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Editing model")}
+            <input
+              value={editForm.model}
+              onChange={(e) => editEdit({ model: e.target.value })}
+              placeholder="image-edit-model"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Maximum picture size")}
+            <input
+              value={editForm.maxSize}
+              onChange={(e) => editEdit({ maxSize: e.target.value })}
+              placeholder="2048x2048"
+              spellCheck={false}
+              autoComplete="off"
+              aria-invalid={!maxSizeOk(editForm.maxSize)}
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+        </div>
+        <p className="text-[11px] text-fg-faint">
+          {t("Leave the address empty to edit with the server above, with its key. The model above is not used for editing, as a model that makes pictures may not change them; leave this one empty for the server's own. A key goes only to the address it was given for.")}
+        </p>
+        <p className="text-[11px] text-fg-faint">
+          {t("The maximum picture size is the most pixels a picture sent to be edited may have, such as 2048x2048, whichever way up it is. A picture beyond it is not sent: the agent is told the limit is exceeded and what it is. Leave it empty for no limit.")}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {editDraft && (
+            <button
+              type="button"
+              className={primaryCls}
+              disabled={!maxSizeOk(editForm.maxSize)}
+              onClick={() => void change({ editBaseUrl: editForm.baseUrl, editModel: editForm.model, ...(editForm.maxSize.trim() !== images.editMaxSize ? { editMaxSize: editForm.maxSize.trim() } : {}), ...(editForm.apiKey ? { editApiKey: editForm.apiKey } : {}) })}
+            >
+              {t("Save")}
+            </button>
+          )}
+          {editDraft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-fg" onClick={() => setEditDraft(null)}>
+              {t("Discard")}
+            </button>
+          )}
+          {images.editKeySet && !editDraft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-danger" onClick={() => void change({ editApiKey: "" })}>
+              {t("Remove the saved editing key")}
+            </button>
+          )}
+        </div>
+      </fieldset>
+
+      <SwitchRow
+        title={t("Image editing")}
+        detail={images.editEnabled ? t("On: pictures are changed on the Images page, and the agent can have an edit_image tool.") : t("Off: no pictures are changed, on the Images page or by the agent.")}
+        on={images.editEnabled}
+        onChange={(editEnabled) => void change({ editEnabled })}
+        disabled={busy || !!editDraft || (!(images.editBaseUrl || images.baseUrl) && !images.editEnabled)}
+        note={editDraft ? t("Save or discard the changes first.") : !(images.editBaseUrl || images.baseUrl) && !images.editEnabled ? t("Save the address of an image endpoint first.") : undefined}
+      />
+      <SwitchRow
+        title={t("Several pictures per edit")}
+        detail={images.editMultiple ? t("On: an edit takes up to eight pictures, on the Images page and for edit_image.") : t("Off: an edit takes one picture.")}
+        on={images.editMultiple}
+        onChange={(editMultiple) => void change({ editMultiple })}
+        disabled={busy || !!editDraft}
+      />
+      <p className="text-[11px] text-fg-faint">
+        {t("Switch on several pictures only if the editing endpoint takes more than one in a request, to combine subjects or keep a style. The agent then names its pictures in the order the prompt refers to them, and the Images page takes up to eight pictures for an edit. What an endpoint takes is said of that endpoint, so editing moved to another server switches it off again.")}
+      </p>
+      <p className="text-[11px] text-fg-faint">
+        {t("The result is a new picture in the generated-images folder, named after the original, which is not changed. Editing can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it. This switch is for the feature as a whole: whether a chat's agent gets the edit_image tool is set in the tool lists, as for generation.")}
+      </p>
+      <SwitchRow
+        title={t("Stable Diffusion extra settings")}
+        detail={
+          images.sdExtras
+            ? t("On: the Images page shows settings that only stable-diffusion.cpp servers understand, under Advanced, and sends them in the description.")
+            : t("Off: the Images page shows and sends only the settings of the OpenAI image format.")
+        }
+        on={images.sdExtras}
+        onChange={(sdExtras) => void change({ sdExtras })}
+        // Saving a new address of another server takes it off again, so it waits for the save as the other switches of the endpoint do.
+        disabled={busy || !!draft || !!editDraft}
+      />
+      <p className="text-[11px] text-fg-faint">
+        {t("Switch this on only if the image endpoint, for generating and for editing, is a stable-diffusion.cpp server. It adds a seed, the steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description, which that server reads out of it; any other endpoint would take the block as part of the description. For making and changing pictures on the Images page: the agent's tools do not use these settings. While this is off none of them is sent, whatever was typed or kept before.")}
+      </p>
+      {busy && (
+        <p className="flex items-center gap-2 text-xs text-fg-subtle">
+          <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
         </p>
       )}
       {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}

@@ -1,8 +1,8 @@
 # The interface
 
 What the portal does in the browser, apart from the chat itself. Everything on
-this page is kept **in this browser** — the theme, the language, the
-confirmations, the shortcuts — so a phone and a laptop can differ without one
+this page is kept **in this browser** — the theme, the animations, the language,
+the confirmations, the shortcuts — so a phone and a laptop can differ without one
 changing the other. The exception is the tools switched off by default, which
 the server keeps.
 
@@ -28,6 +28,51 @@ the next load rather than the one after.
 **Settings → This browser → Theme** is light, dark or **System**, the default,
 which follows the machine and changes with it — at sunset, on a desktop that
 flips.
+
+## Animations
+
+The portal has always moved a little: panels slide in, menus unroll, a working
+chat's mark breathes. On top of that sits a layer of larger flourishes, **on by
+default**:
+
+- **Opening the portal.** Its mark lights up and two doors part on it. About a
+  second, and only when you open the portal — not when you reload the page.
+- **Chats.** Opening or switching to one lets the conversation you leave drift
+  away and the last messages of the next swing in one after another, with its
+  name sliding in. A chat that was deleted dissolves.
+- **Messages.** What you send rises from the send button's corner as the arrow on
+  it flies off; what the agent answers and runs rises in; something that went
+  wrong shakes once.
+- **Deleting.** A chat's row, in the sidebar and on **Sessions**, flashes red and
+  breaks apart while the rows below close the gap; a deleted message and the
+  reply to it do the same in the conversation. A new chat's row slides in, and a
+  chat that moves up the list, or is pinned, slides to its new place.
+- **Panels.** They come in from the side they are docked at with a bounce, drop
+  away when closed, and a panel carried to another place flies there from where
+  you let go of it.
+- **Dialogs, menus and lists.** A dialog swings up out of the page and sinks
+  when it closes, and so does the picture viewer; a menu unrolls from its button, its lines one after another;
+  a drop-down list does the same.
+- **Settings.** The side navigation comes in line by line, the page you pick
+  slides in, and a switch's knob bounces.
+- **The Browser page.** Its screen switches on like an old tube.
+- **Voice mode.** The orb comes up out of a swell of light, and the windows that
+  open on its stage overshoot into place.
+- **Pictures being made.** While the agent has a picture made or changed, a soft
+  light drifts over the frame that holds its place and a sheen passes; the
+  picture then fades in over it. See [Sessions](/guide/sessions#pictures-the-agent-makes).
+
+None of it waits for you or takes a click away: what is leaving is a picture of
+what was there, laid over the page, while the page itself is already as it
+will be. Nothing moves on a keystroke or as the agent's words stream in.
+
+**Settings → This browser → Animations** switches all of this off. It is kept in
+this browser, like the theme, so a phone and a laptop can differ. Off, the portal
+is as it was before the flourishes were added.
+
+If your system asks for **reduced motion** (the *prefers-reduced-motion* setting),
+the flourishes do not play, whatever the switch says, and the portal's own
+quieter motion steps aside as well. The switch says so while that is the case.
 
 ## Language
 
@@ -63,8 +108,12 @@ in two places:
   switched off there is not offered to the model at all; the extension stays
   installed and its slash commands keep working. Tools are listed once a
   conversation has run, because that is when pi builds the list of what its
-  extensions registered. A group can be switched off as a whole, and each
-  package can be given a name of your own — *Rename* — for the list.
+  extensions registered. The portal's own `generate_image` and `edit_image` are the exception:
+  they are listed as soon as image generation or editing is switched on. A group
+  can be switched off as a whole, and each package can be given a name of your own — *Rename* — for the list. The
+  portal's picture tools (`show_image`, `generate_image` and `edit_image`) share
+  one group, **Images**, in every tool list; an extension's tool of one of those
+  names stays in the group of its extension.
 - **Projects → Tools** on a project's row sets what every chat in that project starts
   with, against the portal-wide default; see [Projects](/guide/projects#tools).
 - The **tools** control of a chat switches them for that chat only, from its

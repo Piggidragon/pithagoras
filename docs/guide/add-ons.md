@@ -6,7 +6,7 @@ The portal talks directly to the host Docker API; no Docker CLI inside the porta
 
 This guide covers the managed Linux Docker installation. Add-ons are separate from [pi extensions](/guide/extensions) and [channel packages](/channels/index).
 
-The **Subagents** and **Memory** tabs beside them switch on the [opt-in features](/guide/features) — a subagent tool and Understory as the agent's memory. The portal can run Understory itself with the same Docker access; pointed at one you run, it needs none.
+The **Subagents** and **Memory** tabs beside them switch on the [opt-in features](/guide/features) — a subagent tool and Understory as the agent's memory. The portal can run Understory itself with the same Docker access; pointed at one you run, it needs none. Image generation and editing, which need no Docker at all, are set up under [Settings → Agent → Images](/guide/features#image-generation).
 
 ## Choose your next step
 
@@ -175,14 +175,14 @@ Browser uses Docker's `unless-stopped` restart policy. If `BROWSER_EXTERNAL=true
 ### Choose engines, install and wait for Ready
 
 1. Open **Settings → Add-ons → Voice**.
-2. Expand **Voice service**. Under **Speech engines** the page shows the GPU it can read and what fits it. Leave **Choose for me, based on my GPU** on, or turn it off and pick the engines yourself (see [the engines](#engines-and-gpu-memory) below).
+2. Expand **Voice service**. Under **Speech engines** the page shows the GPU it can read and what fits it. Leave **Choose for me, based on my GPU** on, or turn it off and pick the engines yourself (see [the engines](#engines-devices-and-memory) below).
 3. Click **Install voice** and follow **Setup log** until the service shows **Ready**.
 
 ::: info First setup takes time
 The installer downloads an image, builds the runtimes, and downloads the models of the engines you chose. A running container is not yet a ready service.
 :::
 
-Once the services are healthy, the installer enables voice and saves the endpoints automatically. If you previously used custom endpoints, click **Use installed voice** to reconnect.
+Once the services are healthy, the installer enables voice and saves the endpoints automatically. If you previously used custom endpoints, click **Use installed voice** to reconnect. Before it replaces your saved endpoints, the runtime and the recognition model, and whether voice was on, the portal remembers them, so that [**Uninstall**](#remove-voice) can put them back. Your voice, speech detection and speaking instructions are not touched, and neither is your input language, with one exception: a Chatterbox install changes a language Chatterbox does not speak, such as auto-detect, to English, and uninstalling does not change it back.
 
 ### Engines, devices and memory
 
@@ -304,8 +304,9 @@ The service can be healthy while the TTS model is unloaded. GPU memory is alloca
 | **Start voice** | Starts the existing managed container, reusing its models. |
 | **Retry setup** | Restarts a failed container and its setup script; retained downloads/builds are reused where the script can reuse them. |
 | **Stop · release VRAM** | Stops the voice processes in the container, releasing their GPU allocations. Keeps model files. |
+| **Uninstall** | Asks first, then stops and removes the `pithagoras-voice` container and puts the voice settings back (see [Remove Voice](#remove-voice)). Keeps the downloaded engines and models unless you tick the box in the question. |
 | **GPU** (shown when the host has more than one GPU and the engines use one) | Runs the speech engines on the chosen GPU, so the session model can keep the other. A running voice service is recreated on it at once and a stopped one on its next start; model files are kept. **Automatic** takes the GPU `VOICE_GPU` names, else the one with the most free memory when installing or rebuilding; a start keeps the GPU the service is on. A GPU that cannot hold the engines installed is refused. |
-| Disable voice controls and save | Hides the session controls; it is not a container-uninstall operation. |
+| Disable voice controls and save | Hides the session controls; the service stays installed. Use **Uninstall** to remove it. |
 
 ### When GPU memory is released
 
@@ -381,25 +382,23 @@ docker pull lscr.io/linuxserver/chromium:latest
 
 ### Recreate Voice after a portal update
 
-Voice's setup script is captured when its container is created. To apply a newer installer after updating the portal, end voice sessions, click **Stop · release VRAM**, and run:
-
-```sh
-docker rm pithagoras-voice
-```
-
-Then click **Install voice** again. Keep `pithagoras_voice-models` to reuse the models and builds; recreating is not a guarantee that every cached binary is rebuilt. The installer pins its runtime revisions rather than tracking upstream automatically.
+Voice's setup script is captured when its container is created. To apply a newer installer after updating the portal, end voice sessions, click **Uninstall** and leave **Also delete the downloaded engines and models** unticked, then click **Install voice** again. The models and builds in `pithagoras_voice-models` are reused; recreating is not a guarantee that every cached binary is rebuilt. The installer pins its runtime revisions rather than tracking upstream automatically.
 
 ### Remove Voice
 
-Voice currently has no Remove button. To uninstall it while retaining downloads, stop it, run the same `docker rm` command, disable voice controls, and save.
+Click **Uninstall** under **Settings → Add-ons → Voice → Voice service**. It is offered once there is a container, or while the saved settings still point at the managed service after the container is gone (removed by hand, say), and asks first, naming what goes (with **Ask before deleting** turned off under [Settings](/guide/interface#confirmations), the question is skipped and the downloads are kept). Then:
 
-::: danger Delete voice downloads permanently
-To also erase downloaded models, source trees and builds, run the following **only after stopping and removing the voice container**:
+- The `pithagoras-voice` container is stopped and removed. Nothing else of yours is touched: a container of that name that the portal did not make is left alone, and the Docker image the container ran in stays, since other containers may use it.
+- The voice settings go back to what they were before the install: the runtime, the speech recognition and speech synthesis addresses and the recognition model, and whether voice was on, as the portal remembered them when it connected the service. The recognition side (address and model) and the speech side (address and runtime) are remembered each on its own, and again at every connect, so an address you set up after the install and then connected over comes back as that one. Your voice, language, speech detection and speaking instructions are not part of that and stay as they are.
+- An address you set up yourself stays as it is. Only what points at the managed service (the ports in [Service addresses](#service-addresses-and-health-checks)) is changed, so a speech server you saved after the install is not replaced by older settings. A service installed by an older portal, which remembered nothing, has what points at it reset to a portal with nothing set up (the Compose overlay's default addresses, no recognition model, the runtime **Breeze Python**) and voice switched off; your own address beside it is kept.
+- **Also delete the downloaded engines and models** is off by default. Off, the volume `pithagoras_voice-models` stays and a later **Install voice** is quick. Ticked, the volume is deleted too, and the next install downloads and builds the engines again. This cannot be undone.
+- If Docker refuses to delete the volume (another container has it, say), the container is still removed and the settings are still put back; the page says why the downloads stay, and they can be removed by hand (see below).
+- The GPU chosen on the page is kept: it is a choice about the host, not about the service.
 
-```sh
-# Destructive: the next installation must download/build the voice runtime again.
-docker volume rm pithagoras_voice-models
-```
+Afterwards the page shows **Not installed**, as on a portal that never installed the service, and **Install voice** works again. Uninstalling something that is not installed changes nothing, and where the settings still point at the service after the container was removed by hand, it puts them right. It waits while a setup is under way. Without access to Docker the page offers no **Uninstall** (it says **Automatic voice setup requires access to Docker.**), and the API answers `Docker is unavailable`, as it does for an install.
+
+::: tip By hand
+Without the button, `docker rm -f pithagoras-voice` removes the container, and `docker volume rm pithagoras_voice-models` the downloads, **only after the container is removed**. The settings are then yours to put right.
 :::
 
 ### Delete the browser profile

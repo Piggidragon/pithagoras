@@ -287,6 +287,28 @@ export function openPicture(base: string, rel: unknown): { fd: number; size: num
 }
 
 /**
+ * A picture in the folder, read whole, for one that is sent on as it is, to an
+ * image endpoint to be changed. Opened as a picture shown is: checked by its
+ * bytes and its size, and never through a link out of the folder.
+ */
+export function readPicture(base: string, rel: unknown): { bytes: Buffer; mimeType: string; name: string } {
+  const opened = openPicture(base, rel);
+  try {
+    const bytes = Buffer.alloc(opened.size);
+    let read = 0;
+    while (read < bytes.length) {
+      const n = readSync(opened.fd, bytes, read, bytes.length - read, read);
+      // Shorter than it was when it was measured.
+      if (n === 0) break;
+      read += n;
+    }
+    return { bytes: bytes.subarray(0, read), mimeType: opened.mimeType, name: opened.name };
+  } finally {
+    closeSync(opened.fd);
+  }
+}
+
+/**
  * What a failed change is called to the person, by what the system said.
  * Anything not known here is left as it is, and becomes a plain 500 with a log line.
  */
@@ -517,7 +539,7 @@ export function makeFolder(base: string, dirRel: unknown, name: unknown): string
 }
 
 /** The start of a name that fits in `max` bytes, cut between letters, not inside one. */
-function fitBytes(name: string, max: number): string {
+export function fitBytes(name: string, max: number): string {
   let start = "";
   for (const ch of name) {
     if (Buffer.byteLength(start + ch) > max) break;
@@ -598,4 +620,26 @@ export function uploadTarget(
     throw new FileError("exists", `Too many files called "${clean}" here`);
   };
   return { fd, finish, abandon };
+}
+
+/**
+ * Keeps `data` as a new file called `name` in the folder `dirRel`, for what
+ * the portal makes itself, such as a picture the agent had generated. Put in
+ * place as an upload is: written beside its place first, never over something
+ * that is there (a taken name gets a number), and into no place outside the
+ * folder. Returns its path, from the chat's folder.
+ */
+export function saveNewFile(base: string, dirRel: unknown, name: string, data: Buffer): string {
+  const target = uploadTarget(base, dirRel, name);
+  try {
+    let written = 0;
+    while (written < data.length) written += writeSync(target.fd, data, written, data.length - written, written);
+    fsyncSync(target.fd);
+  } catch (e) {
+    closeSync(target.fd);
+    target.abandon();
+    throw ioFailure(e, "The file could not be saved", "Nothing was changed.");
+  }
+  closeSync(target.fd);
+  return target.finish();
 }

@@ -176,3 +176,21 @@ test('a change the prompt could not be built with goes back to what the rule sai
  assert.deepEqual(fresh.lines(), []);
  assert.equal(fresh.set(true), true);
 });
+test('what a tool says of itself follows the instructions, whatever they are, and only while the tool is there', () => {
+ const line = 'Call generate_image to make a picture.';
+ assert.equal(audioSystemRule(undefined, ''), AUDIO_SYSTEM_RULE, 'nothing to add: as it was');
+ const custom = audioSystemRule('Answer in one word.', line);
+ assert.ok(custom.includes(` Answer in one word. ${line} Do not read the marker aloud.`));
+ assert.ok(audioSystemRule(undefined, line).includes(`${DEFAULT_VOICE_INSTRUCTIONS} ${line} Do not read the marker aloud.`));
+ let there = false;
+ const rule = new AudioRule(() => 'Answer in one word.', () => (there ? line : ''));
+ rule.set(true);
+ assert.deepEqual(rule.lines(), [audioSystemRule('Answer in one word.')], 'no tool: no line');
+ there = true;
+ assert.equal(rule.set(true), true, 'the tool came with a reload: the prompt is built again');
+ assert.deepEqual(rule.lines(), [custom]);
+ assert.equal(rule.into('Base', 'Base'), `Base\n\n${custom}`);
+ there = false;
+ assert.equal(rule.set(true), true, 'and went again');
+ assert.deepEqual(rule.lines(), [audioSystemRule('Answer in one word.')]);
+});

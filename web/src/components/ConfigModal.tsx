@@ -11,6 +11,7 @@ import {
   LuFileJson,
   LuFolder,
   LuHammer,
+  LuImage,
   LuInfo,
   LuKeyboard,
   LuMonitor,
@@ -37,10 +38,12 @@ import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { formatTokens } from "../transcript";
 import { displayName } from "../tool-groups";
 import { useAsksBeforeDeleting } from "../confirm-prefs";
+import { useAnimations } from "../motion";
 import { useNotifyState } from "../notify";
 import { setCommandTrigger, typedCharacter, useCommandTrigger, validTrigger } from "../command-trigger";
 import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
+import { PicturesPanel } from "./PicturesPanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
@@ -66,6 +69,7 @@ export type Tab =
   | "people"
   | "add-ons"
   | "tools"
+  | "images"
   | "skills"
   | "mcp"
   | "extensions"
@@ -96,6 +100,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
     label: msg("Agent"),
     tabs: [
       { id: "tools", label: msg("Tools"), icon: <LuHammer />, hint: msg("What the agent may reach for, by default") },
+      { id: "images", label: msg("Images"), icon: <LuImage />, hint: msg("The image model behind making and changing pictures") },
       { id: "skills", label: msg("Skills"), icon: <LuWrench />, hint: msg("Procedures the agent can reach for") },
       { id: "mcp", label: msg("MCP"), icon: <LuPlug />, hint: msg("Servers the agent can pull tools from") },
       { id: "extensions", label: msg("Extensions"), icon: <LuBlocks />, hint: msg("Install and manage packages") },
@@ -303,6 +308,7 @@ export function ConfigModal({
       {nav.kind === "tab" && nav.id === "people" && <PeoplePanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "add-ons" && <PortalExtensions onError={setError} />}
       {nav.kind === "tab" && nav.id === "tools" && <ToolDefaults onError={setError} />}
+      {nav.kind === "tab" && nav.id === "images" && <PicturesPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "mcp" && <McpPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "extensions" && (
@@ -457,7 +463,7 @@ function RailItem({
       onClick={onClick}
       title={hint}
       aria-current={active ? "page" : undefined}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition ${
+      className={`rail-item flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition ${
         active
           ? "bg-accent/10 text-accent ring-1 ring-inset ring-accent/20"
           : "text-fg-muted hover:bg-fg/5 hover:text-fg"
@@ -526,6 +532,20 @@ function Confirmations() {
       detail={t("Chats, messages, files, skills, routines, projects, voices, channels, providers. Unsaved changes are still asked about: there is no other copy of them.")}
       on={ask}
       onChange={setAsk}
+    />
+  );
+}
+
+/** The flourishes on top of the portal's own motion: one switch, kept in this browser. */
+function Animations() {
+  const { chosen, reduced, set } = useAnimations();
+  return (
+    <SwitchRow
+      title={t("Fancy animations")}
+      detail={t("The portal opens through two doors, chats swing in, deleted rows break apart and panels dock with a bounce. Short ones, and none of them waits for you or gets in your way. Off, the portal is as quiet as it was before.")}
+      on={chosen}
+      onChange={set}
+      note={reduced ? t("Your system asks for reduced motion, so none of them play, whatever this says.") : undefined}
     />
   );
 }
@@ -694,6 +714,9 @@ function BrowserPanel({ onError }: { onError: (e: string) => void }) {
       </p>
       <Section title={t("Appearance")}>
         <Appearance />
+      </Section>
+      <Section title={t("Animations")}>
+        <Animations />
       </Section>
       <Section title={t("Language")} hint={t("The portal's own words. What the agent writes is up to the agent.")}>
         <LanguagePicker />

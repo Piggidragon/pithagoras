@@ -11,7 +11,10 @@ import { Select } from '../src/components/Select';
 import type { PortalEvent, Session } from '../src/api';
 import '../src/styles';
 import { installTooltips } from '../src/tooltips';
+import { installMotion } from '../src/motion';
 installTooltips();
+// As the app does: the Animations switch and reduced motion are read from the page, for what moves with them.
+installMotion();
 
 const phase = new URLSearchParams(location.search).get('phase') ?? 'tools';
 const now = Date.now();
@@ -48,6 +51,19 @@ if (phase === 'commands') {
   );
 }
 if (phase === 'compacting') events.push(ev('compaction_start', {}, 6));
+// Pictures: one sent, one made, one made from that, and one shown without a title. Their files are what the test serves.
+// An edit's path is the original's, as the agent gave it; the folder is the chat's, so a path inside it is the same file.
+if (phase === 'pictures') events.push(
+  ev('portal_prompt', { message: 'Paint a lighthouse, then make it blue.', images: [{ name: 'sketch.png', mimeType: 'image/png' }] }, 9),
+  ev('tool_execution_start', { toolCallId: 'g1', toolName: 'generate_image', args: { prompt: 'A lighthouse at dusk', title: 'A lighthouse at dusk' } }, 8),
+  ev('tool_execution_end', { toolCallId: 'g1', toolName: 'generate_image', result: { content: [{ type: 'text', text: 'Generated and shown to the user: generated-images/lighthouse.png' }], details: { path: 'generated-images/lighthouse.png', title: 'A lighthouse at dusk', portalImage: true } } }, 7),
+  ev('tool_execution_start', { toolCallId: 'e1', toolName: 'edit_image', args: { path: '/workspaces/pithagoras/generated-images/lighthouse.png', prompt: 'Make it blue' } }, 6),
+  ev('tool_execution_end', { toolCallId: 'e1', toolName: 'edit_image', result: { content: [{ type: 'text', text: 'Edited and shown to the user: generated-images/lighthouse-edited.png' }], details: { path: 'generated-images/lighthouse-edited.png', title: 'The lighthouse, in blue', portalImage: true } } }, 5),
+  ev('tool_execution_start', { toolCallId: 's1', toolName: 'show_image', args: { path: 'docs/diagram.png' } }, 4),
+  ev('tool_execution_end', { toolCallId: 's1', toolName: 'show_image', result: { content: [{ type: 'text', text: 'Shown: docs/diagram.png' }], details: { path: 'docs/diagram.png' } } }, 3),
+  ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Here they are.' }] } }, 2),
+  ev('agent_end', {}, 1),
+);
 // A finished reply with what writing it took, as llama.cpp measured it: `?phase=stats`.
 if (phase === 'stats') events.push(
   ev('portal_prompt', { message: 'hi' }, 6),
@@ -214,12 +230,16 @@ if (phase === 'git') {
       { name: 'web_search', source: 'pi-web-access', description: 'Search the web', enabled: !off.includes('web_search'), defaultOn: true },
       { name: 'web_fetch', source: 'pi-web-access', enabled: !off.includes('web_fetch'), defaultOn: true },
       { name: 'bash', source: 'builtin', enabled: true, defaultOn: true },
+      // The portal's picture tools, each registered by an extension of its own.
+      { name: 'show_image', source: 'pictures', inline: true, enabled: !off.includes('show_image'), defaultOn: true },
+      { name: 'generate_image', source: 'image-generation', inline: true, enabled: true, defaultOn: true },
+      { name: 'edit_image', source: 'image-editing', inline: true, enabled: true, defaultOn: true },
     ] });
     return realFetch(url, init);
   }) as typeof fetch;
 }
 
-const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'stats' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
+const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'stats' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.
 if (phase === 'nudge') {

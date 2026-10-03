@@ -19,8 +19,15 @@ session never deletes its folder.
 Type and send. The request returns as soon as pi accepts the message — it does
 not wait for the work to finish. Close the tab if you like.
 
-While a run is in progress you can keep typing; further messages are queued.
-**Stop** aborts the current run.
+While a run is in progress you can keep typing. Words sent mid-run steer it: the
+agent takes them in after the step it is on, instead of when the whole run is
+over. Until then the message sits in the transcript marked *Waiting — goes in
+after the current step*. A message that did not get that far — the run was
+stopped, or the portal restarted, before the agent took it in — says so and has
+a button to send it again. **Stop** aborts the current run. In
+[voice mode](/guide/voice#pictures-tool-cards-and-controls) what you say stops
+the task by default, and its settings have a switch to add it to the running task
+instead.
 
 ## The message box
 
@@ -38,8 +45,13 @@ Nothing is thrown away to be typed again.
 Paste a screenshot into the box, drop pictures on it, or pick them with the
 paperclip, and they wait above the words as thumbnails — the × takes one back
 out. They go to the model with the message, up to eight of them, and a message
-can be a picture alone. The sent message shows them; click one to open it
-full size.
+can be a picture alone. The sent message shows them; click one to
+[look at it in the viewer](#looking-at-a-picture).
+
+The model sees them, but they are not files of the chat's folder, so the agent's
+[`edit_image`](/guide/features#editing-a-picture) cannot change them: put a picture
+in the folder with the Files panel for that, or change it on the
+[Images page](/guide/images#changing-a-picture).
 
 A photo straight off a phone is made smaller in the browser before it goes:
 2048 pixels on its longer side, as a JPEG. Models scale anything bigger down on
@@ -66,6 +78,49 @@ Two keys work from anywhere on the page:
 | --- | --- |
 | `/` | Jump to the message box with the command list open. Not while you are typing somewhere else, where it is a character. It is the [command character](/guide/commands#the-command-character), so it is another key if you chose one |
 | `Esc` | In the message box, **stop the run**. Only when the box is empty — the moment the send button is a stop button — so it can never cost you words |
+
+## Looking at a picture
+
+The pictures the agent shows with `show_image` are drawn under their tool line,
+in the middle of the conversation, with the same room above and below. One it
+makes with `generate_image` or changes with `edit_image` has no tool line: it is
+the [preview](#pictures-the-agent-makes) that held its place while it was made,
+in the middle of the conversation as well. A very wide or very tall picture is
+smaller there, never cropped: the viewer shows it whole. The pictures you sent
+are in your message.
+
+A click or a tap on any of them opens it **in the viewer**, over the chat,
+fitted to the screen on a calm backdrop. The chat stays where it was: nothing
+opens in a tab of its own. The viewer covers the whole window, whatever panels
+are docked beside the conversation, and does not move them.
+
+- **Closing it.** The × button, `Esc`, a click beside the picture, or the
+  browser's **back** button — on a phone the way out, which here closes the viewer
+  and does not leave the chat. Focus returns to the picture it was opened from,
+  or to the one shown last.
+- **Looking closely.** The wheel and a pinch zoom in on the spot they are over;
+  a double click or double tap goes between the whole picture and its own size,
+  one screen pixel for one of the picture's; a drag moves a zoomed picture. The
+  buttons at the bottom do the same and say how far it is zoomed (`+`, `-` and
+  `0` on the keyboard). A picture smaller than the screen is shown at its own
+  size, not enlarged.
+- **Several pictures.** The arrows at the sides, `←` and `→`, or a swipe go
+  through every picture of the conversation in the order they came, the ones you
+  sent and the ones the agent showed, with the place in them at the top left.
+- **Its title.** What the agent called the picture is shown under it.
+- **An edit and what it came from.** When a picture was changed with
+  `edit_image` and the original was shown in the conversation too, **Original**
+  and **Edited version** at the top go from one to the other. For an edit made
+  from several pictures, the original is the first of them.
+- **The file itself.** The two icons at the top open the picture in a new tab or
+  download it. That is the only way a picture opens in a tab, and it is on purpose.
+
+The viewer is a dialog: the keyboard stays inside it (`Tab` goes round), and the
+page behind it does not scroll. It opens as quietly as every dialog does, and with
+**Settings → This browser → Animations** on it swings up out of the page and sinks
+away when it closes; with reduced motion asked for by the system it does not move
+at all (see [Animations](/guide/interface#animations)). Voice mode's Pictures
+window is its own place and works as before.
 
 ## Queued channel messages and questions
 
@@ -125,6 +180,61 @@ If an edit's replacement is refused — the model is unreachable, say — the
 conversation is put back as it was, rather than left without the messages the
 edit meant to replace.
 
+## Pictures the agent makes
+
+With the [Images add-on](/guide/features#image-generation) on, a `generate_image`
+or `edit_image` call is not shown as a tool line but as the picture itself, from
+the moment it is asked for:
+
+- **While it is made**, a frame in the shape of the coming picture holds its
+  place: the size the agent asked for, or, for an edit, the shape of the picture
+  being changed (the first, when it was given several), which is shown under the
+  wait; a square when nothing says. It
+  says "Making a picture" or "Editing a picture" and, after a few seconds, how
+  long it has taken; over the picture of an edit, both words and seconds sit on
+  a plate of the theme's own colour, so that they read on a bright picture as
+  on a dark one. Image endpoints do not report how far they are, so the
+  animation does not pretend to: a soft light drifts over the frame and a sheen
+  passes, and that is all.
+- **When the call is over**, the wait is over too: the frame says "Loading the
+  picture", still, until the file has come, however long a large picture over a
+  slow connection takes, and the picture is fetched at once rather than when
+  the browser sees fit. The picture then fades in over it, in the same place.
+  Where the shape was right nothing under it moves; where it was not, the frame
+  takes the picture's own shape. A click opens it in the
+  [viewer](#looking-at-a-picture), with the conversation's other pictures to
+  step through; the file is the one the preview has loaded, not fetched again.
+  If the file cannot be fetched, it says so, and not that the picture is gone.
+- **When it fails**, the frame says so quietly, with the reason in a line or
+  two — the endpoint's answer, a setting that was switched off — and the whole of
+  it under **Details**. A call that was cut off, because the run was stopped or
+  the portal restarted before the picture came back, says it was interrupted.
+- **The call itself** — the tool's name and what the agent gave it: the prompt,
+  the title, the size, the picture to change — is under **Details**, below the
+  picture.
+- **Opening a chat again** draws the pictures that were made at once, with no
+  fade, in the shape asked for when the agent asked for one and otherwise
+  taking their own as they load; one whose file is gone from the folder says so.
+- **A tool of the same name** that another extension brings, and which pi may
+  keep in the portal's place, is the plain tool line it always was, whatever
+  state it is in: only the portal's own calls are drawn as pictures.
+
+The movement is one of the [animations](/guide/interface#animations): with them
+switched off, or when your system asks for reduced motion, the frame is the same
+and still, with the same words, and the picture simply appears. Only a picture
+being made, or just arriving, moves, and only as layers of the frame slide —
+nothing is laid out again — so several in a long chat cost nothing once they
+are made. In
+[voice mode](/guide/voice) the card of such a call carries the same preview as a
+small tile.
+
+Every picture the agent makes this way is also in the [Images](/guide/images) page's
+gallery, from the moment it is saved, with the chat it is from, what it was asked for
+and how it was made. The page can open it, change it, make it again, and delete the
+file — which is the chat's, so that asks every time. What lies in these folders and was
+never listed, such as pictures made before the gallery existed, is found there too, as a
+picture of the folder.
+
 ## Drafts and what is running
 
 What you have typed into a chat's box and not sent is kept per chat, so half a
@@ -140,10 +250,10 @@ A status that names one of the chat's slash commands runs it when clicked.
 
 ## Sidebar and the sessions page
 
-The sidebar opens with New, then the places — Sessions, Projects, Agent,
-Routines and [Audit](#audit), with Browser and Memory added while the
-[browser](/guide/browser) is installed and [Understory](/guide/features#memory-understory)
-holds the agent's memory — then **Pinned**, then **Recents**. The button at its
+The sidebar opens with New, then the places — Sessions, Projects, Agents,
+Routines and [Audit](#audit), with Browser, Memory and Images added while the
+[browser](/guide/browser) is installed, [Understory](/guide/features#memory-understory)
+holds the agent's memory and an [image endpoint](/guide/images) is set up — then **Pinned**, then **Recents**. The button at its
 top edge folds it to a rail of icons; under each chat's title it shows the folder it works in. Recents is capped at twelve; anything past that is reachable from
 the Sessions page, which lists everything with search over names and workspace
 paths.
@@ -187,7 +297,7 @@ Hovering a session gives you pin, rename and delete. Renaming turns the name int
 a field where it stands — Enter or clicking away keeps the new one, Escape puts
 the old one back — and double-clicking the name does the same. Delete asks in the
 portal's own dialog, with the button saying what it will do — and **Settings →
-General → Confirmations** turns that question off, for chats, messages, files,
+This browser → Confirmations** turns that question off, for chats, messages, files,
 skills, routines, projects, voices and channels alike. It is kept per browser.
 Discarding unsaved changes is still asked about. The Agents page's conversations
 can be renamed and deleted the same way, from the row.
@@ -229,14 +339,14 @@ The pill can say `off` and the model go on thinking. What `off` puts in the
 request is decided by pi from the model's entry in `models.json`, and for an
 OpenAI-compatible server it does not know how to switch reasoning off unless it
 is told. Left alone it sends `reasoning_effort: "off"`, which llama.cpp does not
-read: measured on a Qwen-family model, that answer reasons exactly as much as
+read: measured on a local model, that answer reasons exactly as much as
 `medium` does.
 
 Those models switch thinking through their chat template, so say so:
 
 ```json
 {
-  "id": "Ornith1.5-35b",
+  "id": "my-local-model",
   "reasoning": true,
   "thinkingLevelMap": { "off": "off", "minimal": null, "low": null, "medium": "medium", "high": null, "xhigh": null, "max": null },
   "compat": { "thinkingFormat": "qwen-chat-template" }
@@ -281,7 +391,7 @@ information. Until then the window is the one in the model's entry, or the
 default below.
 
 For all models at once there is a **Context window** default under
-Settings → General. It is a ceiling: a model that declares more is held to it, a
+Settings → Defaults. It is a ceiling: a model that declares more is held to it, a
 model that declares less keeps its own number, and a window set for one model in
 its pill wins over it. Leave it empty to use what each model says.
 
@@ -311,9 +421,9 @@ while it runs, `❓ Fix login · asks you` while an extension is waiting for an
 answer, and the plain name when it is done. Whether it is worth switching back
 to is then readable from the tab strip.
 
-The pages that refresh themselves — the sessions in the sidebar, Agent, Routines,
-Channels, Browser, Audit — do that only while the page is visible, and once at
-once when you come back to it. A tab left in the background asks for nothing.
+The pages that refresh themselves — the sessions in the sidebar, Agents, Routines,
+Channels, Browser, Audit — do that only while the page is visible, and once
+when you come back to it. A tab left in the background asks for nothing.
 
 If the connection to a chat breaks, the page reconnects — after two seconds,
 then four, eight and at most fifteen — and says so once a second attempt has
@@ -342,9 +452,16 @@ and, for a tool, which tool and what it was asked to do:
 | Turned away | A stranger on a channel was refused |
 | You answered | A question from the agent was answered |
 | Page opened | The agent's [browser](/guide/browser) was pointed at a page |
+| `allowed-by-exemption` | A routine whose [injection guard](/guide/routines#the-injection-guard) is off did something the guard would have stopped |
+| Log cleared | Somebody emptied the log, and how many entries went |
 
 The buttons above the list filter it: **Everything**, **Refused**, **Allowed**
-(both kinds) or **Strangers**, with counts of each and how many are shown. The
+(every kind of allowed) or **Strangers**, with counts of each and how many are shown. The
 page shows the latest 300 and refreshes every ten seconds while it is visible.
 Who is named is who they are called now: renaming a person renames them through
-the history. There is no button to clear it.
+the history.
+
+**Clear the log** empties it, after a confirmation. It deletes every recorded
+decision, not only the ones the filter shows, but not one made while the question
+was open. A clear leaves a *Log cleared* row behind that says how many entries it
+removed, so an emptied log cannot pass for a quiet one.

@@ -43,7 +43,9 @@ then close the tab. The profile lives on its own volume and survives restarts.
 
 The portal proxies the browser's UI at `/browser-ui`, so **Open browser** shows
 it inline with a fullscreen button, using the portal's own certificate and
-credential. No second password, no second certificate.
+credential. No second password, no second certificate. The frame switches on like
+a screen when it opens, unless [the animations](/guide/interface#animations) are
+off.
 
 That needs the portal itself on HTTPS. The VNC client gates on
 `isSecureContext`, and a frame only counts as secure when **every page above it**
@@ -147,19 +149,20 @@ this page, its own browser, no profile, no allowlist.
 
 ## Who may drive it
 
-The browser reaches the agent as an MCP server, so it is switched where every
-other package is: the blocks icon beside the composer for one conversation,
-**Settings → Tools** for all of them, and **Projects → Tools** for the chats of one
-project. Having its tools is having the browser — a conversation with them all off
-is not offered them and does not reach the container. A routine still has its own
-switch on its own page.
+The browser reaches the agent as the portal's own tools, a group named `browser`
+in the tools list, so it is switched where every other tool is: the tools icon
+beside the composer for one conversation, **Settings → Tools** for all of them,
+and **Projects → Tools** for the chats of one project. Having its tools is having
+the browser — a conversation with them all off is not offered them and does not
+reach the container. A routine has its own **Browser** switch on its own page,
+off by default.
 
-Which server that is comes from where it connects, not from what it is called:
-the one whose `--cdp-endpoint` points at this browser. The portal writes it as
-`browser`, and an entry written by hand or by an older portal under another name
-is found the same way.
+With a Playwright MCP server added by hand instead, which server is the browser
+comes from where it connects, not from what it is called: the one whose
+`--cdp-endpoint` points at this browser. The same switches then apply to its
+tools.
 
-Like any other package, its tools are **on** unless something says otherwise.
+Like any other tool, they are **on** unless something says otherwise.
 An installation that had the old per-session switch keeps what it had: the
 browser's tools are written into the defaults as off and the conversations that
 had been granted it are given it back. So an existing portal wakes up the way it
@@ -177,7 +180,7 @@ second one to keep in step with it.
 
 Deliberately **not** gated on who is speaking. The agent has its own accounts and
 uses them as itself, including when it is helping a colleague. What balances
-that is visibility: every page it opens is recorded in [Audit](/guide/security).
+that is visibility: every page it opens is recorded in [Audit](/guide/sessions#audit).
 
 ::: warning With `EXECUTOR=container`
 pi runs inside the container and never tells the portal what it registered, so

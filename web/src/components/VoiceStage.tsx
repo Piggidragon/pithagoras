@@ -80,7 +80,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const [shown, setShown] = useState(false), [terminalShown, setTerminalShown] = useState(false);
   const [filesShown, setFilesShown] = useState(false), [filesUsed, setFilesUsed] = useState(false), [filesSince, setFilesSince] = useState<number | undefined>(undefined);
   const filesWindow = useRef<HTMLElement>(null), picturesWindow = useRef<HTMLElement>(null), conversationWindow = useRef<HTMLElement>(null);
-  // Pictures the agent showed with show_image. A new one opens the window on it.
+  // Pictures the agent showed with show_image or made with generate_image or edit_image. A new one opens the window on it.
   const pictures = useMemo(() => shownPictures(toolEvents), [toolEvents]);
   const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
   const [picturesShown, setPicturesShown] = useState(false), [pictureIndex, setPictureIndex] = useState(0);
@@ -438,7 +438,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       {conversation && <VoiceConversation sessionId={sessionId} items={items} />}
       <ResizeHandles target={conversationWindow} />
     </section>
-    <VoiceToolActivity events={toolEvents} folder={folder} onOpen={openCall} />
+    <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} />
     <div className="voice-presence">
       <div className="voice-avatar"><VoiceOrb mode={mode} levels={levels} look={orbStyle} /></div>
       <div className="voice-dock-center">

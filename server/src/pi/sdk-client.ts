@@ -1,5 +1,9 @@
 import { CanvasTools } from "./canvas-tools.js";
 import { showImageTool } from "./show-image-tool.js";
+import { GENERATE_IMAGE_VOICE_LINE, GenerateImageTool } from "./generate-image-tool.js";
+import { EDIT_IMAGE_VOICE_LINE, EditImageTool } from "./edit-image-tool.js";
+import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE } from "../image-generation.js";
+import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { crossModelThinkingExtension } from "./cross-model-thinking.js";
@@ -275,6 +279,11 @@ function packageOf(info: any): string | undefined {
   return info?.origin === "package" && info?.scope === "user" && typeof info.source === "string" ? info.source : undefined;
 }
 
+/** Whether the portal's own inline extension registered it: pi names those <inline:name>, which no file's path is. */
+function isInline(info: any): boolean {
+  return typeof info?.path === "string" && /^<inline:[^>]+>$/.test(info.path);
+}
+
 /** Read a member that may be a getter or a method, without assuming which. */
 function callable(obj: any, key: string): any {
   const v = obj?.[key];
@@ -398,9 +407,20 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // prompt templates — so installed packages contribute no commands at all.
     // The CLI wires this up for you; here it has to be asked for.
     const voiceFirst = new VoiceFirstTurn();
-    const audioRule = new AudioRule(getVoiceInstructions);
-    const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
     let resourceLoader: any;
+    // What the conversation has switched off: the client's, once there is one.
+    let switchedOff: () => ReadonlySet<string> = () => new Set(opts.toolsOff ?? []);
+    // Whether the model has the tool is settled when pi loads it and by the tool switches: the rule says
+    // so only while it has — and it is the portal's, not an extension's of the same name that pi keeps.
+    const imageTool = opts.sessionId ? new GenerateImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
+    const editTool = opts.sessionId ? new EditImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
+    const audioRule = new AudioRule(getVoiceInstructions, () =>
+      [
+        imageTool?.registered() && !switchedOff().has(GENERATE_IMAGE_TOOL) ? GENERATE_IMAGE_VOICE_LINE : "",
+        editTool?.registered() && !switchedOff().has(EDIT_IMAGE_TOOL) ? EDIT_IMAGE_VOICE_LINE : "",
+      ].filter(Boolean).join(" "),
+    );
+    const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
     try {
       // Both are required: the constructor resolves each and throws on
       // undefined, which previously left every session with no extensions.
@@ -421,7 +441,11 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ];
       if (canvases) factories.push({ name: "canvases", factory: canvases.extension });
       // Beside the canvases: both are how the agent puts something on the screen.
-      if (opts.sessionId) factories.push({ name: "pictures", factory: showImageTool(opts.cwd) });
+      if (opts.sessionId) factories.push({ name: SHOW_IMAGE_SOURCE, factory: showImageTool(opts.cwd) });
+      // Registers nothing while the add-on is off or has no address: see GenerateImageTool.
+      if (imageTool) factories.push({ name: GENERATE_IMAGE_SOURCE, factory: imageTool.extension });
+      // The same for editing, with its own switch.
+      if (editTool) factories.push({ name: EDIT_IMAGE_SOURCE, factory: editTool.extension });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       // Only where it means something: a conversation with the primary user has
@@ -523,6 +547,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     });
 
     const client = new SdkPiClient(session, modelRuntime, () => {});
+    switchedOff = () => client.switchedOff;
     client.portalSessionId = opts.sessionId;
     client.canvases = canvases;
     if (eventBus && resourceLoader) {
@@ -550,7 +575,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // As pi emits it, not as forward() passes it on: a queue_update held
       // behind a settle would be too late for the prompt() that caused it.
       client.noteQueue(event);
-      client.forward(event);
+      // The start of a call of the portal's own picture tools says so: the page draws a picture for those from then on, and never for the tool of that name an extension may bring, which pi keeps instead. Only here is it known which of the two it is, and only the end of a call that made a picture would say so later.
+      const own = event?.type === "tool_execution_start" && ((event.toolName === GENERATE_IMAGE_TOOL && imageTool?.registered()) || (event.toolName === EDIT_IMAGE_TOOL && editTool?.registered()));
+      client.forward(own ? { ...event, [GENERATED_PICTURE_MARK]: true } : event);
     });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};
@@ -1207,6 +1234,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       description: typeof tool.description === "string" ? tool.description : undefined,
       source: sourceLabel(tool.sourceInfo),
       package: packageOf(tool.sourceInfo),
+      ...(isInline(tool.sourceInfo) ? { inline: true as const } : {}),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
   }
@@ -1221,6 +1249,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   async setToolsOff(names: string[]): Promise<void> {
     this.switchedOff = new Set(names);
     this.applyToolsOff();
+    // What the rule says of a tool that is switched off or on is for the next message, as for a reload.
+    this.sayAudioRuleAgain();
   }
 
   applyToolsOff(): void {
@@ -1347,6 +1377,20 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // And has pi switch every extension tool back on — which is every MCP tool,
     // the browser's among them. The switches are the portal's to keep.
     if (this.switchedOff.size) this.applyToolsOff();
+    this.sayAudioRuleAgain();
+  }
+
+  /**
+   * The rule as the tools are now, after a reload or a tool switch: what it
+   * says of a tool that came or went, such as image generation, holds from the
+   * next message of any kind, not only from the next spoken one. A conversation
+   * that has no rule has nothing to correct.
+   */
+  private sayAudioRuleAgain(): void {
+    const rule = this.audioRule;
+    if (!rule?.lines().length) return;
+    // As in sayAudioRule: a prompt that could not be built again leaves pi's as it was.
+    if (rule.set(true) && !this.buildPromptAgain()) rule.undo();
   }
 
   /** HTML unless a .jsonl path is given, matching pi's own /export. */

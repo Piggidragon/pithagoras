@@ -9,6 +9,11 @@ A person's page in Settings → **People**, under *Allowed anyway*. Rules with n
 person apply to a whole role and stay on the list behind it, since they belong
 to nobody in particular.
 
+The role `heartbeat` takes rules too: the commands an agent's
+[heartbeat](/guide/agents#its-heartbeat) may run on a look, added under
+**Commands it may run** on the agent's Heartbeat tab and listed here as for every
+agent's heartbeat. A rule for all roles applies to it as well.
+
 Choosing **Always allow** on a request writes one here for that person. Deleting
 it takes the permission back — there is no separate revocation mechanism to
 learn or to audit.
@@ -21,7 +26,9 @@ bash: himalaya envelope list*
 
 A tool and a pattern. `*` stands for the parts that vary; everything else is
 literal. For `bash` the pattern is matched against the command, for file tools
-against the path.
+against the path. A call that names several pictures (`edit_image` with
+[several pictures](/guide/features#several-pictures) switched on) is matched on
+each picture's path, and is allowed only if every one is.
 
 A bare `*` is rejected. That is not a rule, it is switching the thing off by
 accident.

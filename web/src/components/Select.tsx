@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { createPortal } from "react-dom";
 import { LuCheck, LuChevronDown } from "react-icons/lu";
 
+import { useLeaveRef } from "../motion";
 import { t } from "../i18n";
 export interface SelectOption<T extends string | number = string> {
   value: T;
@@ -49,6 +50,8 @@ export function Select<T extends string | number = string>({
   const [place, setPlace] = useState<{ left: number; top: number; width: number; above: boolean; maxHeight: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  // Shut, the list drops away as a picture of itself (see motion.ts).
+  const listRef = useLeaveRef<HTMLDivElement>("menu", list);
   const typed = useRef({ text: "", at: 0 });
   const listId = useId();
   const selectedIndex = options.findIndex((o) => o.value === value);
@@ -202,7 +205,7 @@ export function Select<T extends string | number = string>({
         place &&
         createPortal(
           <div
-            ref={list}
+            ref={listRef}
             id={listId}
             // Part of whatever popover the select is in, though drawn at the body: see useDismiss.
             data-popover-layer

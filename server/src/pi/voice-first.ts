@@ -8,9 +8,13 @@ export const DEFAULT_VOICE_INSTRUCTIONS = 'This is a live voice conversation. St
  * fixed parts. What the [Audio mode] marker means and what to do without it
  * stay as they are whatever the instructions say, since the model has to get
  * those right for typed messages too (issue #26).
+ *
+ * `extra` follows the instructions, whatever they are: what a tool this
+ * conversation has says about itself, which a person's own wording cannot
+ * have left out for the tool to be there.
  */
-export function audioSystemRule(instructions: string = DEFAULT_VOICE_INSTRUCTIONS): string {
-  return 'The portal prefixes user requests sent in voice mode with [Audio mode], including microphone transcriptions and typed requests that should receive spoken replies. This paragraph only describes the marker: it does not mean any request has it. A request is spoken only when its own text begins with the line [Audio mode]. Decide the reply format from the latest user request only. When it starts with [Audio mode], follow these speaking rules for the entire reply, including updates after tools: ' + instructions.trim() + ' Do not read the marker aloud. When the latest user request has no [Audio mode] prefix, use normal chat formatting; an audio marker in older conversation history does not keep voice mode enabled.';;
+export function audioSystemRule(instructions: string = DEFAULT_VOICE_INSTRUCTIONS, extra = ''): string {
+  return 'The portal prefixes user requests sent in voice mode with [Audio mode], including microphone transcriptions and typed requests that should receive spoken replies. This paragraph only describes the marker: it does not mean any request has it. A request is spoken only when its own text begins with the line [Audio mode]. Decide the reply format from the latest user request only. When it starts with [Audio mode], follow these speaking rules for the entire reply, including updates after tools: ' + instructions.trim() + (extra ? ' ' + extra : '') + ' Do not read the marker aloud. When the latest user request has no [Audio mode] prefix, use normal chat formatting; an audio marker in older conversation history does not keep voice mode enabled.';;
 }
 /** The rule with the built-in instructions. */
 export const AUDIO_SYSTEM_RULE = audioSystemRule();
@@ -55,11 +59,15 @@ export class AudioRule {
   private readonly past = new Set<string>();
   /** What it said before the last change. */
   private before = '';
-  constructor(private readonly saved: () => unknown = () => undefined) {}
+  constructor(
+    private readonly saved: () => unknown = () => undefined,
+    /** Asked with the instructions, each time the rule is turned on. */
+    private readonly extra: () => string = () => '',
+  ) {}
   lines(): string[] { return this.said ? [this.said] : []; }
   /** Whether that changed what it says. */
   set(on: boolean): boolean {
-    const next = on && voiceRulesOn() ? audioSystemRule(voiceInstructions(this.saved())) : '';
+    const next = on && voiceRulesOn() ? audioSystemRule(voiceInstructions(this.saved()), this.extra()) : '';
     if (next === this.said) return false;
     if (this.said) this.past.add(this.said);
     this.before = this.said;

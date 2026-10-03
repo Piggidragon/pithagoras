@@ -229,7 +229,7 @@ export const hostReader = { read: (): Host => readHost() };
 
 /**
  * What the GPU check finds, and what it would suggest, for the page to show before anything is installed.
- * `cpuOnly` is that the check found there is no GPU: what is suggested is then recognition alone on the CPU.
+ * `cpuOnly` is that the check found there is no GPU: what is suggested is then Kokoro on the CPU, or recognition alone on the CPU where the host is too small for it.
  * `selected` is the card it would use: the one asked for, by the choice on the page (`chosen`, a UUID) or by `VOICE_GPU`; else, with a container,
  * the one it is on and not the one with the most room, as the memory the service holds is what makes its own card look full.
  */
@@ -316,6 +316,35 @@ export async function stop() {
   if (pending) throw new Error('Wait for the image download to finish before stopping');
   await checked('POST', `/containers/${CONTAINER}/stop?t=10`);
   error = '';
+}
+
+/** The container is gone, and the volume with the downloads is not: what the caller has to go on with is the same, and what it says is not. */
+export class DataNotRemoved extends Error {}
+/**
+ * Removes the managed container, and with `removeData` the volume that holds its downloads and builds (the engines and
+ * models), which a reinstall would otherwise reuse. Nothing there is not an error: the container may have been removed by hand.
+ * The image is left, as other containers may be made from it. A volume that cannot be removed is a `DataNotRemoved`, thrown
+ * when the container is already gone.
+ */
+export async function uninstall(removeData = false) {
+  if (pending) throw new Error('Wait for voice setup to finish before uninstalling');
+  if (!dockerAvailable()) throw new Error('Docker is unavailable');
+  // Held like a setup: the page shows it as under way, and no start or install begins in the middle of it.
+  pending = true; error = ''; progress = 'Removing the voice service';
+  try {
+    const found = await request<{Config?: {Labels?: Record<string,string>}; State?: {Running?: boolean}}>('GET', `/containers/${CONTAINER}/json`);
+    if (found.status !== 404) {
+      if (found.status >= 400) throw new Error(`Cannot inspect voice container: Docker ${found.status}`);
+      if (found.body.Config?.Labels?.['pithagoras.addon'] !== 'voice') throw new Error('The pithagoras-voice container is not a managed voice add-on, so it is left alone.');
+      if (found.body.State?.Running) await checked('POST', `/containers/${CONTAINER}/stop?t=10`);
+      await checked('DELETE', `/containers/${CONTAINER}`);
+    }
+    if (removeData) {
+      progress = 'Removing the downloaded engines and models';
+      const volume = await request<{ message?: string }>('DELETE', `/volumes/${VOLUME}`);
+      if (volume.status >= 400 && volume.status !== 404) throw new DataNotRemoved(`The voice container is removed, but its downloaded engines and models could not be deleted: ${volume.body?.message || `Docker returned ${volume.status}`}`);
+    }
+  } finally { pending = false; }
 }
 
 /** `port` is the audio.cpp process the engine is in: the GPU one, unless speech is put on the CPU. */

@@ -196,7 +196,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
                 // The height lives on the wrapper so fullscreen can override
                 // it. On the iframe it stayed at 32rem and left the bottom of
                 // the screen black.
-                className="relative h-[32rem] overflow-hidden rounded-xl border border-line bg-black [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
+                className="fx-power relative h-[32rem] overflow-hidden rounded-xl border border-line bg-black [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
               >
                 <iframe
                   src={uiUrl}

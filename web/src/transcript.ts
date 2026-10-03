@@ -2,6 +2,7 @@ import type { PortalEvent } from "./api";
 import { unwrap } from "./tool-activity";
 import { argsSummary } from "./tool-args";
 import { msg, t } from "./i18n";
+import { GENERATED_PICTURE_MARK } from "../../server/src/generated-picture";
 
 /** A picture that went with a message, by the name the server keeps it under. */
 export interface SentImage {
@@ -15,16 +16,25 @@ const sentImages = (raw: unknown): SentImage[] | undefined => {
   return list.length ? list : undefined;
 };
 
-/** A picture the agent put in front of the person with show_image: its path in the chat's folder. */
+/** A picture the agent put in front of the person with show_image, or made or changed for them with generate_image or edit_image: its path in the chat's folder. */
 export interface ShownPicture {
   path: string;
   title?: string;
 }
 
-/** The picture a show_image call ended with, when it succeeded. */
+/**
+ * The picture a show_image, generate_image or edit_image call ended with, when it succeeded.
+ *
+ * All answer with a path in the chat's folder and a title. generate_image and
+ * edit_image are taken only with the mark the portal's own tool sets: an
+ * extension may bring a tool of that name, whose path is not one in the
+ * chat's folder.
+ */
 export function shownPicture(payload: any): ShownPicture | undefined {
-  if (String(payload?.toolName ?? payload?.name ?? "") !== "show_image" || payload?.isError) return undefined;
+  if (payload?.isError) return undefined;
+  const name = String(payload?.toolName ?? payload?.name ?? "");
   const details = payload?.result?.details;
+  if (name === "generate_image" || name === "edit_image" ? details?.[GENERATED_PICTURE_MARK] !== true : name !== "show_image") return undefined;
   if (typeof details?.path !== "string" || !details.path) return undefined;
   return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };
 }
@@ -118,6 +128,10 @@ export type Item =
       status: "running" | "done" | "error";
       detail?: string;
       picture?: ShownPicture;
+      /** The seq of the end that showed `picture`: what versions its URL, so that every place that draws it asks for the same one (see PictureCall). */
+      pictureSeq?: number;
+      /** A call of the portal's own generate_image or edit_image, as its start says (see generated-picture.ts), not of a tool of that name an extension brings. */
+      portalPicture?: true;
       args?: unknown;
       output?: string;
       /** How many lines `output` had before it was cut to its end. */
@@ -146,6 +160,32 @@ export type CommandState = "running" | "done" | "quiet" | "started" | "queued" |
 
 /** Enough of a tool's output to read in the transcript; the whole of it is in the agent terminal. */
 const TOOL_OUTPUT_MAX = 60_000;
+
+/**
+ * Where, in a text that is still being written, the end it shows starts: the
+ * start so far, moved on only once the text from there has grown long, and
+ * then to a line break, so the lines after it wrap as they did.
+ *
+ * A start that followed the newest token — the last 600 characters, say — is
+ * a different text with each one: it begins at another word, so every line
+ * wraps anew and what is on show jumps back and forth, which at a fast
+ * model's speed read as the text racing rather than growing. The text is
+ * laid out from the same start instead, and the window only cuts off its
+ * top. Inside a paragraph with no line break to move on to, it is laid out
+ * from the same start for much longer, `longest` characters, and only then cut
+ * at a word, leaving little: that reflows what is shown, so it is rare (once
+ * in about `longest`, tens of seconds of even a fast model's reasoning).
+ */
+export function shownFrom(text: string, from: number, most = 6000, longest = 30000): number {
+  if (from > text.length) return 0;
+  if (text.length - from <= most) return from;
+  // The last line break that still leaves far more than the window shows.
+  const lineBreak = text.lastIndexOf("\n", text.length - 600);
+  if (lineBreak >= from) return lineBreak + 1;
+  if (text.length - from <= longest) return from;
+  const space = text.indexOf(" ", text.length - 600);
+  return space >= 0 ? space + 1 : text.length - 600;
+}
 
 /** Lines in a text, not counting a newline at its very end. */
 export function lineCount(text: string): number {
@@ -409,6 +449,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           name: String(p.toolName ?? p.name ?? "tool"),
           status: "running",
           detail: summarizeToolInput(p),
+          ...(p[GENERATED_PICTURE_MARK] === true ? { portalPicture: true as const } : {}),
           ...(args !== undefined ? { args } : {}),
           ...(ev.at !== undefined ? { since: ev.at } : {}),
         });
@@ -464,7 +505,10 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             // Its updates were live only; how many there were is kept on its end.
             if (typeof p.updates === "number") it.updates = Math.max(it.updates ?? 0, p.updates);
             const picture = shownPicture(p);
-            if (picture) it.picture = picture;
+            if (picture) {
+              it.picture = picture;
+              it.pictureSeq = ev.seq;
+            }
             break;
           }
         }

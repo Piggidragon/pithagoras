@@ -299,6 +299,21 @@ export function endpoints(c: VoiceChoice) {
   };
 }
 
+/** Every address `endpoints` can write: where the managed container's services listen, on the portal's loopback. */
+const MANAGED_URLS = [speechUrl, cpuSpeechUrl, whisperUrl, `http://127.0.0.1:${SPEECH_PORT}/v1/audio/transcriptions`, `http://127.0.0.1:${CPU_PORT}/v1/audio/transcriptions`];
+/**
+ * Does the address lead to a service of the managed container? Judged by where it points, so that it holds for settings
+ * saved by hand or by an older portal as well. `localhost` is the same loopback, and a slash at the end is the same path.
+ */
+export function isManagedUrl(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) return false;
+    return MANAGED_URLS.includes(`http://127.0.0.1:${url.port}${url.pathname.replace(/\/+$/, "")}`);
+  } catch { return false; }
+}
+
 /** What has to answer before the service counts as ready. */
 export const healthUrls = (c: VoiceChoice) => [
   ...(c.asr === "whisper" ? [`http://127.0.0.1:${WHISPER_PORT}/health`] : []),
