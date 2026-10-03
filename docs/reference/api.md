@@ -26,7 +26,6 @@ curl -s -b jar localhost:4100/api/sessions
 | | |
 | --- | --- |
 | `GET /api/workspaces` | `{ root, workspaces: [{ name, path, isGit }] }` |
-| `POST /api/workspaces` | `{ name }` → creates a directory; the name is slugified |
 
 ## Projects
 

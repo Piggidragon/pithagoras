@@ -121,6 +121,19 @@ transcripts, installed pi packages and installed channel packages all survive a
 rebuild. When the new version changes the database, the portal copies it aside
 and upgrades it before it starts serving; see [Upgrading](/guide/upgrading).
 
+## What the web app is sent
+
+The build leaves a brotli and a gzip copy beside each script, style and model
+that gains from one, and the portal sends the copy the browser asks for: the web
+app is about a third of its size over a plain-HTTP LAN, and the voice models,
+which are fourteen megabytes uncompressed, about a fifth. Files named by their
+content (everything under `/assets/`) are kept by the browser for a year; the
+page itself and the voice models are asked about again each time, and answered
+with a short "not changed" when they have not.
+
+Running from source, `npm run build -w web` makes the copies; a build copied
+into place by hand without them is sent as it is.
+
 ## Volumes
 
 | Path | Holds |

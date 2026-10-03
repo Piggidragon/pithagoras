@@ -1,6 +1,7 @@
 import { bindHost, loginThrottle, portalSecurityHeaders, tlsFiles } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
-import { canvasEvents, listCanvases } from "./canvases.js";
+import { eventsRouter } from "./api/events.js";
+import { serveWeb } from "./web-static.js";
 import { clampLevel } from "./pi/model-runtime.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
@@ -13,9 +14,6 @@ import { nanoid } from "nanoid";
 import {
   createSession,
   deleteSession,
-  eventsBefore,
-  eventsSince,
-  replayStart,
   getSession,
   listAgentSessions,
   listChatSessions,
@@ -25,7 +23,7 @@ import {
   updateSession,
 } from "./db.js";
 import { checkWorkspace, workspaceRoot } from "./workspaces.js";
-import { insideReal, isUnderText, isWithinText } from "./within.js";
+import { insideReal, isWithinText } from "./within.js";
 import { agentHomePath } from "./agent-home.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import { AgentError, agentOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
@@ -76,10 +74,9 @@ import {
   readCompactionSettings,
   writeCompactionSettings,
 } from "./pi-settings.js";
-import { eventTime, getDb } from "./db.js";
+import { getDb } from "./db.js";
 import { getBuiltinCommands, picturesRefused } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
-import { isValidSlug, slugify } from "./slug.js";
 import {
   NEW_CHAT_TITLE,
   ProjectError,
@@ -117,15 +114,6 @@ import {
 
 const WORKSPACE_ROOT = workspaceRoot();
 const PORT = Number(process.env.PORT || 4100);
-/**
- * How much of a long conversation a fresh page load replays.
- *
- * Small on purpose. Not a correctness limit — a reconnect with a cursor still
- * receives everything it missed, and older events are fetched on demand as you
- * scroll back. Replaying twenty thousand meant a refresh rendered the entire
- * history and then visibly scrolled through it.
- */
-const REPLAY_EVENTS = 1_200;
 /** Persistent place for CLIs, kept on PATH so pi and its tools can reach them. */
 const BIN_DIR = path.resolve(process.env.BIN_DIR || "/data/bin");
 
@@ -285,33 +273,6 @@ app.get("/api/workspaces", (_req, res) => {
       isGit: existsSync(path.join(WORKSPACE_ROOT, name, ".git")),
     }));
   res.json({ root: WORKSPACE_ROOT, workspaces });
-});
-
-app.post("/api/workspaces", (req, res) => {
-  const raw = req.body?.name;
-  if (typeof raw !== "string" || !raw.trim()) {
-    return res.status(400).json({ error: "name required" });
-  }
-  // "Cool Project" becomes the directory "cool-project", and that same slug
-  // becomes the session title — one name drives both.
-  const name = slugify(raw);
-  if (!isValidSlug(name)) {
-    return res.status(400).json({ error: `"${raw}" does not produce a usable folder name` });
-  }
-
-  const target = path.join(WORKSPACE_ROOT, name);
-  if (path.resolve(target) !== target || !isUnderText(WORKSPACE_ROOT, target)) {
-    return res.status(400).json({ error: "Invalid workspace name" });
-  }
-  if (existsSync(target)) return res.status(409).json({ error: `Workspace "${name}" already exists` });
-
-  try {
-    mkdirSync(target, { recursive: true });
-  } catch (e) {
-    return res.status(500).json({ error: (e as Error).message });
-  }
-  clearProjectTools(name);
-  res.json({ name, path: target, isGit: false });
 });
 
 // --- projects ---
@@ -1394,144 +1355,7 @@ mountBrowserProxy(app);
 
 // --- event stream ---
 
-/**
- * Replay-then-tail. The client passes the last seq it saw, so reconnecting
- * after minutes or days delivers exactly what was missed and then continues
- * live — no gap, no duplicates.
- */
-/** What came before a cursor: the transcript scrolling back rather than forward. */
-app.get("/api/sessions/:id/events/before", (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: "Not found" });
-  const before = Number(req.query.before ?? 0) || 0;
-  // At least one: SQLite takes a negative LIMIT as no limit at all.
-  const limit = Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 1200, 3000));
-  const rows = eventsBefore(session.id, before, limit);
-  res.json({
-    events: rows.map((r) => ({
-      seq: r.seq,
-      type: r.type,
-      at: eventTime(r.created_at),
-      payload: JSON.parse(r.payload),
-    })),
-    // Whether asking again would return anything, so the UI knows to stop.
-    more: rows.length === limit,
-  });
-});
-
-/** How often a canvas being written is sent on its chat's stream, at most. */
-const CANVAS_EVERY_MS = 250;
-
-app.get("/api/sessions/:id/events", (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: "Not found" });
-
-  const since = Number(req.query.since ?? 0) || 0;
-
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-    "X-Accel-Buffering": "no",
-  });
-
-  const write = (row: { seq: number; type: string; payload: string; created_at?: string }) => {
-    res.write(`${row.seq > 0 ? `id: ${row.seq}\n` : ""}data: ${JSON.stringify({
-      seq: row.seq,
-      type: row.type,
-      // What the activity line counts from, so a refresh mid-run still knows
-      // how long the agent has been on this rather than starting from zero.
-      at: eventTime(row.created_at),
-      payload: JSON.parse(row.payload),
-    })}\n\n`);
-  };
-
-  // The chat's canvases come on the same stream, under their own name. They
-  // had a stream of their own, and two per open chat is how three tabs used up
-  // the six connections a browser allows one address: a fourth chat, and every
-  // request its page made, waited for one of them to close.
-  //
-  // The list first, not after the conversation: a long one replayed over a
-  // slow link kept the panel empty until the last of it had come.
-  const writeCanvas = (message: unknown) => res.write(`event: canvas\ndata: ${JSON.stringify(message)}\n\n`);
-  // A document being written changes many times a second, each change the
-  // whole of it, and the conversation's own events wait behind them on this
-  // one connection. So only the latest of a document's changes goes, at most
-  // every CANVAS_EVERY_MS; anything else sends what was held first, in order.
-  const held = new Map<string, unknown>();
-  let heldTimer: ReturnType<typeof setTimeout> | undefined;
-  const sendHeld = () => {
-    clearTimeout(heldTimer);
-    heldTimer = undefined;
-    for (const message of held.values()) writeCanvas(message);
-    held.clear();
-  };
-  const onCanvas = (message: { type?: string; canvas?: { id?: string } }) => {
-    if (message?.type === "update" && message.canvas?.id) {
-      held.set(message.canvas.id, message);
-      heldTimer ??= setTimeout(sendHeld, CANVAS_EVERY_MS);
-      return;
-    }
-    sendHeld();
-    writeCanvas(message);
-  };
-  canvasEvents.on(session.id, onCanvas);
-  writeCanvas({ type: "snapshot", canvases: listCanvases(session.id) });
-
-  // How often this chat's events were put back under seqs a page had read
-  // past (see bumpReloads): a page that last saw another count missed one, and
-  // loads the chat again rather than go on from its cursor.
-  res.write(`event: reloads\ndata: ${JSON.stringify({ reloads: session.reloads ?? 0 })}\n\n`);
-  // The versions of its messages, as they are now; later changes come live
-  // (portal_versions). A page does not ask for them after each change.
-  res.write(`event: versions\ndata: ${JSON.stringify({ versions: sessions.messageVersions(session.id) })}\n\n`);
-  // Replace stale in-memory deltas before durable replay, then restore the current snapshot.
-  res.write("event: live-reset\ndata: {}\n\n");
-
-  // A fresh load gets the end of the conversation, not the beginning. Replaying
-  // from zero and stopping at the batch limit is how a long session came back
-  // from a refresh showing its first few thousand events and nothing since —
-  // the transcript ended mid-turn, on whatever the cap happened to land on.
-  const cursor = since === 0 ? replayStart(session.id, REPLAY_EVENTS) : since;
-
-  // Paged to the end rather than one batch: a reconnect after a long run has
-  // more to catch up on than a single query returns, and stopping early loses
-  // exactly the part it was reconnecting for.
-  let lastSent = cursor;
-  for (;;) {
-    const batch = eventsSince(session.id, lastSent);
-    if (!batch.length) break;
-    for (const row of batch) {
-      write(row);
-      lastSent = row.seq;
-    }
-    if (batch.length < 5000) break;
-  }
-  for (const row of sessions.liveSnapshot(session.id)) write(row);
-  res.write(`event: caught-up\ndata: ${JSON.stringify({ seq: lastSent })}\n\n`);
-
-  const onEvent = (row: { seq: number; type: string; payload: string; created_at?: string }) => {
-    // Live-only events carry a negative seq: deliver them, but never let one
-    // move the replay cursor, or a reconnect would skip stored history.
-    if (row.seq < 0) {
-      write(row);
-      return;
-    }
-    // Guard against double-sending anything the replay already covered.
-    if (row.seq <= lastSent) return;
-    lastSent = row.seq;
-    write(row);
-  };
-  sessions.on(`session:${session.id}`, onEvent);
-
-  const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
-  req.on("close", () => {
-    clearInterval(heartbeat);
-    sessions.off(`session:${session.id}`, onEvent);
-    canvasEvents.off(session.id, onCanvas);
-    clearTimeout(heldTimer);
-  });
-});
+app.use("/api", eventsRouter());
 
 /**
  * Anything under /api that no route took. Answered in JSON, like every other
@@ -1547,7 +1371,7 @@ app.use("/api", (req, res) => {
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
 if (existsSync(webDist)) {
   app.use(portalSecurityHeaders);
-  app.use(express.static(webDist));
+  serveWeb(app, webDist);
   // A built file that is not there is a 404, not the page: a tab from before a
   // deploy asking for a chunk the deploy removed would otherwise be handed
   // HTML under a script's name, and the service worker would keep it.

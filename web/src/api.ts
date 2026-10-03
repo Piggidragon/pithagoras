@@ -420,8 +420,6 @@ export const api = {
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
-  createWorkspace: (name: string) =>
-    json<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify({ name }) }),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
   /** Without a workspace the chat starts in Home. */
   createSession: (workspace?: string, title?: string) =>
