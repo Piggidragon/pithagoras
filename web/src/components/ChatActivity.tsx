@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useNow } from "../use-now";
 import {
   LuBot,
   LuBrain,
@@ -229,18 +230,6 @@ const TOOL_ICONS: Record<string, IconType> = {
 function ToolIcon({ name }: { name: string }) {
   const Icon = TOOL_ICONS[toolIconKind(name)];
   return <Icon />;
-}
-
-/** A clock that ticks once a second while `on`. */
-export function useNow(on: boolean) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!on) return;
-    setNow(Date.now());
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [on]);
-  return now;
 }
 
 /**

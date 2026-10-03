@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useNow } from '../use-now';
 import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSparkles } from 'react-icons/lu';
 import { api, type PortalEvent } from '../api';
 import { describeCall, describeOutcome, elapsed, unwrap, type ToolCall, type ToolTarget } from '../tool-activity';
@@ -49,7 +50,6 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { event
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const cards = useRef<Card[]>([]);
   const [shown, setShown] = useState<Card[]>([]);
-  const [, setNow] = useState(0);
   const update = (next: Card[]) => { cards.current = next; setShown(next); };
   const later = (ms: number, run: () => void) => {
     const timer = setTimeout(() => { timers.current.delete(timer); run(); }, ms);
@@ -101,17 +101,12 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { event
   }, [events, folder]);
 
   // A running card counts its time, so it is only redrawn while one is.
-  const running = shown.some(card => card.status === 'running');
-  useEffect(() => {
-    if (!running) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [running]);
+  const now = useNow(shown.some(card => card.status === 'running'));
   useEffect(() => () => { for (const timer of timers.current) clearTimeout(timer); }, []);
 
   return <div className="voice-tool-activity" aria-label={t("Tool activity")} aria-live="polite" aria-relevant="additions">
     {shown.map(card => {
-      const took = Date.now() - card.startedAt;
+      const took = Math.max(0, now - card.startedAt);
       const note = card.status === 'running' ? (took >= 3000 ? elapsed(took) : '') : card.outcome;
       const className = `voice-tool-float flies-${card.slot % 2 ? 'right' : 'left'} flight-lane-${Math.floor(card.slot / 2)} is-${card.status}${card.leaving ? ' is-leaving' : ''}`;
       // A picture being made, made or not made is the preview the chat shows, as a tile in the place of the mark; another extension's tool of that name, which ends with no picture, has the mark.

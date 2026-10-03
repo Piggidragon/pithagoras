@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useNow } from "../use-now";
 import { LuSquare, LuTrash2 } from "react-icons/lu";
 import { api, type BackgroundState } from "../api";
 import { useFollowBottom } from "../use-follow-bottom";
@@ -28,12 +29,8 @@ export function BackgroundJobs({
 }) {
   const jobs = state.jobs.filter((j) => !j.attached);
   const job = jobs.find((j) => j.key === selected) ?? jobs[0];
-  const [now, setNow] = useState(() => Date.now());
+  const now = useNow(jobs.some((j) => j.state === "running"));
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, []);
 
   const took = (from: number, to?: number) => formatElapsed(Math.max(0, Math.floor(((to ?? now) - from) / 1000)));
 

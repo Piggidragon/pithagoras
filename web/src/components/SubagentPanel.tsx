@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
+import { useNow } from "../use-now";
 import { Markdown } from "./Markdown";
 import { LuArrowUp, LuBot, LuSquare } from "react-icons/lu";
 import { api } from "../api";
@@ -56,13 +57,8 @@ export function SubagentPanel({
 }
 
 function AgentView({ sessionId, agent, items }: { sessionId: string; agent: Subagent; items: Item[] }) {
-  const [now, setNow] = useState(() => Date.now());
   const running = agent.status === "running";
-  useEffect(() => {
-    if (!running) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [running]);
+  const now = useNow(running);
   const { attach, onScroll, follow } = useFollowBottom<HTMLDivElement>();
   const childItems = useMemo(() => (agent.kind === "protocol" ? buildTranscript(agent.events) : []), [agent]);
   const tool = agent.kind === "tool" ? items.find((i): i is Extract<Item, { kind: "tool" }> => i.kind === "tool" && `tool:${i.callId ?? i.id}` === agent.id) : undefined;

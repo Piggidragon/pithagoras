@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useNow } from '../use-now';
 import { formatElapsed, prefillShare, promptLabel, type Activity } from '../transcript';
 import { formatNumber, t } from "../i18n";
 
 export function ActivityProgress({ phase, compact = false }: { phase: Activity; compact?: boolean }) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => { setNow(Date.now()); const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [phase.since]);
+  const now = useNow(true);
   const seconds = Math.max(0, Math.floor((now - (phase.since ?? now)) / 1000));
   const p = phase.prefill;
   const total = p?.total ?? 0;

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useNow } from "../use-now";
 import { LuBot, LuPlay, LuRefreshCw, LuSquareTerminal } from "react-icons/lu";
 import type { BackgroundJob } from "../api";
 import { subagentName, type Subagent } from "../subagents";
@@ -44,12 +45,7 @@ export function RunningTray({
   const runningAgents = agents.filter((a) => a.status === "running");
   const runningJobs = jobs.filter((j) => j.state !== "exited" && !j.attached);
   const any = runningAgents.length + runningJobs.length + statuses.length > 0;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!runningAgents.length && !runningJobs.length) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [runningAgents.length, runningJobs.length]);
+  const now = useNow(runningAgents.length > 0 || runningJobs.length > 0);
   if (!any) return null;
   const since = (at?: number) => (at ? formatElapsed(Math.max(0, Math.floor((now - at) / 1000))) : "");
 

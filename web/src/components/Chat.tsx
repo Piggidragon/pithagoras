@@ -22,6 +22,7 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
 import { Fragment, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useNow } from "../use-now";
 import type { DiagramPlugin } from "streamdown";
 import { Markdown } from "./Markdown";
 import { followPointer } from "../pointer-drag";
@@ -921,13 +922,7 @@ export function Chat({
     () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant" || item.kind === "command"),
     [items, hasEarlier],
   );
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!running) return;
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [running]);
+  const now = useNow(running);
 
   // Commands come from pi at runtime, so anything a newly installed package
   // registers shows up here without the portal knowing about it in advance.

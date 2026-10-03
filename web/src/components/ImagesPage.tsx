@@ -9,7 +9,7 @@ import { bytesLabel } from "../projects";
 import { isEscape } from "../shortcuts";
 import { sinceThen } from "../time";
 import { formatDateTime, msg, t, tp } from "../i18n";
-import { useNow } from "./ChatActivity";
+import { useNow } from "../use-now";
 import { confirmDialog } from "./ConfirmDialog";
 import { ImageMaker, type Mode } from "./ImageMaker";
 import { ImagePreview, type PreviewState } from "./ImagePreview";
