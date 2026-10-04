@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { schemaFingerprint } from "./schema-fingerprint.mjs";
-import { inProcessHome } from "./server-harness.mjs";
+import { freePort, inProcessHome } from "./server-harness.mjs";
 
 // The schema is versioned: a database below SCHEMA_VERSION is checked and backed
 // up before it is changed, and one at it is not. So a change to the schema that
@@ -103,7 +103,7 @@ test("a database at the schema before this one is checked and backed up, brought
   copyFileSync(new URL("./fixtures/portal-v2.db", import.meta.url), file);
   assert.deepEqual(upgradeCheck(file), { needed: true, from: 2 });
 
-  const run = startUpgrade(dir, 50000 + Math.floor(Math.random() * 1000));
+  const run = startUpgrade(dir, await freePort());
   const exited = await new Promise((resolve) => run.child.on("exit", resolve));
   assert.equal(exited, 0, run.output());
   assert.match(run.output(), /upgrading the database from version 2 to 3/);

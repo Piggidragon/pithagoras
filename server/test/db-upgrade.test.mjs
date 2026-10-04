@@ -221,7 +221,7 @@ test("a database from a newer portal is not opened: the page says so, and the fi
   assert.deepEqual(upgradeCheck(same.file), { needed: false, from: SCHEMA_VERSION });
 
   const before = hash(a.file);
-  const port = 49000 + Math.floor(Math.random() * 1000);
+  const port = await freePort();
   const run = startUpgrade(a.dir, port);
   try {
     assert.ok(await until(async () => { try { return (await fetch(`http://127.0.0.1:${port}/api/sessions`)).status === 500; } catch { return false; } }), run.output());

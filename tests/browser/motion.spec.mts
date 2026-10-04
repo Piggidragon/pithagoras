@@ -216,7 +216,8 @@ test('a chat that is left drifts away as a picture, and the one that opens plays
   await portal(page);
   await page.goto('/s/a');
   await expect(page.getByText('A answer 5')).toBeVisible();
-  const list = page.locator('.chat-list');
+  // The picture of the chat that is left is a copy of its list, with the class too: the real list is the one outside the picture's frame.
+  const list = page.locator('.chat-list:not([data-ghost] *)');
 
   await row(page, 'Second chat').click();
   await expect(list).toHaveClass(/is-opening/);

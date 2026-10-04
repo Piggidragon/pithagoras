@@ -48,8 +48,13 @@ export const freePort = () => new Promise((resolve) => {
   const s = createServer().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
 });
 
-/** Every folder the server reads and writes, set to a place in `home`: none of them is left to its default. */
+/**
+ * Every folder the server reads and writes, set to a place in `home`: none of them is left to its default.
+ * And git is kept from looking above the temp folder for a repository: where that folder lies inside one, a
+ * command pi runs in a chat folder would otherwise be run in it, with the developer's credentials.
+ */
 const homeEnv = (home) => ({
+  GIT_CEILING_DIRECTORIES: path.dirname(home),
   DATA_DIR: home, BIN_DIR: path.join(home, "bin"), SESSION_DIR: path.join(home, "sessions"), CHANNELS_DIR: path.join(home, "channels"),
   AGENT_HOME: path.join(home, "agent-home"), WORKSPACE_ROOT: path.join(home, "ws"), PI_CODING_AGENT_DIR: path.join(home, "agent"),
 });
