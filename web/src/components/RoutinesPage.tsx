@@ -113,7 +113,7 @@ function Timing({
             value={runAt}
             onChange={(e) => onRunAt(e.target.value)}
             aria-label={t("Run at")}
-            className={`${inputCls} mt-1 text-xs [color-scheme:dark]`}
+            className={`${inputCls} mt-1 text-xs`}
           />
           {!runAt && <p role="alert" className="mt-1 text-[11px] text-warn">{t("Pick a time to run it at.")}</p>}
           <p className="mt-1 text-[11px] text-fg-faint">

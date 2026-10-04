@@ -1004,7 +1004,7 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
                 className="cursor-pointer outline-none [&:focus-visible_circle]:stroke-accent"
               >
                 <title>{n.description ? `${title} — ${n.description}` : title}</title>
-                {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" stroke="#ef4444" strokeWidth={1.5} />}
+                {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" className="stroke-danger" strokeWidth={1.5} />}
                 <circle cx={p.x} cy={p.y} r={r} fill={colourOf(n.type)} stroke="transparent" strokeWidth={3} />
                 <text x={p.x} y={p.y + r + 13} textAnchor="middle" className="fill-fg text-[11px]">
                   {title.length > 32 ? `${title.slice(0, 31)}…` : title}
@@ -1094,7 +1094,7 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
                 ))}
                 {graph.nodes.some((n) => n.links === 0) && (
                   <li className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-[#ef4444]" />
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-danger" />
                     {t("orphan (unlinked)")}
                   </li>
                 )}

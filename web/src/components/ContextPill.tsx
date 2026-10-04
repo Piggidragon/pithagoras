@@ -21,10 +21,9 @@ const CIRC = 2 * Math.PI * RING.r;
 
 /** Green while there's room, amber once compaction is near, red when it's close. */
 function tone(pct: number) {
-  if (pct >= 90) return { stroke: "#f87171", text: "text-danger", bar: "bg-danger" };
-  if (pct >= 75) return { stroke: "#fb923c", text: "text-warn", bar: "bg-warn" };
-  if (pct >= 50) return { stroke: "#fbbf24", text: "text-warn", bar: "bg-warn" };
-  return { stroke: "#34d399", text: "text-ok", bar: "bg-ok" };
+  if (pct >= 90) return { stroke: "stroke-danger", text: "text-danger", bar: "bg-danger" };
+  if (pct >= 50) return { stroke: "stroke-warn", text: "text-warn", bar: "bg-warn" };
+  return { stroke: "stroke-ok", text: "text-ok", bar: "bg-ok" };
 }
 
 /**
@@ -161,17 +160,16 @@ function Donut({ pct, color }: { pct: number; color: string }) {
   const filled = Math.max(0, Math.min(100, pct));
   return (
     <svg width={18} height={18} viewBox="0 0 18 18" className="-rotate-90">
-      <circle cx={9} cy={9} r={RING.r} fill="none" stroke="#3f3f46" strokeWidth={RING.stroke} />
+      <circle cx={9} cy={9} r={RING.r} fill="none" className="stroke-fg/15" strokeWidth={RING.stroke} />
       <circle
         cx={9}
         cy={9}
         r={RING.r}
         fill="none"
-        stroke={color}
         strokeWidth={RING.stroke}
         strokeLinecap="round"
         strokeDasharray={`${(filled / 100) * CIRC} ${CIRC}`}
-        className="transition-[stroke-dasharray] duration-500"
+        className={`${color} transition-[stroke-dasharray] duration-500`}
       />
     </svg>
   );

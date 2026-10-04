@@ -129,7 +129,7 @@
 .voice-stage-action.is-muted, .voice-stage.is-docked .voice-stage-action.is-muted { color: #fff2d2; background: #614721; border-color: #d8ad62; }
 .voice-stage-action.voice-end, .voice-stage.is-docked .voice-stage-action.voice-end { color: #ffe5e5; background: #743d47; border-color: #c88490; }
 .voice-stage-action.voice-end:hover { background: #92505c; }
-.voice-stage button:focus-visible, .voice-tool-float[role="button"]:focus-visible { outline: 2px solid #a2d5ff; outline-offset: 4px; }
+.voice-stage button:focus-visible, .voice-tool-float[role="button"]:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 4px; }
 
 /* Overscan the canvas so the halo fades out beyond the orb's layout box. */
 .voice-avatar { position: relative; aspect-ratio: 1; overflow: visible; }
@@ -170,10 +170,12 @@
 .canvas-document,.canvas-editor { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 24px 30px; font-size: 14px; line-height: 1.75; }
 .canvas-editor { width: 100%; resize: none; outline-offset: -2px; background: rgb(var(--canvas)); color: rgb(var(--fg)); font-family: inherit; }
 .canvas-panel footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px; border-top: 1px solid rgb(var(--line)); }
-.canvas-delete-confirm { font-size: 12px; color: #e48b8b; }
+.canvas-delete-confirm { font-size: 12px; color: rgb(var(--danger)); }
 .canvas-empty { padding: 25px; color: rgb(var(--fg-muted)); font-size: 13px; }
 .canvas-empty h3 { margin: 12px 0; color: rgb(var(--fg)); }
-.canvas-error,.canvas-notice { margin: 4px 16px; font-size: 12px; color: #d99066; }
+.canvas-error,.canvas-notice { margin: 4px 16px; font-size: 12px; }
+.canvas-error { color: rgb(var(--danger)); }
+.canvas-notice { color: rgb(var(--warn)); }
 @media (max-width: 600px) { .session-canvases { right: 8px; top: 57px; } .canvas-panel { width: calc(100vw - 72px); height: calc(100dvh - 225px); } }
 
 /* One work panel beside a full orb; two panels above a compact dock. */

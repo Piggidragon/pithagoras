@@ -561,7 +561,7 @@ export function ImageMaker({
                       />
                     </button>
                     {sources.length > 1 && <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-surface/85 px-1 text-[10px] tabular-nums text-fg">{i + 1}</span>}
-                    {masking && i === 0 && <span className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-accent px-1 text-[10px] text-white">{t("Mask")}</span>}
+                    {masking && i === 0 && <span className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-accent px-1 text-[10px] text-accent-fg">{t("Mask")}</span>}
                     <button
                       type="button"
                       onClick={() => {
