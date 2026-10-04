@@ -7,7 +7,7 @@ The [Docker add-ons guide](/guide/add-ons) covers GPU prerequisites, automatic Q
 :::
 
 ::: info Already installed?
-Start with the controls below. Manual Compose and native systemd services are alternative deployments; do not run them alongside the managed installer.
+Start with the controls below. A manual Compose setup and a native audio.cpp unit are alternative deployments; do not run them alongside the managed installer.
 :::
 
 Enable **Voice** under **Settings → Add-ons** to talk to any open session.
@@ -290,13 +290,18 @@ both are loaded.
 
 ### Start the runtime
 
-With Compose, on the GPU of your choice:
+With Compose:
 
 ```sh
-VOICE_GPU=1 docker compose -f docker-compose.yml -f docker-compose.voice.yml \
+docker compose -f docker-compose.yml -f docker-compose.voice.yml \
   --profile voice-multilingual up -d audiocpp
 curl --fail http://127.0.0.1:7871/health
 ```
+
+`VOICE_GPU` is the index of the GPU the service runs on, as `nvidia-smi` lists
+them, and it is `0` when unset: on a host with one GPU, leave it alone. With
+more than one, name the card the session model does not use, in front of the
+command or in `.env`: `VOICE_GPU=<index> docker compose …`.
 
 `server.json` binds loopback, and Compose publishes the container's port on
 `127.0.0.1:7871`: the service has no authentication, so nothing should reach it
@@ -306,7 +311,7 @@ audio.cpp's own name for voice cloning — not a truncated `"clone"`.
 `deploy/voice-multilingual/` also holds a systemd unit for a native audio.cpp
 build. It reads the same `server.json`, so point `/models` at your GGUF
 directory — a symlink is enough — or edit the two paths in that file. Build the
-server where the unit expects it, next to the existing Breeze unit's binary:
+server where the unit's `ExecStart` expects it:
 
 ```sh
 cd /opt/audio.cpp
@@ -314,7 +319,8 @@ scripts/build_linux.sh --backend cuda --target audiocpp_server
 ```
 
 The unit uses GPU 0 unless `/etc/default/pithagoras-audio-cpp-multilingual`
-sets another, for example `VOICE_GPU=1`.
+sets another with `VOICE_GPU=<index>`, which is what a host with two GPUs does to
+leave the first to the session model.
 
 ### Point the portal at it
 
@@ -381,18 +387,28 @@ models:
     cmd: |
       /path/to/audiocpp_server --config /path/to/server.json
       --host 127.0.0.1 --port ${PORT}
-    env: ["CUDA_DEVICE_ORDER=PCI_BUS_ID", "CUDA_VISIBLE_DEVICES=1"]
+    # The GPU for speech, as nvidia-smi lists them; leave both lines out with one GPU.
+    env: ["CUDA_DEVICE_ORDER=PCI_BUS_ID", "CUDA_VISIBLE_DEVICES=<index>"]
     aliases: [chatterbox, qwen3-asr]
     ttl: 900          # stop the process after 15 quiet minutes
     unlisted: true    # not a chat model, so keep it out of /v1/models
 ```
 
-Breeze, the English voice, is a third model in the same `server.json` (`"id":
-"breeze"`, `"family": "breeze_tts"`, `"mode": "streaming"`, the layout in
-`deploy/cortex-voice/audio-cpp.json`) with `breeze` added to the aliases. Choose
-**Breeze audio.cpp · streaming** as the speech runtime in the portal and it sends
-`model: breeze`. The
-audio.cpp build has to include the family: a build made with
+Breeze, the English voice, is a third model in the same `server.json`, with
+`breeze` added to the aliases:
+
+```json
+{
+  "id": "breeze",
+  "family": "breeze_tts",
+  "path": "/models/Breeze-TTS-2-GGUF/breeze-tts-2-q8_0.gguf",
+  "task": "tts",
+  "mode": "streaming"
+}
+```
+
+Choose **Breeze audio.cpp · streaming** as the speech runtime in the portal and
+it sends `model: breeze`. The audio.cpp build has to include the family: a build made with
 `--model-set custom --models chatterbox,qwen3_asr` cannot load it, so add
 `breeze_tts` to `--models` and rebuild. With `"max_loaded_models": 2` the server
 keeps Qwen3-ASR and whichever speaking voice was used last resident, and
@@ -408,9 +424,12 @@ gateway measured 6.5 s for a first spoken sentence.
 
 The gateway runs one model at a time unless told otherwise, so without a
 `routing` section every speech request would unload the language model. Put the
-audio entry in a matrix set with the LLM that leaves its GPU free. Speech lives
-on the second GPU, so it goes next to a model pinned to the first, and a model
-split across both stays alone:
+audio entry in a matrix set with the LLM that leaves its GPU free. In this
+example speech lives on the second of two GPUs, so it goes next to a model pinned
+to the first, and a model split across both stays alone. With one GPU, the audio
+entry can share a set with a model only if that model leaves the roughly 5.5 GB
+the two speech models need; otherwise leave it out of the sets and the gateway
+swaps them:
 
 ```yaml
 routing:
@@ -563,9 +582,7 @@ rest by **Save voice settings**.
 
 **Speech generation → Fast** uses CFG 1, avoiding the extra guidance branch.
 **Expressive** uses CFG 4 for stronger voice direction. Fast can change delivery
-and voice similarity, so compare using the same reference. The Breeze runtime
-also caches up to eight encoded reference clips in CPU memory, keyed by audio
-content rather than temporary upload filename.
+and voice similarity, so compare using the same reference.
 
 ## Input language and accuracy
 
@@ -640,57 +657,6 @@ model inference or microphone hardware.
 Runtime references: [Breeze](https://github.com/breezeblue-ai/breeze-tts),
 [Whisper.cpp server](https://github.com/ggml-org/whisper.cpp/tree/master/examples/server).
 
-## Alternative: native services
-
-::: details Show alternative deployment details
-`deploy/cortex-voice` holds example systemd units for running the speech services
-natively on a host, without Docker: `pithagoras-whisper` (Whisper.cpp on the CPU),
-`pithagoras-breeze` (the Python Breeze runtime) and `pithagoras-audio-cpp`
-(Breeze on audio.cpp). They were written for one machine, so change the paths in
-them to where Breeze's source, Python environment and weights, the audio.cpp
-build and Whisper.cpp sit on yours before installing them. Whisper is built
-without CUDA and uses the CPU, leaving the GPU to Breeze. Both endpoints bind to
-loopback and use the same default URLs as the add-on.
-
-Install the unit files into `/etc/systemd/system`, reload systemd, and start
-`pithagoras-whisper`. Start `pithagoras-breeze` when sufficient GPU memory is
-available. Breeze reserves roughly 8 GB of the GPU; use
-`systemctl stop pithagoras-breeze` to release its memory, or
-`systemctl disable --now pithagoras-breeze` before returning the GPU to another
-service permanently. Do not run these units alongside the managed add-on or the
-Compose voice services; they use the same ports.
-
-Browser tests use the public JFK speech sample bundled with Whisper.cpp as a
-synthetic microphone stream; they do not record from your physical microphone.
-:::
-
-## Alternative: native audio.cpp streaming runtime
-
-::: details Show alternative deployment details
-The example uses audio.cpp at commit `efb04233dab73aeee4b2912042a90e7b36329061`,
-built for the CUDA architecture of the GPU (`86` there) with the `breeze_tts`
-model, from the `breeze_tts_2_q8_0` Q8 package.
-`pithagoras-audio-cpp.service` serves loopback port 7861; the Voice add-on uses
-runtime `audio-cpp` and URL `http://127.0.0.1:7861/v1/audio/speech`.
-The reference recording and transcript are sent inline and cached by the runtime.
-
-The player begins with 650 ms of PCM buffered, then schedules arriving audio
-chunks contiguously. Synthesis stays single-file while playback runs independently.
-Barge-in cancels the HTTP stream and scheduled audio. The Python runtime retains
-whole-phrase buffering because its measured synthesis is slower than playback.
-
-On an RTX 3060 with a language model resident, a warmed reference-clone sample
-generated 4.88 seconds of audio in 3.05 seconds, with first audio at 0.94 seconds.
-The prior Python runtime took 8.40 seconds for the same text (its output duration
-was 4.32 seconds). The audio.cpp process used 4414 MiB VRAM. These are sample
-measurements, not latency guarantees for every input. A separate portal request
-produced 8 seconds of audio in 4.94 seconds, with first bytes at 0.99 seconds.
-
-Rollback: stop `pithagoras-audio-cpp`, start `pithagoras-breeze`, select runtime
-`breeze`, and restore the speech URL to port 7860. Only one TTS unit should be
-enabled at boot. The language model and Whisper do not need to restart.
-:::
-
 ## Session prefill snapshots
 
 `LLAMA_DISK_CACHE_MODELS` names the llama.cpp models, comma-separated, whose
@@ -762,8 +728,8 @@ automatically after a host reboot; start it in Settings when needed. Setup failu
 remain visible in the log and can be retried. Whisper listens on loopback port 8188
 and Breeze on 7862, inside the portal's own network namespace: the voice container
 joins the portal container's network (or the host's, for a native portal) and
-publishes no host ports. These differ from the older manual systemd setup, which
-the installer does not modify. Stop older TTS services before using the managed
+publishes no host ports. These differ from a manually managed setup, the Compose overlay or a native unit,
+which the installer does not modify. Stop such TTS services before using the managed
 service to avoid loading two copies into VRAM. A managed container made by an
 earlier version is migrated automatically; see
 [Docker add-ons](/guide/add-ons#service-addresses-and-health-checks).

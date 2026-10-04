@@ -172,6 +172,60 @@ file is gone still shows its transcript, but the agent starts over without
 remembering it, and a notice in the chat says so. A moved folder is found again
 by the file's name, so a data folder copied to another path keeps its chats.
 
+## Backing up
+
+The upgrade backs the database up by itself, but only when it changes it (see
+[Upgrading](/guide/upgrading)). A backup of your own is up to you. What holds
+your work:
+
+- **`/data`**: the volume `portal-data`, or the folder `PORTAL_DATA_DIR` names. The
+  database, the chats' files, pi's settings and packages, the agents, the pictures.
+- **The memory of the Understory the portal runs**, if you use it: the volume
+  `pithagoras_understory-memory` (`UNDERSTORY_VOLUME`), plain markdown files.
+- **The browser's logins**, if you want to keep them: the volume
+  `pithagoras_browser-profile`. The voice models are downloads and can be fetched again.
+- **Your workspaces** are your own repositories: back them up as you do now.
+
+`portal.db` is in write-ahead mode: recent writes sit in `portal.db-wal` beside it
+until SQLite folds them in. Copying the files of a running portal one after the
+other can take them at different moments, and the copy then fails SQLite's check or
+lacks the last hours. There are two ways around that.
+
+**Stop, copy, start.** The simplest, and it takes everything in one consistent step:
+
+```sh
+docker stop pithagoras
+DATA=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' pithagoras)
+docker run --rm -v "$DATA:/data:ro" -v "$PWD:/backup" alpine tar czf /backup/pithagoras-data.tgz -C /data .
+docker start pithagoras
+```
+
+**While it runs.** Have SQLite make the copy of the database, which is consistent
+while it is read and holds what the log holds, then copy the rest of `/data`:
+
+```sh
+docker exec pithagoras node -e 'new (require("better-sqlite3"))("/data/portal.db", { fileMustExist: true }).backup("/data/portal-backup.db").then(() => console.log("done"))'
+```
+
+This is the call the portal makes before an upgrade. Copy `/data` as you copy any
+folder, but take the database from `portal-backup.db` and leave `portal.db`,
+`portal.db-wal`, `portal.db-shm` and `portal.sock` out of the copy. Remove
+`portal-backup.db` afterwards: it is as large as the database.
+
+The memory of Understory is files, so it can be archived like any volume. Stop
+Understory first (**Settings → Add-ons → Memory → Stop**) if you want to be sure no
+tidy-up pass is writing:
+
+```sh
+docker run --rm -v pithagoras_understory-memory:/memory:ro -v "$PWD:/backup" alpine tar czf /backup/understory-memory.tgz -C /memory .
+```
+
+**Restoring.** Stop the portal, unpack into the data folder, and for a copy made
+the second way put the database copy in as `portal.db` and remove `portal.db-wal`
+and `portal.db-shm`; then start it. A backup from an older version is upgraded on
+that start, with the check and the backup described in [Upgrading](/guide/upgrading);
+one from a newer version is refused.
+
 ## Installing command-line tools
 
 Updating rebuilds the image, so anything installed into the container's own
@@ -188,7 +242,9 @@ servers are published this way. The Python equivalent is `uvx <tool>`; `uv` and
 there is no Python to install either.
 
 **`/data/bin`.** On `PATH` for the portal and everything pi launches, and on the
-volume. Drop a binary there — no redeploy, no image change:
+volume. Drop a binary there — no redeploy, no image change. It comes last on
+`PATH`, so a file there adds a tool and never replaces `node`, `git`, `docker` or
+`pi`:
 
 ```bash
 docker exec pithagoras sh -c "curl -fsSL <url> -o /data/bin/tool && chmod +x /data/bin/tool"
@@ -287,7 +343,7 @@ npm run docs
 ## Publishing the docs
 
 `.github/workflows/docs.yml` builds and deploys them to GitHub Pages on every
-push to `main` that touches `docs/`, `channels/` or the workflow itself.
+push to `main` that touches `docs/` or the workflow itself.
 
 The workflow turns Pages on itself the first time it runs — `configure-pages`
 is given `enablement: true` and the permission to use it — so a fork publishes

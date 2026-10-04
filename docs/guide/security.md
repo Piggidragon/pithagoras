@@ -100,6 +100,15 @@ itself (`data:`); any other is shown as a small label, "Picture from
 security policy says the same to the browser, so a picture that gets past the
 label is refused there.
 
+## The agent's browser is behind the login
+
+The portal proxies the agent's [browser](/guide/browser#embedded-or-in-a-tab) at
+`/browser-ui`, and what the browser holds (its logins, its open pages, whatever the
+agent is doing in it) is shown there live. The page and its websocket therefore sit
+behind the portal's login like every other route: without it they answer 401, and a
+websocket opened from another site is refused. The portal does not hand its own
+login cookie, or the visitor's `Authorization` header, on to the browser.
+
 ## People are a separate layer
 
 The guard also enforces what a teammate may do, checked per tool call so it
