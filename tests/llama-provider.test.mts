@@ -44,6 +44,20 @@ test("the first spoken turn has thinking switched off on every llama server, wha
   for (const provider of ["openrouter", "mine", "llama-swap-2"]) assert.equal(thinking(provider), undefined, provider);
 });
 
+test("a list saved in the voice settings decides instead, by the names in it, whatever the Providers page says", () => {
+  const thinking = (provider: string, saved?: string[]) => {
+    const turn = new VoiceFirstTurn(() => saved), handlers = new Map<string, (...args: any[]) => any>();
+    turn.extension({ on: (name: string, fn: any) => handlers.set(name, fn) });
+    turn.arm();
+    return handlers.get("before_provider_request")!({ payload: { chat_template_kwargs: {} } }, { model: { provider } })?.chat_template_kwargs?.enable_thinking;
+  };
+  assert.equal(thinking("gpu-box"), false, "none saved: the kind saved for it");
+  assert.equal(thinking("gpu-box", ["llama-swap"]), undefined, "a list that does not name it");
+  assert.equal(thinking("gpu-box", ["gpu-box"]), false, "a list that does");
+  assert.equal(thinking("openrouter", ["openrouter"]), false, "whatever it is");
+  assert.equal(thinking("llama-swap", []), undefined, "an empty list keeps thinking on everywhere");
+});
+
 test("the prefill progress goes through the same answer", async () => {
   startLlamaProxy(() => {});
   await new Promise((resolve) => setTimeout(resolve, 50));

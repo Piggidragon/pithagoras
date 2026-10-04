@@ -1309,6 +1309,16 @@ export function getVoiceInstructions(): string {
   }
 }
 
+/** The providers saved for voice mode's first call without thinking; undefined where the default list is used. */
+export function getSkipThinkingProviders(): string[] | undefined {
+  try {
+    const saved = JSON.parse(getSetting("voice") ?? "{}").skipThinkingProviders;
+    return Array.isArray(saved) ? saved.filter((name): name is string => typeof name === "string") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Only what the portal was explicitly told; absent keys fall through.
  *

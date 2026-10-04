@@ -500,6 +500,17 @@ preferences are unchanged. This skips initial
 reasoning latency, but prompt processing and sentence synthesis still take time.
 Other providers and the container executor retain their normal thinking behavior.
 
+**Settings → Add-ons → Voice → Reply without thinking first on** names the
+providers instead, as the model menu shows them, separated by commas. Switching
+thinking off goes through the llama.cpp chat template, so only llama.cpp servers
+and the gateways in front of them, such as llama-swap, follow it. Until a list
+is saved, the portal goes by what the Providers page says each provider is, so
+a llama.cpp server with any name counts; the field then shows the usual names.
+A saved list counts exactly the providers it names, each as it is or as
+`name=<address>`, and an empty list keeps thinking on everywhere. **Reset to
+the default list** goes back to the portal's own judgement, which follows its
+updates.
+
 ### Speaking instructions
 
 The rules for how the agent talks — one short spoken sentence before a task's
