@@ -1,41 +1,30 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /** Settings → People over canned answers: what the page sends when somebody is forgotten, demoted or allowed something. */
 async function portal(page: Page, people: any[]) {
   const sent: { method: string; url: string; body: any }[] = [];
   const rules: any[] = [];
-  await page.route('**/api/**', async (route) => {
-    const url = new URL(route.request().url());
-    const p = url.pathname;
-    const method = route.request().method();
-    let body: any = {};
-    if (p === '/api/auth/status') body = { authed: true, authRequired: false };
-    else if (p === '/api/sessions' && method === 'GET') body = { sessions: [], executor: 'host' };
-    else if (p === '/api/people' && method === 'GET') body = { people };
-    else if (p === '/api/tool-rules' && method === 'GET') body = { rules };
-    else if (p === '/api/tool-rules' && method === 'POST') {
-      const rule = route.request().postDataJSON();
+  await mockPortal(page, ({ path: p, method, url, json }) => {
+    if (p === '/api/people' && method === 'GET') return { people };
+    if (p === '/api/tool-rules' && method === 'GET') return { rules };
+    if (p === '/api/tool-rules' && method === 'POST') {
+      const rule = json();
       sent.push({ method, url: p, body: rule });
       rules.push({ id: 'r1', role: rule.role, tool: rule.tool, pattern: rule.pattern, person_key: rule.personKey, note: '', created_at: '' });
-      body = { rules };
-    } else if (p.startsWith('/api/people/')) {
-      sent.push({ method, url: p + url.search, body: method === 'PATCH' ? route.request().postDataJSON() : undefined });
+      return { rules };
+    }
+    if (p.startsWith('/api/people/')) {
+      sent.push({ method, url: p + url.search, body: method === 'PATCH' ? json() : undefined });
       // A save is stored as the server keeps the text: trimmed. The role stays as it was here.
       const patched = people.find((x) => x.key === decodeURIComponent(p.slice('/api/people/'.length)));
       if (method === 'PATCH' && patched) {
-        const sentBody = route.request().postDataJSON();
+        const sentBody = json();
         Object.assign(patched, { name: sentBody.name.trim() || patched.name, notes: sentBody.notes.trim() });
       }
-      body = method === 'PATCH' ? { person: patched ?? people[0] } : { ok: true };
-    } else if (p === '/api/settings') body = { settings: {}, stored: {}, defaults: {}, piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w' };
-    else if (p === '/api/models') body = { models: [], providers: {} };
-    else if (p === '/api/extensions') body = { settingsPath: '/a/settings.json', extensions: [] };
-    await route.fulfill({ json: body });
-  });
-  await page.addInitScript(() => {
-    localStorage.setItem('pithagoras.setup', 'done');
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-  });
+      return method === 'PATCH' ? { person: patched ?? people[0] } : { ok: true };
+    }
+  }, { settings: true });
   return sent;
 }
 

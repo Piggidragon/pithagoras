@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
 
 /** The portal with no server: Settings → Add-ons, over canned answers for the opt-in features. */
 async function portal(page: Page, { reachable = true, available = true, docker = false, llm = { source: 'auto' } as any, autoPossible = true, dreamFails = false, container = 'absent' } = {}) {
@@ -16,28 +17,17 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     },
   };
   const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editMaxSize: '', editKeySet: false, timeoutSeconds: 300, sdExtras: false, editReady: false };
-  await page.route('**/api/**', async (route) => {
-    const url = new URL(route.request().url());
-    const p = url.pathname;
-    const method = route.request().method();
-    let body: unknown = {};
-    if (p === '/api/auth/status') body = { authed: true, authRequired: false };
-    else if (p === '/api/sessions' && method === 'GET') body = { sessions: [], executor: 'host' };
-    else if (p === '/api/settings') body = {
+  await mockPortal(page, async ({ path: p, method, url, json }) => {
+    if (p === '/api/settings') return {
       settings: { provider: 'p', model: 'm', thinkingLevel: 'medium' }, stored: {}, defaults: { provider: 'p', model: 'm', thinkingLevel: 'medium' },
       piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w',
     };
-    else if (p === '/api/models') body = { models: [{ provider: 'p', id: 'm', name: 'M', contextWindow: 65536 }, { provider: 'llama-swap', id: 'qwen3.8', name: 'Qwen 3.8' }], providers: { p: 'p' } };
-    else if (p === '/api/extensions') body = { settingsPath: '/a/settings.json', extensions: [] };
-    else if (p === '/api/browser') body = { running: false, sessions: [], routines: [], install: { available: false, mode: 'docker', container: 'absent', pulling: { active: false } }, config: {} };
-    else if (p === '/api/voice') body = { enabled: false };
-    else if (p === '/api/workspaces') body = { root: '/w', workspaces: [] };
-    else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
-    else if (p === '/api/features/subagent' && method === 'GET') body = { subagent: state.subagent };
-    else if (p === '/api/features/flags') body = { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled }, images: { enabled: images.enabled && images.baseUrl !== '' } };
-    else if (p === '/api/features/images' && method === 'GET') body = { images };
-    else if (p === '/api/features/images' && method === 'PUT') {
-      const patch = route.request().postDataJSON();
+    if (p === '/api/models') return { models: [{ provider: 'p', id: 'm', name: 'M', contextWindow: 65536 }, { provider: 'llama-swap', id: 'qwen3.8', name: 'Qwen 3.8' }], providers: { p: 'p' } };
+    if (p === '/api/features/subagent' && method === 'GET') return { subagent: state.subagent };
+    if (p === '/api/features/flags') return { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled }, images: { enabled: images.enabled && images.baseUrl !== '' } };
+    if (p === '/api/features/images' && method === 'GET') return { images };
+    if (p === '/api/features/images' && method === 'PUT') {
+      const patch = json();
       sent.push({ path: p, body: patch });
       // The shape of the edit tool counts as a change only while there is an edit tool.
       const changed = (patch.enabled !== undefined && patch.enabled !== images.enabled) || (patch.editEnabled !== undefined && patch.editEnabled !== images.editEnabled)
@@ -49,56 +39,58 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       if (apiKey !== undefined) images.keySet = apiKey !== '';
       if (editApiKey !== undefined) images.editKeySet = editApiKey !== '';
       images.editReady = images.editEnabled && (images.editBaseUrl || images.baseUrl) !== '';
-      body = { images, changed, reloaded: 1, waiting: 1 };
+      return { images, changed, reloaded: 1, waiting: 1 };
     }
-    else if (p === '/api/features') body = { ...state, images };
-    else if (p === '/api/features/subagent' && method === 'PUT') {
-      const patch = route.request().postDataJSON();
+    if (p === '/api/features') return { ...state, images };
+    if (p === '/api/features/subagent' && method === 'PUT') {
+      const patch = json();
       sent.push({ path: p, body: patch });
       if (patch.mode) state.subagent.mode = patch.mode;
       if (patch.maxParallel) state.subagent.maxParallel = patch.maxParallel;
       if (patch.model) state.subagent.model = patch.model;
       if (patch.enabled !== undefined) Object.assign(state.subagent, { enabled: patch.enabled, installed: patch.enabled, source: patch.enabled ? '/app/extensions/subagent' : null });
-      body = { subagent: state.subagent, reloaded: 1, waiting: 1 };
-    } else if (p === '/api/features/understory/config' && method === 'PUT') {
-      const patch = route.request().postDataJSON();
+      return { subagent: state.subagent, reloaded: 1, waiting: 1 };
+    }
+    if (p === '/api/features/understory/config' && method === 'PUT') {
+      const patch = json();
       sent.push({ path: p, body: patch });
       const { apiKey, ...llm } = patch.llm;
       state.understory.managed.config = { llm: llm.source === 'custom' ? { ...llm, hasKey: Boolean(apiKey) || state.understory.managed.config.llm?.hasKey } : llm, dreamInterval: patch.dreamInterval, dreamAt: patch.dreamAt };
       state.understory.managed.nextDream = patch.dreamAt ? '2026-09-29T01:00:00.000Z' : null;
-      body = { understory: state.understory };
-    } else if (p === '/api/features/understory/install' && method === 'POST') {
+      return { understory: state.understory };
+    }
+    if (p === '/api/features/understory/install' && method === 'POST') {
       sent.push({ path: p, body: null });
       Object.assign(state.understory.managed, { container: 'running', image: true });
       Object.assign(state.understory, { enabled: true, adapterInstalled: true, tokenSet: true, url: state.understory.managed.url });
-      body = { understory: state.understory, reloaded: 1, waiting: 0 };
-    } else if (p === '/api/features/understory/install' && method === 'DELETE') {
+      return { understory: state.understory, reloaded: 1, waiting: 0 };
+    }
+    if (p === '/api/features/understory/install' && method === 'DELETE') {
       sent.push({ path: `${p}${url.search}`, body: null });
       Object.assign(state.understory.managed, { container: 'absent' });
       Object.assign(state.understory, { enabled: false });
-      body = { understory: state.understory, reloaded: 1, waiting: 0 };
-    } else if (p === '/api/features/understory/dream' && method === 'POST' && dreamFails) {
-      return route.fulfill({ status: 502, json: { error: 'fetch failed', run: { ok: false, said: 'fetch failed' }, understory: state.understory } });
-    } else if (p === '/api/features/understory/dream' && method === 'POST') {
+      return { understory: state.understory, reloaded: 1, waiting: 0 };
+    }
+    if (p === '/api/features/understory/dream' && method === 'POST' && dreamFails) {
+      return reply(502, { error: 'fetch failed', run: { ok: false, said: 'fetch failed' }, understory: state.understory });
+    }
+    if (p === '/api/features/understory/dream' && method === 'POST') {
       sent.push({ path: p, body: null });
       state.understory.managed.lastDream = { at: '2026-09-28T12:00:00.000Z', ok: true, ran: true, said: '2 files changed — merged two notes' };
-      body = { understory: state.understory };
-    } else if (p === '/api/features/understory/stop' && method === 'POST') {
+      return { understory: state.understory };
+    }
+    if (p === '/api/features/understory/stop' && method === 'POST') {
       sent.push({ path: p, body: null });
       state.understory.managed.container = 'stopped';
-      body = { understory: state.understory };
-    } else if (p === '/api/features/understory' && method === 'PUT') {
-      const patch = route.request().postDataJSON();
+      return { understory: state.understory };
+    }
+    if (p === '/api/features/understory' && method === 'PUT') {
+      const patch = json();
       sent.push({ path: p, body: patch });
       Object.assign(state.understory, { enabled: patch.enabled, adapterInstalled: state.understory.adapterInstalled || patch.enabled, ...(patch.url ? { url: patch.url } : {}) });
-      body = { understory: state.understory, reloaded: 0, waiting: 0 };
+      return { understory: state.understory, reloaded: 0, waiting: 0 };
     }
-    await route.fulfill({ json: body });
-  });
-  await page.addInitScript(() => {
-    localStorage.setItem('pithagoras.setup', 'done');
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-  });
+  }, { settings: true });
   return { sent };
 }
 

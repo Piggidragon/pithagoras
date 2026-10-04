@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 /**
  * A background job's output is followed once a second. One read that failed,

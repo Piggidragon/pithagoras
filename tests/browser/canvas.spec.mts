@@ -1,4 +1,4 @@
-import { test,expect } from '@playwright/test';
+import { test, expect } from './portal-mock';
 test('canvas streams on the stage, retains a partial draft and supports inline edits and deletion',async({page})=>{
  const failures:string[]=[];page.on('pageerror',e=>failures.push(e.message));
  await page.route('**/api/browser',r=>r.fulfill({json:{running:false,install:{container:'stopped'},sessions:[]}}));

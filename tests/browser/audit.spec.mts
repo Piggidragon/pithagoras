@@ -1,19 +1,8 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /** The audit page over canned answers. */
-async function portal(page: Page, entries: unknown[]) {
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    if (p === '/api/auth/status') return route.fulfill({ json: { authed: true, authRequired: false } });
-    if (p === '/api/sessions') return route.fulfill({ json: { sessions: [], executor: 'host' } });
-    if (p === '/api/audit') return route.fulfill({ json: { entries } });
-    return route.fulfill({ json: {} });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-  });
-}
+const portal = (page: Page, entries: unknown[]) => mockPortal(page, ({ path }) => (path === '/api/audit' ? { entries } : undefined));
 
 const entry = (id: number, subject: string) => ({ id, at: '2026-10-01T09:00:00Z', kind: 'refused', tool: 'bash', subject, reason: 'on the list', person_key: null, person_name: null, session_id: null });
 

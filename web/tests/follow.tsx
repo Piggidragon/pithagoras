@@ -16,9 +16,7 @@ function Entry({ n }: { n: number }) {
 
 function Box() {
   const followed = useFollowBottom<HTMLDivElement>();
-  const { onScroll, hold, follow } = followed;
-  // Before the box was given by `attach`, it was given as `ref`.
-  const attach = (followed as any).attach ?? followed.ref;
+  const { onScroll, hold, follow, attach } = followed;
   const [drawn, setDrawn] = useState(0);
   (window as any).redraw = () => setDrawn((n) => n + 1);
   (window as any).grow = (px: number) => {

@@ -1,4 +1,5 @@
-import { test, expect, type Page, type Route } from '@playwright/test';
+import { type Page, type Route } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 type Put = { content: string; mtime?: number };
 

@@ -1,33 +1,31 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
 /** A portal with a password: signed in once the right one is posted, signed out again when `expired` says so, and not answering while `down`. */
 async function portal(page: Page, state: { authed: boolean; expired?: boolean; down?: boolean }) {
   const calls = { status: 0, login: [] as unknown[], rename: 0 };
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    const method = route.request().method();
+  await mockPortal(page, async ({ path: p, method, route, json }) => {
     // What a proxy answers while the portal behind it restarts: a page of its own, not JSON.
-    if (state.down && p.startsWith('/api/auth/')) { if (p === '/api/auth/status') calls.status++; return route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>Bad Gateway</h1>' }); }
-    if (p === '/api/auth/status') { calls.status++; return route.fulfill({ json: { authRequired: true, authed: state.authed } }); }
+    if (state.down && p.startsWith('/api/auth/')) {
+      if (p === '/api/auth/status') calls.status++;
+      await route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>Bad Gateway</h1>' });
+      return DONE;
+    }
+    if (p === '/api/auth/status') { calls.status++; return { authRequired: true, authed: state.authed }; }
     if (p === '/api/auth/login') {
-      const body = route.request().postDataJSON();
+      const body = json();
       calls.login.push(body);
-      if (body.password !== 'secret') return route.fulfill({ status: 401, json: { error: 'Wrong password' } });
+      if (body.password !== 'secret') return reply(401, { error: 'Wrong password' });
       state.authed = true;
       state.expired = false;
-      return route.fulfill({ json: { ok: true } });
+      return { ok: true };
     }
     // The portal has forgotten this browser: what the server answers to a cookie it no longer takes.
-    if (state.expired) return route.fulfill({ status: 401, json: { error: 'Unauthorized' } });
-    if (p === '/api/sessions' && method === 'GET') return route.fulfill({ json: { sessions: [session], executor: 'host' } });
-    if (p === '/api/sessions/s1' && method === 'PATCH') { calls.rename++; return route.fulfill({ json: session }); }
-    if (p === '/api/workspaces') return route.fulfill({ json: { root: '/w', workspaces: [] } });
-    return route.fulfill({ json: {} });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
+    if (state.expired) return reply(401, { error: 'Unauthorized' });
+    if (p === '/api/sessions' && method === 'GET') return { sessions: [session], executor: 'host' };
+    if (p === '/api/sessions/s1' && method === 'PATCH') { calls.rename++; return session; }
+    if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
   });
   return calls;
 }

@@ -12,6 +12,7 @@ import type { PortalEvent, Session } from '../src/api';
 import '../src/styles';
 import { installTooltips } from '../src/tooltips';
 import { installMotion } from '../src/motion';
+import { mockFetch } from './mock-fetch';
 import { setLanguage } from '../src/i18n';
 // Offers the languages, as the app does: `setLang('de')` fetches German.
 import '../src/locales';
@@ -149,15 +150,11 @@ if (phase === 'agents') {
     { key: 'j1', sid: 4242, pids: [4242, 4250], command: 'npm run dev -- --port 5173', startedAt: now - 754_000, state: 'running', hasOutput: true, attached: false },
     { key: 'j2', sid: 4300, pids: [], command: 'python -m http.server 8000', startedAt: now - 3_600_000, exitedAt: now - 1_200_000, state: 'exited', hasOutput: true, attached: false },
   ] };
-  const realFetch = window.fetch;
-  window.fetch = (async (url: any, init?: any) => {
-    const u = String(url);
-    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
-    if (u.endsWith('/background')) return reply(jobs);
-    if (u.includes('/commands')) return reply({ commands: [{ name: 'bg-update', description: 'Update pi-background', source: 'extension' }] });
-    if (u.includes('/background/') && u.includes('/output')) return reply({ text: u.includes('from=') ? '' : '> vite\n\n  VITE v5.4  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host to expose\n', from: 0, size: 120 });
-    return realFetch(url, init);
-  }) as typeof fetch;
+  mockFetch((u) => {
+    if (u.endsWith('/background')) return jobs;
+    if (u.includes('/commands')) return { commands: [{ name: 'bg-update', description: 'Update pi-background', source: 'extension' }] };
+    if (u.includes('/background/') && u.includes('/output')) return { text: u.includes('from=') ? '' : '> vite\n\n  VITE v5.4  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n  ➜  Network: use --host to expose\n', from: 0, size: 120 };
+  });
 }
 
 // An extension fills the chat box twice at once, the way pi's RPC mode names it and then as a paste: delivered as the page does, on arrival.
@@ -168,68 +165,54 @@ const fills: PortalEvent[] = phase === 'editor' ? [
 // What is typed is told to the portal, for an extension to read; an extension pastes into it later.
 // Whether the chat's pi is up is what the background list says: `?pi=off` until the test sets window.piUp.
 if (phase === 'editor' || phase === 'paste') {
-  const realFetch = window.fetch;
   (window as any).drafts = [];
   (window as any).piUp = new URLSearchParams(location.search).get('pi') !== 'off';
-  window.fetch = (async (url: any, init?: any) => {
-    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
-    if (String(url).endsWith('/draft')) {
-      (window as any).drafts.push(JSON.parse(init.body));
-      return reply({ ok: true });
+  mockFetch((u, init) => {
+    if (u.endsWith('/draft')) {
+      (window as any).drafts.push(JSON.parse(init!.body as string));
+      return { ok: true };
     }
-    if (String(url).endsWith('/background')) return reply({ supported: true, jobs: [], statuses: [], widgets: [], piRunning: (window as any).piUp });
-    return realFetch(url, init);
-  }) as typeof fetch;
+    if (u.endsWith('/background')) return { supported: true, jobs: [], statuses: [], widgets: [], piRunning: (window as any).piUp };
+  });
 }
 // A status left by a pi that has gone: the chat has none to ask, and none is started to answer.
 if (phase === 'gone') {
-  const realFetch = window.fetch;
   (window as any).commandsAsked = [];
-  window.fetch = (async (url: any, init?: any) => {
-    const u = String(url);
-    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
-    if (u.endsWith('/background')) return reply({ supported: true, jobs: [], widgets: [], statuses: [{ key: 'bg', text: 'bg ⬆ v2.6.5 /bg-update' }] });
+  mockFetch((u) => {
+    if (u.endsWith('/background')) return { supported: true, jobs: [], widgets: [], statuses: [{ key: 'bg', text: 'bg ⬆ v2.6.5 /bg-update' }] };
     if (u.includes('/commands')) {
       (window as any).commandsAsked.push(u.slice(u.indexOf('/commands')));
-      return reply(u.includes('ifRunning=1') ? { commands: [], notRunning: true } : { commands: [{ name: 'bg-update', description: 'Update', source: 'extension' }] });
+      return u.includes('ifRunning=1') ? { commands: [], notRunning: true } : { commands: [{ name: 'bg-update', description: 'Update', source: 'extension' }] };
     }
-    return realFetch(url, init);
-  }) as typeof fetch;
+  });
 }
 // Two chats: the first has a status that names a command, the second nothing. Which chats are asked for their commands is kept.
 if (phase === 'switch') {
-  const realFetch = window.fetch;
   (window as any).commandsAsked = [];
-  window.fetch = (async (url: any, init?: any) => {
-    const u = String(url);
-    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
-    if (u.endsWith('/background')) return reply({ supported: true, jobs: [], widgets: [], statuses: u.includes('/sessions/first/') ? [{ key: 'bg', text: 'bg ⬆ v2.6.5 /bg-update' }] : [] });
+  mockFetch((u) => {
+    if (u.endsWith('/background')) return { supported: true, jobs: [], widgets: [], statuses: u.includes('/sessions/first/') ? [{ key: 'bg', text: 'bg ⬆ v2.6.5 /bg-update' }] : [] };
     if (u.includes('/commands')) {
       (window as any).commandsAsked.push(u.split('/')[3]);
-      return reply({ commands: [{ name: 'bg-update', description: 'Update', source: 'extension' }] });
+      return { commands: [{ name: 'bg-update', description: 'Update', source: 'extension' }] };
     }
-    return realFetch(url, init);
-  }) as typeof fetch;
+  });
 }
 
 // The Git panel, Files and the tools list of a chat that has not started: `?phase=git`. What the page sent is in window.sentTools.
 if (phase === 'git') {
-  const realFetch = window.fetch;
   (window as any).sentTools = [];
   let off: string[] = [];
-  window.fetch = (async (url: any, init?: any) => {
-    const u = String(url);
-    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
-    if (u.endsWith('/git/gh')) return reply({ installed: false, authed: false, repo: null, url: null, defaultBranch: null, note: 'Install gh' });
-    if (/\/git(\?|$)/.test(u)) return reply({ repo: true, root: '/workspaces/pithagoras', prefix: '', branch: 'main', head: 'a'.repeat(40), upstream: 'origin/main', ahead: 0, behind: 0, stashes: 0, operation: null, truncated: false, remotes: [], files: [{ path: 'README.md', x: '.', y: 'M', kind: 'changed', unstaged: { added: 2, removed: 1, binary: false } }, { path: 'notes.txt', x: '?', y: '?', kind: 'untracked' }] });
-    if (u.includes('/files?')) return reply({ path: '', entries: [{ name: 'README.md', type: 'file', size: 12, mtime: 1 }], truncated: false });
-    if (u.includes('/file?')) return reply({ content: '# Pithagoras\n', binary: false, size: 13, mtime: 1 });
+  mockFetch((u, init) => {
+    if (u.endsWith('/git/gh')) return { installed: false, authed: false, repo: null, url: null, defaultBranch: null, note: 'Install gh' };
+    if (/\/git(\?|$)/.test(u)) return { repo: true, root: '/workspaces/pithagoras', prefix: '', branch: 'main', head: 'a'.repeat(40), upstream: 'origin/main', ahead: 0, behind: 0, stashes: 0, operation: null, truncated: false, remotes: [], files: [{ path: 'README.md', x: '.', y: 'M', kind: 'changed', unstaged: { added: 2, removed: 1, binary: false } }, { path: 'notes.txt', x: '?', y: '?', kind: 'untracked' }] };
+    if (u.includes('/files?')) return { path: '', entries: [{ name: 'README.md', type: 'file', size: 12, mtime: 1 }], truncated: false };
+    if (u.includes('/file?')) return { content: '# Pithagoras\n', binary: false, size: 13, mtime: 1 };
     if (u.endsWith('/tools') && init?.method === 'PUT') {
-      off = JSON.parse(init.body).off;
+      off = JSON.parse(init.body as string).off;
       (window as any).sentTools.push(off);
-      return reply({ off });
+      return { off };
     }
-    if (u.endsWith('/tools')) return reply({ live: false, off, names: {}, tools: [
+    if (u.endsWith('/tools')) return { live: false, off, names: {}, tools: [
       { name: 'web_search', source: 'pi-web-access', description: 'Search the web', enabled: !off.includes('web_search'), defaultOn: true },
       { name: 'web_fetch', source: 'pi-web-access', enabled: !off.includes('web_fetch'), defaultOn: true },
       { name: 'bash', source: 'builtin', enabled: true, defaultOn: true },
@@ -237,24 +220,21 @@ if (phase === 'git') {
       { name: 'show_image', source: 'pictures', inline: true, enabled: !off.includes('show_image'), defaultOn: true },
       { name: 'generate_image', source: 'image-generation', inline: true, enabled: true, defaultOn: true },
       { name: 'edit_image', source: 'image-editing', inline: true, enabled: true, defaultOn: true },
-    ] });
-    return realFetch(url, init);
-  }) as typeof fetch;
+    ] };
+  });
 }
 
 const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'stats' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.
 if (phase === 'nudge') {
-  const realFetch = window.fetch;
   (window as any).backgroundAsked = 0;
-  window.fetch = (async (url: any, init?: any) => {
-    if (String(url).endsWith('/background')) {
+  mockFetch((u) => {
+    if (u.endsWith('/background')) {
       (window as any).backgroundAsked++;
-      return new Response(JSON.stringify({ supported: true, jobs: [], widgets: [], statuses: [] }), { headers: { 'Content-Type': 'application/json' } });
+      return { supported: true, jobs: [], widgets: [], statuses: [] };
     }
-    return realFetch(url, init);
-  }) as typeof fetch;
+  });
 }
 
 function Fixture() {

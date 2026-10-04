@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 test('a status that moves many times a second is shown from its events, without asking for the background list again', async ({ page }) => {
   await page.goto('/tests/chat.html?phase=nudge');

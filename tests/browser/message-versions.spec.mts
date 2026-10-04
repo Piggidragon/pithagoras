@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /**
  * A message sent again, or edited, has versions: the page shows which one is
@@ -9,36 +10,16 @@ async function portal(page: Page) {
   const at = new Date().toISOString();
   const session = { id: 'a', title: 'Circle constants', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at };
   const state = { versions: { 5: [2, 5] } as Record<number, number[]>, switched: [] as { path: string; body: any }[] };
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions: [session], executor: 'host' };
+  await mockPortal(page, async ({ path: p, json }) => {
+    if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
     // Versions come with the stream; this is here for a page that asks anyway (and a test counts that it does not).
-    else if (p === '/api/sessions/a/versions') reply = { versions: state.versions };
-    else if (p.endsWith('/version')) {
-      state.switched.push({ path: p, body: route.request().postDataJSON() });
-      reply = { ok: true };
-    } else if (p.endsWith('/canvases')) reply = [];
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript(() => {
-    localStorage.setItem('pithagoras.setup', 'done');
-    const streams: any[] = ((window as any).streams = []);
-    (window as any).EventSource = class {
-      url: string; closed = false; onmessage: any; onopen: any; onerror: any;
-      listeners: Record<string, ((e: any) => void)[]> = {};
-      constructor(url: string) { this.url = url; streams.push(this); setTimeout(() => this.onopen?.(), 0); }
-      addEventListener(name: string, fn: (e: any) => void) { (this.listeners[name] ??= []).push(fn); }
-      close() { this.closed = true; }
-      emit(name: string, data: unknown) {
-        const e = { data: JSON.stringify(data) };
-        if (name === 'message') this.onmessage?.(e);
-        else (this.listeners[name] ?? []).forEach((fn) => fn(e));
-      }
-    };
-  });
+    if (p === '/api/sessions/a/versions') return { versions: state.versions };
+    if (p.endsWith('/version')) {
+      state.switched.push({ path: p, body: json() });
+      return { ok: true };
+    }
+    if (p.endsWith('/canvases')) return [];
+  }, { streams: 'open', settings: true });
   return state;
 }
 

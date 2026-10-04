@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
 import { DEFAULT_ORB } from '../../server/src/orb-style';
 
 /**
@@ -8,26 +9,14 @@ import { DEFAULT_ORB } from '../../server/src/orb-style';
  */
 async function portal(page: Page, answer: (path: string, method: string, body: any) => { status?: number; json: unknown } | undefined) {
   const sent: { path: string; body: any }[] = [];
-  await page.route('**/api/**', async (route) => {
-    const request = route.request();
-    const p = new URL(request.url()).pathname;
-    const method = request.method();
-    if (method === 'PUT') sent.push({ path: p, body: request.postDataJSON() });
-    const given = answer(p, method, method === 'PUT' ? request.postDataJSON() : undefined);
-    if (given) return route.fulfill({ status: given.status ?? 200, json: given.json });
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
-    else if (p === '/api/agents') reply = { agents: [{ id: 'home', name: 'Nova', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', unread: 0 }] };
-    else if (p === '/api/agent/sessions') reply = { sessions: [], agentHome: '/a' };
-    else if (p === '/api/projects') reply = { root: '/w', home: '/h', projects: [{ name: 'demo', path: '/w/demo', isGit: false, hasInstructions: true, hasTools: false, sessions: 0, lastActive: null }] };
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-  });
+  await mockPortal(page, ({ path: p, method, json }) => {
+    if (method === 'PUT') sent.push({ path: p, body: json() });
+    const given = answer(p, method, method === 'PUT' ? json() : undefined);
+    if (given) return reply(given.status ?? 200, given.json);
+    if (p === '/api/agents') return { agents: [{ id: 'home', name: 'Nova', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', unread: 0 }] };
+    if (p === '/api/agent/sessions') return { sessions: [], agentHome: '/a' };
+    if (p === '/api/projects') return { root: '/w', home: '/h', projects: [{ name: 'demo', path: '/w/demo', isGit: false, hasInstructions: true, hasTools: false, sessions: 0, lastActive: null }] };
+  }, { settings: true });
   return sent;
 }
 

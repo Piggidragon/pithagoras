@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /**
  * Installing and removing the agent's browser, from the Browser page and from
@@ -16,19 +17,13 @@ async function portal(page: Page, start: { container?: string; mode?: string; ru
   };
   let release = () => {};
   const held = new Promise<void>((r) => (release = r));
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    const method = route.request().method();
-    if (p === '/api/auth/status') return route.fulfill({ json: { authed: true, authRequired: false } });
-    if (p === '/api/sessions') return route.fulfill({ json: { sessions: [], executor: 'host' } });
+  await mockPortal(page, async ({ path: p, method }) => {
     if (p === '/api/browser' && method === 'GET') {
-      return route.fulfill({
-        json: {
-          running: state.running, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
-          install: { available: true, mode: state.mode, image: start.image ?? false, container: state.container, binary: '/usr/bin/chromium', pulling: state.pulling },
-          config: { user: 'abc', hasPassword: start.hasPassword ?? true },
-        },
-      });
+      return {
+        running: state.running, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
+        install: { available: true, mode: state.mode, image: start.image ?? false, container: state.container, binary: '/usr/bin/chromium', pulling: state.pulling },
+        config: { user: 'abc', hasPassword: start.hasPassword ?? true },
+      };
     }
     if (p.startsWith('/api/browser') && method !== 'GET') {
       calls.push(`${method} ${p}`);
@@ -40,14 +35,9 @@ async function portal(page: Page, start: { container?: string; mode?: string; ru
         state.container = 'absent';
         state.running = false;
       }
-      return route.fulfill({ json: { ok: true } });
+      return { ok: true };
     }
-    return route.fulfill({ json: {} });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-  });
+  }, { settings: true });
   return { calls, state, release };
 }
 

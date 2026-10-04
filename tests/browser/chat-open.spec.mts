@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, HANG } from './portal-mock';
 
 /**
  * Opening a chat: the stream it keeps open, and the effort pill it draws
@@ -25,41 +26,38 @@ async function portal(page: Page, opts: { streamsOpen?: boolean; listHangs?: boo
   let picked = false;
   /** Every GET, by path, and how often. */
   const asked: Record<string, number> = {};
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    const method = route.request().method();
+  // Every stream the page opens is in window.streams, with whether it has been closed. One not `open` stays pending.
+  await mockPortal(page, async ({ path: p, method }) => {
     if (method === 'GET') asked[p] = (asked[p] ?? 0) + 1;
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions, executor: 'host' };
-    else if (/^\/api\/sessions\/\w+$/.test(p)) reply = sessions.find((s) => p.endsWith('/' + s.id));
+    if (p === '/api/sessions') return { sessions, executor: 'host' };
+    if (/^\/api\/sessions\/\w+$/.test(p)) return sessions.find((s) => p.endsWith('/' + s.id));
     // These answers never come: what their pills show is the first guess.
-    else if (p === '/api/sessions/b/config' || p === '/api/sessions/c2/config') return;
-    else if (p === '/api/sessions/a/config' && method === 'POST') {
+    if (p === '/api/sessions/b/config' || p === '/api/sessions/c2/config') return HANG;
+    if (p === '/api/sessions/a/config' && method === 'POST') {
       picked = true;
-      reply = { ok: true, applied: ['model'], state: { model: qwen, thinkingLevel: 'medium' } };
-    } else if (p === '/api/sessions/a/config' || p === '/api/sessions/a/models') {
+      return { ok: true, applied: ['model'], state: { model: qwen, thinkingLevel: 'medium' } };
+    }
+    if (p === '/api/sessions/a/config' || p === '/api/sessions/a/models') {
       // The model menu fetches the catalogue where the browser has none cached, and is answered as the config is.
-      reply = picked ? { ...config(qwen, ALL, { provider: 'llama-swap', model: qwen.id }), live: true } : config(ornith, ['off', 'medium']);
-    } else if (p === '/api/sessions/c/config') reply = config(ornith, ['off', 'medium'], { provider: 'llama-swap', model: null });
+      return picked ? { ...config(qwen, ALL, { provider: 'llama-swap', model: qwen.id }), live: true } : config(ornith, ['off', 'medium']);
+    }
+    if (p === '/api/sessions/c/config') return config(ornith, ['off', 'medium'], { provider: 'llama-swap', model: null });
     // The default is Qwen now, and pi's catalogue has not said its levels yet.
-    else if (p === '/api/sessions/d/config') reply = config(qwen, []);
+    if (p === '/api/sessions/d/config') return config(qwen, []);
     // No catalogue yet: opening the model menu asks pi for it, which says the default is Qwen now.
-    else if (p === '/api/sessions/e/config') reply = config(ornith, ['off', 'medium'], undefined, []);
-    else if (p === '/api/sessions/e/models') reply = { ...config(qwen, ALL), live: true };
+    if (p === '/api/sessions/e/config') return config(ornith, ['off', 'medium'], undefined, []);
+    if (p === '/api/sessions/e/models') return { ...config(qwen, ALL), live: true };
     // Still Ornith, the default, but pi's catalogue has not answered yet.
-    else if (p === '/api/sessions/f/config') reply = config(ornith, []);
+    if (p === '/api/sessions/f/config') return config(ornith, []);
     // No default set in the portal: pi's own, which an idle chat cannot name.
-    else if (p === '/api/sessions/g/config') reply = config({ id: 'default', name: "pi's default", provider: 'llama-swap' }, []);
+    if (p === '/api/sessions/g/config') return config({ id: 'default', name: "pi's default", provider: 'llama-swap' }, []);
     // The browser has no connection for it: asked, and never answered.
-    else if (p.endsWith('/canvases') && opts.listHangs) return;
-    else if (p.endsWith('/canvases')) reply = [];
-    else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript((open: boolean) => {
-    localStorage.setItem('pithagoras.setup', 'done');
+    if (p.endsWith('/canvases') && opts.listHangs) return HANG;
+    if (p.endsWith('/canvases')) return [];
+    if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
+    if (p === '/api/models') return { models: [], providers: {} };
+  }, { streams: opts.streamsOpen === false ? 'pending' : 'open', settings: true });
+  await page.addInitScript(() => {
     // Whether the page is hidden, as the test says.
     (window as any).hide = (hidden: boolean) => {
       (window as any).hidden = hidden;
@@ -67,22 +65,7 @@ async function portal(page: Page, opts: { streamsOpen?: boolean; listHangs?: boo
     };
     Object.defineProperty(document, 'hidden', { get: () => !!(window as any).hidden });
     Object.defineProperty(document, 'visibilityState', { get: () => ((window as any).hidden ? 'hidden' : 'visible') });
-    // Every stream the page opens, and whether it has been closed. One not
-    // `open` stays pending, as when the browser has no connection to give it.
-    const streams: any[] = ((window as any).streams = []);
-    (window as any).EventSource = class {
-      url: string; closed = false; onmessage: any; onopen: any; onerror: any;
-      listeners: Record<string, ((e: any) => void)[]> = {};
-      constructor(url: string) { this.url = url; streams.push(this); if (open) setTimeout(() => this.onopen?.(), 0); }
-      addEventListener(name: string, fn: (e: any) => void) { (this.listeners[name] ??= []).push(fn); }
-      close() { this.closed = true; }
-      emit(name: string, data: unknown) {
-        const e = { data: JSON.stringify(data) };
-        if (name === 'message') this.onmessage?.(e);
-        else (this.listeners[name] ?? []).forEach((fn) => fn(e));
-      }
-    };
-  }, opts.streamsOpen ?? true);
+  });
   return { sessions, asked };
 }
 

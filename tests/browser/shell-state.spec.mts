@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
 
 /**
  * What the shell around a chat does with what arrives: tokens drawn a frame at
@@ -15,27 +16,20 @@ async function portal(page: Page, opts: Opts = {}) {
   const sessions = ['a', 'b', 'c', 'd'].map((id, i) => chat(id, `Chat ${'ABCD'[i]}`));
   const asked: Record<string, number> = {};
   const answered: unknown[] = [];
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    const method = route.request().method();
+  await mockPortal(page, async ({ path: p, method, json }) => {
     if (method === 'GET') asked[p] = (asked[p] ?? 0) + 1;
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions, executor: 'host' };
-    else if (p === '/api/sessions/gone') return route.fulfill({ status: 404, json: { error: 'Session not found' } });
-    else if (/^\/api\/sessions\/\w+$/.test(p)) reply = sessions.find((s) => p.endsWith('/' + s.id));
-    else if (p.endsWith('/ui-response')) {
-      answered.push(route.request().postDataJSON());
+    if (p === '/api/sessions') return { sessions, executor: 'host' };
+    if (p === '/api/sessions/gone') return reply(404, { error: 'Session not found' });
+    if (/^\/api\/sessions\/\w+$/.test(p)) return sessions.find((s) => p.endsWith('/' + s.id));
+    if (p.endsWith('/ui-response')) {
+      answered.push(json());
       await opts.hold;
-      reply = opts.answer ?? { ok: true };
-    } else if (p.endsWith('/config')) reply = { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
-    else if (p.endsWith('/canvases')) reply = [];
-    else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    await route.fulfill({ json: reply });
-  });
+      return opts.answer ?? { ok: true };
+    }
+    if (p.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
+    if (p.endsWith('/canvases')) return [];
+  }, { streams: 'none', settings: true });
   await page.addInitScript(() => {
-    localStorage.setItem('pithagoras.setup', 'done');
     // The page's animations are on here: the sidebar measures its rows only then.
     localStorage.removeItem('animations');
     (window as any).hide = (hidden: boolean) => {

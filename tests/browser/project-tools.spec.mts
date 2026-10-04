@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
 
 /**
  * A portal with one project, "demo", and three tools seen. `off` is what the
@@ -13,23 +14,20 @@ async function portal(page: Page, opts: { off?: string[]; refuse?: string; tools
   /** What the page asked to have made, and the chats it then started. */
   const made: { body: any }[] = [];
   const chats: string[] = [];
-  await page.route('**/api/**', async (route) => {
-    const url = new URL(route.request().url());
-    const p = url.pathname;
-    const method = route.request().method();
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions' && method === 'POST') {
+  await mockPortal(page, async ({ path: p, method, json, route }) => {
+    if (p === '/api/sessions' && method === 'POST') {
       chats.push(route.request().postData() ?? '');
-      reply = { id: 'c1', title: 'New chat', workspace: '/w/fresh', executor: 'host', status: 'idle', created_at: '', updated_at: '', last_error: null, pinned: false };
-    } else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
-    else if (p === '/api/projects' && method === 'POST') {
-      const body = route.request().postDataJSON();
+      return { id: 'c1', title: 'New chat', workspace: '/w/fresh', executor: 'host', status: 'idle', created_at: '', updated_at: '', last_error: null, pinned: false };
+    }
+    if (p === '/api/sessions') return { sessions: [], executor: 'host' };
+    if (p === '/api/projects' && method === 'POST') {
+      const body = json();
       made.push({ body });
-      reply = { name: 'fresh', path: '/w/fresh', isGit: false, hasInstructions: false, ...(opts.toolsError ? { toolsError: opts.toolsError } : {}) };
-    } else if (p === '/api/tools') {
+      return { name: 'fresh', path: '/w/fresh', isGit: false, hasInstructions: false, ...(opts.toolsError ? { toolsError: opts.toolsError } : {}) };
+    }
+    if (p === '/api/tools') {
       // What the portal-wide default says: web_fetch off.
-      reply = {
+      return {
         tools: [
           { name: 'web_search', source: 'pi-web-access', defaultOn: true },
           { name: 'web_fetch', source: 'pi-web-access', defaultOn: false },
@@ -38,20 +36,26 @@ async function portal(page: Page, opts: { off?: string[]; refuse?: string; tools
         off: ['web_fetch'],
         names: {},
       };
-    } else if (p === '/api/projects') {
-      reply = { root: '/w', home: '/h', projects: [{ name: 'demo', path: '/w/demo', isGit: false, hasInstructions: false, hasTools: off.length !== 1 || off[0] !== 'web_fetch', sessions: 0, lastActive: null }] };
-    } else if (p === '/api/projects/demo/tools' && opts.refuse) {
-      return route.fulfill({ status: 400, json: { error: opts.refuse, code: 'tools-unsupported' } });
-    } else if (p === '/api/projects/demo/tools' && method === 'GET' && down.reads) {
-      return route.fulfill({ status: 500, json: { error: 'The portal is starting up' } });
-    } else if (p === '/api/projects/demo/tools' && method === 'PUT' && opts.saveFails) {
-      return route.fulfill({ status: 500, json: { error: opts.saveFails } });
-    } else if (p === '/api/projects/demo/tools' && method === 'PUT') {
-      off = route.request().postDataJSON().off;
+    }
+    if (p === '/api/projects') {
+      return { root: '/w', home: '/h', projects: [{ name: 'demo', path: '/w/demo', isGit: false, hasInstructions: false, hasTools: off.length !== 1 || off[0] !== 'web_fetch', sessions: 0, lastActive: null }] };
+    }
+    if (p === '/api/projects/demo/tools' && opts.refuse) {
+      return reply(400, { error: opts.refuse, code: 'tools-unsupported' });
+    }
+    if (p === '/api/projects/demo/tools' && method === 'GET' && down.reads) {
+      return reply(500, { error: 'The portal is starting up' });
+    }
+    if (p === '/api/projects/demo/tools' && method === 'PUT' && opts.saveFails) {
+      return reply(500, { error: opts.saveFails });
+    }
+    if (p === '/api/projects/demo/tools' && method === 'PUT') {
+      off = json().off;
       puts.push(off);
-      reply = { off, applied: 0 };
-    } else if (p === '/api/projects/demo/tools') {
-      reply = {
+      return { off, applied: 0 };
+    }
+    if (p === '/api/projects/demo/tools') {
+      return {
         live: false,
         off,
         names: {},
@@ -61,15 +65,10 @@ async function portal(page: Page, opts: { off?: string[]; refuse?: string; tools
           { name: 'todo', source: 'pi-todo', enabled: !off.includes('todo'), defaultOn: true },
         ],
       };
-    } else if (p === '/api/projects/demo/instructions') reply = { text: 'Use tabs.' };
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-    localStorage.removeItem('toolGroupsOpen');
-  });
+    }
+    if (p === '/api/projects/demo/instructions') return { text: 'Use tabs.' };
+  }, { settings: true });
+  await page.addInitScript(() => localStorage.removeItem('toolGroupsOpen'));
   await page.goto('/projects');
   return { puts, made, chats, down };
 }

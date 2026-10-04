@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /**
  * The keyboard in the dialogs that cover the page: Settings (the shared Modal),
@@ -10,46 +11,17 @@ const chat = { id: 'a', title: 'Chat A', workspace: '/w/site', status: 'idle', k
 
 async function portal(page: Page) {
   const answered: unknown[] = [];
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions: [chat], executor: 'host' };
-    else if (/^\/api\/sessions\/\w+$/.test(p)) reply = chat;
-    else if (p.endsWith('/ui-response')) {
-      answered.push(route.request().postDataJSON());
-      reply = { ok: true };
-    } else if (p.endsWith('/config')) reply = { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
-    else if (p.endsWith('/canvases')) reply = [];
-    else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    else if (p === '/api/routines/report-targets') reply = { targets: [], default: null };
-    else if (p === '/api/tool-names') reply = { names: {} };
-    else if (p === '/api/settings') {
-      const defaults = { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' };
-      reply = { settings: defaults, stored: {}, defaults, piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w' };
+  await mockPortal(page, ({ path, method, json }) => {
+    if (path === '/api/sessions') return { sessions: [chat], executor: 'host' };
+    if (/^\/api\/sessions\/\w+$/.test(path)) return chat;
+    if (path.endsWith('/ui-response')) {
+      answered.push(json());
+      return { ok: true };
     }
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript(() => {
-    localStorage.setItem('pithagoras.setup', 'done');
-    const streams: any[] = ((window as any).streams = []);
-    (window as any).EventSource = class {
-      closed = false; onmessage: any; onopen: any; onerror: any;
-      listeners: Record<string, ((e: any) => void)[]> = {};
-      constructor() {
-        streams.push(this);
-        setTimeout(() => this.onopen?.(), 0);
-      }
-      addEventListener(name: string, fn: (e: any) => void) { (this.listeners[name] ??= []).push(fn); }
-      close() { this.closed = true; }
-      emit(name: string, data: unknown) {
-        const e = { data: JSON.stringify(data) };
-        if (name === 'message') this.onmessage?.(e);
-        else (this.listeners[name] ?? []).forEach((fn) => fn(e));
-      }
-    };
-  });
+    if (path.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
+    if (path.endsWith('/canvases')) return [];
+    if (path === '/api/settings' && method === 'PUT') return { settings: {}, compaction: { keepRecentTokens: 20000 }, refreshed: 0, note: '' };
+  }, { streams: 'open', settings: true });
   return { answered };
 }
 

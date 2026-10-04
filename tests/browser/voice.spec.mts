@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './portal-mock';
 import { readFileSync } from 'node:fs';
 const sample = readFileSync(new URL('../fixtures/jfk.wav', import.meta.url));
 test.beforeEach(async ({ page }) => {

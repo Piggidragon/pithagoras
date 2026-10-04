@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 type Unsaved = { changed: number; unpushed: number; stashes: number; unknown?: true };
 

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 test("the model menu's providers link goes through the router, as any other link", async ({ page }) => {
   await page.goto('/tests/chat.html?phase=model');

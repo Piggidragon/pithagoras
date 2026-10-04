@@ -1,17 +1,7 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
-async function portal(page: Page) {
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
-    else if (p === '/api/extensions') reply = { extensions: [], settingsPath: '/p/settings.json' };
-    else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
-}
+const portal = (page: Page) => mockPortal(page, undefined, { settings: true });
 
 test('Tab ends the listening for a new shortcut and moves on, instead of becoming the shortcut', async ({ page }) => {
   await portal(page);

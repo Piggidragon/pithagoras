@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import { test, expect } from './portal-mock';
 // The engine choice asks for the GPU as the page opens; the tests that are about something else get none to read.
 test.beforeEach(async({page})=>{await page.route('**/api/voice/hardware',r=>r.fulfill({json:{gpus:[],source:'none',error:'',checked:false,cpuOnly:false,host:{totalMiB:16384,freeMiB:12000,threads:8},selected:null,reserveMiB:0,suggestion:{tts:'breeze',asr:'whisper',asrModel:'base'}}}));});
 test('settings install progress, ready connection, and stop',async({page})=>{

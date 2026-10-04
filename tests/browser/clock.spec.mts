@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 /**
  * An elapsed time that counts, drawn for something that has only just started

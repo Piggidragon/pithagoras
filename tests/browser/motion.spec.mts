@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /**
  * The extra animations (web/src/motion.ts): on by default, one switch to turn
@@ -43,46 +44,43 @@ async function portal(page: Page, { off = false, confirms = true, places, many =
   const state = { removeDelay: 80, sessions: [chat('a', 'First chat'), chat('b', 'Second chat'), chat('c', 'Third chat'), chat('d', 'Fourth chat'), ...extra], events: { a: conversation('A', bigTurn), b: conversation('B'), c: [] as any[], d: [] as any[], r: conversation('R') } as Record<string, any[]> };
   // A routine's chat: opened by its address, and not in the list of chats.
   const routine = chat('r', 'Routine chat', { kind: 'routine' });
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    const method = route.request().method();
-    let reply: unknown = {};
+  await mockPortal(page, async ({ path: p, method, json }) => {
     let m: RegExpMatchArray | null;
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions' && method === 'GET') reply = { sessions: state.sessions, executor: 'host' };
-    else if (p === '/api/sessions' && method === 'POST') {
+    if (p === '/api/sessions' && method === 'GET') return { sessions: state.sessions, executor: 'host' };
+    if (p === '/api/sessions' && method === 'POST') {
       const made = chat(`n${state.sessions.length}`, 'A new chat');
       state.sessions = [made, ...state.sessions];
       state.events[made.id] = [];
-      reply = made;
-    } else if (p === '/api/sessions/r') reply = routine;
-    else if ((m = p.match(/^\/api\/sessions\/(\w+)\/messages\/(\d+)$/)) && method === 'DELETE') {
+      return made;
+    }
+    if (p === '/api/sessions/r') return routine;
+    if ((m = p.match(/^\/api\/sessions\/(\w+)\/messages\/(\d+)$/)) && method === 'DELETE') {
       const [id, seq] = [m[1], Number(m[2])];
       const next = state.events[id].find((e) => e.seq > seq && e.type === 'portal_prompt');
       const to = next?.seq ?? null;
       state.events[id] = state.events[id].filter((e) => !(e.seq >= seq && (to === null || e.seq < to)));
       // The server says so a moment after it has answered.
       setTimeout(() => page.evaluate(([id, from, to]) => (window as any).emit(id, { seq: 9000 + from, type: 'portal_removed', payload: { from, to } }), [id, seq, to] as const).catch(() => {}), state.removeDelay);
-      reply = { ok: true };
-    } else if ((m = p.match(/^\/api\/sessions\/(\w+)$/)) && method === 'DELETE') {
+      return { ok: true };
+    }
+    if ((m = p.match(/^\/api\/sessions\/(\w+)$/)) && method === 'DELETE') {
       state.sessions = state.sessions.filter((s) => s.id !== m![1]);
-      reply = { ok: true };
-    } else if ((m = p.match(/^\/api\/sessions\/(\w+)$/))) reply = state.sessions.find((s) => s.id === m![1]) ?? {};
-    else if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) reply = { live: false, state: { model: { id: 'm', name: 'Model', provider: 'x' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
-    else if (/^\/api\/sessions\/\w+\/files$/.test(p)) reply = { path: '', entries: [], truncated: false };
-    else if (p.endsWith('/canvases')) reply = [];
-    else if (p.endsWith('/background')) reply = { jobs: [], statuses: [] };
-    else if (p === '/api/projects') reply = { root: '/w', home: '/w', projects: [] };
-    else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    else if (p === '/api/features/flags') reply = { subagent: { enabled: false }, understory: { enabled: false } };
-    else if (p === '/api/settings') reply = { settings: {}, defaults: {}, stored: {}, executor: 'host', workspaceRoot: '/w', piSettingsPath: '/p/settings.json', compaction: { keepRecentTokens: 20000 }, contextDefault: null };
-    else if (p === '/api/extensions') reply = { extensions: [], settingsPath: '/p/settings.json' };
-    else if (/report/.test(p)) reply = { targets: [], default: null };
-    await route.fulfill({ json: reply });
-  });
+      return { ok: true };
+    }
+    if ((m = p.match(/^\/api\/sessions\/(\w+)$/))) return state.sessions.find((s) => s.id === m![1]) ?? {};
+    if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model: { id: 'm', name: 'Model', provider: 'x' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
+    if (/^\/api\/sessions\/\w+\/files$/.test(p)) return { path: '', entries: [], truncated: false };
+    if (p.endsWith('/canvases')) return [];
+    if (p.endsWith('/background')) return { jobs: [], statuses: [] };
+    if (p === '/api/projects') return { root: '/w', home: '/w', projects: [] };
+    if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
+    if (p === '/api/models') return { models: [], providers: {} };
+    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false } };
+    if (p === '/api/settings') return { settings: {}, defaults: {}, stored: {}, executor: 'host', workspaceRoot: '/w', piSettingsPath: '/p/settings.json', compaction: { keepRecentTokens: 20000 }, contextDefault: null };
+    if (p === '/api/extensions') return { extensions: [], settingsPath: '/p/settings.json' };
+    if (/report/.test(p)) return { targets: [], default: null };
+  }, { streams: 'none', settings: true });
   await page.addInitScript(([events, off, confirms, places]) => {
-    localStorage.setItem('pithagoras.setup', 'done');
     if (off) localStorage.setItem('animations', 'off');
     if (!confirms) localStorage.setItem('confirmDeletes', 'off');
     if (places) localStorage.setItem('panelPlaces', JSON.stringify(places));

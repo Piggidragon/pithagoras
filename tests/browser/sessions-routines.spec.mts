@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
 
 async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
@@ -10,33 +11,23 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '', updatedAt: '1',
     workspaceProblem: null, ...opts.routine,
   };
-  await page.route('**/api/**', async (route) => {
-    const url = new URL(route.request().url());
-    const p = url.pathname;
-    const method = route.request().method();
-    const body = route.request().postDataJSON?.() ?? null;
+  await mockPortal(page, async ({ path: p, method, json }) => {
+    const body = json();
     if (method !== 'GET') sent.push({ method, path: p, body });
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions' && opts.listFailsAfterRename && sent.some((s) => s.method === 'PATCH')) return route.fulfill({ status: 502, json: { error: 'bad gateway' } });
-    else if (p === '/api/sessions') reply = { sessions: [session, other], executor: 'host' };
-    else if (p === '/api/sessions/s1' && method === 'PATCH' && opts.renameFails) return route.fulfill({ status: 500, json: { error: 'disk full' } });
-    else if (p === '/api/sessions/s1' && method === 'PATCH') { session.title = body.title; reply = session; }
-    else if (p === '/api/routines' && method === 'GET') reply = { routines: [routine] };
-    else if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return route.fulfill({ status: 400, json: { error: opts.refuses } });
-    else if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: String(Date.now()) }); reply = routine; }
-    else if (p === '/api/routines/r1/sessions') reply = { sessions: [] };
-    else if (p === '/api/routines/report-targets') reply = { targets: [], default: null };
+    if (p === '/api/sessions' && opts.listFailsAfterRename && sent.some((s) => s.method === 'PATCH')) return reply(502, { error: 'bad gateway' });
+    if (p === '/api/sessions') return { sessions: [session, other], executor: 'host' };
+    if (p === '/api/sessions/s1' && method === 'PATCH' && opts.renameFails) return reply(500, { error: 'disk full' });
+    if (p === '/api/sessions/s1' && method === 'PATCH') { session.title = body.title; return session; }
+    if (p === '/api/routines' && method === 'GET') return { routines: [routine] };
+    if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return reply(400, { error: opts.refuses });
+    if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: String(Date.now()) }); return routine; }
+    if (p === '/api/routines/r1/sessions') return { sessions: [] };
+    if (p === '/api/routines/report-targets') return { targets: [], default: null };
     // The routines page offers the agents' homes beside the projects; the first one is Home.
-    else if (p === '/api/agents') reply = { agents: [{ id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: {}, voice: '' }] };
-    else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [{ name: 'site', path: '/w/site', isGit: true }, { name: 'notes', path: '/w/notes', isGit: false }] };
-    else if (p === '/api/models') reply = { models: [{ provider: 'x', id: 'm', name: 'M', reasoning: false }], providers: {} };
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-  });
+    if (p === '/api/agents') return { agents: [{ id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: {}, voice: '' }] };
+    if (p === '/api/workspaces') return { root: '/w', workspaces: [{ name: 'site', path: '/w/site', isGit: true }, { name: 'notes', path: '/w/notes', isGit: false }] };
+    if (p === '/api/models') return { models: [{ provider: 'x', id: 'm', name: 'M', reasoning: false }], providers: {} };
+  }, { settings: true });
   return sent;
 }
 

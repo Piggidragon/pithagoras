@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /** Settings → MCP over canned answers, with every save that was sent. */
 async function portal(page: Page) {
@@ -10,21 +11,13 @@ async function portal(page: Page) {
       { name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false },
     ],
   };
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    if (p === '/api/auth/status') return route.fulfill({ json: { authed: true, authRequired: false } });
-    if (p === '/api/sessions') return route.fulfill({ json: { sessions: [], executor: 'host' } });
-    if (p === '/api/mcp') return route.fulfill({ json: mcp });
-    if (p.startsWith('/api/mcp/servers/') && route.request().method() === 'PUT') {
-      saves.push(`${p.slice('/api/mcp/servers/'.length)} from ${route.request().postDataJSON().from}`);
-      return route.fulfill({ json: { ok: true } });
+  await mockPortal(page, ({ path, method, json }) => {
+    if (path === '/api/mcp') return mcp;
+    if (path.startsWith('/api/mcp/servers/') && method === 'PUT') {
+      saves.push(`${path.slice('/api/mcp/servers/'.length)} from ${json().from}`);
+      return { ok: true };
     }
-    return route.fulfill({ json: {} });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-  });
+  }, { settings: true });
   await page.goto('/settings/mcp');
   return { saves, dialog: page.getByRole('dialog', { name: 'Settings' }) };
 }

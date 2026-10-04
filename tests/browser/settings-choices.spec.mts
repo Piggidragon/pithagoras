@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 import { DEFAULT_ORB } from '../../server/src/orb-style';
 
 /**
@@ -6,16 +7,7 @@ import { DEFAULT_ORB } from '../../server/src/orb-style';
  * choices and switches: which one holds, and whether a switch is on. Over canned answers.
  */
 async function portal(page: Page, answers: Record<string, unknown>) {
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    if (p === '/api/auth/status') return route.fulfill({ json: { authed: true, authRequired: false } });
-    if (p === '/api/sessions') return route.fulfill({ json: { sessions: [], executor: 'host' } });
-    return route.fulfill({ json: answers[p] ?? {} });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-  });
+  await mockPortal(page, ({ path }) => answers[path], { settings: true });
 }
 
 const entry = (id: number, kind: string) => ({ id, at: '2026-10-01T09:00:00Z', kind, tool: 'bash', subject: 'rm -rf x', reason: 'on the list', person_key: null, person_name: null, session_id: null });

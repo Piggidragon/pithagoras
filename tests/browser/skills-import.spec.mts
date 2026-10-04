@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 const SHA = 'a'.repeat(40);
 
@@ -14,34 +15,23 @@ async function portal(page: Page, { skipped = [], lookSkipped = [] }: Portal = {
   const looks: unknown[] = [];
   const imports: any[] = [];
   let loads = 0;
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    const method = route.request().method();
-    if (p === '/api/auth/status') return route.fulfill({ json: { authed: true, authRequired: false } });
-    if (p === '/api/sessions' && method === 'GET') return route.fulfill({ json: { sessions: [], executor: 'host' } });
-    if (p === '/api/skills') { loads++; return route.fulfill({ json: { root: '/agent/skills', skills: [], diagnostics: [] } }); }
+  await mockPortal(page, ({ path: p, json }) => {
+    if (p === '/api/skills') { loads++; return { root: '/agent/skills', skills: [], diagnostics: [] }; }
     if (p === '/api/skills/preview-import') {
-      const sent = route.request().postDataJSON();
+      const sent = json();
       looks.push(sent);
-      return route.fulfill({
-        json: {
-          spec: sent.spec,
-          sha: SHA,
-          found: [{ name: 'pdf', description: 'Read a PDF', installed: false, from: 'skills/pdf' }],
-          skipped: lookSkipped,
-        },
-      });
+      return {
+        spec: sent.spec,
+        sha: SHA,
+        found: [{ name: 'pdf', description: 'Read a PDF', installed: false, from: 'skills/pdf' }],
+        skipped: lookSkipped,
+      };
     }
     if (p === '/api/skills/import') {
-      imports.push(route.request().postDataJSON());
-      return route.fulfill({ json: { ok: true, imported: ['pdf'], skipped } });
+      imports.push(json());
+      return { ok: true, imported: ['pdf'], skipped };
     }
-    return route.fulfill({ json: {} });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-  });
+  }, { settings: true });
   return { looks, imports, loads: () => loads };
 }
 

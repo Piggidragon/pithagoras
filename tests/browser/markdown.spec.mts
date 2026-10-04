@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 /** The portal's markdown, as a reply, a note or a fetched page is drawn with it. */
 const page = (text: string) => `/tests/markdown.html?text=${encodeURIComponent(text)}`;

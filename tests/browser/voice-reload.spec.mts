@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 // As an ordinary browser does it: no audio before the page has been touched.
 // Headless Chromium lets it start without, which would skip the part tested here.

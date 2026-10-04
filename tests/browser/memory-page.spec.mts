@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
 
 const tree = {
   name: '/', path: '/', kind: 'directory', children: [
@@ -33,56 +34,55 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
   const changes: { method: string; path: string; body?: any }[] = [];
   let logCleared = false;
   let wiped = false;
-  await page.route('**/api/**', async (route) => {
-    const url = new URL(route.request().url());
-    const p = url.pathname;
-    let body: unknown = {};
-    if (p === '/api/auth/status') body = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') body = { sessions: [], executor: 'host' };
-    else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
-    else if (p === '/api/features/flags') body = { subagent: { enabled: false }, understory: { enabled } };
-    else if (p === '/api/features') body = { subagent: {}, understory: { enabled, url: 'http://127.0.0.1:3800/mcp', managed: { available: true, container: 'running', config: { llm: { source: 'auto' }, dreamInterval: '' }, providers: [], pulling: { active: false }, lastDream: { at: '2026-09-28T14:00:00Z', ok: true, ran: true, said: '1 file changed — mended the link' } } } };
-    else if (p === '/api/browser') body = { running: false, configured: false, routines: [] };
-    else if (p === '/api/memory/health') body = writable ? { writable: true, health: healthy } : { writable: false };
-    else if (p === '/api/memory/concept' && route.request().method() === 'PUT') {
-      const sent = route.request().postDataJSON();
+  await mockPortal(page, async ({ path: p, method, url, json }) => {
+    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled } };
+    if (p === '/api/features') return { subagent: {}, understory: { enabled, url: 'http://127.0.0.1:3800/mcp', managed: { available: true, container: 'running', config: { llm: { source: 'auto' }, dreamInterval: '' }, providers: [], pulling: { active: false }, lastDream: { at: '2026-09-28T14:00:00Z', ok: true, ran: true, said: '1 file changed — mended the link' } } } };
+    if (p === '/api/memory/health') return writable ? { writable: true, health: healthy } : { writable: false };
+    if (p === '/api/memory/concept' && method === 'PUT') {
+      const sent = json();
       changes.push({ method: 'PUT', path: sent.path, body: sent });
       concepts[sent.path] = { path: sent.path, frontmatter: { ...sent.frontmatter, timestamp: '2026-09-28T14:00:00.000Z' }, body: sent.body };
-      body = { concept: concepts[sent.path], health: healthy };
-    } else if (p === '/api/memory/concept' && route.request().method() === 'DELETE') {
+      return { concept: concepts[sent.path], health: healthy };
+    }
+    if (p === '/api/memory/concept' && method === 'DELETE') {
       changes.push({ method: 'DELETE', path: url.searchParams.get('path')! });
-      body = { health: afterDelete };
-    } else if (p === '/api/memory/reindex') {
+      return { health: afterDelete };
+    }
+    if (p === '/api/memory/reindex') {
       changes.push({ method: 'POST', path: p });
-      body = { pruned: ['/empty'], reindexed: 3, health: { ...broken1 } };
-    } else if (p === '/api/memory/repair') {
+      return { pruned: ['/empty'], reindexed: 3, health: { ...broken1 } };
+    }
+    if (p === '/api/memory/repair') {
       changes.push({ method: 'POST', path: p });
-      body = { ran: true, summary: '**Fixed** the link from [branches](/deployment/branches.md).\n\n## What changed\n\n- removed the dangling link', filesChanged: ['/deployment/branches.md'], health: healthy };
-    } else if (p === '/api/memory/wipe') {
+      return { ran: true, summary: '**Fixed** the link from [branches](/deployment/branches.md).\n\n## What changed\n\n- removed the dangling link', filesChanged: ['/deployment/branches.md'], health: healthy };
+    }
+    if (p === '/api/memory/wipe') {
       changes.push({ method: 'POST', path: p });
       wiped = true;
       logCleared = true;
-      body = { health: healthy };
-    } else if (p === '/api/memory/clear-log') {
+      return { health: healthy };
+    }
+    if (p === '/api/memory/clear-log') {
       changes.push({ method: 'POST', path: p });
       logCleared = true;
-      body = { health: healthy };
-    } else if (p.startsWith('/api/memory/')) {
+      return { health: healthy };
+    }
+    if (p.startsWith('/api/memory/')) {
       asked.push(`${p}${url.search}`);
-      if (broken) return route.fulfill({ status: 502, json: { error: 'Could not reach Understory at http://127.0.0.1:3800: it did not answer in time.' } });
-      if (p === '/api/memory/tree') body = wiped ? { name: '/', path: '/', kind: 'directory', children: [{ name: 'index.md', path: '/index.md', kind: 'reserved' }, { name: 'log.md', path: '/log.md', kind: 'reserved' }] } : tree;
-      else if (p === '/api/memory/validate') body = conformant ? { conformant: true, conceptCount: 2, directoryCount: 2, issues: [] } : { conformant: false, conceptCount: 2, directoryCount: 2, issues: [{ path: '/people/owner.md', severity: 'warning', message: 'No description in its frontmatter' }] };
+      if (broken) return reply(502, { error: 'Could not reach Understory at http://127.0.0.1:3800: it did not answer in time.' });
+      if (p === '/api/memory/tree') return wiped ? { name: '/', path: '/', kind: 'directory', children: [{ name: 'index.md', path: '/index.md', kind: 'reserved' }, { name: 'log.md', path: '/log.md', kind: 'reserved' }] } : tree;
+      if (p === '/api/memory/validate') return conformant ? { conformant: true, conceptCount: 2, directoryCount: 2, issues: [] } : { conformant: false, conceptCount: 2, directoryCount: 2, issues: [{ path: '/people/owner.md', severity: 'warning', message: 'No description in its frontmatter' }] };
       // Newest first, as Understory keeps it.
-      else if (p === '/api/memory/log') body = logCleared ? [] : [
+      if (p === '/api/memory/log') return logCleared ? [] : [
         { date: '2026-09-28', action: 'Update', summary: 'Linked [Branch Deployment on Test Host](/deployment/branches.md) to its owner.' },
         { date: '2026-09-27', action: 'Creation', summary: 'Added [The owner](/people/owner.md).' },
       ];
-      else if (p === '/api/memory/graph' && notes) body = {
+      if (p === '/api/memory/graph' && notes) return {
         // A long memory: every note linked to the one before, and to one a few places back.
         nodes: Array.from({ length: notes }, (_, i) => ({ path: `/n${i}.md`, title: `Note ${i}`, type: i % 3 ? 'Person' : 'Deployment Process', links: 2 })),
         edges: Array.from({ length: notes - 1 }, (_, i) => ({ source: `/n${i}.md`, target: `/n${i + 1}.md` })).concat(Array.from({ length: Math.floor(notes / 7) }, (_, i) => ({ source: `/n${i * 7}.md`, target: `/n${(i * 7 + 5) % notes}.md` }))),
       };
-      else if (p === '/api/memory/graph') body = {
+      if (p === '/api/memory/graph') return {
         nodes: [
           { path: '/deployment/branches.md', title: 'Branch Deployment on Test Host', type: 'Deployment Process', links: 1 },
           { path: '/people/owner.md', title: 'The owner', type: 'Person', links: 1 },
@@ -90,20 +90,15 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
         ],
         edges: [{ source: '/deployment/branches.md', target: '/people/owner.md' }],
       };
-      else if (p === '/api/memory/traces') body = [{ id: 't1', kind: 'mutation', input: 'Persist the following knowledge', startedAt: '2026-09-28T09:17:47Z', notation: 'browse layout → write branches.md → ✓', usage: { inputTokens: 9683, outputTokens: 735 } }];
-      else if (p === '/api/memory/search') body = url.searchParams.get('q') === 'deploy' ? [{ path: '/deployment/branches.md', title: 'Branch Deployment on Test Host', description: 'The test host deploys branches.' }] : [];
-      else if (p === '/api/memory/concept') {
+      if (p === '/api/memory/traces') return [{ id: 't1', kind: 'mutation', input: 'Persist the following knowledge', startedAt: '2026-09-28T09:17:47Z', notation: 'browse layout → write branches.md → ✓', usage: { inputTokens: 9683, outputTokens: 735 } }];
+      if (p === '/api/memory/search') return url.searchParams.get('q') === 'deploy' ? [{ path: '/deployment/branches.md', title: 'Branch Deployment on Test Host', description: 'The test host deploys branches.' }] : [];
+      if (p === '/api/memory/concept') {
         const c = concepts[url.searchParams.get('path') ?? ''];
-        if (!c) return route.fulfill({ status: 404, json: { error: 'Concept not found' } });
-        body = c;
+        if (!c) return reply(404, { error: 'Concept not found' });
+        return c;
       }
     }
-    await route.fulfill({ json: body });
-  });
-  await page.addInitScript(() => {
-    localStorage.setItem('pithagoras.setup', 'done');
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-  });
+  }, { settings: true });
   return { asked, changes };
 }
 

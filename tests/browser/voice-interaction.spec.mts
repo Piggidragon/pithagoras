@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './portal-mock';
 import { readFileSync } from 'node:fs';
 const sample = readFileSync(new URL('../fixtures/jfk.wav', import.meta.url));
 // A 2×2 PNG, as a picture from the phone or the folder would be.

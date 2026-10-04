@@ -36,5 +36,7 @@ export default defineConfig({
       });
     },
   }],
-  server: { port: 5190, proxy: { "/api": "http://localhost:4100" } },
+  // The portal's default port. A test run points it at a dead one (PITHAGORAS_API), so that a request no test
+  // answered cannot reach a portal that happens to run on this machine.
+  server: { port: 5190, proxy: { "/api": process.env.PITHAGORAS_API ?? "http://localhost:4100" } },
 });

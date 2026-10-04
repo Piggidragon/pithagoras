@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 /**
  * The voice stage's styles, where a rule that cannot win is easy to add to and hard to see: the cards that fly out

@@ -1,4 +1,5 @@
-import { test, expect, type Locator, type Page, type Route } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
 /**
  * The Images page (web/src/components/ImagesPage.tsx) over a portal that is made up: the pictures
@@ -72,22 +73,14 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
   const sorted = () => [...pics].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
   const job = (over: Partial<Job>): Job => ({ id: `j${state.jobs.length + 1}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: '', startedAt: Date.now(), ...over });
 
-  await page.route('**/api/**', async (route: Route) => {
-    const url = new URL(route.request().url());
-    const p = url.pathname;
-    const method = route.request().method();
-    let body: unknown = {};
-    if (p === '/api/auth/status') body = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') body = { sessions: [], executor: 'host' };
-    else if (p === '/api/projects') body = { root: '/w', home: '/h', projects: [] };
-    else if (p === '/api/features/flags') body = { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: flagOn } };
-    else if (p === '/api/features/images') body = { images };
-    else if (p === '/api/browser') body = { running: false, configured: false, routines: [] };
-    else if (p === '/api/images' && method === 'GET') {
+  await mockPortal(page, async ({ path: p, method, url, json, route }) => {
+    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: flagOn } };
+    if (p === '/api/features/images') return { images };
+    if (p === '/api/images' && method === 'GET') {
       state.listed.push(url.search);
-      if (failList) return route.fulfill({ status: 500, json: { error: 'The gallery could not be read' } });
+      if (failList) return reply(500, { error: 'The gallery could not be read' });
       const ids = url.searchParams.get('ids');
-      if (ids) body = { pictures: ids.split(',').map((id) => pics.find((x) => x.id === id)).filter(Boolean) };
+      if (ids) return { pictures: ids.split(',').map((id) => pics.find((x) => x.id === id)).filter(Boolean) };
       else {
         const origin = url.searchParams.get('origin');
         const kind = url.searchParams.get('kind');
@@ -101,51 +94,52 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
         }
         const pageOf = all.slice(0, limit);
         const last = pageOf[pageOf.length - 1];
-        body = { pictures: pageOf, next: all.length > limit && last ? `${last.createdAt}:${last.id}` : null, total, pageBytes: pics.filter((x) => x.origin === 'page').reduce((sum, x) => sum + x.bytes, 0) };
+        return { pictures: pageOf, next: all.length > limit && last ? `${last.createdAt}:${last.id}` : null, total, pageBytes: pics.filter((x) => x.origin === 'page').reduce((sum, x) => sum + x.bytes, 0) };
       }
-    } else if (p === '/api/images/jobs' && method === 'GET') body = { jobs: state.jobs, limit: state.limit };
-    else if (p.startsWith('/api/images/jobs/') && method === 'DELETE') {
+    }
+    if (p === '/api/images/jobs' && method === 'GET') return { jobs: state.jobs, limit: state.limit };
+    if (p.startsWith('/api/images/jobs/') && method === 'DELETE') {
       const id = p.split('/').pop()!;
       state.stopped.push(id);
       state.jobs = state.jobs.filter((j) => j.id !== id);
-      body = { ok: true };
-    } else if (p === '/api/images/generate' && method === 'POST') {
-      const sent = route.request().postDataJSON();
+      return { ok: true };
+    }
+    if (p === '/api/images/generate' && method === 'POST') {
+      const sent = json();
       state.generated.push(sent);
-      if (sent.prompt === 'refuse me') return route.fulfill({ status: 429, json: { error: '4 pictures are being made already: wait for one to finish, or stop one' } });
+      if (sent.prompt === 'refuse me') return reply(429, { error: '4 pictures are being made already: wait for one to finish, or stop one' });
       const made = Array.from({ length: sent.count ?? 1 }, () => job({ prompt: sent.prompt, ...(sent.size ? { size: sent.size } : {}) }));
       state.jobs.unshift(...made);
-      return route.fulfill({ status: 202, json: { jobs: made } });
-    } else if (p === '/api/images/edit' && method === 'POST') {
-      const sent = route.request().postDataJSON();
+      return reply(202, { jobs: made });
+    }
+    if (p === '/api/images/edit' && method === 'POST') {
+      const sent = json();
       state.edited.push(sent);
       const made = Array.from({ length: sent.count ?? 1 }, () => job({ kind: 'edit', prompt: sent.prompt, from: sent.sources[0] }));
       state.jobs.unshift(...made);
-      return route.fulfill({ status: 202, json: { jobs: made } });
-    } else if (p === '/api/images/upload' && method === 'POST') {
+      return reply(202, { jobs: made });
+    }
+    if (p === '/api/images/upload' && method === 'POST') {
       const made = pic({ kind: 'uploaded', prompt: url.searchParams.get('name') ?? '' });
       state.uploads.push({ name: url.searchParams.get('name'), type: route.request().headers()['content-type'], size: route.request().postDataBuffer()?.length ?? 0 });
       pics.push(made);
-      return route.fulfill({ status: 201, json: { picture: made } });
-    } else if (p === '/api/images/delete' && method === 'POST') {
-      const { ids } = route.request().postDataJSON();
+      return reply(201, { picture: made });
+    }
+    if (p === '/api/images/delete' && method === 'POST') {
+      const { ids } = json();
       // As the portal says it: the whole request is refused when it names more.
-      if (ids.length > 200) return route.fulfill({ status: 400, json: { error: 'At most 200 pictures at a time' } });
+      if (ids.length > 200) return reply(400, { error: 'At most 200 pictures at a time' });
       state.deleted.push(ids);
       for (const id of ids) pics.splice(pics.findIndex((x) => x.id === id), 1);
-      body = { deleted: ids, failed: [] };
-    } else if (/^\/api\/images\/[0-9a-f]{12}\/file$/.test(p)) {
+      return { deleted: ids, failed: [] };
+    }
+    if (/^\/api\/images\/[0-9a-f]{12}\/file$/.test(p)) {
       const id = p.split('/')[3];
       state.files.push(id);
-      return route.fulfill({ body: svg(id), contentType: 'image/svg+xml' });
+      await route.fulfill({ body: svg(id), contentType: 'image/svg+xml' });
+      return DONE;
     }
-    await route.fulfill({ json: body });
-  });
-  await page.addInitScript(() => {
-    localStorage.setItem('pithagoras.setup', 'done');
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-  });
-
+  }, { settings: true });
   return {
     state,
     pics,

@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /**
  * What the first draw has to fetch: the shell and the chat, not the other
@@ -10,21 +11,13 @@ const at = new Date().toISOString();
 const chat = { id: 'a', title: 'Chat A', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, created_at: at, provider: null, model: null, thinking_level: null };
 
 async function portal(page: Page) {
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions: [chat], executor: 'host' };
-    else if (/^\/api\/sessions\/\w+$/.test(p)) reply = chat;
-    else if (p.endsWith('/config')) reply = { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
-    else if (p.endsWith('/canvases')) reply = [];
-    else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript(() => {
-    localStorage.setItem('pithagoras.setup', 'done');
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
+  await mockPortal(page, ({ path }) => {
+    if (path === '/api/sessions') return { sessions: [chat], executor: 'host' };
+    if (/^\/api\/sessions\/\w+$/.test(path)) return chat;
+    if (path.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
+    if (path.endsWith('/canvases')) return [];
+    if (path === '/api/workspaces') return { root: '/w', workspaces: [] };
+    if (path === '/api/models') return { models: [], providers: {} };
   });
   const files: string[] = [];
   page.on('request', (r) => files.push(new URL(r.url()).pathname));

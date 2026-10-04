@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
 
 /**
  * A page whose first read fails: after a restart of the portal, or while it is
@@ -43,19 +44,11 @@ const answers: Record<string, unknown> = {
 async function portal(page: Page, down: string[], { replies = {}, fresh = false }: { replies?: Record<string, unknown>; fresh?: boolean } = {}) {
   const failing = new Set(down);
   const asked: string[] = [];
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
+  await mockPortal(page, ({ path: p }) => {
     asked.push(p);
-    if (p === '/api/auth/status') return route.fulfill({ json: { authed: true, authRequired: false } });
-    if (p === '/api/sessions') return route.fulfill({ json: { sessions: [], executor: 'host' } });
-    if (failing.has(p)) return route.fulfill({ status: 500, json: { error: 'The portal is starting up' } });
-    return route.fulfill({ json: replies[p] ?? answers[p] ?? {} });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-  });
-  // A browser that has not been through the setup assistant yet is shown it, while no model can be used.
-  if (!fresh) await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+    if (failing.has(p)) return reply(500, { error: 'The portal is starting up' });
+    return replies[p] ?? answers[p];
+  }, { setup: fresh ? 'fresh' : 'done', settings: true });
   return { up: (...paths: string[]) => paths.forEach((p) => failing.delete(p)), asked };
 }
 

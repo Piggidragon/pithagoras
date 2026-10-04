@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 const calls = (page: Page) => page.evaluate(() => (window as any).gitCalls.filter((c: any) => c.method === 'POST').map((c: any) => ({ url: c.url.replace('/api/sessions/s/git', ''), body: c.body })));
 const row = (page: Page, name: string) => page.getByRole('button', { name: new RegExp(name.replace(/[.]/g, '\\.')) }).first();

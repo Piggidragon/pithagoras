@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
 
 /**
  * The model picker of the composer: which provider a pick goes to, and which
@@ -17,36 +18,24 @@ type Portal = { posts: unknown[]; failWith: { error: string } | null; hold: { a:
 async function portal(page: Page): Promise<Portal> {
   const state: Portal = { posts: [], failWith: null, hold: { a: null } };
   const sessions = [chat('a', 'First chat', 'prov-a', 'Alpha'), chat('b', 'Second chat', 'prov-b', 'Beta')];
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    const method = route.request().method();
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions, executor: 'host' };
-    else if (/^\/api\/sessions\/\w+$/.test(p)) reply = sessions.find((s) => p.endsWith('/' + s.id));
-    else if (p === '/api/sessions/a/config' && method === 'POST') {
-      state.posts.push(route.request().postDataJSON());
-      if (state.failWith) return route.fulfill({ status: 500, json: { ...state.failWith, applied: [] } });
-      reply = { ok: true, applied: ['model'], state: config(model('prov-b', 'Beta')).state };
-    } else if (p === '/api/sessions/a/config') {
+  await mockPortal(page, async ({ path: p, method, json }) => {
+    if (p === '/api/sessions') return { sessions, executor: 'host' };
+    if (/^\/api\/sessions\/\w+$/.test(p)) return sessions.find((s) => p.endsWith('/' + s.id));
+    if (p === '/api/sessions/a/config' && method === 'POST') {
+      state.posts.push(json());
+      if (state.failWith) return reply(500, { ...state.failWith, applied: [] });
+      return { ok: true, applied: ['model'], state: config(model('prov-b', 'Beta')).state };
+    }
+    if (p === '/api/sessions/a/config') {
       await state.hold.a;
-      reply = config(model('prov-a', 'Alpha'));
-    } else if (p === '/api/sessions/b/config') reply = config(model('prov-b', 'Beta'));
-    else if (p.endsWith('/models')) reply = config(model('prov-a', 'Alpha'));
-    else if (p.endsWith('/canvases')) reply = [];
-    else if (p === '/api/workspaces') reply = { root: '/w', workspaces: [] };
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript(() => {
-    localStorage.setItem('pithagoras.setup', 'done');
-    (window as any).EventSource = class {
-      onopen: any;
-      constructor() { setTimeout(() => this.onopen?.(), 0); }
-      addEventListener() {}
-      close() {}
-    };
-  });
+      return config(model('prov-a', 'Alpha'));
+    }
+    if (p === '/api/sessions/b/config') return config(model('prov-b', 'Beta'));
+    if (p.endsWith('/models')) return config(model('prov-a', 'Alpha'));
+    if (p.endsWith('/canvases')) return [];
+    if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
+    if (p === '/api/models') return { models: [], providers: {} };
+  }, { streams: 'open', settings: true });
   return state;
 }
 

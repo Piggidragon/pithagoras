@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /**
  * The picture tools in the tool lists. The portal registers show_image,
@@ -17,32 +18,22 @@ const others = [{ name: 'web_search', source: 'pi-web-access' }, { name: 'todo',
 async function portal(page: Page, { extension = false, path = '/settings/tools' } = {}) {
   const puts: string[][] = [];
   const seen = [...pictures.filter((tool) => !(extension && tool.name === 'generate_image')), ...(extension ? [{ name: 'generate_image', source: 'my-images' }] : []), ...others];
-  await page.route('**/api/**', async (route) => {
-    const url = new URL(route.request().url());
-    const p = url.pathname;
-    const method = route.request().method();
-    let reply: unknown = {};
-    if (p === '/api/auth/status') reply = { authed: true, authRequired: false };
-    else if (p === '/api/sessions') reply = { sessions: [], executor: 'host' };
-    else if (p === '/api/projects') reply = { root: '/w', home: '/h', projects: [{ name: 'demo', path: '/w/demo', isGit: false, hasInstructions: false, hasTools: false, sessions: 0, lastActive: null }] };
-    else if (p === '/api/tools' && method === 'GET') reply = { tools: seen.map((tool) => ({ ...tool, defaultOn: true })), off: [], names: {} };
-    else if (p === '/api/tools' && method === 'PUT') {
-      const { off } = route.request().postDataJSON();
+  await mockPortal(page, async ({ path: p, method, json }) => {
+    if (p === '/api/projects') return { root: '/w', home: '/h', projects: [{ name: 'demo', path: '/w/demo', isGit: false, hasInstructions: false, hasTools: false, sessions: 0, lastActive: null }] };
+    if (p === '/api/tools' && method === 'GET') return { tools: seen.map((tool) => ({ ...tool, defaultOn: true })), off: [], names: {} };
+    if (p === '/api/tools' && method === 'PUT') {
+      const { off } = json();
       puts.push(off);
-      reply = { off, applied: 0 };
-    } else if (p === '/api/projects/demo/tools' && method === 'PUT') {
-      const { off } = route.request().postDataJSON();
+      return { off, applied: 0 };
+    }
+    if (p === '/api/projects/demo/tools' && method === 'PUT') {
+      const { off } = json();
       puts.push(off);
-      reply = { off, applied: 0 };
-    } else if (p === '/api/projects/demo/tools') reply = { live: false, off: [], names: {}, tools: seen.map((tool) => ({ ...tool, enabled: true, defaultOn: true })) };
-    else if (p === '/api/models') reply = { models: [], providers: {} };
-    await route.fulfill({ json: reply });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-    localStorage.removeItem('toolGroupsOpen');
-  });
+      return { off, applied: 0 };
+    }
+    if (p === '/api/projects/demo/tools') return { live: false, off: [], names: {}, tools: seen.map((tool) => ({ ...tool, enabled: true, defaultOn: true })) };
+  }, { settings: true });
+  await page.addInitScript(() => localStorage.removeItem('toolGroupsOpen'));
   await page.goto(path);
   return { puts };
 }

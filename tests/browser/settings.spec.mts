@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal, reply } from './portal-mock';
 
 interface Portal {
   models?: boolean;
@@ -37,35 +38,31 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
   ] : []);
   let saved: unknown = null;
   let installed: string[] = [];
-  await page.route('**/api/**', async (route) => {
-    const url = new URL(route.request().url());
-    const p = url.pathname;
-    const method = route.request().method();
+  await mockPortal(page, async ({ path: p, method, json }) => {
     calls.push(`${method} ${p}`);
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    let body: unknown = {};
-    if (p === '/api/auth/status') body = { authed: true, authRequired: Boolean(login), ...(login?.shortPassword ? { shortPassword: true } : {}) };
-    else if (p === '/api/sessions' && method === 'GET') body = { sessions: [], executor: 'host' };
-    else if (p === '/api/sessions') body = { id: 'new', title: 'New', workspace: '/w', status: 'idle', kind: 'task', pinned: false };
-    else if (p === '/api/settings' && method === 'PUT') {
-      const sent = route.request().postDataJSON();
+    if (p === '/api/auth/status') return { authed: true, authRequired: Boolean(login), ...(login?.shortPassword ? { shortPassword: true } : {}) };
+    if (p === '/api/sessions' && method === 'POST') return { id: 'new', title: 'New', workspace: '/w', status: 'idle', kind: 'task', pinned: false };
+    if (p === '/api/settings' && method === 'PUT') {
+      const sent = json();
       savingMost = Math.max(savingMost, ++savingNow);
       await wait(settingsSaveDelay?.(settingsSaves.length) ?? 0);
       savingNow--;
       // What the server ends on: the save that landed last.
       settingsSaves.push(sent);
       saved = sent;
-      body = { settings: {}, compaction: { keepRecentTokens: 20000 }, refreshed: 0, note: '' };
+      return { settings: {}, compaction: { keepRecentTokens: 20000 }, refreshed: 0, note: '' };
     }
-    else if (p === '/api/settings') {
+    if (p === '/api/settings') {
       await wait(slow + slowSettings);
-      body = {
+      return {
         settings: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' }, stored, defaults: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' },
         piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w',
       };
-    } else if (p === '/api/models') { await wait(slow * 2); body = { models: available(), providers: { 'llama-swap': 'llama-swap' } }; }
-    else if (p === '/api/routines/report-targets') { await wait(slow); body = { targets: [], default: null }; }
-    else if (p === '/api/providers') body = {
+    }
+    if (p === '/api/models') { await wait(slow * 2); return { models: available(), providers: { 'llama-swap': 'llama-swap' } }; }
+    if (p === '/api/routines/report-targets') { await wait(slow); return { targets: [], default: null }; }
+    if (p === '/api/providers') return {
       presets: [
         { kind: 'llama-cpp', label: 'llama.cpp', description: 'One llama-server', id: 'llama-server', endpoint: true, baseUrl: 'http://127.0.0.1:8080/v1', key: 'optional' },
         { kind: 'llama-swap', label: 'llama-swap', description: 'Several models, swapped in', id: 'llama-swap', endpoint: true, baseUrl: 'http://127.0.0.1:8080/v1', key: 'optional' },
@@ -78,34 +75,26 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
         ...(openRouterFromEnv ? [{ id: 'openrouter', kind: 'openrouter', label: 'OpenRouter', key: { set: true, source: 'environment' }, models: [], endpoint: false }] : []),
       ],
     };
-    else if (p === '/api/providers/status') body = { status: { 'llama-swap': { state: 'up', ms: 12, listed: 1, missing: ['Gone'], loaded: ['Ornith'] } } };
-    else if (p === '/api/extensions') { await wait(slow * 3); body = { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:pi-web-access', name: 'pi-web-access', settings: [{ key: 'braveApiKey', value: '', configured: false }, { key: 'safeSearch', value: true, configured: true }, { key: 'enableCache', value: '', configured: false }] }] }; }
-    else if (p === '/api/extensions/settings' && method === 'PUT') { extensionSaves.push(route.request().postDataJSON()); body = { ok: true }; }
-    else if (p === '/api/packages/catalog') body = { packages: [
+    if (p === '/api/providers/status') return { status: { 'llama-swap': { state: 'up', ms: 12, listed: 1, missing: ['Gone'], loaded: ['Ornith'] } } };
+    if (p === '/api/extensions') { await wait(slow * 3); return { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:pi-web-access', name: 'pi-web-access', settings: [{ key: 'braveApiKey', value: '', configured: false }, { key: 'safeSearch', value: true, configured: true }, { key: 'enableCache', value: '', configured: false }] }] }; }
+    if (p === '/api/extensions/settings' && method === 'PUT') { extensionSaves.push(json()); return { ok: true }; }
+    if (p === '/api/packages/catalog') return { packages: [
       { name: 'pi-web-access', version: '0.31.0', description: 'Web search for pi', weekly: 198311, keywords: ['pi-package'], provider: false, homepage },
       { name: 'pi-subagents', version: '0.71.0', description: 'Delegate to helpers', weekly: 100713, keywords: ['pi-package'], provider: false, date: new Date(Date.now() - 2 * 86400_000).toISOString() },
     ] };
-    else if (p === '/api/packages' && method === 'POST') { installed.push(route.request().postDataJSON().spec); body = { ok: true, output: '' }; }
-    else if (p === '/api/providers/probe' && probe) {
-      const asked: string = route.request().postDataJSON().baseUrl;
+    if (p === '/api/packages' && method === 'POST') { installed.push(json().spec); return { ok: true, output: '' }; }
+    if (p === '/api/providers/probe' && probe) {
+      const asked: string = json().baseUrl;
       await wait(probeDelay?.(asked) ?? 0);
       const listed = probe(asked);
-      if (!listed) return route.fulfill({ status: 502, json: { error: 'Nothing answered there.' } });
+      if (!listed) return reply(502, { error: 'Nothing answered there.' });
       // As the server says it: with its scheme and its /v1.
       const at = /\/v\d/.test(asked) ? asked : `${/^https?:/.test(asked) ? '' : 'http://'}${asked.replace(/\/+$/, '')}/v1`;
-      body = { baseUrl: at, models: listed.map((m) => (typeof m === 'string' ? { id: m } : m)) };
+      return { baseUrl: at, models: listed.map((m) => (typeof m === 'string' ? { id: m } : m)) };
     }
-    else if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push({ id: decodeURIComponent(p.split('/').pop()!), body: route.request().postDataJSON() }); body = { ok: true, ...(providerNote ? { note: providerNote } : {}) }; }
-    else if (p === '/api/providers/probe') return route.fulfill({ status: 502, json: { error: 'Nothing answered at 127.0.0.1:8080 — is the server running, and reachable from here?' } });
-    else if (p === '/api/tool-names') body = { names: {} };
-    else if (p === '/api/browser') body = { running: false, sessions: [], routines: [] };
-    else if (p === '/api/voice') body = { enabled: false };
-    else if (p === '/api/workspaces') body = { root: '/w', workspaces: [] };
-    await route.fulfill({ json: body });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-  });
+    if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push({ id: decodeURIComponent(p.split('/').pop()!), body: json() }); return { ok: true, ...(providerNote ? { note: providerNote } : {}) }; }
+    if (p === '/api/providers/probe') return reply(502, { error: 'Nothing answered at 127.0.0.1:8080 — is the server running, and reachable from here?' });
+  }, { setup: 'fresh', settings: true });
   return { calls, saved: () => saved, installed: () => installed, providerSaves, settingsSaves, extensionSaves, savingMost: () => savingMost };
 }
 

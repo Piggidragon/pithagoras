@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import { test, expect } from './portal-mock';
 import path from 'node:path';
 test('upload a voice reference, select it, save settings, and delete it',async({page})=>{
  let config={enabled:true,voice:'design',whisperUrl:'http://localhost/a',breezeUrl:'http://localhost/b',instruction:'Clear',cfgScale:4};

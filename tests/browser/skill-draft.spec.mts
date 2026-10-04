@@ -1,22 +1,14 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /** Settings → Skills with one skill the user can edit, over canned answers. */
 async function portal(page: Page, source: unknown = null) {
   const updates: string[] = [];
   const skill = { name: 'notes', description: 'Take notes', path: '/agent/skills/notes/SKILL.md', scope: 'user', editable: true, manualOnly: false, broken: false, enabled: true, source, content: '---\nname: notes\n---\nTake notes.' };
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    const method = route.request().method();
-    if (p === '/api/auth/status') return route.fulfill({ json: { authed: true, authRequired: false } });
-    if (p === '/api/sessions' && method === 'GET') return route.fulfill({ json: { sessions: [], executor: 'host' } });
-    if (p === '/api/skills/notes/update') { updates.push(method); skill.content = '---\nname: notes\n---\nTake the upstream notes.'; return route.fulfill({ json: { ok: true, imported: ['notes'] } }); }
-    if (p === '/api/skills') return route.fulfill({ json: { root: '/agent/skills', skills: [skill], diagnostics: [] } });
-    return route.fulfill({ json: {} });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-  });
+  await mockPortal(page, ({ path, method }) => {
+    if (path === '/api/skills/notes/update') { updates.push(method); skill.content = '---\nname: notes\n---\nTake the upstream notes.'; return { ok: true, imported: ['notes'] }; }
+    if (path === '/api/skills') return { root: '/agent/skills', skills: [skill], diagnostics: [] };
+  }, { settings: true });
   return updates;
 }
 

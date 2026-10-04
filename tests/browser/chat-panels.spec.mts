@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect } from './portal-mock';
 
 const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox())!;
 /** The panels in one place; with all of them in one place, the panels. */

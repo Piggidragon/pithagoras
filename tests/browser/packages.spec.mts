@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect, mockPortal } from './portal-mock';
 
 /**
  * Enter in the field that names a package: it must not start a second install
@@ -9,21 +10,14 @@ async function portal(page: Page, answers: Record<string, unknown>) {
   const posts: string[] = [];
   let release = () => {};
   const held = new Promise<void>((r) => (release = r));
-  await page.route('**/api/**', async (route) => {
-    const p = new URL(route.request().url()).pathname;
-    if (p === '/api/auth/status') return route.fulfill({ json: { authed: true, authRequired: false } });
-    if (p === '/api/sessions') return route.fulfill({ json: { sessions: [], executor: 'host' } });
-    if (route.request().method() === 'POST' && (p === '/api/packages' || p === '/api/channel-packages')) {
-      posts.push(`${p} ${route.request().postData()}`);
+  await mockPortal(page, async ({ path, method, route }) => {
+    if (method === 'POST' && (path === '/api/packages' || path === '/api/channel-packages')) {
+      posts.push(`${path} ${route.request().postData()}`);
       await held;
-      return route.fulfill({ json: { ok: true, output: '' } });
+      return { ok: true, output: '' };
     }
-    return route.fulfill({ json: answers[p] ?? {} });
-  });
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
-    localStorage.setItem('pithagoras.setup', 'done');
-  });
+    return answers[path];
+  }, { settings: true });
   return { posts, release };
 }
 
