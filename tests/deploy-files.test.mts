@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -37,6 +39,33 @@ test('what the docs tell a deployment to set reaches the container: the clock, t
     assert.match(read(file), /\$\{PORTAL_TLS_DIR:-\/dev\/null\}:\/certs:ro/, `${file} mounts the certificates`);
     // An empty TZ would make the runtime name its clock "Etc/Unknown" on the heartbeat and routine pages.
     assert.match(read(file), /TZ: \$\{TZ:-UTC\}/, `${file} gives the clock a zone when none is set`);
+  }
+});
+
+test('the command the deployment guide gives for .env writes a password and a folder as they were typed, whatever characters they hold', () => {
+  const command = /^printf '.*> \.env$/m.exec(read('docs/guide/deploying.md'))?.[0];
+  assert.ok(command, 'the guide has the command');
+  // A password manager's symbols: `%` and `\` are what printf reads as a conversion and an escape in its format.
+  const password = '50%off-%s-%b-\\n-$HOME';
+  const folder = '/srv/my %d repos';
+  const edited = command.replace("'something-long'", `'${password}'`).replace("'/path/to/repos'", `'${folder}'`);
+  assert.notEqual(edited, command, 'the placeholders are in the command');
+
+  const temp = mkdtempSync(path.join(process.env.TMPDIR || tmpdir(), 'pitha-env-'));
+  try {
+    // openssl is not what is under test, and is not on every machine.
+    mkdirSync(path.join(temp, 'bin'));
+    writeFileSync(path.join(temp, 'bin', 'openssl'), '#!/bin/sh\necho 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n');
+    chmodSync(path.join(temp, 'bin', 'openssl'), 0o755);
+    execFileSync('bash', ['-c', edited], { cwd: temp, env: { ...process.env, PATH: `${path.join(temp, 'bin')}:${process.env.PATH}` } });
+    assert.deepEqual(readFileSync(path.join(temp, '.env'), 'utf8').split('\n'), [
+      `PORTAL_PASSWORD=${password}`,
+      `WORKSPACES_DIR=${folder}`,
+      'PORTAL_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      '',
+    ]);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
   }
 });
 

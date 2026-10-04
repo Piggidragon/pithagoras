@@ -12,10 +12,11 @@ cd Pithagoras
 ```
 
 Create a `.env` next to `docker-compose.yml`. This writes one, with a secret of
-its own (change the password and the folder first):
+its own (change the password and the folder first, between the single quotes,
+where `%`, `$` and `\` are taken as they are):
 
 ```bash
-printf 'PORTAL_PASSWORD=something-long\nWORKSPACES_DIR=/path/to/repos\nPORTAL_SECRET=%s\n' "$(openssl rand -hex 32)" > .env
+printf 'PORTAL_PASSWORD=%s\nWORKSPACES_DIR=%s\nPORTAL_SECRET=%s\n' 'something-long' '/path/to/repos' "$(openssl rand -hex 32)" > .env
 ```
 
 Write `PORTAL_SECRET=` followed by the output of `openssl rand -hex 32` if you
