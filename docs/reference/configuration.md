@@ -44,7 +44,7 @@ an empty field inherits, and clearing one hands the setting back.
 | `SESSION_DIR` | `./data/sessions` (image: `/data/sessions`) | One folder per session, holding pi's conversation file. Removed when the session is deleted — with the container executor, a file written by another user can keep a folder from going; that is logged. |
 | `WORKSPACE_ROOT` | `/workspaces` | Directories sessions can be created against. `WORKSPACES_DIR` is read as well, when this is unset. |
 | `WORKSPACES_DIR` | — (required in Compose) | Compose only: the host folder mounted at `/workspaces`. Both Compose files refuse to start without it. |
-| `BIN_DIR` | `$DATA_DIR/bin` (image: `/data/bin`) | Persistent CLI installation directory added to PATH. |
+| `BIN_DIR` | `$DATA_DIR/bin` (image: `/data/bin`) | Persistent folder for command-line tools. The portal creates it. The image puts `/data/bin` last on `PATH`; with another value, or when you run from source, add the folder to `PATH` yourself. |
 | `PI_CODING_AGENT_DIR` | `$HOME/.pi/agent` | Override pi’s settings/package directory. |
 | `LLAMA_BASE_URL` | — | Read by pi’s installed llama extension; not by the portal directly. |
 | `CHANNELS_DIR` | `$DATA_DIR/channels` (image: `/data/channels`) | Installed channel packages. |

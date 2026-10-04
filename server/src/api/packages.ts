@@ -90,7 +90,9 @@ export function packagesRouter(): Router {
 
   router.post("/packages/update", async (_req, res) => {
     try {
-      const { stdout, stderr } = await pi(["update", "--all"]);
+      // The packages only: `--all` updates pi as well, which it cannot do where it is the portal's own locked copy
+      // (the image), and says so with an error after the packages were updated. pi comes with the portal's version.
+      const { stdout, stderr } = await pi(["update", "--extensions"]);
       res.json({ ok: true, output: (stdout + stderr).trim() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

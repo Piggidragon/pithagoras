@@ -123,6 +123,10 @@ transcripts, installed pi packages and installed channel packages all survive a
 rebuild. When the new version changes the database, the portal copies it aside
 and upgrades it before it starts serving; see [Upgrading](/guide/upgrading).
 
+The image runs the version of pi that the portal's lock file names, built in
+with it, so a new pi arrives with a new image and not with **Update all** in
+Settings → Extensions, which updates the installed packages only.
+
 ## What the web app is sent
 
 The build leaves a brotli and a gzip copy beside each script, style and model

@@ -276,8 +276,8 @@ const de: Locale = {
     "Ask the agent to create a canvas, or start a document here.": "Bitte den Agenten, ein Canvas anzulegen, oder beginne hier ein Dokument.",
     "Create canvas": "Canvas erstellen",
     // components/ChannelsPanel.tsx
-    "GitHub repo of a channel package": "GitHub-Repository eines Channel-Pakets",
-    "Channel name": "Name des Channels",
+    "GitHub repo of a channel package": "GitHub-Repository eines Kanal-Pakets",
+    "Channel name": "Name des Kanals",
     "Slug": "Slug",
     "starting": "startet",
     "error": "Fehler",
@@ -1280,7 +1280,7 @@ const de: Locale = {
     "Drag the bottom left corner to resize": "Untere linke Ecke ziehen, um die Größe zu ändern",
     // components/RoutinesPage.tsx
     "Routine name": "Name der Routine",
-    "Pick a time to run it at.": "Wähle eine Zeit, zu der es laufen soll.",
+    "Pick a time to run it at.": "Wähle eine Zeit, zu der sie laufen soll.",
     "ok": "ok",
     "Every 15 min": "Alle 15 Min.",
     "Hourly": "Stündlich",
@@ -2232,7 +2232,7 @@ const de: Locale = {
     "binary": "binär",
     // components/git/views.tsx
     "Mark resolved": "Als gelöst markieren",
-    "Show the other {n} files": { one: "Die anderen {n} Datei zeigen", other: "Die anderen {n} Dateien zeigen" },
+    "Show the other {n} files": { one: "Die andere Datei zeigen", other: "Die anderen {n} Dateien zeigen" },
     "No longer changed — it was committed, discarded, or put back as it was.": "Nicht mehr geändert — sie wurde committet, verworfen oder in den alten Zustand zurückversetzt.",
     "Nothing to show: nothing of it is staged.": "Nichts zu zeigen: nichts davon ist gestaget.",
     "Nothing to show: no changes in its text.": "Nichts zu zeigen: keine Änderungen am Text.",

@@ -204,6 +204,12 @@ test("a package pi cannot install is an error with pi's words, and the next one 
   assert.equal((await send("/api/packages", "POST", { spec: "npm:works" })).status, 200);
 });
 
+test("Update all updates the installed packages and leaves pi to the portal's own version", async () => {
+  assert.equal((await send("/api/packages/update", "POST")).status, 200);
+  // `--all` would have pi update itself too, which it refuses where it is the locked copy of the image.
+  assert.deepEqual(runs(), [["pi", "update", "--extensions"]]);
+});
+
 // --- channels ---
 
 const channelPort = async () => String(await freePort());

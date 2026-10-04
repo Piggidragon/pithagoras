@@ -40,8 +40,9 @@ running commands, so install ones you trust. The registry can be another one
 | path | `/absolute/path/to/package` |
 
 They persist across restarts, because `HOME` points at the data volume. **Update
-all** upgrades everything; the bin icon removes one. Chats started from then on
-have the package; open ones pick it up with `/reload`.
+all** upgrades the installed packages; pi itself comes with the portal's version,
+so a new pi arrives with an update of the portal. The bin icon removes one. Chats
+started from then on have the package; open ones pick it up with `/reload`.
 
 ## Switching one off
 

@@ -92,6 +92,13 @@ test("a translation fills in the same words, and a count's has every form", asyn
   }
 });
 
+test("German says Kanal for a channel, and not the English word beside it", async () => {
+  const { strings } = await load("de.ts");
+  const said = Object.entries(strings).flatMap(([key, text]) => (typeof text === "string" ? [[key, text]] : Object.values(text as Plural).map((form) => [key, form ?? ""])));
+  const english = said.filter(([, text]) => /\bChannels?\b/.test(text.replace(/\{\w+\}/g, "")));
+  assert.deepEqual(english.map(([key]) => key), []);
+});
+
 test("English is what the code says; another language where it has the text", () => {
   addLocale({ code: "xx", name: "Test", strings: { "Hello {name}": "Hallo {name}", "{n} files": { one: "eine Datei", other: "{n} Dateien" } } });
   try {

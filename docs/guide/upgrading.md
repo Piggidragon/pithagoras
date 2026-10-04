@@ -70,7 +70,7 @@ What the first start after an install of version 0.1.0, or of any build made bef
 - **The Upgrading page.** The database is checked, backed up and upgraded, as above. The schema version was raised for this release, so an install made before it goes through this once.
 - **A voice add-on.** The container of a voice add-on that an older version made is made again, with the engines and the card it had, the next time it is started or installed from Settings → Add-ons; the models and builds in its volume are kept. Rebuilding the portal does not touch it until then.
 - **`WORKSPACES_DIR` is required.** An install whose `.env` never set it was mounting the folder `/root/repos` of the host, and Compose now stops until the variable is set. Set it to the folder your repositories are in; for an install that relied on the old default, that is `/root/repos`. The Portainer stack asks for it too.
-- **The password.** A new or changed `PORTAL_PASSWORD` has to be at least 8 characters and not `change-me`. A portal that already ran with a shorter one keeps starting with it, with a warning; see [Deploying](/guide/deploying#environment).
+- **The password.** A portal whose `PORTAL_PASSWORD` is still `change-me`, the example of the first release's `.env.example`, no longer starts, so change it before you upgrade. A new or changed password has to be at least 8 characters; a portal that already ran with a shorter one keeps starting with it, with a warning. See [Deploying](/guide/deploying#environment).
 - **Channel packages.** A third-party channel has to say who sent each message (`from` in `ctx.ask`), or once a primary user is named its messages are turned away like a stranger's. See [Writing a channel](/channels/writing-a-channel).
 
 ## Pin a version
@@ -92,4 +92,4 @@ Run a release rather than `latest`, so that going back is changing one value. Ea
    - Portainer: set `PITHAGORAS_VERSION` to the release before.
    - Built from source: `docker tag pithagoras-portal:previous pithagoras-portal:latest`, then `docker compose up -d --no-build portal`.
 
-An older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.
+From this version on, an older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. Versions before this one open it anyway and run against it, so put the backup back before you start one of them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.
