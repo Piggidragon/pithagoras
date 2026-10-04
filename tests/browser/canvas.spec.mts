@@ -38,9 +38,7 @@ test('canvas streams on the stage, retains a partial draft and supports inline e
  await expect(page.getByText('Edited by you',{exact:false})).toBeVisible();
  const downloadEvent=page.waitForEvent('download');await page.getByLabel('Download canvas',{exact:true}).click();expect((await downloadEvent).suggestedFilename()).toBe('Human revision.md');
  await page.getByLabel('Store canvas',{exact:true}).click();await expect(page.getByLabel('Canvas stored',{exact:true})).toBeDisabled();
- await page.getByTestId('workspace').screenshot({path:'/tmp/pithagoras-canvas.png'});
  await page.setViewportSize({width:390,height:844});
- await page.getByTestId('workspace').screenshot({path:'/tmp/pithagoras-canvas-mobile.png'});
  // Its width animates to the new viewport: measured once it has got there.
  await expect.poll(async()=>{const box=await page.getByLabel('Session canvas workspace').boundingBox();return box!.x>=0&&box!.x+box!.width<=390;}).toBe(true);
  await page.getByLabel('Delete canvas').click();await page.getByRole('button',{name:'Delete',exact:true}).click();

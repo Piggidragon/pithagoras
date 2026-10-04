@@ -27,5 +27,4 @@ test('phone can send, open workspace navigation, and scroll slash commands witho
  const menu=page.locator('.prompt-shell > .absolute');await expect(menu).toBeVisible();
  expect(await menu.evaluate(e=>e.scrollHeight>e.clientHeight)).toBe(true);
  await menu.evaluate(e=>e.scrollTop=e.scrollHeight);expect(await menu.evaluate(e=>e.scrollTop)).toBeGreaterThan(0);
- await page.screenshot({path:'/tmp/pithagoras-mobile-issue3.png'});
 });

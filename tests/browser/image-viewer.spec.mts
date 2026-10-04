@@ -522,7 +522,6 @@ test('the viewer is as wide as the window on a phone, with the controls inside i
     expect(b.x + b.width).toBeLessThanOrEqual(win.width);
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: '/tmp/pithagoras-image-viewer-phone.png' });
 });
 
 test('Open in a new tab and Download are there for the file itself, and are the only way a tab opens', async ({ page }) => {

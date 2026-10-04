@@ -22,7 +22,6 @@ test('settings install progress, ready connection, and stop',async({page})=>{
  await page.getByRole('button',{name:'Stop · release VRAM'}).click();
  await expect(page.getByRole('button',{name:'Start voice',exact:true})).toBeEnabled();
  expect(actions).toEqual(['install','stop']);
- await page.screenshot({path:'/tmp/pithagoras-voice-addon.png'});
 });
 
 // The saved settings the install overwrote, as the portal puts them back, and the page that has to show them.
@@ -54,7 +53,6 @@ test('uninstall asks first and says what goes, keeps the downloads unless told, 
  await expect(dialog).toContainText('speech servers you set up yourself stay as they are');
  // Keeping the downloads is the default: a new install is then quick.
  await expect(dialog.getByRole('checkbox', { name: /Also delete the downloaded engines and models/ })).not.toBeChecked();
- await page.screenshot({ path: '/tmp/pithagoras-voice-uninstall.png' });
  await dialog.getByRole('button', { name: 'Cancel' }).click();
  await expect(dialog).toBeHidden();
  expect(requests).toEqual([]);
@@ -189,7 +187,6 @@ test('speech detection settings save and restore defaults',async({page})=>{
  await expect(silence).toHaveValue('500');
  await page.getByRole('button',{name:'Reset speech detection'}).click();
  await expect(silence).toHaveValue('1000');
- await page.screenshot({path:'/tmp/pithagoras-vad-settings.png'});
 });
 
 test('speaking instructions show the built-in text, save an edit and reset to the built-in text',async({page})=>{
@@ -238,7 +235,6 @@ test('speaking instructions show the built-in text, save an edit and reset to th
  await expect(text).toBeVisible();
  await expect(text).toHaveValue(builtIn);
  await reset.scrollIntoViewIfNeeded();
- await page.screenshot({path:'/tmp/pithagoras-speaking-instructions.png'});
 });
 
 test('speaking instructions say when the portal is set to send none',async({page})=>{
@@ -323,7 +319,6 @@ test('engine choice: the GPU is shown, the install picks for it by default, and 
  await synthesis.click();
  await page.getByRole('option',{name:/Chatterbox/}).click();
  await expect(page.getByText('Needs about 4.3 GiB of GPU memory. Fits.')).toBeVisible();
- await page.screenshot({path:'/tmp/pithagoras-voice-engines.png'});
  await page.getByRole('button',{name:'Install voice',exact:true}).click();
  await expect.poll(()=>posts.length).toBe(1);
  expect(posts[0]).toEqual({tts:'chatterbox',asr:'qwen3-asr',asrModel:'0.6b'});
@@ -490,7 +485,6 @@ test('engine choice: a GPU host also picks where recognition runs, and the CPU s
  await expect(page.getByRole('alert').filter({hasText:'more than this GPU has'})).toHaveCount(0);
  await expect(page.getByText('Needs about 2.9 GiB of memory on the CPU. Fits.')).toBeVisible();
  await expect(page.getByText('This host: 8 CPU threads, 16 GiB of memory, 11.7 GiB free')).toBeVisible();
- await page.screenshot({path:'/tmp/pithagoras-voice-engines-cpu.png'});
  await page.getByRole('button',{name:'Install voice',exact:true}).click();
  await expect.poll(()=>posts.length).toBe(1);
  expect(posts[0]).toEqual({tts:'breeze',asr:'qwen3-asr',asrModel:'1.7b',asrDevice:'cpu'});
@@ -538,7 +532,6 @@ test('engine choice: with no GPU everything runs on the CPU, which is said: Koko
  // Kokoro's memory and Whisper's, both on the CPU, and nothing on a GPU.
  await expect(page.getByText('Needs about 2.1 GiB of memory on the CPU. Fits.')).toBeVisible();
  await expect(page.getByText('Needs about',{exact:false}).filter({hasText:'GPU memory'})).toHaveCount(0);
- await page.screenshot({path:'/tmp/pithagoras-voice-engines-no-gpu.png'});
  await page.getByRole('button',{name:'Install voice',exact:true}).click();
  await expect.poll(()=>posts.length).toBe(1);
  expect(posts[0]).toEqual({tts:'kokoro',ttsDevice:'cpu',asr:'whisper',asrModel:'small'});
