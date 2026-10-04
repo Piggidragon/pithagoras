@@ -9,6 +9,7 @@ import { useFollowBottom } from "../use-follow-bottom";
 import { CompactionMarker, Ring, Shimmer, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { isEnter } from "../shortcuts";
 import { t, useLanguage } from "../i18n";
+import { tabKeys } from "../tab-keys";
 
 /**
  * The subagents of a chat, one at a time: what it is doing, drawn like the
@@ -44,9 +45,9 @@ export function SubagentPanel({
   return (
     <div className="sub-panel">
       {agents.length > 1 && (
-        <div className="sub-tabs" role="tablist" aria-label={t("Subagents")}>
+        <div className="sub-tabs" role="tablist" aria-label={t("Subagents")} onKeyDown={tabKeys}>
           {agents.map((a) => (
-            <button key={a.id} type="button" role="tab" aria-selected={a.id === agent.id} onClick={() => onSelect(a.id)} className={`sub-tab is-${a.status}`}>
+            <button key={a.id} type="button" role="tab" aria-selected={a.id === agent.id} tabIndex={a.id === agent.id ? 0 : -1} onClick={() => onSelect(a.id)} className={`sub-tab is-${a.status}`}>
               {a.status === "running" ? <Ring /> : <i className="bg-job-dot" aria-hidden />}
               {subagentName(a)}
             </button>

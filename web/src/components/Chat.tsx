@@ -45,8 +45,10 @@ import { local } from "../safe-storage";
 import { fancy, glide, launch, leaveRef, mark, settle, useLeaveRef, type Mark } from "../motion";
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, opensComposer, stopsRun } from "../shortcuts";
-import { DOCKED_MIN, EDGE, KEEP, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
+import { DOCKED_MIN, EDGE, KEEP, SPLIT, SPLIT_LEAST, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
 import { msg, t } from "../i18n";
+import { tabKeys } from "../tab-keys";
+import { STEP, arrowSteps } from "../resize-keys";
 
 // The terminal emulator is large and only a chat that opens a shell needs it.
 const TerminalPanel = lazyComponent(() => import("./TerminalPanel"), "TerminalPanel");
@@ -348,7 +350,7 @@ export function Chat({
   const [sizes, setSizes] = useState<PlaceSizes>(() => readPlaceSizes(local.get("panelSizes")));
   // Between the two panels in one place. One for all places: no more than two
   // panels are open (useWorkPanels), so only one place ever holds two.
-  const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || 0.55);
+  const [split, setSplit] = useState(() => Number(local.get("panelSplit")) || SPLIT);
   const [frames, setFrames] = useState<Frames>(() => readFrames(local.get("panelFloats")));
   useEffect(() => local.set("panelPlaces", JSON.stringify(places)), [places]);
   useEffect(() => local.set("panelSizes", JSON.stringify(sizes)), [sizes]);
@@ -491,6 +493,23 @@ export function Chat({
     if (el) Object.assign(el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
   };
 
+  /**
+   * What a side can be made, from the width drawn — at both sides, what the two
+   * gave way to. Made wider, the other side gives way, as far as it would for
+   * the side sized last (see sideStyle); the conversation keeps its room. No
+   * narrower than of use, unless drawn narrower already: then from there, not
+   * with a jump to the least.
+   */
+  const sideRange = (place: "left" | "right", el: HTMLElement, area: HTMLElement) => {
+    const other: "left" | "right" = place === "left" ? "right" : "left";
+    const them = asides.current[other];
+    const mine = el.getBoundingClientRect().width;
+    const room = area.clientWidth - KEEP.w - (them ? 2 : 1) * EDGE;
+    const least = Math.min(DOCKED_MIN.w, mine);
+    const most = Math.max(least, room - (them ? Math.min(DOCKED_MIN.w, widthAt(other), room) : 0));
+    return { other, them, mine, least, most };
+  };
+
   /** The edge between the conversation and the panels in a place: their width, or their height at the bottom. */
   const dragSize = (place: Exclude<Dock, "float">) => (e: React.PointerEvent) => {
     const el = asides.current[place], area = body.current;
@@ -513,17 +532,8 @@ export function Chat({
       );
       return;
     }
-    // From the width drawn — at both sides, what the two gave way to. Made
-    // wider, the other side gives way, as far as it would for the side sized
-    // last (see sideStyle); the conversation keeps its room. No narrower than
-    // of use, unless drawn narrower already: then from there, not with a
-    // jump to the least. Let go, this side is the one sized last.
-    const other: "left" | "right" = place === "left" ? "right" : "left";
-    const them = asides.current[other];
-    const mine = el.getBoundingClientRect().width;
-    const room = area.clientWidth - KEEP.w - (them ? 2 : 1) * EDGE;
-    const least = Math.min(DOCKED_MIN.w, mine);
-    const most = Math.max(least, room - (them ? Math.min(DOCKED_MIN.w, widthAt(other), room) : 0));
+    // Let go, this side is the one sized last.
+    const { other, them, mine, least, most } = sideRange(place, el, area);
     const after = (to: number): PlaceSizes => ({ ...sizes, [place]: to, lead: place });
     const draw = (s: PlaceSizes) => {
       Object.assign(el.style, sideStyle(place, s));
@@ -562,11 +572,52 @@ export function Chat({
     drag(
       e,
       (dx, dy) => {
-        ratio = Math.min(Math.max(across(place) ? (x + dx - box.left) / box.width : (y + dy - box.top) / box.height, 0.15), 0.85);
+        ratio = Math.min(Math.max(across(place) ? (x + dx - box.left) / box.width : (y + dy - box.top) / box.height, SPLIT_LEAST), 1 - SPLIT_LEAST);
         draw(ratio);
       },
       (cancelled) => (cancelled ? draw(split) : setSplit(ratio)),
     );
+  };
+
+  /**
+   * The keys of the edge between the conversation and the panels, for whoever has no pointer: an arrow
+   * moves the edge that way by a step (four with Shift), Home gives the place its first size back.
+   */
+  const keySize = (place: Exclude<Dock, "float">) => (e: React.KeyboardEvent) => {
+    const area = body.current;
+    if (!area) return;
+    const bottom = place === "bottom";
+    if (e.key === "Home") {
+      e.preventDefault();
+      return setSizes((s) => ({ ...s, [place]: undefined }));
+    }
+    const steps = arrowSteps(e, bottom ? "y" : "x");
+    if (!steps) return;
+    e.preventDefault();
+    // The edge goes the way the arrow points, as it does with the pointer: a panel at the right is wider for a move to the left.
+    const delta = steps * STEP * (place === "right" || bottom ? -1 : 1);
+    if (bottom) {
+      const within = { w: area.clientWidth, h: area.clientHeight };
+      const from = dockedSize({ width: 0, height: heightAt() }, within).height;
+      const to = dockedSize({ width: 0, height: from + delta }, within).height;
+      return setSizes((s) => ({ ...s, bottom: to }));
+    }
+    const el = asides.current[place];
+    if (!el) return;
+    const { mine, least, most } = sideRange(place, el, area);
+    setSizes({ ...sizes, [place]: Math.round(Math.min(most, Math.max(least, mine + delta))), lead: place });
+  };
+
+  /** The keys of the edge between two panels in one place: an arrow moves it that way, Home puts it back in the middle. */
+  const keySplit = (place: Dock) => (e: React.KeyboardEvent) => {
+    if (e.key === "Home") {
+      e.preventDefault();
+      return setSplit(SPLIT);
+    }
+    const steps = arrowSteps(e, across(place) ? "x" : "y");
+    if (!steps) return;
+    e.preventDefault();
+    setSplit(Math.min(Math.max(split + steps * 0.05, SPLIT_LEAST), 1 - SPLIT_LEAST));
   };
 
   /** Done carrying or sizing: the room measured again, for whatever changed meanwhile. */
@@ -595,6 +646,21 @@ export function Chat({
         stopMoving();
       },
     );
+  };
+
+  /** The keys of a floating window's corner: an arrow makes it larger or smaller by a step, Home, Enter or Space give it the size it first had. */
+  const keyFrame = (kind: AsidePanel) => (e: React.KeyboardEvent) => {
+    const from = placed(kind);
+    const reset = e.key === "Home" || e.key === "Enter" || e.key === " ";
+    const wide = arrowSteps(e, "x"), tall = arrowSteps(e, "y");
+    if (!reset && !wide && !tall) return;
+    e.preventDefault();
+    // The size it had before it was ever sized by hand.
+    const first = fitFrame(before.frame, room);
+    const w = reset ? first.w : from.w + wide * STEP, h = reset ? first.h : from.h + tall * STEP;
+    const at = fitFrame({ ...from, w: Math.min(w, room.w - from.x), h: Math.min(h, room.h - from.y) }, room);
+    setFrames((f) => ({ ...f, [kind]: at }));
+    setOnTop(kind);
   };
 
   /**
@@ -1378,23 +1444,23 @@ export function Chat({
           <LuGripVertical aria-hidden className="h-3.5 w-3.5" />
         </span>
         {kind === "terminal" ? (
-          <div className="chat-tabs" role="tablist" aria-label={t("Terminals")}>
-            <button type="button" role="tab" aria-selected={terminalTab === "agent"} onClick={() => setTerminalTab("agent")}>
+          <div className="chat-tabs" role="tablist" aria-label={t("Terminals")} onKeyDown={tabKeys}>
+            <button type="button" role="tab" aria-selected={terminalTab === "agent"} tabIndex={terminalTab === "agent" ? 0 : -1} onClick={() => setTerminalTab("agent")}>
               {t("Agent")}
               {running && <i className="chat-tab-live" aria-label={t("Running")} />}
             </button>
-            <button type="button" role="tab" aria-selected={terminalTab === "jobs"} onClick={() => setTerminalTab("jobs")}>
+            <button type="button" role="tab" aria-selected={terminalTab === "jobs"} tabIndex={terminalTab === "jobs" ? 0 : -1} onClick={() => setTerminalTab("jobs")}>
               {t("Background")}
               {background.jobs.some((j) => j.state === "running" && !j.attached) && <i className="chat-tab-live" aria-label={t("Running")} />}
             </button>
-            <button type="button" role="tab" aria-selected={terminalTab === "shell"} onClick={() => setTerminalTab("shell")}>
+            <button type="button" role="tab" aria-selected={terminalTab === "shell"} tabIndex={terminalTab === "shell" ? 0 : -1} onClick={() => setTerminalTab("shell")}>
               {t("Your shell")}
             </button>
           </div>
         ) : kind === "git" ? (
-          <div className="chat-tabs" role="tablist" aria-label={t("Git")}>
+          <div className="chat-tabs" role="tablist" aria-label={t("Git")} onKeyDown={tabKeys}>
             {GIT_TABS.map((tab) => (
-              <button key={tab.id} type="button" role="tab" aria-selected={gitTab === tab.id} onClick={() => setGitTab(tab.id)}>
+              <button key={tab.id} type="button" role="tab" aria-selected={gitTab === tab.id} tabIndex={gitTab === tab.id ? 0 : -1} onClick={() => setGitTab(tab.id)}>
                 {t(tab.label)}
                 {tab.id === "changes" && gitCount > 0 && <span className="ml-1 rounded-full bg-fg/10 px-1 text-[10px]">{gitCount}</span>}
               </button>
@@ -1483,8 +1549,16 @@ export function Chat({
         {i > 0 && (
           <div
             onPointerDown={dragSplit(place)}
+            onKeyDown={keySplit(place)}
             title={t("Drag to resize")}
-            className={`shrink-0 touch-none bg-line transition hover:bg-accent/40 ${across(place) ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize"}`}
+            role="separator"
+            tabIndex={0}
+            aria-label={t("Space between the two panels")}
+            aria-orientation={across(place) ? "vertical" : "horizontal"}
+            aria-valuenow={Math.round(split * 100)}
+            aria-valuemin={Math.round(SPLIT_LEAST * 100)}
+            aria-valuemax={Math.round((1 - SPLIT_LEAST) * 100)}
+            className={`shrink-0 touch-none bg-line transition hover:bg-accent/40 focus-visible:bg-accent ${across(place) ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize"}`}
           />
         )}
         <div
@@ -1518,8 +1592,16 @@ export function Chat({
     const edge = (
       <div
         onPointerDown={dragSize(place)}
+        onKeyDown={keySize(place)}
         title={t("Drag to resize")}
-        className={`chat-aside-edge shrink-0 touch-none bg-line transition hover:bg-accent/40 max-md:hidden ${wide ? "h-1 cursor-row-resize" : "w-1 cursor-col-resize"}`}
+        role="separator"
+        tabIndex={0}
+        aria-label={wide ? t("Height of the panels at the bottom") : place === "left" ? t("Width of the panels on the left") : t("Width of the panels on the right")}
+        aria-orientation={wide ? "horizontal" : "vertical"}
+        aria-valuenow={Math.round(wide ? heightAt() : widthAt(place))}
+        aria-valuemin={wide ? DOCKED_MIN.h : DOCKED_MIN.w}
+        aria-valuemax={Math.max(Math.round(wide ? heightAt() : widthAt(place)), wide ? innerHeight : innerWidth)}
+        className={`chat-aside-edge shrink-0 touch-none bg-line transition hover:bg-accent/40 focus-visible:bg-accent max-md:hidden ${wide ? "h-1 cursor-row-resize" : "w-1 cursor-col-resize"}`}
       />
     );
     return place === "left" ? <>{aside}{edge}</> : <>{edge}{aside}</>;
@@ -1538,7 +1620,16 @@ export function Chat({
         className={`chat-aside flex flex-col overflow-hidden ${ASIDE.float} ${onTop === kind ? "!z-[21]" : ""} ${COVER}`}
       >
         {slotsIn("float", [kind])}
-        <div onPointerDown={sizeFrame(kind)} title={t("Drag to resize")} aria-hidden="true" className="chat-aside-grip max-md:hidden" />
+        <div
+          onPointerDown={sizeFrame(kind)}
+          onKeyDown={keyFrame(kind)}
+          title={t("Drag to resize")}
+          role="button"
+          tabIndex={0}
+          aria-label={t("Resize {panel}", { panel: t(PANEL[kind].label) })}
+          aria-description={t("The arrow keys make the window larger or smaller, Home gives it its first size back.")}
+          className="chat-aside-grip max-md:hidden"
+        />
       </aside>
     );
   };

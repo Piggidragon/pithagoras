@@ -28,6 +28,7 @@ import { StatusDot } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { pollWhileVisible } from "../poll";
 import { msg, t, tp } from "../i18n";
+import { tabKeys } from "../tab-keys";
 import { useFlash } from "../use-flash";
 import { when } from "../time";
 
@@ -541,13 +542,14 @@ type AgentTab = (typeof AGENT_TABS)[number][0];
 /** The tabs under an agent's header; Activity counts what is unread. */
 function AgentTabs({ tab, onTab, unread }: { tab: AgentTab; onTab: (id: AgentTab) => void; unread: number }) {
   return (
-    <div role="tablist" aria-label={t("Agent sections")} className="mt-5 flex gap-1 overflow-x-auto border-b border-line">
+    <div role="tablist" aria-label={t("Agent sections")} onKeyDown={tabKeys} className="mt-5 flex gap-1 overflow-x-auto border-b border-line">
       {AGENT_TABS.map(([id, label]) => (
         <button
           key={id}
           role="tab"
           type="button"
           aria-selected={tab === id}
+          tabIndex={tab === id ? 0 : -1}
           onClick={() => onTab(id)}
           className={`-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition ${
             tab === id ? "border-accent text-fg" : "border-transparent text-fg-muted hover:text-fg"

@@ -34,6 +34,9 @@ export const across = (dock: Dock) => dock === "bottom";
 export const KEEP = { w: 320, h: 260 };
 /** The least docked panels are made: at a side, and at the bottom. */
 export const DOCKED_MIN = { w: 320, h: 160 };
+/** Where the edge between two panels in one place starts, and the least either may have of the room. */
+export const SPLIT = 0.55;
+export const SPLIT_LEAST = 0.15;
 
 /**
  * The size docked panels are dragged to in a chat of `area`'s size: no more

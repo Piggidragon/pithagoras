@@ -3,6 +3,7 @@ import { LuCheck, LuPalette, LuRefreshCw, LuRotateCcw } from "react-icons/lu";
 import { Modal } from "./Modal";
 import { api } from "../api";
 import { msg, t } from "../i18n";
+import { tabKeys } from "../tab-keys";
 import { DEFAULT_ORB, ORB_PALETTES, itemColor, type OrbEyes, type OrbFinish, type OrbHat, type OrbPattern, type OrbPersonality, type OrbProp, type OrbState, type OrbStyle } from "../../../server/src/orb-style";
 import { ORB_STYLE_EVENT, VoiceOrb, type VoiceLevels } from "./VoiceOrb";
 import { VoicePicker } from "./AgentVoice";
@@ -241,22 +242,13 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
             role="tablist"
             aria-label={t("Avatar sections")}
             className="flex gap-1 overflow-x-auto border-b border-line"
-            onKeyDown={(e) => {
-              const at = TABS.findIndex(([id]) => id === tab);
-              const next = e.key === "ArrowRight" ? at + 1 : e.key === "ArrowLeft" ? at - 1 : e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : null;
-              if (next === null) return;
-              e.preventDefault();
-              const id = TABS[(next + TABS.length) % TABS.length][0];
-              setTab(id);
-              (e.currentTarget.querySelector(`[data-tab="${id}"]`) as HTMLElement | null)?.focus();
-            }}
+            onKeyDown={tabKeys}
           >
             {TABS.map(([id, label]) => (
               <button
                 key={id}
                 type="button"
                 role="tab"
-                data-tab={id}
                 aria-selected={tab === id}
                 tabIndex={tab === id ? 0 : -1}
                 onClick={() => setTab(id)}

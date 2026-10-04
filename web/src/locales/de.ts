@@ -328,6 +328,12 @@ const de: Locale = {
     "required": "erforderlich",
     "Cancel": "Abbrechen",
     // components/Chat.tsx
+    "Space between the two panels": "Aufteilung zwischen den beiden Bereichen",
+    "Height of the panels at the bottom": "Höhe der Bereiche unten",
+    "Width of the panels on the left": "Breite der Bereiche links",
+    "Width of the panels on the right": "Breite der Bereiche rechts",
+    "Resize {panel}": "Größe von {panel} ändern",
+    "The arrow keys make the window larger or smaller, Home gives it its first size back.": "Die Pfeiltasten machen das Fenster größer oder kleiner, Pos1 gibt ihm seine erste Größe zurück.",
     "The run has finished.": "Der Lauf ist beendet.",
     "Close the browser": "Browser schließen",
     "Subagents": "Subagents",
@@ -1257,6 +1263,8 @@ const de: Locale = {
     "Context window of {model}": "Kontextfenster von {model}",
     "Thinks before answering": "Denkt vor dem Antworten",
     // components/ResizeHandles.tsx
+    "Resize the window": "Fenstergröße ändern",
+    "The arrow keys make the window larger or smaller, Home gives it back to the layout.": "Die Pfeiltasten machen das Fenster größer oder kleiner, Pos1 gibt es an das Layout zurück.",
     "Drag the right edge to resize": "Rechten Rand ziehen, um die Größe zu ändern",
     "Drag the left edge to resize": "Linken Rand ziehen, um die Größe zu ändern",
     "Drag the bottom edge to resize": "Unteren Rand ziehen, um die Größe zu ändern",

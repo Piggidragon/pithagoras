@@ -137,7 +137,9 @@ the voice turns you take, see [Voice latency profiling](/guide/voice-profiling).
 corner, to make it the size you want; the canvas panel has the same grips. A
 window keeps that size until the windows are arranged differently — one opens
 or closes — and then the layout places them again. On a phone the windows take
-the width and cannot be resized.
+the width and cannot be resized. Without a pointer, a window's bottom corner is
+reached with `Tab`: the arrow keys make the window larger or smaller (`Shift`
+for bigger steps), and `Home` or `Enter` give it back to the layout.
 
 **Reloading.** A reload keeps voice mode on in that tab. Where the browser will
 not play audio before the page is touched, the voice screen says "Click or

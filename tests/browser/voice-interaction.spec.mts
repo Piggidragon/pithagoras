@@ -320,6 +320,31 @@ test('windows can be resized by their edges, until the windows are arranged anew
   expect(await terminal.evaluate(el => el.style.width)).toBe('');
 });
 
+test('a window is sized from its corner with the arrow keys, and Home hands it back to the layout', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Show terminal' }).click();
+  const terminal = page.locator('.voice-terminal-window');
+  await settled(page);
+  const before = (await terminal.boundingBox())!;
+  // One grip of the five is reached with Tab: the corner.
+  const grip = terminal.getByRole('button', { name: 'Resize the window' });
+  await expect(grip).toHaveCount(1);
+  await grip.focus();
+  // Smaller, where it already fills the stage to the dock.
+  await page.keyboard.press('Shift+ArrowLeft');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await expect(terminal).toHaveAttribute('data-sized', 'pin');
+  const after = (await terminal.boundingBox())!;
+  expect(after.width).toBeCloseTo(before.width - 96, 0);
+  expect(after.height).toBeCloseTo(before.height - 48, 0);
+  // The corner moved, not the window: its left edge stayed.
+  expect(after.x).toBeCloseTo(before.x, 0);
+  await page.keyboard.press('Home');
+  await expect(terminal).not.toHaveAttribute('data-sized', /.+/);
+  expect(await terminal.evaluate(el => el.style.width)).toBe('');
+});
+
 test('the conversation window renders a reply as markdown, also while it is written, and puts it in a speech bubble apart from what the user said', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Show the conversation' }).click();

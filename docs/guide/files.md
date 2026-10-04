@@ -93,3 +93,10 @@ you sized last keeps its width and the other gives way first; it gets its width
 back as soon as there is room again. A panel you have never moved goes where
 all of them went before. A panel carried to another place flies there from where
 you let go of it, unless [the animations](/guide/interface#animations) are off.
+
+Sizing needs no pointer: the edge between the conversation and the panels, the
+edge between two panels and a floating window's corner are reached with `Tab`.
+An arrow key moves the edge that way by a step (`Shift` makes it four), and
+`Home` gives it its first size back; a window's corner takes `Enter` for that
+too. A list of tabs, such as the terminal's, is one stop for `Tab`; the arrow
+keys, `Home` and `End` go through it.

@@ -415,7 +415,7 @@
 .resize-se::after, .resize-sw::after { content: ""; position: absolute; bottom: 4px; width: 8px; height: 8px; border-bottom: 2px solid rgb(var(--fg) / .35); opacity: 0; transition: opacity .2s; }
 .resize-se::after { right: 4px; border-right: 2px solid rgb(var(--fg) / .35); border-bottom-right-radius: 3px; }
 .resize-sw::after { left: 4px; border-left: 2px solid rgb(var(--fg) / .35); border-bottom-left-radius: 3px; }
-:is(.voice-browser-window, .voice-terminal-window, .voice-files-window, .canvas-panel):hover > :is(.resize-se, .resize-sw)::after { opacity: 1; }
+:is(.voice-browser-window, .voice-terminal-window, .voice-files-window, .canvas-panel):hover > :is(.resize-se, .resize-sw)::after, .resize-handle:focus-visible::after { opacity: 1; }
 .canvas-panel { position: relative; }
 /* While dragging, a frame under the pointer (the browser) must not take the moves, and text is not selected. */
 body.is-resizing { user-select: none; -webkit-user-select: none; }
