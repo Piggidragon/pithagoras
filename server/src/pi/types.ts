@@ -119,6 +119,13 @@ export interface PiClient extends EventEmitter {
    * dropped, as pi had queued them.
    */
   clearQueue?(): string[];
+  /**
+   * Tells the extensions their pi is being let go, as pi's own runtime does
+   * before it disposes one: that is where they stop their timers and the
+   * processes they started. Settles when they have, or have said they cannot.
+   * Optional: a pi in a process of its own does this as it exits.
+   */
+  shutdown?(): Promise<void>;
   dispose(): void;
 
   getState(): Promise<PiState>;

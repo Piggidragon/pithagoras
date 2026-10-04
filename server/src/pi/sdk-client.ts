@@ -266,6 +266,7 @@ function callable(obj: any, key: string): any {
  */
 export class SdkPiClient extends EventEmitter implements PiClient {
   private disposed = false;
+  private toldShutdown = false;
   private canvases?: CanvasTools;
   private voiceFirst?: VoiceFirstTurn;
   private audioRule?: AudioRule;
@@ -977,6 +978,23 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   clearQueue(): string[] {
     const { steering, followUp } = this.session.clearQueue();
     return [...steering, ...followUp].map(String);
+  }
+
+  /**
+   * What pi's own runtime does before it lets a session go. AgentSession.dispose()
+   * does not: it is the runtime that tells the extensions, and this portal has
+   * none. They stop their timers and the servers they started there. Left
+   * unsaid, each pi that was released stayed running and in memory.
+   */
+  async shutdown(): Promise<void> {
+    if (this.disposed || this.toldShutdown) return;
+    this.toldShutdown = true;
+    try {
+      const runner = this.session.extensionRunner;
+      if (runner?.hasHandlers?.("session_shutdown")) await runner.emit({ type: "session_shutdown", reason: "quit" });
+    } catch {
+      // An extension that fails to wind down must not keep its pi from being let go.
+    }
   }
 
   dispose(): void {

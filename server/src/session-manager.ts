@@ -17,6 +17,8 @@ import { projectOf } from "./workspaces.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/session-edit.js";
 import { AUDIO_MESSAGE_PREFIX } from "./pi/voice-first.js";
+import { isDialog } from "./pi/ui-requests.js";
+import { forgetTaint } from "./pi/guard.js";
 import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
@@ -287,6 +289,8 @@ interface LiveSession {
 class SessionManager extends EventEmitter {
   private live = new Map<string, LiveSession>();
   private stopping = new WeakSet<PiClient>();
+  /** The pis being let go, by chat: a new one is not started beside the old one's shutdown. */
+  private releasing = new Map<string, Promise<void>>();
   private stream = new LiveEvents(appendEvent);
   /** Model failures pi has not recovered from: see model-errors.ts. */
   private modelErrors = new ModelErrors();
@@ -445,7 +449,10 @@ class SessionManager extends EventEmitter {
 
   /** Stream updates in memory; persist completed messages and lifecycle metadata. */
   private record(sessionId: string, type: string, payload: unknown): EventRow | undefined {
-    this.touch(sessionId);
+    // A status line or a widget describes the chat; nobody is using it. An
+    // extension that refreshes one every second kept the idle clock at zero, and
+    // the reaper never let go of the chat.
+    if (type !== "extension_ui_request" || isDialog((payload as { method?: unknown })?.method)) this.touch(sessionId);
     if (EPHEMERAL_EVENTS.has(type)) {
       // Still deliver it to anyone attached right now, with a negative seq so
       // it can never be confused with a stored event during replay.
@@ -916,6 +923,9 @@ class SessionManager extends EventEmitter {
   }
 
   private async startClient(sessionId: string): Promise<PiClient> {
+    // The pi that was let go still has its extensions winding down, on the same
+    // conversation file: the next one starts after them.
+    await this.releasing.get(sessionId);
     const session = getSession(sessionId);
     if (!session) throw new Error(`Unknown session ${sessionId}`);
 
@@ -2517,16 +2527,44 @@ class SessionManager extends EventEmitter {
 
   async stop(sessionId: string): Promise<void> {
     const live = this.live.get(sessionId);
-    if (!live) return;
+    // One that is being let go already: whoever stops it again waits for that.
+    if (!live) return this.releasing.get(sessionId);
     // Said while its events are still heard: a background subagent goes with
     // its pi, and nothing else would say it ended.
     live.client.endSubagents?.("Its chat's pi was stopped");
     this.stopping.add(live.client);
-    live.client.dispose();
     this.live.delete(sessionId);
     this.stream.clear(sessionId);
     this.forgetPi(sessionId);
-    await live.executor.cleanup?.(sessionId).catch(() => {});
+    const release = this.release(sessionId, live);
+    this.releasing.set(sessionId, release);
+    try {
+      await release;
+    } finally {
+      if (this.releasing.get(sessionId) === release) this.releasing.delete(sessionId);
+    }
+  }
+
+  /**
+   * Lets go of a pi the way pi's own runtime does: its extensions are told
+   * first, so that they stop their timers and processes, and then it is
+   * disposed. Without the first step each release left them running, and the
+   * guard's hook on the conversation kept the whole pi in memory.
+   */
+  private async release(sessionId: string, { client, executor }: LiveSession): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      Promise.resolve()
+        .then(() => client.shutdown?.())
+        .catch(() => {}),
+      // An extension that never answers must not keep a chat from being stopped.
+      new Promise<void>((resolve) => (timer = setTimeout(resolve, this.releaseMs))),
+    ]);
+    clearTimeout(timer);
+    client.dispose();
+    // Whether or not the guard heard of the shutdown: its hook holds the pi.
+    forgetTaint(sessionId);
+    await executor.cleanup?.(sessionId).catch(() => {});
   }
 
   /** pi is gone, and what it was holding with it. */
@@ -2611,6 +2649,9 @@ class SessionManager extends EventEmitter {
 
   /** How long a restart waits for a run to wind down: a pi that will not is not worth holding it for. */
   abortGraceMs = 3_000;
+
+  /** How long letting a pi go waits for its extensions to wind down: one that hangs is let go anyway. */
+  releaseMs = 3_000;
 
   /**
    * Whether the portal is stopping. A run that ends from here on was aborted by

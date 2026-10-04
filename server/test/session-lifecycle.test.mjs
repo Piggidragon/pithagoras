@@ -21,6 +21,7 @@ const { findSessionFile } = await import("../dist/pi/session-file.js");
 const { routineSupervisor } = await import("../dist/routines/supervisor.js");
 const { beginCanvasWrite, createCanvas, listCanvases, markCanvasRead, saveCanvasPrefix } = await import("../dist/canvases.js");
 const { proxyBaseUrl, startLlamaProxy } = await import("../dist/llama-progress.js");
+const { guardExtension, taintSession } = await import("../dist/pi/guard.js");
 
 test.after(() => getDb().close());
 
@@ -32,6 +33,8 @@ class FakePi extends EventEmitter {
   dialogs = 0;
   prompts = [];
   aborted = 0;
+  /** What it was told to do to let go, in order. */
+  calls = [];
   constructor(opts, file) {
     super();
     this.sessionFile = file ?? path.join(opts.sessionDir, "conversation.jsonl");
@@ -44,7 +47,8 @@ class FakePi extends EventEmitter {
   async prompt(message) { this.prompts.push(message); return { outcome: "started" }; }
   clearQueue() { return []; }
   async abort() { this.aborted++; await this.onAbort?.(); }
-  dispose() { this.disposed = true; this.emit("exit", { code: 0, signal: null }); }
+  async shutdown() { this.calls.push("shutdown"); await this.onShutdown?.(); }
+  dispose() { this.calls.push("dispose"); this.disposed = true; this.emit("exit", { code: 0, signal: null }); }
 }
 
 /** Every pi started, and what holds the next launch back. */
@@ -480,6 +484,106 @@ test("whatever pi says, and whatever asks something of it, counts as use", async
   const stopped = await sessions.reapIdle();
   assert.ok(!stopped.includes(said.id) && !stopped.includes(asked.id));
   assert.equal(said.pi.disposed || asked.pi.disposed, false);
+});
+
+/** The guard's hook on a conversation, as pi's start of one leaves it. */
+const hookGuard = (id) => guardExtension("g", undefined, id)({ on() {} });
+
+test("a pi that is let go is told first, so that its extensions stop what they started, and nothing of it stays in memory", async () => {
+  const { id, pi } = await idleFor(60);
+  hookGuard(id);
+  assert.equal(taintSession(id), true, "the guard holds the conversation while it runs");
+  assert.ok((await sessions.reapIdle()).includes(id));
+  assert.deepEqual(pi.calls, ["shutdown", "dispose"], "the extensions hear of it before pi goes");
+  assert.equal(taintSession(id), false, "the guard's hook, which holds the whole pi, is let go");
+});
+
+test("an extension that never winds down, or fails to, does not keep a pi from being let go", async () => {
+  const slow = sessions.releaseMs;
+  sessions.releaseMs = 40;
+  try {
+    const hung = await idleFor(60);
+    hookGuard(hung.id);
+    hung.pi.onShutdown = () => new Promise(() => {});
+    const failed = await idleFor(60);
+    failed.pi.onShutdown = async () => {
+      throw new Error("a handler that threw");
+    };
+    const started = Date.now();
+    const stopped = await sessions.reapIdle();
+    assert.ok(stopped.includes(hung.id) && stopped.includes(failed.id));
+    assert.ok(Date.now() - started < 2000, "gave up on it");
+    assert.equal(hung.pi.disposed && failed.pi.disposed, true);
+    assert.equal(taintSession(hung.id), false, "its guard hook goes whether or not the guard heard of it");
+  } finally {
+    sessions.releaseMs = slow;
+  }
+});
+
+test("a message for a chat whose pi is winding down starts the next one after it, not beside it", async () => {
+  const { id, pi } = await idleFor(60);
+  let finish;
+  pi.onShutdown = () => new Promise((resolve) => (finish = resolve));
+  const stopping = sessions.stop(id);
+  await until(() => finish, "the extensions to be told");
+  const before = launched.length;
+  let again = false;
+  const second = sessions.stop(id).then(() => (again = true));
+  const sent = sessions.prompt(id, "back again");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(launched.length, before, "no second pi while the first is winding down");
+  assert.equal(again, false, "and a second stop waits for it too");
+  assert.equal(pi.disposed, false);
+
+  finish();
+  await Promise.all([stopping, second]);
+  assert.equal(await sent, true);
+  assert.equal(launched.length, before + 1);
+  assert.equal(pi.disposed, true);
+  assert.deepEqual(lastPi().prompts, ["back again"]);
+});
+
+test("the SDK client tells the extensions their session ends, once, and only if one is listening", async () => {
+  const sent = [];
+  const client = (handlers, emit) => {
+    const pi = Object.create(SdkPiClient.prototype);
+    pi.session = {
+      extensionRunner: {
+        hasHandlers: (name) => name === "session_shutdown" && handlers,
+        emit: async (event) => {
+          sent.push(event);
+          await emit?.();
+        },
+      },
+    };
+    return pi;
+  };
+  const listening = client(true);
+  await listening.shutdown();
+  await listening.shutdown();
+  assert.deepEqual(sent, [{ type: "session_shutdown", reason: "quit" }], "once, as pi's own runtime says it");
+
+  sent.length = 0;
+  await client(false).shutdown();
+  assert.deepEqual(sent, [], "nobody listening: nothing to say");
+
+  await client(true, async () => {
+    throw new Error("an extension that fails");
+  }).shutdown();
+  assert.equal(sent.length, 1, "a failing extension is not the portal's failure");
+});
+
+test("a status line or a widget an extension refreshes is not use, and a question to the person is", async () => {
+  const quiet = await idleFor(60);
+  const base = { type: "extension_ui_request", method: "setStatus", statusKey: "bg", statusText: "0 tasks" };
+  quiet.pi.emit("event", { ...base, id: "a" });
+  quiet.pi.emit("event", { ...base, id: "b", method: "setWidget", widgetKey: "bg", widgetContent: [] });
+  quiet.pi.emit("event", { ...base, id: "c", method: "setTitle", title: "t" });
+  const asked = await idleFor(60);
+  asked.pi.emit("event", { type: "extension_ui_request", id: "d", method: "select", title: "Which?", options: ["a", "b"] });
+  const stopped = await sessions.reapIdle();
+  assert.ok(stopped.includes(quiet.id), "an idle chat with a live status line is let go all the same");
+  assert.ok(!stopped.includes(asked.id), "a question counts as use");
 });
 
 test("the reaper runs on its own and stops with the server", async () => {

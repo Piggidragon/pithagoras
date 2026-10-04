@@ -606,6 +606,15 @@ export function taintSession(portalSessionId: string): boolean {
   return Boolean(taint);
 }
 
+/**
+ * Lets go of a conversation's taint hook, which holds its whole pi in memory
+ * for as long as it is listed. The guard's own session_shutdown does it too;
+ * this is for a pi whose extensions never got to hear of the shutdown.
+ */
+export function forgetTaint(portalSessionId: string): void {
+  taints.delete(portalSessionId);
+}
+
 /** An ExtensionFactory — see pi's InlineExtension. One instance per session. */
 export function guardExtension(
   sessionId: string,

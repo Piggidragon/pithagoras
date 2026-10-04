@@ -127,6 +127,21 @@ anything.
 
 An unanswered dialog times out after five minutes rather than wedging the
 session forever.
+
+A status line or a widget an extension keeps refreshing does not count as use of
+the chat, and does not cut what the agent is writing into pieces: only a dialog
+does either.
+
+## When a chat's agent is let go
+
+A chat that nobody has used for twenty minutes has its agent let go, to free
+what it holds; the next message starts it again, on the same conversation. A
+routine that runs in a clean session lets its agent go when the run ends, and
+so does deleting a chat or stopping the portal. Extensions are told first, with
+pi's `session_shutdown` event (reason `quit`), so that they can stop their timers
+and the servers they started. One that has not finished after three seconds is
+let go regardless.
+
 ## Switching tools off for one chat
 
 The blocks icon in the composer says which tools the agent may reach for **in
