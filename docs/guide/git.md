@@ -143,7 +143,7 @@ there; the list of pull requests has the same.
 Below, the list of pull requests, filtered by **Open**, **Merged**, **Closed** or
 **All**. Click one to read it: the description, the checks (*Passed*, *Failed*,
 *Running*), the review state, and the conversation of comments and reviews in
-order, and the changed files with their diffs. From there you can:
+order, and the changed files with their diffs. They are listed as a commit's are: a letter says what happened to each, a rename shows the old name when you point at it, and a deleted file is struck through. From there you can:
 
 - **Check out** its branch here, to try it or work on it. It is offered for a
   pull request from a fork even where its branch has the same name as one you have

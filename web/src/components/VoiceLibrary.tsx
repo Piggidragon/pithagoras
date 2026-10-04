@@ -5,6 +5,7 @@ import {LuPlus,LuTrash2} from 'react-icons/lu';
 import {samplesWav} from '../voice';
 import {json} from '../api';
 import {micError} from '../mic-error';
+import {blobBase64} from '../attachments';
 import {confirmDialog} from './ConfirmDialog';
 import { languageName, t } from "../i18n";
 import { KOKORO_VOICES } from "../../../server/src/kokoro-voices";
@@ -23,7 +24,7 @@ async function reference(file:File){
  const renderer=new OfflineAudioContext(1,Math.round(decoded.duration*16000),16000);
  const source=renderer.createBufferSource();source.buffer=decoded;source.connect(renderer.destination);source.start();
  const rendered=await renderer.startRendering();const blob=samplesWav(rendered.getChannelData(0));
- return new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error(t('Could not read the recording')));reader.readAsDataURL(blob);});
+ return blobBase64(blob).catch(()=>{throw Error(t('Could not read the recording'));});
 }
 /**
  * `onPending` hands the page a function that saves the descriptions edited and not yet saved, or null

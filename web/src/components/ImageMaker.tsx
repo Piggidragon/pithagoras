@@ -143,7 +143,7 @@ export function ImageMaker({
   const sourcesNow = useRef(sources);
   sourcesNow.current = sources;
   // Making and changing have a switch and an address each: either can be on without the other.
-  const generating = features.enabled && features.baseUrl !== "";
+  const generating = features.ready;
   const changing = features.editReady;
   const full = running >= limit;
   const count = Math.min(form.count, Math.max(1, limit - running));

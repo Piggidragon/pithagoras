@@ -101,13 +101,12 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
 
   // Closing without saving puts the saved orb back.
   const close = () => { setOpen(false); setDraft(saved); setVoiceDraft(savedVoice); setError(""); setDone(false); };
-  const shown = saved;
   const name = <T extends string>(list: [T, string, ...unknown[]][], value: T) => t(list.find(([v]) => v === value)?.[1] ?? value);
   const summary = [
-    name(PERSONALITIES, shown.personality),
-    shown.eyes !== "none" && name(EYES, shown.eyes),
-    shown.hat !== "none" && name(HATS, shown.hat),
-    shown.prop !== "none" && name(PROPS, shown.prop),
+    name(PERSONALITIES, saved.personality),
+    saved.eyes !== "none" && name(EYES, saved.eyes),
+    saved.hat !== "none" && name(HATS, saved.hat),
+    saved.prop !== "none" && name(PROPS, saved.prop),
   ].filter(Boolean).join(" · ");
 
   const change = (patch: Partial<OrbStyle>) => { setDraft((d) => ({ ...d, ...patch })); setDone(false); };
@@ -129,6 +128,27 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
       setBusy(false);
     }
   };
+
+  /** The sliders of `keys`, in the order SLIDERS lists them. */
+  const sliders = (keys: (typeof SLIDERS)[number][0][]) =>
+    SLIDERS.filter(([key]) => keys.includes(key)).map(([key, label, min, max, help]) => (
+      <label key={key} className="block text-xs text-fg-muted">
+        <span className="flex justify-between gap-3">
+          <span>{t(label)}</span>
+          <span className="tabular-nums text-accent">{draft[key].toFixed(2)}×</span>
+        </span>
+        <input
+          type="range"
+          className="mt-1.5 w-full accent-current"
+          min={min}
+          max={max}
+          step={0.05}
+          value={draft[key]}
+          onChange={(e) => change({ [key]: Number(e.target.value) } as Partial<OrbStyle>)}
+        />
+        <span className="mt-0.5 block text-[11px] text-fg-faint">{t(help)}</span>
+      </label>
+    ));
 
   /** One choice of what is on or worn by the orb: its options, and its colour once one is picked. */
   const itemRow = <K extends "eyes" | "hat" | "prop">(key: K, colorKey: "eyeColor" | "hatColor" | "propColor", title: string, options: readonly (readonly [OrbStyle[K], string])[]) => (
@@ -197,7 +217,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
       <div className="relative h-16 w-16 shrink-0" title={summary}>
         <div className="flex h-full w-full items-center justify-center rounded-2xl bg-[#0b1220] ring-1 ring-inset ring-accent/15">
           <div className="voice-avatar w-[66%]">
-            <VoiceOrb mode="idle" levels={still} look={shown} />
+            <VoiceOrb mode="idle" levels={still} look={saved} />
           </div>
         </div>
         <button
@@ -283,24 +303,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
             </div>
           </div>
 
-          {SLIDERS.filter(([key]) => key === "speed" || key === "reactivity").map(([key, label, min, max, help]) => (
-            <label key={key} className="block text-xs text-fg-muted">
-              <span className="flex justify-between gap-3">
-                <span>{t(label)}</span>
-                <span className="tabular-nums text-accent">{draft[key].toFixed(2)}×</span>
-              </span>
-              <input
-                type="range"
-                className="mt-1.5 w-full accent-current"
-                min={min}
-                max={max}
-                step={0.05}
-                value={draft[key]}
-                onChange={(e) => change({ [key]: Number(e.target.value) } as Partial<OrbStyle>)}
-              />
-              <span className="mt-0.5 block text-[11px] text-fg-faint">{t(help)}</span>
-            </label>
-          ))}
+          {sliders(["speed", "reactivity"])}
 
           </>}
           {tab === "colours" && <>
@@ -384,24 +387,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
               ))}
             </div>
           </div>
-          {SLIDERS.filter(([key]) => key === "glow").map(([key, label, min, max, help]) => (
-            <label key={key} className="block text-xs text-fg-muted">
-              <span className="flex justify-between gap-3">
-                <span>{t(label)}</span>
-                <span className="tabular-nums text-accent">{draft[key].toFixed(2)}×</span>
-              </span>
-              <input
-                type="range"
-                className="mt-1.5 w-full accent-current"
-                min={min}
-                max={max}
-                step={0.05}
-                value={draft[key]}
-                onChange={(e) => change({ [key]: Number(e.target.value) } as Partial<OrbStyle>)}
-              />
-              <span className="mt-0.5 block text-[11px] text-fg-faint">{t(help)}</span>
-            </label>
-          ))}
+          {sliders(["glow"])}
 
           </>}
           {tab === "face" && <>

@@ -25,6 +25,7 @@ const STAYS = { done: 4500, failed: 7000 };
 /** How long a card takes to go, so it is taken out after its animation. */
 const LEAVING = 600;
 const SLOTS = 4;
+const SLOT_IDS = Array.from({ length: SLOTS }, (_, i) => i);
 
 /**
  * What the agent is doing, as cards flying out of the orb.
@@ -78,7 +79,7 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { event
         // A slot a card is still leaving from is taken last, and that card then
         // goes at once rather than being flown over.
         const leavingFrom = new Set(next.filter(c => c.leaving).map(c => c.slot));
-        const slot = [0, 1, 2, 3].find(s => !taken.has(s) && !leavingFrom.has(s)) ?? [0, 1, 2, 3].find(s => !taken.has(s)) ?? 0;
+        const slot = SLOT_IDS.find(s => !taken.has(s) && !leavingFrom.has(s)) ?? SLOT_IDS.find(s => !taken.has(s)) ?? 0;
         next = next.filter(c => !(c.leaving && c.slot === slot));
         const call = unwrap(p);
         const look = isPictureTool(call.name) && p[GENERATED_PICTURE_MARK] === true ? pictureCall(call.name, call.input, folder) : undefined;

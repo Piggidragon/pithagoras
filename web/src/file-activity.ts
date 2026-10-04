@@ -1,5 +1,6 @@
 import type { PortalEvent } from "./api";
 import { below } from "./paths";
+import { toolArgsOf, toolNameOf } from "./tool-payload";
 
 /** A file the agent has just read or changed, as a path inside the chat's folder. */
 export interface FileActivity {
@@ -10,9 +11,8 @@ export interface FileActivity {
 }
 
 const TOOLS = new Set(["read", "write", "edit"]);
-const nameOf = (p: any): string => String(p?.toolName ?? p?.name ?? "");
 const pathOf = (p: any): string | undefined => {
-  const input = p?.input ?? p?.args ?? p?.parameters ?? {};
+  const input = toolArgsOf(p) ?? {};
   const given = input.path ?? input.file_path;
   return typeof given === "string" && given ? given : undefined;
 };
@@ -54,7 +54,7 @@ export function latestFileActivity(events: PortalEvent[], folder: string): FileA
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     const p = event.payload;
-    const tool = nameOf(p);
+    const tool = toolNameOf(p);
     if (!TOOLS.has(tool)) continue;
     let given: string | undefined;
     if (event.type === "tool_execution_start" && tool === "read") given = pathOf(p);

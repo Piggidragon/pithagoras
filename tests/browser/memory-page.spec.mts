@@ -90,7 +90,7 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
         ],
         edges: [{ source: '/deployment/branches.md', target: '/people/owner.md' }],
       };
-      if (p === '/api/memory/traces') return [{ id: 't1', kind: 'mutation', input: 'Persist the following knowledge', startedAt: '2026-09-28T09:17:47Z', notation: 'browse layout → write branches.md → ✓', usage: { inputTokens: 9683, outputTokens: 735 } }];
+      if (p === '/api/memory/traces') return [{ id: 't1', kind: 'mutation', input: 'Persist the following knowledge', startedAt: '2026-09-28T09:17:47Z', notation: 'browse layout → write branches.md → ✓', usage: { inputTokens: 9683, outputTokens: 2000 } }];
       if (p === '/api/memory/search') return url.searchParams.get('q') === 'deploy' ? [{ path: '/deployment/branches.md', title: 'Branch Deployment on Test Host', description: 'The test host deploys branches.' }] : [];
       if (p === '/api/memory/concept') {
         const c = concepts[url.searchParams.get('path') ?? ''];
@@ -171,7 +171,7 @@ test('the graph draws the notes and their links, says what the colours are, and 
   await expect(legend).toContainText('Deployment Process');
   await expect(legend).toContainText('orphan (unlinked)');
   await page.getByText('Query paths').click();
-  await expect(page.getByText('9.7k→735 tok')).toBeVisible();
+  await expect(page.getByText('9.7k→2k tok')).toBeVisible();
   const before = await graph.getAttribute('viewBox');
   await page.getByRole('button', { name: 'Zoom in' }).click();
   expect(await graph.getAttribute('viewBox')).not.toBe(before);

@@ -1088,6 +1088,7 @@ test("the sidebar is told whether the page is there: on while an address is set 
   assert.deepEqual((await call("GET", "/features/flags")).body.images, { enabled: true }, "only changing is set up");
   const state = (await call("GET", "/features/images")).body.images;
   assert.equal(state.enabled, false);
+  assert.equal(state.ready, false, "nothing to make pictures with: only changing is set up");
   assert.equal(state.editReady, true);
   gen.saveImageGeneration({ editEnabled: false });
   assert.deepEqual((await call("GET", "/features/flags")).body.images, { enabled: false }, "an address for changes that is switched off is not a page");

@@ -62,10 +62,14 @@ const svg = (id: string, w = 800, h = 600) => {
 };
 
 /** An ImagesFeature as the portal tells of it. */
-const feature = (over: Record<string, unknown> = {}) => ({
-  enabled: true, baseUrl: 'https://images.example.com/v1', model: 'image-model', size: '1024x1024', keySet: true,
-  editEnabled: true, editBaseUrl: '', editModel: '', editMultiple: false, timeoutSeconds: 300, editKeySet: false, editReady: true, sdExtras: false, ...over,
-});
+const feature = (over: Record<string, unknown> = {}) => {
+  const f = {
+    enabled: true, baseUrl: 'https://images.example.com/v1', model: 'image-model', size: '1024x1024', keySet: true,
+    editEnabled: true, editBaseUrl: '', editModel: '', editMultiple: false, timeoutSeconds: 300, editKeySet: false, editReady: true, sdExtras: false, ...over,
+  };
+  // The portal says whether pictures can be made, as it says whether they can be changed.
+  return { ready: f.enabled && f.baseUrl !== '', ...f };
+};
 
 async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false } = {}) {
   const pics = [...pictures];
@@ -327,6 +331,15 @@ test('with only changing set up the page opens in Edit: no form to make a pictur
   await tile(page, 'Make it night').click();
   await expect(viewer(page).getByRole('button', { name: 'Run again' })).toBeVisible();
   await page.keyboard.press('Escape');
+  await tile(page, 'A fox').click();
+  await expect(viewer(page).getByRole('button', { name: 'Run again' })).toHaveCount(0);
+});
+
+test('whether pictures can be made is what the portal says, not worked out again from the address', async ({ page }) => {
+  // Switched on and with an address, but the portal says that it is not ready: the page believes it, in the form and in the viewer.
+  await portal(page, { pictures: [pic({ prompt: 'A fox' })], images: feature({ ready: false }) });
+  await page.goto('/images');
+  await expect(maker(page).getByRole('radio', { name: /^Generate/ })).toContainText('not set up');
   await tile(page, 'A fox').click();
   await expect(viewer(page).getByRole('button', { name: 'Run again' })).toHaveCount(0);
 });

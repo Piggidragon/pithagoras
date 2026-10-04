@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { api, ApiError, type PortalTool } from "../api";
 import { LoadFailed } from "./SettingsUi";
-import { displayName, groupSummary, groupTools, nextOff, sourceName } from "../tool-groups";
-import { useOpenGroups } from "../use-open-groups";
+import { ToolGroupList } from "./ToolGroupList";
+import { nextOff } from "../tool-groups";
 import { t, tp } from "../i18n";
 
 /**
@@ -48,7 +47,6 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
   // Why the last switch did not take, which the page put back.
   const [flipError, setFlipError] = useState("");
   const [names, setNames] = useState<Record<string, string>>({});
-  const groups = useOpenGroups();
 
   useEffect(() => {
     let cancelled = false;
@@ -157,74 +155,7 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
             : t("Not started yet — these are the tools earlier chats had. What you switch here holds for this chat from its first message; the defaults stay as they are.")}
         </p>
       )}
-      {groupTools(tools).map((group) => {
-        const open = groups.isOpen(group.source);
-        return (
-        <div key={group.source} className="border-b border-line/60 last:border-0">
-          <div className="flex items-center gap-1 px-1.5 py-1.5">
-            <button
-              type="button"
-              aria-expanded={open}
-              onClick={() => groups.toggle(group.source)}
-              className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left transition hover:bg-fg/5"
-            >
-              {open ? (
-                <LuChevronDown className="h-3 w-3 shrink-0 text-fg-faint" />
-              ) : (
-                <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
-              )}
-              <span
-                title={sourceName(group.source)}
-                className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-muted"
-              >
-                {displayName(group.source, names)}
-              </span>
-              <span className="shrink-0 text-[10px] text-fg-faint">{groupSummary(group)}</span>
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => flip(group.tools.map((t) => t.name), group.allOff)}
-              className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-50"
-            >
-              {group.allOff ? t("all on") : t("all off")}
-            </button>
-          </div>
-          <ul className={open ? "pb-1" : "hidden"}>
-            {group.tools.map((tool) => (
-              <li key={tool.name}>
-                <label
-                  title={tool.description}
-                  className="flex cursor-pointer items-center gap-2 px-3 py-1 text-xs transition hover:bg-fg/5"
-                >
-                  <input
-                    type="checkbox"
-                    checked={tool.enabled}
-                    disabled={busy}
-                    onChange={(e) => flip([tool.name], e.target.checked)}
-                    className="h-3 w-3 shrink-0 accent-accent"
-                  />
-                  <span
-                    className={`min-w-0 flex-1 truncate font-mono ${
-                      tool.enabled ? "text-fg" : "text-fg-faint line-through"
-                    }`}
-                  >
-                    {tool.name}
-                  </span>
-                  {/* Only where this chat disagrees with the default, so the
-                      setting is findable from the place it is being overruled. */}
-                  {tool.defaultOn !== undefined && tool.defaultOn !== tool.enabled && (
-                    <span className="shrink-0 text-[10px] text-fg-faint">
-                      {tool.defaultOn ? t("default on") : t("default off")}
-                    </span>
-                  )}
-                </label>
-              </li>
-            ))}
-          </ul>
-        </div>
-        );
-      })}
+      <ToolGroupList tools={tools} names={names} busy={busy} onFlip={flip} />
       {live && (
         <p className="px-3 py-1.5 text-[10px] text-fg-faint">
           {t("Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with.")}

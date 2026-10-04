@@ -4,7 +4,7 @@ import { api, type AvailableModel } from "../api";
 import { forget, refreshFailed, useCached } from "../settings-cache";
 import { Modal } from "./Modal";
 import { PackageCatalog } from "./PackageCatalog";
-import { KindIcon, ProviderEditor, StatusBadge, useInstalledPackages, useProviderStatus } from "./ProvidersPanel";
+import { KindIcon, ProviderEditor, StatusBadge, takenProviderIds, useInstalledPackages, useProviderStatus } from "./ProvidersPanel";
 import { Select } from "./Select";
 import { SetupNav, SetupSteps } from "./SetupSteps";
 import { EffortPicker, LoadFailed, ghostCls, primaryCls } from "./SettingsUi";
@@ -186,7 +186,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
                 <ProviderEditor
                   embedded
                   view={providers.value}
-                  taken={new Set(configured.filter((p) => p.key.source !== "environment").map((p) => p.id))}
+                  taken={takenProviderIds(configured)}
                   onCancel={() => setAdding(false)}
                   onSaved={() => void providerSaved()}
                   onInstalled={() => void Promise.all([providers.reload(), models.reload()])}

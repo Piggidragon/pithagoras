@@ -38,6 +38,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import { codeAreaCls, inputCls, primarySmCls } from "./SettingsUi";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
+import { formatTokens } from "../transcript";
 
 /**
  * The agent's memory in Understory, laid out as Understory's own page lays it
@@ -67,6 +68,9 @@ function TypeBadge({ type, className = "" }: { type: string; className?: string 
     </span>
   );
 }
+
+/** The tree and its health check: the check failing is not the tree failing. */
+const readTree = () => Promise.all([api.memoryTree(), api.memoryValidate().catch(() => null)]);
 
 export function MemoryPage() {
   const [params, setParams] = useSearchParams();
@@ -119,7 +123,7 @@ export function MemoryPage() {
 
   /** Reads what a change moved — the tree, the counts, what a search finds — without leaving what is open. */
   const refresh = () => {
-    Promise.all([api.memoryTree(), api.memoryValidate().catch(() => null)]).then(([t, v]) => {
+    readTree().then(([t, v]) => {
       setTree(t);
       setValidation(v);
     }, () => {});
@@ -161,7 +165,7 @@ export function MemoryPage() {
     setLoading(true);
     setFailed(null);
     setRound((r) => r + 1);
-    Promise.all([api.memoryTree(), api.memoryValidate().catch(() => null)])
+    readTree()
       .then(([t, v]) => {
         setTree(t);
         setValidation(v);
@@ -958,8 +962,8 @@ function Issues({ validation, onOpen, onBack }: { validation: MemoryValidation |
   );
 }
 
-/** Tokens, short: 9.7k. */
-const tokens = (n?: number) => (n === undefined ? "?" : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+/** Tokens as the chat writes them (9.7k, 2k), or a ? where the trace kept none. */
+const tokens = (n?: number) => (n === undefined ? "?" : formatTokens(n));
 
 function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack: () => void }) {
   const colourOf = useContext(Colours);

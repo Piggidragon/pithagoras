@@ -82,9 +82,7 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
   if (!view) return failed ? <LoadFailed error={failed} onRetry={reload} /> : <ProvidersSkeleton />;
 
   const saved = async (note?: string) => { setEditing(null); setNotice(note ?? null); await load(); };
-  // Names in use in pi's files. One keyed only from the environment is not:
-  // a key can still be stored for it, under the name pi knows it by.
-  const ids = new Set(view.providers.filter((p) => p.key.source !== "environment").map((p) => p.id));
+  const ids = takenProviderIds(view.providers);
 
   return (
     <>
@@ -292,6 +290,12 @@ function ModelChip({ model: m, loaded, missing }: { model: ProviderModel; loaded
 type Row = ProviderModel & { keep: boolean; found: boolean; own: boolean; ctxText: string };
 
 const toRow = (m: ProviderModel, keep: boolean, found: boolean, own = false): Row => ({ ...m, keep, found, own, ctxText: m.contextWindow ? m.contextWindow.toLocaleString("en-US") : "" });
+
+/**
+ * The names in use in pi's files. One keyed only from the environment is not:
+ * a key can still be stored for it, under the name pi knows it by.
+ */
+export const takenProviderIds = (providers: ProviderInfo[]) => new Set(providers.filter((p) => p.key.source !== "environment").map((p) => p.id));
 
 function uniqueId(base: string, taken: Set<string>): string {
   if (!taken.has(base)) return base;

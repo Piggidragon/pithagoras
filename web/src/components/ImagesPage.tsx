@@ -13,7 +13,7 @@ import { useNow } from "../use-now";
 import { confirmDialog } from "./ConfirmDialog";
 import { ImageMaker, type Mode } from "./ImageMaker";
 import { ImagePreview, type PreviewState } from "./ImagePreview";
-import { ImageViewer } from "./ImageViewer";
+import { ImageViewer, iconButton } from "./ImageViewer";
 import { PageHeader, Stat } from "./PageHeader";
 import { Empty, ErrorBanner, Segments, btnCls, ghostCls } from "./SettingsUi";
 import type { ViewerPicture } from "../image-viewer";
@@ -58,9 +58,8 @@ const KIND_SHORT: Record<PictureKind, string> = {
 /** What a folder is called: its agent for an agent's home, as the sidebar names it (Home where the server gave no name), or its place under the workspace root. */
 const folderName = (folder: { name: string; home: boolean }): string => (folder.home ? folder.name || t("Home") : folder.name);
 
-/** The viewer's own buttons are this size; the ones this page adds match them. */
-const viewerButton =
-  "grid h-10 w-10 shrink-0 place-items-center rounded-lg text-fg-muted transition hover:bg-fg/10 hover:text-fg disabled:pointer-events-none disabled:opacity-35 aria-pressed:bg-accent/15 aria-pressed:text-accent sm:h-9 sm:w-9";
+/** The viewer's own buttons, with a look for the ones that are on: the ones this page adds match them. */
+const viewerButton = `${iconButton} aria-pressed:bg-accent/15 aria-pressed:text-accent`;
 
 interface Listing {
   pictures: GalleryPicture[];
@@ -240,8 +239,8 @@ export function ImagesPage() {
   const [prompt, setPrompt] = useState("");
   const [sources, setSources] = useState<GalleryPicture[]>([]);
   // Making and changing are set up apart: one can be on without the other, and the form has both, whichever is not set up saying so.
-  const makes = !!features && features.enabled && features.baseUrl !== "";
-  const changes = !!features && features.editReady;
+  const makes = !!features?.ready;
+  const changes = !!features?.editReady;
   // Where the person has not chosen yet, the one that is set up; making where both are.
   const [chosen, setChosen] = useState<Mode | null>(null);
   const mode: Mode = chosen ?? (changes && !makes ? "edit" : "make");
@@ -610,7 +609,8 @@ export function ImagesPage() {
               <ViewerActions
                 key={picture.id}
                 picture={picture}
-                features={features}
+                makes={makes}
+                canEdit={changes}
                 onShown={shown}
                 onEdit={editIt}
                 // While the form is in Edit, the pictures are taken into it from here as well, one after another, with the viewer open.
@@ -686,7 +686,8 @@ function PictureDetails({ picture }: { picture: GalleryPicture }) {
  */
 function ViewerActions({
   picture,
-  features,
+  makes,
+  canEdit,
   onShown,
   onEdit,
   use,
@@ -694,7 +695,9 @@ function ViewerActions({
   onDelete,
 }: {
   picture: GalleryPicture;
-  features: ImagesFeature | null;
+  /** Whether pictures can be made, and whether they can be changed: what the buttons that make one again say. */
+  makes: boolean;
+  canEdit: boolean;
   onShown: (picture: GalleryPicture) => void;
   onEdit: (picture: GalleryPicture) => void;
   /** Where the form is in Edit: whether this picture is one of the edit's, whether the edit has all it takes, and a way to take it in or out. */
@@ -704,8 +707,6 @@ function ViewerActions({
 }) {
   const [details, setDetails] = useState(false);
   useEffect(() => onShown(picture), [picture.id, onShown]);
-  const makes = !!features && features.enabled && features.baseUrl !== "";
-  const canEdit = !!features && features.editReady;
   // A picture put in by the person has no description to make again.
   const again = picture.kind !== "uploaded" && picture.prompt !== "" && (picture.kind === "generated" ? makes : canEdit);
   return (

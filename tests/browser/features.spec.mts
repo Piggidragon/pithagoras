@@ -16,7 +16,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       },
     },
   };
-  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editMaxSize: '', editKeySet: false, timeoutSeconds: 300, sdExtras: false, editReady: false };
+  const images = { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editMaxSize: '', editKeySet: false, timeoutSeconds: 300, sdExtras: false, ready: false, editReady: false };
   await mockPortal(page, async ({ path: p, method, url, json }) => {
     if (p === '/api/settings') return {
       settings: { provider: 'p', model: 'm', thinkingLevel: 'medium' }, stored: {}, defaults: { provider: 'p', model: 'm', thinkingLevel: 'medium' },
@@ -38,6 +38,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       if (patch.timeoutSeconds === null) images.timeoutSeconds = 300;
       if (apiKey !== undefined) images.keySet = apiKey !== '';
       if (editApiKey !== undefined) images.editKeySet = editApiKey !== '';
+      images.ready = images.enabled && images.baseUrl !== '';
       images.editReady = images.editEnabled && (images.editBaseUrl || images.baseUrl) !== '';
       return { images, changed, reloaded: 1, waiting: 1 };
     }

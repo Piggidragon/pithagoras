@@ -7,7 +7,7 @@
 // 100 at a time), ?bigdiff=1 for diffs of 6,500 rows, ?prtruncated=1 for a pull request diff that stops in its last
 // file, ?fork=1 for a pull request from a fork's `main` while `main` is checked out, ?pullsfail=1 and ?currentfail=1
 // for GitHub failing the first time it is asked for the list and for this branch's pull request, ?prdifffail=1 for
-// a pull request whose diff cannot be had, ?unmerged=1 for a branch that is not merged and has to be deleted
+// a pull request whose diff cannot be had, ?prfiles=1 for one that also renamed a file and deleted another, ?unmerged=1 for a branch that is not merged and has to be deleted
 // anyway, ?branch=<name> for another branch checked out. window.stateFails = true makes reading the repository
 // fail, as a portal that cannot be reached would. window.moveHead() moves HEAD, as a commit in the shell would.
 // What the panel asked for is in window.gitCalls; window.agentWrote() changes a file the way the agent would.
@@ -170,7 +170,9 @@ window.fetch = (async (input: any, init?: any) => {
   }
   if (/^\/pulls\/\d+\/diff$/.test(path)) {
     if (params.get('prdifffail')) return reply({ error: 'gh pr diff failed' }, 502);
-    return reply({ diff: diffOf('src/auth/login.ts') + diffOf('src/auth/session.ts'), truncated: params.get('prtruncated') === '1' });
+    // ?prfiles=1: a file renamed with nothing changed in it, and one deleted, besides the two changed.
+    const more = params.get('prfiles') ? 'diff --git a/src/auth/jwt.ts b/src/auth/token.ts\nsimilarity index 100%\nrename from src/auth/jwt.ts\nrename to src/auth/token.ts\ndiff --git a/src/auth/old.ts b/src/auth/old.ts\ndeleted file mode 100644\nindex 1..0\n--- a/src/auth/old.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-one\n-two\n' : '';
+    return reply({ diff: diffOf('src/auth/login.ts') + diffOf('src/auth/session.ts') + more, truncated: params.get('prtruncated') === '1' });
   }
   if (/^\/pulls\/\d+\/(merge|comment|review|checkout)$/.test(path)) return reply({ ok: true, said: '' });
   return reply({ ok: true });

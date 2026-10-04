@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { LuEraser, LuPaintbrush } from "react-icons/lu";
 import { btnCls } from "./SettingsUi";
+import { blobBase64 } from "../attachments";
 import { t } from "../i18n";
 
 /** What is painted is kept this small at most: the mask is made at the picture's own size only when it is sent. */
@@ -9,14 +10,6 @@ const LONGEST = 1024;
 export interface MaskHandle {
   /** The mask as a PNG in base64, transparent where the person painted; null when nothing is painted. */
   mask: () => Promise<string | null>;
-}
-
-/** The bytes of a blob as base64, in pieces: one call with them all spreads a large picture over the stack. */
-async function base64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let text = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(text);
 }
 
 /**
@@ -116,7 +109,7 @@ export const MaskPainter = forwardRef<MaskHandle, { src: string }>(function Mask
       ctx.drawImage(paint, 0, 0, out.width, out.height);
       const blob = await new Promise<Blob | null>((done) => out.toBlob(done, "image/png"));
       if (!blob) throw new Error(t("The mask could not be made for a picture this large"));
-      return base64(blob);
+      return blobBase64(blob);
     },
   }));
 

@@ -397,6 +397,20 @@ test('the diff of a file in conflict offers no Discard, and says Mark resolved w
   await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible();
 });
 
+test('the files of a pull request are listed as a commit’s are: the letter says what happened, a rename shows where it came from, a deleted file is struck through', async ({ page }) => {
+  await page.goto('/tests/git.html?tab=pulls&prfiles=1');
+  await page.getByRole('button', { name: /Login with a password/ }).last().click();
+  const renamed = page.getByRole('button', { name: /token\.ts/ });
+  await expect(renamed).toHaveAttribute('title', 'src/auth/jwt.ts → src/auth/token.ts');
+  await expect(renamed.getByTitle('Renamed')).toHaveText('R');
+  const deleted = page.getByRole('button', { name: /old\.ts/ });
+  await expect(deleted.getByTitle('Deleted')).toHaveText('D');
+  await expect(deleted.locator('.line-through')).toHaveText('old.ts');
+  // The file opens as before: the diff is the pull request's, not a second request.
+  await deleted.click();
+  await expect(page.getByRole('table', { name: 'Changes to src/auth/old.ts' })).toBeVisible();
+});
+
 test('only the last file of a cut-off pull request diff says it was cut off', async ({ page }) => {
   await page.goto('/tests/git.html?tab=pulls&prtruncated=1');
   await page.getByRole('button', { name: /Login with a password/ }).last().click();

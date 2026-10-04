@@ -401,7 +401,6 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         if (signal.aborted) cancel();
       });
     } while (true);
-    if (!response.ok) throw new Error((await response.json()).error || t("Speech generation failed"));
     mark('tts_headers',{serverTiming:response.headers.get('server-timing')??''});
     let body=response.body;
     if(body&&trace){let first=true;body=body.pipeThrough(new TransformStream<Uint8Array<ArrayBuffer>,Uint8Array<ArrayBuffer>>({transform(chunk,controller){if(first&&chunk.length){first=false;mark('first_bytes');}controller.enqueue(chunk);}}));}

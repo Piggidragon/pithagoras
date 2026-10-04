@@ -6,7 +6,8 @@ import { webLink } from "../../package-names";
 import { gitApi, type Check, type Comparison, type PullDetail, type PullSummary } from "../../git-api";
 import { parseDiff, type DiffFile } from "../../git-diff";
 import { confirmDialog } from "../ConfirmDialog";
-import { Counts, ErrorNote, Letter, Quiet, SectionHead, splitPath, TextButton } from "./bits";
+import { Counts, ErrorNote, Quiet, SectionHead, TextButton } from "./bits";
+import { ChangeList } from "./History";
 import { useGit } from "./context";
 import { useGitDraft } from "./draft";
 import { when } from "../../time";
@@ -333,6 +334,9 @@ const PullMarkdown = ({ children }: { children: string }) => (
   </div>
 );
 
+/** The letter a changed file is listed under, as the commit's and a comparison's lists write it. */
+const STATUS_LETTER = { added: "A", deleted: "D", renamed: "R", modified: "M" } as const;
+
 /** One pull request: what it is, its checks, its files, what was said — and what can be done with it. */
 export function PullView({ n }: { n: number }) {
   const { id, repo, act, busy, show } = useGit();
@@ -484,23 +488,16 @@ export function PullView({ n }: { n: number }) {
       ) : !files ? (
         <Quiet>{t("Loading…")}</Quiet>
       ) : (
-        <ul>
-          {files.files.map((f) => {
-            const { dir, name } = splitPath(f.path);
-            const letter = f.status === "added" ? "A" : f.status === "deleted" ? "D" : f.status === "renamed" ? "R" : "M";
-            return (
-              <li key={f.path}>
-                <button type="button" onClick={() => show({ kind: "parsed", title: f.path, file: f, truncated: files.truncated && f === files.files[files.files.length - 1] })} className="flex w-full items-center gap-1.5 px-2 py-1 text-left transition hover:bg-fg/5">
-                  <Letter letter={letter} />
-                  <span className="min-w-0 truncate text-xs text-fg">{name}</span>
-                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-fg-faint">{dir}</span>
-                  <Counts added={f.added} removed={f.removed} binary={f.binary} />
-                </button>
-              </li>
-            );
-          })}
+        <>
+          <ChangeList
+            files={files.files.map(({ path, from, status, added, removed, binary }) => ({ path, from, status: STATUS_LETTER[status], added, removed, binary }))}
+            open={(f) => {
+              const file = files.files.find((d) => d.path === f.path)!;
+              show({ kind: "parsed", title: file.path, file, truncated: files.truncated && file === files.files[files.files.length - 1] });
+            }}
+          />
           {files.truncated && <Quiet>{t("Too large to show whole — the last files are missing.")}</Quiet>}
-        </ul>
+        </>
       )}
 
       {(pull.commits?.length ?? 0) > 0 && (

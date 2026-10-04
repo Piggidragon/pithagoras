@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert, LuWandSparkles } from "react-icons/lu";
-import { api, type AvailableModel, type Features, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
+import { api, type AvailableModel, type Features, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentMode, type UnderstoryLlmChoice } from "../api";
 import { MAX_SIZE, TIMEOUT_SECONDS } from "../../../server/src/image-settings";
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
@@ -9,10 +9,12 @@ import { LoadFailed, SwitchRow, inputCls, primaryCls } from "./SettingsUi";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
 
 /**
- * The opt-in features: off in a fresh install, one switch each. Both are
- * written into pi's own configuration — a package, an MCP server — so what
- * the switch does can also be seen, and undone, from Extensions and MCP.
+ * The opt-in add-ons: off in a fresh install, one switch each. Each is written
+ * into pi's own configuration — a package, an MCP server — so what the switch
+ * does can also be seen, and undone, from Extensions and MCP.
  */
+
+/** All the features at once, which is what Understory's tab reads: Subagents and Images each read their own. */
 function useFeatures() {
   return useFirstRead(api.features);
 }
@@ -76,8 +78,6 @@ const MODES: { value: SubagentMode; label: string; detail: string }[] = [
 export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
   // Its own, not with Understory's: a Docker that cannot be reached is not this tab's to wait on.
   const [subagent, setSubagent, failed, retry] = useFirstRead(() => api.subagentFeature().then((r) => r.subagent));
-  const features = subagent && { subagent };
-  const setFeatures = (f: { subagent: SubagentFeature }) => setSubagent(f.subagent);
   const [busy, setBusy] = useState(false);
   // Said in the language shown, whenever it is drawn.
   const [note, setNote] = useState<(() => string) | null>(null);
@@ -88,22 +88,22 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
     api.allModels().then((r) => setModels(r.models)).catch(() => {});
   }, []);
 
-  if (!features) return failed ? <ReadFailed error={failed} onRetry={retry} /> : <Loading />;
-  const s = features.subagent;
+  if (!subagent) return failed ? <ReadFailed error={failed} onRetry={retry} /> : <Loading />;
+  const s = subagent;
 
   const change = async (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) => {
     setBusy(true);
     setNote(null);
     // The choice shows at once; what the server says after is what stays.
-    if (patch.mode || patch.maxParallel || patch.model) setFeatures({ ...features, subagent: { ...s, ...patch } });
+    if (patch.mode || patch.maxParallel || patch.model) setSubagent({ ...s, ...patch });
     try {
-      const { subagent, waiting } = await api.setSubagentFeature(patch);
-      setFeatures({ ...features, subagent });
+      const { subagent: saved, waiting } = await api.setSubagentFeature(patch);
+      setSubagent(saved);
       setNote(() => () => reloadNote(waiting));
       // A chat's model menu has the subagents' model while the tool is on.
       window.dispatchEvent(new Event("features-changed"));
     } catch (e) {
-      setFeatures(features);
+      setSubagent(s);
       onError((e as Error).message);
     } finally {
       setBusy(false);
@@ -322,13 +322,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
   const runsHere = m.container === "running" || m.container === "stopped";
   const foreign = m.container === "foreign";
   const address = url ?? u.url;
-  const origin = (() => {
-    try {
-      return new URL(u.url).origin;
-    } catch {
-      return null;
-    }
-  })();
+  const origin = originOf(u.url) || null;
 
   /** Runs one change, and takes what the server says the state is after it. */
   const act = async (what: string, run: () => Promise<{ understory: Features["understory"]; waiting?: number }>) => {

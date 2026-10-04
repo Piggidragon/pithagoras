@@ -153,7 +153,7 @@ function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState<string[]>([]);
+  const [lastSent, setLastSent] = useState<string | null>(null);
   if (agent.status !== "running") return null;
   if (!agent.input) {
     return (
@@ -171,7 +171,7 @@ function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }
     setError(null);
     try {
       await api.subagentInput(sessionId, agent.id, message);
-      setSent((s) => [...s, message]);
+      setLastSent(message);
       setText("");
     } catch (e) {
       setError((e as Error).message);
@@ -181,7 +181,7 @@ function AgentInput({ sessionId, agent }: { sessionId: string; agent: Subagent }
   };
   return (
     <div className="sub-input">
-      {sent.length > 0 && <div className="sub-input-sent">{t("Sent: “{text}”", { text: sent[sent.length - 1] })}</div>}
+      {lastSent !== null && <div className="sub-input-sent">{t("Sent: “{text}”", { text: lastSent })}</div>}
       {error && <p className="bg-jobs-error">{error}</p>}
       <div className="sub-input-box">
         <textarea

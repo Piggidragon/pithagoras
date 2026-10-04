@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type BackgroundState, type PortalEvent } from "./api";
 import { stripAnsi } from "./transcript";
 import { piRunning } from "./drafts";
+import { pollWhileVisible } from "./poll";
 import { reconcile } from "./reconcile";
 
 const EMPTY: BackgroundState = { supported: false, jobs: [], statuses: [], widgets: [] };
@@ -68,7 +69,7 @@ export function useBackground(sessionId: string, busy: boolean, events: PortalEv
   // Kept with the chat it is of. Cleared in an effect, another chat's state
   // lasted a render into the next, long enough for its status lines to make
   // this one list its commands, which starts its pi.
-  const [held, setHeld] = useState<{ sessionId: string; state: BackgroundState; since: Mark }>({ sessionId, state: EMPTY, since: { live: 0, stored: 0 } });
+  const [held, setHeld] = useState<{ sessionId: string; state: BackgroundState; since: Mark }>({ sessionId, state: EMPTY, since: NOWHERE });
   const state = held.sessionId === sessionId ? held.state : EMPTY;
   const current = useRef(sessionId);
   current.current = sessionId;
@@ -99,13 +100,10 @@ export function useBackground(sessionId: string, busy: boolean, events: PortalEv
     };
     load();
     const running = state.jobs.some((j) => j.state === "running");
-    const t = window.setInterval(load, busy || running ? 2000 : 6000);
-    const visible = () => !document.hidden && load();
-    document.addEventListener("visibilitychange", visible);
+    const stop = pollWhileVisible(load, busy || running ? 2000 : 6000);
     return () => {
       live = false;
-      window.clearInterval(t);
-      document.removeEventListener("visibilitychange", visible);
+      stop();
     };
   }, [sessionId, busy, tick, state.jobs.some((j) => j.state === "running")]);
   // Where this chat's events were when its answer was asked for. Another

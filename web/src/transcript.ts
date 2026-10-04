@@ -1,6 +1,7 @@
 import type { PortalEvent } from "./api";
-import { unwrap } from "./tool-activity";
+import { unwrapCall } from "./tool-activity";
 import { argsSummary } from "./tool-args";
+import { toolArgsOf, toolNameOf } from "./tool-payload";
 import { msg, t } from "./i18n";
 import { GENERATED_PICTURE_MARK } from "../../server/src/generated-picture";
 
@@ -32,7 +33,7 @@ export interface ShownPicture {
  */
 export function shownPicture(payload: any): ShownPicture | undefined {
   if (payload?.isError) return undefined;
-  const name = String(payload?.toolName ?? payload?.name ?? "");
+  const name = toolNameOf(payload);
   const details = payload?.result?.details;
   if (name === "generate_image" || name === "edit_image" ? details?.[GENERATED_PICTURE_MARK] !== true : name !== "show_image") return undefined;
   if (typeof details?.path !== "string" || !details.path) return undefined;
@@ -468,12 +469,12 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
       case "tool_execution_start": {
         closeCurrent();
         answerEnd = null;
-        const args = p.input ?? p.args ?? p.parameters;
+        const args = toolArgsOf(p);
         items.push({
           kind: "tool",
           id: `t${ev.seq}`,
           callId: typeof p.toolCallId === "string" ? p.toolCallId : undefined,
-          name: String(p.toolName ?? p.name ?? "tool"),
+          name: toolNameOf(p, "tool"),
           status: "running",
           detail: summarizeToolInput(p),
           ...(p[GENERATED_PICTURE_MARK] === true ? { portalPicture: true as const } : {}),
@@ -518,7 +519,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
       case "tool_execution_end": {
         // Close the most recent still-running tool of the same name. By its id,
         // one taken for cut off too: its end is what really happened.
-        const name = String(p.toolName ?? p.name ?? "tool");
+        const name = toolNameOf(p, "tool");
         for (let i = items.length - 1; i >= 0; i--) {
           const it = items[i];
           if (it.kind === "tool" &&
@@ -626,7 +627,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
 
 /** The call an update belongs to: by its id, or else the newest one of that name still running. */
 function findRunningTool(items: Item[], p: any): Extract<Item, { kind: "tool" }> | undefined {
-  const name = String(p.toolName ?? p.name ?? "");
+  const name = toolNameOf(p);
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
     if (it.kind !== "tool") continue;
@@ -636,10 +637,10 @@ function findRunningTool(items: Item[], p: any): Extract<Item, { kind: "tool" }>
 }
 
 function summarizeToolInput(p: any): string | undefined {
-  const raw = p.input ?? p.args ?? p.parameters;
+  const raw = toolArgsOf(p);
+  const call = unwrapCall(toolNameOf(p), raw);
   // Through the MCP adapter, what the tool inside was given.
-  const input = String(p.toolName ?? p.name ?? "") === "mcp" && raw && typeof raw === "object" && typeof raw.tool === "string" ? unwrap(p).input : raw;
-  return argsSummary(input);
+  return argsSummary(call.name !== toolNameOf(p) ? call.input : raw);
 }
 
 /**

@@ -1328,6 +1328,8 @@ export interface ImagesFeature {
   editKeySet: boolean;
   /** How long a request for a picture, made or edited, may take, in whole seconds. */
   timeoutSeconds: number;
+  /** Whether pictures can be made: switched on, and with an address to ask. The portal says it, so that the page does not work it out again. */
+  ready: boolean;
   /** Whether the agent has an edit tool: switched on, and with an address to ask. */
   editReady: boolean;
   /** The endpoint is stable-diffusion.cpp's server: the page shows, and sends, the settings that only it reads. Off by default. */

@@ -74,7 +74,7 @@ const config = (baseUrl: string, more: Partial<ReturnType<typeof gen.imageGenera
 });
 /** What the page is told of a fresh install, with `more` changed. */
 const fresh = (more: Record<string, unknown> = {}) => ({
-  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300, sdExtras: false, editKeySet: false, editReady: false, ...more,
+  enabled: false, baseUrl: "", model: "", size: "", keySet: false, editEnabled: false, editBaseUrl: "", editModel: "", editMultiple: false, editMaxSize: "", timeoutSeconds: 300, sdExtras: false, editKeySet: false, ready: false, editReady: false, ...more,
 });
 
 test("a request is checked: the address is a base with no secret in it, the size a real one", () => {
@@ -114,6 +114,7 @@ test("it is off until switched on with an address, and the key is kept but never
   assert.equal(gen.imageGenerationReady(), true);
   const state = gen.imageGenerationState();
   assert.equal(state.keySet, true);
+  assert.equal(state.ready, true, "the page is told whether pictures can be made, and does not work it out");
   assert.ok(!("apiKey" in state));
   assert.ok(!JSON.stringify(state).includes(KEY), "nothing the page is given holds the key");
 

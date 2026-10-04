@@ -670,7 +670,7 @@ function GlobalSettings({
   const shown = (v: unknown) => (v === undefined ? "" : String(v));
   const [prefix, setPrefix] = useState(String(settings.toolPrefix ?? "server"));
   const [idle, setIdle] = useState(shown(settings.idleTimeout));
-  const [timeout, setTimeout] = useState(shown(settings.requestTimeoutMs));
+  const [request, setRequest] = useState(shown(settings.requestTimeoutMs));
   const [dirty, setDirty] = useState(false);
 
   // The fields follow the file when it changes elsewhere (the raw editor, another
@@ -680,7 +680,7 @@ function GlobalSettings({
     if (dirty) return;
     setPrefix(String(settings.toolPrefix ?? "server"));
     setIdle(shown(settings.idleTimeout));
-    setTimeout(shown(settings.requestTimeoutMs));
+    setRequest(shown(settings.requestTimeoutMs));
   }, [loaded]);
 
   const save = async () => {
@@ -689,8 +689,8 @@ function GlobalSettings({
     else next.toolPrefix = prefix;
     if (idle.trim() === "") delete next.idleTimeout;
     else next.idleTimeout = Number(idle);
-    if (timeout.trim() === "") delete next.requestTimeoutMs;
-    else next.requestTimeoutMs = Number(timeout);
+    if (request.trim() === "") delete next.requestTimeoutMs;
+    else next.requestTimeoutMs = Number(request);
     if (await onSave(next)) setDirty(false);
   };
 
@@ -736,10 +736,10 @@ function GlobalSettings({
         <Field label={t("Request timeout")} hint={t("Milliseconds")}>
           <input
             className={inputCls}
-            value={timeout}
+            value={request}
             placeholder={t("default")}
             inputMode="numeric"
-            onChange={(ev) => track(setTimeout)(ev.target.value)}
+            onChange={(ev) => track(setRequest)(ev.target.value)}
           />
         </Field>
       </div>

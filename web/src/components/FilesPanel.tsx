@@ -22,6 +22,7 @@ import { ApiError, api, type FileEntry, type Unsaved } from "../api";
 import type { FileActivity } from "../file-activity";
 import { flushFileDraft, keepFileDraft, readFileDraft } from "../file-drafts";
 import { local } from "../safe-storage";
+import { bytesLabel } from "../projects";
 import { confirmDialog } from "./ConfirmDialog";
 import { within } from "../paths";
 import { isEnter, isEscape } from "../shortcuts";
@@ -38,9 +39,6 @@ interface Open {
   mtime: number;
   saved: string;
 }
-
-const sizeOf = (bytes: number): string =>
-  bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 const HIDDEN_KEY = "filesShowHidden";
 /** Whether names that start with a dot are shown. Off unless it was turned on: they are mostly settings and tools' own folders. */
@@ -395,7 +393,7 @@ export const FilesPanel = memo(function FilesPanel({
       }
       // Opened while it was asked, and gone now: up to the folder it was in, which the change of folder loads.
       const shown = dirRef.current;
-      if (within(path, shown)) return setDir(path.split("/").slice(0, -1).join("/"));
+      if (within(path, shown)) return setDir(parentOf(path));
     } catch (e) {
       problem = (e as Error).message;
     } finally {
@@ -566,7 +564,7 @@ export const FilesPanel = memo(function FilesPanel({
               )}
             </span>
             {!file.loading && !file.error && (
-              <span className="shrink-0 text-[10px] text-fg-faint">{sizeOf(file.size)}</span>
+              <span className="shrink-0 text-[10px] text-fg-faint">{bytesLabel(file.size)}</span>
             )}
             <a href={api.fileDownloadUrl(sessionId, file.path)} title={t("Download this file")} aria-label={t("Download this file")} className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg">
               <LuDownload aria-hidden className="h-3.5 w-3.5" />
@@ -726,7 +724,7 @@ export const FilesPanel = memo(function FilesPanel({
                     )}
                     <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                     {entry.link && entry.type !== "link" && <LuLink aria-label={t("A link")} className="h-3 w-3 shrink-0 text-fg-faint" />}
-                    {entry.type === "file" && <span className="shrink-0 text-[10px] text-fg-faint">{sizeOf(entry.size)}</span>}
+                    {entry.type === "file" && <span className="shrink-0 text-[10px] text-fg-faint">{bytesLabel(entry.size)}</span>}
                   </button>
                   {/* Out of the way until the row is pointed at, but always there on a touch screen, which cannot point. */}
                   <div className="files-row-actions flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">

@@ -1,5 +1,6 @@
 import { insideFolder } from "./file-activity";
 import { t, tp } from "./i18n";
+import { toolArgsOf, toolNameOf } from "./tool-payload";
 
 /**
  * What a tool call is, in words, for the cards that fly out of the orb in voice mode.
@@ -46,9 +47,6 @@ const hostOf = (url: string) => {
  */
 export const SHELL_TOOL = /^(bash|shell|terminal|exec_command)$/i;
 
-const nameOf = (p: any) => String(p?.toolName ?? p?.name ?? "tool");
-const argsOf = (p: any): unknown => p?.input ?? p?.args ?? p?.parameters;
-
 /**
  * The call as the agent made it. The MCP adapter puts every server's tools
  * behind one `mcp` tool, so a web search and a database query would both read
@@ -64,7 +62,7 @@ export function unwrapCall(name: string, args: unknown): { name: string; input: 
 }
 
 /** A payload's call, unwrapped: see unwrapCall. */
-export const unwrap = (p: any) => unwrapCall(nameOf(p), argsOf(p));
+export const unwrap = (p: any) => unwrapCall(toolNameOf(p, "tool"), toolArgsOf(p));
 
 /** The name to show for a call. */
 export const toolName = (name: string, args: unknown): string => unwrapCall(name, args).name;

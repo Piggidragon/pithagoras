@@ -159,7 +159,7 @@ export function imageEditingTarget(config: ImageGenerationConfig = imageGenerati
 export function imageGenerationState() {
   const config = imageGenerationConfig();
   const { apiKey, editApiKey, ...rest } = config;
-  return { ...rest, keySet: apiKey !== "", editKeySet: editApiKey !== "", editReady: imageEditingReady(config) };
+  return { ...rest, keySet: apiKey !== "", editKeySet: editApiKey !== "", ready: imageGenerationReady(config), editReady: imageEditingReady(config) };
 }
 
 export interface ImageGenerationPatch {
