@@ -393,6 +393,33 @@ test("a colleague reads a code base that has tokens in it, and a rule for writin
   }
 });
 
+test("a rule for writing opens no place where secrets are kept: the check is on every tool, not only on commands", () => {
+  const ids = ["write", "edit"].map((tool) => {
+    const id = `rule-secrets-${tool}`;
+    addToolRule({ id, role: "all", tool, pattern: "*", note: "", person_key: null });
+    return id;
+  });
+  try {
+    for (const role of ["colleague", "guest"]) {
+      const h = guardAs({ role, key: "priya", workspace });
+      for (const [tool, input] of [
+        ["write", { path: path.join(folder, "agent", "auth.json"), content: "{}" }],
+        ["write", { path: ".env", content: "PORTAL_PASSWORD=x" }],
+        ["edit", { path: ".ssh/authorized_keys", edits: [] }],
+      ]) {
+        const result = call(h, tool, input);
+        assert.equal(refused(result), true, `${role}: ${tool} ${JSON.stringify(input)}`);
+        assert.match(result.reason, /it reads a place where secrets are kept/);
+      }
+      // What the rule is for goes through.
+      assert.equal(call(h, "write", { path: "notes/a.txt", content: "x" }), undefined, role);
+      assert.equal(lastAudit().kind, "allowed-by-rule");
+    }
+  } finally {
+    for (const id of ids) deleteToolRule(id);
+  }
+});
+
 test("the skills the agent offers can be read by whoever it serves, and nothing else beside the folder", () => {
   const skills = path.join(folder, "agent", "skills");
   mkdirSync(path.join(skills, "pdf"), { recursive: true });

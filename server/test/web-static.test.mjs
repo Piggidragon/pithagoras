@@ -16,10 +16,12 @@ const root = scratch("pithagoras-web-static-");
 // Below a dot folder, as a build kept under `~/.pithagoras` is: Express takes a
 // file with one in its path for hidden and answers 404, unless it is told the root.
 const dist = path.join(root, ".pithagoras", "web", "dist");
-const outside = path.join(root, ".pithagoras", "secret.txt");
+// What a path that climbs out of the build can name: the folder above it, and the one above that.
+const outside = path.join(dist, "..", "secret.txt");
+const farther = path.join(dist, "..", "..", "secret.txt");
 mkdirSync(path.join(dist, "assets"), { recursive: true });
 mkdirSync(path.join(dist, "voice-assets"));
-writeFileSync(outside, "not for the web");
+for (const secret of [outside, farther]) writeFileSync(secret, "not for the web");
 writeFileSync(path.join(dist, ".hidden.js"), "export const secret = 1;\n".repeat(200));
 const script = "export const answer = 42;\n".repeat(200);
 const wasm = Buffer.alloc(20_000, 7);
@@ -134,12 +136,25 @@ test("a file written over since its copy was made is sent as it is now", async (
 });
 
 test("nothing outside the built files is reached by a path that climbs out of them", async () => {
-  writeFileSync(outside + ".br", "x".repeat(2000));
-  for (const url of ["/assets/..%2f..%2fsecret.txt", "/..%2fsecret.txt", "/%2e%2e/secret.txt", "/assets/%00"]) {
+  for (const secret of [outside, farther]) writeFileSync(secret + ".br", "x".repeat(2000));
+  // Each URL is for a file that is there: a path that leads nowhere is a test of nothing, as it was
+  // once the build moved deeper, and any server answered it with a 404.
+  const climbing = {
+    "/assets/..%2f..%2fsecret.txt": outside,
+    "/..%2fsecret.txt": outside,
+    "/%2e%2e/secret.txt": outside,
+    "/..%2f..%2fsecret.txt": farther,
+    "/assets/..%2f..%2f..%2fsecret.txt": farther,
+    "/%2e%2e/%2e%2e/secret.txt": farther,
+  };
+  for (const [url, secret] of Object.entries(climbing)) {
+    assert.equal(path.join(dist, decodeURIComponent(url)), secret, `${url} names the file it is about`);
     const res = await get(url, { "accept-encoding": "br" });
     assert.notEqual(res.body.toString(), "x".repeat(2000), url);
     assert.ok(!res.body.toString().includes("not for the web"), url);
   }
+  const res = await get("/assets/%00", { "accept-encoding": "br" });
+  assert.ok(!res.body.toString().includes("not for the web"));
 });
 
 test("a build below a dot folder is served, and a hidden file inside it still is not", async () => {

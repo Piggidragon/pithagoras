@@ -123,3 +123,24 @@ test("a change that fails after its chat was left says nothing in the chat opene
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(thinkingPill(page)).toBeEnabled();
 });
+
+test("a model pick that fails after its chat was left says nothing in the chat opened, and does not keep it busy", async ({ page }) => {
+  const state = await portal(page);
+  let release!: () => void;
+  state.hold.post = new Promise<void>((resolve) => { release = resolve; });
+  state.failWith = { error: 'Model not found: prov-a/Beta' };
+  await page.goto('/s/a');
+  await modelPill(page).click();
+  await page.getByRole('button', { name: 'More models' }).click();
+  await page.getByTitle('Beta', { exact: true }).click();
+  await expect.poll(() => state.posts.length).toBe(1);
+  await page.getByText('Second chat').first().click();
+  await expect(page).toHaveURL(/\/s\/b$/);
+  await expect(modelPill(page)).toHaveText('Beta');
+  release();
+  await page.waitForTimeout(400);
+  // Not said in the other chat's model menu, and its pills are not waiting on a pick that is not theirs.
+  await modelPill(page).click();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(thinkingPill(page)).toBeEnabled();
+});

@@ -51,10 +51,13 @@ export const freePort = () => new Promise((resolve) => {
 /**
  * Every folder the server reads and writes, set to a place in `home`: none of them is left to its default.
  * And git is kept from looking above the temp folder for a repository: where that folder lies inside one, a
- * command pi runs in a chat folder would otherwise be run in it, with the developer's credentials.
+ * command pi runs in a chat folder would otherwise be run in it, with the developer's credentials. Nor does it
+ * read the developer's own config, which may sign every commit.
  */
 const homeEnv = (home) => ({
   GIT_CEILING_DIRECTORIES: path.dirname(home),
+  // A config of its own, empty: not the developer's, whose signing or hooks would run in a test that commits.
+  GIT_CONFIG_GLOBAL: path.join(home, ".gitconfig"), GIT_CONFIG_NOSYSTEM: "1",
   DATA_DIR: home, BIN_DIR: path.join(home, "bin"), SESSION_DIR: path.join(home, "sessions"), CHANNELS_DIR: path.join(home, "channels"),
   AGENT_HOME: path.join(home, "agent-home"), WORKSPACE_ROOT: path.join(home, "ws"), PI_CODING_AGENT_DIR: path.join(home, "agent"),
 });

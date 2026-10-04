@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { schemaFingerprint } from "./schema-fingerprint.mjs";
@@ -93,6 +93,15 @@ function startUpgrade(dataDir, port) {
   child.stderr.on("data", (c) => { out += c; });
   return { child, output: () => out };
 }
+
+// A database in WAL mode (bytes 18 and 19 of its header are 2) leaves a -shm and a -wal file beside it when it is only
+// read, which the next `git add -A` commits. The fixtures are kept with a rollback journal; the upgrade turns WAL on itself.
+test("the fixtures are kept without a write-ahead log, so that looking into one in place leaves no files beside it", () => {
+  for (const name of ["portal-v2.db", "portal-unversioned.db"]) {
+    const header = readFileSync(new URL(`./fixtures/${name}`, import.meta.url)).subarray(0, 20);
+    assert.deepEqual([header[18], header[19]], [1, 1], name);
+  }
+});
 
 // fixtures/portal-v2.db was made by the code of the release before this one (d2b6fcc, SCHEMA_VERSION 2): a chat with two
 // messages and their answers, a stored canvas, two pictures of which one is an edit of the other, a person with notes, and a saved voice.

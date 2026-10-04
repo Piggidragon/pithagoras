@@ -31,3 +31,19 @@ test("a push from a test's chat folder cannot reach the repository that the temp
   assert.throws(() => git(chat, "push", "origin", "main"), (e) => e.status === 128, "fatal: no repository here");
   assert.throws(() => git(remote, "rev-parse", "--verify", "main"), "nothing arrived at the remote");
 });
+
+test("a commit in a test's home does not read the git config of the person running the tests", () => {
+  // A developer who signs their commits, with a program that cannot sign now (a key that is not plugged in).
+  const theirs = path.join(scratch("pithagoras-theirs-"), "gitconfig");
+  writeFileSync(theirs, "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /bin/false\n");
+  process.env.GIT_CONFIG_GLOBAL = theirs;
+  inProcessHome("pithagoras-signing-");
+  const repo = path.join(process.env.WORKSPACE_ROOT, "signed");
+  mkdirSync(repo);
+  git(repo, "init", "-b", "main");
+  writeFileSync(path.join(repo, "work"), "one");
+  git(repo, "add", "work");
+  // Fails with "failed to sign the data" where their config is read.
+  git(repo, "commit", "-m", "one");
+  assert.equal(git(repo, "log", "--format=%s").trim(), "one");
+});

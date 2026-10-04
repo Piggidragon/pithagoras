@@ -11,6 +11,8 @@ const home = scratch("pithagoras-git-");
 process.env.HOME = home;
 process.env.GIT_CONFIG_GLOBAL = path.join(home, ".gitconfig");
 process.env.GIT_CONFIG_NOSYSTEM = "1";
+// Nor the repository that the temp folder may lie in: a developer's TMPDIR can be inside a work tree.
+process.env.GIT_CEILING_DIRECTORIES = path.dirname(home);
 writeFileSync(process.env.GIT_CONFIG_GLOBAL, "[user]\n\tname = Tester\n\temail = t@example.com\n[init]\n\tdefaultBranch = main\n");
 // A gh of our own, first on the PATH: it writes down what it was asked and answers as GitHub would.
 const bin = path.join(home, "bin");
