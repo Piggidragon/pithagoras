@@ -46,17 +46,17 @@ export function caretFrom(read: typeof caretOf): void {
 }
 
 /**
- * The portal told what is in a chat's box once typing pauses. Emptied — sent,
- * most often — at once, ahead of the message: a command that read the box
- * would otherwise find itself in it.
- */
-/**
  * The chats whose pi is up, as their background list last said: only then can
  * an extension ask what is in the box. Told of every pause and cursor move
  * otherwise, the portal kept text nothing would read.
  */
 const piUp = new Set<string>();
 
+/**
+ * The portal told what is in a chat's box once typing pauses. Emptied — sent,
+ * most often — at once, ahead of the message: a command that read the box
+ * would otherwise find itself in it.
+ */
 function tellPortal(): (id: string, text: string) => void {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const send = (id: string, text: string) => void api.draft(id, text, text ? caretOf(id) : undefined).catch(() => {});

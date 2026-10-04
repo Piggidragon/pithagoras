@@ -32,12 +32,6 @@ function StateBadge({ pull }: { pull: Pick<PullSummary, "state" | "isDraft"> }) 
   return <span className={`shrink-0 rounded px-1 text-[10px] ring-1 ring-inset ${look[state] ?? "text-fg-subtle ring-line"}`}>{named[state] ?? state.toLowerCase()}</span>;
 }
 
-/**
- * Pull requests, through gh: the one for the branch checked out (or a way to
- * open it), and the repository's list. Without gh, or signed out, it says so —
- * and the branch can still be compared with its base, which is most of what a
- * pull request is for before anybody else looks at it.
- */
 /** What reviewers decided, as GitHub names it, in words. */
 const DECISION: Record<string, string> = {
   APPROVED: msg("approved"),
@@ -46,6 +40,12 @@ const DECISION: Record<string, string> = {
 };
 const decision = (d: string) => labelOf(DECISION, d, (other) => other.toLowerCase().replace(/_/g, " "));
 
+/**
+ * Pull requests, through gh: the one for the branch checked out (or a way to
+ * open it), and the repository's list. Without gh, or signed out, it says so —
+ * and the branch can still be compared with its base, which is most of what a
+ * pull request is for before anybody else looks at it.
+ */
 export function Pulls() {
   const { id, repo, show } = useGit();
   const gh = repo.gh;
@@ -204,8 +204,10 @@ function readForm(text: string): PullForm | null {
   }
 }
 
-/** Open a pull request for the branch checked out: pushed first if it is not on GitHub yet. */
-/** `onOpened` is told of every pull request opened, with its number where gh's answer gave one. */
+/**
+ * Open a pull request for the branch checked out: pushed first if it is not on GitHub yet.
+ * `onOpened` is told of every pull request opened, with its number where gh's answer gave one.
+ */
 function OpenPull({ onOpened }: { onOpened: (n?: number) => void }) {
   const { id, repo, act, busy } = useGit();
   const defaultBranch = repo.gh?.defaultBranch ?? null;

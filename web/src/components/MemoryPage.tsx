@@ -40,16 +40,7 @@ import { codeAreaCls, inputCls, primarySmCls } from "./SettingsUi";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
 import { formatTokens } from "../transcript";
 
-/**
- * The agent's memory in Understory, laid out as Understory's own page lays it
- * out: its folders and notes with a search down the side, and a note, the log
- * of changes or the graph of links beside them. Read only — the agent keeps
- * its memory, through its tools. Everything is asked through the portal (see
- * server/src/api/memory.ts), so it works wherever the portal does.
- *
- * What is open is in the address: `?note=<path>`, or `?view=log|graph|issues`,
- * so it can be linked to and Back goes back through it.
- */
+/** What the page shows in place of a note: the log of changes, the graph of links, or what the health check found. */
 type View = "log" | "graph" | "issues";
 
 /** The colour of each type of note, the same in the list, a note and the graph. */
@@ -72,6 +63,16 @@ function TypeBadge({ type, className = "" }: { type: string; className?: string 
 /** The tree and its health check: the check failing is not the tree failing. */
 const readTree = () => Promise.all([api.memoryTree(), api.memoryValidate().catch(() => null)]);
 
+/**
+ * The agent's memory in Understory, laid out as Understory's own page lays it
+ * out: its folders and notes with a search down the side, and a note, the log
+ * of changes or the graph of links beside them. Read only — the agent keeps
+ * its memory, through its tools. Everything is asked through the portal (see
+ * server/src/api/memory.ts), so it works wherever the portal does.
+ *
+ * What is open is in the address: `?note=<path>`, or `?view=log|graph|issues`,
+ * so it can be linked to and Back goes back through it.
+ */
 export function MemoryPage() {
   const [params, setParams] = useSearchParams();
   const note = params.get("note");

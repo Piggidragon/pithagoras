@@ -276,10 +276,10 @@ function drawPattern(ctx: Ctx, kind: OrbPattern, back: boolean, r: number, t: nu
 function lift(ctx: Ctx, r: number) { ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = r * 0.08; ctx.shadowOffsetY = r * 0.03; }
 function unlift(ctx: Ctx) { ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0; }
 
-/** Where the eyes sit and how big they are: widened and raised when listening, stretched by the voice when speaking. */
 /** How far the face is into listening (`wide`) and into speaking (`talk`), each 0 to 1, eased from one state to the next. */
 interface Mood { wide: number; talk: number }
 
+/** Where the eyes sit and how big they are: widened and raised when listening, stretched by the voice when speaking. */
 function faceOf(r: number, mood: Mood, level: number) {
   return {
     ex: r * 0.36,

@@ -164,6 +164,9 @@ function AgentCards({ agents, onOpen, onNew }: { agents: Agent[]; onOpen: (id: s
   );
 }
 
+/** Conversations started here rather than arriving through a channel. */
+const BROWSER = "browser";
+
 /**
  * The agent's conversations, one per chat rather than one overall.
  *
@@ -172,9 +175,6 @@ function AgentCards({ agents, onOpen, onNew }: { agents: Agent[]; onOpen: (id: s
  * That is what stops a group chat and a DM sharing a memory. They are ordinary
  * sessions, so they open in the ordinary chat view.
  */
-/** Conversations started here rather than arriving through a channel. */
-const BROWSER = "browser";
-
 function AgentView({
   agent,
   back,

@@ -27,6 +27,15 @@ const LEAVING = 600;
 const SLOTS = 4;
 const SLOT_IDS = Array.from({ length: SLOTS }, (_, i) => i);
 
+/** Where a card leads, as its title names it. */
+const TARGET: Record<ToolTarget, string> = {
+  terminal: msg("the terminal"),
+  files: msg("the files"),
+  browser: msg("the browser"),
+  canvas: msg("the document"),
+  pictures: msg("the picture"),
+};
+
 /**
  * What the agent is doing, as cards flying out of the orb.
  *
@@ -37,15 +46,6 @@ const SLOT_IDS = Array.from({ length: SLOTS }, (_, i) => i);
  * the file in Files, the terminal, the browser, the document, the picture.
  * That is a role it takes on, not another element: see the card below.
  */
-/** Where a card leads, as its title names it. */
-const TARGET: Record<ToolTarget, string> = {
-  terminal: msg("the terminal"),
-  files: msg("the files"),
-  browser: msg("the browser"),
-  canvas: msg("the document"),
-  pictures: msg("the picture"),
-};
-
 export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { events: PortalEvent[]; sessionId: string; folder: string; onOpen: (call: ToolCall) => void }) {
   const seen = useRef(events.reduce((n, e) => Math.max(n, e.seq), 0));
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());

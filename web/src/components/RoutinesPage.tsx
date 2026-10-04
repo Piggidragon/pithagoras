@@ -125,13 +125,6 @@ function Timing({
   );
 }
 
-/**
- * Work that happens on a schedule rather than because somebody asked.
- *
- * A routine is a standing instruction and a cron expression: it fires, the
- * agent does the job, and it goes quiet again. What it did last time is kept,
- * because that is the only way to know a routine is working.
- */
 /** The select's value for a routine: "" inherits, "off" is silent. */
 function reportValue(r: Routine): string {
   if (r.reportChannel === "") return "off";
@@ -154,6 +147,13 @@ const reported = (r: Routine) =>
 const labelFor = (targets: ReportTarget[], to: ReportTo) =>
   targets.find((t) => t.channel === to.channel && t.target === to.target)?.label;
 
+/**
+ * Work that happens on a schedule rather than because somebody asked.
+ *
+ * A routine is a standing instruction and a cron expression: it fires, the
+ * agent does the job, and it goes quiet again. What it did last time is kept,
+ * because that is the only way to know a routine is working.
+ */
 export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);

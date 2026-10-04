@@ -663,8 +663,10 @@ export const api = {
   subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
   /** Image generation alone: nothing of Understory or Docker asked for. */
   imagesFeature: () => json<{ images: ImagesFeature }>("/api/features/images"),
-  /** Only whether each is on — cheap, for the sidebar and the chat's menus. */
-  /** `images`: image generation is on and has an address, which is when the Images page is in the sidebar. */
+  /**
+   * Only whether each is on — cheap, for the sidebar and the chat's menus.
+   * `images`: image generation is on and has an address, which is when the Images page is in the sidebar.
+   */
   featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
   subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),

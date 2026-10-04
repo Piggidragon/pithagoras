@@ -8,14 +8,7 @@ import { LoadFailed } from "./SettingsUi";
 import { msg, t } from "../i18n";
 import { tabKeys } from "../tab-keys";
 
-/**
- * Optional pieces of the portal itself, as opposed to pi's packages.
- *
- * This is where an add-on is found before it exists. Its own page appears in
- * the sidebar once installed, which is the right place to live and the wrong
- * place to be discovered from — nothing was visible until it was already
- * running, so there was nowhere to press install.
- */
+/** The add-ons, in the order they are listed. */
 const addons = [
   { id: 'browser', label: msg('Browser'), Icon: LuGlobe },
   { id: 'voice', label: msg('Voice'), Icon: LuMic },
@@ -24,6 +17,14 @@ const addons = [
 ] as const;
 type Addon = typeof addons[number]['id'];
 
+/**
+ * Optional pieces of the portal itself, as opposed to pi's packages.
+ *
+ * This is where an add-on is found before it exists. Its own page appears in
+ * the sidebar once installed, which is the right place to live and the wrong
+ * place to be discovered from — nothing was visible until it was already
+ * running, so there was nowhere to press install.
+ */
 export function PortalExtensions({ onError }: { onError: (e: string) => void }) {
   const id = useId();
   const [selected, setSelected] = useState<Addon>('browser');

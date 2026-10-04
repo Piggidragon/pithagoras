@@ -8,8 +8,9 @@ import { msg } from "./i18n";
  * message, so seeing their own words buried under three framing blocks is
  * noise. Folded away rather than dropped: it is still what the model saw, and
  * when a reply looks strange this is usually why.
+ *
+ * Keep in step with FRAMING_TAGS in the server's channels/framing.ts, which a test compares.
  */
-/** Keep in step with FRAMING_TAGS in the server's channels/framing.ts, which a test compares. */
 export const CONTEXT_BLOCKS: { tag: string; label: string }[] = [
   { tag: "speaker", label: msg("Speaker") },
   { tag: "sent-since-you-last-spoke", label: msg("Sent while idle") },
