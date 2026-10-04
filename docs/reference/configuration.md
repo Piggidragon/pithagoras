@@ -42,11 +42,11 @@ an empty field inherits, and clearing one hands the setting back.
 | `PORTAL_UPGRADE_BACKUP` | — | `skip` upgrades the database without backing it up first, for a disk that cannot hold the copy. See [Upgrading](/guide/upgrading). |
 | `SESSION_DIR` | `./data/sessions` (image: `/data/sessions`) | One folder per session, holding pi's conversation file. Removed when the session is deleted — with the container executor, a file written by another user can keep a folder from going; that is logged. |
 | `WORKSPACE_ROOT` | `/workspaces` | Directories sessions can be created against. `WORKSPACES_DIR` is read as well, when this is unset. |
-| `BIN_DIR` | `/data/bin` | Persistent CLI installation directory added to PATH. |
+| `BIN_DIR` | `$DATA_DIR/bin` (image: `/data/bin`) | Persistent CLI installation directory added to PATH. |
 | `PI_CODING_AGENT_DIR` | `$HOME/.pi/agent` | Override pi’s settings/package directory. |
 | `LLAMA_BASE_URL` | — | Read by pi’s installed llama extension; not by the portal directly. |
-| `CHANNELS_DIR` | `/data/channels` | Installed channel packages. |
-| `AGENT_HOME` | `/data/agent-home` | The first agent's directory. Any other agent gets one under `agents/`, beside it. See [Agents](/guide/agents). |
+| `CHANNELS_DIR` | `$DATA_DIR/channels` (image: `/data/channels`) | Installed channel packages. |
+| `AGENT_HOME` | `$DATA_DIR/agent-home` (image: `/data/agent-home`) | The first agent's directory. Any other agent gets one under `agents/`, beside it. See [Agents](/guide/agents). |
 | `HOME` | `/data/home` | pi's home — its settings and packages. |
 | `EXECUTOR` | `host` | `host` or `container`. |
 | `PI_IMAGE` | `pithagoras-runner:latest` | Image for the container executor. |

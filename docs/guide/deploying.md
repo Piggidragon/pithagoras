@@ -216,8 +216,8 @@ Everything here is optional except the password.
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the add-ons and container executor talk to. |
 | `VOICE_GPU` / `VOICE_VRAM_RESERVE_MIB` | — | Managed voice: the GPU it uses where none is chosen on the voice page, and memory in MiB to keep free on it. Both Compose files pass them from `.env`; see [Docker add-ons](/guide/add-ons#engines-devices-and-memory). |
 | `NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the package catalogue searches. |
-| `CHANNELS_DIR` | `/data/channels` | Where third-party channel packages install. |
-| `AGENT_HOME` | `/data/agent-home` | The first agent's directory. Other agents are made in `agents/` beside it. |
+| `CHANNELS_DIR` | `/data/channels` (from source: `$DATA_DIR/channels`) | Where third-party channel packages install. |
+| `AGENT_HOME` | `/data/agent-home` (from source: `$DATA_DIR/agent-home`) | The first agent's directory. Other agents are made in `agents/` beside it. |
 | `PI_PROVIDER` | — | Overrides pi's `defaultProvider`. |
 | `PI_MODEL` | — | Overrides pi's `defaultModel`. |
 | `PI_THINKING_LEVEL` | — | Overrides pi's `defaultThinkingLevel`. |
@@ -251,11 +251,20 @@ node --input-type=module -e 'import Database from "better-sqlite3"; const db = n
 
 A working installation prints `{ ok: 1 }`.
 
+The server needs the `pi` CLI on your `PATH`, as the image has it, and a
+password, as above. Everything it keeps for itself goes in `./data` unless you
+set `DATA_DIR`: the database, `bin/`, `agent-home/`, `channels/` and the local
+browser's profile. Nothing is written to `/data`, which only the image has.
+
 ```bash
 npm install
-npm run dev:server   # API on :4100
+PORTAL_PASSWORD='a password of 8 or more characters' npm run dev:server   # API on :4100
 npm run dev:web      # Vite dev server, proxying to it
 ```
+
+To try it without a login, set
+`PORTAL_ALLOW_NO_PASSWORD=1` instead of the password; the server then listens on
+`127.0.0.1` only, unless `ALLOW_OPEN=1` is set.
 
 And the docs site you are reading:
 

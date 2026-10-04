@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync 
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { dataFolder } from "../data-dir.js";
 import { isUnderText, isWithinText } from "../within.js";
 
 const run = promisify(execFile);
@@ -70,7 +71,7 @@ export interface BrokenChannel {
 
 /** Where third-party packages are installed. Builtins ship inside the image. */
 export const channelsDir = (): string => {
-  const dir = path.resolve(process.env.CHANNELS_DIR || "/data/channels");
+  const dir = dataFolder("CHANNELS_DIR", "channels");
   mkdirSync(dir, { recursive: true });
   return dir;
 };

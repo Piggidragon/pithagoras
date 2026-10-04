@@ -25,6 +25,7 @@ import {
 import { checkWorkspace, workspaceRoot } from "./workspaces.js";
 import { insideReal, isWithinText } from "./within.js";
 import { agentHomePath } from "./agent-home.js";
+import { dataFolder } from "./data-dir.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
 import { AgentError, agentOf, agentsRoot, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
 import { sweepRemoved } from "./folder-removal.js";
@@ -116,7 +117,7 @@ import {
 const WORKSPACE_ROOT = workspaceRoot();
 const PORT = Number(process.env.PORT || 4100);
 /** Persistent place for CLIs, kept on PATH so pi and its tools can reach them. */
-const BIN_DIR = path.resolve(process.env.BIN_DIR || "/data/bin");
+const BIN_DIR = dataFolder("BIN_DIR", "bin");
 
 // Everything the portal starts carries this, and keeps it when it is detached:
 // it is how a background job is known to be the agent's. See background.ts.
