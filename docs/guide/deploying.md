@@ -20,9 +20,11 @@ WORKSPACES_DIR=/path/to/repos
 ```
 
 `.env.example` lists every variable Compose reads. `WORKSPACES_DIR` is the host
-folder your repositories are in; `PORTAL_DATA_DIR` (optional) is an absolute host
-path to keep the portal's data in, instead of the `portal-data` Docker volume.
-Keep it apart from `WORKSPACES_DIR`.
+folder your repositories are in, and it is required: there is no default, and
+Compose stops with a message until it is set, rather than mount a folder nobody
+chose. `PORTAL_DATA_DIR` (optional) is an absolute host path to keep the
+portal's data in, instead of the `portal-data` Docker volume. Keep it apart from
+`WORKSPACES_DIR`.
 
 `PORTAL_SECRET` signs the login cookie. Leave it out and logins are invalidated
 on every restart, which is exactly the annoyance you would expect. The cookie is
@@ -59,8 +61,8 @@ projects. The legacy `WORKSPACES_DIR` variable is also accepted when
 set, the server uses `/workspaces`.
 
 With the supplied Compose files, `WORKSPACES_DIR` selects the **host** directory
-mounted at `/workspaces`. Keep the portal's `WORKSPACE_ROOT=/workspaces` so it
-uses the path visible inside its container.
+mounted at `/workspaces`, and has to be set. Keep the portal's
+`WORKSPACE_ROOT=/workspaces` so it uses the path visible inside its container.
 
 ## Installing add-ons
 
@@ -198,18 +200,23 @@ anyway. This is the right home for `apt-get install` lines.
 
 ## Environment
 
-Everything here is optional except the password.
+Everything here is optional except the password and, with the Compose files,
+`WORKSPACES_DIR`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PORTAL_PASSWORD` | — | Required. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one. A portal that already ran with a shorter password keeps starting with it, with a warning in the log and in Settings, but a new or changed one has to be long enough. Changing it ends every login made under the old one. |
-| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. |
+| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. See [Running without a password](#running-without-a-password). |
+| `ALLOW_OPEN` | — | `1` makes a portal with no password listen on every interface instead of `127.0.0.1` only. Both Compose files pass it. |
 | `PORTAL_SECRET` | random | Signs the session cookie. Set it to survive restarts. |
 | `PORT` | `4100` | Port to listen on. |
+| `TZ` | UTC | The time zone of the portal's clock, such as `Europe/Berlin`. A container keeps UTC unless it is told one. The quiet hours of an [agent's heartbeat](/guide/agents#its-heartbeat) and the schedule of a repeating [routine](/guide/routines) are read on this clock. Both Compose files pass it from `.env` or the shell. |
+| `PORTAL_UPGRADE_BACKUP` | — | `skip` upgrades the database without the backup it is otherwise made first, for a volume with no room for the copy. Both Compose files pass it; see [Upgrading](/guide/upgrading#no-room-for-the-backup). |
 | `EXECUTOR` | `host` | `host` or `container` — see [Architecture](/reference/architecture#executors). |
 | `WORKSPACE_ROOT` | `/workspaces` | Where workspaces live inside the container. |
+| `WORKSPACES_DIR` | — (required) | Compose only: the host folder mounted at `/workspaces`. |
 | `PORTAL_DATA_DIR` | `portal-data` volume | Compose only: an absolute host path to mount at `/data` instead of the volume. |
-| `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file; Compose mounts `PORTAL_TLS_DIR` at `/certs`. |
+| `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file; both Compose files mount `PORTAL_TLS_DIR` at `/certs`, so name the files there (`/certs/portal.crt`). |
 | `PORTAL_CONTAINER_NAME` | `pithagoras` (Compose) | The portal's own container name, for managed add-ons and container mounts. Unset natively. |
 | `PI_IMAGE` | `pithagoras-runner:latest` | Container executor's image. |
 | `TASK_MEMORY_MB` / `TASK_CPUS` / `TASK_PIDS_LIMIT` | `2048` / `2` / `512` | Container executor limits. |
@@ -227,14 +234,19 @@ pi's own `settings.json` decides — see
 [the resolution order](/guide/settings#where-a-model-comes-from). They are empty
 in the compose file for exactly that reason.
 
-Provider credentials (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, and anything
-else pi understands) pass straight through to pi.
+Provider credentials (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` and
+`OPENAI_API_KEY`) are passed from `.env` to pi by both Compose files. For another
+provider, add its variable to the `environment:` list of the file, or save the
+key under **Settings → Providers**, which needs no change to the file.
 
 ## Portainer
 
 `docker-compose.portainer.yml` pulls a prebuilt image from GHCR instead of
 building locally. Point a Portainer stack at it and set the same environment
-variables.
+variables: it passes everything `docker-compose.yml` does, the certificates and
+the TLS variables, the password settings and the provider keys included, and
+`WORKSPACES_DIR` is required there too. Set `PITHAGORAS_VERSION` to a release
+(see [Upgrading](/guide/upgrading#pin-a-version)).
 
 ## Running from source
 
@@ -306,9 +318,14 @@ The container executor creates each session directory before starting Docker and
 
 Existing session directories must be writable by that portal user. For a custom non-root runner, ensure its executable and required configuration are readable by the portal UID, and any additional cache/home paths are writable. Fix ownership on the host rather than making the session directory world-writable.
 
-## Passwordless local development
+## Running without a password
 
-Without `PORTAL_PASSWORD`, the portal binds only to `127.0.0.1`. Set a password before exposing it on your LAN or through a reverse proxy. `ALLOW_OPEN=1` explicitly permits an unauthenticated network listener; anyone who can reach it can run commands. Docker Compose still requires a password.
+Without `PORTAL_PASSWORD` the portal does not start: it runs arbitrary commands, so an empty or misspelt password must not quietly open the port. Two settings, both deliberate, change that:
+
+- `PORTAL_ALLOW_NO_PASSWORD=1` lets it start with no login. It then listens on `127.0.0.1` only, so a reverse proxy on the same host reaches it and nothing else does.
+- `ALLOW_OPEN=1` on top of that makes it listen on every interface. This is what a proxy in another container, or on another machine, needs; anyone who can reach the port can then run commands, so the port must be closed to everything but the proxy.
+
+Both Compose files pass both variables on. They bind to the host (`network_mode: host`), so `127.0.0.1` there is the host's own loopback, which a container on Docker's bridge network cannot reach: for a proxy in such a container, set `ALLOW_OPEN=1` and keep the port closed with the host's firewall. With a password, the portal listens on every interface and neither is needed.
 
 Login attempts are limited per direct network source. A reverse proxy shares that limit across its clients; untrusted forwarding headers do not bypass it. The production UI sends a Content Security Policy that permits the local browser, microphone processing, and configured HTTP/WebSocket services.
 

@@ -30,6 +30,8 @@ If you can't, and you accept upgrading without a backup, start once with:
 PORTAL_UPGRADE_BACKUP=skip
 ```
 
+Put it in `.env` and recreate the container (`docker compose up -d`): both Compose files pass it on to the portal, as does the Portainer stack when it is set in the stack's environment. Take it out again afterwards, or no later upgrade is backed up.
+
 ### A damaged database
 
 SQLite can recover everything still readable into a new file. Both shipped Compose files name the container `pithagoras` and set `PORTAL_CONTAINER_NAME` to it; the page and the log show these steps with the name your portal has been told. The volume holding its data is read from the container, since the Compose files name it differently:
@@ -60,6 +62,16 @@ mv portal.db portal-damaged.db && rm -f portal.db-wal portal.db-shm && mv portal
 ```
 
 The portal checks the recovered database before upgrading it. Rows on damaged pages can't be recovered, which usually means part of the event history of some conversations. Once you're happy with the result, delete `portal-damaged.db`.
+
+## Upgrading from the first release
+
+What the first start after an install of version 0.1.0, or of any build made before this one, shows and needs:
+
+- **The Upgrading page.** The database is checked, backed up and upgraded, as above. The schema version was raised for this release, so an install made before it goes through this once.
+- **A voice add-on.** The container of a voice add-on that an older version made is made again, with the engines and the card it had, the next time it is started or installed from Settings → Add-ons; the models and builds in its volume are kept. Rebuilding the portal does not touch it until then.
+- **`WORKSPACES_DIR` is required.** An install whose `.env` never set it was mounting the folder `/root/repos` of the host, and Compose now stops until the variable is set. Set it to the folder your repositories are in; for an install that relied on the old default, that is `/root/repos`. The Portainer stack asks for it too.
+- **The password.** A new or changed `PORTAL_PASSWORD` has to be at least 8 characters and not `change-me`. A portal that already ran with a shorter one keeps starting with it, with a warning; see [Deploying](/guide/deploying#environment).
+- **Channel packages.** A third-party channel has to say who sent each message (`from` in `ctx.ask`), or once a primary user is named its messages are turned away like a stranger's. See [Writing a channel](/channels/writing-a-channel).
 
 ## Pin a version
 
