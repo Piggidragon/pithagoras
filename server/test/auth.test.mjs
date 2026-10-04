@@ -189,6 +189,15 @@ test("the portal does not start without a password, with the example's, or with 
   }
 });
 
+test("a secret that is a shell command, as a .env written from the old guide holds, is warned about", async () => {
+  // Refused for its password, so that it ends: the warning comes before.
+  const start = (secret) => runToEnd([ENTRY], serverEnv(testHome("pithagoras-auth-secret-"), 0, { PORTAL_PASSWORD: "short", PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: secret }), { ms: 20_000 });
+  const copied = await start("$(openssl rand -hex 32)");
+  assert.match(copied.err, /PORTAL_SECRET is a shell command/);
+  const real = await start("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+  assert.doesNotMatch(real.err, /PORTAL_SECRET/);
+});
+
 test("a password shorter than the minimum only stops a portal it is new to: one that ran with it keeps working, with a warning", async () => {
   const home = testHome("pithagoras-auth-kept-");
   const run = (password, port) => startServer(serverEnv(home, port, { PORTAL_PASSWORD: password, PORTAL_ALLOW_NO_PASSWORD: password ? "" : "1" }));

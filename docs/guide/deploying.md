@@ -11,13 +11,17 @@ git clone https://github.com/thecodacus/Pithagoras.git
 cd Pithagoras
 ```
 
-Create a `.env` next to `docker-compose.yml`:
+Create a `.env` next to `docker-compose.yml`. This writes one, with a secret of
+its own (change the password and the folder first):
 
 ```bash
-PORTAL_PASSWORD=something-long
-PORTAL_SECRET=$(openssl rand -hex 32)
-WORKSPACES_DIR=/path/to/repos
+printf 'PORTAL_PASSWORD=something-long\nWORKSPACES_DIR=/path/to/repos\nPORTAL_SECRET=%s\n' "$(openssl rand -hex 32)" > .env
 ```
+
+Write `PORTAL_SECRET=` followed by the output of `openssl rand -hex 32` if you
+make the file by hand. Compose does not run commands in a `.env`: the text
+`PORTAL_SECRET=$(openssl rand -hex 32)` would be the secret itself, the same for
+everyone who copied it from here. The portal says so when it starts with one.
 
 `.env.example` lists every variable Compose reads. `WORKSPACES_DIR` is the host
 folder your repositories are in, and it is required: there is no default, and
@@ -327,6 +331,9 @@ The server needs the `pi` CLI on your `PATH`, as the image has it, and a
 password, as above. Everything it keeps for itself goes in `./data` unless you
 set `DATA_DIR`: the database, `bin/`, `agent-home/`, `channels/` and the local
 browser's profile. Nothing is written to `/data`, which only the image has.
+The one exception is pi's conversation files, which go to `./data/sessions`
+unless `SESSION_DIR` is set, also when `DATA_DIR` is: set both, or a moved
+`DATA_DIR` leaves the conversations behind.
 
 ```bash
 npm install

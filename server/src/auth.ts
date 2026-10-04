@@ -15,6 +15,15 @@ import { tlsFiles } from "./http-security.js";
  */
 const PASSWORD = process.env.PORTAL_PASSWORD || "";
 const SECRET = process.env.PORTAL_SECRET || crypto.randomBytes(32).toString("hex");
+// What a .env written from the deploying guide's old example holds: nothing runs a command in that
+// file, so the secret is the command's own text, the same on every install that copied it.
+if (/^\$\(/.test(process.env.PORTAL_SECRET ?? "")) {
+  console.warn(
+    "\n  WARNING: PORTAL_SECRET is a shell command, not a secret: a .env file is not run through a shell,\n" +
+      "  so it was taken as written, and anybody who has read the guide knows it. Put the output of\n" +
+      "  `openssl rand -hex 32` there instead.\n"
+  );
+}
 const COOKIE = (process.env.VOICE_COMPARISON === "true" || process.env.VOICE_PIPELINE_MODE === "sequential") ? "pi_portal_sequential_auth" : "pi_portal_auth";
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 

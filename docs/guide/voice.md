@@ -215,7 +215,7 @@ git clone https://github.com/ggml-org/whisper.cpp voice-runtime/whisper.cpp
 git clone https://github.com/breezeblue-ai/breeze-tts voice-runtime/breeze-tts
 bash voice-runtime/whisper.cpp/models/download-ggml-model.sh base voice-runtime/whisper.cpp/models
 uvx --from huggingface-hub hf download BreezeBlue/Breeze-TTS-2 --local-dir voice-runtime/Breeze-TTS-2
-docker compose -f docker-compose.yml -f docker-compose.voice.yml --profile voice up -d --build whisper breeze
+docker compose -f docker-compose.voice.yml --profile voice up -d --build whisper breeze
 ```
 
 The source checkouts are retained locally, so subsequent builds use those same
@@ -223,7 +223,7 @@ revisions until you update them. Downloading models and compiling the images
 can take a while. Inspect startup with:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.voice.yml --profile voice logs -f whisper breeze
+docker compose -f docker-compose.voice.yml --profile voice logs -f whisper breeze
 curl --fail http://127.0.0.1:7860/health
 ```
 
@@ -293,7 +293,7 @@ both are loaded.
 With Compose:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.voice.yml \
+docker compose -f docker-compose.voice.yml \
   --profile voice-multilingual up -d audiocpp
 curl --fail http://127.0.0.1:7871/health
 ```
@@ -650,7 +650,7 @@ other tab or wait for it to finish. Keep one active voice conversation per GPU
 service. Disabling the add-on hides controls; stop its containers separately:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.voice.yml --profile voice stop whisper breeze
+docker compose -f docker-compose.voice.yml --profile voice stop whisper breeze
 ```
 
 ## Development checks
