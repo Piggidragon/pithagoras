@@ -190,6 +190,8 @@ test("a picture sent as a data URL is read, one that is not base64 is refused", 
   const { origin, server } = await fake((_req, res) => json(res, answer));
   try {
     assert.equal((await gen.generateImage(config(origin), { prompt: "p" })).ext, "png");
+    answer = { data: [{ b64_json: b64(PNG).replace(/(.{16})/g, "$1\r\n") }] };
+    assert.deepEqual((await gen.generateImage(config(origin), { prompt: "p" })).bytes, PNG, "wrapped lines are read as the other paths read them");
     answer = { data: [{ b64_json: "!!! not base64 !!!" }] };
     await assert.rejects(gen.generateImage(config(origin), { prompt: "p" }), /not base64/);
     for (const empty of [{ data: [] }, { data: [{}] }, {}, { data: "x" }]) {

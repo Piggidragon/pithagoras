@@ -4,7 +4,7 @@ import https from "node:https";
 import { BlockList, isIP } from "node:net";
 import { getSetting, putSetting } from "./db.js";
 import { promptWith, type NativeSettings, type OutputFormat } from "./image-settings.js";
-import { pictureExt } from "./prompt-images.js";
+import { decodeBase64, pictureExt } from "./prompt-images.js";
 
 /**
  * Image generation as an add-on: the agent's `generate_image` tool asks an
@@ -296,7 +296,6 @@ export class ImageGenerationError extends Error {}
 
 /** After decoding: what the portal serves back as a picture, with room to spare. */
 export const MAX_GENERATED_BYTES = 20 * 1024 * 1024;
-const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 export interface GenerateOptions {
   /** The chat being stopped. */
@@ -468,13 +467,13 @@ function picture(bytes: Buffer, max: number): { bytes: Buffer; ext: string } {
   return { bytes, ext };
 }
 
-/** Base64, or a data: URL holding it, decoded; the size is worked out before anything large is. */
+/** Base64, or a data: URL holding it, decoded. */
 function fromBase64(given: string, max: number): Buffer {
-  const comma = given.startsWith("data:") ? given.indexOf(",") : -1;
-  const data = (comma >= 0 ? given.slice(comma + 1) : given).replace(/\s+/g, "");
-  if (!data || !BASE64.test(data)) throw new ImageGenerationError("The picture the image endpoint sent is not base64");
-  if (Math.floor((data.length * 3) / 4) > max + 3) throw new ImageGenerationError(`The picture is over ${max / 1024 / 1024} MB`);
-  return Buffer.from(data, "base64");
+  const decoded = decodeBase64(given, max);
+  if ("error" in decoded) {
+    throw new ImageGenerationError(decoded.error === "invalid" ? "The picture the image endpoint sent is not base64" : `The picture is over ${max / 1024 / 1024} MB`);
+  }
+  return decoded.bytes;
 }
 
 /** A body read up to a limit, which is not read past. */
