@@ -480,7 +480,9 @@ The buttons above the list filter it: **Everything**, **Refused**, **Allowed**
 (every kind of allowed) or **Strangers**, with counts of each and how many are shown. The
 page shows the latest 300 and refreshes every ten seconds while it is visible.
 Who is named is who they are called now: renaming a person renames them through
-the history.
+the history. A filter that shows nothing says "Nothing matches this filter"; a
+log that could not be read says so, with **Try again**, rather than "Nothing
+recorded".
 
 **Clear the log** empties it, after a confirmation. It deletes every recorded
 decision, not only the ones the filter shows, but not one made while the question

@@ -135,6 +135,11 @@ in two places:
   next message. It is there before the first message too, so a tool can be
   kept away from a chat from the start.
 
+A deployment that cannot switch tools (`EXECUTOR=container`) says so in place of
+the list. A portal that did not answer is not taken for that: the list says it
+could not be read and offers **Try again**, and a switch the portal did not save
+snaps back with the reason beside it.
+
 Both are safety tools as much as convenience: a browser or shell tool that a
 chat has no business with is simply not there to be talked into.
 

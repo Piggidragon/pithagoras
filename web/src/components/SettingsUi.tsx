@@ -1,4 +1,5 @@
-import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { LuCircleAlert } from "react-icons/lu";
 import { t } from "../i18n";
 import { EFFORT_LEVELS, effortLabel } from "../effort";
 import { Select } from "./Select";
@@ -29,6 +30,38 @@ export function Empty({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-xl border border-dashed border-line px-3 py-8 text-center text-sm text-fg-subtle">
       {children}
+    </div>
+  );
+}
+
+/**
+ * What a page shows when its first read failed. Without it the page keeps its
+ * skeleton, or draws "Nobody yet" as fact; both read as "wait" or "empty" and
+ * neither says there is something to try again. The button is held while the
+ * second try is on its way, so that one that fails again is seen to have run.
+ */
+export function LoadFailed({ error, onRetry }: { error: string | Error; onRetry: () => unknown }) {
+  const [busy, setBusy] = useState(false);
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => void (here.current = false);
+  }, []);
+  return (
+    <div role="alert" className="flex items-start gap-2 rounded-xl border border-danger/25 bg-danger/10 px-3 py-3 text-sm text-danger">
+      <LuCircleAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{t("Could not load this: {error}", { error: typeof error === "string" ? error : error.message })}</span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          void Promise.resolve(onRetry()).finally(() => here.current && setBusy(false));
+        }}
+        className="shrink-0 rounded px-1.5 underline underline-offset-2 hover:text-fg disabled:opacity-40"
+      >
+        {t("Try again")}
+      </button>
     </div>
   );
 }

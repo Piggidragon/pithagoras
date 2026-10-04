@@ -15,7 +15,7 @@ import {
 } from "react-icons/lu";
 import { api, type Agent, type BrokenChannelPackage, type Channel, type ChannelKind } from "../api";
 import { Select } from "./Select";
-import { Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { LoadFailed, Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
 import { isEnter } from "../shortcuts";
@@ -53,18 +53,25 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
   // The same, readable by a second Enter that comes before the draw.
   const installingNow = useRef(false);
   const [loading, setLoading] = useState(true);
+  // Why the first read failed: "No channels yet" would say that none were set up.
+  const [failed, setFailed] = useState<string | null>(null);
+  const had = useRef(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
   const load = async () => {
     try {
       const r = await api.channels();
+      had.current = true;
+      setFailed(null);
       setChannels(r.channels);
       setKinds(r.kinds);
       setBroken(r.broken ?? []);
       setHome(r.agentHome);
     } catch (e) {
-      onError((e as Error).message);
+      // A refresh of what is shown goes to the banner; with nothing read yet the page says it itself.
+      if (had.current) onError((e as Error).message);
+      else setFailed((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -142,6 +149,10 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
 
         {loading ? (
           <p className="mt-2 text-sm text-fg-subtle">{t("Loading…")}</p>
+        ) : failed && !had.current ? (
+          <div className="mt-2">
+            <LoadFailed error={failed} onRetry={load} />
+          </div>
         ) : channels.length === 0 ? (
           <div className="mt-2 rounded-xl border border-dashed border-line px-3 py-6 text-center text-sm text-fg-subtle">
             {t("No channels yet.")}

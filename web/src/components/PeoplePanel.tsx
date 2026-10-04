@@ -10,7 +10,7 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type Person, type Role, type ToolRule } from "../api";
-import { Segments, inputCls, primaryCls } from "./SettingsUi";
+import { LoadFailed, Segments, inputCls, primaryCls } from "./SettingsUi";
 import { labelOf, msg, t, tp, tx } from "../i18n";
 import { useFlash } from "../use-flash";
 import { confirmDialog } from "./ConfirmDialog";
@@ -62,15 +62,22 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
   const [people, setPeople] = useState<Person[]>([]);
   const [rules, setRules] = useState<ToolRule[]>([]);
   const [loading, setLoading] = useState(true);
+  // Why the first read failed: "Nobody yet" would say that nobody has written.
+  const [failed, setFailed] = useState<string | null>(null);
+  const had = useRef(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
 
   const load = async () => {
     try {
       const [p, r] = await Promise.all([api.people(), api.toolRules()]);
+      had.current = true;
+      setFailed(null);
       setPeople(p.people);
       setRules(r.rules);
     } catch (e) {
-      onError((e as Error).message);
+      // A refresh of what is shown goes to the banner; with nothing read yet the page says it itself.
+      if (had.current) onError((e as Error).message);
+      else setFailed((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -87,6 +94,8 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
       </p>
     );
   }
+
+  if (failed && !had.current) return <LoadFailed error={failed} onRetry={load} />;
 
   const open = people.find((p) => p.key === openKey);
   if (open) {

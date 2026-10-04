@@ -5,7 +5,7 @@ import {
   LuRefreshCw, LuRoute, LuSearch, LuServer, LuShuffle, LuTrash2, LuWandSparkles, LuX,
 } from "react-icons/lu";
 import { api, type ProviderInfo, type ProviderKind, type ProviderModel, type ProviderStatus, type ProvidersView } from "../api";
-import { forget, useCached } from "../settings-cache";
+import { forget, refreshFailed, useCached } from "../settings-cache";
 import { packageName } from "../package-names";
 import { PackageCatalog } from "./PackageCatalog";
 import { parseWindow } from "../context-window";
@@ -14,7 +14,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import { formatTokens } from "../transcript";
 import { Select } from "./Select";
-import { Empty, Field, Section, btnCls, ghostCls, inputCls, inputSmCls, primaryCls } from "./SettingsUi";
+import { Empty, Field, LoadFailed, Section, btnCls, ghostCls, inputCls, inputSmCls, primaryCls } from "./SettingsUi";
 import { t, tp } from "../i18n";
 import { forgetModels } from "../model-catalogue";
 
@@ -38,7 +38,7 @@ export function KindIcon({ kind, className = "h-4 w-4" }: { kind: ProviderKind; 
  * out. Everything lands in pi's own files, as pi would write it.
  */
 export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => void; onSetup?: () => void }) {
-  const { value: view, reload } = useCached("providers", api.providers, { onError: (e) => onError(e.message) });
+  const { value: view, failed, reload } = useCached("providers", api.providers, { onError: refreshFailed("providers", onError) });
   const status = useProviderStatus();
   /** The provider being edited, or "new" for one being added. */
   const [editing, setEditing] = useState<string | null>(null);
@@ -79,7 +79,7 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
     }
   };
 
-  if (!view) return <ProvidersSkeleton />;
+  if (!view) return failed ? <LoadFailed error={failed} onRetry={reload} /> : <ProvidersSkeleton />;
 
   const saved = async (note?: string) => { setEditing(null); setNotice(note ?? null); await load(); };
   // Names in use in pi's files. One keyed only from the environment is not:

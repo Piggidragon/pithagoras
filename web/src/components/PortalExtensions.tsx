@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "react";
 import { LuBot, LuBrain, LuCheck, LuGlobe, LuMic, LuRefreshCw } from "react-icons/lu";
 import { api, type BrowserStatus } from "../api";
 import { BrowserInstall } from "./BrowserInstall";
+import { LoadFailed } from "./SettingsUi";
 import { msg, t } from "../i18n";
 
 /**
@@ -60,18 +61,27 @@ export function PortalExtensions({ onError }: { onError: (e: string) => void }) 
 
 function BrowserAddon({ onError }: { onError: (e: string) => void }) {
   const [status, setStatus] = useState<BrowserStatus | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
 
+  // Before the first read there is no page to put the error on, so the page says it; a poll that fails later goes to the banner.
   const load = () =>
     api
       .browser()
-      .then(setStatus)
-      .catch((e) => onError((e as Error).message));
+      .then((s) => {
+        setFailed(null);
+        setStatus(s);
+      })
+      .catch((e) => {
+        if (status) onError((e as Error).message);
+        else setFailed((e as Error).message);
+      });
 
   useEffect(() => {
     load();
   }, []);
 
   if (!status) {
+    if (failed) return <LoadFailed error={failed} onRetry={load} />;
     return (
       <p className="flex items-center gap-2 text-sm text-fg-subtle">
         <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}

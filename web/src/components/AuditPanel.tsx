@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuTrash2, LuUserX } from "react-icons/lu";
 import { confirmDialog } from "./ConfirmDialog";
 import { PageHeader, Stat } from "./PageHeader";
-import { Segments } from "./SettingsUi";
+import { LoadFailed, Segments } from "./SettingsUi";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
 import { msg, t, tp } from "../i18n";
@@ -81,6 +81,9 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
+  // Why the first read failed: an empty list and "0 refused" would say there is nothing to see, and the page tries again by itself only every ten seconds.
+  const [failed, setFailed] = useState<string | null>(null);
+  const had = useRef(false);
   const [clearing, setClearing] = useState(false);
   // Shown by the button, as MemoryPage's log does, so a poll that works does
   // not take it off the page banner before it is read.
@@ -97,11 +100,16 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
       .audit(300)
       .then((r) => {
         if (since !== cleared.current) return;
+        had.current = true;
+        setFailed(null);
         setEntries(r.entries);
         onError(null);
       })
       .catch((e) => {
-        if (since === cleared.current) onError((e as Error).message);
+        if (since !== cleared.current) return;
+        // A refresh of what is shown goes to the banner; with nothing read yet the page says it itself.
+        if (had.current) onError((e as Error).message);
+        else setFailed((e as Error).message);
       })
       .finally(() => setLoading(false));
   };
@@ -161,6 +169,8 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
     );
   }
 
+  if (failed && !had.current) return <LoadFailed error={failed} onRetry={load} />;
+
   const counts = {
     refused: entries.filter((e) => e.kind === "refused").length,
     allowed: entries.filter((e) => e.kind.startsWith("allowed")).length,
@@ -201,7 +211,9 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
 
       {shown.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-fg-faint">
-          {t("Nothing recorded. The guard writes here when it refuses something, lets something through on a rule or an approval, or turns a stranger away.")}
+          {decisions.length > 0
+            ? t("Nothing matches this filter.")
+            : t("Nothing recorded. The guard writes here when it refuses something, lets something through on a rule or an approval, or turns a stranger away.")}
         </p>
       ) : (
         <ul className="stagger-in space-y-1">

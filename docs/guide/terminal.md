@@ -60,6 +60,10 @@ Some limits:
 
 - Jobs are followed only when pi runs **on the host** (`EXECUTOR=host`) on Linux.
   With `EXECUTOR=container` the tab says so instead.
+- A read of the output that fails, because the portal is restarting or cannot be
+  reached, keeps what was read, says so under it and tries again, a little less
+  often each time, until it works. It stops only for a job whose output is no file
+  the portal can follow.
 - A job whose output does not go to a file cannot be followed from here, and says
   so. A command the chat itself shows is in the Agent tab, not listed here.
 - Stopping a job that has already ended is refused with a message.

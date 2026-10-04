@@ -366,7 +366,7 @@ app.post("/api/projects", (req, res) => {
   }
   if (toolsOff !== undefined) {
     if (!isToolList(toolsOff)) return res.status(400).json({ error: "toolsOff must be a list of tool names" });
-    if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+    if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   }
   try {
     const project = createProject(WORKSPACE_ROOT, name, instructions);
@@ -435,7 +435,7 @@ app.put("/api/projects/:name/instructions", (req, res) => {
 app.get("/api/projects/:name/tools", (req, res) => {
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
-    if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+    if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
     const defaults = toolDefaultsOff();
     const exceptions = projectTools(project.name);
     const servers = mcpServerNames();
@@ -468,7 +468,7 @@ app.put("/api/projects/:name/tools", async (req, res) => {
   if (!isToolList(off)) return res.status(400).json({ error: "off must be a list of tool names" });
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
-    if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+    if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
     const stored = saveProjectTools(project, off);
     const applied = await sessions.applyToolDefaults(project.name);
     res.json({ off: defaultsFor(toolDefaultsOff(), stored), applied });
@@ -912,6 +912,8 @@ app.put("/api/sessions/:id/draft", (req, res) => {
  */
 const TOOLS_UNSUPPORTED =
   "Tools cannot be switched with EXECUTOR=container: pi runs inside the container and the portal never sees what it registered";
+/** With a `code`, so that the page tells this answer from any other failure of the same request by it, not by the sentence. */
+const toolsUnsupported = { error: TOOLS_UNSUPPORTED, code: "tools-unsupported" };
 
 /**
  * The tools this conversation could use, and which of them are on.
@@ -923,7 +925,7 @@ const TOOLS_UNSUPPORTED =
 app.get("/api/sessions/:id/tools", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+  if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const { tools, live } = await sessions.getTools(session.id);
   const names = toolGroupNames();
   // The whole off list, not only the tools loaded right now: the page sends
@@ -936,7 +938,7 @@ app.get("/api/sessions/:id/tools", async (req, res) => {
 app.put("/api/sessions/:id/tools", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+  if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const off = req.body?.off;
   if (!isToolList(off)) return res.status(400).json({ error: "off must be a list of tool names" });
   res.json({ off: await sessions.setTools(session.id, off) });
@@ -952,7 +954,7 @@ app.put("/api/sessions/:id/tools", async (req, res) => {
 app.get("/api/tools", (_req, res) => {
   // Refused here as well as on the PUT: a list of checkboxes that draws fine
   // and answers every flip with an error is the switch that looks like it works.
-  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+  if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const off = new Set(toolDefaultsOff());
   const servers = mcpServerNames();
   res.json({
@@ -985,7 +987,7 @@ app.put("/api/tool-names", (req, res) => {
  * see working.
  */
 app.put("/api/tools", async (req, res) => {
-  if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
+  if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const off = req.body?.off;
   if (!isToolList(off)) return res.status(400).json({ error: "off must be a list of tool names" });
   const stored = setToolDefaultsOff(off);

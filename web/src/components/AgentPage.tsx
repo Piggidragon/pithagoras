@@ -23,7 +23,7 @@ import { api, ApiError, type Agent, type AgentSession, type AgentSetup as Setup 
 import { AgentSetup } from "./AgentSetup";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
-import { primarySmCls } from "./SettingsUi";
+import { LoadFailed, primarySmCls } from "./SettingsUi";
 import { StatusDot } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { pollWhileVisible } from "../poll";
@@ -79,7 +79,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
   if (!agents) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 py-6">
-        {error ? <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div> : <RowsSkeleton />}
+        {error ? <LoadFailed error={error} onRetry={loadAgents} /> : <RowsSkeleton />}
       </div>
     );
   }
@@ -189,6 +189,7 @@ function AgentView({
 }) {
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [setup, setSetup] = useState<Setup | null>(null);
+  const [setupFailed, setSetupFailed] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
@@ -196,6 +197,8 @@ function AgentView({
   // refresh works, and must not wipe out — or be wiped by — the answer to a
   // rename or a delete.
   const [loadError, setLoadError] = useState("");
+  // Whether the list was ever read: a failure before that is not "out of date", there is nothing to be out of date.
+  const listRead = useRef(false);
   // The conversation whose name is open for editing, if any; the agent's own as "agent".
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -216,6 +219,7 @@ function AgentView({
     api
       .agentSessions(agent.id)
       .then((r) => {
+        listRead.current = true;
         setSessions(r.sessions);
         setLoadError("");
       })
@@ -225,8 +229,17 @@ function AgentView({
       .catch((e) => setLoadError((e as Error).message))
       .finally(() => setLoading(false));
 
+  const readSetup = () =>
+    api.agentSetup(agent.id).then(
+      (r) => {
+        setSetupFailed(null);
+        setSetup(r);
+      },
+      (e) => setSetupFailed((e as Error).message),
+    );
+
   useEffect(() => {
-    api.agentSetup(agent.id).then(setSetup).catch(() => {});
+    void readSetup();
     load();
     return pollWhileVisible(load, 5000);
     // Keyed on the agent by its parent: one agent per mount.
@@ -404,16 +417,25 @@ function AgentView({
           {tab === "activity" && <ActivityFeed agent={agent} onChanged={onChanged} onSelect={onSelect} />}
           {tab === "heartbeat" && <HeartbeatSettings agent={agent} onChanged={onChanged} />}
           {tab === "files" && setup?.initialised && <AgentFiles agent={agent.id} setup={setup} onSaved={setSetup} />}
+          {tab === "files" && !setup && setupFailed && (
+            <div className="mt-4">
+              <LoadFailed error={setupFailed} onRetry={readSetup} />
+            </div>
+          )}
 
           {tab === "conversations" && (
           <>
-          {loadError && (
+          {loadError && listRead.current && (
             <div className="mt-4 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">
               {t("Could not refresh the conversations — what is shown may be out of date.")} {loadError}
             </div>
           )}
           {loading ? (
             <RowsSkeleton />
+          ) : loadError && !listRead.current ? (
+            <div className="mt-4">
+              <LoadFailed error={loadError} onRetry={load} />
+            </div>
           ) : sessions.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-line px-4 py-10 text-center">
               <p className="text-sm text-fg-muted">{t("Nothing has reached the agent yet.")}</p>

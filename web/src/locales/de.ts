@@ -146,6 +146,7 @@ const de: Locale = {
     "Back": "Zurück",
     "Writes SOUL.md, PrimaryUser.md and MEMORY.md into the agent's home directory. All three are handed to pi as context whenever a conversation starts, and stay editable here. An existing MEMORY.md is never overwritten.": "Schreibt SOUL.md, PrimaryUser.md und MEMORY.md in das Home-Verzeichnis des Agenten. Alle drei bekommt pi als Kontext, sobald ein Gespräch beginnt, und sie bleiben hier bearbeitbar. Eine vorhandene MEMORY.md wird nie überschrieben.",
     // components/AuditPanel.tsx
+    "Nothing matches this filter.": "Nichts passt zu diesem Filter.",
     "Which decisions to show": "Welche Entscheidungen angezeigt werden",
     "Clear the audit log?": "Das Audit-Protokoll leeren?",
     "Every recorded decision is deleted, not only the ones the filter shows. This cannot be undone.": "Jede aufgezeichnete Entscheidung wird gelöscht, nicht nur die, die der Filter zeigt. Das lässt sich nicht rückgängig machen.",
@@ -171,6 +172,7 @@ const de: Locale = {
     "turned away": "abgewiesen",
     "Nothing recorded. The guard writes here when it refuses something, lets something through on a rule or an approval, or turns a stranger away.": "Nichts aufgezeichnet. Der Wächter schreibt hierher, wenn er etwas ablehnt, etwas per Regel oder Freigabe durchlässt oder einen Fremden abweist.",
     // components/BackgroundJobs.tsx
+    "The output could not be read — trying again: {error}": "Die Ausgabe ließ sich nicht lesen — neuer Versuch: {error}",
     "Background jobs can only be followed when pi runs on the host (EXECUTOR=host).": "Hintergrundjobs lassen sich nur verfolgen, wenn pi auf dem Host läuft (EXECUTOR=host).",
     "Nothing running in the background. What the agent leaves running — a dev server, a watcher, an extension's job — shows up here.": "Im Hintergrund läuft nichts. Was der Agent laufen lässt — ein Dev-Server, ein Watcher, der Job einer Erweiterung — erscheint hier.",
     "Background jobs": "Hintergrundjobs",
@@ -1351,6 +1353,7 @@ const de: Locale = {
     "Nothing matches that.": "Nichts passt dazu.",
     "No chats yet.": "Noch keine Chats.",
     // components/SettingsUi.tsx
+    "Could not load this: {error}": "Das ließ sich nicht laden: {error}",
     "Switch": "Schalter",
     // components/SetupSteps.tsx
     "Steps": "Schritte",
@@ -1458,6 +1461,7 @@ const de: Locale = {
     "all on": "alle an",
     "all off": "alle aus",
     // components/ToolSwitches.tsx
+    "That switch was not saved: {error}": "Dieser Schalter wurde nicht gespeichert: {error}",
     "No tools registered.": "Keine Tools registriert.",
     "{n} switched off. The rest are listed once a conversation has run.": { one: "{n} ausgeschaltet. Der Rest wird aufgelistet, sobald ein Gespräch gelaufen ist.", other: "{n} ausgeschaltet. Der Rest wird aufgelistet, sobald ein Gespräch gelaufen ist." },
     "No tools seen yet — they are listed once a conversation has run.": "Noch keine Tools gesehen — sie werden aufgelistet, sobald ein Gespräch gelaufen ist.",

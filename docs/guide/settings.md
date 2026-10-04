@@ -23,6 +23,13 @@ as picked or not, and not only the colour does. An off switch has an edge you ca
 see in the light theme too. A page with a **Save** button shows **Saved** beside
 it for two seconds, counted from the last save.
 
+A page that cannot read what it shows, because the portal was restarting or could
+not be reached, says so in red with the reason and a **Try again** button, in the
+place of its list. It does not show an empty list or "Nobody yet" as if that were
+what the portal holds. The same goes for the Projects, Audit and Agents pages and
+for the add-ons. A refresh that fails while a page is already showing something
+is a message at the top of the dialog instead, and what was shown stays.
+
 ## Defaults
 
 *(The **Defaults** page; older links call it `general`.)*

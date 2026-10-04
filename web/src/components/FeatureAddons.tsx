@@ -5,7 +5,7 @@ import { api, type AvailableModel, type Features, type ImagesFeature, type Image
 import { MAX_SIZE, TIMEOUT_SECONDS } from "../../../server/src/image-settings";
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
-import { SwitchRow, inputCls, primaryCls } from "./SettingsUi";
+import { LoadFailed, SwitchRow, inputCls, primaryCls } from "./SettingsUi";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
 
 /**
@@ -13,12 +13,30 @@ import { formatDateTime, msg, t, tp, tx } from "../i18n";
  * written into pi's own configuration — a package, an MCP server — so what
  * the switch does can also be seen, and undone, from Extensions and MCP.
  */
-function useFeatures(onError: (e: string) => void) {
-  const [features, setFeatures] = useState<Features | null>(null);
+function useFeatures() {
+  return useFirstRead(api.features);
+}
+
+/**
+ * A tab's first read. Until it has come there is nothing to show, so a failure
+ * is said where the tab would be, with a way to try again; a banner over a tab
+ * that spins on forever said it too quietly.
+ */
+function useFirstRead<T>(read: () => Promise<T>) {
+  const [value, setValue] = useState<T | null>(null);
+  const [failed, setFailed] = useState<Error | null>(null);
+  const retry = () =>
+    read().then(
+      (v) => {
+        setFailed(null);
+        setValue(v);
+      },
+      (e: Error) => setFailed(e),
+    );
   useEffect(() => {
-    api.features().then(setFeatures).catch((e: Error) => onError(e.message));
+    void retry();
   }, []);
-  return [features, setFeatures] as const;
+  return [value, setValue, failed, retry] as const;
 }
 
 /** What a switch did to the chats that are open. */
@@ -57,10 +75,7 @@ const MODES: { value: SubagentMode; label: string; detail: string }[] = [
 
 export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
   // Its own, not with Understory's: a Docker that cannot be reached is not this tab's to wait on.
-  const [subagent, setSubagent] = useState<SubagentFeature | null>(null);
-  useEffect(() => {
-    api.subagentFeature().then((r) => setSubagent(r.subagent), (e: Error) => onError(e.message));
-  }, []);
+  const [subagent, setSubagent, failed, retry] = useFirstRead(() => api.subagentFeature().then((r) => r.subagent));
   const features = subagent && { subagent };
   const setFeatures = (f: { subagent: SubagentFeature }) => setSubagent(f.subagent);
   const [busy, setBusy] = useState(false);
@@ -73,7 +88,7 @@ export function SubagentAddon({ onError }: { onError: (e: string) => void }) {
     api.allModels().then((r) => setModels(r.models)).catch(() => {});
   }, []);
 
-  if (!features) return <Loading />;
+  if (!features) return failed ? <ReadFailed error={failed} onRetry={retry} /> : <Loading />;
   const s = features.subagent;
 
   const change = async (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) => {
@@ -268,7 +283,7 @@ function choiceOf(d: Draft): UnderstoryLlmChoice | null {
 const INSTALLING = msg("Installing Understory…");
 
 export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
-  const [features, setFeatures] = useFeatures(onError);
+  const [features, setFeatures, failed, retry] = useFeatures();
   const [url, setUrl] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -298,7 +313,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
     };
   }, [watching]);
 
-  if (!features) return <Loading />;
+  if (!features) return failed ? <ReadFailed error={failed} onRetry={retry} /> : <Loading />;
   const u = features.understory;
   const m = u.managed;
   const form = draft ?? draftOf(m);
@@ -722,17 +737,14 @@ const originOf = (address: string): string => {
 
 export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   // Its own, not with Understory's: a Docker that cannot be reached is not this tab's to wait on.
-  const [images, setImages] = useState<ImagesFeature | null>(null);
+  const [images, setImages, failed, retry] = useFirstRead(() => api.imagesFeature().then((r) => r.images));
   const [draft, setDraft] = useState<ImagesDraft | null>(null);
   const [editDraft, setEditDraft] = useState<ImagesEditDraft | null>(null);
   const [busy, setBusy] = useState(false);
   // Said in the language shown, whenever it is drawn.
   const [note, setNote] = useState<(() => string) | null>(null);
-  useEffect(() => {
-    api.imagesFeature().then((r) => setImages(r.images), (e: Error) => onError(e.message));
-  }, []);
 
-  if (!images) return <Loading />;
+  if (!images) return failed ? <ReadFailed error={failed} onRetry={retry} /> : <Loading />;
   const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, timeout: String(images.timeoutSeconds), apiKey: "" };
   const edit = (patch: Partial<ImagesDraft>) => setDraft({ ...form, ...patch });
   const editForm = editDraft ?? { baseUrl: images.editBaseUrl, model: images.editModel, maxSize: images.editMaxSize, apiKey: "" };
@@ -1010,6 +1022,14 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
         </p>
       )}
       {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+    </div>
+  );
+}
+
+function ReadFailed({ error, onRetry }: { error: Error; onRetry: () => unknown }) {
+  return (
+    <div className="mt-4">
+      <LoadFailed error={error} onRetry={onRetry} />
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { sameChoice, type VoiceChoice } from "../../../server/src/voice-engines"
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
 import { DEFAULT_KOKORO_VOICE } from "../../../server/src/kokoro-voices";
 import { labelOf, languageName, msg, t } from "../i18n";
-import { btnCls, inputCls } from "./SettingsUi";
+import { LoadFailed, btnCls, inputCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
 
@@ -92,8 +92,11 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const [saved, setSaved] = useState(false);
   // A saved voice's description is stored on its own; this saves the edited ones along with the settings.
   const pendingDescriptions = useRef<(() => Promise<void>) | null>(null);
-  useEffect(() => { api.voice().then(setConfig).catch(e => onError(e.message)); }, []);
-  if (!config) return null;
+  // Nothing of the page can be drawn without it, so the failure is said where the page would be.
+  const [readFailed, setReadFailed] = useState<string | null>(null);
+  const readConfig = () => api.voice().then(value => { setReadFailed(null); setConfig(value); }, e => setReadFailed((e as Error).message));
+  useEffect(() => { void readConfig(); }, []);
+  if (!config) return readFailed ? <div className="mt-4"><LoadFailed error={readFailed} onRetry={readConfig} /></div> : null;
   const update = (patch: Partial<VoiceConfig>) => { setConfig({ ...config, ...patch }); setSaved(false); };
   const instructions = config.responseInstructions ?? "";
   const builtIn = config.defaultResponseInstructions ?? "";

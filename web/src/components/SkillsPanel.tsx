@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LuCheck,
   LuChevronLeft,
@@ -14,7 +14,7 @@ import {
   LuWrench,
 } from "react-icons/lu";
 import { api, type FoundSkill, type Skill, type SkillDiagnostic, type SkippedSkill } from "../api";
-import { Switch, btnCls, codeAreaCls, inputCls, primaryCls } from "./SettingsUi";
+import { LoadFailed, Switch, btnCls, codeAreaCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import { isEnter } from "../shortcuts";
@@ -35,6 +35,9 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
   const [diagnostics, setDiagnostics] = useState<SkillDiagnostic[]>([]);
   const [root, setRoot] = useState("");
   const [loading, setLoading] = useState(true);
+  // Why the first read failed: "None yet" would say there are no skills.
+  const [failed, setFailed] = useState<string | null>(null);
+  const had = useRef(false);
   const [openName, setOpenName] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -42,11 +45,15 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
   const load = async () => {
     try {
       const r = await api.skills();
+      had.current = true;
+      setFailed(null);
       setSkills(r.skills);
       setDiagnostics(r.diagnostics ?? []);
       setRoot(r.root);
     } catch (e) {
-      onError((e as Error).message);
+      // A refresh of what is shown goes to the banner; with nothing read yet the page says it itself.
+      if (had.current) onError((e as Error).message);
+      else setFailed((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -143,6 +150,10 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
 
         {loading ? (
           <p className="mt-2 text-sm text-fg-subtle">{t("Loading…")}</p>
+        ) : failed && !had.current ? (
+          <div className="mt-2">
+            <LoadFailed error={failed} onRetry={load} />
+          </div>
         ) : mine.length === 0 ? (
           <div className="mt-2 rounded-xl border border-dashed border-line px-3 py-6 text-center text-sm text-fg-subtle">
             {t("None yet.")}

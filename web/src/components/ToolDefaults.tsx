@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuChevronDown, LuChevronRight, LuCheck, LuPencil, LuX } from "react-icons/lu";
-import { api } from "../api";
+import { api, ApiError } from "../api";
+import { LoadFailed } from "./SettingsUi";
 import { displayName, groupSummary, groupTools, nextOff, sourceName } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 import { isEnter, isEscape } from "../shortcuts";
@@ -25,6 +26,9 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   const [loading, setLoading] = useState(true);
   /** Why there is nothing to switch here, where the deployment cannot do it. */
   const [refusal, setRefusal] = useState("");
+  /** Any other failure of the read: no statement about the deployment, so it is not shown as one. */
+  const [failed, setFailed] = useState<string | null>(null);
+  const [tries, setTries] = useState(0);
   const [busy, setBusy] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
   /** The group being renamed, and what has been typed so far. */
@@ -35,15 +39,17 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
     api
       .toolDefaults()
       .then((r) => {
+        setFailed(null);
         setTools(r.tools);
         setOff(r.off);
         setNames(r.names ?? {});
       })
       // A deployment where this cannot work says so in place of the list — the
-      // same as the switches beside the composer, and for the same reason.
-      .catch((e) => setRefusal((e as Error).message))
+      // same as the switches beside the composer, and for the same reason. Only
+      // that answer: a portal that could not be reached is tried again.
+      .catch((e) => (e instanceof ApiError && e.body.code === "tools-unsupported" ? setRefusal(e.message) : setFailed((e as Error).message)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [tries]);
 
   const flip = async (names: string[], enabled: boolean) => {
     const wanted = nextOff(off, names, enabled);
@@ -84,6 +90,17 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   };
 
   if (loading) return null;
+  if (failed) {
+    return (
+      <LoadFailed
+        error={failed}
+        onRetry={() => {
+          setLoading(true);
+          setTries((n) => n + 1);
+        }}
+      />
+    );
+  }
   if (refusal) {
     return (
       <p className="rounded-xl border border-line bg-raised/40 px-3 py-2 text-xs text-fg-subtle">

@@ -17,7 +17,7 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type McpConfigView, type McpServerEntry, type McpServerView } from "../api";
-import { Field, Segments, btnCls, codeAreaCls, inputCls, primaryCls, primarySmCls } from "./SettingsUi";
+import { Field, LoadFailed, Segments, btnCls, codeAreaCls, inputCls, primaryCls, primarySmCls } from "./SettingsUi";
 import { msg, t, tx } from "../i18n";
 
 
@@ -63,6 +63,7 @@ function textToPairs(text: string, sep: string): Record<string, string> | undefi
 export function McpPanel({ onError }: { onError: (e: string) => void }) {
   const [view, setView] = useState<McpConfigView | null>(null);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ name: string | null } | null>(null);
   const [importing, setImporting] = useState(false);
   const [installing, setInstalling] = useState(false);
@@ -71,8 +72,11 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
   const load = async () => {
     try {
       setView(await api.mcp());
+      setFailed(null);
     } catch (e) {
-      onError((e as Error).message);
+      // With nothing read yet, the page says so itself, with a way to try again; the banner is for a refresh.
+      if (view) onError((e as Error).message);
+      else setFailed((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -94,6 +98,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
     }
   };
 
+  if (!view && failed) return <LoadFailed error={failed} onRetry={load} />;
   if (loading || !view) {
     return (
       <p className="flex items-center gap-2 text-sm text-fg-subtle">

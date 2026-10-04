@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LuBlocks, LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
@@ -9,7 +9,7 @@ import { within } from "../paths";
 import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
-import { inputCls, primarySmCls } from "./SettingsUi";
+import { LoadFailed, inputCls, primarySmCls } from "./SettingsUi";
 import { ToolSwitches } from "./ToolSwitches";
 import { isEnter } from "../shortcuts";
 import { t, tp, tx } from "../i18n";
@@ -42,22 +42,32 @@ export function ProjectsPage({
   const [editing, setEditing] = useState<Project | null>(null);
   const [toolsOf, setToolsOf] = useState<Project | null>(null);
 
-  const load = useCallback(() => {
-    api
-      .projects()
-      .then((r) => {
-        setProjects(r.projects);
-        setRoot(r.root);
-      })
-      .catch((e) => setError((e as Error).message));
-  }, []);
+  /** Why the first read failed: until there is a list, that is said where the list would be. */
+  const [failed, setFailed] = useState<string | null>(null);
+  const had = useRef(false);
+
+  const load = useCallback(
+    () =>
+      api
+        .projects()
+        .then((r) => {
+          had.current = true;
+          setFailed(null);
+          setProjects(r.projects);
+          setRoot(r.root);
+        })
+        .catch((e) => (had.current ? setError((e as Error).message) : setFailed((e as Error).message))),
+    [],
+  );
   // Also when the chats change: the counts and the "last active" are theirs.
   // The list is a new array on every poll, and a running chat changes its
   // timestamp on every one. What the server counts is only which chats there
   // are and where, so that is what is compared; "last active" is worked out
   // here from the list itself.
   const chats = sessions.map((s) => `${s.id}:${s.workspace}`).join("|");
-  useEffect(load, [load, chats]);
+  useEffect(() => {
+    void load();
+  }, [load, chats]);
 
   const attempt = async (fn: () => Promise<void>) => {
     setError(null);
@@ -161,7 +171,13 @@ export function ProjectsPage({
           {error && <p className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
 
           {projects === null ? (
-            <RowsSkeleton />
+            failed ? (
+              <div className="mt-4">
+                <LoadFailed error={failed} onRetry={load} />
+              </div>
+            ) : (
+              <RowsSkeleton />
+            )
           ) : (
             <ul className="stagger-in mt-4 space-y-1">
               {projects.length === 0 && (

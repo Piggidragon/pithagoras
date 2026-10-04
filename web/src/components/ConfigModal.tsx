@@ -50,11 +50,11 @@ import { ToolDefaults } from "./ToolDefaults";
 import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { ProvidersPanel } from "./ProvidersPanel";
-import { EffortPicker, Empty, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { EffortPicker, Empty, LoadFailed, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { PackageCatalog } from "./PackageCatalog";
 import { packageName, webLink } from "../package-names";
-import { prefetchSettings, useCached } from "../settings-cache";
+import { prefetchSettings, refreshFailed, useCached } from "../settings-cache";
 import type { Tab } from "../settings-tabs";
 import { serialSaver } from "../serial-saver";
 import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
@@ -142,7 +142,7 @@ export const ConfigModal = memo(function ConfigModal({
 
   // Loaded here rather than inside the Extensions tab: the rail lists every
   // extension that exposes settings, so it needs them before anything is shown.
-  const exts = useCached("extensions", api.extensions, { onError: (e) => setError(e.message) });
+  const exts = useCached("extensions", api.extensions, { onError: refreshFailed("extensions", setError) });
   const extensions = exts.value?.extensions ?? [];
   const settingsPath = exts.value?.settingsPath ?? "";
   const loadingExts = !exts.value && !exts.failed;
@@ -289,6 +289,8 @@ export const ConfigModal = memo(function ConfigModal({
         <ExtensionsPanel
           extensions={extensions}
           loading={loadingExts}
+          failed={exts.value ? null : exts.failed}
+          onRetry={exts.reload}
           onError={setError}
           onRefresh={loadExtensions}
           onConfigure={(spec) => setNav({ kind: "ext", spec })}
@@ -303,6 +305,8 @@ export const ConfigModal = memo(function ConfigModal({
           <ExtensionPanel ext={activeExt} onError={setError} onSaved={loadExtensions} />
         ) : loadingExts ? (
           <div className="skeleton-group space-y-2"><div className="skeleton h-9 w-1/2" /><div className="skeleton h-16 w-full" /><div className="skeleton h-16 w-full" /></div>
+        ) : exts.failed ? (
+          <LoadFailed error={exts.failed} onRetry={exts.reload} />
         ) : (
           <Empty>{t("That extension is no longer installed.")}</Empty>
         ))}
@@ -459,8 +463,15 @@ function RailItem({
  * opening a form.
  */
 function ReportDefault({ onError }: { onError: (e: string) => void }) {
-  const { value: kept, reload: load } = useCached("report-targets", api.reportTargets, { onError: (e) => onError(e.message) });
-  if (!kept) return null;
+  const { value: kept, failed, reload: load } = useCached("report-targets", api.reportTargets, { onError: refreshFailed("report-targets", onError) });
+  if (!kept) {
+    // Said as it is: the setting is not missing, it was not read.
+    return failed ? (
+      <Section title={t("Routine reports")}>
+        <LoadFailed error={failed} onRetry={load} />
+      </Section>
+    ) : null;
+  }
   const targets: ReportTarget[] = kept.targets;
   const current: ReportTo | null = kept.default;
 
@@ -721,7 +732,8 @@ function BrowserPanel({ onError }: { onError: (e: string) => void }) {
 /** Where this portal keeps what it keeps, set when it was deployed. */
 function AboutPanel({ onError }: { onError: (e: string) => void }) {
   // What Defaults reads too, fetched ahead: drawn at once from what is kept.
-  const meta = useCached("settings", api.settings, { onError: (e) => onError(e.message) }).value;
+  const { value: meta, failed, reload } = useCached("settings", api.settings, { onError: refreshFailed("settings", onError) });
+  if (!meta && failed) return <LoadFailed error={failed} onRetry={reload} />;
   if (!meta) return <div className="skeleton-group space-y-2"><div className="skeleton h-4 w-32" /><div className="skeleton h-28 w-full" /></div>;
   const agentDir = meta.piSettingsPath.replace(/\/settings\.json$/, "");
   const rows: { icon: ReactNode; label: string; value: string; detail: string }[] = [
@@ -763,7 +775,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
   // All three are fetched ahead and kept, and the page waits for all three:
   // drawn part by part, the model menus filled in and a warning pushed the
   // context settings down after the page was already on screen.
-  const settings = useCached("settings", api.settings, { onError: (e) => onError(e.message) });
+  const settings = useCached("settings", api.settings, { onError: refreshFailed("settings", onError) });
   const modelsQuery = useCached("models", api.allModels);
   const reports = useCached("report-targets", api.reportTargets);
   const r = settings.value;
@@ -874,6 +886,8 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
   }, [models]);
 
   const ready = stored && defaults && (models || modelsFailed) && (reports.value || reports.failed);
+  // Without the settings there is nothing to show: no skeleton that never ends.
+  if (!r && settings.failed) return <LoadFailed error={settings.failed} onRetry={settings.reload} />;
   if (!ready) {
     // The shape of the page, so it does not jump when the page replaces it.
     return (
@@ -1053,12 +1067,17 @@ const SOURCES = [
 function ExtensionsPanel({
   extensions,
   loading,
+  failed,
+  onRetry,
   onError,
   onRefresh,
   onConfigure,
 }: {
   extensions: ExtensionInfo[];
   loading: boolean;
+  /** Why the list could not be read, when it has not been: "Nothing installed" would be a claim. */
+  failed: Error | null;
+  onRetry: () => unknown;
   onError: (e: string) => void;
   onRefresh: () => Promise<ExtensionInfo[]>;
   onConfigure: (spec: string) => void;
@@ -1165,6 +1184,8 @@ function ExtensionsPanel({
       <Section title={`${t("Installed")}${extensions.length ? ` (${extensions.length})` : ""}`}>
         {loading ? (
           <p className="text-sm text-fg-subtle">{t("Reading installed packages…")}</p>
+        ) : failed ? (
+          <LoadFailed error={failed} onRetry={onRetry} />
         ) : extensions.length === 0 ? (
           <Empty>
             {t("Nothing installed yet.")}
@@ -1434,11 +1455,20 @@ function AdvancedPanel({
   onError: (e: string) => void;
 }) {
   const [file, setFile] = useState<{ path: string; content: string } | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
   const [saved, flashSaved] = useFlash();
   const [busy, setBusy] = useState(false);
 
+  const read = () =>
+    api.piSettings().then(
+      (f) => {
+        setFailed(null);
+        setFile(f);
+      },
+      (e) => setFailed((e as Error).message),
+    );
   useEffect(() => {
-    api.piSettings().then(setFile).catch((e) => onError((e as Error).message));
+    void read();
   }, []);
 
   return (
@@ -1447,7 +1477,7 @@ function AdvancedPanel({
       hint={t("pi's own settings file, where installed extensions keep their configuration.")}
     >
       {!file ? (
-        <p className="text-sm text-fg-subtle">{t("Loading…")}</p>
+        failed ? <LoadFailed error={failed} onRetry={read} /> : <p className="text-sm text-fg-subtle">{t("Loading…")}</p>
       ) : (
         <div className="space-y-2">
           <textarea

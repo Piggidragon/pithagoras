@@ -128,6 +128,7 @@ test("a refusal for another reason is not taken for unsaved work", async () => {
   await withApi(async (base) => {
     const res = await del(base, "nothing-here");
     assert.equal(res.status, 404);
-    assert.equal(res.code, undefined);
+    // Every refusal names its kind; only "unsaved" is the question about work that would be lost.
+    assert.equal(res.code, "missing");
   });
 });
