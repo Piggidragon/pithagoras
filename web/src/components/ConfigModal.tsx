@@ -4,7 +4,6 @@ import {
   LuBlocks,
   LuBrain,
   LuCheck,
-  LuCircleAlert,
   LuDownload,
   LuExternalLink,
   LuEye,
@@ -50,7 +49,7 @@ import { ToolDefaults } from "./ToolDefaults";
 import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { ProvidersPanel } from "./ProvidersPanel";
-import { EffortPicker, Empty, LoadFailed, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { EffortPicker, Empty, ErrorBanner, LoadFailed, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { PackageCatalog } from "./PackageCatalog";
 import { packageName, webLink } from "../package-names";
@@ -136,6 +135,7 @@ export const ConfigModal = memo(function ConfigModal({
 }) {
   const [nav, setNav] = useState<Nav>({ kind: "tab", id: TABS.some((t) => t.id === initialTab) ? initialTab : "general" });
   const [error, setError] = useState<string | null>(null);
+  const banner = useRef<HTMLDivElement>(null);
   /** A section a search went to, to scroll to once its page has drawn it. */
   const [target, setTarget] = useState<{ section: string; n: number } | null>(null);
   const page = useRef<HTMLDivElement>(null);
@@ -149,6 +149,14 @@ export const ConfigModal = memo(function ConfigModal({
   const loadExtensions = async () => (await exts.reload())?.extensions ?? [];
 
   useEffect(() => prefetchSettings(), []);
+
+  // A refused save is said at the top of the pane, which a long form has scrolled away from: it is brought into
+  // view when it comes, and it is not the next section's.
+  useEffect(() => {
+    if (error) banner.current?.scrollIntoView({ block: "nearest" });
+  }, [error]);
+  const section = nav.kind === "tab" ? nav.id : nav.spec;
+  useEffect(() => setError(null), [section]);
 
   const configurable = exts.value ? extensions.filter((e) => e.settings.length > 0) : railSnapshot().map((e) => ({ ...e, settings: [] as ExtensionInfo["settings"], placeholder: true }));
   useEffect(() => {
@@ -263,17 +271,9 @@ export const ConfigModal = memo(function ConfigModal({
         </SettingsSearch>
       }
     >
-      {error && (
-        <div role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-          <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-          <span className="min-w-0 flex-1">{error}</span>
-          <button onClick={() => setError(null)} aria-label={t("Dismiss")} className="text-danger/70 hover:text-danger">
-            ✕
-          </button>
-        </div>
-      )}
+      {error && <ErrorBanner ref={banner} className="mb-4" onClose={() => setError(null)}>{error}</ErrorBanner>}
 
-      <div key={nav.kind === "tab" ? nav.id : nav.spec} ref={page} className="settings-page">
+      <div key={section} ref={page} className="settings-page">
       {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} onSetup={onSetup} />}
       {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
       {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}
@@ -1156,6 +1156,7 @@ function ExtensionsPanel({
               act("install", () => api.installPackage(spec.trim()))
             }
             placeholder="npm:@scope/package"
+            aria-label={t("Install by name")}
             className={`${inputCls} font-mono text-xs`}
           />
           <button
@@ -1482,6 +1483,7 @@ function AdvancedPanel({
         <div className="space-y-2">
           <textarea
             value={file.content}
+            aria-label="settings.json"
             onChange={(e) => setFile({ ...file, content: e.target.value })}
             rows={16}
             spellCheck={false}

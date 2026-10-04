@@ -273,6 +273,9 @@ const de: Locale = {
     "Ask the agent to create a canvas, or start a document here.": "Bitte den Agenten, ein Canvas anzulegen, oder beginne hier ein Dokument.",
     "Create canvas": "Canvas erstellen",
     // components/ChannelsPanel.tsx
+    "GitHub repo of a channel package": "GitHub-Repository eines Channel-Pakets",
+    "Channel name": "Name des Channels",
+    "Slug": "Slug",
     "starting": "startet",
     "error": "Fehler",
     "stopped": "gestoppt",
@@ -325,6 +328,7 @@ const de: Locale = {
     "required": "erforderlich",
     "Cancel": "Abbrechen",
     // components/Chat.tsx
+    "The run has finished.": "Der Lauf ist beendet.",
     "Close the browser": "Browser schließen",
     "Subagents": "Subagents",
     "Close the subagents": "Subagents schließen",
@@ -468,6 +472,8 @@ const de: Locale = {
     "runs when this one ends": "läuft, wenn dieser endet",
     "done": "fertig",
     // components/ComposerBar.tsx
+    "Model: {name}": "Modell: {name}",
+    "Effort: {level}": "Aufwand: {level}",
     "local": "lokal",
     "Running locally": "Läuft lokal",
     "Thinking on / off": "Denken an / aus",
@@ -913,6 +919,7 @@ const de: Locale = {
     // components/Markdown.tsx
     "Picture from {host} not loaded": "Bild von {host} nicht geladen",
     // components/McpPanel.tsx
+    "Server JSON": "Server-JSON",
     "Its entry is deleted from the MCP file, with its environment, headers and anything added by hand. There is no undo.": "Sein Eintrag wird aus der MCP-Datei gelöscht, samt Umgebung, Headern und allem, was von Hand hinzugefügt wurde. Das lässt sich nicht rückgängig machen.",
     "Reading configuration…": "Konfiguration wird gelesen…",
     "The MCP adapter is not installed": "Der MCP-Adapter ist nicht installiert",
@@ -1083,6 +1090,7 @@ const de: Locale = {
     "{n} more": "{n} weitere",
     "Chats started from now on have it. Open ones pick it up with /reload.": "Chats, die ab jetzt starten, haben es. Offene bekommen es mit /reload.",
     // components/PeoplePanel.tsx
+    "Tool": "Tool",
     "Primary": "Hauptnutzer",
     "You. Everything.": "Du. Alles.",
     "Colleague": "Kollege",
@@ -1255,6 +1263,7 @@ const de: Locale = {
     "Drag the bottom right corner to resize": "Untere rechte Ecke ziehen, um die Größe zu ändern",
     "Drag the bottom left corner to resize": "Untere linke Ecke ziehen, um die Größe zu ändern",
     // components/RoutinesPage.tsx
+    "Routine name": "Name der Routine",
     "Pick a time to run it at.": "Wähle eine Zeit, zu der es laufen soll.",
     "ok": "ok",
     "Every 15 min": "Alle 15 Min.",
@@ -1328,13 +1337,19 @@ const de: Locale = {
     "Run /{command}": "/{command} ausführen",
     // components/Select.tsx
     "Choose…": "Auswählen…",
-    // components/SessionsPage.tsx
+    // components/SessionActions.tsx
+    "Could not pin \"{name}\": {error}": "„{name}“ konnte nicht angeheftet werden: {error}",
+    "Could not unpin \"{name}\": {error}": "„{name}“ konnte nicht gelöst werden: {error}",
     "Could not rename \"{name}\": {error}": "„{name}“ konnte nicht umbenannt werden: {error}",
-    "Session name": "Name der Sitzung",
-    "Pinned": "Angeheftet",
+    "Could not delete \"{name}\": {error}": "„{name}“ konnte nicht gelöscht werden: {error}",
     "Unpin": "Lösen",
     "Pin": "Anheften",
+    "Unpin {name}": "{name} lösen",
+    "Pin {name}": "{name} anheften",
     "Delete session": "Sitzung löschen",
+    // components/SessionsPage.tsx
+    "Session name": "Name der Sitzung",
+    "Pinned": "Angeheftet",
     "Sessions": "Sitzungen",
     "Every task you have handed to pi. Each one runs on the server, so you can close the tab and pick it back up here once it is done.": "Jede Aufgabe, die du pi gegeben hast. Jede läuft auf dem Server, du kannst also den Tab schließen und sie hier wieder aufnehmen, wenn sie fertig ist.",
     "total": "insgesamt",
@@ -1396,6 +1411,8 @@ const de: Locale = {
     "Recents": "Zuletzt",
     "{n} more…": "{n} weitere…",
     // components/SkillsPanel.tsx
+    "The skill's file": "Die Datei des Skills",
+    "GitHub repo of skills": "GitHub-Repository mit Skills",
     "Replace your local edits?": "Deine lokalen Änderungen ersetzen?",
     "Update fetches {name} from its source again. What you changed in it here, saved or not, is replaced.": "Aktualisieren holt {name} erneut aus der Quelle. Was du hier daran geändert hast, gespeichert oder nicht, wird ersetzt.",
     "A skill is a set of instructions the agent pulls in when its description matches what is being asked. Every session sees them, so they are a good place for a procedure you would otherwise repeat. Switching one off stops pi loading it at all, rather than hiding it here.": "Ein Skill ist eine Anleitung, die der Agent heranzieht, wenn ihre Beschreibung zur Anfrage passt. Jede Sitzung sieht sie, also sind sie ein guter Ort für einen Ablauf, den du sonst immer wieder erklären würdest. Ausschalten sorgt dafür, dass pi ihn gar nicht lädt, statt ihn hier nur zu verstecken.",

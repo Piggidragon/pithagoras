@@ -40,9 +40,12 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder={t("Password")}
+          aria-label={t("Password")}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? "login-error" : undefined}
           className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-fg outline-none transition placeholder:text-fg-faint focus:border-accent/50 focus:ring-4 focus:ring-accent/10"
         />
-        {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+        {error && <p id="login-error" role="alert" className="mt-2 text-xs text-danger">{error}</p>}
 
         <button
           type="submit"

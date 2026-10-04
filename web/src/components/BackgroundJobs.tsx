@@ -74,7 +74,10 @@ export function BackgroundJobs({
             ))}
             </div>
             {jobs.some((j) => j.state === "exited") && (
-              <button type="button" className="bg-jobs-clear" onClick={() => void api.clearBackground(sessionId).then(onChanged)} title={t("Forget the finished jobs")}>
+              <button type="button" className="bg-jobs-clear" onClick={() => {
+                setError(null);
+                api.clearBackground(sessionId).then(onChanged, (e) => setError((e as Error).message));
+              }} title={t("Forget the finished jobs")}>
                 <LuTrash2 aria-hidden /> {t("Clear finished")}
               </button>
             )}
@@ -98,7 +101,7 @@ export function BackgroundJobs({
                   </button>
                 )}
               </div>
-              {error && <p className="bg-jobs-error">{error}</p>}
+              {error && <p role="alert" className="bg-jobs-error">{error}</p>}
               {job.hasOutput ? (
                 <JobOutput key={job.key} sessionId={sessionId} jobKey={job.key} live={job.state !== "exited"} />
               ) : (

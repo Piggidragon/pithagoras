@@ -214,7 +214,7 @@ function ProviderCard({ provider: p, status, busy, onEdit, onRemove }: { provide
               <StatusBadge status={status} />
             </div>
           )}
-          {status?.state === "down" && status.message && <p className="float-in mt-1 text-[11px] text-danger/90">{status.message}</p>}
+          {status?.state === "down" && status.message && <p role="alert" className="float-in mt-1 text-[11px] text-danger/90">{status.message}</p>}
           {status?.state === "up" && !!status.missing?.length && (
             <p className="float-in mt-1 text-[11px] text-warn">
               {status.missing.length === 1

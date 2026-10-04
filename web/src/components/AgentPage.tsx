@@ -21,9 +21,9 @@ import { PageHeader, Stat } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
 import { api, ApiError, type Agent, type AgentSession, type AgentSetup as Setup } from "../api";
 import { AgentSetup } from "./AgentSetup";
-import { confirmDialog } from "./ConfirmDialog";
+import { confirmDeleteSession } from "./SessionActions";
 import { Modal } from "./Modal";
-import { LoadFailed, primarySmCls } from "./SettingsUi";
+import { ErrorBanner, LoadFailed, primarySmCls } from "./SettingsUi";
 import { StatusDot } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { pollWhileVisible } from "../poll";
@@ -276,17 +276,7 @@ function AgentView({
   };
 
   const remove = async (s: AgentSession) => {
-    const fresh = s.channel && s.channel.slug !== BROWSER;
-    const ok = await confirmDialog({
-      title: t("Delete \"{name}\"?", { name: s.title }),
-      message: fresh
-        ? t("The agent forgets this conversation, and the next message in that chat starts a new one.")
-        : t("It is stopped if it is running, and its transcript is removed."),
-      confirmLabel: t("Delete"),
-      danger: true,
-      deletes: true,
-    });
-    if (!ok) return;
+    if (!(await confirmDeleteSession(s.title, Boolean(s.channel && s.channel.slug !== BROWSER)))) return;
     setError("");
     try {
       await api.deleteSession(s.id);
@@ -380,8 +370,11 @@ function AgentView({
               <button
                 onClick={async () => {
                   setStarting(true);
+                  setError("");
                   try {
                     onSelect((await api.startAgentChat(agent.id)).id);
+                  } catch (e) {
+                    setError((e as Error).message);
                   } finally {
                     setStarting(false);
                   }
@@ -410,9 +403,7 @@ function AgentView({
 
           <AgentTabs tab={tab} onTab={setTab} unread={agent.unread} />
 
-          {error && (
-            <div className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>
-          )}
+          {error && <ErrorBanner className="mt-4" onClose={() => setError("")}>{error}</ErrorBanner>}
 
           {tab === "activity" && <ActivityFeed agent={agent} onChanged={onChanged} onSelect={onSelect} />}
           {tab === "heartbeat" && <HeartbeatSettings agent={agent} onChanged={onChanged} />}
@@ -614,7 +605,7 @@ function DeleteAgent({ agent, onClose, onDeleted }: { agent: Agent; onClose: () 
       onClose={onClose}
       footer={
         <div className="flex items-center justify-end gap-2">
-          {error && <p className="mr-auto text-xs text-danger">{error}</p>}
+          {error && <p role="alert" className="mr-auto text-xs text-danger">{error}</p>}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
             {t("Cancel")}
           </button>
@@ -771,6 +762,7 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            aria-label={file.name}
             rows={14}
             spellCheck={false}
             placeholder={file.name === "WATCH.md" ? WATCH_EXAMPLE : undefined}

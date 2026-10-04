@@ -402,6 +402,7 @@ function SkillDetail({
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            aria-label={t("The skill's file")}
             rows={18}
             spellCheck={false}
             className={`${codeAreaCls} resize-y`}
@@ -577,6 +578,7 @@ function ImportSkills({
           }}
           onKeyDown={(e) => isEnter(e) && spec.trim() && look()}
           placeholder="anthropics/skills"
+          aria-label={t("GitHub repo of skills")}
           className={`${inputCls} font-mono text-xs`}
         />
         <button disabled={!spec.trim() || busy !== null} onClick={look} className={btnCls}>

@@ -295,12 +295,16 @@ a match, open; one shut during a search is shut only until the search ends.
 The chat's name at the top of the conversation renames it too: click it.
 A name is at most 120 characters, wherever it is given — `/name` included.
 
-Hovering a session gives you pin, rename and delete. Renaming turns the name into
-a field where it stands — Enter or clicking away keeps the new one, Escape puts
-the old one back — and double-clicking the name does the same. Delete asks in the
-portal's own dialog, with the button saying what it will do — and **Settings →
-This browser → Confirmations** turns that question off, for chats, messages, files,
-skills, routines, projects, voices and channels alike. It is kept per browser.
+Hovering a session gives you pin, rename and delete; with the keyboard, a row is
+reached with `Tab` and opened with `Enter` or `Space`, and its buttons show as
+soon as one of them has the focus. One the server refuses — pin, rename or
+delete — says so in an alert, with the reason, beside the list, and the row
+stays as it was. Renaming turns the name into a field where it stands — Enter or
+clicking away keeps the new one, Escape puts the old one back — and
+double-clicking the name does the same. Delete asks in the portal's own dialog,
+with the button saying what it will do — and **Settings → This browser →
+Confirmations** turns that question off, for chats, messages, files, skills,
+routines, projects, voices and channels alike. It is kept per browser.
 Discarding unsaved changes is still asked about. The Agents page's conversations
 can be renamed and deleted the same way, from the row.
 

@@ -622,7 +622,7 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
             )}
           </div>
           {m.pulling.active && <p className="font-mono text-[11px] text-fg-faint">{m.pulling.line}</p>}
-          {m.pulling.error && <p className="text-[11px] text-warn">{m.pulling.error}</p>}
+          {m.pulling.error && <p role="alert" className="text-[11px] text-warn">{m.pulling.error}</p>}
           {!runsHere && <p className="text-[11px] text-fg-faint">{t("Installing downloads its image the first time.")}</p>}
         </section>
       )}

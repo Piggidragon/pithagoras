@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuTrash2, LuUserX } from "react-icons/lu";
 import { confirmDialog } from "./ConfirmDialog";
 import { PageHeader, Stat } from "./PageHeader";
-import { LoadFailed, Segments } from "./SettingsUi";
+import { ErrorBanner, LoadFailed, Segments } from "./SettingsUi";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
 import { msg, t, tp } from "../i18n";
@@ -49,11 +49,7 @@ export function AuditPage() {
   return (
     <div className="h-full overflow-y-auto px-4 py-6">
       <div className="mx-auto w-full max-w-3xl">
-        {error && (
-          <div className="mb-4 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {error}
-          </div>
-        )}
+        {error && <ErrorBanner className="mb-4" onClose={() => setError(null)}>{error}</ErrorBanner>}
         <AuditPanel onError={setError} />
       </div>
     </div>
@@ -207,7 +203,7 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
           <LuTrash2 className="h-3 w-3" /> {t("Clear the log")}
         </button>
       </div>
-      {clearFailed && <p className="mb-3 text-xs text-danger">{clearFailed}</p>}
+      {clearFailed && <p role="alert" className="mb-3 text-xs text-danger">{clearFailed}</p>}
 
       {shown.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-fg-faint">

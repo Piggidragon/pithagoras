@@ -15,7 +15,7 @@ import { ExtensionDialog, type UiRequest } from "./components/ExtensionDialog";
 import { lazyComponent } from "./lazy";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
-import { ghostCls } from "./components/SettingsUi";
+import { ErrorBanner, ghostCls } from "./components/SettingsUi";
 import { pollWhileVisible, reconnectDelay } from "./poll";
 import { canvasConnection, canvasMessage } from "./canvas-feed";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
@@ -248,6 +248,8 @@ function Shell({
     setSessions((prev) => reconcile(prev, r.sessions));
     setSessionsAsked(true);
     setExecutor(r.executor);
+    // A list that came is the end of the outage the first one reported.
+    setError(null);
     return r.sessions;
   }, []);
 
@@ -275,7 +277,7 @@ function Shell({
   useEffect(() => {
     refreshSessions().catch((e) => {
       setSessionsAsked(true);
-      setError(String(e));
+      setError((e as Error).message);
     });
     return pollWhileVisible(() => refreshSessions().catch(() => {}), 5000);
   }, [refreshSessions]);
@@ -701,7 +703,7 @@ function Shell({
           <button type="button" aria-label={t("Open navigation")} aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
           <span className="truncate text-sm text-fg">{active?.title || "Pithagoras"}</span>
         </header>
-        {error && <div className="bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>}
+        {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}
         {/* Not for the first miss: a server restarting, or a wifi that blinked,
             is back before it can be read. Two in a row is an outage. */}
         {sessionId && failures >= 2 && missing !== sessionId && (

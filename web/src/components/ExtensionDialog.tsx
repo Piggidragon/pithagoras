@@ -122,6 +122,7 @@ export function ExtensionDialog({
                 <textarea
                   autoFocus
                   rows={10}
+                  aria-label={request.title || t("Extension")}
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   className={`${codeAreaCls} resize-y text-fg`}
@@ -132,6 +133,7 @@ export function ExtensionDialog({
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   onKeyDown={(e) => isEnter(e) && respond({ value })}
+                  aria-label={request.title || t("Extension")}
                   placeholder={request.placeholder}
                   className={`${inputCls} text-fg`}
                 />

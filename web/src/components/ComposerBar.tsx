@@ -224,6 +224,8 @@ export function ComposerBar({
   const [busy, setBusy] = useState(false);
   /** Why the last model picked was not taken, shown in the menu where it was picked. */
   const [pickError, setPickError] = useState<string | null>(null);
+  /** Why the last change of effort was not taken: shown beside the pills, where the slider snapped back to the old level. */
+  const [levelError, setLevelError] = useState<string | null>(null);
   /** Where the handle sits mid-drag, before the change is sent. */
   const [dragEffort, setDragEffort] = useState<number | null>(null);
   // Each menu opens over its own button; see menu-anchor.ts.
@@ -465,8 +467,11 @@ export function ComposerBar({
       return;
     }
     setBusy(true);
+    setLevelError(null);
     try {
       await saver.request(level);
+    } catch (e) {
+      setLevelError((e as Error).message);
     } finally {
       // Only now: the slider stays where it was dragged, and the controls stay
       // busy, until the last save has landed.
@@ -485,6 +490,9 @@ export function ComposerBar({
           type="button"
           disabled={busy}
           onClick={() => setOpen(open === "model" ? null : "model")}
+          aria-label={t("Model: {name}", { name: shortName(cfg.state.model) })}
+          aria-haspopup="true"
+          aria-expanded={open === "model"}
           className={`max-w-[220px] truncate rounded-lg px-2 py-1.5 transition disabled:opacity-50 ${
             open === "model" ? "bg-fg/10 text-fg" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
           }`}
@@ -504,6 +512,9 @@ export function ComposerBar({
           // On/off models flip right here; there is no scale to open a panel for.
           onClick={() => (onOff ? flipThinking() : setOpen(open === "effort" ? null : "effort"))}
           aria-pressed={onOff ? thinkingOn : undefined}
+          aria-label={onOff ? undefined : t("Effort: {level}", { level: effortLabel(cfg.state.thinkingLevel) })}
+          aria-haspopup={onOff ? undefined : "true"}
+          aria-expanded={onOff ? undefined : open === "effort"}
           className={`rounded-lg px-2 py-1 transition first-letter:uppercase disabled:opacity-50 ${
             open === "effort"
               ? "bg-fg/10 text-fg"
@@ -528,6 +539,9 @@ export function ComposerBar({
           ref={pills.tools}
           type="button"
           onClick={() => setOpen(open === "tools" ? null : "tools")}
+          aria-label={t("Which tools this conversation may use")}
+          aria-haspopup="true"
+          aria-expanded={open === "tools"}
           className={`rounded-lg px-2 py-1 transition ${
             open === "tools" ? "bg-fg/10 text-fg" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
           }`}
@@ -542,6 +556,7 @@ export function ComposerBar({
             onChanged={load}
           />
         )}
+        {levelError && <p role="alert" className="basis-full px-2 py-0.5 text-danger">{levelError}</p>}
         {/* The same mark as a working chat has in the lists, and its word shimmering as "Thinking" does. */}
         {running && (
           <span className="composer-working ml-1 inline-flex items-center gap-1.5">
@@ -554,7 +569,7 @@ export function ComposerBar({
 
       {/* Tools */}
       {open === "tools" && (
-        <div ref={menuRef} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menuRef} role="group" aria-label={t("Tools in this chat")} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <p className="px-3 py-1 text-[11px] text-fg-subtle">{t("Tools in this chat")}</p>
           <ToolSwitches sessionId={sessionId} />
         </div>
@@ -562,7 +577,7 @@ export function ComposerBar({
 
       {/* Models */}
       {open === "model" && (
-        <div ref={menuRef} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
+        <div ref={menuRef} role="group" aria-label={t("Models")} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           <div className="flex items-center gap-2 px-3 py-1">
             <p className="text-[11px] text-fg-subtle">{t("Models")}</p>
             {/* The cached copy goes first: a fetch that fails leaves nothing old behind for the next menu. */}
@@ -610,6 +625,7 @@ export function ComposerBar({
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder={t("Filter models…")}
+                aria-label={t("Filter models…")}
                 className="mx-2 mb-1 w-[calc(100%-1rem)] rounded border border-line bg-canvas px-2 py-1 text-xs outline-none focus:border-accent"
               />
               <div className="max-h-72 overflow-y-auto">
@@ -647,7 +663,7 @@ export function ComposerBar({
 
       {/* Effort */}
       {open === "effort" && levels.length > 1 && (
-        <div ref={menuRef} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div ref={menuRef} role="group" aria-label={t("Effort")} style={{ left: menuLeft }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           {onOff ? (
             // Reached through /effort; the pill flips the same switch directly.
             <button
@@ -676,6 +692,8 @@ export function ComposerBar({
                 max={levels.length - 1}
                 step={1}
                 value={effortIndex}
+                aria-label={t("Effort")}
+                aria-valuetext={effortLabel(levels[effortIndex] ?? cfg.state.thinkingLevel)}
                 onChange={(e) => setDragEffort(Number(e.target.value))}
                 onPointerUp={(e) => commitEffort(Number(e.currentTarget.value))}
                 onKeyUp={(e) => commitEffort(Number(e.currentTarget.value))}

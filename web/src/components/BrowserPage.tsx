@@ -10,7 +10,7 @@ import {
 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { BrowserInstall } from "./BrowserInstall";
-import { inputCls } from "./SettingsUi";
+import { ErrorBanner, LoadFailed, inputCls } from "./SettingsUi";
 import { api, type BrowserStatus } from "../api";
 import { pollWhileVisible } from "../poll";
 import { t, tx } from "../i18n";
@@ -26,10 +26,14 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
   const [status, setStatus] = useState<BrowserStatus | null>(null);
   const [allowlist, setAllowlist] = useState("");
   const [dirty, setDirty] = useState(false);
+  // What a button was refused, kept until the next press; and what the poll could not read, which is only true
+  // until the next poll that can. Two messages, so that a poll that works does not take back one nobody read yet.
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [shown, setShown] = useState(false);
 
   const act = async (fn: () => Promise<unknown>) => {
+    setError(null);
     try {
       await fn();
       await load();
@@ -44,9 +48,10 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
       .browser()
       .then((s) => {
         setStatus(s);
+        setLoadError(null);
         if (!dirty) setAllowlist(s.allowlist);
       })
-      .catch((e) => setError((e as Error).message));
+      .catch((e) => setLoadError((e as Error).message));
 
   useEffect(() => {
     load();
@@ -56,9 +61,15 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
   if (!status) {
     return (
       <div className="h-full overflow-y-auto px-4 py-6">
-        <p className="mx-auto flex w-full max-w-3xl items-center gap-2 text-sm text-fg-subtle">
-          <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}
-        </p>
+        <div className="mx-auto w-full max-w-3xl">
+          {loadError ? (
+            <LoadFailed error={loadError} onRetry={load} />
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-fg-subtle">
+              <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}
+            </p>
+          )}
+        </div>
       </div>
     );
   }
@@ -80,13 +91,13 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
   return (
     <div className="h-full overflow-y-auto px-4 py-6">
       <div className="mx-auto w-full max-w-3xl">
-        {error && (
-          <div className="mb-4 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {error}
-          </div>
+        {(error || loadError) && (
+          <ErrorBanner className="mb-4" onClose={error ? () => setError(null) : undefined}>
+            {error || loadError}
+          </ErrorBanner>
         )}
 
-        <InstallPanel status={status} reload={load} onError={setError} />
+        <InstallPanel status={status} reload={load} onError={(message) => setError(message || null)} />
 
         <PageHeader
           icon={<LuGlobe />}
@@ -243,6 +254,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
             {dirty && (
               <button
                 onClick={async () => {
+                  setError(null);
                   try {
                     await api.setBrowserAllowlist(allowlist);
                     setDirty(false);
@@ -268,6 +280,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
               setDirty(true);
             }}
             placeholder={"*.google.com\ngithub.com"}
+            aria-label={t("Where it may go")}
             className={`${inputCls} font-mono text-xs`}
           />
           <p className="mt-1.5 text-[11px] text-fg-faint">

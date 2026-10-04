@@ -22,6 +22,7 @@ export function BrowserInstall({
 }: {
   status: BrowserStatus;
   reload: () => Promise<unknown>;
+  /** An empty message takes back the last one: what was said of an action that went before is not said of this one. */
   onError: (message: string) => void;
   lifecycle?: boolean;
 }) {
@@ -46,6 +47,7 @@ export function BrowserInstall({
   const act = async (fn: () => Promise<unknown>) => {
     if (busy) return;
     setBusy(true);
+    onError("");
     try {
       await fn();
     } catch (e) {
@@ -73,7 +75,10 @@ export function BrowserInstall({
           <button
             type="button"
             disabled={busy}
-            onClick={async () => setPassword((await api.suggestBrowserPassword()).password)}
+            onClick={() => {
+              onError("");
+              api.suggestBrowserPassword().then((r) => setPassword(r.password), (e) => onError((e as Error).message));
+            }}
             className="rounded-lg bg-fg/5 px-2.5 py-1.5 text-[11px] text-fg-muted transition hover:bg-fg/10 disabled:opacity-40"
           >
             {t("Suggest one")}

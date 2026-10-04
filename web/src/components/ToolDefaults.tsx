@@ -153,6 +153,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                       type="button"
                       onClick={() => rename(group.source, renaming.value)}
                       title={t("Save")}
+                      aria-label={t("Save")}
                       className="shrink-0 rounded p-1 text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
                     >
                       <LuCheck className="h-3 w-3" />
@@ -161,6 +162,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                       type="button"
                       onClick={() => setRenaming(null)}
                       title={t("Cancel")}
+                      aria-label={t("Cancel")}
                       className="shrink-0 rounded p-1 text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
                     >
                       <LuX className="h-3 w-3" />

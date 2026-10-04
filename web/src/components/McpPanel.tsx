@@ -163,7 +163,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
       )}
 
       {view.parseError && (
-        <section className="mb-6 rounded-xl border border-danger/30 bg-danger/10 p-3">
+        <section role="alert" className="mb-6 rounded-xl border border-danger/30 bg-danger/10 p-3">
           <div className="flex items-start gap-2">
             <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
             <div className="min-w-0">
@@ -308,14 +308,14 @@ function ServerRow({
         {t("On")}
       </label>
       <button
-        className="shrink-0 rounded-lg p-1.5 text-fg-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+        className="shrink-0 rounded-lg p-1.5 text-fg-faint opacity-0 transition hover:bg-danger/10 hover:text-danger focus:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
         title={t("Remove")}
         aria-label={t("Remove {name}", { name: server.name })}
         onClick={onDelete}
       >
         <LuTrash2 className="h-4 w-4" />
       </button>
-      <button className="shrink-0 text-fg-faint" onClick={onOpen} title={t("Edit")}>
+      <button className="shrink-0 text-fg-faint" onClick={onOpen} title={t("Edit")} aria-label={t("Edit {name}", { name: server.name })}>
         <LuChevronRight className="h-4 w-4" />
       </button>
     </li>
@@ -344,6 +344,7 @@ function ImportBox({
         className={codeAreaCls}
         rows={7}
         spellCheck={false}
+        aria-label={t("Server JSON")}
         placeholder={"{\n  \"mcpServers\": {\n    \"filesystem\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/data\"]\n    }\n  }\n}"}
         value={text}
         onChange={(ev) => setText(ev.target.value)}
@@ -774,6 +775,7 @@ function RawEditor({
         className={codeAreaCls}
         rows={14}
         spellCheck={false}
+        aria-label="mcp.json"
         value={text}
         onChange={(ev) => setText(ev.target.value)}
       />

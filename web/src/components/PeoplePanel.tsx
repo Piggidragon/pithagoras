@@ -203,6 +203,7 @@ function RuleRow({
       <button
         onClick={onDelete}
         title={t("Revoke")}
+        aria-label={t("Revoke")}
         className="shrink-0 rounded-lg p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger"
       >
         <LuTrash2 className="h-3.5 w-3.5" />
@@ -279,6 +280,7 @@ function PersonDetail({
         <button
           disabled={busy}
           title={t("Forget — the next message from them arrives as a stranger again")}
+          aria-label={t("Forget")}
           onClick={async () => {
             const ok = onlyPrimary
               ? await confirmDialog({ title: t("Forget the only primary user?"), confirmLabel: t("Forget"), ...noPrimaryLeft })
@@ -374,12 +376,14 @@ function PersonDetail({
             value={tool}
             onChange={(e) => setTool(e.target.value)}
             placeholder="bash"
+            aria-label={t("Tool")}
             className="w-20 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-[11px] outline-none focus:border-accent/60"
           />
           <input
             value={pattern}
             onChange={(e) => setPattern(e.target.value)}
             placeholder="himalaya envelope list*"
+            aria-label={t("Pattern")}
             className="min-w-0 flex-1 rounded-lg border border-line bg-raised/60 px-2 py-1.5 font-mono text-[11px] outline-none placeholder:text-fg-faint focus:border-accent/60"
           />
           <button

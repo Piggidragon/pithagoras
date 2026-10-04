@@ -5,7 +5,6 @@ import {
   LuCheck,
   LuChevronLeft,
   LuChevronRight,
-  LuCircleAlert,
   LuClock,
   LuFolder,
   LuHouse,
@@ -17,7 +16,7 @@ import {
 import { PageHeader, Stat } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
 import { api, type Agent, type ReportTarget, type ReportTo, type Routine, type Workspace } from "../api";
-import { Segments, Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { ErrorBanner, Segments, Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { below } from "../paths";
 import { pollWhileVisible } from "../poll";
@@ -113,6 +112,7 @@ function Timing({
             type="datetime-local"
             value={runAt}
             onChange={(e) => onRunAt(e.target.value)}
+            aria-label={t("Run at")}
             className={`${inputCls} mt-1 text-xs [color-scheme:dark]`}
           />
           {!runAt && <p role="alert" className="mt-1 text-[11px] text-warn">{t("Pick a time to run it at.")}</p>}
@@ -159,14 +159,20 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
+  // What a save or a run was refused, kept until the next one; and what the poll could not read, which is only true
+  // until the next poll that can.
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const places = usePlaces();
 
   const load = () =>
     api
       .routines()
-      .then((r) => setRoutines(r.routines))
-      .catch((e) => setError((e as Error).message))
+      .then((r) => {
+        setRoutines(r.routines);
+        setLoadError(null);
+      })
+      .catch((e) => setLoadError((e as Error).message))
       .finally(() => setLoading(false));
 
   useEffect(() => {
@@ -177,12 +183,8 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
   const open = routines.find((r) => r.id === openId);
 
   // Shown in the list and in a routine alike: a refused save or run is said where it was asked for.
-  const errorBox = error && (
-    <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-      <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-      <span className="min-w-0 flex-1">{error}</span>
-      <button onClick={() => setError(null)} aria-label={t("Dismiss")}>✕</button>
-    </div>
+  const errorBox = (error || loadError) && (
+    <ErrorBanner className="mt-4" onClose={error ? () => setError(null) : undefined}>{error || loadError}</ErrorBanner>
   );
 
   if (open) {
@@ -419,7 +421,7 @@ function WorkspacePicker({
         {error && ` ${t("The projects could not be listed ({error}), so only Home is offered.", { error })}`}
       </p>
       {problem && value && (
-        <p className="mt-1 text-[11px] text-danger">
+        <p role="alert" className="mt-1 text-[11px] text-danger">
           {t("{place} is not there any more ({problem}). Its runs fail until another place is chosen.", { place: value, problem })}
         </p>
       )}
@@ -457,6 +459,7 @@ function SchedulePicker({
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        aria-label={t("Schedule")}
         placeholder="0 9 * * *"
         className={`${inputCls} mt-1 font-mono text-xs`}
       />
@@ -472,7 +475,7 @@ function SchedulePicker({
           </button>
         ))}
       </div>
-      {preview.error && <p className="mt-1.5 text-[11px] text-danger">{preview.error}</p>}
+      {preview.error && <p role="alert" className="mt-1.5 text-[11px] text-danger">{preview.error}</p>}
       {preview.runs && preview.runs.length > 0 && (
         <p className="mt-1.5 text-[11px] text-fg-subtle">
           {t("Next: {when}", { when: preview.runs.map((r) => formatDateTime(r)).join(" · ") })}
@@ -503,6 +506,7 @@ function NewRoutine({
 
   const create = async () => {
     setBusy(true);
+    onError("");
     try {
       await onCreated(
         await api.createRoutine(
@@ -681,7 +685,8 @@ function RoutineDetail({
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full bg-transparent text-sm font-medium text-fg outline-none"
+            aria-label={t("Routine name")}
+            className="w-full rounded bg-transparent text-sm font-medium text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
           <p className="truncate text-xs text-fg-subtle">
             {r.done ? t("already ran") : r.enabled ? until(r.nextRun) : t("disabled")} ·{" "}

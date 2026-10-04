@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { LuCheck, LuDownload, LuFolder, LuImage, LuInfo, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles, LuX } from "react-icons/lu";
+import { LuCheck, LuDownload, LuFolder, LuImage, LuInfo, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob, type PictureKind, type PictureOrigin } from "../api";
 import { MAX_SOURCES, addSources, sourceName } from "../edit-sources";
 import { appendPage, fieldsText, madeButNotListed, mergeTop, readFilter, sameList, tiles, viewerList, viewerPicture, type Filter, type Tile } from "../images-gallery";
@@ -15,7 +15,7 @@ import { ImageMaker, type Mode } from "./ImageMaker";
 import { ImagePreview, type PreviewState } from "./ImagePreview";
 import { ImageViewer } from "./ImageViewer";
 import { PageHeader, Stat } from "./PageHeader";
-import { Empty, Segments, btnCls, ghostCls } from "./SettingsUi";
+import { Empty, ErrorBanner, Segments, btnCls, ghostCls } from "./SettingsUi";
 import type { ViewerPicture } from "../image-viewer";
 
 /** How many pictures a page of the gallery has: enough to fill a screen and some, and few enough to be quick. */
@@ -120,6 +120,8 @@ export function ImagesPage() {
         if (asked.current !== mine) return;
         setList({ pictures: page.pictures, next: page.next, total: page.total, pageBytes: page.pageBytes });
         setLoading(false);
+        // A gallery that has loaded is the end of one that could not.
+        setError(null);
       },
       (e: Error) => {
         if (asked.current !== mine) return;
@@ -487,14 +489,7 @@ export function ImagesPage() {
           </div>
         </PageHeader>
 
-        {error && (
-          <div role="alert" className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-            <span className="min-w-0 flex-1">{error}</span>
-            <button type="button" onClick={() => setError(null)} aria-label={t("Dismiss")} title={t("Dismiss")} className="shrink-0 rounded p-0.5 hover:bg-danger/10">
-              <LuX aria-hidden className="h-4 w-4" />
-            </button>
-          </div>
-        )}
+        {error && <ErrorBanner onClose={() => setError(null)}>{error}</ErrorBanner>}
 
         {features && (
           <ImageMaker

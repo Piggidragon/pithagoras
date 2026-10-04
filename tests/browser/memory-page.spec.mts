@@ -222,6 +222,22 @@ test('the search lists what matches, and says when nothing does', async ({ page 
   await expect(notes(page).getByRole('button', { name: /The owner/ })).toBeVisible();
 });
 
+test('a search that failed is not still said once the next one has started or has worked', async ({ page }) => {
+  await portal(page);
+  // After the portal's own answers, so this one is asked first.
+  await page.route('**/api/memory/search*', (route) => route.request().url().includes('q=broken')
+    ? route.fulfill({ status: 502, json: { error: 'Understory did not answer' } })
+    : route.fallback());
+  await page.goto('/memory');
+  const search = page.getByLabel('Search the memory');
+  await search.fill('broken');
+  await expect(page.getByText('Understory did not answer')).toBeVisible();
+  // The next search is a new question: the old answer is gone when it starts, and not only when the new one comes back.
+  await search.fill('deploy');
+  await expect(page.getByText('Understory did not answer')).toHaveCount(0);
+  await expect(page.getByRole('list', { name: 'Found in the memory' }).getByRole('button', { name: /Branch Deployment/ })).toBeVisible();
+});
+
 test('a bundle with issues says how many, and lists them', async ({ page }) => {
   await portal(page, { conformant: false });
   await page.goto('/memory');

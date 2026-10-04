@@ -19,7 +19,7 @@ import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
-import { Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuPaperclip, LuX } from "react-icons/lu";
@@ -903,6 +903,22 @@ export function Chat({
     () => hasEarlier || items.some((item) => item.kind === "user" || item.kind === "assistant" || item.kind === "command"),
     [items, hasEarlier],
   );
+  // A screen reader is told when a run ends, with the start of the reply it ended on: once, and not
+  // as the words stream in, which a live region over the transcript would read out a few at a time.
+  const [heard, setHeard] = useState<{ id: string; text: string } | null>(null);
+  const wasRunning = useRef({ id: session.id, running });
+  useEffect(() => {
+    const before = wasRunning.current;
+    wasRunning.current = { id: session.id, running };
+    if (before.id !== session.id || !before.running || running) return;
+    const id = session.id;
+    // The status comes at once and the last words a frame later (see App's drain), so the reply is read once they are drawn.
+    const timer = setTimeout(() => {
+      const reply = [...lastItems.current].reverse().find((item) => item.kind === "assistant" && item.text.trim());
+      setHeard({ id, text: reply?.kind === "assistant" ? reply.text.trim().slice(0, 300) : t("The run has finished.") });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [running, session.id]);
   // Commands come from pi at runtime, so anything a newly installed package
   // registers shows up here without the portal knowing about it in advance.
   //
@@ -982,6 +998,8 @@ export function Chat({
     setPaletteShut(false);
   }, [slashText]);
   const matches = paletteShut ? [] : allMatches;
+  // The list is the message box's to the screen reader: which command the arrows are on is what it reads out.
+  const paletteId = useId();
   const paletteBox = useRef<HTMLDivElement>(null);
   // Shut, the command list and the way back to the end drop away as pictures of themselves (see motion.ts).
   const paletteRef = useLeaveRef<HTMLDivElement>("menu", paletteBox);
@@ -1647,6 +1665,7 @@ export function Chat({
         data-transcript=""
         className="flex-1 overflow-y-auto px-4 py-6"
       >
+        <div role="status" aria-live="polite" className="sr-only">{heard?.id === session.id ? heard.text : ""}</div>
         <div ref={list} className={`chat-list mx-auto w-full max-w-3xl space-y-3${opening ? " is-opening" : ""}`}>
         <div ref={topEdge} aria-hidden className="h-px" />
         {!loading && hasEarlier && hiddenHere === 0 && (
@@ -1703,7 +1722,7 @@ export function Chat({
         })}
 
           {actionError && (
-            <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
+            <div role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
           )}
           {!loading && running && phase && !statusShownElsewhere && <StatusIndicator phase={phase} />}
         </div>
@@ -1755,6 +1774,7 @@ export function Chat({
         {matches.length > 0 && (
           <div
             ref={paletteRef}
+            id={paletteId}
             role="listbox"
             aria-label={t("Commands")}
             className="float-in absolute bottom-full left-0 right-0 mb-2 max-h-[min(18rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop"
@@ -1762,6 +1782,7 @@ export function Chat({
             {matches.map((c, i) => (
               <button
                 key={c.name}
+                id={`${paletteId}-${i}`}
                 type="button"
                 role="option"
                 aria-selected={i === picked}
@@ -1937,6 +1958,9 @@ export function Chat({
                 : t("Describe the task…")
           }
           aria-label={t("Message")}
+          aria-autocomplete={matches.length > 0 ? "list" : undefined}
+          aria-controls={matches.length > 0 ? paletteId : undefined}
+          aria-activedescendant={matches.length > 0 ? `${paletteId}-${Math.min(picked, matches.length - 1)}` : undefined}
           className="prompt-input"
           style={{ height: composerHeight, minHeight: MIN_COMPOSER_HEIGHT, maxHeight: "45vh" }}
         />

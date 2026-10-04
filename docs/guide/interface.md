@@ -160,3 +160,22 @@ see [Settings](/guide/settings#shortcuts).
 Dialogs, an extension's question and the phone's navigation drawer take the
 keyboard when they open: focus moves into them, Tab goes round them instead of
 into the page behind, and Esc (or closing them) puts focus back where it was.
+
+## With a screen reader
+
+Every button, field and slider has a name that is spoken: the icon-only ones
+carry their action ("Pin First chat", "Rename First chat"), and the name stays
+when a hover tip would have blanked the `title`. A button that opens a list
+says so and whether it is open (the context pill, the model and effort
+buttons), and a field that a tab or a list belongs to points at it.
+
+- **A run that ends** is announced once, with the start of its last reply, or
+  "The run has finished." where it said nothing. The reply is not read out
+  word by word while it is written.
+- **The command list** (type the command character in the message box) is the
+  box's own: the arrow keys move through it and the command they are on is
+  what is read out.
+- **What went wrong** is announced when it appears: a refused pin, rename or
+  delete (in the sidebar and on [Sessions](/guide/sessions)), a wrong password,
+  a failed load, a message under a field. An error that is a banner has a
+  Dismiss button, and goes away by itself once the next try works.

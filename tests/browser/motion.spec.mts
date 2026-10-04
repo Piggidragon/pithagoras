@@ -141,7 +141,7 @@ const row = (page: Page, title: string) => sidebar(page).locator('.session-row',
 
 async function deleteChat(page: Page, title: string) {
   await row(page, title).hover();
-  await row(page, title).getByRole('button', { name: 'Delete session' }).click();
+  await row(page, title).getByRole('button', { name: `Delete ${title}` }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
 }
 

@@ -220,6 +220,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
             onChange={(e) => setSpec(e.target.value)}
             onKeyDown={(e) => isEnter(e) && spec.trim() && install()}
             placeholder="user/repo"
+            aria-label={t("GitHub repo of a channel package")}
             className={`${inputCls} font-mono text-xs`}
           />
           <button
@@ -279,6 +280,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
                   }}
                   className="shrink-0 rounded p-1 text-fg-subtle hover:text-danger"
                   title={t("Uninstall")}
+                  aria-label={t("Uninstall")}
                 >
                   <LuTrash2 className="h-3.5 w-3.5" />
                 </button>
@@ -292,6 +294,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
             {broken.map((b) => (
               <li
                 key={b.packageName}
+                role="alert"
                 className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
               >
                 <LuCircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -500,7 +503,8 @@ function ChannelDetail({
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full bg-transparent text-sm font-medium text-fg outline-none"
+            aria-label={t("Channel name")}
+            className="w-full rounded bg-transparent text-sm font-medium text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
           <p className="truncate text-xs text-fg-subtle">
             {kind?.label ?? ch.kind} ·{" "}
@@ -519,8 +523,8 @@ function ChannelDetail({
       </div>
 
       {ch.error && (
-        <div className="mb-5 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-          <LuCircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <div role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+          <LuCircleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p className="min-w-0">{ch.error}</p>
         </div>
       )}
@@ -533,6 +537,7 @@ function ChannelDetail({
         <input
           value={slug}
           onChange={(e) => setSlug(e.target.value)}
+          aria-label={t("Slug")}
           className={`${inputCls} mt-2 font-mono text-xs`}
         />
         <p className="mt-1 text-[11px] text-fg-faint">
@@ -592,6 +597,7 @@ function ChannelDetail({
         <textarea
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
+          aria-label={t("Instructions")}
           rows={6}
           placeholder={t("You are answering over {channel}. Keep replies short — they are read on a phone. Never paste secrets or full file contents.", { channel: kind?.label ?? t("this channel") })}
           className={`${inputCls} mt-2 resize-y text-xs leading-relaxed`}
@@ -622,6 +628,7 @@ function ChannelDetail({
                   type={f.secret ? "password" : "text"}
                   value={values[f.key] ?? ""}
                   onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                  aria-label={f.label}
                   placeholder={
                     f.secret && ch.secretsSet.includes(f.key)
                       ? t("leave blank to keep the stored value")
@@ -637,8 +644,8 @@ function ChannelDetail({
       )}
 
       {!kind && (
-        <div className="mb-6 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-          <LuCircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <div role="alert" className="mb-6 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+          <LuCircleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p>
             {t("No installed package provides “{kind}”. Reinstall it to edit this channel, or delete the channel below.", { kind: ch.kind })}
           </p>
@@ -747,6 +754,7 @@ function NewChannelForm({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
+          aria-label={t("Name")}
           className={`${inputCls} mt-1`}
         />
       </div>
@@ -761,6 +769,7 @@ function NewChannelForm({
             type={f.secret ? "password" : "text"}
             value={values[f.key] ?? ""}
             onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+            aria-label={f.label}
             placeholder={f.placeholder}
             className={`${inputCls} mt-1 font-mono text-xs`}
           />

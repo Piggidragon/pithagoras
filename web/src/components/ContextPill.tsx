@@ -260,6 +260,9 @@ export function ContextPill({
     [t("Cost"), `$${formatNumber(cfg.stats.cost, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`],
   ];
 
+  // The donut says it in colour; the pill says it in words, as its name and its tooltip.
+  const fullness = known ? t("Context {n}% full", { n: formatNumber(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) : t("Context: counted again at the next reply");
+
   return (
     // Not positioned itself: the card is placed in the toolbar, over this pill
     // (see menu-anchor.ts), rather than hanging leftwards off its right edge.
@@ -268,7 +271,10 @@ export function ContextPill({
         ref={pill}
         type="button"
         onClick={() => setOpen(!open)}
-        title={known ? t("Context {n}% full", { n: formatNumber(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) : t("Context: counted again at the next reply")}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label={fullness}
+        title={fullness}
         className={`flex items-center gap-1.5 rounded px-2 py-1 ${
           open ? "bg-raised" : "hover:bg-raised"
         }`}
@@ -278,7 +284,7 @@ export function ContextPill({
       </button>
 
       {open && (
-        <div ref={card} style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
+        <div ref={card} role="group" aria-label={t("Context")} style={{ left: anchorLeft(pill.current, MENU_WIDTH) }} className="composer-menu float-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-full rounded-xl border border-line bg-surface p-3 shadow-pop">
           <div className="flex items-baseline justify-between">
             <p className="text-sm text-fg-muted">{t("Context")}</p>
             <p className={`text-sm tabular-nums ${known ? look.text : "text-fg-subtle"}`}>{known ? t("{n}% full", { n: formatNumber(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) : t("just compacted")}</p>

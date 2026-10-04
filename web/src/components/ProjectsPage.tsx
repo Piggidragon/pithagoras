@@ -168,7 +168,7 @@ export function ProjectsPage({
             }
           />
 
-          {error && <p className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
+          {error && <p role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
 
           {projects === null ? (
             failed ? (
@@ -356,7 +356,7 @@ function NewProject({
       unsaved={!busy && (!!name.trim() || !!instructions.trim() || toolsOff !== undefined)}
       footer={
         <div className="flex items-center justify-end gap-2">
-          {error && <p className="mr-auto text-xs text-danger">{error}</p>}
+          {error && <p role="alert" className="mr-auto text-xs text-danger">{error}</p>}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
             {t("Cancel")}
           </button>
@@ -468,7 +468,7 @@ function Instructions({
       unsaved={text !== null && text !== saved && !busy}
       footer={
         <div className="flex items-center justify-end gap-2">
-          {error && <p className="mr-auto text-xs text-danger">{error}</p>}
+          {error && <p role="alert" className="mr-auto text-xs text-danger">{error}</p>}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
             {t("Cancel")}
           </button>

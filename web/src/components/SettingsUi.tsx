@@ -1,5 +1,5 @@
-import { Children, cloneElement, isValidElement, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { LuCircleAlert } from "react-icons/lu";
+import { Children, cloneElement, forwardRef, isValidElement, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { LuCircleAlert, LuX } from "react-icons/lu";
 import { t } from "../i18n";
 import { EFFORT_LEVELS, effortLabel } from "../effort";
 import { Select } from "./Select";
@@ -33,6 +33,26 @@ export function Empty({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+/**
+ * Something that went wrong, said where a person can see it, and as an alert so
+ * that a screen reader says it too. With `onClose` it can be put away by hand;
+ * whoever owns the message also takes it back when it stops being true — the
+ * next poll that works, the next thing asked — so it never outlives its cause.
+ */
+export const ErrorBanner = forwardRef<HTMLDivElement, { children: ReactNode; onClose?: () => void; className?: string }>(function ErrorBanner({ children, onClose, className = "" }, ref) {
+  return (
+    <div ref={ref} role="alert" className={`flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger ${className}`}>
+      <LuCircleAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{children}</span>
+      {onClose && (
+        <button type="button" onClick={onClose} aria-label={t("Dismiss")} title={t("Dismiss")} className="shrink-0 rounded p-0.5 hover:bg-danger/10">
+          <LuX aria-hidden className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+});
 
 /**
  * What a page shows when its first read failed. Without it the page keeps its

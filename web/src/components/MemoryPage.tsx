@@ -107,6 +107,8 @@ export function MemoryPage() {
   const [query, setQuery] = useState("");
   const [asked, setAsked] = useState("");
   const [hits, setHits] = useState<MemoryHit[] | null>(null);
+  // Apart from `failed`, which a search must not set: nothing takes that back until the whole tree is read again.
+  const [searchFailed, setSearchFailed] = useState<string | null>(null);
 
   // Whether notes can be changed here, and what the last change left behind.
   const [writable, setWritable] = useState(false);
@@ -175,6 +177,8 @@ export function MemoryPage() {
     return () => clearTimeout(t);
   }, [query]);
   useEffect(() => {
+    // A new question is not the old one's failure.
+    setSearchFailed(null);
     if (!asked) {
       setHits(null);
       return;
@@ -182,7 +186,7 @@ export function MemoryPage() {
     let current = true;
     api.memorySearch(asked).then(
       (found) => current && setHits(found),
-      (e: Error) => current && setFailed(e.message),
+      (e: Error) => current && setSearchFailed(e.message),
     );
     return () => {
       current = false;
@@ -273,7 +277,8 @@ export function MemoryPage() {
               </button>
             )}
           </div>
-          {failed && tree && <p className="px-3 pt-2 text-xs text-warn">{failed}</p>}
+          {failed && tree && <p role="alert" className="px-3 pt-2 text-xs text-warn">{failed}</p>}
+          {searchFailed && <p role="alert" className="px-3 pt-2 text-xs text-warn">{searchFailed}</p>}
           <nav aria-label={t("Notes")} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
             {hits ? (
               <Hits hits={hits} asked={asked} open={note} onOpen={openNote} />
@@ -583,7 +588,7 @@ function Note({
         <div className="mx-auto max-w-3xl">
           {error && <p role="alert" className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
           {failed ? (
-            <p className="text-sm text-warn">{failed}</p>
+            <p role="alert" className="text-sm text-warn">{failed}</p>
           ) : !concept ? (
             <div className="skeleton-group space-y-2" aria-label={t("Loading the note")}>
               <div className="skeleton h-24 w-full" />
@@ -891,7 +896,7 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
       <section aria-label={t("Changes to the memory")} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
         <div className="mx-auto max-w-3xl">
           {failed ? (
-            <p className="text-sm text-warn">{failed}</p>
+            <p role="alert" className="text-sm text-warn">{failed}</p>
           ) : !log ? (
             <div className="skeleton-group space-y-2" aria-label={t("Loading the log")}>
               {[0, 1, 2].map((i) => <div key={i} className="skeleton h-12 w-full" />)}
@@ -1059,7 +1064,7 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
       <Bar title={t("Graph")} onBack={onBack} />
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {failed ? (
-          <p className="p-4 text-sm text-warn">{failed}</p>
+          <p role="alert" className="p-4 text-sm text-warn">{failed}</p>
         ) : !graph ? (
           <div className="skeleton m-4 h-64" aria-label={t("Loading the graph")} />
         ) : (
