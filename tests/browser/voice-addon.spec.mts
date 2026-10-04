@@ -40,7 +40,7 @@ const uninstallPage = async (page: any, state = 'running') => {
  });
  await page.goto('/tests/voice-addon.html');
  await page.locator('summary').filter({ hasText: 'Voice service' }).click();
- return { requests, setState: (value: string) => { status = value; }, setConnected: (value: boolean) => { connected = value; }, fail: (message: string) => { failure = message; } };
+ return { requests, change: (patch: any) => { config = { ...config, ...patch }; }, setState: (value: string) => { status = value; }, setConnected: (value: boolean) => { connected = value; }, fail: (message: string) => { failure = message; } };
 };
 
 test('uninstall asks first and says what goes, keeps the downloads unless told, and shows the settings that were put back', async ({ page }) => {
@@ -71,6 +71,17 @@ test('uninstall asks first and says what goes, keeps the downloads unless told, 
  await expect(page.getByLabel('Speech synthesis URL')).toHaveValue('http://tts.example.test:9001/v1/audio/speech');
  await expect(page.getByLabel('Describe the speaking voice')).toHaveValue('Edited and not saved yet');
  await expect(page.getByRole('checkbox', { name: 'Enable voice controls in sessions' })).not.toBeChecked();
+});
+
+test('a service that turns ready takes over what the install wrote, and not what is being typed', async ({ page }) => {
+ const { change, setState } = await uninstallPage(page, 'starting');
+ await page.locator('summary').filter({ hasText: 'Advanced connection' }).click();
+ await page.getByLabel('Describe the speaking voice').fill('Edited and not saved yet');
+ // The install writes its own connection settings as it comes up.
+ change({ whisperUrl: 'http://127.0.0.1:7999/v1/audio/transcriptions' });
+ setState('running');
+ await expect(page.getByLabel('Speech recognition URL')).toHaveValue('http://127.0.0.1:7999/v1/audio/transcriptions', { timeout: 8000 });
+ await expect(page.getByLabel('Describe the speaking voice')).toHaveValue('Edited and not saved yet');
 });
 
 test('uninstall deletes the downloaded engines and models only when the box is ticked, and is not offered where nothing is installed', async ({ page }) => {

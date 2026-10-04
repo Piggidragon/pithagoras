@@ -34,10 +34,14 @@ function UninstallQuestion({ removeData }: { removeData: { current: boolean } })
   </div>;
 }
 
+/** What the install and the uninstall write into the settings, apart from what is edited on this page. */
+const managed = (c: VoiceConfig) => ({ enabled: c.enabled, runtime: c.runtime, whisperUrl: c.whisperUrl, breezeUrl: c.breezeUrl, sttModel: c.sttModel });
+
 export function VoiceAddon({ onError }: { onError: (message: string) => void }) {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
   const [install, setInstall] = useState<VoiceInstallStatus | null>(null);
-  useEffect(()=>{if(install?.state==='running')void api.voice().then(value=>{setConfig(value);window.dispatchEvent(new Event('voice-config-changed'));}).catch(e=>onError(e.message));},[install?.state]);
+  // The install writes its connection settings as the service comes up. Only those are taken over, so that what is being typed here is not replaced; a failed poll makes the state flip to unavailable and back, and would otherwise do it every time.
+  useEffect(()=>{if(install?.state==='running')void api.voice().then(value=>{setConfig(current=>current?{...current,...managed(value)}:value);window.dispatchEvent(new Event('voice-config-changed'));}).catch(e=>onError(e.message));},[install?.state]);
   const [actionBusy, setActionBusy] = useState(false);
   useEffect(() => {
     let disposed=false, timer: ReturnType<typeof setTimeout>;
@@ -71,7 +75,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
       setPicked(null);
       // The portal put the settings back. Taken over here, so that a save does not write the managed ones again; the rest of the page, edits not yet saved among it, stays.
       const back = await api.voice();
-      setConfig(current => current && { ...current, enabled: back.enabled, runtime: back.runtime, whisperUrl: back.whisperUrl, breezeUrl: back.breezeUrl, sttModel: back.sttModel });
+      setConfig(current => current && { ...current, ...managed(back) });
       window.dispatchEvent(new Event('voice-config-changed'));
     } catch { /* the next poll shows it */ }
     setActionBusy(false);
