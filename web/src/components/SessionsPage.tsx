@@ -14,6 +14,7 @@ import { RowsSkeleton } from "./Skeleton";
 import { HOME, folderFrom, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { useFlip } from "../motion";
+import { useNow } from "../use-now";
 import { t, useLanguage } from "../i18n";
 
 /**
@@ -48,6 +49,8 @@ export const SessionsPage = memo(function SessionsPage({
   onRename: (id: string, title: string) => Promise<void>;
 }) {
   useLanguage();
+  // How long ago each chat changed is told in minutes, from the clock when it is drawn: and a list that has not changed is not drawn again.
+  useNow(true, 60_000);
   const [query, setQuery] = useState("");
   /** The session whose name is being edited in place. */
   const [renaming, setRenaming] = useState<string | null>(null);

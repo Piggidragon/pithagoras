@@ -170,3 +170,20 @@ test('a button with only a title keeps its name while the tooltip has lifted the
   await expect(page.locator('#text')).toHaveAttribute('title', '');
   await expect(page.locator('#text')).not.toHaveAttribute('aria-label');
 });
+
+test('a page that is still loading says so as a status, and a folder says how many chats it holds in words', async ({ page }) => {
+  const at = new Date().toISOString();
+  const session = (id: string) => ({ id, title: `Chat ${id}`, workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, created_at: at, provider: null, model: null, thinking_level: null });
+  await mockPortal(page, ({ path: p, method }) => {
+    if (method !== 'GET') return;
+    if (p === '/api/providers') return HANG;
+    if (p === '/api/sessions') return { sessions: [session('a'), session('b')], executor: 'host' };
+    if (p === '/api/projects') return { root: '/w', home: '/h', projects: [{ name: 'site', path: '/w/site', isGit: true, sessions: 2, hasInstructions: false, hasTools: false }] };
+    if (p === '/api/workspaces') return { root: '/w', workspaces: [{ name: 'site', path: '/w/site', isGit: true }] };
+  }, { settings: true });
+  await page.goto('/sessions');
+  // The number is what is seen; what is read is the number with its noun.
+  await expect(page.getByRole('main').getByText('2 chats', { exact: true })).toBeAttached();
+  await page.goto('/settings/models');
+  await expect(page.getByRole('status').filter({ hasText: 'Loading providers' })).toBeAttached();
+});

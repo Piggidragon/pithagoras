@@ -43,6 +43,18 @@ test('a session is renamed from the sessions page', async ({ page }) => {
   expect(page.url()).toContain('/sessions');
 });
 
+test('how long ago a chat changed moves on while the sessions page is left open', async ({ page }) => {
+  await portal(page);
+  // Time is the page's from here. The list it polls is the same each time, so nothing about it changes.
+  await page.clock.install();
+  await page.goto('/sessions');
+  const row = page.getByRole('main').locator('li', { hasText: 'Old name' });
+  await expect(row).toContainText('just now');
+  await page.clock.runFor(10 * 60_000);
+  await expect(row).toContainText('10m ago');
+  await expect(row).not.toContainText('just now');
+});
+
 test('a routine is moved from Home into a project', async ({ page }) => {
   const sent = await portal(page);
   await page.goto('/routines');

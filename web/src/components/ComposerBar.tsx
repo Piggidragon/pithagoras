@@ -277,6 +277,10 @@ export function ComposerBar({
       .catch(() => {});
   };
 
+  /** The chat shown now: what a change asked of another one says, when it settles, is not for this one. */
+  const shown = useRef(sessionId);
+  shown.current = sessionId;
+
   /** Whether the chat had started when last looked at — see the effect on `started`. */
   const wasStarted = useRef(started);
   useEffect(() => {
@@ -284,6 +288,8 @@ export function ComposerBar({
     setCfg(seed(session));
     setOpen(null);
     setPickError(null);
+    setLevelError(null);
+    setBusy(false);
     setDragEffort(null);
     // Another chat, loaded here: its having started already is no change.
     wasStarted.current = started;
@@ -400,6 +406,7 @@ export function ComposerBar({
   // The provider goes with the id: without it the server looks for the model
   // among the chat's own provider, and one that another provider lists is not found.
   const applyModel = async (m: PiModel) => {
+    const asked = sessionId;
     setBusy(true);
     setPickError(null);
     try {
@@ -410,9 +417,9 @@ export function ComposerBar({
       setShowAll(false);
       setFilter("");
     } catch (e) {
-      setPickError((e as Error).message);
+      if (shown.current === asked) setPickError((e as Error).message);
     } finally {
-      setBusy(false);
+      if (shown.current === asked) setBusy(false);
     }
   };
 
@@ -461,17 +468,20 @@ export function ComposerBar({
       setDragEffort(null);
       return;
     }
+    const asked = sessionId;
     setBusy(true);
     setLevelError(null);
     try {
       await saver.request(level);
     } catch (e) {
-      setLevelError((e as Error).message);
+      if (shown.current === asked) setLevelError((e as Error).message);
     } finally {
       // Only now: the slider stays where it was dragged, and the controls stay
       // busy, until the last save has landed.
-      setBusy(false);
-      setDragEffort(null);
+      if (shown.current === asked) {
+        setBusy(false);
+        setDragEffort(null);
+      }
     }
   };
   const commitEffort = (index: number) => applyLevel(levels[index]);

@@ -9,6 +9,7 @@ import { Select } from "./Select";
 import { SetupNav, SetupSteps } from "./SetupSteps";
 import { EffortPicker, LoadFailed, ghostCls, primaryCls } from "./SettingsUi";
 import { msg, t, tp } from "../i18n";
+import { SkeletonGroup } from "./Skeleton";
 
 import { modelTraits } from "../model-traits";
 import { dismissSetup as dismiss } from "../setup-state";
@@ -161,7 +162,7 @@ export function SetupAssistant({ onClose, onStartChat }: { onClose: () => void; 
             {!providers.value && providers.failed ? (
               <LoadFailed error={providers.failed} onRetry={providers.reload} />
             ) : !providers.value ? (
-              <div className="skeleton-group space-y-2"><div className="skeleton h-10 w-full" /><div className="skeleton h-24 w-full" /></div>
+              <SkeletonGroup className="space-y-2" label={t("Loading…")}><div className="skeleton h-10 w-full" /><div className="skeleton h-24 w-full" /></SkeletonGroup>
             ) : configured.length > 0 && !adding ? (
               <>
                 <ul className="stagger-in space-y-1.5">

@@ -148,7 +148,9 @@
   input[type="range"]:hover::-webkit-slider-thumb, input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.2); }
   input[type="range"]:hover::-moz-range-thumb, input[type="range"]:active::-moz-range-thumb { transform: scale(1.2); }
   input[type="range"]:focus-visible { outline: none; }
-  input[type="range"]:focus-visible::-webkit-slider-thumb, input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px rgb(var(--surface)), 0 0 0 4px rgb(var(--accent)); }
+  /* One rule for each engine, as the hover ones above: a selector list with a pseudo-element the engine does not know is dropped whole. */
+  input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px rgb(var(--surface)), 0 0 0 4px rgb(var(--accent)); }
+  input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px rgb(var(--surface)), 0 0 0 4px rgb(var(--accent)); }
   input[type="range"]:disabled { opacity: .4; cursor: not-allowed; }
 
   input[type="file"] { font-size: 12px; color: rgb(var(--fg-muted)); }

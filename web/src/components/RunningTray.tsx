@@ -50,7 +50,7 @@ export function RunningTray({
   const since = (at?: number) => (at ? formatElapsed(Math.max(0, Math.floor((now - at) / 1000))) : "");
 
   return (
-    <div className="running-tray" aria-label={t("Running beside the conversation")}>
+    <div className="running-tray" role="group" aria-label={t("Running beside the conversation")}>
       {runningAgents.map((a) => (
         <button key={a.id} type="button" className="running-chip is-agent" onClick={() => onAgent(a.id)} title={a.detail ? `${subagentName(a)} — ${a.detail}` : subagentName(a)}>
           <span className="running-chip-icon"><Ring /></span>

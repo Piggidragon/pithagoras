@@ -53,3 +53,23 @@ for (const theme of ['light', 'dark'] as const) {
     await expect.poll(() => field.evaluate((el) => getComputedStyle(el).borderColor)).toBe(r.accent);
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`${theme}: a slider with the focus is drawn differently, on its thumb, while its outline is off`, async ({ page }) => {
+    await portal(page, theme);
+    await page.goto('/sessions');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<input id="probe" type="range" aria-label="Probe" style="position:fixed;top:20px;left:20px;width:160px">'));
+    const slider = page.locator('#probe');
+    const box = (await slider.boundingBox())!;
+    // The ring is on the thumb and reaches past the slider's own box, so a little more than it is taken.
+    const clip = { x: box.x - 10, y: box.y - 10, width: box.width + 20, height: box.height + 20 };
+    const before = await page.screenshot({ clip, animations: 'disabled' });
+    await slider.focus();
+    await expect(slider).toBeFocused();
+    // The browser's own outline is off for a slider, so what changes in the picture is the ring the page draws on the thumb.
+    expect(await slider.evaluate((node) => getComputedStyle(node).outlineStyle)).toBe('none');
+    const after = await page.screenshot({ clip, animations: 'disabled' });
+    expect(after.equals(before), 'the focused slider looks like the one without').toBe(false);
+  });
+}

@@ -512,9 +512,10 @@ test('a folder counts, and shows running, all its chats in the sidebar as on the
   await page.goto('/sessions');
   const side = sidebar(page);
   const main = page.getByRole('main');
-  const count = (scope: ReturnType<Page['locator']>) => scope.locator('[data-folder="project:notes"] [aria-label$=" chats"], [data-folder="project:notes"] [aria-label$=" chat"]').first();
-  await expect(count(side)).toHaveText('2');
-  await expect(count(main)).toHaveText('2');
+  // The number is for the eye and its noun for a screen reader: the count has no role to carry a label.
+  const count = (scope: ReturnType<Page['locator']>) => scope.locator('[data-folder="project:notes"]').getByText(/^\d+ chats?$/).first();
+  await expect(count(side)).toHaveText('2 chats');
+  await expect(count(main)).toHaveText('2 chats');
   // Shut, a folder shows that something in it runs.
   await expect(folder(side, 'notes')).toHaveAttribute('aria-expanded', 'false');
   await expect(side.locator('[data-folder="project:notes"] > div').first().locator('.status-working')).toHaveCount(1);

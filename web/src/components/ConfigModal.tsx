@@ -63,6 +63,7 @@ import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
 import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
+import { SkeletonGroup } from "./Skeleton";
 import { useFlash } from "../use-flash";
 
 /** Either a fixed tab or one extension's own configuration page. */
@@ -302,7 +303,7 @@ export const ConfigModal = memo(function ConfigModal({
         (activeExt ? (
           <ExtensionPanel ext={activeExt} onError={setError} onSaved={loadExtensions} />
         ) : loadingExts ? (
-          <div className="skeleton-group space-y-2"><div className="skeleton h-9 w-1/2" /><div className="skeleton h-16 w-full" /><div className="skeleton h-16 w-full" /></div>
+          <SkeletonGroup className="space-y-2" label={t("Loading…")}><div className="skeleton h-9 w-1/2" /><div className="skeleton h-16 w-full" /><div className="skeleton h-16 w-full" /></SkeletonGroup>
         ) : exts.failed ? (
           <LoadFailed error={exts.failed} onRetry={exts.reload} />
         ) : (
@@ -732,7 +733,7 @@ function AboutPanel({ onError }: { onError: (e: string) => void }) {
   // What Defaults reads too, fetched ahead: drawn at once from what is kept.
   const { value: meta, failed, reload } = useCached("settings", api.settings, { onError: refreshFailed("settings", onError) });
   if (!meta && failed) return <LoadFailed error={failed} onRetry={reload} />;
-  if (!meta) return <div className="skeleton-group space-y-2"><div className="skeleton h-4 w-32" /><div className="skeleton h-28 w-full" /></div>;
+  if (!meta) return <SkeletonGroup className="space-y-2" label={t("Loading…")}><div className="skeleton h-4 w-32" /><div className="skeleton h-28 w-full" /></SkeletonGroup>;
   const agentDir = meta.piSettingsPath.replace(/\/settings\.json$/, "");
   const rows: { icon: ReactNode; label: string; value: string; detail: string }[] = [
     {
@@ -889,7 +890,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
   if (!ready) {
     // The shape of the page, so it does not jump when the page replaces it.
     return (
-      <div className="skeleton-group space-y-7" aria-label={t("Loading")}>
+      <SkeletonGroup className="space-y-7" label={t("Loading")}>
         {[56, 44].map((h) => (
           <div key={h} className="space-y-2.5">
             <div className="skeleton h-3 w-28" />
@@ -897,7 +898,7 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
             <div className="skeleton w-full" style={{ height: `${h / 4}rem` }} />
           </div>
         ))}
-      </div>
+      </SkeletonGroup>
     );
   }
 

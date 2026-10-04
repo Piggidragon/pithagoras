@@ -1,14 +1,17 @@
 import { Component, type ReactNode } from "react";
 import { LuRotateCw, LuTriangleAlert } from "react-icons/lu";
 import { t } from "../i18n";
+import { Modal } from "./Modal";
 import { primarySmCls } from "./SettingsUi";
 
 /**
  * What a page that threw is replaced with, instead of the whole portal going
  * blank: the sidebar stays, the other pages still open, and this one can be
  * tried again. `resetKey` changing — another page, another chat — starts over.
+ * `fallback` is what is shown instead of the page's own message, for what is not
+ * a page.
  */
-export class ErrorBoundary extends Component<{ resetKey: string; children: ReactNode }, { error: Error | null; key: string }> {
+export class ErrorBoundary extends Component<{ resetKey: string; fallback?: ReactNode; children: ReactNode }, { error: Error | null; key: string }> {
   state = { error: null as Error | null, key: this.props.resetKey };
 
   static getDerivedStateFromError(error: Error) {
@@ -26,6 +29,7 @@ export class ErrorBoundary extends Component<{ resetKey: string; children: React
   render() {
     const { error } = this.state;
     if (!error) return this.props.children;
+    if (this.props.fallback) return this.props.fallback;
     return (
       <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
         <div className="grid h-11 w-11 place-items-center rounded-2xl bg-danger/10 text-danger">
@@ -52,4 +56,22 @@ export class ErrorBoundary extends Component<{ resetKey: string; children: React
       </div>
     );
   }
+}
+
+/**
+ * What a dialog is replaced with when its code could not be fetched. A file that
+ * a portal updated since this page was opened no longer has is not found again
+ * by trying, so a reload is what there is to offer.
+ */
+export function DialogFailed({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal title={t("Could not be opened")} onClose={onClose}>
+      <div role="alert" className="flex flex-col items-start gap-3 text-sm text-fg-muted">
+        <p>{t("The part of the portal that opens this could not be loaded. This happens when the portal was updated while this page was open.")}</p>
+        <button type="button" onClick={() => window.location.reload()} className={primarySmCls}>
+          <LuRotateCw className="h-3.5 w-3.5" /> {t("Reload the portal")}
+        </button>
+      </div>
+    </Modal>
+  );
 }

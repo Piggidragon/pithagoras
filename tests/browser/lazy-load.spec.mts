@@ -39,3 +39,19 @@ test('the first draw does not fetch the other pages or the terminal emulator, an
   // Only that one.
   expect(files.filter((f) => PAGES.test(f))).toHaveLength(1);
 });
+
+test('a dialog whose file cannot be fetched is said so over the portal, which stays, and can be closed', async ({ page }) => {
+  await portal(page);
+  // After an update the old file is gone: the server answers 404, and the import fails.
+  await page.route(/\/components\/(ConfigModal|SetupAssistant)\.tsx/, (route) => route.fulfill({ status: 404, body: 'not found' }));
+  await page.goto('/s/a/settings/general');
+  const dialog = page.getByRole('dialog', { name: 'Could not be opened' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Reload the portal' })).toBeVisible();
+  // Not a blank page: the shell, with its chats, is where it was.
+  await expect(page.getByRole('complementary', { name: 'Sidebar' }).getByText('Chat A')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(/\/s\/a$/);
+  await expect(page.getByRole('complementary', { name: 'Sidebar' }).getByText('Chat A')).toBeVisible();
+});

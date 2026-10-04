@@ -16,6 +16,7 @@ import { formatTokens } from "../transcript";
 import { Select } from "./Select";
 import { Empty, Field, LoadFailed, Section, btnCls, ghostCls, inputCls, inputSmCls, primaryCls } from "./SettingsUi";
 import { t, tp } from "../i18n";
+import { SkeletonGroup } from "./Skeleton";
 import { forgetModels } from "../model-catalogue";
 
 const KIND_ICONS: Record<ProviderKind, IconType> = {
@@ -173,11 +174,11 @@ export function useInstalledPackages() {
 
 function ProvidersSkeleton() {
   return (
-    <div className="skeleton-group space-y-2" aria-label={t("Loading providers")}>
+    <SkeletonGroup className="space-y-2" label={t("Loading providers")}>
       <div className="skeleton h-4 w-40" />
       <div className="skeleton h-20 w-full" />
       <div className="skeleton h-20 w-full" />
-    </div>
+    </SkeletonGroup>
   );
 }
 

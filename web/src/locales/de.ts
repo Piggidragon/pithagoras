@@ -705,6 +705,8 @@ const de: Locale = {
     "This page ran into a problem and could not be shown.": "Diese Seite ist auf ein Problem gestoßen und konnte nicht angezeigt werden.",
     "Try again": "Erneut versuchen",
     "Reload the portal": "Portal neu laden",
+    "Could not be opened": "Konnte nicht geöffnet werden",
+    "The part of the portal that opens this could not be loaded. This happens when the portal was updated while this page was open.": "Der Teil des Portals, der dies öffnet, konnte nicht geladen werden. Das passiert, wenn das Portal aktualisiert wurde, während diese Seite offen war.",
     // components/ExtensionDialog.tsx
     "This question has expired. Your answer was not delivered.": "Diese Frage ist abgelaufen. Deine Antwort wurde nicht zugestellt.",
     "Extension": "Erweiterung",

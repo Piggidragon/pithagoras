@@ -38,6 +38,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import { codeAreaCls, inputCls, primarySmCls } from "./SettingsUi";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
+import { SkeletonGroup } from "./Skeleton";
 import { formatTokens } from "../transcript";
 
 /** What the page shows in place of a note: the log of changes, the graph of links, or what the health check found. */
@@ -288,9 +289,9 @@ export function MemoryPage() {
             {hits ? (
               <Hits hits={hits} asked={asked} open={note} onOpen={openNote} />
             ) : !tree ? (
-              <div className="skeleton-group space-y-1.5 px-1" aria-label={t("Loading the memory")}>
+              <SkeletonGroup className="space-y-1.5 px-1" label={t("Loading the memory")}>
                 {[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-6 w-full" />)}
-              </div>
+              </SkeletonGroup>
             ) : !tree.children?.length ? (
               <p className="px-2 py-6 text-center text-xs text-fg-subtle">{t("Nothing is in the memory yet. The agent adds to it as it learns.")}</p>
             ) : (
@@ -595,10 +596,10 @@ function Note({
           {failed ? (
             <p role="alert" className="text-sm text-warn">{failed}</p>
           ) : !concept ? (
-            <div className="skeleton-group space-y-2" aria-label={t("Loading the note")}>
+            <SkeletonGroup className="space-y-2" label={t("Loading the note")}>
               <div className="skeleton h-24 w-full" />
               <div className="skeleton h-40 w-full" />
-            </div>
+            </SkeletonGroup>
           ) : draft ? (
             <form
               aria-label={t("Edit the note")}
@@ -903,9 +904,9 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
           {failed ? (
             <p role="alert" className="text-sm text-warn">{failed}</p>
           ) : !log ? (
-            <div className="skeleton-group space-y-2" aria-label={t("Loading the log")}>
+            <SkeletonGroup className="space-y-2" label={t("Loading the log")}>
               {[0, 1, 2].map((i) => <div key={i} className="skeleton h-12 w-full" />)}
-            </div>
+            </SkeletonGroup>
           ) : recent.length === 0 ? (
             <p className="text-sm text-fg-subtle">{t("Nothing has changed yet.")}</p>
           ) : (
@@ -1071,7 +1072,7 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
         {failed ? (
           <p role="alert" className="p-4 text-sm text-warn">{failed}</p>
         ) : !graph ? (
-          <div className="skeleton m-4 h-64" aria-label={t("Loading the graph")} />
+          <div className="skeleton m-4 h-64" role="status"><span className="sr-only">{t("Loading the graph")}</span></div>
         ) : (
           <>
             <svg

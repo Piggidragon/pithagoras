@@ -4,7 +4,7 @@ import { fillFrom } from "./editor-fills";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
-import { ErrorBoundary } from "./components/ErrorBoundary";
+import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
@@ -829,6 +829,8 @@ function Shell({
         />
       )}
 
+      {/* Their code is fetched when one opens, and a file that is gone must not take the portal with it. */}
+      <ErrorBoundary resetKey={`${settings}:${setup}`} fallback={<DialogFailed onClose={() => { setSetup(false); if (settings) closeSettings(); }} />}>
       <Suspense fallback={null}>
         {settings && (
           <ConfigModal
@@ -849,6 +851,7 @@ function Shell({
           />
         )}
       </Suspense>
+      </ErrorBoundary>
     </div>
   );
 }

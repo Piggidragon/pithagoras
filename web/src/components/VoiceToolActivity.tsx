@@ -105,7 +105,7 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { event
   const now = useNow(shown.some(card => card.status === 'running'));
   useEffect(() => () => { for (const timer of timers.current) clearTimeout(timer); }, []);
 
-  return <div className="voice-tool-activity" aria-label={t("Tool activity")} aria-live="polite" aria-relevant="additions">
+  return <div className="voice-tool-activity" role="log" aria-label={t("Tool activity")} aria-live="polite" aria-relevant="additions">
     {shown.map(card => {
       const took = Math.max(0, now - card.startedAt);
       const note = card.status === 'running' ? (took >= 3000 ? elapsed(took) : '') : card.outcome;

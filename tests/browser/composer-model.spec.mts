@@ -13,16 +13,17 @@ const catalogue = [model('prov-a', 'Alpha'), model('prov-a', 'Shared'), model('p
 const config = (current: ReturnType<typeof model>) =>
   ({ live: true, state: { model: current, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: catalogue }, named: { provider: current.provider, model: current.id } });
 
-type Portal = { posts: unknown[]; failWith: { error: string } | null; hold: { a: Promise<void> | null } };
+type Portal = { posts: unknown[]; failWith: { error: string } | null; hold: { a: Promise<void> | null; post: Promise<void> | null } };
 
 async function portal(page: Page): Promise<Portal> {
-  const state: Portal = { posts: [], failWith: null, hold: { a: null } };
+  const state: Portal = { posts: [], failWith: null, hold: { a: null, post: null } };
   const sessions = [chat('a', 'First chat', 'prov-a', 'Alpha'), chat('b', 'Second chat', 'prov-b', 'Beta')];
   await mockPortal(page, async ({ path: p, method, json }) => {
     if (p === '/api/sessions') return { sessions, executor: 'host' };
     if (/^\/api\/sessions\/\w+$/.test(p)) return sessions.find((s) => p.endsWith('/' + s.id));
     if (p === '/api/sessions/a/config' && method === 'POST') {
       state.posts.push(json());
+      await state.hold.post;
       if (state.failWith) return reply(500, { ...state.failWith, applied: [] });
       return { ok: true, applied: ['model'], state: config(model('prov-b', 'Beta')).state };
     }
@@ -89,4 +90,36 @@ test("an answer for the chat just left does not draw its model in the chat opene
   release();
   await page.waitForTimeout(400);
   await expect(modelPill(page)).toHaveText('Beta');
+});
+
+const thinkingPill = (page: Page) => page.getByTitle('Thinking on / off');
+
+test("a failed effort change is not still said under the composer of the chat opened next", async ({ page }) => {
+  const state = await portal(page);
+  await page.goto('/s/a');
+  state.failWith = { error: 'The chat is compacting' };
+  await thinkingPill(page).click();
+  await expect(page.getByRole('alert')).toHaveText('The chat is compacting');
+  await page.getByText('Second chat').first().click();
+  await expect(page).toHaveURL(/\/s\/b$/);
+  await expect(modelPill(page)).toHaveText('Beta');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test("a change that fails after its chat was left says nothing in the chat opened, and does not keep it busy", async ({ page }) => {
+  const state = await portal(page);
+  let release!: () => void;
+  state.hold.post = new Promise<void>((resolve) => { release = resolve; });
+  state.failWith = { error: 'The chat is compacting' };
+  await page.goto('/s/a');
+  await thinkingPill(page).click();
+  await expect.poll(() => state.posts.length).toBe(1);
+  await page.getByText('Second chat').first().click();
+  await expect(modelPill(page)).toHaveText('Beta');
+  // The other chat's own pills are not waiting on a save that is not theirs.
+  await expect(thinkingPill(page)).toBeEnabled();
+  release();
+  await page.waitForTimeout(400);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(thinkingPill(page)).toBeEnabled();
 });

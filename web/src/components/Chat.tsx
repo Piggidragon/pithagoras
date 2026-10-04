@@ -1455,11 +1455,11 @@ export function Chat({
           <div className="chat-tabs" role="tablist" aria-label={t("Terminals")} onKeyDown={tabKeys}>
             <button type="button" role="tab" aria-selected={terminalTab === "agent"} tabIndex={terminalTab === "agent" ? 0 : -1} onClick={() => setTerminalTab("agent")}>
               {t("Agent")}
-              {running && <i className="chat-tab-live" aria-label={t("Running")} />}
+              {running && <i className="chat-tab-live" role="img" aria-label={t("Running")} />}
             </button>
             <button type="button" role="tab" aria-selected={terminalTab === "jobs"} tabIndex={terminalTab === "jobs" ? 0 : -1} onClick={() => setTerminalTab("jobs")}>
               {t("Background")}
-              {background.jobs.some((j) => j.state === "running" && !j.attached) && <i className="chat-tab-live" aria-label={t("Running")} />}
+              {background.jobs.some((j) => j.state === "running" && !j.attached) && <i className="chat-tab-live" role="img" aria-label={t("Running")} />}
             </button>
             <button type="button" role="tab" aria-selected={terminalTab === "shell"} tabIndex={terminalTab === "shell" ? 0 : -1} onClick={() => setTerminalTab("shell")}>
               {t("Your shell")}
@@ -1938,7 +1938,7 @@ export function Chat({
           </div>
         )}
         {(attached.length > 0 || adding > 0) && (
-          <div className="flex flex-wrap items-center gap-2 px-3 pt-3" aria-label={t("Pictures going with the message")}>
+          <div role="group" className="flex flex-wrap items-center gap-2 px-3 pt-3" aria-label={t("Pictures going with the message")}>
             {attached.map((a) => (
               <div key={a.id} className="pop-in group/att relative">
                 <img src={a.data} alt={a.name} title={a.name} className="h-14 w-14 rounded-lg object-cover ring-1 ring-line" />
