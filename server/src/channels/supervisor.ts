@@ -283,10 +283,14 @@ class ChannelSupervisor {
   async tellRestart(sessionIds: string[]): Promise<void> {
     for (const id of sessionIds) {
       const session = getSession(id);
-      if (!session?.channel_slug || !session.channel_key || !this.canSend(session.channel_slug)) continue;
+      const live = session?.channel_slug ? this.liveBySlug(session.channel_slug) : undefined;
+      if (!session?.channel_slug || !session.channel_key || !live?.send) continue;
       try {
-        await this.send(
-          session.channel_slug,
+        // Not through send(): that keeps what it says as a note for the agent,
+        // and a note taints the conversation for good (see notesBlock) — which
+        // this sentence of the portal's own, with nothing from outside in it,
+        // would do to the primary user's. They will say it again anyway.
+        await live.send(
           unscopeKey(session.channel_slug, session.channel_key),
           "The portal restarted while I was working on this, so my answer was cut off. Please send your message again.",
         );

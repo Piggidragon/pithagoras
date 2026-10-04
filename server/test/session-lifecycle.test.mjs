@@ -12,7 +12,7 @@ import { inProcessHome } from "./server-harness.mjs";
 const home = inProcessHome("pithagoras-lifecycle-");
 mkdirSync(path.join(home, "work"), { recursive: true });
 
-const { appendEvent, createSession, eventsSince, getDb, getSession, updateSession } = await import("../dist/db.js");
+const { appendEvent, createSession, eventsSince, getDb, getSession, pendingNotes, updateSession } = await import("../dist/db.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { sessions, IMAGE_ROOT, SESSION_ROOT } = await import("../dist/session-manager.js");
 const { channelSupervisor } = await import("../dist/channels/supervisor.js");
@@ -276,6 +276,8 @@ test("the conversations a restart cut off are the ones on a channel, run or mess
   }
   assert.deepEqual(spoken.map((s) => s.target).sort(), ["chat:20", "chat:21"]);
   assert.match(spoken[0].text, /portal restarted.*send your message again/);
+  // Told, not noted: a note is read as what other runs wrote and taints the conversation for good.
+  for (const id of [mid, unsent]) assert.deepEqual(pendingNotes(id), [], "the next message goes in untainted");
 });
 
 test("a channel that cannot be spoken to first is not written to about a restart", async () => {
@@ -438,6 +440,26 @@ test("an idle pi that is in the middle of something is left alone", async () => 
   sessions.editing.delete(id);
 
   assert.deepEqual(await sessions.reapIdle(), [id], "and let go once it is not");
+});
+
+test("a container that still holds a process of the agent's is kept, and let go once it holds none", async () => {
+  const { id, pi } = await idleFor(60);
+  let held = true;
+  const asked = [];
+  Object.assign(sessions.live.get(id).executor, { holdsProcesses: async (asking) => (asked.push(asking), held) });
+  assert.deepEqual(await sessions.reapIdle(), [], "a dev server in it would end with pi");
+  assert.deepEqual(asked, [id]);
+  assert.equal(pi.disposed, false);
+
+  // A message that comes in while the container is asked about is use, as at any other time.
+  sessions.live.get(id).executor.holdsProcesses = async () => (sessions.activity.set(id, Date.now() + 1), false);
+  assert.deepEqual(await sessions.reapIdle(), [], "used meanwhile");
+
+  held = false;
+  sessions.live.get(id).executor.holdsProcesses = async () => held;
+  sessions.activity.set(id, Date.now() - 60 * 60_000);
+  assert.deepEqual(await sessions.reapIdle(), [id]);
+  assert.equal(pi.disposed, true);
 });
 
 test("whatever pi says, and whatever asks something of it, counts as use", async () => {

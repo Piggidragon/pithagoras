@@ -135,6 +135,37 @@ test("a page that catches up on a long run slowly is not buffered whole, loses n
   }
 });
 
+test("a page that leaves between two pages of the replay leaves nothing waiting for it", async () => {
+  createSession({ id: "left", title: "left", workspace: home, executor: "host" });
+  atomically(() => Array.from({ length: 5200 }, (_, i) => appendEvent("left", "portal_notice", { i })));
+  const app = express();
+  let held;
+  let drainBefore;
+  let notices = 0;
+  app.use((req, res, next) => {
+    held = res;
+    drainBefore = res.listenerCount("drain");
+    const write = res.write.bind(res);
+    // The last event of the first page is the last write before the replay looks for the next page.
+    res.write = (chunk, ...rest) => {
+      const result = write(chunk, ...rest);
+      if (String(chunk).includes("portal_notice") && ++notices === 5000) res.destroy();
+      return result;
+    };
+    next();
+  });
+  app.use("/api", eventsRouter());
+  const stream = open(app, "/api/sessions/left/events?since=1");
+  try {
+    await until(() => notices >= 5000, "the first page to go out");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(notices, 5000, "not a row more to a page that has gone");
+    assert.equal(held.listenerCount("drain"), drainBefore, "no wait for a drain that cannot come");
+  } finally {
+    stream.close();
+  }
+});
+
 test("scrolling back answers with the stored text too, and with the page it was asked for", async () => {
   const app = express();
   app.use("/api", eventsRouter());

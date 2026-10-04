@@ -223,12 +223,14 @@ test("a project folder is out of the way at once and removed after, and a stop i
   for (let i = 0; i < 100 && readdirSync(root).length; i++) await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(readdirSync(root), [], "and the tree goes shortly after");
 
-  // What a stop left: a folder put aside and not removed.
-  mkdirSync(path.join(root, ".deleting-leftover", "deep"), { recursive: true });
+  // What a stop left: a folder put aside and not removed. Folders of the user's own that start the same way are not it.
+  mkdirSync(path.join(root, ".deleting-0123456789ab", "deep"), { recursive: true });
+  mkdirSync(path.join(root, ".deleting-later"));
+  mkdirSync(path.join(root, ".deleting-0123456789abc"));
   mkdirSync(path.join(root, "kept"));
   sweepRemoved(root);
-  for (let i = 0; i < 100 && readdirSync(root).includes(".deleting-leftover"); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.deepEqual(readdirSync(root), ["kept"]);
+  for (let i = 0; i < 100 && readdirSync(root).includes(".deleting-0123456789ab"); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(readdirSync(root).sort(), [".deleting-0123456789abc", ".deleting-later", "kept"]);
 });
 
 test("deleting and renaming refuse the same places", async () => {

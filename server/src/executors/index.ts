@@ -45,6 +45,13 @@ export interface Executor {
   launch(opts: LaunchOptions): Promise<PiClient>;
   /** Best-effort cleanup of anything left behind outside the child process. */
   cleanup?(sessionId: string): Promise<void>;
+  /**
+   * Whether the session's isolation holds a process besides pi, one that would
+   * end with it: a dev server the agent started. Only where pi's end is the end
+   * of everything it started; a host process outlives pi's. True when it cannot
+   * be told, for what is asked about is whether stopping is safe.
+   */
+  holdsProcesses?(sessionId: string): Promise<boolean>;
 }
 
 function piArgs(opts: LaunchOptions, sessionDir: string): string[] {
@@ -176,6 +183,16 @@ export class ContainerExecutor implements Executor {
     await removeStoppedRunner(opts.sessionId);
     const child = spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"] });
     return new PiRpcClient(child);
+  }
+
+  /** `docker top` lists the container's processes under a header; pi is the first of them, and the only one when nothing else runs. */
+  async holdsProcesses(sessionId: string): Promise<boolean> {
+    try {
+      const { stdout } = await promisify(execFile)("docker", ["top", `pithagoras-${sessionId}`]);
+      return stdout.split("\n").filter((line) => line.trim()).length > 2;
+    } catch {
+      return true;
+    }
   }
 
   async cleanup(sessionId: string): Promise<void> {

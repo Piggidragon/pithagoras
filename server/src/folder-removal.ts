@@ -13,6 +13,8 @@ import path from "node:path";
  * removed from there without waiting for it.
  */
 const PREFIX = ".deleting-";
+/** Only a name removeFolderLater made: the folder it sweeps holds the user's own, and `.deleting-later` may be one of them. */
+const PUT_ASIDE = /^\.deleting-[0-9a-f]{12}$/;
 
 export function removeFolderLater(dir: string): void {
   const away = path.join(path.dirname(dir), `${PREFIX}${randomBytes(6).toString("hex")}`);
@@ -38,7 +40,7 @@ export function sweepRemoved(parent: string): void {
     return;
   }
   for (const name of names) {
-    if (!name.startsWith(PREFIX)) continue;
+    if (!PUT_ASIDE.test(name)) continue;
     void rm(path.join(parent, name), { recursive: true, force: true }).catch(() => {});
   }
 }

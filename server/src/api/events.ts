@@ -70,9 +70,16 @@ export function eventsRouter(): Router {
     // False when the socket has more than it can send at once.
     const write = (row: { seq: number; type: string; payload: string; created_at?: string }) =>
       res.write(`${row.seq > 0 ? `id: ${row.seq}\n` : ""}data: ${eventJson(row)}\n\n`);
-    /** Waits for the socket to take what is buffered. False when the page has gone instead. */
+    // Closed is told by the event, which comes after the socket is destroyed.
+    const left = () => gone || res.destroyed;
+    /**
+     * Waits for the socket to take what is buffered. False when the page has gone
+     * instead, which is said at once for one that went already: a socket that is
+     * closed neither drains nor closes again, and this would wait for ever.
+     */
     const drained = () =>
       new Promise<boolean>((resolve) => {
+        if (left()) return resolve(false);
         const done = () => {
           res.off("drain", done);
           res.off("close", done);
@@ -156,8 +163,9 @@ export function eventsRouter(): Router {
       // from a refresh showing its first few thousand events and nothing since —
       // the transcript ended mid-turn, on whatever the cap happened to land on.
       const cursor = since === 0 ? replayStart(session.id, REPLAY_EVENTS) : since;
-      const replay = await replaySince(session.id, cursor, (row) => (write(row) ? !gone : drained()));
-      if (gone) return;
+      // Nothing is written to a page that has gone, as between two pages of a long replay.
+      const replay = await replaySince(session.id, cursor, (row) => (left() ? false : write(row) ? !gone : drained()));
+      if (gone || replay.gone) return;
       lastSent = replay.lastSent;
       for (const row of sessions.liveSnapshot(session.id)) write(row);
       res.write(`event: caught-up\ndata: ${JSON.stringify({ seq: lastSent })}\n\n`);

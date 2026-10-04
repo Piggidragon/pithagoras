@@ -39,3 +39,19 @@ test('provider keys reach the container by name, never as a value on the docker 
   assert.equal(readFileSync(process.env.KEY_FILE!,'utf8'),'sk-or-example-secret-value','and docker still has it in its environment to copy');
  }finally{for(const [k,v] of Object.entries(saved)){if(v===undefined)delete process.env[k];else process.env[k]=v;}rmSync(temp,{recursive:true,force:true});}
 });
+
+test('a container holds a process besides pi when docker top lists a second one, and when it cannot be asked',async()=>{
+ const temp=scratch('pitha-runner-top-');const saved={PATH:process.env.PATH,TOP_FILE:process.env.TOP_FILE};
+ process.env.PATH=temp+':'+saved.PATH;process.env.TOP_FILE=join(temp,'top');
+ // `docker top` as docker prints it: a header, then a line for each process; a missing container is an error.
+ writeFileSync(join(temp,'docker'),'#!/bin/sh\nif [ "$1" = "top" ] && [ "$2" = "pithagoras-gone" ]; then echo "Error response from daemon: No such container: $2" >&2; exit 1; fi\nif [ "$1" = "top" ]; then cat "$TOP_FILE"; exit 0; fi\nexit 1\n',{mode:0o755});
+ const header='UID PID PPID C STIME TTY TIME CMD\n';
+ try {
+  const executor=new ContainerExecutor('test-runner',join(temp,'sessions'),{memoryMb:2048,cpus:2,pidsLimit:512});
+  writeFileSync(process.env.TOP_FILE!,header+'node 101 100 0 10:00 ? 00:00:01 pi --mode rpc\n');
+  assert.equal(await executor.holdsProcesses('abc'),false,'pi alone ends with the container and loses nothing');
+  writeFileSync(process.env.TOP_FILE!,header+'node 101 100 0 10:00 ? 00:00:01 pi --mode rpc\nnode 202 101 0 10:05 ? 00:00:09 npm run dev\n');
+  assert.equal(await executor.holdsProcesses('abc'),true,'a dev server the agent left running would end with it');
+  assert.equal(await executor.holdsProcesses('gone'),true,'not told: not safe to stop');
+ }finally{for(const [k,v] of Object.entries(saved)){if(v===undefined)delete process.env[k];else process.env[k]=v;}rmSync(temp,{recursive:true,force:true});}
+});

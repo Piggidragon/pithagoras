@@ -427,7 +427,8 @@ command or question waiting, no subagent working in the background. Every pi is 
 whole agent in memory (or a container), and a portal with many conversations
 would otherwise hold them all until it stopped. Nothing is lost — the next
 message starts pi again from the conversation's file, which takes a few seconds
-on a cold start. Picking a model or opening the command list also starts it. A
+on a cold start. A container chat in which the agent left a process running, a
+dev server for instance, is kept: that process would end with the container. Picking a model or opening the command list also starts it. A
 routine that runs in a clean session each time lets its pi go as soon as the run
 ends.
 

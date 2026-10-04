@@ -1199,8 +1199,9 @@ class SessionManager extends EventEmitter {
    * or a container of up to a few gigabytes. Nothing else ever released one:
    * thirty people on a channel held thirty, and a routine run in a clean
    * session each hour left twenty-four a day. The chat is not lost — the next
-   * message starts pi again from its file. Started by the server, so that
-   * anything that imports this builds no timer.
+   * message starts pi again from its file — but what the agent left running in
+   * a container is, so a container that holds such a process is kept. Started
+   * by the server, so that anything that imports this builds no timer.
    */
   startReaper(everyMs = 60_000): void {
     if (this.reaper) return;
@@ -1211,8 +1212,13 @@ class SessionManager extends EventEmitter {
   /** The sessions whose pi it stopped. `now` and `idleMs` are for a test to set. */
   async reapIdle(idleMs = IDLE_STOP_MS, now = Date.now()): Promise<string[]> {
     const stopped: string[] = [];
-    for (const [id, { client }] of [...this.live]) {
-      if (now - (this.activity.get(id) ?? now) < idleMs || this.inUse(id, client)) continue;
+    const quiet = (id: string, client: PiClient) => now - (this.activity.get(id) ?? now) >= idleMs && !this.inUse(id, client);
+    for (const [id, { client, executor }] of [...this.live]) {
+      if (!quiet(id, client)) continue;
+      // What the agent left running in a container goes with its pi, and the
+      // portal does not track it (see BACKGROUND_SUPPORTED): so it is asked.
+      // Asked of the container, so a message may come in meanwhile: quiet again.
+      if (executor.holdsProcesses && ((await executor.holdsProcesses(id)) || !quiet(id, client) || this.live.get(id)?.client !== client)) continue;
       await this.stop(id);
       stopped.push(id);
     }
